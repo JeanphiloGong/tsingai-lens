@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import base64
 from hashlib import sha256
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -15,25 +14,27 @@ except ImportError:  # pragma: no cover
 
 from tests.support.collection_service import build_test_collection_service
 from application.core.comparison_service import ComparisonService
-from domain.core.comparison_projection import ComparisonRowProjector
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
 )
 from application.source.document_markdown_service import DocumentMarkdownService
+from infra.persistence.sqlite import (
+    SqliteSourceArtifactRepository,
+)
 from controllers.core import documents as documents_controller
 from domain.core import (
     BaselineReference,
     CharacterizationObservation,
     CollectionComparableResult,
     ComparableResult,
-    ComparisonRowRecord,
-    CoreFactSet,
+    ComparisonFactSet,
     DocumentProfile,
     MeasurementResult,
     SampleVariant,
     StructureFeature,
     TestCondition as CoreTestCondition,
 )
+from domain.core.paper_fact import PaperFactSet
 from domain.source import (
     CollectionFileRecord,
     CollectionImportDocumentRecord,
@@ -61,6 +62,9 @@ from tests.support.pbf_acceptance_fixture import (
     pbf_acceptance_structure_features,
     pbf_acceptance_test_conditions,
 )
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
 
 
 def _store_document_profiles(
@@ -68,8 +72,9 @@ def _store_document_profiles(
     collection_id: str,
     profiles: list[dict],
 ) -> None:
-    document_profile_service.core_fact_repository.replace_collection_document_profiles(
+    document_profile_service.paper_fact_repository.replace_document_profiles(
         collection_id,
+        "build_test",
         tuple(DocumentProfile.from_mapping(row) for row in profiles),
     )
 
@@ -174,22 +179,11 @@ def _store_core_document_semantics(
 ) -> None:
     comparable_results = comparable_results or []
     scoped_results = scoped_results or []
-    comparison_rows: tuple[ComparisonRowRecord, ...] = ()
-    if comparable_results and scoped_results:
-        comparison_rows = ComparisonRowProjector().project_rows_from_semantic_artifacts(
-            collection_id=collection_id,
-            comparable_results=(
-                ComparableResult.from_mapping(row) for row in comparable_results
-            ),
-            scoped_results=(
-                CollectionComparableResult.from_mapping(row) for row in scoped_results
-            ),
-        )
-    comparison_service.core_fact_repository.replace_collection_facts(
+    comparison_service.paper_fact_repository.replace_paper_facts(
         collection_id,
-        CoreFactSet(
+        "build_test",
+        PaperFactSet(
             paper_facts_ready=True,
-            comparison_artifacts_ready=True,
             sample_variants=tuple(
                 SampleVariant.from_mapping(row) for row in (sample_variants or [])
             ),
@@ -211,13 +205,19 @@ def _store_core_document_semantics(
             structure_features=tuple(
                 StructureFeature.from_mapping(row) for row in (structure_features or [])
             ),
+        ),
+    )
+    comparison_service.comparison_repository.replace(
+        collection_id,
+        "build_test",
+        ComparisonFactSet(
+            comparison_artifacts_ready=True,
             comparable_results=tuple(
                 ComparableResult.from_mapping(row) for row in comparable_results
             ),
             collection_comparable_results=tuple(
                 CollectionComparableResult.from_mapping(row) for row in scoped_results
             ),
-            comparison_rows=comparison_rows,
         ),
     )
 
@@ -225,9 +225,25 @@ def _store_core_document_semantics(
 @pytest.fixture()
 def document_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service)
-    comparison_service = ComparisonService(collection_service)
-    document_markdown_service = DocumentMarkdownService(collection_service)
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    paper_fact_repository = MemoryPaperFactRepository()
+    comparison_repository = MemoryComparisonRepository()
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+    )
+    comparison_service = ComparisonService(
+        collection_service,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=MemoryObjectiveRepository(),
+        comparison_repository=comparison_repository,
+        document_profile_service=document_profile_service,
+    )
+    document_markdown_service = DocumentMarkdownService(
+        collection_service,
+        source_artifact_repository=source_repository,
+    )
 
     return (
         collection_service,
@@ -821,10 +837,15 @@ def test_document_figure_image_route_streams_extracted_asset(document_services):
     ) = document_services
     record = collection_service.create_collection(name="Figure Image Collection")
     collection_id = record["collection_id"]
-    paths = collection_service.get_paths(collection_id)
-    asset_path = paths.output_dir / "image_assets" / "fig-1.png"
-    asset_path.parent.mkdir(parents=True, exist_ok=True)
-    asset_path.write_bytes(b"\x89PNG\r\n\x1a\nfixture\n")
+    content = b"\x89PNG\r\n\x1a\nfixture\n"
+    asset_sha256 = sha256(content).hexdigest()
+    storage_key = collection_service.write_figure_asset(
+        collection_id,
+        "build-figure",
+        "image_assets/fig-1.png",
+        content,
+        asset_sha256,
+    )
     markdown_service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         SourceArtifactSet.from_records(
@@ -836,8 +857,10 @@ def test_document_figure_image_route_streams_extracted_asset(document_services):
                     "figure_order": 1,
                     "figure_label": "Fig. 1",
                     "caption_text": "Fig. 1. Microstructure.",
-                    "image_path": "image_assets/fig-1.png",
+                    "image_path": storage_key,
                     "image_mime_type": "image/png",
+                    "asset_sha256": asset_sha256,
+                    "image_size_bytes": len(content),
                 }
             ],
         ),
@@ -852,9 +875,9 @@ def test_document_figure_image_route_streams_extracted_asset(document_services):
         )
     )
 
-    assert Path(response.path).read_bytes() == b"\x89PNG\r\n\x1a\nfixture\n"
+    assert response.body == content
     assert response.media_type == "image/png"
-    assert response.headers["content-disposition"].startswith("inline;")
+    assert response.headers["content-disposition"] == 'inline; filename="fig-1.png"'
 
 
 def test_document_figure_image_route_rejects_figure_from_other_document(
@@ -952,6 +975,116 @@ def test_document_figure_image_route_rejects_path_outside_collection(
     assert "outside.png" not in str(exc.detail)
 
 
+def test_document_figure_image_route_rejects_another_collections_object_key(
+    document_services,
+):
+    (
+        collection_service,
+        _document_profile_service,
+        _comparison_service,
+        markdown_service,
+    ) = document_services
+    first = collection_service.create_collection(name="First Figure Collection")
+    second = collection_service.create_collection(name="Second Figure Collection")
+    content = b"figure"
+    digest = sha256(content).hexdigest()
+    foreign_key = collection_service.write_figure_asset(
+        second["collection_id"],
+        "build-figure",
+        "image_assets/figure.png",
+        content,
+        digest,
+    )
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        first["collection_id"],
+        SourceArtifactSet.from_records(
+            documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
+            figures=[
+                {
+                    "document_id": "paper-1",
+                    "figure_id": "fig-1",
+                    "figure_order": 1,
+                    "image_path": foreign_key,
+                    "image_mime_type": "image/png",
+                    "asset_sha256": digest,
+                    "image_size_bytes": len(content),
+                }
+            ],
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documents_controller.get_collection_document_figure_image(
+                first["collection_id"],
+                "paper-1",
+                "fig-1",
+                _document_request(document_services),
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "figure_image_path_invalid"
+
+
+@pytest.mark.parametrize("failure", ["missing", "hash_mismatch"])
+def test_document_figure_image_route_reports_unavailable_object_bytes(
+    document_services,
+    failure,
+):
+    (
+        collection_service,
+        _document_profile_service,
+        _comparison_service,
+        markdown_service,
+    ) = document_services
+    record = collection_service.create_collection(name="Unavailable Figure Collection")
+    collection_id = record["collection_id"]
+    content = b"figure"
+    digest = sha256(content).hexdigest()
+    storage_key = collection_service.write_figure_asset(
+        collection_id,
+        "build-figure",
+        "image_assets/figure.png",
+        content,
+        digest,
+    )
+    if failure == "missing":
+        collection_service.object_store.delete(storage_key)
+    else:
+        (collection_service.root_dir / storage_key).write_bytes(b"corrupt")
+    markdown_service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        SourceArtifactSet.from_records(
+            documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
+            figures=[
+                {
+                    "document_id": "paper-1",
+                    "figure_id": "fig-1",
+                    "figure_order": 1,
+                    "image_path": storage_key,
+                    "image_mime_type": "image/png",
+                    "asset_sha256": digest,
+                    "image_size_bytes": len(content),
+                }
+            ],
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            documents_controller.get_collection_document_figure_image(
+                collection_id,
+                "paper-1",
+                "fig-1",
+                _document_request(document_services),
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "figure_image_unavailable"
+
+
 def test_document_comparison_semantics_route_returns_409_when_semantics_are_not_ready(
     document_services,
 ):
@@ -989,23 +1122,26 @@ def test_document_comparison_semantics_route_returns_404_for_missing_document(
     ) = document_services
     record = collection_service.create_collection(name="Missing Document Semantics")
     collection_id = record["collection_id"]
-    comparison_service.core_fact_repository.replace_collection_facts(
+    comparison_service.paper_fact_repository.replace_document_profiles(
         collection_id,
-        CoreFactSet(
-            comparison_artifacts_ready=True,
-            document_profiles=(
-                DocumentProfile.from_mapping(
-                    {
-                        "document_id": "paper-2",
-                        "collection_id": collection_id,
-                        "title": "Other Paper",
-                        "source_filename": "other.txt",
-                        "doc_type": "experimental",
-                        "confidence": 0.9,
-                    }
-                ),
+        "build_test",
+        (
+            DocumentProfile.from_mapping(
+                {
+                    "document_id": "paper-2",
+                    "collection_id": collection_id,
+                    "title": "Other Paper",
+                    "source_filename": "other.txt",
+                    "doc_type": "experimental",
+                    "confidence": 0.9,
+                }
             ),
         ),
+    )
+    comparison_service.comparison_repository.replace(
+        collection_id,
+        "build_test",
+        ComparisonFactSet(comparison_artifacts_ready=True),
     )
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(

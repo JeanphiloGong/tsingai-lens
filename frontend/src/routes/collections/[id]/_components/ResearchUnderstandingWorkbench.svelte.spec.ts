@@ -96,8 +96,7 @@ function datasetResponse(overrides: {
 	systemWarnings?: Record<string, number>;
 	reviewCandidateReasons?: Record<string, number>;
 	reviewCandidateWarnings?: Record<string, number>;
-	scopeType?: string;
-	scopeId?: string;
+	objectiveId?: string | null;
 	datasetId?: string;
 	items?: DatasetSampleFixture[];
 } = {}) {
@@ -122,8 +121,7 @@ function datasetResponse(overrides: {
 		schema_version: 'research_understanding_dataset.v1',
 		dataset_id: overrides.datasetId ?? 'rud_col_123_objective_obj_1',
 		collection_id: 'col_123',
-		scope_type: overrides.scopeType ?? 'objective',
-		scope_id: overrides.scopeId ?? 'obj_1',
+		objective_id: overrides.objectiveId === undefined ? 'obj_1' : overrides.objectiveId,
 		task_type: 'research_understanding_finding',
 		metric_profile: 'research_understanding_finding.v1',
 		label_status_filter: null,
@@ -968,17 +966,11 @@ function understandingFixture(): ResearchUnderstanding {
 	};
 }
 
-function goalUnderstandingFixture(): ResearchUnderstanding {
+function objectiveUnderstandingFixture(): ResearchUnderstanding {
 	const fixture = understandingFixture();
 	return {
 		...fixture,
-		scope: {
-			...fixture.scope,
-			scope_type: 'goal',
-			goal_id: 'goal_1',
-			objective_id: null,
-			title: 'Confirmed heat-treatment goal'
-		}
+			scope: { ...fixture.scope, objective_id: 'obj_1', title: 'Confirmed heat-treatment objective' }
 	};
 }
 
@@ -1353,8 +1345,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 							trainingReady: 1,
 							reviewCandidate: 15,
 							rejected: 0,
-							scopeType: 'collection',
-							scopeId: 'goal',
+							objectiveId: null,
 							datasetId: 'rud_col_123_collection_goal'
 						})
 					)
@@ -3795,8 +3786,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(exportUrl.pathname).toBe(
 			'/api/v1/collections/col_123/research-understanding/dataset'
 		);
-		expect(exportUrl.searchParams.get('scope_type')).toBe('objective');
-		expect(exportUrl.searchParams.get('scope_id')).toBe('obj_1');
+		expect(exportUrl.searchParams.get('objective_id')).toBe('obj_1');
 		expect(exportUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
 		expect(exportUrl.searchParams.get('format')).toBe('training_jsonl');
 		expect(exportUrl.pathname).not.toContain('/dataset/collection');
@@ -3817,13 +3807,12 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(requestedUrl.pathname).toBe(
 			'/api/v1/collections/col_123/research-understanding/dataset'
 		);
-		expect(requestedUrl.searchParams.get('scope_type')).toBe('objective');
-		expect(requestedUrl.searchParams.get('scope_id')).toBe('obj_1');
+		expect(requestedUrl.searchParams.get('objective_id')).toBe('obj_1');
 		expect(requestedUrl.searchParams.get('dataset_use_status')).toBeNull();
 		expect(requestedUrl.searchParams.get('format')).toBeNull();
 	});
 
-	it('keeps the single training export scoped to the current goal', async () => {
+	it('keeps the single training export scoped to the current objective', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method = init?.method ?? 'GET';
@@ -3856,8 +3845,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 							systemWarnings: {
 								table_row_alignment_uncertain: 4
 							},
-							scopeType: 'collection',
-							scopeId: 'goal',
+								objectiveId: null,
 							datasetId: 'rud_col_123_collection_goal'
 						})
 					)
@@ -3875,7 +3863,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			return Promise.resolve(jsonResponse({}));
 		});
 		render(ResearchUnderstandingWorkbench, {
-			understanding: goalUnderstandingFixture(),
+			understanding: objectiveUnderstandingFixture(),
 			collectionId: 'col_123'
 		});
 
@@ -3887,12 +3875,12 @@ describe('ResearchUnderstandingWorkbench', () => {
 		clickDatasetSummary(datasetRegion);
 		await expect.poll(() => collectionDatasetGetRequestCount()).toBe(1);
 		await expect.poll(() => datasetRegion?.textContent ?? '').toContain(
-			'1 training-ready, 1 message-exportable, 1 protocol-ready, and 15 review-candidate goal sample(s) in this collection.'
+			'1 training-ready, 1 message-exportable, 1 protocol-ready, and 15 review-candidate objective sample(s) in this collection.'
 		);
 		const datasetText = datasetRegion?.textContent ?? '';
 		expect(datasetText).toContain('Collection dataset');
 		expect(datasetText).toContain(
-			'1 training-ready, 1 message-exportable, 1 protocol-ready, and 15 review-candidate goal sample(s) in this collection.'
+			'1 training-ready, 1 message-exportable, 1 protocol-ready, and 15 review-candidate objective sample(s) in this collection.'
 		);
 		expect(datasetText).toContain('Training ready 1');
 		expect(datasetText).toContain('Training messages 1');
@@ -3921,8 +3909,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(exportUrl.pathname).toBe(
 			'/api/v1/collections/col_123/research-understanding/dataset'
 		);
-		expect(exportUrl.searchParams.get('scope_type')).toBe('goal');
-		expect(exportUrl.searchParams.get('scope_id')).toBe('goal_1');
+		expect(exportUrl.searchParams.get('objective_id')).toBe('obj_1');
 		expect(exportUrl.searchParams.get('dataset_use_status')).toBe('training_ready');
 		expect(exportUrl.searchParams.get('format')).toBe('training_jsonl');
 	});
@@ -3947,7 +3934,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		});
 
 		render(ResearchUnderstandingWorkbench, {
-			understanding: goalUnderstandingFixture(),
+			understanding: objectiveUnderstandingFixture(),
 			collectionId: 'col_123'
 		});
 
@@ -4006,9 +3993,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 							ready_to_write: true,
 							next_steps: []
 						},
-						decision_progress_by_goal: [
+							decision_progress_by_objective: [
 							{
-								goal_id: 'goal_1a7a26d850b9',
+									objective_id: 'obj_1a7a26d850b9',
 								total_rows: 1,
 								actionable_count: 1,
 								skipped_count: 0,
@@ -4018,9 +4005,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 								next_review_finding_id: 'finding_mechanism_limited'
 							}
 						],
-						affected_goals: [
+							affected_objectives: [
 							{
-								goal_id: 'goal_1a7a26d850b9',
+									objective_id: 'obj_1a7a26d850b9',
 								training_ready_count: 1,
 								training_message_count: 1,
 								protocol_ready_count: 1,
@@ -4086,12 +4073,12 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect
 			.element(browserPage.getByText('1 actionable row(s), 0 skipped row(s), 0 written.'))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Goal review progress')).toBeInTheDocument();
+			await expect.element(browserPage.getByText('Objective review progress')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Readiness after import')).toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(
-					'1 goal(s): 1 training-ready, 1 message-ready, 1 protocol-ready, 13 review-candidate, 0 rejected.'
+					'1 objective(s): 1 training-ready, 1 message-ready, 1 protocol-ready, 13 review-candidate, 0 rejected.'
 				)
 			)
 			.toBeInTheDocument();
@@ -4100,7 +4087,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 				browserPage.getByText('Training export: ready. Protocol drafting: ready.')
 			)
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('goal_1a7a26d850b9').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByText('obj_1a7a26d850b9').first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('1 actionable, 0 skipped · accept 1, reject 0, correct 0'))
 			.toBeInTheDocument();
@@ -4199,8 +4186,8 @@ describe('ResearchUnderstandingWorkbench', () => {
 							ready_to_write: true,
 							next_steps: []
 						},
-						decision_progress_by_goal: [],
-						affected_goals: [],
+							decision_progress_by_objective: [],
+							affected_objectives: [],
 						readiness_summary: {},
 						review_scope_gate: {}
 					})
@@ -4220,8 +4207,8 @@ describe('ResearchUnderstandingWorkbench', () => {
 		datasetRegion?.setAttribute('open', '');
 
 		const tsv = [
-			'expert_action\tissue_type\texpert_note\tcollection_id\tgoal_id\tfinding_id',
-			'correct\t\tChecked source table.\tcol_123\tgoal_1\tfinding_strength_supported'
+				'expert_action\tissue_type\texpert_note\tcollection_id\tobjective_id\tfinding_id',
+				'correct\t\tChecked source table.\tcol_123\tobj_1\tfinding_strength_supported'
 		].join('\n');
 		await browserPage.getByLabelText('Reviewed decisions').fill(tsv);
 		await browserPage.getByRole('button', { name: 'Dry run' }).click();
@@ -4352,8 +4339,8 @@ describe('ResearchUnderstandingWorkbench', () => {
 						errors: [],
 						warnings: [],
 						review_progress: { actionable_count: 1, skipped_count: 0 },
-						decision_progress_by_goal: [],
-						affected_goals: [],
+							decision_progress_by_objective: [],
+							affected_objectives: [],
 						readiness_summary: {}
 					})
 				);
@@ -4492,8 +4479,8 @@ describe('ResearchUnderstandingWorkbench', () => {
 							ready_to_write: true,
 							next_steps: []
 						},
-						decision_progress_by_goal: [],
-						affected_goals: [{ goal_id: 'obj_1', written_count: 1 }],
+							decision_progress_by_objective: [],
+							affected_objectives: [{ objective_id: 'obj_1', written_count: 1 }],
 						readiness_summary: {}
 					})
 				);
@@ -4566,8 +4553,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 							trainingReady: 1,
 							reviewCandidate: 15,
 							rejected: 0,
-							scopeType: 'collection',
-							scopeId: 'goal',
+							objectiveId: null,
 							datasetId: 'rud_col_123_collection_goal'
 						})
 					)
@@ -4587,7 +4573,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			return Promise.resolve(jsonResponse({}));
 		});
 		render(ResearchUnderstandingWorkbench, {
-			understanding: goalUnderstandingFixture(),
+			understanding: objectiveUnderstandingFixture(),
 			collectionId: 'col_123'
 		});
 
@@ -4608,7 +4594,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(exportLinks[0]?.getAttribute('href')).not.toContain('/dataset/collection');
 	});
 
-	it('links protocol drafting to Copilot when a goal has training-ready messages', async () => {
+	it('links protocol drafting to Copilot when an objective has training-ready messages', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method = init?.method ?? 'GET';
@@ -4633,7 +4619,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			return Promise.resolve(jsonResponse({}));
 		});
 		render(ResearchUnderstandingWorkbench, {
-			understanding: goalUnderstandingFixture(),
+			understanding: objectiveUnderstandingFixture(),
 			collectionId: 'col_123'
 		});
 
@@ -4642,7 +4628,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		await expect.element(browserPage.getByText('Next review candidate')).not.toBeInTheDocument();
 		const draftUrl = new URL(draftLink.element().getAttribute('href') ?? '', 'http://localhost');
 		expect(draftUrl.pathname).toBe('/collections/col_123/assistant');
-		expect(draftUrl.searchParams.get('goal_id')).toBe('goal_1');
+		expect(draftUrl.searchParams.get('objective_id')).toBe('obj_1');
 	});
 
 	it('blocks protocol drafting from the review loop until goal findings are training-ready', async () => {
@@ -4670,7 +4656,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			return Promise.resolve(jsonResponse({}));
 		});
 		render(ResearchUnderstandingWorkbench, {
-			understanding: goalUnderstandingFixture(),
+			understanding: objectiveUnderstandingFixture(),
 			collectionId: 'col_123'
 		});
 
@@ -4705,7 +4691,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 			return Promise.resolve(jsonResponse({}));
 		});
 		render(ResearchUnderstandingWorkbench, {
-			understanding: goalUnderstandingFixture(),
+			understanding: objectiveUnderstandingFixture(),
 			collectionId: 'col_123'
 		});
 
@@ -5151,8 +5137,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(requestPath(input)).toBe('/api/v1/collections/col_123/research-understanding/feedback');
 		expect(init.method).toBe('POST');
 		expect(JSON.parse(String(init.body))).toEqual({
-			scope_type: 'objective',
-			scope_id: 'obj_1',
+			objective_id: 'obj_1',
 			finding_id: 'finding_mechanism_limited',
 			claim_id: 'claim_mechanism_limited',
 			review_status: 'incorrect',
@@ -5519,9 +5504,9 @@ describe('ResearchUnderstandingWorkbench', () => {
 			.toBeInTheDocument();
 	});
 
-	it('submits feedback against the confirmed goal scope id', async () => {
+	it('submits feedback against the objective id', async () => {
 		render(ResearchUnderstandingWorkbench, {
-			understanding: goalUnderstandingFixture(),
+			understanding: objectiveUnderstandingFixture(),
 			collectionId: 'col_123'
 		});
 
@@ -5540,8 +5525,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(feedbackPostCall).toBeTruthy();
 		const [, init] = feedbackPostCall!;
 		expect(JSON.parse(String(init.body))).toMatchObject({
-			scope_type: 'goal',
-			scope_id: 'goal_1',
+			objective_id: 'obj_1',
 			finding_id: 'finding_mechanism_limited',
 			claim_id: 'claim_mechanism_limited',
 			review_status: 'incorrect'
@@ -5652,8 +5636,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 		expect(requestPath(input)).toBe('/api/v1/collections/col_123/research-understanding/curations');
 		expect(init.method).toBe('POST');
 		expect(JSON.parse(String(init.body))).toEqual({
-			scope_type: 'objective',
-			scope_id: 'obj_1',
+			objective_id: 'obj_1',
 			finding_id: 'finding_mechanism_limited',
 			claim_id: 'claim_mechanism_limited',
 			curated_claim_type: 'mechanism',
@@ -6042,8 +6025,7 @@ describe('ResearchUnderstandingWorkbench', () => {
 							trainingReady: 1,
 							reviewCandidate: 15,
 							rejected: 0,
-							scopeType: 'collection',
-							scopeId: 'goal',
+								objectiveId: null,
 							datasetId: 'rud_col_123_collection_goal'
 						})
 					)

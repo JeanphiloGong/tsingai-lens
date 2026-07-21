@@ -11,7 +11,18 @@ uv sync
 
 ## Required Runtime Variables
 
-Set backend LLM runtime variables before local runs:
+Set the PostgreSQL URL before any backend command that constructs persistence:
+
+```bash
+export LENS_DATABASE_URL='postgresql+psycopg://lens:<password>@localhost:5432/lens-postgres-dev'
+```
+
+The URL is required, must use the synchronous `postgresql+psycopg` driver, and
+must name a database. Keep credentials in `backend/.env` or the shell; never
+commit them.
+
+Set backend LLM runtime variables before local runs that invoke model-backed
+features:
 
 ```bash
 export LLM_BASE_URL=http://localhost:11434/v1
@@ -40,6 +51,19 @@ refuses to save AI-generated experiment plans from the message, because those
 plans require a `collection_grounded` answer with source links and the
 `protocol_ready_findings` review gate.
 
+## Initialize Or Upgrade The Schema
+
+Alembic is the only schema authority. Application startup never creates or
+changes tables:
+
+```bash
+alembic upgrade head
+alembic current --check-heads
+```
+
+For a fresh development database, run the same commands. Historical SQLite or
+JSON data is not imported by startup or by these migrations.
+
 ## Start the Backend
 
 ```bash
@@ -58,9 +82,25 @@ pytest -q
 python3 ../scripts/check_docs_governance.py
 ```
 
+Run the PostgreSQL migration lifecycle test only against a disposable database
+whose name ends in `_test`; the test intentionally downgrades it:
+
+```bash
+export LENS_TEST_DATABASE_URL='postgresql+psycopg://lens:<password>@localhost:5432/lens_test'
+pytest -q tests/integration/persistence/test_migrations.py
+LENS_DATABASE_URL="$LENS_TEST_DATABASE_URL" alembic upgrade head
+LENS_DATABASE_URL="$LENS_TEST_DATABASE_URL" alembic current --check-heads
+```
+
+For the supported Compose deployment, health diagnosis, upgrade, backup, and
+restore procedures, use [`../../../deploy/README.md`](../../../deploy/README.md).
+That document is the deployment operations authority; this runbook does not
+duplicate its destructive restore commands.
+
 ## Operational Notes
 
-- Backend data persists under `backend/data`.
+- Structured product state persists in PostgreSQL. `backend/data` holds
+  immutable object bytes, collection workspaces, and rebuildable scratch.
 - Collection build creates Source runtime settings from collection paths and
   environment variables; no `default.yaml` file is required in Docker volumes.
 - Public HTTP paths are split between `/api/*` for docs and static assets and

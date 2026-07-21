@@ -56,13 +56,18 @@ from domain.core.evidence_backbone import (
     TestCondition,
 )
 from domain.core.document_profile import DocumentProfile
-from domain.core.fact_store import CoreFactSet
+from domain.core.paper_fact import PaperFactSet
 from domain.core.research_objective import (
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
 )
-from domain.ports import CoreFactRepository, SourceArtifactRepository
+from domain.ports import (
+    ObjectiveRepository,
+    PaperFactRepository,
+    SourceArtifactRepository,
+)
 from domain.shared.enums import (
     DOC_TYPE_REVIEW,
     EPISTEMIC_DIRECTLY_OBSERVED,
@@ -73,10 +78,6 @@ from domain.shared.enums import (
     TRACEABILITY_STATUS_PARTIAL,
 )
 from domain.shared.record_normalization import normalize_record_value
-from infra.persistence.factory import (
-    build_core_fact_repository,
-    build_source_artifact_repository,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -432,31 +433,18 @@ class PaperFactsService:
     def __init__(
         self,
         collection_service: CollectionService,
-        document_profile_service: DocumentProfileService | None = None,
+        source_artifact_repository: SourceArtifactRepository,
+        paper_fact_repository: PaperFactRepository,
+        objective_repository: ObjectiveRepository,
+        document_profile_service: DocumentProfileService,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
-        core_fact_repository: CoreFactRepository | None = None,
-        source_artifact_repository: SourceArtifactRepository | None = None,
     ) -> None:
         self.collection_service = collection_service
-        self.document_profile_service = document_profile_service or DocumentProfileService(
-            collection_service=self.collection_service,
-            core_fact_repository=core_fact_repository,
-            source_artifact_repository=source_artifact_repository,
-        )
+        self.document_profile_service = document_profile_service
         self._structured_extractor = structured_extractor
-        self.core_fact_repository = (
-            core_fact_repository
-            or build_core_fact_repository(
-                self.collection_service.root_dir.parent / "lens.sqlite"
-            )
-        )
-        self.source_artifact_repository = (
-            source_artifact_repository
-            or getattr(self.document_profile_service, "source_artifact_repository", None)
-            or build_source_artifact_repository(
-                self.collection_service.root_dir.parent / "lens.sqlite"
-            )
-        )
+        self.objective_repository = objective_repository
+        self.paper_fact_repository = paper_fact_repository
+        self.source_artifact_repository = source_artifact_repository
 
     def _get_structured_extractor(self) -> CoreLLMStructuredExtractor:
         if self._structured_extractor is None:
@@ -581,7 +569,7 @@ class PaperFactsService:
         }
 
     def read_evidence_cards(self, collection_id: str) -> tuple[dict[str, Any], ...]:
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        facts = self.objective_repository.read(collection_id)
         cards = self._objective_evidence_cards_from_facts(collection_id, facts)
         if cards:
             return cards
@@ -600,14 +588,22 @@ class PaperFactsService:
     def build_paper_facts(
         self,
         collection_id: str,
+        *,
+        build_id: str,
     ) -> dict[str, tuple[dict[str, Any], ...]]:
         self.collection_service.get_collection(collection_id)
         try:
-            profiles = self.document_profile_service.read_document_profiles(collection_id)
+            profiles = self.document_profile_service.read_document_profiles(
+                collection_id,
+                build_id=build_id,
+            )
         except DocumentProfilesNotReadyError as exc:
             raise PaperFactsNotReadyError(collection_id) from exc
 
-        objective_facts = self.core_fact_repository.read_collection_facts(collection_id)
+        objective_facts = self.objective_repository.read(
+            collection_id,
+            build_id=build_id,
+        )
         objective_contexts = (
             objective_facts.objective_contexts
             if objective_facts.research_objectives_ready
@@ -620,22 +616,27 @@ class PaperFactsService:
             documents, text_units = load_collection_inputs(
                 collection_id,
                 self.source_artifact_repository,
+                build_id=build_id,
             )
             blocks = load_blocks_artifact(
                 collection_id,
                 self.source_artifact_repository,
+                build_id=build_id,
             )
             tables = load_tables_artifact(
                 collection_id,
                 self.source_artifact_repository,
+                build_id=build_id,
             )
             table_rows = load_table_rows_artifact(
                 collection_id,
                 self.source_artifact_repository,
+                build_id=build_id,
             )
             table_cells = load_table_cells_artifact(
                 collection_id,
                 self.source_artifact_repository,
+                build_id=build_id,
             )
         except FileNotFoundError as exc:
             raise PaperFactsNotReadyError(collection_id) from exc
@@ -1197,9 +1198,10 @@ class PaperFactsService:
         measurement_results = self._deduplicate_measurement_result_records(
             measurement_results
         )
-        self.core_fact_repository.replace_collection_facts(
+        self.paper_fact_repository.replace_paper_facts(
             collection_id,
-            self._build_core_fact_set(
+            build_id,
+            self._build_paper_fact_set(
                 document_profiles=profiles,
                 evidence_anchors=evidence_anchors,
                 method_facts=method_facts,
@@ -1211,11 +1213,10 @@ class PaperFactsService:
                 structure_features=structure_features,
             ),
         )
-        objective_evidence_units = (
-            self.core_fact_repository.read_collection_facts(
-                collection_id
-            ).objective_evidence_units
-        )
+        objective_evidence_units = self.objective_repository.read(
+            collection_id,
+            build_id=build_id,
+        ).objective_evidence_units
 
         logger.info(
             "Paper facts extraction finished collection_id=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurement_results=%s characterization_observations=%s structure_features=%s objective_evidence_units=%s",
@@ -1249,8 +1250,10 @@ class PaperFactsService:
         collection_id: str,
     ) -> tuple[dict[str, Any], ...]:
         self.collection_service.get_collection(collection_id)
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
-        cards_table = self._objective_evidence_cards_from_facts(collection_id, facts)
+        objective_facts = self.objective_repository.read(collection_id)
+        cards_table = self._objective_evidence_cards_from_facts(
+            collection_id, objective_facts
+        )
         if cards_table:
             logger.info(
                 "Objective evidence view derivation finished collection_id=%s evidence_cards=%s",
@@ -1258,8 +1261,9 @@ class PaperFactsService:
                 len(cards_table),
             )
             return cards_table
-        if not self._paper_fact_records_available(facts):
-            self.build_paper_facts(collection_id)
+        paper_facts = self.paper_fact_repository.read(collection_id)
+        if not self._paper_fact_records_available(paper_facts):
+            raise PaperFactsNotReadyError(collection_id)
         records = self._load_paper_fact_records(collection_id)
         cards_table = self._legacy_evidence_cards_from_records(collection_id, records)
         logger.info(
@@ -1272,7 +1276,7 @@ class PaperFactsService:
     def _objective_evidence_cards_from_facts(
         self,
         collection_id: str,
-        facts: CoreFactSet,
+        facts: ObjectiveFactSet,
     ) -> tuple[dict[str, Any], ...]:
         if not facts.objective_evidence_units:
             return ()
@@ -1515,7 +1519,7 @@ class PaperFactsService:
         collection_id: str,
     ) -> dict[str, tuple[dict[str, Any], ...]]:
         self.collection_service.get_collection(collection_id)
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        facts = self.paper_fact_repository.read(collection_id)
         if not self._paper_fact_records_available(facts):
             raise PaperFactsNotReadyError(collection_id)
 
@@ -1554,7 +1558,7 @@ class PaperFactsService:
             ),
         }
 
-    def _paper_fact_records_available(self, facts: CoreFactSet) -> bool:
+    def _paper_fact_records_available(self, facts: PaperFactSet) -> bool:
         return bool(
             facts.paper_facts_ready
             or facts.evidence_anchors
@@ -1571,7 +1575,7 @@ class PaperFactsService:
         self,
         collection_id: str,
     ) -> tuple[ObjectiveContext, ...]:
-        facts = self.core_fact_repository.read_collection_facts(collection_id)
+        facts = self.objective_repository.read(collection_id)
         if not facts.research_objectives_ready:
             return ()
         return facts.objective_contexts
@@ -1589,7 +1593,7 @@ class PaperFactsService:
             for payload in (record.to_record(),)
         )
 
-    def _build_core_fact_set(
+    def _build_paper_fact_set(
         self,
         *,
         document_profiles: tuple[DocumentProfile, ...],
@@ -1601,8 +1605,9 @@ class PaperFactsService:
         measurement_results: tuple[dict[str, Any], ...],
         characterization: tuple[dict[str, Any], ...],
         structure_features: tuple[dict[str, Any], ...],
-    ) -> CoreFactSet:
-        return CoreFactSet(
+    ) -> PaperFactSet:
+        return PaperFactSet(
+            paper_facts_ready=True,
             document_profiles=document_profiles,
             evidence_anchors=self._domain_records_from_records(
                 evidence_anchors,

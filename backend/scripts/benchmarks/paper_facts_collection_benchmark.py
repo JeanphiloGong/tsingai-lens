@@ -160,6 +160,11 @@ def parse_args() -> argparse.Namespace:
         help="Target collection id.",
     )
     parser.add_argument(
+        "--build-id",
+        required=True,
+        help="Pending collection build to read and replace paper facts for.",
+    )
+    parser.add_argument(
         "--collections-root",
         type=Path,
         help="Optional collections root override. Defaults to <backend-root>/data/collections.",
@@ -180,23 +185,41 @@ def parse_args() -> argparse.Namespace:
 def build_services(
     collections_root: Path,
     session_factory: Any,
-) -> tuple[Any, Any, Any, Any]:
+) -> tuple[Any, Any, Any, Any, Any, Any, Any]:
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
     from application.core.semantic_build.paper_facts_service import PaperFactsService
     from application.source.collection_service import CollectionService
     from infra.persistence.file import FileCollectionWorkspace
     from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
-
+    from infra.persistence.postgres.paper_fact_repository import (
+        PostgresPaperFactRepository,
+    )
+    from infra.persistence.postgres.research_understanding_repository import (
+        PostgresResearchUnderstandingRepository,
+    )
+    from infra.persistence.postgres.source_artifact_repository import (
+        PostgresSourceArtifactRepository,
+    )
     collection_service = CollectionService(
         repository=PostgresCollectionRepository(session_factory),
         workspace=FileCollectionWorkspace(collections_root),
     )
+    source_artifact_repository = PostgresSourceArtifactRepository(session_factory)
+    paper_fact_repository = PostgresPaperFactRepository(session_factory)
+    research_understanding_repository = PostgresResearchUnderstandingRepository(
+        session_factory
+    )
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
+        source_artifact_repository=source_artifact_repository,
+        paper_fact_repository=paper_fact_repository,
     )
     return (
         collection_service,
+        source_artifact_repository,
+        paper_fact_repository,
+        research_understanding_repository,
         document_profile_service,
         PaperFactsService,
         CoreLLMStructuredExtractor,
@@ -206,7 +229,10 @@ def build_services(
 def load_collection_inputs_for_benchmark(
     collection_id: str,
     *,
+    build_id: str,
     collection_service: Any,
+    source_artifact_repository: Any,
+    document_profile_service: Any,
 ) -> tuple[Path, pd.DataFrame, pd.DataFrame | None, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     from application.source.artifact_input_service import (
         load_blocks_artifact,
@@ -214,19 +240,46 @@ def load_collection_inputs_for_benchmark(
         load_table_cells_artifact,
         load_table_rows_artifact,
     )
-    from application.core.semantic_build.document_profile_service import (
-        DocumentProfileService,
-        DocumentProfilesNotReadyError,
-    )
+    from application.core.semantic_build.document_profile_service import DocumentProfilesNotReadyError
     output_dir = collection_service.get_paths(collection_id).output_dir
-    documents, text_units = load_collection_inputs(collection_id)
-    blocks = load_blocks_artifact(collection_id)
-    table_rows = load_table_rows_artifact(collection_id)
-    table_cells = load_table_cells_artifact(collection_id)
+    document_records, text_unit_records = load_collection_inputs(
+        collection_id,
+        source_artifact_repository,
+        build_id=build_id,
+    )
+    documents = pd.DataFrame(document_records)
+    text_units = (
+        pd.DataFrame(text_unit_records) if text_unit_records is not None else None
+    )
+    blocks = pd.DataFrame(
+        load_blocks_artifact(
+            collection_id,
+            source_artifact_repository,
+            build_id=build_id,
+        )
+    )
+    table_rows = pd.DataFrame(
+        load_table_rows_artifact(
+            collection_id,
+            source_artifact_repository,
+            build_id=build_id,
+        )
+    )
+    table_cells = pd.DataFrame(
+        load_table_cells_artifact(
+            collection_id,
+            source_artifact_repository,
+            build_id=build_id,
+        )
+    )
     try:
-        profiles = DocumentProfileService(
-            collection_service=collection_service,
-        ).read_document_profiles(collection_id)
+        profiles = pd.DataFrame(
+            profile.to_record()
+            for profile in document_profile_service.read_document_profiles(
+                collection_id,
+                build_id=build_id,
+            )
+        )
     except DocumentProfilesNotReadyError as exc:
         raise SystemExit(
             "document profiles are missing. Build document profiles first so this "
@@ -248,7 +301,7 @@ def build_selection_plan(
 ) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
     from application.source.artifact_input_service import build_document_records
 
-    document_records = build_document_records(documents, text_units)
+    document_records = pd.DataFrame(build_document_records(documents, text_units))
     all_text_windows_by_doc = paper_facts_service._build_text_windows_by_document(blocks)
     table_rows_by_doc = paper_facts_service._group_table_rows_by_document(table_rows)
     table_cells_by_doc = paper_facts_service._group_table_cells_by_document(table_cells)
@@ -447,6 +500,9 @@ def main() -> int:
     engine = build_database_engine(DatabaseSettings())
     (
         collection_service,
+        source_artifact_repository,
+        paper_fact_repository,
+        research_understanding_repository,
         document_profile_service,
         paper_facts_service_class,
         extractor_class,
@@ -461,7 +517,10 @@ def main() -> int:
         profiles,
     ) = load_collection_inputs_for_benchmark(
         args.collection_id,
+        build_id=args.build_id,
         collection_service=collection_service,
+        source_artifact_repository=source_artifact_repository,
+        document_profile_service=document_profile_service,
     )
 
     inner_extractor = extractor_class(
@@ -471,6 +530,9 @@ def main() -> int:
     )
     planning_service = paper_facts_service_class(
         collection_service=collection_service,
+        source_artifact_repository=source_artifact_repository,
+        paper_fact_repository=paper_fact_repository,
+        research_understanding_repository=research_understanding_repository,
         document_profile_service=document_profile_service,
         structured_extractor=inner_extractor,
     )
@@ -491,6 +553,9 @@ def main() -> int:
     )
     benchmark_service = paper_facts_service_class(
         collection_service=collection_service,
+        source_artifact_repository=source_artifact_repository,
+        paper_fact_repository=paper_fact_repository,
+        research_understanding_repository=research_understanding_repository,
         document_profile_service=document_profile_service,
         structured_extractor=timing_extractor,
     )
@@ -503,7 +568,10 @@ def main() -> int:
 
     try:
         collection_started_at = perf_counter()
-        frames = benchmark_service.build_paper_facts(args.collection_id)
+        frames = benchmark_service.build_paper_facts(
+            args.collection_id,
+            build_id=args.build_id,
+        )
         collection_elapsed_s = perf_counter() - collection_started_at
     finally:
         service_logger.removeHandler(log_handler)
@@ -526,6 +594,7 @@ def main() -> int:
     summary: dict[str, Any] = {
         "script": "paper_facts_collection_benchmark.py",
         "collection_id": args.collection_id,
+        "build_id": args.build_id,
         "backend_root": str(runtime.backend_root),
         "collections_root": str(collections_root),
         "output_dir": str(output_dir),

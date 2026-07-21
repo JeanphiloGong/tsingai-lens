@@ -11,8 +11,17 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.goal.session_service import GoalSessionService
+from application.core.comparison_service import ComparisonService
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
+)
+from application.core.research_understanding_service import ResearchUnderstandingService
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
+from application.core.semantic_build.paper_facts_service import PaperFactsService
+from application.core.semantic_build.research_objective_service import (
+    ResearchObjectiveService,
 )
 from application.core.workspace_overview_service import WorkspaceService
 from application.source.task_service import TaskService
@@ -22,8 +31,14 @@ from controllers.schemas.goal.session import (
     GoalSessionCreateRequest,
     GoalSessionMessageRequest,
 )
-from infra.persistence.factory import build_goal_session_repository
 from infra.persistence.memory import MemoryBuildRepository
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
+from tests.support.objective_workspace_repository import (
+    InMemoryObjectiveWorkspaceRepository,
+)
 
 
 def _request(goal_session_service, user_id: str = "local-user"):
@@ -68,19 +83,93 @@ class _FakeLLMClient:
         self.chat = _FakeChat(content)
 
 
+class _EmptyResearchUnderstandingRepository:
+    backend_name = "memory"
+
+    def read_objective_understanding(self, collection_id, objective_id):
+        return None
+
+    def list_objective_understandings(self, collection_id):
+        return ()
+
+
+class _EmptyResearchUnderstandingFeedbackService:
+    def export_dataset(self, **kwargs):  # noqa: ANN003, ANN201
+        return {
+            "collection_id": kwargs["collection_id"],
+            "objective_id": kwargs["objective_id"],
+            "items": [],
+            "warnings": [],
+        }
+
+
 @pytest.fixture()
 def goal_session_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
-    workspace_service = WorkspaceService(collection_service, task_service)
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    paper_fact_repository = MemoryPaperFactRepository()
+    research_understanding_repository = _EmptyResearchUnderstandingRepository()
+    comparison_repository = MemoryComparisonRepository()
+    objective_repository = MemoryObjectiveRepository()
+    document_profile_service = DocumentProfileService(
+        collection_service=collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+    )
+    research_understanding_service = ResearchUnderstandingService(
+        source_artifact_repository=source_repository,
+    )
+    workspace_service = WorkspaceService(
+        collection_service=collection_service,
+        task_service=task_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        comparison_repository=comparison_repository,
+        document_profile_service=document_profile_service,
+    )
+    research_objective_service = ResearchObjectiveService(
+        collection_service=collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        research_understanding_repository=research_understanding_repository,
+        document_profile_service=document_profile_service,
+        research_understanding_service=research_understanding_service,
+    )
+    comparison_service = ComparisonService(
+        collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        comparison_repository=comparison_repository,
+        document_profile_service=document_profile_service,
+    )
+    paper_facts_service = PaperFactsService(
+        collection_service=collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        document_profile_service=document_profile_service,
+    )
     service = GoalSessionService(
         collection_service=collection_service,
         research_view_service=ResearchViewAggregationService(
-            collection_service,
-            workspace_service,
+            collection_service=collection_service,
+            source_artifact_repository=source_repository,
+            paper_fact_repository=paper_fact_repository,
+            objective_repository=objective_repository,
+            comparison_service=comparison_service,
+            research_understanding_service=research_understanding_service,
         ),
         workspace_service=workspace_service,
-        goal_session_repository=build_goal_session_repository(tmp_path / "lens.sqlite"),
+        research_objective_service=research_objective_service,
+        comparison_service=comparison_service,
+        paper_facts_service=paper_facts_service,
+        research_understanding_feedback_service=(
+            _EmptyResearchUnderstandingFeedbackService()
+        ),
+        goal_session_repository=InMemoryObjectiveWorkspaceRepository(),
         llm_client=_FakeLLMClient("General background."),
         model="fake-model",
     )
@@ -98,7 +187,6 @@ def test_goal_sessions_route_creates_minimal_session_and_messages(
             GoalSessionCreateRequest(
                 collection_id=collection["collection_id"],
                 focused_objective_id="obj_lpbf_strength",
-                focused_goal_id="goal_lpbf_strength",
             ),
             _request(service),
         )
@@ -122,7 +210,6 @@ def test_goal_sessions_route_creates_minimal_session_and_messages(
 
     assert session.collection_id == collection["collection_id"]
     assert session.focused_objective_id == "obj_lpbf_strength"
-    assert session.focused_goal_id == "goal_lpbf_strength"
     assert session.goal_text is None
     assert session.goal_brief_json == {}
     assert session.answer_mode == "hybrid"
@@ -130,6 +217,14 @@ def test_goal_sessions_route_creates_minimal_session_and_messages(
     assert response.used_evidence_ids == []
     assert response.source_links == []
     assert len(messages.items) == 2
+
+
+def test_goal_session_create_schema_rejects_focused_goal_id():
+    with pytest.raises(ValueError):
+        GoalSessionCreateRequest(
+            collection_id="col_1",
+            focused_goal_id="goal_legacy",
+        )
 
 
 def test_goal_sessions_route_returns_404_for_missing_session(goal_session_services):

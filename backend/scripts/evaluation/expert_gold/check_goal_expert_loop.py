@@ -15,15 +15,15 @@ from urllib.error import HTTPError, URLError
 
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_COLLECTION_ID = "col_0cc5013fdb3c"
-DEFAULT_GOAL_IDS = (
-    "goal_0914003ad572",
-    "goal_1a7a26d850b9",
-    "goal_399171646354",
-    "goal_061c9c049e69",
-    "goal_6bf7d2c1030e",
-    "goal_3037e425673a",
+DEFAULT_OBJECTIVE_IDS = (
+    "obj_how-do-build-platform-preheating-temperature-and-build-platform-preheati_a13773ac",
+    "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba",
+    "obj_how-do-laser-power-scanning-speed-energy-density-porosity-level-and-pore_f18da72e",
+    "obj_how-do-scan-strategy-rotation-angles-and-build-orientation-angles-influe_2248ccb8",
+    "obj_how-do-scanning-strategy-scanning-speed-and-energy-density-affect-yield_6d508ef8",
+    "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419",
 )
-PLAN_LIST_PATH = "/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+PLAN_LIST_PATH = "/api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans"
 PLAN_DETAIL_PATH = f"{PLAN_LIST_PATH}/{{plan_id}}"
 GOAL_SESSION_PATH = "/api/v1/goal-sessions"
 GOAL_SESSION_MESSAGE_PATH = f"{GOAL_SESSION_PATH}/{{session_id}}/messages"
@@ -53,10 +53,10 @@ def parse_args() -> argparse.Namespace:
         help="Collection id to check.",
     )
     parser.add_argument(
-        "--goal-id",
+        "--objective-id",
         action="append",
-        dest="goal_ids",
-        help="Goal id to check. May repeat. Defaults to the local 6-goal 316L set.",
+        dest="objective_ids",
+        help="Objective id to check. May repeat. Defaults to the local 316L set.",
     )
     parser.add_argument(
         "--api-base-url",
@@ -112,7 +112,7 @@ def main() -> None:
     args = parse_args()
     summary = check_goal_expert_loop(
         collection_id=args.collection_id,
-        goal_ids=tuple(args.goal_ids or DEFAULT_GOAL_IDS),
+        objective_ids=tuple(args.objective_ids or DEFAULT_OBJECTIVE_IDS),
         api_base_url=args.api_base_url,
         runtime_write_check=args.runtime_write_check,
         expert_satisfaction_gate=args.expert_satisfaction_gate,
@@ -130,7 +130,7 @@ def main() -> None:
 def check_goal_expert_loop(
     *,
     collection_id: str,
-    goal_ids: tuple[str, ...] = DEFAULT_GOAL_IDS,
+    objective_ids: tuple[str, ...] = DEFAULT_OBJECTIVE_IDS,
     api_base_url: str | None = None,
     runtime_write_check: bool = False,
     expert_satisfaction_gate: bool = False,
@@ -143,29 +143,29 @@ def check_goal_expert_loop(
     effective_require_complete = require_complete or expert_satisfaction_gate
     effective_runtime_write_check = runtime_write_check or expert_satisfaction_gate
     findings_module = _load_sibling_module(
-        "check_goal_findings_projection.py",
-        "check_goal_findings_projection",
+        "check_objective_findings_projection.py",
+        "check_objective_findings_projection",
     )
     dataset_module = _load_sibling_module(
         "check_goal_dataset_quality.py",
         "check_goal_dataset_quality",
     )
-    findings = findings_module.check_goal_findings_projection(
+    findings = findings_module.check_objective_findings_projection(
         collection_id=collection_id,
-        goal_ids=goal_ids,
+        objective_ids=objective_ids,
         api_base_url=api_base_url,
     )
     dataset = dataset_module.check_goal_dataset_quality(
         collection_id=collection_id,
-        goal_ids=goal_ids,
+        objective_ids=objective_ids,
         api_base_url=api_base_url,
         require_training_ready=effective_require_all_training_ready,
     )
-    runtime_goal_id = _runtime_write_goal_id(dataset, goal_ids)
+    runtime_objective_id = _runtime_write_objective_id(dataset, objective_ids)
     runtime_contract = _runtime_contract_layer(
         api_base_url,
         collection_id=collection_id,
-        goal_id=runtime_goal_id,
+        objective_id=runtime_objective_id,
         runtime_write_check=effective_runtime_write_check,
     )
     layers = {
@@ -181,7 +181,12 @@ def check_goal_expert_loop(
             require_runtime_write=effective_runtime_write_check,
         ),
     }
-    goals = _goal_rollup(findings, dataset, collection_id=collection_id)
+    goals = _goal_rollup(
+        findings,
+        dataset,
+        collection_id=collection_id,
+        objective_ids=objective_ids,
+    )
     completion = _completion_summary(goals)
     expert_satisfaction = _expert_satisfaction_summary(
         layers,
@@ -198,7 +203,7 @@ def check_goal_expert_loop(
         "status": status,
         "completion_status": completion["status"],
         "collection_id": collection_id,
-        "goal_count": len(goal_ids),
+        "goal_count": len(objective_ids),
         "expert_satisfaction_gate": expert_satisfaction_gate,
         "require_all_training_ready": effective_require_all_training_ready,
         "require_complete": effective_require_complete,
@@ -223,9 +228,13 @@ def _load_sibling_module(filename: str, module_name: str):
 
 
 def _expert_review_layer(findings: dict[str, Any]) -> dict[str, Any]:
-    goals = _mapping_list(findings.get("goals"))
-    primary_count = sum(int(goal.get("primary_finding_count") or 0) for goal in goals)
-    direct_evidence_count = sum(int(goal.get("direct_evidence_count") or 0) for goal in goals)
+    objectives = _mapping_list(findings.get("objectives"))
+    primary_count = sum(
+        int(objective.get("primary_finding_count") or 0) for objective in objectives
+    )
+    direct_evidence_count = sum(
+        int(objective.get("direct_evidence_count") or 0) for objective in objectives
+    )
     return {
         "status": "pass" if findings.get("status") == "pass" else "fail",
         "primary_finding_count": primary_count,
@@ -280,8 +289,8 @@ def _experiment_layer(
     require_runtime_write: bool = False,
 ) -> dict[str, Any]:
     goals = _mapping_list(dataset.get("goals"))
-    eligible_goal_ids = [
-        str(goal.get("goal_id"))
+    eligible_objective_ids = [
+        str(goal.get("objective_id"))
         for goal in goals
         if int(goal.get("protocol_ready_count") or 0) > 0
     ]
@@ -292,13 +301,13 @@ def _experiment_layer(
     if require_runtime_write and not bool(runtime_contract.get("runtime_write_check")):
         runtime_ready = False
     protocol_ready = (
-        len(eligible_goal_ids) == len(goals) and len(goals) > 0
+        len(eligible_objective_ids) == len(goals) and len(goals) > 0
         if require_all_goals_protocol_ready
-        else bool(eligible_goal_ids)
+        else bool(eligible_objective_ids)
     )
     return {
         "status": "pass" if protocol_ready and runtime_ready else "fail",
-        "eligible_goal_ids": eligible_goal_ids,
+        "eligible_objective_ids": eligible_objective_ids,
         "requires_all_goals_protocol_ready": require_all_goals_protocol_ready,
         "requires_runtime_write": require_runtime_write,
         "runtime_write_scope": (
@@ -330,14 +339,14 @@ def _runtime_contract_layer(
     api_base_url: str | None,
     *,
     collection_id: str,
-    goal_id: str,
+    objective_id: str,
     runtime_write_check: bool,
 ) -> dict[str, Any]:
     if not api_base_url:
         return {
             "status": "not_checked",
             "api_base_url": "",
-            "goal_id": goal_id,
+            "objective_id": objective_id,
             "runtime_write_check": runtime_write_check,
             "checks": [],
             "requirement": "Pass --api-base-url to verify running API routes.",
@@ -350,7 +359,7 @@ def _runtime_contract_layer(
         return {
             "status": "fail",
             "api_base_url": base_url,
-            "goal_id": goal_id,
+            "objective_id": objective_id,
             "checks": [],
             "error": str(exc),
             "requirement": "Running API exposes goal-session and experiment-plan routes.",
@@ -366,7 +375,7 @@ def _runtime_contract_layer(
             _experiment_plan_write_checks(
                 base_url,
                 collection_id=collection_id,
-                goal_id=goal_id,
+                objective_id=objective_id,
                 cookie=cookie,
             )
         )
@@ -386,7 +395,7 @@ def _runtime_contract_layer(
         and not any(check["status"] == "fail" for check in checks)
         else "fail",
         "api_base_url": base_url,
-        "goal_id": goal_id,
+        "objective_id": objective_id,
         "runtime_write_check": runtime_write_check,
         "checks": checks,
         "requirement": (
@@ -400,14 +409,14 @@ def _runtime_contract_layer(
     return result
 
 
-def _runtime_write_goal_id(dataset: dict[str, Any], goal_ids: tuple[str, ...]) -> str:
+def _runtime_write_objective_id(dataset: dict[str, Any], objective_ids: tuple[str, ...]) -> str:
     for goal in _mapping_list(dataset.get("goals")):
         if int(goal.get("protocol_ready_count") or 0) <= 0:
             continue
-        goal_id = _text(goal.get("goal_id"))
-        if goal_id:
-            return goal_id
-    return goal_ids[0] if goal_ids else ""
+        objective_id = _text(goal.get("objective_id"))
+        if objective_id:
+            return objective_id
+    return objective_ids[0] if objective_ids else ""
 
 
 def _experiment_plan_route_checks(paths: dict[str, Any]) -> list[dict[str, str]]:
@@ -511,20 +520,20 @@ def _experiment_plan_write_checks(
     base_url: str,
     *,
     collection_id: str,
-    goal_id: str,
+    objective_id: str,
     cookie: str,
 ) -> list[dict[str, Any]]:
-    if not collection_id or not goal_id:
+    if not collection_id or not objective_id:
         return [
             {
                 "name": "write smoke experiment plan",
                 "path": "",
                 "method": "post",
                 "status": "fail",
-                "detail": "collection_id and goal_id are required",
+                "detail": "collection_id and objective_id are required",
             }
         ]
-    plan_list_path = f"/api/v1/collections/{collection_id}/goals/{goal_id}/experiment-plans"
+    plan_list_path = f"/api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans"
     smoke_content = (
         "Hypothesis: Lens runtime smoke check validates editable experiment "
         "plan storage.\n\n"
@@ -623,21 +632,26 @@ def _goal_rollup(
     dataset: dict[str, Any],
     *,
     collection_id: str,
+    objective_ids: tuple[str, ...],
 ) -> list[dict[str, Any]]:
     dataset_by_goal = {
-        str(goal.get("goal_id")): goal for goal in _mapping_list(dataset.get("goals"))
+        str(goal.get("objective_id")): goal for goal in _mapping_list(dataset.get("goals"))
+    }
+    objectives_by_id = {
+        str(objective.get("objective_id")): objective
+        for objective in _mapping_list(findings.get("objectives"))
     }
     rows = []
-    for goal in _mapping_list(findings.get("goals")):
-        goal_id = str(goal.get("goal_id"))
-        dataset_goal = dataset_by_goal.get(goal_id, {})
+    for objective_id in objective_ids:
+        objective = objectives_by_id.get(objective_id, {})
+        dataset_goal = dataset_by_goal.get(objective_id, {})
         rows.append(
             {
-                "goal_id": goal_id,
+                "objective_id": objective_id,
                 "collection_id": collection_id,
-                "question": _text(goal.get("question")),
-                "review_url": _goal_review_url(collection_id, goal_id),
-                "training_ready_url": _goal_training_ready_url(collection_id, goal_id),
+                "question": _text(objective.get("question")),
+                "review_url": _goal_review_url(collection_id, objective_id),
+                "training_ready_url": _goal_training_ready_url(collection_id, objective_id),
                 "next_review_finding_id": (
                     _text(dataset_goal.get("next_review_finding_id"))
                     if int(dataset_goal.get("review_candidate_count") or 0) > 0
@@ -648,8 +662,12 @@ def _goal_rollup(
                     if int(dataset_goal.get("review_candidate_count") or 0) > 0
                     else {}
                 ),
-                "primary_finding_count": int(goal.get("primary_finding_count") or 0),
-                "direct_evidence_count": int(goal.get("direct_evidence_count") or 0),
+                "primary_finding_count": int(
+                    objective.get("primary_finding_count") or 0
+                ),
+                "direct_evidence_count": int(
+                    objective.get("direct_evidence_count") or 0
+                ),
                 "dataset_item_count": int(dataset_goal.get("item_count") or 0),
                 "training_ready_count": int(dataset_goal.get("training_ready_count") or 0),
                 "training_message_ready_count": int(
@@ -674,23 +692,23 @@ def _goal_rollup(
 def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
     total_goals = len(goals)
     goals_without_training_ready = [
-        str(goal.get("goal_id"))
+        str(goal.get("objective_id"))
         for goal in goals
         if int(goal.get("training_ready_count") or 0) == 0
     ]
     goals_without_training_messages = [
-        str(goal.get("goal_id"))
+        str(goal.get("objective_id"))
         for goal in goals
         if int(goal.get("training_message_ready_count") or 0) == 0
     ]
     goals_without_protocol_ready = [
-        str(goal.get("goal_id"))
+        str(goal.get("objective_id"))
         for goal in goals
         if int(goal.get("protocol_ready_count") or 0) == 0
     ]
     pending_goals = [
         {
-            "goal_id": str(goal.get("goal_id")),
+            "objective_id": str(goal.get("objective_id")),
             "question": _text(goal.get("question")),
             "review_candidate_count": int(goal.get("review_candidate_count") or 0),
             "training_ready_count": int(goal.get("training_ready_count") or 0),
@@ -713,7 +731,7 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     protocol_ready_goals = [
         {
-            "goal_id": str(goal.get("goal_id")),
+            "objective_id": str(goal.get("objective_id")),
             "question": _text(goal.get("question")),
             "training_ready_count": int(goal.get("training_ready_count") or 0),
             "training_message_ready_count": int(
@@ -722,7 +740,7 @@ def _completion_summary(goals: list[dict[str, Any]]) -> dict[str, Any]:
             "protocol_ready_count": int(goal.get("protocol_ready_count") or 0),
             "assistant_url": _goal_assistant_url(
                 str(goal.get("collection_id") or ""),
-                str(goal.get("goal_id") or ""),
+                str(goal.get("objective_id") or ""),
             ),
             "training_ready_url": _text(goal.get("training_ready_url")),
         }
@@ -1013,7 +1031,7 @@ def render_text_summary(summary: dict[str, Any]) -> str:
         for index, goal in enumerate(protocol_ready_goals, start=1):
             lines.extend(
                 [
-                    f"{index}. {_text(goal.get('question')) or _text(goal.get('goal_id'))}",
+                    f"{index}. {_text(goal.get('question')) or _text(goal.get('objective_id'))}",
                     (
                         "   counts: "
                         f"training_ready={int(goal.get('training_ready_count') or 0)}, "
@@ -1029,7 +1047,7 @@ def render_text_summary(summary: dict[str, Any]) -> str:
         for index, goal in enumerate(pending_goals, start=1):
             lines.extend(
                 [
-                    f"{index}. {_text(goal.get('question')) or _text(goal.get('goal_id'))}",
+                    f"{index}. {_text(goal.get('question')) or _text(goal.get('objective_id'))}",
                     f"   action: {_text(goal.get('next_action'))}",
                 ]
             )
@@ -1170,24 +1188,24 @@ def _first_pending_goal_href(summary: dict[str, Any]) -> str:
 
 def _goal_review_url(
     collection_id: str,
-    goal_id: str,
+    objective_id: str,
     *,
     finding_id: str = "",
 ) -> str:
     params = {"review": "queue"}
     if finding_id:
         params["finding_id"] = finding_id
-    return f"/collections/{collection_id}/goals/{goal_id}?{urlencode(params)}"
+    return f"/collections/{collection_id}/objectives/{objective_id}?{urlencode(params)}"
 
 
-def _goal_training_ready_url(collection_id: str, goal_id: str) -> str:
-    return f"/collections/{collection_id}/goals/{goal_id}?review=training_ready"
+def _goal_training_ready_url(collection_id: str, objective_id: str) -> str:
+    return f"/collections/{collection_id}/objectives/{objective_id}?review=training_ready"
 
 
-def _goal_assistant_url(collection_id: str, goal_id: str) -> str:
-    if not collection_id or not goal_id:
+def _goal_assistant_url(collection_id: str, objective_id: str) -> str:
+    if not collection_id or not objective_id:
         return ""
-    return f"/collections/{collection_id}/assistant?goal_id={goal_id}"
+    return f"/collections/{collection_id}/assistant?objective_id={objective_id}"
 
 
 def _pending_goal_action(goal: dict[str, Any]) -> str:
@@ -1212,7 +1230,7 @@ def _pending_goal_href(goal: dict[str, Any]) -> str:
     if finding_id:
         return _goal_review_url(
             _text(goal.get("collection_id")),
-            _text(goal.get("goal_id")),
+            _text(goal.get("objective_id")),
             finding_id=finding_id,
         )
     return _text(goal.get("review_url"))

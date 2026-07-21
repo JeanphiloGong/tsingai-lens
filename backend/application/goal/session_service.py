@@ -48,7 +48,6 @@ from domain.goal import (
     GoalSourceMode,
 )
 from domain.ports import GoalSessionRepository
-from infra.persistence.factory import build_goal_session_repository
 
 AnswerMode = GoalAnswerMode
 SourceMode = GoalSourceMode
@@ -115,36 +114,24 @@ class GoalSessionService:
         collection_service: CollectionService,
         research_view_service: ResearchViewAggregationService,
         workspace_service: WorkspaceService,
-        comparison_service: ComparisonService | None = None,
-        paper_facts_service: PaperFactsService | None = None,
-        research_objective_service: ResearchObjectiveService | None = None,
-        research_understanding_feedback_service: (
-            ResearchUnderstandingFeedbackService | None
-        ) = None,
-        goal_session_repository: GoalSessionRepository | None = None,
+        research_objective_service: ResearchObjectiveService,
+        comparison_service: ComparisonService,
+        paper_facts_service: PaperFactsService,
+        research_understanding_feedback_service: ResearchUnderstandingFeedbackService,
+        goal_session_repository: GoalSessionRepository,
         llm_client: Any | None = None,
         model: str | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.research_view_service = research_view_service
         self.workspace_service = workspace_service
-        self.comparison_service = comparison_service or ComparisonService(
-            collection_service=self.collection_service,
-        )
-        self.paper_facts_service = paper_facts_service or PaperFactsService(
-            collection_service=self.collection_service,
-        )
-        self.research_objective_service = (
-            research_objective_service
-            or ResearchObjectiveService(collection_service=self.collection_service)
-        )
+        self.comparison_service = comparison_service
+        self.paper_facts_service = paper_facts_service
+        self.research_objective_service = research_objective_service
         self.research_understanding_feedback_service = (
             research_understanding_feedback_service
-            or ResearchUnderstandingFeedbackService()
         )
-        self.goal_session_repository = (
-            goal_session_repository or build_goal_session_repository()
-        )
+        self.goal_session_repository = goal_session_repository
         self.model = (
             model
             or os.getenv("GOAL_COPILOT_LLM_MODEL")
@@ -164,7 +151,6 @@ class GoalSessionService:
         focused_material_id: str | None = None,
         focused_paper_id: str | None = None,
         focused_objective_id: str | None = None,
-        focused_goal_id: str | None = None,
         goal_text: str | None = None,
         goal_brief_json: dict[str, Any] | None = None,
         answer_mode: str | None = "hybrid",
@@ -178,7 +164,6 @@ class GoalSessionService:
             focused_material_id=focused_material_id,
             focused_paper_id=focused_paper_id,
             focused_objective_id=focused_objective_id,
-            focused_goal_id=focused_goal_id,
             goal_text=goal_text,
             goal_brief_json=goal_brief_json,
             answer_mode=answer_mode,
@@ -214,7 +199,6 @@ class GoalSessionService:
         focused_material_id: Any = _UNSET,
         focused_paper_id: Any = _UNSET,
         focused_objective_id: Any = _UNSET,
-        focused_goal_id: Any = _UNSET,
         goal_text: Any = _UNSET,
         goal_brief_json: Any = _UNSET,
         answer_mode: Any = _UNSET,
@@ -232,28 +216,18 @@ class GoalSessionService:
                 focused_material_id=focused_material_id,
                 focused_paper_id=session.focused_paper_id,
                 focused_objective_id=session.focused_objective_id,
-                focused_goal_id=session.focused_goal_id,
             )
         if focused_paper_id is not _UNSET:
             session = session.with_focus(
                 focused_material_id=session.focused_material_id,
                 focused_paper_id=focused_paper_id,
                 focused_objective_id=session.focused_objective_id,
-                focused_goal_id=session.focused_goal_id,
             )
         if focused_objective_id is not _UNSET:
             session = session.with_focus(
                 focused_material_id=session.focused_material_id,
                 focused_paper_id=session.focused_paper_id,
                 focused_objective_id=focused_objective_id,
-                focused_goal_id=session.focused_goal_id,
-            )
-        if focused_goal_id is not _UNSET:
-            session = session.with_focus(
-                focused_material_id=session.focused_material_id,
-                focused_paper_id=session.focused_paper_id,
-                focused_objective_id=session.focused_objective_id,
-                focused_goal_id=focused_goal_id,
             )
         if goal_text is not _UNSET:
             session = session.with_goal_text(goal_text)
@@ -491,12 +465,10 @@ class GoalSessionService:
             page_context.get("paper_id") or page_context.get("document_id")
         )
         objective_id = _clean_text(page_context.get("objective_id"))
-        goal_id = _clean_text(page_context.get("goal_id"))
         return session.with_page_context(
             material_id=material_id,
             paper_id=paper_id,
             objective_id=objective_id,
-            goal_id=goal_id,
         )
 
     def _apply_inline_command(
@@ -518,7 +490,6 @@ class GoalSessionService:
                 focused_material_id=argument,
                 focused_paper_id=session.focused_paper_id,
                 focused_objective_id=session.focused_objective_id,
-                focused_goal_id=session.focused_goal_id,
             )
             return (
                 session,
@@ -529,7 +500,6 @@ class GoalSessionService:
                 focused_material_id=session.focused_material_id,
                 focused_paper_id=argument,
                 focused_objective_id=session.focused_objective_id,
-                focused_goal_id=session.focused_goal_id,
             )
             return (
                 session,
@@ -540,22 +510,10 @@ class GoalSessionService:
                 focused_material_id=session.focused_material_id,
                 focused_paper_id=session.focused_paper_id,
                 focused_objective_id=argument,
-                focused_goal_id=session.focused_goal_id,
             )
             return (
                 session,
                 f"Focused objective updated to {session.focused_objective_id or 'none'}.",
-            )
-        if command == "confirmed-goal":
-            session = session.with_focus(
-                focused_material_id=session.focused_material_id,
-                focused_paper_id=session.focused_paper_id,
-                focused_objective_id=session.focused_objective_id,
-                focused_goal_id=argument,
-            )
-            return (
-                session,
-                f"Focused confirmed goal updated to {session.focused_goal_id or 'none'}.",
             )
         if command == "goal":
             return session.with_goal_text(argument), "Goal updated."
@@ -565,7 +523,6 @@ class GoalSessionService:
                     focused_material_id=None,
                     focused_paper_id=None,
                     focused_objective_id=None,
-                    focused_goal_id=None,
                 ),
                 "Focus cleared.",
             )
@@ -582,7 +539,6 @@ class GoalSessionService:
         workspace = self._safe_workspace(collection_id, warnings)
         focused_material_id = session.focused_material_id
         focused_objective_id = session.focused_objective_id
-        focused_goal_id = session.focused_goal_id
         objectives = self._safe_objectives(collection_id, warnings)
         objective_research_view = None
         if focused_objective_id:
@@ -608,11 +564,10 @@ class GoalSessionService:
         evidence_cards = self._safe_evidence_cards(collection_id, warnings)
         curated_research_findings = self._safe_curated_research_findings(
             collection_id,
-            focused_goal_id=focused_goal_id,
             focused_objective_id=focused_objective_id,
             warnings=warnings,
         )
-        if (focused_goal_id or focused_objective_id) and not curated_research_findings:
+        if focused_objective_id and not curated_research_findings:
             warnings.append("curated_research_findings_empty")
         if curated_research_findings:
             warnings = [
@@ -628,7 +583,6 @@ class GoalSessionService:
             "focused_material_id": focused_material_id,
             "focused_paper_id": session.focused_paper_id,
             "focused_objective_id": focused_objective_id,
-            "focused_goal_id": focused_goal_id,
             "research_objectives": objectives,
             "objective_research_view": objective_research_view,
             "material_profile": material_profile,
@@ -637,13 +591,12 @@ class GoalSessionService:
             "evidence_cards": evidence_cards,
             "curated_research_findings": curated_research_findings,
         }
-        if curated_research_findings or focused_goal_id:
+        if curated_research_findings or focused_objective_id:
             source_context_payload = {
                 "collection": collection,
                 "focused_material_id": focused_material_id,
                 "focused_paper_id": session.focused_paper_id,
                 "focused_objective_id": focused_objective_id,
-                "focused_goal_id": focused_goal_id,
             }
             if curated_research_findings:
                 source_context_payload["curated_research_findings"] = curated_research_findings
@@ -787,19 +740,15 @@ class GoalSessionService:
         self,
         collection_id: str,
         *,
-        focused_goal_id: str | None,
         focused_objective_id: str | None,
         warnings: list[str],
     ) -> list[dict[str, Any]]:
-        scope_type = "goal" if focused_goal_id else "objective"
-        scope_id = focused_goal_id or focused_objective_id
-        if not scope_id:
+        if not focused_objective_id:
             return []
         try:
             dataset = self.research_understanding_feedback_service.export_dataset(
                 collection_id=collection_id,
-                scope_type=scope_type,
-                scope_id=scope_id,
+                objective_id=focused_objective_id,
                 dataset_use_status="training_ready",
             )
         except FileNotFoundError:
@@ -1456,7 +1405,6 @@ class GoalSessionService:
             f"- focused_material_id: {session.focused_material_id}\n"
             f"- focused_paper_id: {session.focused_paper_id}\n"
             f"- focused_objective_id: {session.focused_objective_id}\n"
-            f"- focused_goal_id: {session.focused_goal_id}\n"
             f"- goal_text: {session.goal_text}\n"
             f"- answer_mode: {session.answer_mode}\n"
             f"- rolling_summary: {session.rolling_summary}\n\n"

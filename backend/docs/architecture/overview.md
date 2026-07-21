@@ -41,21 +41,23 @@ Within the repository-wide system:
 
 ## Current Architectural Shape
 
-The backend is still in transition, but its intended shape is already visible:
+The backend uses the following implemented shape:
 
 - public HTTP flows currently enter through `controllers/`
 - business-domain orchestration is converging under `application/`
-- some legacy flat services still remain and should keep shrinking
+- remaining flat services are explicit application owners rather than hidden
+  persistence composition points
 - the Lens v1 semantic backbone is now
   `document_profiles -> paper facts family -> evidence_cards plus
   comparable_results / collection_comparable_results -> row projection`
 - graph is a Core-derived secondary surface
 - query now crosses a Source-owned runtime facade rather than importing
   GraphRAG internals from product-facing application code
-- persistence is moving from split JSON and handwritten SQLite ownership toward
-  the single authority model defined in
-  [`persistence-model.md`](persistence-model.md); current repositories remain
-  active until their explicit cutover slices land
+- PostgreSQL owns structured runtime state, object storage owns immutable
+  bytes, and local files hold only rebuildable scratch as defined in
+  [`persistence-model.md`](persistence-model.md)
+- no SQLite or vector database is selectable at runtime; the retained SQLite
+  Source implementation supports isolated tests only
 - historical GraphRAG engine code is being retired rather than preserved as a
   separate active backend package
 

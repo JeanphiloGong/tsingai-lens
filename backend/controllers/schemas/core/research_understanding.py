@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 UnderstandingState = Literal["empty", "partial", "ready", "limited"]
-UnderstandingScopeType = Literal["collection", "material", "objective", "goal", "document"]
+UnderstandingScopeType = Literal["collection", "material", "objective", "document"]
 ClaimStatus = Literal["supported", "limited", "conflicted", "unsupported"]
 ClaimType = Literal[
     "finding",
@@ -65,10 +65,9 @@ class ResearchUnderstandingScopeResponse(BaseModel):
 
     scope_type: str = Field(
         ...,
-        description="collection, material, objective, goal, or document",
+        description="collection, material, objective, or document",
     )
     collection_id: str = Field(..., description="Collection ID")
-    goal_id: str | None = Field(default=None, description="Optional confirmed goal scope")
     material_id: str | None = Field(default=None, description="Optional material scope")
     objective_id: str | None = Field(default=None, description="Optional objective scope")
     document_id: str | None = Field(default=None, description="Optional document scope")
@@ -393,10 +392,9 @@ class ResearchUnderstandingResponse(BaseModel):
 class ResearchUnderstandingFeedbackCreateRequest(BaseModel):
     """Expert feedback captured on one research-understanding finding."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
-    scope_type: UnderstandingScopeType
-    scope_id: str = Field(..., min_length=1, max_length=160)
+    objective_id: str = Field(..., min_length=1, max_length=160)
     finding_id: str = Field(..., min_length=1, max_length=200)
     claim_id: str | None = Field(default=None, max_length=200)
     review_status: ResearchUnderstandingFeedbackStatus
@@ -410,8 +408,7 @@ class ResearchUnderstandingFeedbackResponse(BaseModel):
 
     feedback_id: str
     collection_id: str
-    scope_type: str
-    scope_id: str
+    objective_id: str
     finding_id: str
     claim_id: str | None = None
     finding_fingerprint: str | None = None
@@ -432,10 +429,9 @@ class ResearchUnderstandingFeedbackListResponse(BaseModel):
 class ResearchUnderstandingCurationCreateRequest(BaseModel):
     """Expert-curated correction for one research-understanding finding."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
-    scope_type: UnderstandingScopeType
-    scope_id: str = Field(..., min_length=1, max_length=160)
+    objective_id: str = Field(..., min_length=1, max_length=160)
     finding_id: str = Field(..., min_length=1, max_length=200)
     claim_id: str | None = Field(default=None, max_length=200)
     curated_claim_type: ClaimType = Field(default="finding")
@@ -459,8 +455,7 @@ class ResearchUnderstandingCurationResponse(BaseModel):
 
     curation_id: str
     collection_id: str
-    scope_type: str
-    scope_id: str
+    objective_id: str
     finding_id: str
     claim_id: str | None = None
     finding_fingerprint: str | None = None
@@ -504,8 +499,7 @@ class ResearchUnderstandingGoldDraftResponse(BaseModel):
     """Read-only gold-set draft exported from expert claim curations."""
 
     collection_id: str
-    scope_type: str
-    scope_id: str
+    objective_id: str
     gold_id: str
     target_layer: str
     metric_profile: str
@@ -516,7 +510,7 @@ class ResearchUnderstandingGoldDraftResponse(BaseModel):
 class ResearchUnderstandingReviewDecisionImportRequest(BaseModel):
     """Batch import request for explicit expert review decision rows."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     rows: list[dict[str, Any]] = Field(default_factory=list, max_length=1000)
     decision_board_tsv: str | None = Field(default=None, max_length=2_000_000)
@@ -537,8 +531,8 @@ class ResearchUnderstandingReviewDecisionImportResponse(BaseModel):
     errors: list[dict[str, Any]] = Field(default_factory=list)
     warnings: list[dict[str, Any]] = Field(default_factory=list)
     review_progress: dict[str, Any] = Field(default_factory=dict)
-    decision_progress_by_goal: list[dict[str, Any]] = Field(default_factory=list)
-    affected_goals: list[dict[str, Any]] = Field(default_factory=list)
+    decision_progress_by_objective: list[dict[str, Any]] = Field(default_factory=list)
+    affected_objectives: list[dict[str, Any]] = Field(default_factory=list)
     readiness_summary: dict[str, Any] = Field(default_factory=dict)
     review_scope_gate: dict[str, Any] = Field(default_factory=dict)
 
@@ -606,8 +600,7 @@ class ResearchUnderstandingDatasetSampleResponse(BaseModel):
     finding_level: str
     document_ids: list[str] = Field(default_factory=list)
     collection_id: str
-    scope_type: str
-    scope_id: str
+    objective_id: str
     finding_id: str
     claim_id: str | None = None
     finding_fingerprint: str
@@ -640,8 +633,7 @@ class ResearchUnderstandingDatasetResponse(BaseModel):
     schema_version: str
     dataset_id: str
     collection_id: str
-    scope_type: str
-    scope_id: str
+    objective_id: str | None = None
     task_type: str
     metric_profile: str
     label_status_filter: ResearchUnderstandingDatasetLabelStatus | None = None

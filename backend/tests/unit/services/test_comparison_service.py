@@ -8,7 +8,10 @@ from application.core.comparison_service import (
     ComparisonRowsNotReadyError,
     ComparisonService,
 )
-from domain.core import CoreFactSet, ObjectiveEvidenceUnit
+from domain.core import ObjectiveEvidenceUnit, ObjectiveFactSet
+from tests.support.comparison_repository import MemoryComparisonRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 class FakeCollectionService:
@@ -16,34 +19,13 @@ class FakeCollectionService:
         return {"collection_id": collection_id, "name": "Objective collection"}
 
 
-class FakeCoreFactRepository:
-    backend_name = "fake"
-
-    def __init__(self, facts: CoreFactSet) -> None:
-        self.facts = facts
-        self.comparable_results = ()
-        self.collection_comparable_results = ()
-        self.comparison_rows = ()
-
-    def read_collection_facts(self, collection_id: str) -> CoreFactSet:  # noqa: ARG002
-        return self.facts
-
-    def replace_collection_comparison_artifacts(
-        self,
-        collection_id: str,  # noqa: ARG002
-        comparable_results: tuple,
-        collection_comparable_results: tuple,
-        comparison_rows: tuple,
-        pairwise_comparison_relations: tuple = (),  # noqa: ARG002
-    ) -> None:
-        self.comparable_results = comparable_results
-        self.collection_comparable_results = collection_comparable_results
-        self.comparison_rows = comparison_rows
-
-
 def test_comparison_service_projects_rows_from_objective_measurements():
-    repository = FakeCoreFactRepository(
-        CoreFactSet(
+    repository = MemoryComparisonRepository()
+    objective_repository = MemoryObjectiveRepository()
+    objective_repository.replace(
+        "col-1",
+        "build_test",
+        ObjectiveFactSet(
             objective_evidence_units=(
                 ObjectiveEvidenceUnit.from_mapping(
                     {
@@ -69,20 +51,23 @@ def test_comparison_service_projects_rows_from_objective_measurements():
                     }
                 ),
             ),
-        )
+        ),
     )
     service = ComparisonService(
         collection_service=FakeCollectionService(),
         document_profile_service=SimpleNamespace(),
-        core_fact_repository=repository,
+        paper_fact_repository=MemoryPaperFactRepository(),
+        objective_repository=objective_repository,
+        comparison_repository=repository,
     )
 
-    rows = service.build_comparison_rows("col-1")
+    rows = service.build_comparison_rows("col-1", "build_test")
 
     assert len(rows) == 1
-    assert len(repository.comparable_results) == 1
-    assert len(repository.collection_comparable_results) == 1
-    assert repository.comparison_rows == rows
+    facts = repository.read("col-1")
+    assert len(facts.comparable_results) == 1
+    assert len(facts.collection_comparable_results) == 1
+    assert service.read_comparison_rows("col-1") == rows
     assert rows[0].comparable_result_id == "objective:oeu-as-built-icorr"
     assert rows[0].material_system_normalized == "316L stainless steel"
     assert rows[0].property_normalized == "corrosion current density"
@@ -90,8 +75,12 @@ def test_comparison_service_projects_rows_from_objective_measurements():
 
 
 def test_comparison_service_does_not_fall_back_to_paper_facts_for_empty_objective_rows():
-    repository = FakeCoreFactRepository(
-        CoreFactSet(
+    repository = MemoryComparisonRepository()
+    objective_repository = MemoryObjectiveRepository()
+    objective_repository.replace(
+        "col-1",
+        "build_test",
+        ObjectiveFactSet(
             objective_evidence_units=(
                 ObjectiveEvidenceUnit.from_mapping(
                     {
@@ -105,13 +94,15 @@ def test_comparison_service_does_not_fall_back_to_paper_facts_for_empty_objectiv
                     }
                 ),
             ),
-        )
+        ),
     )
     service = ComparisonService(
         collection_service=FakeCollectionService(),
         document_profile_service=SimpleNamespace(),
-        core_fact_repository=repository,
+        paper_fact_repository=MemoryPaperFactRepository(),
+        objective_repository=objective_repository,
+        comparison_repository=repository,
     )
 
     with pytest.raises(ComparisonRowsNotReadyError):
-        service.build_comparison_rows("col-1")
+        service.build_comparison_rows("col-1", "build_test")

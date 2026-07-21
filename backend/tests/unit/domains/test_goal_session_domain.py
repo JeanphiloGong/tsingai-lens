@@ -28,6 +28,7 @@ def test_goal_session_record_requires_collection_and_normalizes_context() -> Non
     assert session.goal_text == "compare strength"
     assert session.answer_mode == "grounded"
     assert session.to_record()["goal_brief_json"] == {"target": "316L"}
+    assert "focused_goal_id" not in session.to_record()
 
 
 def test_goal_session_record_updates_chat_state_after_answer() -> None:

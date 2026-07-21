@@ -142,6 +142,19 @@ class SqliteSourceArtifactRepository:
                 ),
             )
 
+    def replace_collection_figures(
+        self,
+        collection_id: str,
+        figures: tuple[SourceFigure, ...],
+    ) -> None:
+        self._ensure_schema()
+        with self._connection() as connection:
+            connection.execute(
+                "DELETE FROM source_figures WHERE collection_id = ?",
+                (collection_id,),
+            )
+            self._insert_figures(connection, collection_id, figures)
+
     def list_documents(self, collection_id: str) -> list[SourceDocument]:
         self._ensure_schema()
         with self._connection() as connection:

@@ -12,7 +12,6 @@ from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtra
 from domain.core import ResearchUnderstanding
 from domain.ports import SourceArtifactRepository
 from domain.source import SourceBlock, SourceDocument, SourceTable
-from infra.persistence.factory import build_source_artifact_repository
 from infra.source.runtime.mapping.text_quality import normalize_display_text
 
 logger = logging.getLogger(__name__)
@@ -102,14 +101,14 @@ class ResearchUnderstandingService:
         source_artifact_repository: SourceArtifactRepository | None = None,
         structured_extractor: Any | None = None,
     ) -> None:
-        self.source_artifact_repository = (
-            source_artifact_repository or build_source_artifact_repository()
-        )
+        self.source_artifact_repository = source_artifact_repository
         self.structured_extractor = structured_extractor or CoreLLMStructuredExtractor()
 
     def with_presentation(
         self,
         understanding: ResearchUnderstanding | Mapping[str, Any] | None,
+        *,
+        recover_source_findings: bool = True,
     ) -> dict[str, Any] | None:
         if understanding is None:
             return None
@@ -120,7 +119,7 @@ class ResearchUnderstandingService:
         )
         record = self._record_with_traceable_evidence_refs(record)
         record = self._record_without_off_axis_recovered_objects(record)
-        if _text(_mapping(record.get("scope")).get("scope_type")) != "goal":
+        if recover_source_findings:
             record = self._record_with_recovered_presentation_objects(record)
         record = self._record_with_comparison_condition_evidence(record)
         record["presentation"] = self._presentation_for(record)
@@ -131,25 +130,25 @@ class ResearchUnderstandingService:
         self,
         payload: Mapping[str, Any],
     ) -> dict[str, Any]:
-        return self._build_goal_or_objective_understanding(
+        return self._build_objective_understanding(
             payload,
-            scope_type="objective",
+            synthesize_findings=False,
         )
 
-    def build_goal_understanding(
+    def synthesize_objective_understanding(
         self,
         payload: Mapping[str, Any],
     ) -> dict[str, Any]:
-        return self._build_goal_or_objective_understanding(
+        return self._build_objective_understanding(
             payload,
-            scope_type="goal",
+            synthesize_findings=True,
         )
 
-    def _build_goal_or_objective_understanding(
+    def _build_objective_understanding(
         self,
         payload: Mapping[str, Any],
         *,
-        scope_type: str,
+        synthesize_findings: bool,
     ) -> dict[str, Any]:
         objective = _mapping(payload.get("objective"))
         context = _mapping(payload.get("objective_context"))
@@ -157,7 +156,6 @@ class ResearchUnderstandingService:
         objective_id = _text(objective.get("objective_id")) or _text(
             context.get("objective_id")
         )
-        goal_id = _text(payload.get("goal_id"))
         question = _text(objective.get("question")) or _text(context.get("question"))
         evidence_units = _mapping_list(payload.get("evidence_units"))
         blocks_by_id, _documents_by_id, tables_by_id = self._source_artifact_lookups(
@@ -175,7 +173,7 @@ class ResearchUnderstandingService:
         )
         recovered_findings = (
             []
-            if scope_type == "goal"
+            if synthesize_findings
             else self._recovered_objective_findings_from_source_blocks(
                 payload,
                 evidence_units=evidence_units,
@@ -212,9 +210,9 @@ class ResearchUnderstandingService:
         )
         context_ids = [item["context_id"] for item in contexts]
         context_ids_by_unit = self._objective_context_ids_by_unit(contexts)
-        if scope_type == "goal":
+        if synthesize_findings:
             claims, relations, relation_warnings, model_traces = (
-                self._goal_finding_syntheses(
+                self._objective_finding_syntheses(
                     payload,
                     evidence_units=evidence_units,
                     evidence_ref_ids_by_unit=evidence_ref_ids_by_unit,
@@ -260,10 +258,9 @@ class ResearchUnderstandingService:
                 {
                     "state": state,
                     "scope": {
-                        "scope_type": scope_type,
+                        "scope_type": "objective",
                         "collection_id": collection_id,
-                        "goal_id": goal_id if scope_type == "goal" else None,
-                        "objective_id": objective_id if scope_type != "goal" else None,
+                        "objective_id": objective_id,
                         "title": question,
                     },
                     "claims": claims,
@@ -277,7 +274,8 @@ class ResearchUnderstandingService:
                     ),
                     "model_traces": model_traces,
                 }
-            )
+            ),
+            recover_source_findings=not synthesize_findings,
         ) or {}
 
     def build_material_understanding(
@@ -774,7 +772,7 @@ class ResearchUnderstandingService:
             model_traces,
         )
 
-    def _goal_finding_syntheses(
+    def _objective_finding_syntheses(
         self,
         payload: Mapping[str, Any],
         *,
@@ -7474,7 +7472,6 @@ class ResearchUnderstandingService:
         collection_id = _text(scope_payload.get("collection_id"))
         objective = _mapping(scope_payload.get("objective"))
         context = _mapping(scope_payload.get("objective_context"))
-        goal_id = _text(scope_payload.get("goal_id"))
         objective_id = _text(objective.get("objective_id")) or _text(
             context.get("objective_id")
         )
@@ -7482,7 +7479,7 @@ class ResearchUnderstandingService:
         trace_record["trace_id"] = _trace_id(
             trace_record.get("task_type"),
             collection_id,
-            goal_id or objective_id,
+            objective_id,
             input_source_ids,
         )
         trace_record["task_type"] = _text(trace_record.get("task_type")) or (
@@ -7490,8 +7487,8 @@ class ResearchUnderstandingService:
         )
         trace_record["trace_status"] = trace_status
         trace_record["collection_id"] = collection_id
-        trace_record["scope_type"] = "goal" if goal_id else "objective"
-        trace_record["scope_id"] = goal_id or objective_id
+        trace_record["scope_type"] = "objective"
+        trace_record["scope_id"] = objective_id
         trace_record["input_blocks"] = [
             {
                 "source_object_id": unit_id,
@@ -9861,13 +9858,13 @@ class ResearchUnderstandingService:
             _mapping(updated.get("scope")),
             contexts=contexts,
         )
-        goal_axes = _dedupe_strings(
+        objective_axes = _dedupe_strings(
             [
                 *_strings(objective.get("process_axes")),
                 *_strings(objective_context.get("variable_process_axes")),
             ]
         )
-        if not goal_axes:
+        if not objective_axes:
             return updated
         relations = _mapping_list(updated.get("relations"))
         off_axis_relation_ids = {
@@ -9875,7 +9872,7 @@ class ResearchUnderstandingService:
             for relation in relations
             if (relation_id := _text(relation.get("relation_id")))
             and relation_id.startswith("rel_recovered_")
-            and not self._relation_matches_goal_axis(relation, goal_axes)
+            and not self._relation_matches_objective_axis(relation, objective_axes)
         }
         if not off_axis_relation_ids:
             return updated
@@ -9958,14 +9955,14 @@ class ResearchUnderstandingService:
             for effect in effects
             for relation_id in _strings(effect.get("relation_ids"))
         }
-        goal_axes = _dedupe_strings(
+        objective_axes = _dedupe_strings(
             [
                 axis
                 for context in contexts_by_id.values()
                 if (
                     _text(context.get("context_id")) == "ctx_objective_scope"
                     or _normalize_match_text(_text(context.get("label")) or "")
-                    in {"objective scope", "goal scope"}
+                    == "objective scope"
                 )
                 for process_context in [_mapping(context.get("process_context"))]
                 for axis in _strings(process_context.get("variable_process_axes"))
@@ -9985,7 +9982,7 @@ class ResearchUnderstandingService:
                 evidence_by_id=evidence_by_id,
                 existing_effects=effects,
             )
-            and self._relation_matches_goal_axis(relation, goal_axes)
+            and self._relation_matches_objective_axis(relation, objective_axes)
         ]
         effects.extend(relation_effects)
         context_summaries = [
@@ -10055,14 +10052,14 @@ class ResearchUnderstandingService:
             )
             for effect in effects
         ]
-        if _text(scope.get("scope_type")) == "goal" and goal_axes:
+        if objective_axes:
             findings = [
                 finding
                 for finding in findings
                 if any(
                     self._axis_labels_match(variable, axis)
                     for variable in _strings(finding.get("variables"))
-                    for axis in goal_axes
+                    for axis in objective_axes
                 )
             ]
         findings = [
@@ -10151,7 +10148,7 @@ class ResearchUnderstandingService:
             evidence_by_id=evidence_by_id,
             blocks_by_id=blocks_by_id,
             tables_by_id=tables_by_id,
-            goal_axes=variable_axes,
+            objective_axes=variable_axes,
         )
         review_queue_findings = self._review_findings_without_covered_ved_rows(
             review_queue_findings,
@@ -10889,10 +10886,7 @@ class ResearchUnderstandingService:
     def _is_scope_context(self, context: Mapping[str, Any]) -> bool:
         context_id = _normalize_match_text(_text(context.get("context_id")) or "")
         label = _normalize_match_text(_text(context.get("label")) or "")
-        return context_id in {"ctx_objective_scope", "ctx_goal_scope", "ctx_goal"} or label in {
-            "objective scope",
-            "goal scope",
-        }
+        return context_id == "ctx_objective_scope" or label == "objective scope"
 
     def _presentation_recovery_process_axes_from_title(self, title: str) -> list[str]:
         normalized = f" {_normalize_match_text(title)} "
@@ -12585,7 +12579,7 @@ class ResearchUnderstandingService:
         evidence_by_id: Mapping[str, dict[str, Any]],
         blocks_by_id: Mapping[str, SourceBlock],
         tables_by_id: Mapping[str, SourceTable],
-        goal_axes: list[str] | tuple[str, ...] = (),
+        objective_axes: list[str] | tuple[str, ...] = (),
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         primary: list[dict[str, Any]] = []
         review_queue: list[dict[str, Any]] = []
@@ -12706,11 +12700,11 @@ class ResearchUnderstandingService:
             evidence_by_id=evidence_by_id,
             tables_by_id=tables_by_id,
         )
-        primary, review_queue = self._promote_uncovered_goal_axis_findings(
+        primary, review_queue = self._promote_uncovered_objective_axis_findings(
             primary,
             review_queue,
             evidence_by_id=evidence_by_id,
-            goal_axes=goal_axes,
+            objective_axes=objective_axes,
         )
         return primary, [
             self._finding_with_review_candidate_table_semantics(
@@ -14163,31 +14157,34 @@ class ResearchUnderstandingService:
             }
         return updated
 
-    def _promote_uncovered_goal_axis_findings(
+    def _promote_uncovered_objective_axis_findings(
         self,
         primary: list[dict[str, Any]],
         review_queue: list[dict[str, Any]],
         *,
         evidence_by_id: Mapping[str, dict[str, Any]],
-        goal_axes: list[str] | tuple[str, ...],
+        objective_axes: list[str] | tuple[str, ...],
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        goal_axis_keys = self._goal_axis_keys(goal_axes)
-        if not goal_axis_keys:
+        objective_axis_keys = self._objective_axis_keys(objective_axes)
+        if not objective_axis_keys:
             return primary, review_queue
 
-        covered_axis_keys = self._covered_goal_axis_keys(
+        covered_axis_keys = self._covered_objective_axis_keys(
             primary,
-            goal_axes=goal_axes,
+            objective_axes=objective_axes,
         )
         promoted: list[dict[str, Any]] = []
         remaining_review_queue: list[dict[str, Any]] = []
         for finding in review_queue:
-            axis_key = self._finding_goal_axis_key(finding, goal_axes=goal_axes)
+            axis_key = self._finding_objective_axis_key(
+                finding,
+                objective_axes=objective_axes,
+            )
             if (
                 axis_key
-                and axis_key in goal_axis_keys
+                and axis_key in objective_axis_keys
                 and axis_key not in covered_axis_keys
-                and self._promotable_table_goal_axis_finding(
+                and self._promotable_table_objective_axis_finding(
                     finding,
                     evidence_by_id=evidence_by_id,
                 )
@@ -14198,35 +14195,43 @@ class ResearchUnderstandingService:
             remaining_review_queue.append(finding)
         return [*primary, *promoted], remaining_review_queue
 
-    def _goal_axis_keys(self, goal_axes: list[str] | tuple[str, ...]) -> set[str]:
+    def _objective_axis_keys(
+        self,
+        objective_axes: list[str] | tuple[str, ...],
+    ) -> set[str]:
         return {
             axis_key
-            for axis in goal_axes
+            for axis in objective_axes
             if (axis_key := self._axis_key(axis))
         }
 
-    def _covered_goal_axis_keys(
+    def _covered_objective_axis_keys(
         self,
         findings: list[dict[str, Any]],
         *,
-        goal_axes: list[str] | tuple[str, ...],
+        objective_axes: list[str] | tuple[str, ...],
     ) -> set[str]:
         return {
             axis_key
             for finding in findings
-            if (axis_key := self._finding_goal_axis_key(finding, goal_axes=goal_axes))
+            if (
+                axis_key := self._finding_objective_axis_key(
+                    finding,
+                    objective_axes=objective_axes,
+                )
+            )
         }
 
-    def _finding_goal_axis_key(
+    def _finding_objective_axis_key(
         self,
         finding: Mapping[str, Any],
         *,
-        goal_axes: list[str] | tuple[str, ...],
+        objective_axes: list[str] | tuple[str, ...],
     ) -> str:
         variable = _text(next(iter(_strings(finding.get("variables"))), ""))
         if not variable:
             return ""
-        for axis in goal_axes:
+        for axis in objective_axes:
             display_axis = self._display_axis_label(axis)
             if display_axis and self._axis_labels_match(variable, display_axis):
                 return self._axis_key(display_axis)
@@ -14260,7 +14265,7 @@ class ResearchUnderstandingService:
             normalized = "selective laser melting"
         return normalized
 
-    def _promotable_table_goal_axis_finding(
+    def _promotable_table_objective_axis_finding(
         self,
         finding: Mapping[str, Any],
         *,
@@ -15270,7 +15275,7 @@ class ResearchUnderstandingService:
         fallback_variable = _text(effect.get("variable_axis"))
         statement_axis = self._statement_comparison_axis(
             _text(effect.get("statement")) or "",
-            goal_axes=[fallback_variable] if fallback_variable else [],
+            objective_axes=[fallback_variable] if fallback_variable else [],
         )
         if (
             not has_synthesis_relation
@@ -18279,7 +18284,7 @@ class ResearchUnderstandingService:
                 if (
                     _text(context.get("context_id")) == "ctx_objective_scope"
                     or _normalize_match_text(_text(context.get("label")) or "")
-                    in {"objective scope", "goal scope"}
+                    == "objective scope"
                 )
                 for property_name in _strings(context.get("property_scope"))
             ]
@@ -18292,14 +18297,14 @@ class ResearchUnderstandingService:
                     [],
                 )
             )
-        goal_axes = _dedupe_strings(
+        objective_axes = _dedupe_strings(
             [
                 axis
                 for context in contexts_by_id.values()
                 if (
                     _text(context.get("context_id")) == "ctx_objective_scope"
                     or _normalize_match_text(_text(context.get("label")) or "")
-                    in {"objective scope", "goal scope"}
+                    == "objective scope"
                 )
                 for process_context in [_mapping(context.get("process_context"))]
                 for axis in [
@@ -18308,14 +18313,14 @@ class ResearchUnderstandingService:
                 ]
             ]
         )
-        goal_axis_relations = [
+        objective_axis_relations = [
             relation
             for relation in related_relations
-            if self._relation_matches_goal_axis(relation, goal_axes)
+            if self._relation_matches_objective_axis(relation, objective_axes)
         ]
         explicit_statement_axis = self._statement_comparison_axis(
             _text(claim.get("statement")) or "",
-            goal_axes=goal_axes,
+            objective_axes=objective_axes,
         )
         if self._is_recovered_expert_effect(claim):
             explicit_statement_axis = ""
@@ -18328,7 +18333,7 @@ class ResearchUnderstandingService:
                 for relation in related_relations
                 if self._statement_comparison_axis(
                     self._presentation_relation_summary(relation),
-                    goal_axes=goal_axes,
+                    objective_axes=objective_axes,
                 )
                 == explicit_statement_axis
             ]
@@ -18341,14 +18346,14 @@ class ResearchUnderstandingService:
                     primary_relation,
                     contexts,
                 )
-        elif goal_axis_relations:
-            related_relations = goal_axis_relations
+        elif objective_axis_relations:
+            related_relations = objective_axis_relations
             primary_relation = related_relations[0]
             variable_axis = self._variable_axis_for(primary_relation, contexts)
             target_property = self._target_property_for(claim, primary_relation, contexts)
-        elif goal_axes and any(
+        elif objective_axes and any(
             self._reviewable_presentation_relation(relation)
-            and self._relation_matches_goal_axis(relation, goal_axes)
+            and self._relation_matches_objective_axis(relation, objective_axes)
             for relation in relations
         ):
             related_relations = []
@@ -18741,14 +18746,14 @@ class ResearchUnderstandingService:
             for context_id in context_ids
             if context_id in contexts_by_id
         ]
-        goal_axes = _dedupe_strings(
+        objective_axes = _dedupe_strings(
             [
                 axis
                 for context in contexts_by_id.values()
                 if (
                     _text(context.get("context_id")) == "ctx_objective_scope"
                     or _normalize_match_text(_text(context.get("label")) or "")
-                    in {"objective scope", "goal scope"}
+                    == "objective scope"
                 )
                 for process_context in [_mapping(context.get("process_context"))]
                 for axis in [
@@ -18759,7 +18764,7 @@ class ResearchUnderstandingService:
         )
         explicit_statement_axis = self._statement_comparison_axis(
             self._presentation_relation_summary(relation),
-            goal_axes=goal_axes,
+            objective_axes=objective_axes,
         )
         if explicit_statement_axis:
             relation = self._relation_with_presentation_subject(
@@ -18844,7 +18849,7 @@ class ResearchUnderstandingService:
         self,
         statement: str,
         *,
-        goal_axes: list[str],
+        objective_axes: list[str],
     ) -> str:
         raw_statement = _text(statement) or ""
         normalized_statement = f" {_normalize_match_text(raw_statement)} "
@@ -18852,7 +18857,7 @@ class ResearchUnderstandingService:
             return ""
         candidate_axes = [
             self._display_axis_label(axis)
-            for axis in goal_axes
+            for axis in objective_axes
             if self._display_axis_label(axis)
         ]
         changed_axis = self._statement_changed_axis(raw_statement)
@@ -19065,12 +19070,12 @@ class ResearchUnderstandingService:
             and relation_evidence_ref_ids <= set(claim_evidence_ref_ids)
         )
 
-    def _relation_matches_goal_axis(
+    def _relation_matches_objective_axis(
         self,
         relation: Mapping[str, Any],
-        goal_axes: list[str],
+        objective_axes: list[str],
     ) -> bool:
-        if not goal_axes:
+        if not objective_axes:
             return False
         searchable = " ".join(
             item
@@ -19083,7 +19088,7 @@ class ResearchUnderstandingService:
         )
         return any(
             self._objective_axis_tokens_match(searchable, axis)
-            for axis in goal_axes
+            for axis in objective_axes
         )
 
     def _relation_matches_finding_target(

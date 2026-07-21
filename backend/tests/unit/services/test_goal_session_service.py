@@ -8,12 +8,10 @@ from application.evaluation import ResearchUnderstandingFeedbackService
 from application.goal.experiment_plan_service import ExperimentPlanService
 from application.goal.session_service import GoalSessionService, _StructuredProtocolDraft
 from tests.support.collection_service import build_test_collection_service
-from domain.core.research_understanding import ResearchUnderstanding
-from infra.persistence.factory import build_goal_session_repository
-from infra.persistence.sqlite import (
-    SqliteEvaluationRepository,
-    SqliteExperimentPlanRepository,
+from tests.support.objective_workspace_repository import (
+    InMemoryObjectiveWorkspaceRepository,
 )
+from domain.core.research_understanding import ResearchUnderstanding
 
 
 class _FakeMessage:
@@ -234,20 +232,9 @@ class _TrainingReadyResearchUnderstandingFeedbackService:
 
     def export_dataset(self, **kwargs):  # noqa: ANN003, ANN201
         self.calls.append(dict(kwargs))
-        if kwargs["scope_type"] != "goal":
-            return {
-                "collection_id": kwargs["collection_id"],
-                "scope_type": kwargs["scope_type"],
-                "scope_id": kwargs["scope_id"],
-                "dataset_use_status_filter": kwargs["dataset_use_status"],
-                "item_count": 0,
-                "items": [],
-                "warnings": [],
-            }
         return {
             "collection_id": kwargs["collection_id"],
-            "scope_type": "goal",
-            "scope_id": kwargs["scope_id"],
+            "objective_id": kwargs["objective_id"],
             "dataset_use_status_filter": kwargs["dataset_use_status"],
             "item_count": 2,
             "items": [
@@ -328,8 +315,7 @@ class _EmptyTrainingReadyResearchUnderstandingFeedbackService:
         self.calls.append(dict(kwargs))
         return {
             "collection_id": kwargs["collection_id"],
-            "scope_type": kwargs["scope_type"],
-            "scope_id": kwargs["scope_id"],
+            "objective_id": kwargs["objective_id"],
             "dataset_use_status_filter": kwargs["dataset_use_status"],
             "item_count": 0,
             "items": [],
@@ -345,8 +331,7 @@ class _ProtocolIneligibleTrainingReadyResearchUnderstandingFeedbackService:
         self.calls.append(dict(kwargs))
         return {
             "collection_id": kwargs["collection_id"],
-            "scope_type": "goal",
-            "scope_id": kwargs["scope_id"],
+            "objective_id": kwargs["objective_id"],
             "dataset_use_status_filter": kwargs["dataset_use_status"],
             "item_count": 5,
             "items": [
@@ -461,24 +446,61 @@ class _SingleUnderstandingRepository:
     def __init__(self, understanding: ResearchUnderstanding) -> None:
         self.understanding = understanding
 
-    def read_research_understanding(
+    def read_objective_understanding(
         self,
         collection_id: str,  # noqa: ARG002
-        scope_type: str,  # noqa: ARG002
-        scope_id: str,  # noqa: ARG002
+        objective_id: str,  # noqa: ARG002
     ):
         return self.understanding
 
-    def list_research_understandings(
+    def list_objective_understandings(
         self,
         collection_id: str,  # noqa: ARG002
-        scope_type: str | None = None,  # noqa: ARG002
     ):
         return (self.understanding,)
 
 
+class _ReviewRepository:
+    def __init__(self) -> None:
+        self.curations = []
+
+    def upsert_feedback(self, feedback):
+        return feedback
+
+    def list_feedback(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        return ()
+
+    def upsert_curation(self, curation):
+        self.curations = [
+            curation,
+            *[
+                item
+                for item in self.curations
+                if item.curation_id != curation.curation_id
+            ],
+        ]
+        return curation
+
+    def list_curations(
+        self,
+        collection_id,
+        objective_id=None,
+        finding_id=None,
+        claim_id=None,
+    ):
+        return tuple(
+            curation
+            for curation in self.curations
+            if curation.collection_id == collection_id
+            and (objective_id is None or curation.objective_id == objective_id)
+            and (finding_id is None or curation.finding_id == finding_id)
+            and (claim_id is None or curation.claim_id == claim_id)
+        )
+
+
 class _PassthroughResearchUnderstandingProjectionService:
-    def with_presentation(self, understanding):
+    def with_presentation(self, understanding, *, recover_source_findings=True):
+        assert recover_source_findings is False
         return understanding.to_record()
 
 
@@ -634,8 +656,11 @@ def _service(
         paper_facts_service=paper_facts_service or _EmptyPaperFactsService(),
         research_objective_service=research_objective_service
         or _EmptyResearchObjectiveService(),
-        research_understanding_feedback_service=research_understanding_feedback_service,
-        goal_session_repository=build_goal_session_repository(tmp_path / "lens.sqlite"),
+        research_understanding_feedback_service=(
+            research_understanding_feedback_service
+            or _EmptyTrainingReadyResearchUnderstandingFeedbackService()
+        ),
+        goal_session_repository=InMemoryObjectiveWorkspaceRepository(),
         llm_client=_FakeLLMClient(content),
         model="fake-model",
     )
@@ -659,8 +684,11 @@ def _service_with_llm_client(
         paper_facts_service=paper_facts_service or _EmptyPaperFactsService(),
         research_objective_service=research_objective_service
         or _EmptyResearchObjectiveService(),
-        research_understanding_feedback_service=research_understanding_feedback_service,
-        goal_session_repository=build_goal_session_repository(tmp_path / "lens.sqlite"),
+        research_understanding_feedback_service=(
+            research_understanding_feedback_service
+            or _EmptyTrainingReadyResearchUnderstandingFeedbackService()
+        ),
+        goal_session_repository=InMemoryObjectiveWorkspaceRepository(),
         llm_client=llm_client,
         model="fake-model",
     )
@@ -675,7 +703,6 @@ def test_goal_session_persists_explicit_context(tmp_path):
         collection_id=collection["collection_id"],
         focused_material_id="mat-316l",
         focused_objective_id="obj_lpbf_strength",
-        focused_goal_id="goal_lpbf_strength",
         goal_text="Compare strength and ductility.",
         answer_mode="hybrid",
     )
@@ -684,7 +711,6 @@ def test_goal_session_persists_explicit_context(tmp_path):
     assert loaded["collection_id"] == collection["collection_id"]
     assert loaded["focused_material_id"] == "mat-316l"
     assert loaded["focused_objective_id"] == "obj_lpbf_strength"
-    assert loaded["focused_goal_id"] == "goal_lpbf_strength"
     assert loaded["goal_text"] == "Compare strength and ductility."
     assert loaded["answer_mode"] == "hybrid"
 
@@ -717,7 +743,6 @@ def test_goal_session_update_can_clear_focus(tmp_path):
         focused_material_id="mat-316l",
         focused_paper_id="paper-a",
         focused_objective_id="obj_lpbf_strength",
-        focused_goal_id="goal_lpbf_strength",
     )
 
     updated = service.update_session(
@@ -725,13 +750,11 @@ def test_goal_session_update_can_clear_focus(tmp_path):
         focused_material_id=None,
         focused_paper_id=None,
         focused_objective_id=None,
-        focused_goal_id=None,
     )
 
     assert updated["focused_material_id"] is None
     assert updated["focused_paper_id"] is None
     assert updated["focused_objective_id"] is None
-    assert updated["focused_goal_id"] is None
 
 
 def test_grounded_message_returns_limited_when_collection_has_no_context(tmp_path):
@@ -808,7 +831,7 @@ def test_material_page_context_scopes_grounded_answer(tmp_path):
     assert "Source links:" in prompt_messages[1]["content"]
 
 
-def test_objective_context_is_available_to_grounded_chat(tmp_path):
+def test_unreviewed_objective_context_is_not_used_as_grounded_evidence(tmp_path):
     service, collection_service = _service(
         tmp_path,
         content="The objective is supported by [Source 1].",
@@ -828,25 +851,17 @@ def test_objective_context_is_available_to_grounded_chat(tmp_path):
     )
     loaded = service.get_session(session["session_id"])
 
-    assert response["source_mode"] == "collection_grounded"
-    assert response["used_evidence_ids"] == ["ev_strength"]
-    assert response["source_links"] == [
-        {
-            "kind": "evidence",
-            "label": "Source 1",
-            "href": (
-                f"/collections/{collection['collection_id']}/documents/"
-                "paper-a?evidence_id=ev_strength"
-            ),
-        }
-    ]
+    assert response["source_mode"] == "collection_limited"
+    assert response["used_evidence_ids"] == []
+    assert response["source_links"] == []
+    assert "curated_research_findings_empty" in response["warnings"]
     assert loaded["focused_objective_id"] == "obj_lpbf_strength"
-    assert loaded["last_paper_ids"] == ["paper-a"]
+    assert loaded["last_paper_ids"] == []
     prompt = service.llm_client.chat.completions.calls[0]["messages"][1]["content"]
     assert "focused_objective_id: obj_lpbf_strength" in prompt
-    assert "objective_research_view" in prompt
-    assert "LPBF energy density and scan strategy shape strength" in prompt
-    assert "oeu_strength" in prompt
+    assert "objective_research_view" not in prompt
+    assert "LPBF energy density and scan strategy shape strength" not in prompt
+    assert "oeu_strength" not in prompt
 
 
 def test_goal_chat_downgrades_uncited_grounded_answer(tmp_path):
@@ -891,14 +906,14 @@ def test_goal_chat_uses_protocol_ready_findings_for_protocol_context(tmp_path):
     collection = collection_service.create_collection("Goal Finding Collection")
     session = service.create_session(
         collection_id=collection["collection_id"],
-        focused_goal_id="goal_preheat",
+        focused_objective_id="obj_preheat",
         answer_mode="hybrid",
     )
 
     response = service.post_message(
         session["session_id"],
         message="Design the next experiment from reviewed findings.",
-        page_context={"goal_id": "goal_preheat"},
+        page_context={"objective_id": "obj_preheat"},
     )
     loaded = service.get_session(session["session_id"])
 
@@ -924,7 +939,7 @@ def test_goal_chat_uses_protocol_ready_findings_for_protocol_context(tmp_path):
             ),
         }
     ]
-    assert loaded["focused_goal_id"] == "goal_preheat"
+    assert loaded["focused_objective_id"] == "obj_preheat"
     assert service.list_messages(session["session_id"])["items"][-1]["review_gate"] == (
         "protocol_ready_findings"
     )
@@ -934,8 +949,7 @@ def test_goal_chat_uses_protocol_ready_findings_for_protocol_context(tmp_path):
     assert feedback_service.calls == [
         {
             "collection_id": collection["collection_id"],
-            "scope_type": "goal",
-            "scope_id": "goal_preheat",
+            "objective_id": "obj_preheat",
             "dataset_use_status": "training_ready",
         }
     ]
@@ -1023,14 +1037,14 @@ Risks or limits
     collection = collection_service.create_collection("Repair Protocol Contract")
     session = service.create_session(
         collection_id=collection["collection_id"],
-        focused_goal_id="goal_preheat",
+        focused_objective_id="obj_preheat",
         answer_mode="hybrid",
     )
 
     response = service.post_message(
         session["session_id"],
         message="Design the next experiment from reviewed findings.",
-        page_context={"goal_id": "goal_preheat"},
+        page_context={"objective_id": "obj_preheat"},
     )
 
     assert response["source_mode"] == "collection_grounded"
@@ -1269,14 +1283,14 @@ Risks or limits
     collection = collection_service.create_collection("Reject Invalid Protocol")
     session = service.create_session(
         collection_id=collection["collection_id"],
-        focused_goal_id="goal_preheat",
+        focused_objective_id="obj_preheat",
         answer_mode="hybrid",
     )
 
     response = service.post_message(
         session["session_id"],
         message="Design the next experiment from reviewed findings.",
-        page_context={"goal_id": "goal_preheat"},
+        page_context={"objective_id": "obj_preheat"},
     )
 
     assert response["source_mode"] == "collection_limited"
@@ -1325,14 +1339,14 @@ Risks or limits
     collection = collection_service.create_collection("Reject Impossible VED Protocol")
     session = service.create_session(
         collection_id=collection["collection_id"],
-        focused_goal_id="goal_preheat",
+        focused_objective_id="obj_preheat",
         answer_mode="hybrid",
     )
 
     response = service.post_message(
         session["session_id"],
         message="Design the next experiment from reviewed findings.",
-        page_context={"goal_id": "goal_preheat"},
+        page_context={"objective_id": "obj_preheat"},
     )
 
     assert response["source_mode"] == "collection_limited"
@@ -1348,9 +1362,9 @@ def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-reviewed",
-                "goal_id": "goal_reviewed",
+                "objective_id": "obj_reviewed",
                 "title": "How does preheating affect ductility?",
             },
             "claims": [
@@ -1445,8 +1459,8 @@ def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
         }
     )
     feedback_service = ResearchUnderstandingFeedbackService(
-        evaluation_repository=SqliteEvaluationRepository(tmp_path / "lens.sqlite"),
-        core_fact_repository=_SingleUnderstandingRepository(understanding),
+        review_repository=_ReviewRepository(),
+        research_understanding_repository=_SingleUnderstandingRepository(understanding),
         research_understanding_service=(
             _PassthroughResearchUnderstandingProjectionService()
         ),
@@ -1482,8 +1496,7 @@ def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
     collection_id = collection["collection_id"]
     feedback_service.record_curation(
         collection_id=collection_id,
-        scope_type="goal",
-        scope_id="goal_reviewed",
+        objective_id="obj_reviewed",
         finding_id="finding_preheat",
         claim_id="claim_preheat",
         curated_claim_type="finding",
@@ -1506,28 +1519,28 @@ def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
 
     dataset = feedback_service.export_dataset(
         collection_id=collection_id,
-        scope_type="goal",
-        scope_id="goal_reviewed",
+        objective_id="obj_reviewed",
         dataset_use_status="training_ready",
     )
     session = service.create_session(
         collection_id=collection_id,
-        focused_goal_id="goal_reviewed",
+        focused_objective_id="obj_reviewed",
         answer_mode="hybrid",
         user_id="expert-a",
     )
     response = service.post_message(
         session["session_id"],
         message="Draft a protocol from reviewed findings.",
-        page_context={"goal_id": "goal_reviewed"},
+        page_context={"objective_id": "obj_reviewed"},
     )
     plan_service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=service.goal_session_repository,
+        research_understanding_feedback_service=feedback_service,
     )
     plan = plan_service.create_plan(
         collection_id=collection_id,
-        goal_id="goal_reviewed",
+        objective_id="obj_reviewed",
         title="Preheating validation protocol",
         content=response["answer"],
         source_message_id=response["message_id"],
@@ -1582,14 +1595,14 @@ def test_goal_chat_suppresses_backbone_readiness_warnings_when_curated_findings_
     collection = collection_service.create_collection("Curated Warning Collection")
     session = service.create_session(
         collection_id=collection["collection_id"],
-        focused_goal_id="goal_preheat",
+        focused_objective_id="obj_preheat",
         answer_mode="hybrid",
     )
 
     response = service.post_message(
         session["session_id"],
         message="Design the next experiment from reviewed findings.",
-        page_context={"goal_id": "goal_preheat"},
+        page_context={"objective_id": "obj_preheat"},
     )
 
     assert response["source_mode"] == "collection_grounded"
@@ -1610,14 +1623,14 @@ def test_goal_chat_warns_when_focused_scope_has_no_protocol_ready_findings(tmp_p
     collection = collection_service.create_collection("Unreviewed Goal Collection")
     session = service.create_session(
         collection_id=collection["collection_id"],
-        focused_goal_id="goal_unreviewed",
+        focused_objective_id="obj_unreviewed",
         answer_mode="hybrid",
     )
 
     response = service.post_message(
         session["session_id"],
         message="Draft an experiment plan.",
-        page_context={"goal_id": "goal_unreviewed"},
+        page_context={"objective_id": "obj_unreviewed"},
     )
 
     assert response["source_mode"] == "collection_limited"
@@ -1628,8 +1641,7 @@ def test_goal_chat_warns_when_focused_scope_has_no_protocol_ready_findings(tmp_p
     assert feedback_service.calls == [
         {
             "collection_id": collection["collection_id"],
-            "scope_type": "goal",
-            "scope_id": "goal_unreviewed",
+            "objective_id": "obj_unreviewed",
             "dataset_use_status": "training_ready",
         }
     ]
@@ -1646,14 +1658,14 @@ def test_goal_chat_excludes_training_ready_findings_that_are_not_protocol_ready(
     collection = collection_service.create_collection("Non Actionable Findings")
     session = service.create_session(
         collection_id=collection["collection_id"],
-        focused_goal_id="goal_non_actionable",
+        focused_objective_id="obj_non_actionable",
         answer_mode="hybrid",
     )
 
     response = service.post_message(
         session["session_id"],
         message="Draft a protocol from reviewed findings.",
-        page_context={"goal_id": "goal_non_actionable"},
+        page_context={"objective_id": "obj_non_actionable"},
     )
 
     assert response["source_mode"] == "collection_limited"

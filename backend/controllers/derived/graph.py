@@ -64,6 +64,9 @@ async def get_collection_graph(
             max_nodes=max_nodes,
             min_weight=min_weight,
             collection_service=request.app.state.collection_service,
+            paper_fact_repository=request.app.state.paper_fact_repository,
+            objective_repository=request.app.state.objective_repository,
+            comparison_service=request.app.state.comparison_service,
         )
     except FileNotFoundError as exc:
         raise HTTPException(
@@ -95,6 +98,9 @@ async def export_collection_graphml(
             max_nodes=max_nodes,
             min_weight=min_weight,
             collection_service=request.app.state.collection_service,
+            paper_fact_repository=request.app.state.paper_fact_repository,
+            objective_repository=request.app.state.objective_repository,
+            comparison_service=request.app.state.comparison_service,
         )
     except FileNotFoundError as exc:
         raise HTTPException(
@@ -133,6 +139,9 @@ async def get_collection_graph_neighbors(
             collection_id=collection_id,
             node_id=node_id,
             collection_service=request.app.state.collection_service,
+            paper_fact_repository=request.app.state.paper_fact_repository,
+            objective_repository=request.app.state.objective_repository,
+            comparison_service=request.app.state.comparison_service,
         )
     except FileNotFoundError as exc:
         raise HTTPException(

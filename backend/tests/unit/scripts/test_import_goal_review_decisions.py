@@ -47,8 +47,7 @@ class FakeFeedbackService:
         self.dataset_exports.append(kwargs)
         return {
             "collection_id": kwargs["collection_id"],
-            "scope_type": kwargs["scope_type"],
-            "scope_id": kwargs["scope_id"],
+            "objective_id": kwargs["objective_id"],
             "item_count": 4,
             "quality_summary": {
                 "training_ready_sample_count": 2,
@@ -133,7 +132,7 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 def _base_row(**overrides):
     row = {
         "collection_id": "col-1",
-        "goal_id": "goal-1",
+        "objective_id": "objective-1",
         "finding_id": "finding-1",
         "claim_id": "claim-1",
         "statement": "Preheating improves ductility.",
@@ -225,10 +224,10 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
                 "rerun dry-run with --fail-on-warnings before import",
             ],
         },
-        "decision_progress_by_goal": [
+        "decision_progress_by_objective": [
             {
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "total_rows": 4,
                 "actionable_count": 3,
                 "skipped_count": 1,
@@ -250,10 +249,10 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
                 },
             }
         ],
-        "affected_goals": [
+        "affected_objectives": [
             {
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "item_count": 4,
                 "training_ready_count": 2,
                 "training_message_count": 1,
@@ -284,21 +283,21 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
             }
         ],
         "readiness_summary": {
-            "goal_count": 1,
-            "projected_training_ready_goal_count": 1,
-            "projected_training_message_goal_count": 1,
-            "projected_protocol_ready_goal_count": 1,
+            "objective_count": 1,
+            "projected_training_ready_objective_count": 1,
+            "projected_training_message_objective_count": 1,
+            "projected_protocol_ready_objective_count": 1,
             "projected_review_candidate_count": 1,
             "projected_rejected_count": 1,
             "ready_for_training_export": True,
             "ready_for_protocol_drafting": True,
-            "goals_still_needing_review_count": 1,
-            "goals_missing_training_messages_count": 0,
-            "goals_missing_protocol_ready_count": 0,
+            "objectives_still_needing_review_count": 1,
+            "objectives_missing_training_messages_count": 0,
+            "objectives_missing_protocol_ready_count": 0,
         },
         "review_scope_gate": {
             "status": "blocked",
-            "scope": "reviewed_goals",
+            "scope": "reviewed_objectives",
             "ready_for_reviewed_scope": False,
             "ready_for_expert_satisfaction_gate": False,
             "blocking_reasons": [
@@ -309,28 +308,25 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
             "skipped_count": 1,
             "ready_for_training_export": True,
             "ready_for_protocol_drafting": True,
-            "goals_still_needing_review_count": 1,
-            "goals_missing_training_messages_count": 0,
-            "goals_missing_protocol_ready_count": 0,
+            "objectives_still_needing_review_count": 1,
+            "objectives_missing_training_messages_count": 0,
+            "objectives_missing_protocol_ready_count": 0,
         },
     }
     assert service.dataset_exports == [
         {
             "collection_id": "col-1",
-            "scope_type": "goal",
-            "scope_id": "goal-1",
+            "objective_id": "objective-1",
         },
         {
             "collection_id": "col-1",
-            "scope_type": "goal",
-            "scope_id": "goal-1",
+            "objective_id": "objective-1",
         }
     ]
     assert service.feedback == [
         {
             "collection_id": "col-1",
-            "scope_type": "goal",
-            "scope_id": "goal-1",
+            "objective_id": "objective-1",
             "finding_id": "finding-accept",
             "claim_id": "claim-1",
             "review_status": "correct",
@@ -340,8 +336,7 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
         },
         {
             "collection_id": "col-1",
-            "scope_type": "goal",
-            "scope_id": "goal-1",
+            "objective_id": "objective-1",
             "finding_id": "finding-reject",
             "claim_id": "claim-1",
             "review_status": "incorrect",
@@ -353,8 +348,7 @@ def test_import_review_decisions_writes_feedback_and_curation(tmp_path):
     assert service.curations == [
         {
             "collection_id": "col-1",
-            "scope_type": "goal",
-            "scope_id": "goal-1",
+            "objective_id": "objective-1",
             "finding_id": "finding-correct",
             "claim_id": "claim-1",
             "curated_claim_type": "finding",
@@ -399,10 +393,10 @@ def test_import_review_decisions_dry_run_does_not_write(tmp_path):
         "ready_to_write": True,
         "next_steps": ["rerun dry-run with --fail-on-warnings before import"],
     }
-    assert summary["affected_goals"] == [
+    assert summary["affected_objectives"] == [
         {
             "collection_id": "col-1",
-            "goal_id": "goal-1",
+            "objective_id": "objective-1",
             "item_count": 4,
             "training_ready_count": 2,
             "training_message_count": 1,
@@ -433,17 +427,17 @@ def test_import_review_decisions_dry_run_does_not_write(tmp_path):
         }
     ]
     assert summary["readiness_summary"] == {
-        "goal_count": 1,
-        "projected_training_ready_goal_count": 1,
-        "projected_training_message_goal_count": 1,
-        "projected_protocol_ready_goal_count": 1,
+        "objective_count": 1,
+        "projected_training_ready_objective_count": 1,
+        "projected_training_message_objective_count": 1,
+        "projected_protocol_ready_objective_count": 1,
         "projected_review_candidate_count": 0,
         "projected_rejected_count": 1,
         "ready_for_training_export": True,
         "ready_for_protocol_drafting": True,
-        "goals_still_needing_review_count": 0,
-        "goals_missing_training_messages_count": 0,
-        "goals_missing_protocol_ready_count": 0,
+        "objectives_still_needing_review_count": 0,
+        "objectives_missing_training_messages_count": 0,
+        "objectives_missing_protocol_ready_count": 0,
     }
     assert service.feedback == []
     assert service.curations == []
@@ -480,7 +474,7 @@ def test_import_review_decisions_renders_text_summary(tmp_path):
     assert "next action: accept_after_checks" in text
     assert "required checks:" in text
     assert "Confirm paper-level scope." in text
-    assert "- col-1/goal-1" in text
+    assert "- col-1/objective-1" in text
     assert (
         "now: training_ready=2 training_messages=1 protocol_ready=1 "
         "review_candidates=1 rejected=1"
@@ -495,11 +489,11 @@ def test_import_review_decisions_renders_text_summary(tmp_path):
         "resolved_review_candidates=1"
     ) in text
     assert "Readiness after import:" in text
-    assert "goals=1 training_ready_goals=1 message_ready_goals=1 protocol_ready_goals=1" in text
+    assert "objectives=1 training_ready_objectives=1 message_ready_objectives=1 protocol_ready_objectives=1" in text
     assert "ready_for_training_export=True ready_for_protocol_drafting=True" in text
     assert "Reviewed-goals gate:" in text
     assert "status=blocked ready_for_reviewed_scope=False" in text
-    assert "scope=reviewed_goals actionable=1 skipped=1" in text
+    assert "scope=reviewed_objectives actionable=1 skipped=1" in text
     assert (
         "This gate covers only goals present in this decision import. "
         "Run check_goal_expert_loop.py for the full collection expert-satisfaction gate."
@@ -666,7 +660,7 @@ def test_import_review_decisions_rejects_invalid_rows(tmp_path):
     assert summary["status"] == "fail"
     assert summary["written_count"] == 0
     assert summary["warnings"] == []
-    assert summary["affected_goals"] == []
+    assert summary["affected_objectives"] == []
     assert [error["message"] for error in summary["errors"]] == [
         "reject requires a valid issue_type",
         "correct requires at least one evidence_ref_id",
@@ -836,9 +830,9 @@ def test_import_review_decisions_validates_current_dataset_refs(tmp_path):
     assert summary["status"] == "fail"
     assert summary["written_count"] == 0
     assert summary["warnings"] == []
-    assert summary["affected_goals"] == []
+    assert summary["affected_objectives"] == []
     assert [error["message"] for error in summary["errors"]] == [
-        "finding_id does not exist in current goal dataset",
+        "finding_id does not exist in current objective dataset",
         (
             "correct references evidence_ref_id(s) not present on current "
             "finding: missing-ev"
@@ -873,9 +867,9 @@ def test_import_review_decisions_rejects_mismatched_claim_id(tmp_path):
     assert summary["status"] == "fail"
     assert summary["written_count"] == 0
     assert summary["warnings"] == []
-    assert summary["affected_goals"] == []
+    assert summary["affected_objectives"] == []
     assert [error["message"] for error in summary["errors"]] == [
-        "claim_id does not match current goal dataset finding"
+        "claim_id does not match current objective dataset finding"
     ]
     assert service.feedback == []
     assert service.curations == []

@@ -6,14 +6,12 @@ from uuid import uuid4
 
 from domain.ports import (
     BuildRepository,
-    CoreFactRepository,
+    ComparisonRepository,
+    ObjectiveRepository,
+    PaperFactRepository,
     SourceArtifactRepository,
 )
 from domain.source import ArtifactStatusRecord, ArtifactVersionRecord
-from infra.persistence.factory import (
-    build_core_fact_repository,
-    build_source_artifact_repository,
-)
 
 
 def _now_iso() -> str:
@@ -108,64 +106,100 @@ class ArtifactRegistryService:
     def __init__(
         self,
         repository: BuildRepository,
-        source_artifact_repository: SourceArtifactRepository | None = None,
-        core_fact_repository: CoreFactRepository | None = None,
+        source_artifact_repository: SourceArtifactRepository,
+        paper_fact_repository: PaperFactRepository,
+        objective_repository: ObjectiveRepository,
+        comparison_repository: ComparisonRepository,
     ) -> None:
         self.repository = repository
-        self.source_artifact_repository = (
-            source_artifact_repository or build_source_artifact_repository()
-        )
-        self.core_fact_repository = core_fact_repository or build_core_fact_repository()
+        self.source_artifact_repository = source_artifact_repository
+        self.paper_fact_repository = paper_fact_repository
+        self.objective_repository = objective_repository
+        self.comparison_repository = comparison_repository
 
     def build_registry(
         self,
         collection_id: str,
         output_dir: str | Path,
+        *,
+        build_id: str | None = None,
     ) -> dict:
         base_dir = Path(output_dir).expanduser().resolve()
-        source_artifacts = self.source_artifact_repository.read_collection_artifacts(
-            collection_id
+        source_artifacts = (
+            self.source_artifact_repository.read_collection_artifacts(
+                collection_id,
+                build_id=build_id,
+            )
+            if build_id is not None
+            else self.source_artifact_repository.read_collection_artifacts(
+                collection_id
+            )
         )
-        core_facts = self.core_fact_repository.read_collection_facts(collection_id)
+        paper_facts = self.paper_fact_repository.read(
+            collection_id,
+            build_id=build_id,
+        )
+        objective_facts = self.objective_repository.read(
+            collection_id,
+            build_id=build_id,
+        )
+        comparison_facts = self.comparison_repository.read(
+            collection_id,
+            build_id=build_id,
+        )
+        objective_evidence_ready = bool(objective_facts.objective_evidence_units)
+        evidence_cards_generated = bool(
+            paper_facts.paper_facts_generated or objective_evidence_ready
+        )
+        evidence_cards_ready = bool(
+            paper_facts.evidence_cards_ready or objective_evidence_ready
+        )
+        comparison_rows_ready = bool(
+            comparison_facts.comparable_results
+            and any(
+                result.included
+                for result in comparison_facts.collection_comparable_results
+            )
+        )
         source_artifacts_generated = not source_artifacts.is_empty()
         payload = ArtifactStatusRecord.build(
             collection_id=collection_id,
             output_path=str(base_dir),
             documents_generated=bool(source_artifacts.documents),
             documents_ready=bool(source_artifacts.documents),
-            document_profiles_generated=bool(core_facts.document_profiles),
-            document_profiles_ready=bool(core_facts.document_profiles),
-            evidence_anchors_generated=core_facts.paper_facts_generated,
-            evidence_anchors_ready=bool(core_facts.evidence_anchors),
-            method_facts_generated=core_facts.paper_facts_generated,
-            method_facts_ready=bool(core_facts.method_facts),
-            evidence_cards_generated=core_facts.evidence_cards_generated,
-            evidence_cards_ready=core_facts.evidence_cards_ready,
-            characterization_observations_generated=core_facts.paper_facts_generated,
+            document_profiles_generated=bool(paper_facts.document_profiles),
+            document_profiles_ready=bool(paper_facts.document_profiles),
+            evidence_anchors_generated=paper_facts.paper_facts_generated,
+            evidence_anchors_ready=bool(paper_facts.evidence_anchors),
+            method_facts_generated=paper_facts.paper_facts_generated,
+            method_facts_ready=bool(paper_facts.method_facts),
+            evidence_cards_generated=evidence_cards_generated,
+            evidence_cards_ready=evidence_cards_ready,
+            characterization_observations_generated=paper_facts.paper_facts_generated,
             characterization_observations_ready=bool(
-                core_facts.characterization_observations
+                paper_facts.characterization_observations
             ),
-            structure_features_generated=core_facts.paper_facts_generated,
-            structure_features_ready=bool(core_facts.structure_features),
-            test_conditions_generated=core_facts.paper_facts_generated,
-            test_conditions_ready=bool(core_facts.test_conditions),
-            baseline_references_generated=core_facts.paper_facts_generated,
-            baseline_references_ready=bool(core_facts.baseline_references),
-            sample_variants_generated=core_facts.paper_facts_generated,
-            sample_variants_ready=bool(core_facts.sample_variants),
-            measurement_results_generated=core_facts.paper_facts_generated,
-            measurement_results_ready=bool(core_facts.measurement_results),
-            comparable_results_generated=core_facts.comparison_artifacts_generated,
-            comparable_results_ready=bool(core_facts.comparable_results),
+            structure_features_generated=paper_facts.paper_facts_generated,
+            structure_features_ready=bool(paper_facts.structure_features),
+            test_conditions_generated=paper_facts.paper_facts_generated,
+            test_conditions_ready=bool(paper_facts.test_conditions),
+            baseline_references_generated=paper_facts.paper_facts_generated,
+            baseline_references_ready=bool(paper_facts.baseline_references),
+            sample_variants_generated=paper_facts.paper_facts_generated,
+            sample_variants_ready=bool(paper_facts.sample_variants),
+            measurement_results_generated=paper_facts.paper_facts_generated,
+            measurement_results_ready=bool(paper_facts.measurement_results),
+            comparable_results_generated=comparison_facts.comparison_artifacts_generated,
+            comparable_results_ready=bool(comparison_facts.comparable_results),
             collection_comparable_results_generated=(
-                core_facts.comparison_artifacts_generated
+                comparison_facts.comparison_artifacts_generated
             ),
             collection_comparable_results_ready=bool(
-                core_facts.collection_comparable_results
+                comparison_facts.collection_comparable_results
             ),
             collection_comparable_results_stale=False,
-            comparison_rows_generated=core_facts.comparison_artifacts_generated,
-            comparison_rows_ready=bool(core_facts.comparison_rows),
+            comparison_rows_generated=comparison_facts.comparison_artifacts_generated,
+            comparison_rows_ready=comparison_rows_ready,
             comparison_rows_stale=False,
             graph_stale=False,
             blocks_generated=source_artifacts_generated,
@@ -185,6 +219,8 @@ class ArtifactRegistryService:
         task_id: str,
         collection_id: str,
         output_dir: str | Path,
+        *,
+        build_id: str | None = None,
     ) -> dict:
         stage = next(
             (
@@ -196,7 +232,7 @@ class ArtifactRegistryService:
         )
         if stage is None:
             raise RuntimeError(f"artifact_registry stage not found for task: {task_id}")
-        payload = self.build_registry(collection_id, output_dir)
+        payload = self.build_registry(collection_id, output_dir, build_id=build_id)
         records = tuple(
             ArtifactVersionRecord(
                 artifact_version_id=f"artifact_{uuid4().hex[:20]}",

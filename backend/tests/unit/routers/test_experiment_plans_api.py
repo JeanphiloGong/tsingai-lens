@@ -9,9 +9,8 @@ from controllers.schemas.goal.experiment_plan import (
     ExperimentPlanCreateRequest,
     ExperimentPlanUpdateRequest,
 )
-from infra.persistence.sqlite import (
-    SqliteExperimentPlanRepository,
-    SqliteGoalSessionRepository,
+from tests.support.objective_workspace_repository import (
+    InMemoryObjectiveWorkspaceRepository,
 )
 
 
@@ -26,16 +25,20 @@ Controls: include a no-preheat control build and repeat specimens for both tempe
 Risks and limits: one reviewed finding is not enough to generalize beyond the cited 316L condition."""
 
 
-def _request(user_id: str = "expert-a"):
-    return SimpleNamespace(state=SimpleNamespace(current_user={"user_id": user_id}))
+def _request(service, user_id: str = "expert-a"):
+    return SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(experiment_plan_service=service),
+        ),
+        state=SimpleNamespace(current_user={"user_id": user_id}),
+    )
 
 
 class _ResearchUnderstandingFeedbackService:
     def export_dataset(self, **kwargs):  # noqa: ANN003, ANN201
         return {
             "collection_id": kwargs["collection_id"],
-            "scope_type": kwargs["scope_type"],
-            "scope_id": kwargs["scope_id"],
+            "objective_id": kwargs["objective_id"],
             "items": [
                 {
                     "finding_id": "finding-1",
@@ -49,7 +52,7 @@ class _ResearchUnderstandingFeedbackService:
         }
 
 
-def _write_goal_message(repository: SqliteGoalSessionRepository) -> None:
+def _write_goal_message(repository: InMemoryObjectiveWorkspaceRepository) -> None:
     repository.write_session(
         {
             "session_id": "session_1",
@@ -57,8 +60,7 @@ def _write_goal_message(repository: SqliteGoalSessionRepository) -> None:
             "collection_id": "col_1",
             "focused_material_id": None,
             "focused_paper_id": None,
-            "focused_objective_id": None,
-            "focused_goal_id": "goal_1",
+            "focused_objective_id": "objective_1",
             "goal_text": None,
             "goal_brief_json": {},
             "answer_mode": "hybrid",
@@ -106,26 +108,22 @@ def _write_goal_message(repository: SqliteGoalSessionRepository) -> None:
     )
 
 
-def test_experiment_plan_routes_create_list_and_update(tmp_path, monkeypatch):
-    goal_session_repository = SqliteGoalSessionRepository(tmp_path / "lens.sqlite")
+def test_experiment_plan_routes_create_list_and_update():
+    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(goal_session_repository)
     service = ExperimentPlanService(
-        repository=SqliteExperimentPlanRepository(tmp_path / "lens.sqlite"),
+        repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
         research_understanding_feedback_service=(
             _ResearchUnderstandingFeedbackService()
         ),
     )
-    monkeypatch.setattr(
-        experiment_plans_controller,
-        "experiment_plan_service",
-        service,
-    )
+    request = _request(service)
 
     created = asyncio.run(
         experiment_plans_controller.create_experiment_plan(
             "col_1",
-            "goal_1",
+            "objective_1",
             ExperimentPlanCreateRequest(
                 title="Preheating validation matrix",
                 content=PROTOCOL_DRAFT,
@@ -138,16 +136,18 @@ def test_experiment_plan_routes_create_list_and_update(tmp_path, monkeypatch):
                     }
                 ],
             ),
-            _request(),
+            request,
         )
     )
     listed = asyncio.run(
-        experiment_plans_controller.list_experiment_plans("col_1", "goal_1")
+        experiment_plans_controller.list_experiment_plans(
+            "col_1", "objective_1", request
+        )
     )
     updated = asyncio.run(
         experiment_plans_controller.update_experiment_plan(
             "col_1",
-            "goal_1",
+            "objective_1",
             created.plan_id,
             ExperimentPlanUpdateRequest(
                 title="Edited validation matrix",
@@ -157,6 +157,7 @@ def test_experiment_plan_routes_create_list_and_update(tmp_path, monkeypatch):
                 ),
                 status="ready_for_review",
             ),
+            request,
         )
     )
 

@@ -12,10 +12,6 @@ from application.goal.protocol_contract import (
 )
 from domain.goal import ExperimentPlanRecord, GoalMessageRecord, GoalSessionRecord
 from domain.ports import ExperimentPlanRepository, GoalSessionRepository
-from infra.persistence.factory import (
-    build_experiment_plan_repository,
-    build_goal_session_repository,
-)
 
 PROTOCOL_READY_REVIEW_GATE = "protocol_ready_findings"
 
@@ -27,9 +23,9 @@ BLOCKED_GOAL_COPILOT_WARNINGS = {
 
 
 class ExperimentPlanNotFoundError(FileNotFoundError):
-    def __init__(self, collection_id: str, goal_id: str, plan_id: str) -> None:
+    def __init__(self, collection_id: str, objective_id: str, plan_id: str) -> None:
         self.collection_id = collection_id
-        self.goal_id = goal_id
+        self.objective_id = objective_id
         self.plan_id = plan_id
         super().__init__(f"experiment plan not found: {plan_id}")
 
@@ -39,26 +35,21 @@ class ExperimentPlanService:
 
     def __init__(
         self,
-        repository: ExperimentPlanRepository | None = None,
-        goal_session_repository: GoalSessionRepository | None = None,
-        research_understanding_feedback_service: (
-            ResearchUnderstandingFeedbackService | None
-        ) = None,
+        repository: ExperimentPlanRepository,
+        goal_session_repository: GoalSessionRepository,
+        research_understanding_feedback_service: ResearchUnderstandingFeedbackService,
     ) -> None:
-        self.repository = repository or build_experiment_plan_repository()
-        self.goal_session_repository = (
-            goal_session_repository or build_goal_session_repository()
-        )
+        self.repository = repository
+        self.goal_session_repository = goal_session_repository
         self.research_understanding_feedback_service = (
             research_understanding_feedback_service
-            or ResearchUnderstandingFeedbackService()
         )
 
     def create_plan(
         self,
         *,
         collection_id: str,
-        goal_id: str,
+        objective_id: str,
         title: str,
         content: str,
         source_message_id: str | None = None,
@@ -68,7 +59,7 @@ class ExperimentPlanService:
     ) -> ExperimentPlanRecord:
         validated_source = self._validate_goal_copilot_source(
             collection_id=collection_id,
-            goal_id=goal_id,
+            objective_id=objective_id,
             content=content,
             source_message_id=source_message_id,
             source_links=source_links,
@@ -98,14 +89,14 @@ class ExperimentPlanService:
             {
                 "plan_id": _plan_id(
                     collection_id,
-                    goal_id,
+                    objective_id,
                     title,
                     content,
                     source_message_id,
                     now,
                 ),
                 "collection_id": collection_id,
-                "goal_id": goal_id,
+                "objective_id": objective_id,
                 "title": title,
                 "content": content,
                 "status": "draft",
@@ -122,14 +113,14 @@ class ExperimentPlanService:
             return stored
         return self._with_source_validity(
             stored,
-            self._current_dataset_items(collection_id, goal_id),
+            self._current_dataset_items(collection_id, objective_id),
         )
 
     def _validate_goal_copilot_source(
         self,
         *,
         collection_id: str,
-        goal_id: str,
+        objective_id: str,
         content: str,
         source_message_id: str | None,
         source_links: list[Mapping[str, Any]] | None,
@@ -150,8 +141,8 @@ class ExperimentPlanService:
             raise ValueError("source_message_id belongs to a different user")
         if session.collection_id != collection_id:
             raise ValueError("source_message_id belongs to a different collection")
-        if session.focused_goal_id != goal_id:
-            raise ValueError("source_message_id is not focused on this goal")
+        if session.focused_objective_id != objective_id:
+            raise ValueError("source_message_id is not focused on this objective")
         if message.role != "assistant":
             raise ValueError("source_message_id must reference an assistant message")
         if message.source_mode != "collection_grounded":
@@ -220,12 +211,12 @@ class ExperimentPlanService:
     def list_plans(
         self,
         collection_id: str,
-        goal_id: str,
+        objective_id: str,
     ) -> tuple[ExperimentPlanRecord, ...]:
-        plans = self.repository.list_plans(collection_id, goal_id)
+        plans = self.repository.list_plans(collection_id, objective_id)
         if not any(_is_goal_copilot_plan(plan) for plan in plans):
             return plans
-        dataset_items = self._current_dataset_items(collection_id, goal_id)
+        dataset_items = self._current_dataset_items(collection_id, objective_id)
         return tuple(
             self._with_source_validity(plan, dataset_items) for plan in plans
         )
@@ -234,20 +225,20 @@ class ExperimentPlanService:
         self,
         *,
         collection_id: str,
-        goal_id: str,
+        objective_id: str,
         plan_id: str,
         title: str,
         content: str,
         status: str,
     ) -> ExperimentPlanRecord:
-        plan = self.repository.read_plan(collection_id, goal_id, plan_id)
+        plan = self.repository.read_plan(collection_id, objective_id, plan_id)
         if plan is None:
-            raise ExperimentPlanNotFoundError(collection_id, goal_id, plan_id)
+            raise ExperimentPlanNotFoundError(collection_id, objective_id, plan_id)
         is_goal_copilot_plan = _is_goal_copilot_plan(plan)
         dataset_items = None
         if is_goal_copilot_plan:
             _validate_goal_copilot_plan_edit(plan, content)
-            dataset_items = self._current_dataset_items(collection_id, goal_id)
+            dataset_items = self._current_dataset_items(collection_id, objective_id)
             if status == "ready_for_review":
                 checked = self._with_source_validity(
                     plan,
@@ -271,13 +262,12 @@ class ExperimentPlanService:
     def _current_dataset_items(
         self,
         collection_id: str,
-        goal_id: str,
+        objective_id: str,
     ) -> tuple[Mapping[str, Any], ...] | None:
         try:
             dataset = self.research_understanding_feedback_service.export_dataset(
                 collection_id=collection_id,
-                scope_type="goal",
-                scope_id=goal_id,
+                objective_id=objective_id,
             )
         except (FileNotFoundError, ValueError):
             return None

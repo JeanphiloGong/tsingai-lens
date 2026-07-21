@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 AnswerMode = Literal["grounded", "hybrid", "general"]
 SourceMode = Literal[
@@ -17,11 +17,12 @@ SourceLinkKind = Literal["document", "evidence"]
 class GoalSessionCreateRequest(BaseModel):
     """Create a collection-bound goal session."""
 
+    model_config = ConfigDict(extra="forbid")
+
     collection_id: str = Field(..., description="Bound collection id")
     focused_material_id: str | None = Field(default=None, description="Focused material id")
     focused_paper_id: str | None = Field(default=None, description="Focused paper/document id")
     focused_objective_id: str | None = Field(default=None, description="Focused research objective id")
-    focused_goal_id: str | None = Field(default=None, description="Focused confirmed goal id")
     goal_text: str | None = Field(default=None, description="User-facing research goal")
     goal_brief_json: dict[str, Any] = Field(
         default_factory=dict,
@@ -33,11 +34,12 @@ class GoalSessionCreateRequest(BaseModel):
 class GoalSessionUpdateRequest(BaseModel):
     """Patch explicit goal session context."""
 
+    model_config = ConfigDict(extra="forbid")
+
     collection_id: str | None = Field(default=None, description="Bound collection id")
     focused_material_id: str | None = Field(default=None, description="Focused material id")
     focused_paper_id: str | None = Field(default=None, description="Focused paper/document id")
     focused_objective_id: str | None = Field(default=None, description="Focused research objective id")
-    focused_goal_id: str | None = Field(default=None, description="Focused confirmed goal id")
     goal_text: str | None = Field(default=None, description="User-facing research goal")
     goal_brief_json: dict[str, Any] | None = Field(
         default=None,
@@ -55,7 +57,6 @@ class GoalSessionResponse(BaseModel):
     focused_material_id: str | None = Field(default=None, description="Focused material id")
     focused_paper_id: str | None = Field(default=None, description="Focused paper/document id")
     focused_objective_id: str | None = Field(default=None, description="Focused research objective id")
-    focused_goal_id: str | None = Field(default=None, description="Focused confirmed goal id")
     goal_text: str | None = Field(default=None, description="User-facing research goal")
     goal_brief_json: dict[str, Any] = Field(
         default_factory=dict,
@@ -76,6 +77,8 @@ class GoalSessionResponse(BaseModel):
 
 class GoalSessionMessageRequest(BaseModel):
     """Post one user message into a goal session."""
+
+    model_config = ConfigDict(extra="forbid")
 
     message: str = Field(..., description="User message or command")
     page_context: dict[str, Any] = Field(

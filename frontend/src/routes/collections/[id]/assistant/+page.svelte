@@ -60,79 +60,80 @@
 	let readinessError = '';
 	let input = '';
 	let loadedKey = '';
-	let goalDatasetSummary: ResearchUnderstandingDataset | null = null;
-	let goalDatasetLoading = false;
+	let objectiveDatasetSummary: ResearchUnderstandingDataset | null = null;
+	let objectiveDatasetLoading = false;
 	let readinessText = '';
 
 	$: collectionId = $page.params.id ?? '';
 	$: queryMaterialId = $page.url.searchParams.get('material_id') ?? '';
 	$: queryPaperId = $page.url.searchParams.get('paper_id') ?? '';
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
-	$: queryGoalId = $page.url.searchParams.get('goal_id') ?? '';
-	$: loadKey = `${collectionId}:${queryMaterialId}:${queryPaperId}:${queryObjectiveId}:${queryGoalId}`;
+	$: loadKey = `${collectionId}:${queryMaterialId}:${queryPaperId}:${queryObjectiveId}`;
 	$: activeSessionId = session?.session_id ?? '';
-	$: goalTrainingReadyCount = goalDatasetSummary?.quality_summary.training_ready_sample_count ?? 0;
-	$: goalTrainingMessageCount =
-		goalDatasetSummary?.quality_summary.training_message_sample_count ?? 0;
-	$: goalProtocolReadyCount = goalDatasetSummary?.quality_summary.protocol_ready_sample_count ?? 0;
-	$: goalReviewCandidateCount =
-		goalDatasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
-	$: goalProtocolReady = goalProtocolReadyCount > 0;
-	$: nextReviewAction = nextReviewActionForDisplay(goalDatasetSummary);
-	$: goalReviewLinkHref = goalReviewHref(
+	$: objectiveTrainingReadyCount =
+		objectiveDatasetSummary?.quality_summary.training_ready_sample_count ?? 0;
+	$: objectiveTrainingMessageCount =
+		objectiveDatasetSummary?.quality_summary.training_message_sample_count ?? 0;
+	$: objectiveProtocolReadyCount =
+		objectiveDatasetSummary?.quality_summary.protocol_ready_sample_count ?? 0;
+	$: objectiveReviewCandidateCount =
+		objectiveDatasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
+	$: objectiveProtocolReady = objectiveProtocolReadyCount > 0;
+	$: nextReviewAction = nextReviewActionForDisplay(objectiveDatasetSummary);
+	$: objectiveReviewLinkHref = objectiveReviewHref(
 		collectionId,
-		queryGoalId,
-		goalReviewCandidateCount,
-		goalTrainingReadyCount,
-		goalProtocolReady
+		queryObjectiveId,
+		objectiveReviewCandidateCount,
+		objectiveTrainingReadyCount,
+		objectiveProtocolReady
 	);
-	$: goalReviewLinkLabel = goalReviewActionLabel(
-		goalReviewCandidateCount,
-		goalTrainingReadyCount,
-		goalProtocolReady
+	$: objectiveReviewLinkLabel = objectiveReviewActionLabel(
+		objectiveReviewCandidateCount,
+		objectiveTrainingReadyCount,
+		objectiveProtocolReady
 	);
-	$: readinessStatus = goalProtocolReady
+	$: readinessStatus = objectiveProtocolReady
 		? 'ready'
-		: goalTrainingReadyCount > 0
+		: objectiveTrainingReadyCount > 0
 			? 'messages_pending'
-		: goalReviewCandidateCount > 0
+		: objectiveReviewCandidateCount > 0
 			? 'needs_review'
-			: goalDatasetSummary
+			: objectiveDatasetSummary
 				? 'empty'
 				: readinessError
 					? 'error'
 					: 'pending';
 	$: {
-		if (!queryGoalId) {
-			readinessText = $t('goalCopilot.experimentReadiness.noGoal');
-		} else if (goalDatasetLoading) {
+		if (!queryObjectiveId) {
+			readinessText = $t('goalCopilot.experimentReadiness.noObjective');
+		} else if (objectiveDatasetLoading) {
 			readinessText = $t('goalCopilot.experimentReadiness.loading');
 		} else if (readinessError) {
 			readinessText = $t('goalCopilot.experimentReadiness.error', { message: readinessError });
-		} else if (goalProtocolReady) {
+		} else if (objectiveProtocolReady) {
 			readinessText = $t('goalCopilot.experimentReadiness.ready', {
-				training: goalTrainingReadyCount,
-				messages: goalTrainingMessageCount
+				training: objectiveTrainingReadyCount,
+				messages: objectiveTrainingMessageCount
 			});
-		} else if (goalTrainingMessageCount > 0) {
+		} else if (objectiveTrainingMessageCount > 0) {
 			readinessText = $t('goalCopilot.experimentReadiness.protocolInputsPending', {
-				training: goalTrainingReadyCount,
-				messages: goalTrainingMessageCount,
-				protocol: goalProtocolReadyCount
+				training: objectiveTrainingReadyCount,
+				messages: objectiveTrainingMessageCount,
+				protocol: objectiveProtocolReadyCount
 			});
-		} else if (goalTrainingReadyCount > 0) {
+		} else if (objectiveTrainingReadyCount > 0) {
 			readinessText = $t('goalCopilot.experimentReadiness.messagesPending', {
-				training: goalTrainingReadyCount,
-				messages: goalTrainingMessageCount
+				training: objectiveTrainingReadyCount,
+				messages: objectiveTrainingMessageCount
 			});
-		} else if (goalReviewCandidateCount > 0) {
+		} else if (objectiveReviewCandidateCount > 0) {
 			readinessText = nextReviewAction
 				? $t('goalCopilot.experimentReadiness.needsReviewAction', {
-						review: goalReviewCandidateCount,
+						review: objectiveReviewCandidateCount,
 						action: nextReviewAction
 					})
 				: $t('goalCopilot.experimentReadiness.needsReview', {
-						review: goalReviewCandidateCount
+						review: objectiveReviewCandidateCount
 					});
 		} else {
 			readinessText = $t('goalCopilot.experimentReadiness.empty');
@@ -219,7 +220,7 @@
 
 	async function loadSession(sessionId = '') {
 		const activeCollectionId = collectionId;
-		const activeGoalId = queryGoalId;
+		const activeObjectiveId = queryObjectiveId;
 		loading = true;
 		error = '';
 		history = readHistory();
@@ -241,7 +242,6 @@
 					focused_material_id: queryMaterialId || null,
 					focused_paper_id: queryPaperId || null,
 					focused_objective_id: queryObjectiveId || null,
-					focused_goal_id: queryGoalId || null,
 					answer_mode: 'hybrid'
 				});
 				messages = [];
@@ -252,7 +252,7 @@
 				storeSessionId(session.session_id);
 				upsertHistory(session);
 			}
-			await loadGoalReadiness(activeCollectionId, activeGoalId);
+			await loadObjectiveReadiness(activeCollectionId, activeObjectiveId);
 		} catch (err) {
 			error = errorMessage(err);
 			session = null;
@@ -262,27 +262,26 @@
 		}
 	}
 
-	async function loadGoalReadiness(
+	async function loadObjectiveReadiness(
 		activeCollectionId: string,
-		activeGoalId: string
+		activeObjectiveId: string
 	) {
-		goalDatasetSummary = null;
+		objectiveDatasetSummary = null;
 		readinessError = '';
-		if (!activeCollectionId || !activeGoalId) {
-			goalDatasetLoading = false;
+		if (!activeCollectionId || !activeObjectiveId) {
+			objectiveDatasetLoading = false;
 			return;
 		}
-		goalDatasetLoading = true;
+		objectiveDatasetLoading = true;
 		try {
 			const dataset = await fetchResearchUnderstandingDataset(activeCollectionId, {
-				scope_type: 'goal',
-				scope_id: activeGoalId
+				objective_id: activeObjectiveId
 			});
-			goalDatasetSummary = dataset;
+			objectiveDatasetSummary = dataset;
 		} catch (err) {
 			readinessError = errorMessage(err);
 		} finally {
-			goalDatasetLoading = false;
+			objectiveDatasetLoading = false;
 		}
 	}
 
@@ -291,8 +290,7 @@
 		return (
 			(nextSession.focused_material_id ?? '') === queryMaterialId &&
 			(nextSession.focused_paper_id ?? '') === queryPaperId &&
-			(nextSession.focused_objective_id ?? '') === queryObjectiveId &&
-			(nextSession.focused_goal_id ?? '') === queryGoalId
+			(nextSession.focused_objective_id ?? '') === queryObjectiveId
 		);
 	}
 
@@ -306,7 +304,6 @@
 				focused_material_id: queryMaterialId || null,
 				focused_paper_id: queryPaperId || null,
 				focused_objective_id: queryObjectiveId || null,
-				focused_goal_id: queryGoalId || null,
 				answer_mode: 'hybrid'
 			});
 			messages = [];
@@ -346,8 +343,7 @@
 				route: 'collection_assistant',
 				material_id: queryMaterialId || null,
 				paper_id: queryPaperId || null,
-				objective_id: queryObjectiveId || null,
-				goal_id: queryGoalId || null
+				objective_id: queryObjectiveId || null
 			});
 			messages = [...messages, response];
 			session = await fetchGoalSession(session.session_id);
@@ -387,16 +383,16 @@
 		return localized.startsWith('research.') ? (sample?.review_action?.label ?? '') : localized;
 	}
 
-	function goalReviewHref(
+	function objectiveReviewHref(
 		activeCollectionId: string,
-		activeGoalId: string,
+		activeObjectiveId: string,
 		reviewCandidateCount: number,
 		trainingReadyCount: number,
 		protocolReady: boolean
 	) {
-		if (!activeCollectionId || !activeGoalId) return '';
-		const baseHref = `/collections/${encodeURIComponent(activeCollectionId)}/goals/${encodeURIComponent(
-			activeGoalId
+		if (!activeCollectionId || !activeObjectiveId) return '';
+		const baseHref = `/collections/${encodeURIComponent(activeCollectionId)}/objectives/${encodeURIComponent(
+			activeObjectiveId
 		)}`;
 		if (reviewCandidateCount > 0 && !protocolReady) {
 			return `${baseHref}?review=queue`;
@@ -407,7 +403,7 @@
 		return baseHref;
 	}
 
-	function goalReviewActionLabel(
+	function objectiveReviewActionLabel(
 		reviewCandidateCount: number,
 		trainingReadyCount: number,
 		protocolReady: boolean
@@ -416,9 +412,9 @@
 			return $t('goalCopilot.experimentReadiness.reviewFindings');
 		}
 		if (trainingReadyCount > 0 && !protocolReady) {
-			return $t('goalCopilot.experimentReadiness.checkReadiness');
+			return $t('goalCopilot.experimentReadiness.checkObjectiveReadiness');
 		}
-		return $t('goalCopilot.experimentReadiness.openGoal');
+		return $t('goalCopilot.experimentReadiness.openObjective');
 	}
 
 	function messageText(message: GoalSessionMessage) {
@@ -563,7 +559,7 @@
 
 	function canSaveExperimentPlan(message: GoalSessionMessage) {
 		return Boolean(
-			queryGoalId &&
+			queryObjectiveId &&
 				message.role === 'assistant' &&
 				message.source_mode === 'collection_grounded' &&
 				hasProtocolReadyReviewGate(message) &&
@@ -608,18 +604,18 @@
 
 	function experimentPlanHref(planId: string) {
 		const anchor = planId ? `?plan_id=${encodeURIComponent(planId)}` : '';
-		return `/collections/${encodeURIComponent(collectionId)}/goals/${encodeURIComponent(
-			queryGoalId
+		return `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(
+			queryObjectiveId
 		)}${anchor}#experiment-plans-title`;
 	}
 
 	async function saveExperimentPlan(message: GoalSessionMessage) {
 		const content = messageText(message).trim();
-		if (!queryGoalId || !content || savingPlanMessageId) return;
+		if (!queryObjectiveId || !content || savingPlanMessageId) return;
 		savingPlanMessageId = message.message_id;
 		error = '';
 		try {
-			const plan = await createExperimentPlan(collectionId, queryGoalId, {
+			const plan = await createExperimentPlan(collectionId, queryObjectiveId, {
 				title: experimentPlanTitle(content),
 				content,
 				source_message_id: message.message_id,
@@ -712,20 +708,20 @@
 			</button>
 		</header>
 
-		{#if queryGoalId}
+		{#if queryObjectiveId}
 			<section class={`experiment-readiness experiment-readiness--${readinessStatus}`}>
 				<div>
 					<span>{$t('goalCopilot.experimentReadiness.title')}</span>
 					<strong>{readinessText}</strong>
 				</div>
 				<div class="experiment-readiness__actions">
-					{#if goalProtocolReady}
+					{#if objectiveProtocolReady}
 						<button type="button" on:click={draftProtocolFromReviewedFindings} disabled={sending}>
 							{$t('goalCopilot.experimentReadiness.draftProtocol')}
 						</button>
 					{/if}
-					<a href={goalReviewLinkHref}>
-						{goalReviewLinkLabel}
+					<a href={objectiveReviewLinkHref}>
+						{objectiveReviewLinkLabel}
 					</a>
 				</div>
 			</section>

@@ -23,8 +23,7 @@ class FakeFeedbackService:
     def export_dataset(self, **kwargs):  # noqa: ANN003
         return {
             "collection_id": kwargs["collection_id"],
-            "scope_type": kwargs["scope_type"],
-            "scope_id": kwargs["scope_id"],
+            "objective_id": kwargs["objective_id"],
             "item_count": 2,
             "quality_summary": {
                 "training_ready_sample_count": 1,
@@ -90,7 +89,7 @@ class GateBlockingFeedbackService(FakeFeedbackService):
 def _row(**overrides):
     row = {
         "collection_id": "col-1",
-        "goal_id": "goal-1",
+        "objective_id": "objective-1",
         "finding_id": "finding-accept",
         "claim_id": "claim-1",
         "action": "accept",
@@ -123,12 +122,12 @@ def test_review_import_service_imports_decision_board_tsv():
                 "expert_action\tissue_type\texpert_note\tcorrected_statement\t"
                 "corrected_variables\tcorrected_mediators\tcorrected_outcomes\t"
                 "corrected_direction\tcorrected_scope_summary\tcorrected_support_grade\t"
-                "corrected_evidence_ref_ids\tcollection_id\tgoal_id\tfinding_id"
+                "corrected_evidence_ref_ids\tcollection_id\tobjective_id\tfinding_id"
             ),
             (
                 "correct\t\tChecked source table.\t"
                 "Preheating increases ductility by 14%.\tpreheating\t\tductility\t"
-                "increase\tLPBF 316L\tpartial\tev-2\tcol-1\tgoal-1\tfinding-correct"
+                "increase\tLPBF 316L\tpartial\tev-2\tcol-1\tobjective-1\tfinding-correct"
             ),
         ]
     )
@@ -145,8 +144,7 @@ def test_review_import_service_imports_decision_board_tsv():
     assert feedback_service.curations == [
         {
             "collection_id": "col-1",
-            "scope_type": "goal",
-            "scope_id": "goal-1",
+            "objective_id": "objective-1",
             "finding_id": "finding-correct",
             "claim_id": "claim-2",
             "curated_claim_type": "finding",
@@ -171,8 +169,8 @@ def test_review_import_service_decision_board_accept_uses_current_acceptance_gat
     service = ResearchUnderstandingReviewImportService(GateBlockingFeedbackService())
     tsv = "\n".join(
         [
-            "expert_action\tissue_type\texpert_note\tcollection_id\tgoal_id\tfinding_id",
-            "accept\t\tLooks valid.\tcol-1\tgoal-1\tfinding-correct",
+            "expert_action\tissue_type\texpert_note\tcollection_id\tobjective_id\tfinding_id",
+            "accept\t\tLooks valid.\tcol-1\tobjective-1\tfinding-correct",
         ]
     )
 
@@ -217,10 +215,10 @@ def test_review_import_service_writes_feedback_and_curation():
     assert summary["written_count"] == 2
     assert summary["counts"] == {"accept": 1, "correct": 1, "skip": 1}
     assert summary["review_progress"]["ready_to_write"] is True
-    assert summary["decision_progress_by_goal"] == [
+    assert summary["decision_progress_by_objective"] == [
         {
             "collection_id": "col-1",
-            "goal_id": "goal-1",
+            "objective_id": "objective-1",
             "total_rows": 3,
             "actionable_count": 2,
             "skipped_count": 1,
@@ -244,7 +242,7 @@ def test_review_import_service_writes_feedback_and_curation():
     ]
     assert summary["review_scope_gate"] == {
         "status": "blocked",
-        "scope": "reviewed_goals",
+        "scope": "reviewed_objectives",
         "ready_for_reviewed_scope": False,
         "ready_for_expert_satisfaction_gate": False,
         "blocking_reasons": [
@@ -255,15 +253,14 @@ def test_review_import_service_writes_feedback_and_curation():
         "skipped_count": 1,
         "ready_for_training_export": True,
         "ready_for_protocol_drafting": True,
-        "goals_still_needing_review_count": 1,
-        "goals_missing_training_messages_count": 0,
-        "goals_missing_protocol_ready_count": 0,
+        "objectives_still_needing_review_count": 1,
+        "objectives_missing_training_messages_count": 0,
+        "objectives_missing_protocol_ready_count": 0,
     }
     assert feedback_service.feedback == [
         {
             "collection_id": "col-1",
-            "scope_type": "goal",
-            "scope_id": "goal-1",
+            "objective_id": "objective-1",
             "finding_id": "finding-accept",
             "claim_id": "claim-1",
             "review_status": "correct",
@@ -297,10 +294,10 @@ def test_review_import_service_blocks_unreviewed_template_when_strict():
             "leave unchecked rows as skip or review them later",
         ],
     }
-    assert summary["decision_progress_by_goal"] == [
+    assert summary["decision_progress_by_objective"] == [
         {
             "collection_id": "col-1",
-            "goal_id": "goal-1",
+            "objective_id": "objective-1",
             "total_rows": 1,
             "actionable_count": 0,
             "skipped_count": 1,
@@ -324,7 +321,7 @@ def test_review_import_service_blocks_unreviewed_template_when_strict():
     ]
     assert summary["review_scope_gate"] == {
         "status": "blocked",
-        "scope": "reviewed_goals",
+        "scope": "reviewed_objectives",
         "ready_for_reviewed_scope": False,
         "ready_for_expert_satisfaction_gate": False,
         "blocking_reasons": [
@@ -337,13 +334,13 @@ def test_review_import_service_blocks_unreviewed_template_when_strict():
         "skipped_count": 1,
         "ready_for_training_export": False,
         "ready_for_protocol_drafting": False,
-        "goals_still_needing_review_count": 0,
-        "goals_missing_training_messages_count": 0,
-        "goals_missing_protocol_ready_count": 0,
+        "objectives_still_needing_review_count": 0,
+        "objectives_missing_training_messages_count": 0,
+        "objectives_missing_protocol_ready_count": 0,
     }
 
 
-def test_review_import_service_dry_run_reports_affected_goal_readiness():
+def test_review_import_service_dry_run_reports_affected_objective_readiness():
     service = ResearchUnderstandingReviewImportService(FakeFeedbackService())
 
     summary = service.import_rows(
@@ -355,21 +352,21 @@ def test_review_import_service_dry_run_reports_affected_goal_readiness():
     assert summary["status"] == "pass"
     assert summary["written_count"] == 0
     assert summary["readiness_summary"] == {
-        "goal_count": 1,
-        "projected_training_ready_goal_count": 1,
-        "projected_training_message_goal_count": 1,
-        "projected_protocol_ready_goal_count": 1,
+        "objective_count": 1,
+        "projected_training_ready_objective_count": 1,
+        "projected_training_message_objective_count": 1,
+        "projected_protocol_ready_objective_count": 1,
         "projected_review_candidate_count": 0,
         "projected_rejected_count": 0,
         "ready_for_training_export": True,
         "ready_for_protocol_drafting": True,
-        "goals_still_needing_review_count": 0,
-        "goals_missing_training_messages_count": 0,
-        "goals_missing_protocol_ready_count": 0,
+        "objectives_still_needing_review_count": 0,
+        "objectives_missing_training_messages_count": 0,
+        "objectives_missing_protocol_ready_count": 0,
     }
     assert summary["review_scope_gate"] == {
         "status": "ready",
-        "scope": "reviewed_goals",
+        "scope": "reviewed_objectives",
         "ready_for_reviewed_scope": True,
         "ready_for_expert_satisfaction_gate": True,
         "blocking_reasons": [],
@@ -377,14 +374,14 @@ def test_review_import_service_dry_run_reports_affected_goal_readiness():
         "skipped_count": 0,
         "ready_for_training_export": True,
         "ready_for_protocol_drafting": True,
-        "goals_still_needing_review_count": 0,
-        "goals_missing_training_messages_count": 0,
-        "goals_missing_protocol_ready_count": 0,
+        "objectives_still_needing_review_count": 0,
+        "objectives_missing_training_messages_count": 0,
+        "objectives_missing_protocol_ready_count": 0,
     }
-    assert summary["affected_goals"] == [
+    assert summary["affected_objectives"] == [
         {
             "collection_id": "col-1",
-            "goal_id": "goal-1",
+            "objective_id": "objective-1",
             "item_count": 2,
             "training_ready_count": 1,
             "training_message_count": 1,
@@ -418,10 +415,10 @@ def test_review_import_service_post_import_reports_current_readiness_not_pending
 
     assert summary["status"] == "pass"
     assert summary["written_count"] == 1
-    assert summary["affected_goals"] == [
+    assert summary["affected_objectives"] == [
         {
             "collection_id": "col-1",
-            "goal_id": "goal-1",
+            "objective_id": "objective-1",
             "item_count": 2,
             "training_ready_count": 1,
             "training_message_count": 1,

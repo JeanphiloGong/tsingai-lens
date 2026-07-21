@@ -6,6 +6,8 @@ from time import perf_counter
 from config import DATA_DIR
 from application.auth import AuthSessionService, SessionNotFoundError
 from application.core.comparison_service import ComparisonService
+from application.core.objective_analysis_service import ObjectiveAnalysisService
+from application.core.research_understanding_service import ResearchUnderstandingService
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
 )
@@ -18,21 +20,24 @@ from application.core.semantic_build.research_objective_service import (
 )
 from application.core.workspace_overview_service import WorkspaceService
 from application.goal.brief_service import GoalService
+from application.goal.experiment_plan_service import ExperimentPlanService
 from application.goal.session_service import GoalSessionService
+from application.evaluation import (
+    ResearchUnderstandingFeedbackService,
+    ResearchUnderstandingReviewImportService,
+)
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
-from application.pipeline.goal_analysis.service import GoalAnalysisPipelineService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.document_markdown_service import DocumentMarkdownService
+from application.source.reference_workflow_service import SourceReferenceWorkflowService
 from application.source.task_service import TaskService
 from controllers import auth
 from controllers.core import (
     comparable_results,
     comparisons,
-    confirmed_goals,
     documents,
     evidence,
-    goal_analysis,
     research_objectives,
     research_understanding_feedback,
     research_view,
@@ -54,7 +59,40 @@ from infra.persistence.database import (
 )
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.build_repository import PostgresBuildRepository
-from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
+from infra.persistence.postgres.collection_repository import (
+    PostgresCollectionRepository,
+)
+from infra.persistence.postgres.comparison_repository import (
+    PostgresComparisonRepository,
+)
+from infra.persistence.postgres.paper_fact_repository import (
+    PostgresPaperFactRepository,
+)
+from infra.persistence.postgres.objective_repository import (
+    PostgresObjectiveRepository,
+)
+from infra.persistence.postgres.source_artifact_repository import (
+    PostgresSourceArtifactRepository,
+)
+from infra.persistence.postgres.objective_workspace_repository import (
+    PostgresObjectiveWorkspaceRepository,
+)
+from infra.persistence.postgres.research_understanding_repository import (
+    PostgresResearchUnderstandingRepository,
+)
+from infra.persistence.postgres.research_understanding_review_repository import (
+    PostgresResearchUnderstandingReviewRepository,
+)
+from domain.ports import (
+    ComparisonRepository,
+    ExperimentPlanRepository,
+    GoalSessionRepository,
+    ObjectiveRepository,
+    PaperFactRepository,
+    ResearchUnderstandingRepository,
+    ResearchUnderstandingReviewRepository,
+    SourceArtifactRepository,
+)
 from infra.persistence.file import FileCollectionWorkspace
 
 from utils.logger import (
@@ -87,6 +125,16 @@ def create_app(
     auth_session_service: AuthSessionService | None = None,
     collection_service: CollectionService | None = None,
     task_service: TaskService | None = None,
+    source_artifact_repository: SourceArtifactRepository | None = None,
+    paper_fact_repository: PaperFactRepository | None = None,
+    objective_repository: ObjectiveRepository | None = None,
+    comparison_repository: ComparisonRepository | None = None,
+    research_understanding_repository: ResearchUnderstandingRepository | None = None,
+    research_understanding_review_repository: (
+        ResearchUnderstandingReviewRepository | None
+    ) = None,
+    goal_session_repository: GoalSessionRepository | None = None,
+    experiment_plan_repository: ExperimentPlanRepository | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -97,6 +145,14 @@ def create_app(
                 auth_session_service is None
                 or collection_service is None
                 or task_service is None
+                or source_artifact_repository is None
+                or paper_fact_repository is None
+                or objective_repository is None
+                or comparison_repository is None
+                or research_understanding_repository is None
+                or research_understanding_review_repository is None
+                or goal_session_repository is None
+                or experiment_plan_repository is None
             ):
                 engine = build_database_engine(DatabaseSettings())
                 session_factory = build_session_factory(engine)
@@ -114,43 +170,133 @@ def create_app(
             active_task_service = task_service or TaskService(
                 PostgresBuildRepository(session_factory)
             )
+            active_source_artifact_repository = (
+                source_artifact_repository
+                or PostgresSourceArtifactRepository(session_factory)
+            )
+            active_paper_fact_repository = (
+                paper_fact_repository or PostgresPaperFactRepository(session_factory)
+            )
+            active_objective_repository = (
+                objective_repository or PostgresObjectiveRepository(session_factory)
+            )
+            active_comparison_repository = (
+                comparison_repository or PostgresComparisonRepository(session_factory)
+            )
+            active_research_understanding_repository = (
+                research_understanding_repository
+                or PostgresResearchUnderstandingRepository(session_factory)
+            )
+            active_review_repository = (
+                research_understanding_review_repository
+                or PostgresResearchUnderstandingReviewRepository(session_factory)
+            )
+            default_workspace_repository = None
+            if goal_session_repository is None or experiment_plan_repository is None:
+                default_workspace_repository = PostgresObjectiveWorkspaceRepository(
+                    session_factory
+                )
+            active_goal_session_repository = (
+                goal_session_repository or default_workspace_repository
+            )
+            active_experiment_plan_repository = (
+                experiment_plan_repository or default_workspace_repository
+            )
             artifact_registry_service = ArtifactRegistryService(
-                active_task_service.repository
+                active_task_service.repository,
+                active_source_artifact_repository,
+                active_paper_fact_repository,
+                active_objective_repository,
+                active_comparison_repository,
             )
             document_profile_service = DocumentProfileService(
                 collection_service=active_collection_service,
+                source_artifact_repository=active_source_artifact_repository,
+                paper_fact_repository=active_paper_fact_repository,
             )
             paper_facts_service = PaperFactsService(
                 collection_service=active_collection_service,
+                source_artifact_repository=active_source_artifact_repository,
+                paper_fact_repository=active_paper_fact_repository,
+                objective_repository=active_objective_repository,
                 document_profile_service=document_profile_service,
             )
             comparison_service = ComparisonService(
                 collection_service=active_collection_service,
+                paper_fact_repository=active_paper_fact_repository,
+                objective_repository=active_objective_repository,
+                comparison_repository=active_comparison_repository,
                 document_profile_service=document_profile_service,
+            )
+            research_understanding_service = ResearchUnderstandingService(
+                source_artifact_repository=active_source_artifact_repository,
+            )
+            research_understanding_feedback_service = (
+                ResearchUnderstandingFeedbackService(
+                    review_repository=active_review_repository,
+                    research_understanding_repository=(
+                        active_research_understanding_repository
+                    ),
+                    research_understanding_service=research_understanding_service,
+                )
             )
             research_objective_service = ResearchObjectiveService(
                 collection_service=active_collection_service,
+                source_artifact_repository=active_source_artifact_repository,
+                paper_fact_repository=active_paper_fact_repository,
+                objective_repository=active_objective_repository,
+                research_understanding_repository=(
+                    active_research_understanding_repository
+                ),
                 document_profile_service=document_profile_service,
+                research_understanding_service=research_understanding_service,
             )
             workspace_service = WorkspaceService(
                 collection_service=active_collection_service,
                 task_service=active_task_service,
+                source_artifact_repository=active_source_artifact_repository,
+                paper_fact_repository=active_paper_fact_repository,
+                objective_repository=active_objective_repository,
+                comparison_repository=active_comparison_repository,
                 document_profile_service=document_profile_service,
             )
             research_view_service = ResearchViewAggregationService(
                 collection_service=active_collection_service,
-                workspace_service=workspace_service,
-                document_profile_service=document_profile_service,
-                paper_facts_service=paper_facts_service,
+                source_artifact_repository=active_source_artifact_repository,
+                paper_fact_repository=active_paper_fact_repository,
+                objective_repository=active_objective_repository,
                 comparison_service=comparison_service,
+                research_understanding_service=research_understanding_service,
             )
-
             application.state.collection_service = active_collection_service
             application.state.task_service = active_task_service
+            application.state.paper_fact_repository = active_paper_fact_repository
+            application.state.objective_repository = active_objective_repository
+            application.state.comparison_repository = active_comparison_repository
+            application.state.research_understanding_repository = (
+                active_research_understanding_repository
+            )
+            application.state.research_understanding_review_repository = (
+                active_review_repository
+            )
+            application.state.research_understanding_feedback_service = (
+                research_understanding_feedback_service
+            )
+            application.state.research_understanding_review_import_service = (
+                ResearchUnderstandingReviewImportService(
+                    research_understanding_feedback_service
+                )
+            )
             application.state.artifact_registry_service = artifact_registry_service
             application.state.document_profile_service = document_profile_service
             application.state.document_markdown_service = DocumentMarkdownService(
                 collection_service=active_collection_service,
+                source_artifact_repository=active_source_artifact_repository,
+            )
+            application.state.reference_workflow_service = (
+                SourceReferenceWorkflowService(
+                    source_artifact_repository=active_source_artifact_repository,
+                )
             )
             application.state.paper_facts_service = paper_facts_service
             application.state.comparison_service = comparison_service
@@ -161,6 +307,7 @@ def create_app(
                 collection_service=active_collection_service,
                 task_service=active_task_service,
                 artifact_registry_service=artifact_registry_service,
+                source_artifact_repository=active_source_artifact_repository,
                 document_profile_service=document_profile_service,
                 research_objective_service=research_objective_service,
             )
@@ -172,9 +319,25 @@ def create_app(
                 comparison_service=comparison_service,
                 paper_facts_service=paper_facts_service,
                 research_objective_service=research_objective_service,
+                research_understanding_feedback_service=(
+                    research_understanding_feedback_service
+                ),
+                goal_session_repository=active_goal_session_repository,
             )
-            application.state.goal_analysis_service = GoalAnalysisPipelineService(
+            application.state.experiment_plan_service = ExperimentPlanService(
+                repository=active_experiment_plan_repository,
+                goal_session_repository=active_goal_session_repository,
+                research_understanding_feedback_service=(
+                    research_understanding_feedback_service
+                ),
+            )
+            application.state.objective_analysis_service = ObjectiveAnalysisService(
+                objective_repository=active_objective_repository,
+                research_understanding_repository=(
+                    active_research_understanding_repository
+                ),
                 research_objective_service=research_objective_service,
+                research_understanding_service=research_understanding_service,
             )
             yield
         finally:
@@ -183,7 +346,7 @@ def create_app(
 
     app = FastAPI(
         title="TsingAI-Lens API",
-        version="0.10.1",
+        version="0.11.0",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",
@@ -297,10 +460,10 @@ def create_app(
     app.include_router(workspace.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(evidence.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(confirmed_goals.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(goal_analysis.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(research_objectives.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(research_understanding_feedback.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(
+        research_understanding_feedback.router, prefix=PUBLIC_API_V1_PREFIX
+    )
     app.include_router(research_view.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(comparisons.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(results.router, prefix=PUBLIC_API_V1_PREFIX)

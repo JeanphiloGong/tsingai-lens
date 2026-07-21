@@ -10,10 +10,6 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
-from application.evaluation import (
-    ResearchUnderstandingFeedbackService,
-    ResearchUnderstandingReviewImportService,
-)
 from controllers.dependencies.auth import require_current_user
 from controllers.schemas.core.research_understanding import (
     ResearchUnderstandingCurationCreateRequest,
@@ -33,8 +29,6 @@ from controllers.schemas.core.research_understanding import (
 from domain.evaluation import ResearchUnderstandingCuration, ResearchUnderstandingFeedback
 
 router = APIRouter(prefix="/collections", tags=["research-understanding-feedback"])
-feedback_service = ResearchUnderstandingFeedbackService()
-review_import_service = ResearchUnderstandingReviewImportService(feedback_service)
 REVIEW_ACTION_OPTIONS = ("accept", "reject", "correct", "skip")
 REJECT_ISSUE_OPTIONS = (
     "evidence_not_grounded",
@@ -76,7 +70,7 @@ DECISION_BOARD_COLUMNS = (
     "corrected_support_grade",
     "corrected_evidence_ref_ids",
     "collection_id",
-    "goal_id",
+    "objective_id",
     "finding_id",
     "claim_id",
     "statement",
@@ -170,9 +164,7 @@ def _training_jsonl_row(
             "task_type": item.task_type,
             "prompt_version": item.training_prompt_version,
             "collection_id": collection_id,
-            "scope_type": item.scope_type,
-            "goal_id": item.scope_id if item.scope_type == "goal" else "",
-            "scope_id": item.scope_id,
+            "objective_id": item.objective_id,
             "sample_id": item.sample_id,
             "finding_id": item.finding_id,
             "claim_id": item.claim_id or "",
@@ -269,9 +261,7 @@ def _agent_review_prompt_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "task": "review_lens_research_finding",
         "collection_id": row["collection_id"],
-        "goal_id": row["goal_id"],
-        "scope_type": row["scope_type"],
-        "scope_id": row["scope_id"],
+        "objective_id": row["objective_id"],
         "sample_id": row["sample_id"],
         "finding_id": row["finding_id"],
         "claim_id": row["claim_id"],
@@ -340,7 +330,7 @@ def _decision_template_row(row: dict[str, Any]) -> dict[str, Any]:
     suggested = row["suggested_target"] if isinstance(row["suggested_target"], dict) else {}
     return {
         "collection_id": row["collection_id"],
-        "goal_id": row["goal_id"],
+        "objective_id": row["objective_id"],
         "finding_id": row["finding_id"],
         "claim_id": row["claim_id"],
         "action": "skip",
@@ -385,7 +375,7 @@ def _dataset_review_packet_response(
     ]
     lines = [
         f"Lens review packet: {response.collection_id}",
-        f"Scope: {response.scope_type} {response.scope_id}",
+        f"Objective: {response.objective_id or 'all'}",
         f"Review candidates: {len(rows)}",
         "",
         REVIEW_INSTRUCTIONS,
@@ -504,7 +494,7 @@ def _decision_board_tsv_row(row: dict[str, Any]) -> dict[str, str]:
         "corrected_support_grade": "",
         "corrected_evidence_ref_ids": "",
         "collection_id": row["collection_id"],
-        "goal_id": row["goal_id"],
+        "objective_id": row["objective_id"],
         "finding_id": row["finding_id"],
         "claim_id": row["claim_id"],
         "statement": row["statement"],
@@ -597,9 +587,7 @@ def _review_jsonl_row(
         decision_hint = {}
     return {
         "collection_id": collection_id,
-        "goal_id": item.scope_id if item.scope_type == "goal" else "",
-        "scope_type": item.scope_type,
-        "scope_id": item.scope_id,
+        "objective_id": item.objective_id,
         "sample_id": item.sample_id,
         "finding_id": item.finding_id,
         "claim_id": item.claim_id or "",
@@ -926,7 +914,7 @@ async def import_research_understanding_review_decisions(
     reviewer = _reviewer_for_write(request, payload.reviewer)
     if payload.decision_board_tsv:
         summary = await run_in_threadpool(
-            review_import_service.import_decision_board_tsv,
+            request.app.state.research_understanding_review_import_service.import_decision_board_tsv,
             content=payload.decision_board_tsv,
             reviewer=reviewer,
             dry_run=payload.dry_run,
@@ -938,7 +926,7 @@ async def import_research_understanding_review_decisions(
         for row in payload.rows
     ]
     summary = await run_in_threadpool(
-        review_import_service.import_rows,
+        request.app.state.research_understanding_review_import_service.import_rows,
         rows=rows,
         reviewer=reviewer,
         dry_run=payload.dry_run,
@@ -958,10 +946,9 @@ async def create_research_understanding_feedback(
     request: Request,
 ) -> ResearchUnderstandingFeedbackResponse:
     feedback = await run_in_threadpool(
-        feedback_service.record_feedback,
+        request.app.state.research_understanding_feedback_service.record_feedback,
         collection_id=collection_id,
-        scope_type=payload.scope_type,
-        scope_id=payload.scope_id,
+        objective_id=payload.objective_id,
         finding_id=payload.finding_id,
         claim_id=payload.claim_id,
         review_status=payload.review_status,
@@ -979,16 +966,15 @@ async def create_research_understanding_feedback(
 )
 async def list_research_understanding_feedback(
     collection_id: str,
-    scope_type: str | None = Query(default=None, max_length=32),
-    scope_id: str | None = Query(default=None, max_length=160),
+    request: Request,
+    objective_id: str | None = Query(default=None, max_length=160),
     finding_id: str | None = Query(default=None, max_length=200),
     claim_id: str | None = Query(default=None, max_length=200),
 ) -> ResearchUnderstandingFeedbackListResponse:
     items = await run_in_threadpool(
-        feedback_service.list_feedback,
+        request.app.state.research_understanding_feedback_service.list_feedback,
         collection_id=collection_id,
-        scope_type=scope_type,
-        scope_id=scope_id,
+        objective_id=objective_id,
         finding_id=finding_id,
         claim_id=claim_id,
     )
@@ -1015,10 +1001,9 @@ async def create_research_understanding_curation(
     request: Request,
 ) -> ResearchUnderstandingCurationResponse:
     curation = await run_in_threadpool(
-        feedback_service.record_curation,
+        request.app.state.research_understanding_feedback_service.record_curation,
         collection_id=collection_id,
-        scope_type=payload.scope_type,
-        scope_id=payload.scope_id,
+        objective_id=payload.objective_id,
         finding_id=payload.finding_id,
         claim_id=payload.claim_id,
         curated_claim_type=payload.curated_claim_type,
@@ -1046,16 +1031,15 @@ async def create_research_understanding_curation(
 )
 async def list_research_understanding_curations(
     collection_id: str,
-    scope_type: str | None = Query(default=None, max_length=32),
-    scope_id: str | None = Query(default=None, max_length=160),
+    request: Request,
+    objective_id: str | None = Query(default=None, max_length=160),
     finding_id: str | None = Query(default=None, max_length=200),
     claim_id: str | None = Query(default=None, max_length=200),
 ) -> ResearchUnderstandingCurationListResponse:
     items = await run_in_threadpool(
-        feedback_service.list_curations,
+        request.app.state.research_understanding_feedback_service.list_curations,
         collection_id=collection_id,
-        scope_type=scope_type,
-        scope_id=scope_id,
+        objective_id=objective_id,
         finding_id=finding_id,
         claim_id=claim_id,
     )
@@ -1101,14 +1085,13 @@ def _current_user_reviewer(user: dict[str, Any]) -> str:
 )
 async def export_research_understanding_gold_draft(
     collection_id: str,
-    scope_type: str = Query(..., max_length=32),
-    scope_id: str = Query(..., min_length=1, max_length=160),
+    request: Request,
+    objective_id: str = Query(..., min_length=1, max_length=160),
 ) -> ResearchUnderstandingGoldDraftResponse:
     draft = await run_in_threadpool(
-        feedback_service.export_gold_draft,
+        request.app.state.research_understanding_feedback_service.export_gold_draft,
         collection_id=collection_id,
-        scope_type=scope_type,
-        scope_id=scope_id,
+        objective_id=objective_id,
     )
     return ResearchUnderstandingGoldDraftResponse(**draft)
 
@@ -1120,18 +1103,17 @@ async def export_research_understanding_gold_draft(
 )
 async def export_research_understanding_dataset(
     collection_id: str,
-    scope_type: str = Query(..., max_length=32),
-    scope_id: str = Query(..., min_length=1, max_length=160),
+    request: Request,
+    objective_id: str = Query(..., min_length=1, max_length=160),
     label_status: ResearchUnderstandingDatasetLabelStatus | None = Query(default=None),
     dataset_use_status: ResearchUnderstandingDatasetUseStatus | None = Query(default=None),
     task_type: str | None = Query(default=None, min_length=1, max_length=80),
     format: ResearchUnderstandingDatasetExportFormat = Query(default="json"),
 ) -> ResearchUnderstandingDatasetResponse | Response:
     dataset = await run_in_threadpool(
-        feedback_service.export_dataset,
+        request.app.state.research_understanding_feedback_service.export_dataset,
         collection_id=collection_id,
-        scope_type=scope_type,
-        scope_id=scope_id,
+        objective_id=objective_id,
         label_status=label_status,
         dataset_use_status=dataset_use_status,
         task_type=task_type,
@@ -1167,16 +1149,15 @@ async def export_research_understanding_dataset(
 )
 async def export_collection_research_understanding_dataset(
     collection_id: str,
-    scope_type: str = Query(default="goal", max_length=32),
+    request: Request,
     label_status: ResearchUnderstandingDatasetLabelStatus | None = Query(default=None),
     dataset_use_status: ResearchUnderstandingDatasetUseStatus | None = Query(default=None),
     task_type: str | None = Query(default=None, min_length=1, max_length=80),
     format: ResearchUnderstandingDatasetExportFormat = Query(default="json"),
 ) -> ResearchUnderstandingDatasetResponse | Response:
     dataset = await run_in_threadpool(
-        feedback_service.export_collection_dataset,
+        request.app.state.research_understanding_feedback_service.export_collection_dataset,
         collection_id=collection_id,
-        scope_type=scope_type,
         label_status=label_status,
         dataset_use_status=dataset_use_status,
         task_type=task_type,

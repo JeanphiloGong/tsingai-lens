@@ -2,13 +2,24 @@
 	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
+	import { onDestroy } from 'svelte';
 	import ResearchUnderstandingWorkbench from '../../_components/ResearchUnderstandingWorkbench.svelte';
 	import { errorMessage } from '../../../../_shared/api';
+	import {
+		fetchExperimentPlans,
+		updateExperimentPlan,
+		type ExperimentPlan,
+		type ExperimentPlanStatus
+	} from '../../../../_shared/experimentPlans';
 	import { t } from '../../../../_shared/i18n';
 	import {
+		confirmObjective,
+		fetchObjectiveAnalysis,
 		fetchObjectiveResearchView,
 		formatShortIdentifier,
-		getResearchViewStateTone,
+		runObjectiveAnalysis,
+		type ObjectiveAnalysis,
+		type ObjectiveAnalysisProgress,
 		type ObjectiveEvidenceRoute,
 		type ObjectiveEvidenceUnit,
 		type ObjectivePaperFrame,
@@ -76,11 +87,25 @@
 		'anchor_id'
 	]);
 	const EVIDENCE_GROUP_PREVIEW_LIMIT = 6;
+	const POLL_DELAY_MS = 2500;
 
 	let objectiveView: ObjectiveResearchView | null = null;
 	let loading = false;
 	let error = '';
+	let analysisActionError = '';
+	let analysisWarnings: string[] = [];
+	let analysisActionRunning = false;
 	let loadedKey = '';
+	let pollTimer: ReturnType<typeof setTimeout> | null = null;
+	let plans: ExperimentPlan[] = [];
+	let selectedPlanId = '';
+	let planTitle = '';
+	let planContent = '';
+	let planStatus: ExperimentPlanStatus = 'draft';
+	let plansOpen = false;
+	let plansLoading = false;
+	let planSaving = false;
+	let planError = '';
 	let selectedEvidenceUnitId = '';
 	let selectedEvidenceKind = 'all';
 	let selectedEvidenceDocumentId = 'all';
@@ -90,11 +115,24 @@
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectiveId = $page.params.objective_id ?? '';
+	$: requestedPlanId = $page.url.searchParams.get('plan_id') ?? '';
 	$: loadKey = `${collectionId}:${objectiveId}`;
 	$: frames = objectiveView?.paper_frames ?? [];
 	$: evidenceUnits = objectiveView?.evidence_units ?? [];
 	$: evidenceRoutes = objectiveView?.evidence_routes ?? [];
 	$: understanding = objectiveView?.understanding ?? null;
+	$: objectiveStatus = objectiveView?.objective.status ?? 'candidate';
+	$: analysisProgress = objectiveView?.objective.analysis_progress ?? null;
+	$: analysisIsPending = objectiveStatus === 'queued' || objectiveStatus === 'running';
+	$: selectedPlan = plans.find((plan) => plan.plan_id === selectedPlanId) ?? null;
+	$: selectedPlanValidity = planSourceValidity(selectedPlan);
+	$: selectedPlanCanEnterReview = canPlanEnterReview(selectedPlan);
+	$: canSavePlan = Boolean(
+		selectedPlan &&
+		planTitle.trim() &&
+		planContent.trim() &&
+		(planStatus !== 'ready_for_review' || selectedPlanCanEnterReview)
+	);
 	$: relevantFrameCount = frames.filter((frame) => frame.relevance !== 'irrelevant').length;
 	$: evidenceKindOptions = buildEvidenceKindOptions(evidenceUnits);
 	$: evidenceDocumentOptions = buildEvidenceDocumentOptions(frames, evidenceUnits);
@@ -129,19 +167,159 @@
 		null;
 	$: if (browser && collectionId && objectiveId && loadKey !== loadedKey) {
 		loadedKey = loadKey;
+		clearPoll();
 		void loadObjectiveView();
 	}
+	$: if (requestedPlanId) {
+		plansOpen = true;
+	}
+
+	onDestroy(clearPoll);
 
 	async function loadObjectiveView() {
 		loading = true;
 		error = '';
 		try {
 			objectiveView = await fetchObjectiveResearchView(collectionId, objectiveId);
+			void loadPlans();
+			schedulePoll();
 		} catch (err) {
 			objectiveView = null;
 			error = errorMessage(err);
+			clearPoll();
 		} finally {
 			loading = false;
+		}
+	}
+
+	function applyAnalysis(result: ObjectiveAnalysis) {
+		if (!objectiveView) return;
+		objectiveView = {
+			...objectiveView,
+			objective: result.objective,
+			understanding: result.understanding ?? objectiveView.understanding
+		};
+		analysisWarnings = result.warnings;
+		schedulePoll();
+	}
+
+	async function startAnalysis() {
+		if (!objectiveView || analysisActionRunning || analysisIsPending) return;
+		analysisActionRunning = true;
+		analysisActionError = '';
+		try {
+			if (objectiveView.objective.status === 'candidate') {
+				applyAnalysis(await confirmObjective(collectionId, objectiveId));
+			}
+			applyAnalysis(await runObjectiveAnalysis(collectionId, objectiveId));
+		} catch (err) {
+			analysisActionError = errorMessage(err);
+			clearPoll();
+		} finally {
+			analysisActionRunning = false;
+		}
+	}
+
+	function clearPoll() {
+		if (!pollTimer) return;
+		clearTimeout(pollTimer);
+		pollTimer = null;
+	}
+
+	function schedulePoll() {
+		clearPoll();
+		const status = objectiveView?.objective.status;
+		if (!browser || (status !== 'queued' && status !== 'running')) return;
+		pollTimer = setTimeout(() => void refreshAnalysis(), POLL_DELAY_MS);
+	}
+
+	async function refreshAnalysis() {
+		try {
+			const result = await fetchObjectiveAnalysis(collectionId, objectiveId);
+			applyAnalysis(result);
+			analysisActionError = '';
+			if (result.objective.status === 'ready') {
+				await loadObjectiveView();
+			}
+		} catch (err) {
+			analysisActionError = errorMessage(err);
+			clearPoll();
+		}
+	}
+
+	function analysisProgressLabel(progress: ObjectiveAnalysisProgress | null) {
+		if (!progress?.current || !progress.total) return '';
+		return `${progress.current}/${progress.total}${progress.unit ? ` ${progress.unit}` : ''}`;
+	}
+
+	function objectiveStatusTone(status: string) {
+		if (status === 'ready') return 'ready';
+		if (status === 'failed') return 'failed';
+		if (status === 'queued' || status === 'running') return 'processing';
+		return 'empty';
+	}
+
+	async function loadPlans() {
+		plansLoading = true;
+		planError = '';
+		try {
+			const response = await fetchExperimentPlans(collectionId, objectiveId);
+			plans = response.items;
+			const nextPlan =
+				(requestedPlanId ? plans.find((plan) => plan.plan_id === requestedPlanId) : null) ??
+				plans.find((plan) => plan.plan_id === selectedPlanId) ??
+				plans[0] ??
+				null;
+			selectPlan(nextPlan);
+		} catch (err) {
+			plans = [];
+			selectPlan(null);
+			planError = errorMessage(err);
+		} finally {
+			plansLoading = false;
+		}
+	}
+
+	function selectPlan(plan: ExperimentPlan | null) {
+		selectedPlanId = plan?.plan_id ?? '';
+		planTitle = plan?.title ?? '';
+		planContent = plan?.content ?? '';
+		planStatus = plan?.status ?? 'draft';
+	}
+
+	function planSourceValidity(plan: ExperimentPlan | null) {
+		const validity = plan?.metadata?.source_validity;
+		return validity === 'current' || validity === 'stale' ? validity : 'unverified';
+	}
+
+	function isCopilotPlan(plan: ExperimentPlan | null) {
+		return Boolean(
+			plan?.source_message_id ||
+			plan?.metadata?.source === 'goal_copilot' ||
+			plan?.metadata?.review_gate === 'protocol_ready_findings'
+		);
+	}
+
+	function canPlanEnterReview(plan: ExperimentPlan | null) {
+		return !isCopilotPlan(plan) || planSourceValidity(plan) === 'current';
+	}
+
+	async function savePlan() {
+		if (!selectedPlan || !canSavePlan || planSaving) return;
+		planSaving = true;
+		planError = '';
+		try {
+			const updated = await updateExperimentPlan(collectionId, objectiveId, selectedPlan.plan_id, {
+				title: planTitle.trim(),
+				content: planContent.trim(),
+				status: planStatus
+			});
+			plans = plans.map((plan) => (plan.plan_id === updated.plan_id ? updated : plan));
+			selectPlan(updated);
+		} catch (err) {
+			planError = errorMessage(err);
+		} finally {
+			planSaving = false;
 		}
 	}
 
@@ -663,8 +841,8 @@
 				</div>
 			</div>
 			<div class="objective-hero__status">
-				<span class={`status-badge status-badge--${getResearchViewStateTone(objectiveView.state)}`}>
-					{$t(`research.state.${objectiveView.state}`)}
+				<span class={`status-badge status-badge--${objectiveStatusTone(objectiveStatus)}`}>
+					{$t(`research.objectives.lifecycle.${objectiveStatus}`)}
 				</span>
 				<strong>{confidenceLabel(objectiveView.objective.confidence)}</strong>
 				<span>{$t('research.objectives.confidence')}</span>
@@ -676,8 +854,61 @@
 				>
 					{$t('research.objectiveWorkspace.askCopilot')}
 				</a>
+				<button class="objective-secondary-action" type="button" on:click={() => (plansOpen = true)}>
+					{$t('research.goalWorkspace.experimentPlansTitle')}
+				</button>
+				{#if objectiveStatus === 'candidate' || objectiveStatus === 'confirmed' || objectiveStatus === 'failed'}
+					<button
+						class="objective-primary-action"
+						type="button"
+						disabled={analysisActionRunning}
+						on:click={startAnalysis}
+					>
+						{objectiveStatus === 'failed'
+							? $t('research.objectives.retryAnalysis')
+							: $t('research.objectives.confirmAndAnalyze')}
+					</button>
+				{/if}
 			</div>
 		</header>
+
+		{#if analysisActionError}
+			<section class="objective-state-card objective-state-card--error" role="alert">
+				<h3>{$t('research.objectives.analysisErrorTitle')}</h3>
+				<p>{analysisActionError}</p>
+			</section>
+		{/if}
+		{#if objectiveStatus === 'failed' && objectiveView.objective.analysis_error}
+			<section class="objective-state-card objective-state-card--error" role="alert">
+				<h3>{$t('research.objectives.analysisErrorTitle')}</h3>
+				<p>{objectiveView.objective.analysis_error}</p>
+			</section>
+		{/if}
+		{#if analysisWarnings.length}
+			<section class="objective-state-card" role="status">
+				{#each analysisWarnings as warning (warning)}
+					<p>{warning}</p>
+				{/each}
+			</section>
+		{/if}
+		{#if analysisIsPending}
+			<section class="objective-analysis-progress" aria-live="polite" aria-busy="true">
+				<div>
+					<span>{$t(`research.objectives.lifecycle.${objectiveStatus}`)}</span>
+					<strong>{analysisProgress?.message ?? $t('research.goalWorkspace.progressBody')}</strong>
+				</div>
+				<div>
+					<span>{$t('research.goalWorkspace.phase')}</span>
+					<strong>{analysisProgress?.phase ?? objectiveStatus}</strong>
+				</div>
+				{#if analysisProgressLabel(analysisProgress)}
+					<div>
+						<span>{$t('research.goalWorkspace.stepProgress')}</span>
+						<strong>{analysisProgressLabel(analysisProgress)}</strong>
+					</div>
+				{/if}
+			</section>
+		{/if}
 
 		<ResearchUnderstandingWorkbench
 			{understanding}
@@ -686,6 +917,75 @@
 			bodyKey="research.understanding.objectiveBody"
 			titleId="objective-understanding-title"
 		/>
+
+		{#if plansOpen}
+			<section class="objective-section experiment-plans" aria-labelledby="experiment-plans-title">
+				<div class="section-heading">
+					<div>
+						<h3 id="experiment-plans-title">{$t('research.goalWorkspace.experimentPlansTitle')}</h3>
+						<p>{$t('research.goalWorkspace.experimentPlansEyebrow')}</p>
+					</div>
+					<button class="objective-secondary-action" type="button" on:click={() => (plansOpen = false)}>
+						{$t('research.goalWorkspace.closePlans')}
+					</button>
+				</div>
+				{#if plansLoading}
+					<p>{$t('research.goalWorkspace.experimentPlansLoading')}</p>
+				{:else if planError}
+					<p class="plan-error" role="alert">{planError}</p>
+				{:else if !plans.length}
+					<p>{$t('research.goalWorkspace.experimentPlansEmpty')}</p>
+				{:else}
+					<div class="experiment-plans__layout">
+						<div class="experiment-plans__list" aria-label={$t('research.goalWorkspace.experimentPlansList')}>
+							{#each plans as plan (plan.plan_id)}
+								<button
+									type="button"
+									class:active={plan.plan_id === selectedPlanId}
+									on:click={() => selectPlan(plan)}
+								>
+									<strong>{plan.title}</strong>
+									<span>{plan.status.replaceAll('_', ' ')}</span>
+								</button>
+							{/each}
+						</div>
+						<form class="experiment-plans__editor" on:submit|preventDefault={savePlan}>
+							<label>
+								<span>{$t('research.goalWorkspace.experimentPlanTitle')}</span>
+								<input bind:value={planTitle} />
+							</label>
+							<label>
+								<span>{$t('research.goalWorkspace.experimentPlanStatus')}</span>
+								<select bind:value={planStatus}>
+									<option value="draft">{$t('research.goalWorkspace.experimentPlanDraft')}</option>
+									<option value="ready_for_review" disabled={!selectedPlanCanEnterReview}>
+										{$t('research.goalWorkspace.experimentPlanReady')}
+									</option>
+									<option value="archived">{$t('research.goalWorkspace.experimentPlanArchived')}</option>
+								</select>
+							</label>
+							<label>
+								<span>{$t('research.goalWorkspace.experimentPlanContent')}</span>
+								<textarea rows="12" bind:value={planContent}></textarea>
+							</label>
+							{#if selectedPlan}
+								<div class="experiment-plans__provenance" aria-label={$t('research.goalWorkspace.experimentPlanProvenance')}>
+									<strong>{selectedPlanValidity}</strong>
+									{#each selectedPlan.source_links as link (`${link.label}-${link.href}`)}
+										<a href={link.href}>{link.label}</a>
+									{/each}
+								</div>
+							{/if}
+							<button class="objective-primary-action" type="submit" disabled={!canSavePlan || planSaving}>
+								{planSaving
+									? $t('research.goalWorkspace.experimentPlanSaving')
+									: $t('research.goalWorkspace.experimentPlanSave')}
+							</button>
+						</form>
+					</div>
+				{/if}
+			</section>
+		{/if}
 
 		<section class="objective-summary-layout">
 			<aside class="objective-summary-panel" aria-label={$t('research.objectiveWorkspace.summary')}>
@@ -1258,6 +1558,129 @@
 
 	.objective-hero__assistant-link:hover {
 		background: var(--bg-subtle);
+	}
+
+	.objective-primary-action,
+	.objective-secondary-action {
+		border: 1px solid var(--border-default);
+		border-radius: 8px;
+		padding: 8px 12px;
+		font: inherit;
+		font-size: 13px;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.objective-primary-action {
+		border-color: var(--accent-strong);
+		background: var(--accent-strong);
+		color: white;
+	}
+
+	.objective-secondary-action {
+		background: var(--surface-card);
+		color: var(--text-primary);
+	}
+
+	.objective-primary-action:disabled,
+	.objective-secondary-action:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+	}
+
+	.objective-analysis-progress {
+		display: grid;
+		grid-template-columns: minmax(0, 2fr) repeat(2, minmax(140px, 1fr));
+		gap: 14px;
+		border: 1px solid var(--border-default);
+		border-radius: var(--radius-lg);
+		padding: 18px 20px;
+		background: var(--surface-card);
+	}
+
+	.objective-analysis-progress > div {
+		display: grid;
+		gap: 4px;
+	}
+
+	.objective-analysis-progress span,
+	.experiment-plans__list span,
+	.experiment-plans__editor label > span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		line-height: 18px;
+	}
+
+	.objective-analysis-progress strong {
+		overflow-wrap: anywhere;
+	}
+
+	.experiment-plans,
+	.experiment-plans__editor,
+	.experiment-plans__editor label,
+	.experiment-plans__provenance {
+		display: grid;
+		gap: 12px;
+	}
+
+	.experiment-plans__layout {
+		display: grid;
+		grid-template-columns: minmax(220px, 0.35fr) minmax(0, 1fr);
+		gap: 18px;
+	}
+
+	.experiment-plans__list {
+		display: grid;
+		align-content: start;
+		gap: 8px;
+	}
+
+	.experiment-plans__list button {
+		display: grid;
+		gap: 4px;
+		border: 1px solid var(--border-default);
+		border-radius: 8px;
+		padding: 12px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.experiment-plans__list button.active {
+		border-color: var(--accent-strong);
+		background: var(--bg-subtle);
+	}
+
+	.experiment-plans__editor input,
+	.experiment-plans__editor select,
+	.experiment-plans__editor textarea {
+		box-sizing: border-box;
+		width: 100%;
+		border: 1px solid var(--border-default);
+		border-radius: 8px;
+		padding: 9px 10px;
+		background: var(--surface-card);
+		color: var(--text-primary);
+		font: inherit;
+	}
+
+	.experiment-plans__editor textarea {
+		resize: vertical;
+	}
+
+	.experiment-plans__provenance {
+		border-left: 3px solid var(--border-default);
+		padding-left: 12px;
+	}
+
+	.experiment-plans__provenance a {
+		width: fit-content;
+		color: var(--color-accent);
+	}
+
+	.plan-error {
+		color: var(--danger-text);
 	}
 
 	.objective-chip-row {
@@ -1969,6 +2392,11 @@
 
 		.objective-hero__status {
 			justify-items: start;
+		}
+
+		.objective-analysis-progress,
+		.experiment-plans__layout {
+			grid-template-columns: 1fr;
 		}
 
 		.evidence-toolbar,

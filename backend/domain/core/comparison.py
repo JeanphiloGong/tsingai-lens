@@ -148,7 +148,8 @@ class ComparableResult:
         value = _normalize_mapping(payload.get("value"))
         evidence = _normalize_mapping(payload.get("evidence"))
         return cls(
-            comparable_result_id=_normalize_text(payload.get("comparable_result_id")) or "",
+            comparable_result_id=_normalize_text(payload.get("comparable_result_id"))
+            or "",
             source_result_id=_normalize_text(payload.get("source_result_id")) or "",
             source_document_id=_normalize_text(payload.get("source_document_id")) or "",
             binding=ContextBinding(
@@ -161,8 +162,12 @@ class ComparableResult:
                     normalized_context.get("material_system_normalized")
                 )
                 or "unspecified material system",
-                process_normalized=_normalize_text(normalized_context.get("process_normalized")),
-                baseline_normalized=_normalize_text(normalized_context.get("baseline_normalized")),
+                process_normalized=_normalize_text(
+                    normalized_context.get("process_normalized")
+                ),
+                baseline_normalized=_normalize_text(
+                    normalized_context.get("baseline_normalized")
+                ),
                 test_condition_normalized=_normalize_text(
                     normalized_context.get("test_condition_normalized")
                 ),
@@ -183,7 +188,9 @@ class ComparableResult:
                 uncertainty=_normalize_text(value.get("uncertainty")),
             ),
             evidence=EvidenceTrace(
-                direct_anchor_ids=_normalize_string_tuple(evidence.get("direct_anchor_ids")),
+                direct_anchor_ids=_normalize_string_tuple(
+                    evidence.get("direct_anchor_ids")
+                ),
                 contextual_anchor_ids=_normalize_string_tuple(
                     evidence.get("contextual_anchor_ids")
                 ),
@@ -269,13 +276,17 @@ class ComparisonAssessment:
             missing_critical_context=_normalize_string_tuple(
                 payload.get("missing_critical_context")
             ),
-            comparability_basis=_normalize_string_tuple(payload.get("comparability_basis")),
+            comparability_basis=_normalize_string_tuple(
+                payload.get("comparability_basis")
+            ),
             comparability_warnings=_normalize_string_tuple(
                 payload.get("comparability_warnings")
             ),
             comparability_status=_normalize_text(payload.get("comparability_status"))
             or COMPARABILITY_STATUS_LIMITED,
-            requires_expert_review=_normalize_bool(payload.get("requires_expert_review")),
+            requires_expert_review=_normalize_bool(
+                payload.get("requires_expert_review")
+            ),
             assessment_epistemic_status=_normalize_text(
                 payload.get("assessment_epistemic_status")
             )
@@ -306,7 +317,9 @@ class CollectionComparableResult:
     sort_order: int | None = None
     policy_family: str = COLLECTION_COMPARISON_POLICY_FAMILY
     policy_version: str = COLLECTION_COMPARISON_POLICY_VERSION
-    comparable_result_normalization_version: str = COMPARABLE_RESULT_NORMALIZATION_VERSION
+    comparable_result_normalization_version: str = (
+        COMPARABLE_RESULT_NORMALIZATION_VERSION
+    )
     assessment_input_fingerprint: str = ""
     reassessment_triggers: tuple[str, ...] = DEFAULT_COLLECTION_REASSESSMENT_TRIGGERS
 
@@ -314,7 +327,8 @@ class CollectionComparableResult:
     def from_mapping(cls, payload: Mapping[str, Any]) -> "CollectionComparableResult":
         return cls(
             collection_id=_normalize_text(payload.get("collection_id")) or "",
-            comparable_result_id=_normalize_text(payload.get("comparable_result_id")) or "",
+            comparable_result_id=_normalize_text(payload.get("comparable_result_id"))
+            or "",
             assessment=ComparisonAssessment.from_mapping(
                 _normalize_mapping(payload.get("assessment"))
             ),
@@ -334,7 +348,9 @@ class CollectionComparableResult:
                 payload.get("assessment_input_fingerprint")
             )
             or "",
-            reassessment_triggers=_normalize_string_tuple(payload.get("reassessment_triggers"))
+            reassessment_triggers=_normalize_string_tuple(
+                payload.get("reassessment_triggers")
+            )
             or DEFAULT_COLLECTION_REASSESSMENT_TRIGGERS,
         )
 
@@ -382,17 +398,21 @@ class PairwiseComparisonRelation:
             collection_id=_normalize_text(payload.get("collection_id")) or "",
             document_id=_normalize_text(payload.get("document_id")) or "",
             current_variant_id=_normalize_text(payload.get("current_variant_id")) or "",
-            reference_variant_id=_normalize_text(payload.get("reference_variant_id")) or "",
+            reference_variant_id=_normalize_text(payload.get("reference_variant_id"))
+            or "",
             comparison_axis=_normalize_text(payload.get("comparison_axis")) or "",
             property_normalized=_normalize_text(payload.get("property_normalized"))
             or "qualitative",
             current_result_id=_normalize_text(payload.get("current_result_id")) or "",
-            reference_result_id=_normalize_text(payload.get("reference_result_id")) or "",
+            reference_result_id=_normalize_text(payload.get("reference_result_id"))
+            or "",
             current_value=_normalize_optional_float(payload.get("current_value")),
             reference_value=_normalize_optional_float(payload.get("reference_value")),
             unit=_normalize_text(payload.get("unit")),
             direction=_normalize_text(payload.get("direction")) or "unknown",
-            evidence_anchor_ids=_normalize_string_tuple(payload.get("evidence_anchor_ids")),
+            evidence_anchor_ids=_normalize_string_tuple(
+                payload.get("evidence_anchor_ids")
+            ),
             relation_payload=_normalize_mapping(payload.get("relation_payload")),
             confidence=_normalize_optional_float(payload.get("confidence")) or 0.0,
             epistemic_status=_normalize_text(payload.get("epistemic_status"))
@@ -422,6 +442,18 @@ class PairwiseComparisonRelation:
             "epistemic_status": self.epistemic_status,
             "relation_version": self.relation_version,
         }
+
+
+@dataclass(frozen=True)
+class ComparisonFactSet:
+    comparison_artifacts_ready: bool = False
+    comparable_results: tuple[ComparableResult, ...] = ()
+    collection_comparable_results: tuple[CollectionComparableResult, ...] = ()
+    pairwise_comparison_relations: tuple[PairwiseComparisonRelation, ...] = ()
+
+    @property
+    def comparison_artifacts_generated(self) -> bool:
+        return self.comparison_artifacts_ready
 
 
 @dataclass(frozen=True)
@@ -461,7 +493,8 @@ class ComparisonRowRecord:
         return cls(
             row_id=_normalize_text(payload.get("row_id")) or "",
             collection_id=_normalize_text(payload.get("collection_id")) or "",
-            comparable_result_id=_normalize_text(payload.get("comparable_result_id")) or "",
+            comparable_result_id=_normalize_text(payload.get("comparable_result_id"))
+            or "",
             source_document_id=_normalize_text(payload.get("source_document_id")) or "",
             variant_id=_normalize_text(payload.get("variant_id")),
             variant_label=_normalize_text(payload.get("variant_label")),
@@ -470,14 +503,23 @@ class ComparisonRowRecord:
             baseline_reference=_normalize_text(payload.get("baseline_reference")),
             result_source_type=_normalize_text(payload.get("result_source_type")),
             result_type=_normalize_text(payload.get("result_type")) or "scalar",
-            result_summary=_normalize_text(payload.get("result_summary")) or "Result reported",
-            supporting_evidence_ids=_normalize_string_tuple(payload.get("supporting_evidence_ids")),
-            supporting_anchor_ids=_normalize_string_tuple(payload.get("supporting_anchor_ids")),
+            result_summary=_normalize_text(payload.get("result_summary"))
+            or "Result reported",
+            supporting_evidence_ids=_normalize_string_tuple(
+                payload.get("supporting_evidence_ids")
+            ),
+            supporting_anchor_ids=_normalize_string_tuple(
+                payload.get("supporting_anchor_ids")
+            ),
             characterization_observation_ids=_normalize_string_tuple(
                 payload.get("characterization_observation_ids")
             ),
-            structure_feature_ids=_normalize_string_tuple(payload.get("structure_feature_ids")),
-            material_system_normalized=_normalize_text(payload.get("material_system_normalized"))
+            structure_feature_ids=_normalize_string_tuple(
+                payload.get("structure_feature_ids")
+            ),
+            material_system_normalized=_normalize_text(
+                payload.get("material_system_normalized")
+            )
             or "unspecified material system",
             process_normalized=_normalize_text(payload.get("process_normalized"))
             or "unspecified process",
@@ -485,16 +527,28 @@ class ComparisonRowRecord:
             or "qualitative",
             baseline_normalized=_normalize_text(payload.get("baseline_normalized"))
             or "unspecified baseline",
-            test_condition_normalized=_normalize_text(payload.get("test_condition_normalized"))
+            test_condition_normalized=_normalize_text(
+                payload.get("test_condition_normalized")
+            )
             or "unspecified test condition",
             comparability_status=_normalize_text(payload.get("comparability_status"))
             or COMPARABILITY_STATUS_LIMITED,
-            comparability_warnings=_normalize_string_tuple(payload.get("comparability_warnings")),
-            comparability_basis=_normalize_string_tuple(payload.get("comparability_basis")),
-            requires_expert_review=_normalize_bool(payload.get("requires_expert_review")),
-            assessment_epistemic_status=_normalize_text(payload.get("assessment_epistemic_status"))
+            comparability_warnings=_normalize_string_tuple(
+                payload.get("comparability_warnings")
+            ),
+            comparability_basis=_normalize_string_tuple(
+                payload.get("comparability_basis")
+            ),
+            requires_expert_review=_normalize_bool(
+                payload.get("requires_expert_review")
+            ),
+            assessment_epistemic_status=_normalize_text(
+                payload.get("assessment_epistemic_status")
+            )
             or EPISTEMIC_UNRESOLVED,
-            missing_critical_context=_normalize_string_tuple(payload.get("missing_critical_context")),
+            missing_critical_context=_normalize_string_tuple(
+                payload.get("missing_critical_context")
+            ),
             value=_normalize_optional_float(payload.get("value")),
             unit=_normalize_text(payload.get("unit")),
         )
@@ -515,7 +569,9 @@ class ComparisonRowRecord:
             "result_summary": self.result_summary,
             "supporting_evidence_ids": list(self.supporting_evidence_ids),
             "supporting_anchor_ids": list(self.supporting_anchor_ids),
-            "characterization_observation_ids": list(self.characterization_observation_ids),
+            "characterization_observation_ids": list(
+                self.characterization_observation_ids
+            ),
             "structure_feature_ids": list(self.structure_feature_ids),
             "material_system_normalized": self.material_system_normalized,
             "process_normalized": self.process_normalized,
@@ -641,8 +697,12 @@ def evaluate_collection_reassessment_reasons(
     policy_family: str = COLLECTION_COMPARISON_POLICY_FAMILY,
     policy_version: str = COLLECTION_COMPARISON_POLICY_VERSION,
 ) -> tuple[str, ...]:
-    active_triggers = scoped_result.reassessment_triggers or DEFAULT_COLLECTION_REASSESSMENT_TRIGGERS
-    current_fingerprint = build_collection_assessment_input_fingerprint(comparable_result)
+    active_triggers = (
+        scoped_result.reassessment_triggers or DEFAULT_COLLECTION_REASSESSMENT_TRIGGERS
+    )
+    current_fingerprint = build_collection_assessment_input_fingerprint(
+        comparable_result
+    )
     reasons: list[str] = []
     if (
         COLLECTION_REASSESSMENT_TRIGGER_POLICY_FAMILY_CHANGED in active_triggers
@@ -720,7 +780,10 @@ def _derive_missing_critical_context(
         missing.append("test_condition")
     if comparable_result.evidence.traceability_status != TRACEABILITY_STATUS_DIRECT:
         missing.append("direct_traceability")
-    if not comparable_result.value.summary or comparable_result.value.summary == "Result reported":
+    if (
+        not comparable_result.value.summary
+        or comparable_result.value.summary == "Result reported"
+    ):
         missing.append("result_value")
     if comparable_result.value.result_type not in SCALAR_LIKE_RESULT_TYPES:
         missing.append("expert_interpretation")
@@ -813,9 +876,8 @@ def _append_pbf_missing_context(
     condition_payload = _condition_payload_from_assessment(assessment_context)
     property_name = _normalize_text(comparable_result.value.property_normalized) or ""
 
-    if (
-        property_name in PBF_ORIENTATION_SENSITIVE_PROPERTIES
-        and not _has_context_value(process_context.get("build_orientation"))
+    if property_name in PBF_ORIENTATION_SENSITIVE_PROPERTIES and not _has_context_value(
+        process_context.get("build_orientation")
     ):
         _append_once(missing, "build_orientation")
 
@@ -840,12 +902,16 @@ def _derive_context_warnings(
 
     warnings: list[str] = []
     process_context = _process_context_from_assessment(assessment_context)
-    energy_density_origin = _normalize_text(process_context.get("energy_density_origin"))
+    energy_density_origin = _normalize_text(
+        process_context.get("energy_density_origin")
+    )
     if energy_density_origin == "derived":
         warnings.append(
             "Energy density was derived from reported inputs; verify the formula before cross-paper comparison."
         )
-    post_treatment = (_normalize_text(process_context.get("post_treatment_summary")) or "").lower()
+    post_treatment = (
+        _normalize_text(process_context.get("post_treatment_summary")) or ""
+    ).lower()
     if any(token in post_treatment for token in ("mixed", "multiple", "varied")):
         warnings.append(
             "Post-treatment state appears mixed under one variant and should be reviewed."
@@ -863,8 +929,7 @@ def _is_pbf_context(
 
     process_context = _process_context_from_assessment(assessment_context)
     if any(
-        _has_context_value(process_context.get(key))
-        for key in PBF_PROCESS_CONTEXT_KEYS
+        _has_context_value(process_context.get(key)) for key in PBF_PROCESS_CONTEXT_KEYS
     ):
         return True
 
@@ -975,7 +1040,10 @@ def _derive_assessment_epistemic_status(
     comparability_status: str,
     requires_expert_review: bool,
 ) -> str:
-    if comparability_status == COMPARABILITY_STATUS_COMPARABLE and not requires_expert_review:
+    if (
+        comparability_status == COMPARABILITY_STATUS_COMPARABLE
+        and not requires_expert_review
+    ):
         return EPISTEMIC_NORMALIZED_FROM_EVIDENCE
     if comparability_status == COMPARABILITY_STATUS_LIMITED:
         return EPISTEMIC_INFERRED_WITH_LOW_CONFIDENCE
@@ -996,7 +1064,9 @@ def _build_deterministic_id(prefix: str, payload: Mapping[str, Any]) -> str:
 def _canonicalize_for_identity(value: Any) -> Any:
     if value is None:
         return None
-    if hasattr(value, "tolist") and not isinstance(value, (str, bytes, bytearray, dict)):
+    if hasattr(value, "tolist") and not isinstance(
+        value, (str, bytes, bytearray, dict)
+    ):
         value = value.tolist()
     if isinstance(value, Mapping):
         return {
@@ -1126,6 +1196,7 @@ __all__ = [
     "ComparableResult",
     "ComparisonAssessment",
     "ComparisonAxis",
+    "ComparisonFactSet",
     "ComparisonRowRecord",
     "ContextBinding",
     "EvidenceTrace",

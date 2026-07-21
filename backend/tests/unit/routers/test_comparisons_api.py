@@ -11,15 +11,21 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from tests.support.collection_service import build_test_collection_service
-from domain.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import ComparisonService
-from application.core.semantic_build.document_profile_service import DocumentProfileService
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from controllers.core import comparisons as comparisons_controller
 from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,
+    ComparisonFactSet,
     build_comparison_row_id,
 )
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
 
 
 def _build_semantic_comparison_record(
@@ -60,7 +66,9 @@ def _build_semantic_comparison_record(
         "source_document_id": source_document_id,
         "binding": {
             "variant_id": variant_id,
-            "baseline_id": f"base-{comparable_result_id}" if baseline_reference else None,
+            "baseline_id": f"base-{comparable_result_id}"
+            if baseline_reference
+            else None,
             "test_condition_id": (
                 f"tc-{comparable_result_id}" if test_condition_normalized else None
             ),
@@ -127,29 +135,36 @@ def _store_core_comparison_artifacts(
     comparable_results: list[dict],
     scoped_results: list[dict],
 ) -> None:
-    row_records = ComparisonRowProjector().project_rows_from_semantic_artifacts(
-        collection_id=collection_id,
-        comparable_results=(
-            ComparableResult.from_mapping(row) for row in comparable_results
-        ),
-        scoped_results=(
-            CollectionComparableResult.from_mapping(row) for row in scoped_results
-        ),
-    )
-    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+    comparison_service.comparison_repository.replace(
         collection_id,
-        tuple(ComparableResult.from_mapping(row) for row in comparable_results),
-        tuple(CollectionComparableResult.from_mapping(row) for row in scoped_results),
-        row_records,
+        "build_test",
+        ComparisonFactSet(
+            comparison_artifacts_ready=True,
+            comparable_results=tuple(
+                ComparableResult.from_mapping(row) for row in comparable_results
+            ),
+            collection_comparable_results=tuple(
+                CollectionComparableResult.from_mapping(row) for row in scoped_results
+            ),
+        ),
     )
 
 
 @pytest.fixture()
 def comparison_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service)
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    paper_fact_repository = MemoryPaperFactRepository()
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+    )
     comparison_service = ComparisonService(
         collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=MemoryObjectiveRepository(),
+        comparison_repository=MemoryComparisonRepository(),
         document_profile_service=document_profile_service,
     )
 
@@ -214,7 +229,9 @@ def test_comparisons_route_exposes_v2_contract_fields_for_existing_rows(
     comparison_services,
 ):
     collection_service, comparison_service, request = comparison_services
-    record = collection_service.create_collection(name="Existing Comparisons Collection")
+    record = collection_service.create_collection(
+        name="Existing Comparisons Collection"
+    )
     collection_id = record["collection_id"]
 
     comparable_result, scoped_result, row_id = _build_semantic_comparison_record(
@@ -281,7 +298,9 @@ def test_comparisons_route_applies_canonical_graph_filters(
     comparison_services,
 ):
     collection_service, comparison_service, request = comparison_services
-    record = collection_service.create_collection(name="Filtered Comparisons Collection")
+    record = collection_service.create_collection(
+        name="Filtered Comparisons Collection"
+    )
     collection_id = record["collection_id"]
 
     comparable_result_1, scoped_result_1, row_id_1 = _build_semantic_comparison_record(

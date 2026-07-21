@@ -11,10 +11,9 @@ from domain.evaluation import (
     ResearchUnderstandingCuration,
     ResearchUnderstandingFeedback,
 )
-from domain.ports import CoreFactRepository, EvaluationRepository
-from infra.persistence.factory import (
-    build_core_fact_repository,
-    build_evaluation_repository,
+from domain.ports import (
+    ResearchUnderstandingRepository,
+    ResearchUnderstandingReviewRepository,
 )
 
 
@@ -85,24 +84,19 @@ class ResearchUnderstandingFeedbackService:
 
     def __init__(
         self,
-        evaluation_repository: EvaluationRepository | None = None,
-        core_fact_repository: CoreFactRepository | None = None,
-        research_understanding_service: ResearchUnderstandingService | None = None,
+        review_repository: ResearchUnderstandingReviewRepository,
+        research_understanding_repository: ResearchUnderstandingRepository,
+        research_understanding_service: ResearchUnderstandingService,
     ) -> None:
-        self.evaluation_repository = (
-            evaluation_repository or build_evaluation_repository()
-        )
-        self.core_fact_repository = core_fact_repository or build_core_fact_repository()
-        self.research_understanding_service = (
-            research_understanding_service or ResearchUnderstandingService()
-        )
+        self.review_repository = review_repository
+        self.research_understanding_repository = research_understanding_repository
+        self.research_understanding_service = research_understanding_service
 
     def record_feedback(
         self,
         *,
         collection_id: str,
-        scope_type: str,
-        scope_id: str,
+        objective_id: str,
         finding_id: str,
         review_status: str,
         issue_type: str,
@@ -112,8 +106,7 @@ class ResearchUnderstandingFeedbackService:
     ) -> ResearchUnderstandingFeedback:
         finding = self._current_finding(
             collection_id=collection_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
+            objective_id=objective_id,
             finding_id=finding_id,
             claim_id=claim_id,
         )
@@ -122,8 +115,7 @@ class ResearchUnderstandingFeedbackService:
             {
                 "feedback_id": _feedback_id(
                     collection_id,
-                    scope_type,
-                    scope_id,
+                    objective_id,
                     finding_id,
                     review_status,
                     issue_type,
@@ -132,8 +124,7 @@ class ResearchUnderstandingFeedbackService:
                     created_at,
                 ),
                 "collection_id": collection_id,
-                "scope_type": scope_type,
-                "scope_id": scope_id,
+                "objective_id": objective_id,
                 "finding_id": finding_id,
                 "claim_id": claim_id,
                 "finding_fingerprint": _finding_fingerprint(finding),
@@ -144,23 +135,19 @@ class ResearchUnderstandingFeedbackService:
                 "created_at": created_at,
             }
         )
-        return self.evaluation_repository.upsert_research_understanding_feedback(
-            feedback
-        )
+        return self.review_repository.upsert_feedback(feedback)
 
     def list_feedback(
         self,
         *,
         collection_id: str,
-        scope_type: str | None = None,
-        scope_id: str | None = None,
+        objective_id: str | None = None,
         finding_id: str | None = None,
         claim_id: str | None = None,
     ) -> tuple[ResearchUnderstandingFeedback, ...]:
-        return self.evaluation_repository.list_research_understanding_feedback(
+        return self.review_repository.list_feedback(
             collection_id=collection_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
+            objective_id=objective_id,
             finding_id=finding_id,
             claim_id=claim_id,
         )
@@ -169,8 +156,7 @@ class ResearchUnderstandingFeedbackService:
         self,
         *,
         collection_id: str,
-        scope_type: str,
-        scope_id: str,
+        objective_id: str,
         finding_id: str,
         curated_claim_type: str,
         curated_status: str,
@@ -190,8 +176,7 @@ class ResearchUnderstandingFeedbackService:
     ) -> ResearchUnderstandingCuration:
         finding = self._current_finding(
             collection_id=collection_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
+            objective_id=objective_id,
             finding_id=finding_id,
             claim_id=claim_id,
         )
@@ -200,13 +185,11 @@ class ResearchUnderstandingFeedbackService:
             {
                 "curation_id": _curation_id(
                     collection_id,
-                    scope_type,
-                    scope_id,
+                    objective_id,
                     finding_id,
                 ),
                 "collection_id": collection_id,
-                "scope_type": scope_type,
-                "scope_id": scope_id,
+                "objective_id": objective_id,
                 "finding_id": finding_id,
                 "claim_id": claim_id,
                 "finding_fingerprint": _finding_fingerprint(finding),
@@ -227,23 +210,19 @@ class ResearchUnderstandingFeedbackService:
                 "updated_at": updated_at,
             }
         )
-        return self.evaluation_repository.upsert_research_understanding_curation(
-            curation
-        )
+        return self.review_repository.upsert_curation(curation)
 
     def list_curations(
         self,
         *,
         collection_id: str,
-        scope_type: str | None = None,
-        scope_id: str | None = None,
+        objective_id: str | None = None,
         finding_id: str | None = None,
         claim_id: str | None = None,
     ) -> tuple[ResearchUnderstandingCuration, ...]:
-        return self.evaluation_repository.list_research_understanding_curations(
+        return self.review_repository.list_curations(
             collection_id=collection_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
+            objective_id=objective_id,
             finding_id=finding_id,
             claim_id=claim_id,
         )
@@ -252,18 +231,15 @@ class ResearchUnderstandingFeedbackService:
         self,
         *,
         collection_id: str,
-        scope_type: str,
-        scope_id: str,
+        objective_id: str,
     ) -> dict[str, object]:
         raw_curations = self.list_curations(
             collection_id=collection_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
+            objective_id=objective_id,
         )
         current_fingerprints = self._current_finding_fingerprints(
             collection_id=collection_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
+            objective_id=objective_id,
         )
         curations = tuple(
             curation
@@ -278,7 +254,7 @@ class ResearchUnderstandingFeedbackService:
                 "document_id": "",
                 "family": "research_understanding_findings",
                 "item_key": ":".join(
-                    [curation.scope_type, curation.scope_id, curation.finding_id]
+                    [curation.objective_id, curation.finding_id]
                 ),
                 "payload": {
                     "finding_id": curation.finding_id,
@@ -313,9 +289,8 @@ class ResearchUnderstandingFeedbackService:
         ]
         return {
             "collection_id": collection_id,
-            "scope_type": scope_type,
-            "scope_id": scope_id,
-            "gold_id": _gold_draft_id(collection_id, scope_type, scope_id),
+            "objective_id": objective_id,
+            "gold_id": _gold_draft_id(collection_id, objective_id),
             "target_layer": "core",
             "metric_profile": "research_understanding_v1",
             "item_count": len(items),
@@ -326,8 +301,7 @@ class ResearchUnderstandingFeedbackService:
         self,
         *,
         collection_id: str,
-        scope_type: str,
-        scope_id: str,
+        objective_id: str,
         label_status: str | None = None,
         dataset_use_status: str | None = None,
         task_type: str | None = None,
@@ -337,16 +311,16 @@ class ResearchUnderstandingFeedbackService:
         if dataset_use_status and dataset_use_status not in DATASET_USE_STATUSES:
             raise ValueError(f"unsupported dataset_use_status: {dataset_use_status}")
 
-        understanding = self.core_fact_repository.read_research_understanding(
-            collection_id,
-            scope_type,
-            scope_id,
+        understanding = (
+            self.research_understanding_repository.read_objective_understanding(
+                collection_id,
+                objective_id,
+            )
         )
         if understanding is None:
             return self._dataset_payload(
                 collection_id=collection_id,
-                scope_type=scope_type,
-                scope_id=scope_id,
+                objective_id=objective_id,
                 label_status_filter=label_status,
                 dataset_use_status_filter=dataset_use_status,
                 task_type_filter=task_type,
@@ -357,8 +331,7 @@ class ResearchUnderstandingFeedbackService:
         items: list[dict[str, object]] = []
         for sample in self._dataset_items_for_understanding(
             collection_id=collection_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
+            objective_id=objective_id,
             understanding=understanding,
         ):
             if label_status and sample["label_status"] != label_status:
@@ -374,8 +347,7 @@ class ResearchUnderstandingFeedbackService:
 
         return self._dataset_payload(
             collection_id=collection_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
+            objective_id=objective_id,
             label_status_filter=label_status,
             dataset_use_status_filter=dataset_use_status,
             task_type_filter=task_type,
@@ -387,7 +359,6 @@ class ResearchUnderstandingFeedbackService:
         self,
         *,
         collection_id: str,
-        scope_type: str = "goal",
         label_status: str | None = None,
         dataset_use_status: str | None = None,
         task_type: str | None = None,
@@ -397,18 +368,20 @@ class ResearchUnderstandingFeedbackService:
         if dataset_use_status and dataset_use_status not in DATASET_USE_STATUSES:
             raise ValueError(f"unsupported dataset_use_status: {dataset_use_status}")
 
-        understandings = self.core_fact_repository.list_research_understandings(
-            collection_id,
-            scope_type,
+        understandings = (
+            self.research_understanding_repository.list_objective_understandings(
+                collection_id
+            )
         )
         items: list[dict[str, object]] = []
         warnings: list[str] = []
         for understanding in understandings:
-            scope_id = understanding.scope_id
+            objective_id = understanding.scope.objective_id
+            if not objective_id:
+                continue
             scope_items = self._dataset_items_for_understanding(
                 collection_id=collection_id,
-                scope_type=understanding.scope.scope_type,
-                scope_id=scope_id,
+                objective_id=objective_id,
                 understanding=understanding,
             )
             for sample in scope_items:
@@ -427,8 +400,7 @@ class ResearchUnderstandingFeedbackService:
 
         return self._dataset_payload(
             collection_id=collection_id,
-            scope_type="collection",
-            scope_id=scope_type,
+            objective_id=None,
             label_status_filter=label_status,
             dataset_use_status_filter=dataset_use_status,
             task_type_filter=task_type,
@@ -440,8 +412,7 @@ class ResearchUnderstandingFeedbackService:
         self,
         *,
         collection_id: str,
-        scope_type: str,
-        scope_id: str,
+        objective_id: str | None,
         label_status_filter: str | None,
         dataset_use_status_filter: str | None,
         task_type_filter: str | None,
@@ -455,10 +426,9 @@ class ResearchUnderstandingFeedbackService:
                 label_counts[status] += 1
         return {
             "schema_version": DATASET_SCHEMA_VERSION,
-            "dataset_id": _dataset_id(collection_id, scope_type, scope_id),
+            "dataset_id": _dataset_id(collection_id, objective_id),
             "collection_id": collection_id,
-            "scope_type": scope_type,
-            "scope_id": scope_id,
+            "objective_id": objective_id,
             "task_type": DATASET_TASK_TYPE,
             "metric_profile": "research_understanding_v1",
             "label_status_filter": label_status_filter,
@@ -529,23 +499,23 @@ class ResearchUnderstandingFeedbackService:
         self,
         *,
         collection_id: str,
-        scope_type: str,
-        scope_id: str,
+        objective_id: str,
         understanding: Any,
     ) -> list[dict[str, object]]:
         understanding_record = (
-            self.research_understanding_service.with_presentation(understanding)
+            self.research_understanding_service.with_presentation(
+                understanding,
+                recover_source_findings=False,
+            )
             or understanding.to_record()
         )
         feedback = self.list_feedback(
             collection_id=collection_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
+            objective_id=objective_id,
         )
         curations = self.list_curations(
             collection_id=collection_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
+            objective_id=objective_id,
         )
         feedback_index = _feedback_index(feedback)
         curation_index = _curation_index(curations)
@@ -576,8 +546,7 @@ class ResearchUnderstandingFeedbackService:
         return [
             self._dataset_sample(
                 collection_id=collection_id,
-                scope_type=scope_type,
-                scope_id=scope_id,
+                objective_id=objective_id,
                 research_objective=_text(understanding.scope.title),
                 finding=finding,
                 evidence_refs=evidence_refs,
@@ -600,15 +569,13 @@ class ResearchUnderstandingFeedbackService:
         self,
         *,
         collection_id: str,
-        scope_type: str,
-        scope_id: str,
+        objective_id: str,
         finding_id: str,
         claim_id: str | None,
     ) -> Mapping[str, Any]:
         findings = self._current_findings(
             collection_id=collection_id,
-            scope_type=scope_type,
-            scope_id=scope_id,
+            objective_id=objective_id,
         )
         for finding in findings:
             if _text(finding.get("finding_id")) != finding_id:
@@ -623,18 +590,21 @@ class ResearchUnderstandingFeedbackService:
         self,
         *,
         collection_id: str,
-        scope_type: str,
-        scope_id: str,
+        objective_id: str,
     ) -> tuple[Mapping[str, Any], ...]:
-        understanding = self.core_fact_repository.read_research_understanding(
-            collection_id,
-            scope_type,
-            scope_id,
+        understanding = (
+            self.research_understanding_repository.read_objective_understanding(
+                collection_id,
+                objective_id,
+            )
         )
         if understanding is None:
             return ()
         understanding_record = (
-            self.research_understanding_service.with_presentation(understanding)
+            self.research_understanding_service.with_presentation(
+                understanding,
+                recover_source_findings=False,
+            )
             or understanding.to_record()
         )
         return self._finding_records(understanding_record)
@@ -643,15 +613,13 @@ class ResearchUnderstandingFeedbackService:
         self,
         *,
         collection_id: str,
-        scope_type: str,
-        scope_id: str,
+        objective_id: str,
     ) -> dict[str, str]:
         return {
             finding_id: _finding_fingerprint(finding)
             for finding in self._current_findings(
                 collection_id=collection_id,
-                scope_type=scope_type,
-                scope_id=scope_id,
+                objective_id=objective_id,
             )
             if (finding_id := _text(finding.get("finding_id")))
         }
@@ -660,8 +628,7 @@ class ResearchUnderstandingFeedbackService:
         self,
         *,
         collection_id: str,
-        scope_type: str,
-        scope_id: str,
+        objective_id: str,
         research_objective: str,
         finding: Mapping[str, Any],
         evidence_refs: Mapping[str, Mapping[str, Any]],
@@ -825,8 +792,7 @@ class ResearchUnderstandingFeedbackService:
             "sample_id": _sample_id(
                 "rus",
                 collection_id,
-                scope_type,
-                scope_id,
+                objective_id,
                 finding_id,
                 label_status,
             ),
@@ -841,8 +807,7 @@ class ResearchUnderstandingFeedbackService:
                 )
             ),
             "collection_id": collection_id,
-            "scope_type": scope_type,
-            "scope_id": scope_id,
+            "objective_id": objective_id,
             "finding_id": finding_id,
             "claim_id": claim_id,
             "finding_fingerprint": finding_fingerprint,
@@ -906,19 +871,19 @@ def _curation_id(*parts: object) -> str:
     return "ruc_" + sha1(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def _gold_draft_id(collection_id: str, scope_type: str, scope_id: str) -> str:
+def _gold_draft_id(collection_id: str, objective_id: str) -> str:
     payload = "_".join(
         part.strip().replace(" ", "_")
-        for part in (collection_id, scope_type, scope_id)
+        for part in (collection_id, objective_id)
         if part.strip()
     )
     return f"gold_{payload}_research_understanding"
 
 
-def _dataset_id(collection_id: str, scope_type: str, scope_id: str) -> str:
+def _dataset_id(collection_id: str, objective_id: str | None) -> str:
     payload = "_".join(
         part.strip().replace(" ", "_")
-        for part in (collection_id, scope_type, scope_id)
+        for part in (collection_id, objective_id or "all_objectives")
         if part.strip()
     )
     return f"dataset_{payload}_research_understanding"

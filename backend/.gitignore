@@ -223,6 +223,7 @@ data/collections/*/files.json
 data/collections/*/import_manifest.json
 data/collections/*/artifacts.json
 data/collections/*/input/
+data/collections/*/objects/
 data/collections/*/output/
 data/traces/
 

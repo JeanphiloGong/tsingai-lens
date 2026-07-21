@@ -5,7 +5,7 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { loadEnv } from 'vite';
 
 export default defineConfig(({ mode }) => {
-	const env = loadEnv(mode, process.cwd(), '');
+	const env = mode === 'test' ? process.env : loadEnv(mode, process.cwd(), '');
 	const apiProxyTarget = env.BACKEND_ORIGIN || 'http://localhost:8000';
 
 	return {

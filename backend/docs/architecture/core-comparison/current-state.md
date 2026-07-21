@@ -24,11 +24,11 @@ of truth.
 - `collection_comparable_results`
   current collection-scoped overlays with assessment and policy metadata
 
-### Projection And Cache
+### Deterministic Projection
 
 - `comparison_rows`
-  collection-facing row projection that may be regenerated from the semantic and
-  scope artifacts
+  collection-facing row projection regenerated from semantic and scope
+  artifacts for every row-facing read; it is not persisted
 
 ## Current Read Paths
 
@@ -47,7 +47,7 @@ This route reads:
 
 `document -> comparable_results -> collection_comparable_results -> optional row projection`
 
-It does not require prebuilt row cache to expose the semantic substrate.
+It does not persist a row cache to expose the semantic substrate.
 
 ### Corpus Comparable Results
 
@@ -68,6 +68,8 @@ current collection overlays only when scope-sensitive judgment is needed.
 - [`../../../application/core/comparison_service.py`](../../../application/core/comparison_service.py)
   artifact IO, collection reads, document inspection, corpus retrieval, and row
   projection orchestration
+- [`../../../infra/persistence/postgres/comparison_repository.py`](../../../infra/persistence/postgres/comparison_repository.py)
+  build-versioned PostgreSQL authority for semantic records and ordered lineage
 - [`../../../controllers/core/comparisons.py`](../../../controllers/core/comparisons.py)
   collection-facing comparison row routes
 - [`../../../controllers/core/documents.py`](../../../controllers/core/documents.py)
@@ -80,8 +82,11 @@ current collection overlays only when scope-sensitive judgment is needed.
 - public API authority remains [`../../specs/api.md`](../../specs/api.md)
 - workspace and readiness semantics use repository-backed `comparable_results`
   plus `collection_comparable_results` as the comparison-semantic readiness basis
-- `comparison_rows` remains a repository-backed projection for routes and
-  downstream consumers that need row rendering
+- `comparison_rows` is never stored; `ComparisonService` regenerates it from
+  `ComparisonFactSet`
+- default semantic reads follow the active successful collection build, while
+  explicit build reads remain available for build processing and diagnostics
+- no SQLite comparison read, fallback, or dual write remains
 - graph and report semantics must continue to consume Core artifacts without
   promoting row cache back into the semantic source of truth
 

@@ -8,12 +8,10 @@ from domain.evaluation import (
     EvaluationFailure,
     EvaluationGoldItem,
     EvaluationPredictionItem,
-    EvaluationPredictionSnapshot,
     EvaluationRun,
     EvaluationScore,
 )
 from domain.ports import EvaluationRepository
-from infra.persistence.factory import build_evaluation_repository
 
 
 DEFAULT_ABSOLUTE_TOLERANCE = 1e-6
@@ -39,11 +37,9 @@ class CoreEvaluationService:
 
     def __init__(
         self,
-        evaluation_repository: EvaluationRepository | None = None,
+        evaluation_repository: EvaluationRepository,
     ) -> None:
-        self.evaluation_repository = (
-            evaluation_repository or build_evaluation_repository()
-        )
+        self.evaluation_repository = evaluation_repository
 
     def evaluate_snapshot(
         self,

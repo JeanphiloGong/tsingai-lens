@@ -11,6 +11,7 @@ vi.mock('./api', () => ({
 const {
 	createResearchUnderstandingCuration,
 	createResearchUnderstandingFeedback,
+	confirmObjective,
 	exportResearchUnderstandingGoldDraft,
 	fetchResearchUnderstandingFeedback,
 	fetchResearchUnderstandingCurations,
@@ -19,9 +20,8 @@ const {
 	fetchCollectionObjectives,
 	fetchCollectionMaterials,
 	fetchCollectionResearchView,
-	fetchConfirmedGoals,
 	fetchDocumentResearchView,
-	fetchGoalAnalysis,
+	fetchObjectiveAnalysis,
 	fetchObjectiveResearchView,
 	fetchMaterialResearchView,
 	formatShortIdentifier,
@@ -46,26 +46,22 @@ describe('research view shared helpers', () => {
 			researchUnderstandingDatasetUrl(
 				'col 1',
 				{
-					scope_type: 'goal',
-					scope_id: 'goal 1',
+					objective_id: 'obj 1',
 					dataset_use_status: 'training_ready'
 				},
 				'training_jsonl'
 			)
 		).toBe(
-			'/api/v1/collections/col%201/research-understanding/dataset?scope_type=goal&scope_id=goal+1&dataset_use_status=training_ready&format=training_jsonl'
+				'/api/v1/collections/col%201/research-understanding/dataset?objective_id=obj+1&dataset_use_status=training_ready&format=training_jsonl'
 		);
 		expect(
 			researchUnderstandingCollectionDatasetUrl(
 				'col 1',
-				{
-					scope_type: 'goal',
-					dataset_use_status: 'training_ready'
-				},
+					{ dataset_use_status: 'training_ready' },
 				'training_jsonl'
 			)
 		).toBe(
-			'/api/v1/collections/col%201/research-understanding/dataset/collection?scope_type=goal&dataset_use_status=training_ready&format=training_jsonl'
+				'/api/v1/collections/col%201/research-understanding/dataset/collection?dataset_use_status=training_ready&format=training_jsonl'
 		);
 	});
 
@@ -74,26 +70,22 @@ describe('research view shared helpers', () => {
 			researchUnderstandingDatasetUrl(
 				'col 1',
 				{
-					scope_type: 'goal',
-					scope_id: 'goal 1',
+					objective_id: 'obj 1',
 					dataset_use_status: 'review_candidate'
 				},
 				'review_packet'
 			)
 		).toBe(
-			'/api/v1/collections/col%201/research-understanding/dataset?scope_type=goal&scope_id=goal+1&dataset_use_status=review_candidate&format=review_packet'
+				'/api/v1/collections/col%201/research-understanding/dataset?objective_id=obj+1&dataset_use_status=review_candidate&format=review_packet'
 		);
 		expect(
 			researchUnderstandingCollectionDatasetUrl(
 				'col 1',
-				{
-					scope_type: 'goal',
-					dataset_use_status: 'review_candidate'
-				},
+					{ dataset_use_status: 'review_candidate' },
 				'review_packet'
 			)
 		).toBe(
-			'/api/v1/collections/col%201/research-understanding/dataset/collection?scope_type=goal&dataset_use_status=review_candidate&format=review_packet'
+				'/api/v1/collections/col%201/research-understanding/dataset/collection?dataset_use_status=review_candidate&format=review_packet'
 		);
 	});
 
@@ -102,26 +94,22 @@ describe('research view shared helpers', () => {
 			researchUnderstandingDatasetUrl(
 				'col 1',
 				{
-					scope_type: 'goal',
-					scope_id: 'goal 1',
+					objective_id: 'obj 1',
 					dataset_use_status: 'review_candidate'
 				},
 				'decision_template'
 			)
 		).toBe(
-			'/api/v1/collections/col%201/research-understanding/dataset?scope_type=goal&scope_id=goal+1&dataset_use_status=review_candidate&format=decision_template'
+				'/api/v1/collections/col%201/research-understanding/dataset?objective_id=obj+1&dataset_use_status=review_candidate&format=decision_template'
 		);
 		expect(
 			researchUnderstandingCollectionDatasetUrl(
 				'col 1',
-				{
-					scope_type: 'goal',
-					dataset_use_status: 'review_candidate'
-				},
+					{ dataset_use_status: 'review_candidate' },
 				'decision_template'
 			)
 		).toBe(
-			'/api/v1/collections/col%201/research-understanding/dataset/collection?scope_type=goal&dataset_use_status=review_candidate&format=decision_template'
+				'/api/v1/collections/col%201/research-understanding/dataset/collection?dataset_use_status=review_candidate&format=decision_template'
 		);
 	});
 
@@ -130,26 +118,22 @@ describe('research view shared helpers', () => {
 			researchUnderstandingDatasetUrl(
 				'col 1',
 				{
-					scope_type: 'goal',
-					scope_id: 'goal 1',
+					objective_id: 'obj 1',
 					dataset_use_status: 'review_candidate'
 				},
 				'decision_board_tsv'
 			)
 		).toBe(
-			'/api/v1/collections/col%201/research-understanding/dataset?scope_type=goal&scope_id=goal+1&dataset_use_status=review_candidate&format=decision_board_tsv'
+				'/api/v1/collections/col%201/research-understanding/dataset?objective_id=obj+1&dataset_use_status=review_candidate&format=decision_board_tsv'
 		);
 		expect(
 			researchUnderstandingCollectionDatasetUrl(
 				'col 1',
-				{
-					scope_type: 'goal',
-					dataset_use_status: 'review_candidate'
-				},
+					{ dataset_use_status: 'review_candidate' },
 				'decision_board_tsv'
 			)
 		).toBe(
-			'/api/v1/collections/col%201/research-understanding/dataset/collection?scope_type=goal&dataset_use_status=review_candidate&format=decision_board_tsv'
+				'/api/v1/collections/col%201/research-understanding/dataset/collection?dataset_use_status=review_candidate&format=decision_board_tsv'
 		);
 	});
 
@@ -158,26 +142,22 @@ describe('research view shared helpers', () => {
 			researchUnderstandingDatasetUrl(
 				'col 1',
 				{
-					scope_type: 'goal',
-					scope_id: 'goal 1',
+					objective_id: 'obj 1',
 					dataset_use_status: 'review_candidate'
 				},
 				'agent_review_prompt_jsonl'
 			)
 		).toBe(
-			'/api/v1/collections/col%201/research-understanding/dataset?scope_type=goal&scope_id=goal+1&dataset_use_status=review_candidate&format=agent_review_prompt_jsonl'
+				'/api/v1/collections/col%201/research-understanding/dataset?objective_id=obj+1&dataset_use_status=review_candidate&format=agent_review_prompt_jsonl'
 		);
 		expect(
 			researchUnderstandingCollectionDatasetUrl(
 				'col 1',
-				{
-					scope_type: 'goal',
-					dataset_use_status: 'review_candidate'
-				},
+					{ dataset_use_status: 'review_candidate' },
 				'agent_review_prompt_jsonl'
 			)
 		).toBe(
-			'/api/v1/collections/col%201/research-understanding/dataset/collection?scope_type=goal&dataset_use_status=review_candidate&format=agent_review_prompt_jsonl'
+				'/api/v1/collections/col%201/research-understanding/dataset/collection?dataset_use_status=review_candidate&format=agent_review_prompt_jsonl'
 		);
 	});
 
@@ -305,9 +285,16 @@ describe('research view shared helpers', () => {
 					objective_id: 'obj_1',
 					question: 'How does heat treatment affect corrosion resistance?',
 					material_scope: ['316L stainless steel'],
-					process_axes: ['heat treatment'],
-					property_axes: ['corrosion resistance'],
-					state: 'partial',
+						process_axes: ['heat treatment'],
+						property_axes: ['corrosion resistance'],
+						status: 'candidate',
+						analysis_error: null,
+						analysis_progress: null,
+						review_summary: {
+							primary_finding_count: 0,
+							review_candidate_count: 0
+						},
+						state: 'partial',
 					paper_frame_count: 2
 				}
 			]
@@ -318,26 +305,8 @@ describe('research view shared helpers', () => {
 		expect(requestJson).toHaveBeenLastCalledWith('/collections/col_123/objectives');
 		expect(objectives.objectives[0].objective_id).toBe('obj_1');
 		expect(objectives.objectives[0].paper_frame_count).toBe(2);
-
-		requestJson.mockResolvedValueOnce({
-			collection_id: 'col_123',
-			goals: [
-				{
-					goal_id: 'goal_1',
-					collection_id: 'col_123',
-					question: 'How does heat treatment affect corrosion resistance?',
-					source_type: 'objective_candidate',
-					status: 'ready',
-					source_objective_id: 'obj_1'
-				}
-			]
-		});
-
-		const goals = await fetchConfirmedGoals('col_123');
-
-		expect(requestJson).toHaveBeenLastCalledWith('/collections/col_123/goals');
-		expect(goals.goals[0].goal_id).toBe('goal_1');
-		expect(goals.goals[0].status).toBe('ready');
+		expect(objectives.objectives[0].status).toBe('candidate');
+		expect(objectives.objectives[0].review_summary.review_candidate_count).toBe(0);
 
 		requestJson.mockResolvedValueOnce({
 			collection_id: 'col_123',
@@ -393,18 +362,33 @@ describe('research view shared helpers', () => {
 		expect(objectiveView.understanding?.claims[0].statement).toBe('Current evidence is limited.');
 	});
 
-	it('normalizes confirmed goal analysis progress', async () => {
+	it('confirms an objective through its existing identity', async () => {
 		requestJson.mockResolvedValueOnce({
 			collection_id: 'col_123',
-			goal: {
-				goal_id: 'goal_1',
-				collection_id: 'col_123',
+			objective: {
+				objective_id: 'obj_1',
 				question: 'How does heat treatment affect strength?',
-				source_type: 'objective_candidate',
-				material_hints: ['316L stainless steel'],
-				process_hints: ['heat treatment'],
-				property_hints: ['yield strength'],
-				source_objective_id: 'obj_1',
+				status: 'confirmed'
+			},
+			understanding: null,
+			warnings: []
+		});
+
+		const analysis = await confirmObjective('col_123', 'obj_1');
+
+		expect(requestJson).toHaveBeenCalledWith(
+			'/collections/col_123/objectives/obj_1/confirm',
+			{ method: 'POST' }
+		);
+		expect(analysis.objective.status).toBe('confirmed');
+	});
+
+	it('normalizes objective analysis progress', async () => {
+		requestJson.mockResolvedValueOnce({
+			collection_id: 'col_123',
+			objective: {
+				objective_id: 'obj_1',
+				question: 'How does heat treatment affect strength?',
 				status: 'running',
 				analysis_error: null,
 				analysis_progress: {
@@ -415,21 +399,18 @@ describe('research view shared helpers', () => {
 					message: 'Routing source blocks and tables.',
 					active_document_id: 'doc_1',
 					active_document_title: 'Heat treatment study',
-					active_source_filename: 'heat-treatment.pdf',
-					active_objective_id: 'obj_1'
+					active_source_filename: 'heat-treatment.pdf'
 				}
 			},
 			understanding: null,
-			pipeline_nodes: {},
-			errors: [],
 			warnings: []
 		});
 
-		const analysis = await fetchGoalAnalysis('col_123', 'goal_1');
+		const analysis = await fetchObjectiveAnalysis('col_123', 'obj_1');
 
-		expect(requestJson).toHaveBeenCalledWith('/collections/col_123/goals/goal_1/analysis');
-		expect(analysis.goal.status).toBe('running');
-		expect(analysis.goal.analysis_progress).toMatchObject({
+		expect(requestJson).toHaveBeenCalledWith('/collections/col_123/objectives/obj_1/analysis');
+		expect(analysis.objective.status).toBe('running');
+		expect(analysis.objective.analysis_progress).toMatchObject({
 			phase: 'objective_evidence_routing_started',
 			current: 3,
 			total: 6,
@@ -438,23 +419,21 @@ describe('research view shared helpers', () => {
 		});
 	});
 
-	it('normalizes research understanding findings on confirmed goal analysis', async () => {
+	it('normalizes research understanding findings on objective analysis', async () => {
 		requestJson.mockResolvedValueOnce({
 			collection_id: 'col_123',
-			goal: {
-				goal_id: 'goal_1',
-				collection_id: 'col_123',
+			objective: {
+				objective_id: 'obj_1',
 				question: 'How does heat treatment affect strength?',
-				source_type: 'objective_candidate',
 				status: 'ready'
 			},
 			understanding: {
 				schema_version: 'research_understanding.v1',
 				state: 'ready',
 				scope: {
-					scope_type: 'goal',
+					scope_type: 'objective',
 					collection_id: 'col_123',
-					goal_id: 'goal_1',
+					objective_id: 'obj_1',
 					title: 'How does heat treatment affect strength?'
 				},
 				claims: [
@@ -593,15 +572,13 @@ describe('research view shared helpers', () => {
 					]
 				}
 			},
-			pipeline_nodes: {},
-			errors: [],
 			warnings: []
 		});
 
-		const analysis = await fetchGoalAnalysis('col_123', 'goal_1');
+		const analysis = await fetchObjectiveAnalysis('col_123', 'obj_1');
 		const finding = analysis.understanding?.presentation.findings[0];
 
-		expect(requestJson).toHaveBeenCalledWith('/collections/col_123/goals/goal_1/analysis');
+		expect(requestJson).toHaveBeenCalledWith('/collections/col_123/objectives/obj_1/analysis');
 		expect(finding).toMatchObject({
 			finding_id: 'finding_claim_1',
 			variables: ['heat treatment'],
@@ -657,8 +634,7 @@ describe('research view shared helpers', () => {
 		requestJson.mockResolvedValueOnce({
 			feedback_id: 'ruf_1',
 			collection_id: 'col_123',
-			scope_type: 'objective',
-			scope_id: 'obj_1',
+			objective_id: 'obj_1',
 			finding_id: 'finding_1',
 			claim_id: 'claim_1',
 			review_status: 'incorrect',
@@ -669,8 +645,7 @@ describe('research view shared helpers', () => {
 		});
 
 		const feedback = await createResearchUnderstandingFeedback('col_123', {
-			scope_type: 'objective',
-			scope_id: 'obj_1',
+			objective_id: 'obj_1',
 			finding_id: 'finding_1',
 			claim_id: 'claim_1',
 			review_status: 'incorrect',
@@ -684,8 +659,7 @@ describe('research view shared helpers', () => {
 			{
 				method: 'POST',
 				body: JSON.stringify({
-					scope_type: 'objective',
-					scope_id: 'obj_1',
+					objective_id: 'obj_1',
 					finding_id: 'finding_1',
 					claim_id: 'claim_1',
 					review_status: 'incorrect',
@@ -709,8 +683,8 @@ describe('research view shared helpers', () => {
 			errors: [],
 			warnings: [],
 			review_progress: { ready_to_write: true },
-			decision_progress_by_goal: [],
-			affected_goals: [],
+			decision_progress_by_objective: [],
+			affected_objectives: [],
 			readiness_summary: {}
 		});
 
@@ -719,7 +693,7 @@ describe('research view shared helpers', () => {
 			fail_on_warnings: true,
 			rows: [
 				{
-					goal_id: 'goal_1',
+					objective_id: 'obj_1',
 					finding_id: 'finding_1',
 					action: 'accept'
 				}
@@ -748,8 +722,8 @@ describe('research view shared helpers', () => {
 			errors: [],
 			warnings: [],
 			review_progress: { ready_to_write: true },
-			decision_progress_by_goal: [],
-			affected_goals: [],
+			decision_progress_by_objective: [],
+			affected_objectives: [],
 			readiness_summary: {}
 		});
 
@@ -757,7 +731,7 @@ describe('research view shared helpers', () => {
 			dry_run: true,
 			fail_on_warnings: true,
 			decision_board_tsv:
-				'expert_action\tcollection_id\tgoal_id\tfinding_id\ncorrect\tcol 123\tgoal_1\tfinding_1\n'
+				'expert_action\tcollection_id\tobjective_id\tfinding_id\ncorrect\tcol 123\tobj_1\tfinding_1\n'
 		};
 		const summary = await importResearchUnderstandingReviewDecisions('col 123', payload);
 
@@ -778,8 +752,7 @@ describe('research view shared helpers', () => {
 				{
 					feedback_id: 'ruf_1',
 					collection_id: 'col_123',
-					scope_type: 'objective',
-					scope_id: 'obj_1',
+					objective_id: 'obj_1',
 					finding_id: 'finding_1',
 					claim_id: 'claim_1',
 					review_status: 'incorrect',
@@ -792,12 +765,11 @@ describe('research view shared helpers', () => {
 		});
 
 		const feedback = await fetchResearchUnderstandingFeedback('col_123', {
-			scope_type: 'objective',
-			scope_id: 'obj_1'
+			objective_id: 'obj_1'
 		});
 
 		expect(requestJson).toHaveBeenCalledWith(
-			'/collections/col_123/research-understanding/feedback?scope_type=objective&scope_id=obj_1'
+			'/collections/col_123/research-understanding/feedback?objective_id=obj_1'
 		);
 		expect(feedback[0].feedback_id).toBe('ruf_1');
 		expect(feedback[0].review_status).toBe('incorrect');
@@ -807,8 +779,7 @@ describe('research view shared helpers', () => {
 		requestJson.mockResolvedValueOnce({
 			curation_id: 'ruc_1',
 			collection_id: 'col_123',
-			scope_type: 'objective',
-			scope_id: 'obj_1',
+			objective_id: 'obj_1',
 			finding_id: 'finding_1',
 			claim_id: 'claim_1',
 			curated_claim_type: 'mechanism',
@@ -822,8 +793,7 @@ describe('research view shared helpers', () => {
 		});
 
 		const curation = await createResearchUnderstandingCuration('col_123', {
-			scope_type: 'objective',
-			scope_id: 'obj_1',
+			objective_id: 'obj_1',
 			finding_id: 'finding_1',
 			claim_id: 'claim_1',
 			curated_claim_type: 'mechanism',
@@ -840,8 +810,7 @@ describe('research view shared helpers', () => {
 			{
 				method: 'POST',
 				body: JSON.stringify({
-					scope_type: 'objective',
-					scope_id: 'obj_1',
+					objective_id: 'obj_1',
 					finding_id: 'finding_1',
 					claim_id: 'claim_1',
 					curated_claim_type: 'mechanism',
@@ -864,8 +833,7 @@ describe('research view shared helpers', () => {
 				{
 					curation_id: 'ruc_1',
 					collection_id: 'col_123',
-					scope_type: 'objective',
-					scope_id: 'obj_1',
+					objective_id: 'obj_1',
 					finding_id: 'finding_1',
 					claim_id: 'claim_1',
 					curated_claim_type: 'mechanism',
@@ -881,12 +849,11 @@ describe('research view shared helpers', () => {
 		});
 
 		const curations = await fetchResearchUnderstandingCurations('col_123', {
-			scope_type: 'objective',
-			scope_id: 'obj_1'
+			objective_id: 'obj_1'
 		});
 
 		expect(requestJson).toHaveBeenCalledWith(
-			'/collections/col_123/research-understanding/curations?scope_type=objective&scope_id=obj_1'
+			'/collections/col_123/research-understanding/curations?objective_id=obj_1'
 		);
 		expect(curations[0].curation_id).toBe('ruc_1');
 		expect(curations[0].curated_status).toBe('limited');
@@ -895,8 +862,7 @@ describe('research view shared helpers', () => {
 	it('exports research understanding curation gold drafts through the same-origin contract', async () => {
 		requestJson.mockResolvedValueOnce({
 			collection_id: 'col_123',
-			scope_type: 'objective',
-			scope_id: 'obj_1',
+			objective_id: 'obj_1',
 			gold_id: 'gold_col_123_objective_obj_1_research_understanding',
 			target_layer: 'core',
 			metric_profile: 'research_understanding_v1',
@@ -915,12 +881,11 @@ describe('research view shared helpers', () => {
 		});
 
 		const draft = await exportResearchUnderstandingGoldDraft('col_123', {
-			scope_type: 'objective',
-			scope_id: 'obj_1'
+			objective_id: 'obj_1'
 		});
 
 		expect(requestJson).toHaveBeenCalledWith(
-			'/collections/col_123/research-understanding/gold-draft?scope_type=objective&scope_id=obj_1'
+			'/collections/col_123/research-understanding/gold-draft?objective_id=obj_1'
 		);
 		expect(draft.item_count).toBe(1);
 		expect(draft.items[0].family).toBe('research_understanding_findings');
@@ -929,10 +894,9 @@ describe('research view shared helpers', () => {
 	it('normalizes research understanding dataset review risk summaries', async () => {
 		requestJson.mockResolvedValueOnce({
 			schema_version: 'research_understanding_dataset.v1',
-			dataset_id: 'rud_col_123_goal_goal_1',
+			dataset_id: 'rud_col_123_objective_obj_1',
 			collection_id: 'col_123',
-			scope_type: 'goal',
-			scope_id: 'goal_1',
+			objective_id: 'obj_1',
 			task_type: 'research_understanding_finding',
 			metric_profile: 'research_understanding_finding.v1',
 			label_status_filter: null,
@@ -1094,12 +1058,11 @@ describe('research view shared helpers', () => {
 		});
 
 		const dataset = await fetchResearchUnderstandingDataset('col_123', {
-			scope_type: 'goal',
-			scope_id: 'goal_1'
+			objective_id: 'obj_1'
 		});
 
 		expect(requestJson).toHaveBeenCalledWith(
-			'/collections/col_123/research-understanding/dataset?scope_type=goal&scope_id=goal_1'
+			'/collections/col_123/research-understanding/dataset?objective_id=obj_1'
 		);
 		expect(dataset.quality_summary.by_review_reason).toEqual({
 			single_paper_evidence: 2,

@@ -5,7 +5,7 @@ This package owns the Core-side LLM contract for semantic build.
 It defines the prompt text, structured schemas, and extractor orchestration
 used to turn Source structural artifacts into Core semantic extraction inputs
 for `document_profiles`, `research_objectives`, objective evidence units, and
-`paper_facts`. It also owns the final confirmed-goal Finding synthesis prompt.
+`paper_facts`. It also owns the final Objective Finding synthesis prompt.
 One structured call compares bounded transient result sets and returns
 evidence-bound agreement, conflict, condition-dependent, or
 insufficient-confirmation Findings. Each returned Finding has one source
@@ -22,13 +22,13 @@ It does not own:
 
 - `prompts.py`
   prompt builders for document-profile, objective, text-window, table-row, and
-  goal-level Finding synthesis
+  objective-level Finding synthesis
 - `schemas.py`
   structured response models for the Core extraction contract
 - `extractor.py`
   provider call orchestration and response parsing for the Core extraction path
 
-The goal-level synthesis is not a paper-Finding aggregation stage. Candidate
+The objective-level synthesis is not a paper-Finding aggregation stage. Candidate
 papers have already been traversed before this call. The model receives
 eligible direct-result units aligned by exact process conditions, with
 source-document provenance retained inside each result set, plus separately

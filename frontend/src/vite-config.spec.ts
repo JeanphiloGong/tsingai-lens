@@ -45,5 +45,5 @@ function resolveConfig() {
 	if (typeof viteConfig !== 'function') {
 		throw new Error('expected vite config factory');
 	}
-	return viteConfig({ command: 'serve', mode: 'development' });
+	return viteConfig({ command: 'serve', mode: 'test' });
 }

@@ -7,8 +7,9 @@ identities, relationships, build lineage, and deletion boundaries.
 
 The PostgreSQL cutover is complete for every maintained structured data family.
 This document describes the implemented runtime, not a future migration target.
-The retained [revision plan](../plans/backend-wide/persistence-model-revision/implementation-plan.md)
-records sequencing and acceptance history; this document owns the stable model.
+Execution and acceptance history is tracked in
+[issue #232](https://github.com/JeanphiloGong/tsingai-lens/issues/232) and its
+linked delivery issues; this document owns the stable model.
 
 This revision does not change the public HTTP contract or the Lens evidence
 model. In particular:

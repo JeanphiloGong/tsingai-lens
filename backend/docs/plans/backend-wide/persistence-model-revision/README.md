@@ -1,30 +1,36 @@
-# Persistence Model Revision
+# Persistence Model Revision Records
 
 ## Purpose
 
-This topic family owns the backend implementation plan for replacing scattered
-file metadata and handwritten SQLite persistence with one explicit relational
-authority, durable binary-object ownership, versioned build lineage, and an
-optional traceable vector index.
+This topic family retains durable decision evidence from the completed backend
+persistence revision. It does not duplicate implementation sequencing or task
+status from the canonical issues.
 
-The work spans collection, Source, Core, Goal, evaluation, authentication, and
-deployment seams, so its lowest backend-local owner is `backend-wide/`.
+The revision established PostgreSQL as the structured runtime authority,
+object storage as the immutable-byte authority, and local files as rebuildable
+scratch. The accepted retrieval gate stopped before adding a vector index.
 
 ## Authority Boundary
 
-- this family owns backend implementation sequencing and verification
 - [`../../../architecture/persistence-model.md`](../../../architecture/persistence-model.md)
-  owns the stable current and target persistence model
+  owns the stable implemented persistence model
+- [issue #232](https://github.com/JeanphiloGong/tsingai-lens/issues/232)
+  owns the revision's execution history and child-issue map
+- [issue #245](https://github.com/JeanphiloGong/tsingai-lens/issues/245)
+  owns final closure evidence and human acceptance
+- [`retrieval-decision.md`](retrieval-decision.md) retains the accepted
+  no-pgvector decision evidence
 - shared product semantics remain owned by the repository-level RFCs
 - stable HTTP behavior remains owned by `backend/docs/specs/api.md`
-- deployment changes remain approval-gated even when listed in this plan
 
 ## Reading Order
 
 - [`../../../architecture/persistence-model.md`](../../../architecture/persistence-model.md)
-  Stable authority, identity, relationship, lifecycle, and deletion contract
-- [`implementation-plan.md`](implementation-plan.md)
-  Dependency-ordered implementation, verification, approval, and cutover plan
+  Stable authority, identity, relationship, lifecycle, and deletion contract.
+- [`retrieval-decision.md`](retrieval-decision.md)
+  Measured retrieval result and the accepted decision not to add pgvector.
+- [issue #232](https://github.com/JeanphiloGong/tsingai-lens/issues/232)
+  Historical sequencing, delivery slices, and linked acceptance records.
 
 ## Related Docs
 

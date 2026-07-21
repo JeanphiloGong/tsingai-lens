@@ -38,7 +38,6 @@ from infra.persistence.postgres.models.evaluation import (
     ResearchUnderstandingCurationRecord,
     ResearchUnderstandingFeedbackRecord,
 )
-from infra.persistence.postgres.models.migration import ObjectiveIdentityMigration
 from infra.persistence.postgres.models.paper_fact import (
     PaperFactBaselineReference,
     PaperFactBuild,
@@ -117,7 +116,6 @@ __all__ = [
     "EvaluationScoreRecord",
     "ObjectiveBuild",
     "ObjectiveExperimentPlan",
-    "ObjectiveIdentityMigration",
     "ObjectiveMessage",
     "ObjectiveContextRecord",
     "ObjectiveEvidenceRouteRecord",

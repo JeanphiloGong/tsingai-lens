@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
+from sqlalchemy import URL, create_engine, event
 
 from domain.core.research_understanding import ResearchUnderstanding
 from domain.evaluation import (
@@ -17,13 +20,130 @@ from infra.persistence.postgres.research_understanding_repository import (
 from infra.persistence.postgres.research_understanding_review_repository import (
     PostgresResearchUnderstandingReviewRepository,
 )
-
-pytest_plugins = (
-    "tests.integration.persistence.test_objective_identity_migration",
+from infra.persistence.database import build_session_factory
+from infra.persistence.postgres.base import Base
+from infra.persistence.postgres.models.auth import AuthUser
+from infra.persistence.postgres.models.build import CollectionBuild, Task
+from infra.persistence.postgres.models.collection import Collection
+from infra.persistence.postgres.models.objective import (
+    ObjectiveBuild,
+    ObjectiveResearchRecord,
+    ResearchObjectiveLifecycle,
 )
 
-
 NOW = "2026-07-20T10:00:00+00:00"
+
+
+@pytest.fixture
+def objective_target(tmp_path):
+    engine = create_engine(
+        URL.create("sqlite+pysqlite", database=str(tmp_path / "target.sqlite"))
+    )
+
+    @event.listens_for(engine, "connect")
+    def _enable_sqlite_foreign_keys(connection, _record) -> None:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    Base.metadata.create_all(engine)
+    sessions = build_session_factory(engine)
+    now = datetime.fromisoformat(NOW)
+    with sessions.begin() as session:
+        session.add(
+            AuthUser(
+                user_id="user-1",
+                email="downstream@example.com",
+                display_name="Downstream Test User",
+                password_hash="test-password-hash",
+                created_at=now,
+            )
+        )
+        session.flush()
+        session.add(
+            Collection(
+                collection_id="collection-1",
+                owner_user_id="user-1",
+                name="Downstream test collection",
+                description=None,
+                status="ready",
+                paper_count=0,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.flush()
+        session.add(
+            Task(
+                task_id="task-1",
+                collection_id="collection-1",
+                task_type="build",
+                status="completed",
+                current_stage="completed",
+                progress_percent=100,
+                progress_detail=None,
+                output_path=None,
+                errors=[],
+                warnings=[],
+                details={},
+                created_at=now,
+                updated_at=now,
+                started_at=now,
+                finished_at=now,
+            )
+        )
+        session.flush()
+        session.add(
+            CollectionBuild(
+                build_id="build-1",
+                task_id="task-1",
+                collection_id="collection-1",
+                build_number=1,
+                status="succeeded",
+                created_at=now,
+                started_at=now,
+                finished_at=now,
+            )
+        )
+        session.flush()
+        session.add(
+            ObjectiveBuild(
+                build_id="build-1",
+                collection_id="collection-1",
+                research_objectives_ready=True,
+            )
+        )
+        session.flush()
+        session.add(
+            ObjectiveResearchRecord(
+                build_id="build-1",
+                objective_id="objective-linked",
+                collection_id="collection-1",
+                objective_order=0,
+                question="How does heat treatment affect strength?",
+                material_scope=["Alloy A"],
+                process_axes=["heat treatment"],
+                property_axes=["strength"],
+                comparison_intent=None,
+                confidence=0.9,
+                reason="Synthetic downstream fixture",
+            )
+        )
+        session.flush()
+        session.add(
+            ResearchObjectiveLifecycle(
+                collection_id="collection-1",
+                objective_id="objective-linked",
+                source_build_id="build-1",
+                status="ready",
+                analysis_error=None,
+                analysis_progress=None,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    try:
+        yield sessions
+    finally:
+        engine.dispose()
 
 
 def _understanding() -> ResearchUnderstanding:
@@ -87,9 +207,9 @@ def _understanding() -> ResearchUnderstanding:
     )
 
 
-def test_objective_understanding_and_review_round_trip(migration_target) -> None:
-    understandings = PostgresResearchUnderstandingRepository(migration_target)
-    reviews = PostgresResearchUnderstandingReviewRepository(migration_target)
+def test_objective_understanding_and_review_round_trip(objective_target) -> None:
+    understandings = PostgresResearchUnderstandingRepository(objective_target)
+    reviews = PostgresResearchUnderstandingReviewRepository(objective_target)
 
     understandings.upsert_objective_understanding(
         "collection-1", "objective-linked", _understanding()
@@ -154,9 +274,9 @@ def test_objective_understanding_and_review_round_trip(migration_target) -> None
 
 
 def test_objective_workspace_preserves_message_and_plan_provenance(
-    migration_target,
+    objective_target,
 ) -> None:
-    repository = PostgresObjectiveWorkspaceRepository(migration_target)
+    repository = PostgresObjectiveWorkspaceRepository(objective_target)
     repository.write_session(
         {
             "session_id": "session-1",

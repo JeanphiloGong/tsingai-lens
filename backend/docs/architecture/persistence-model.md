@@ -157,25 +157,11 @@ parents from the same collection.
 
 ### Legacy SQLite Inventory
 
-The inspected `backend/data/lens.sqlite` contains 53 legacy application tables. They
-are grouped here by real responsibility rather than by the repository class
-that happens to contain them. Its two auth tables are retained legacy data for
-future offline import only; the current runtime neither reads nor writes them.
-The paper-fact, objective, and comparison tables remain in this untouched
-legacy snapshot but are no longer created, read, or written by any maintained
-SQLite repository.
-
-| Responsibility | Count | Current tables |
-| --- | ---: | --- |
-| Authentication | 2 | `auth_users`, `auth_sessions` |
-| Goal sessions and plans | 3 | `goal_sessions`, `goal_messages`, `goal_experiment_plans` |
-| Source | 14 | `source_artifact_builds`, `source_documents`, `source_text_units`, `source_text_unit_documents`, `source_blocks`, `source_block_text_units`, `source_tables`, `source_table_rows`, `source_table_cells`, `source_figures`, `source_reference_entries`, `source_reference_mentions`, `source_reference_resolutions`, `source_reference_candidates` |
-| Legacy Core and Goal workflow state | 25 | `core_fact_collection_status`, `core_paper_skims`, `core_research_objectives`, `core_objective_contexts`, `core_objective_paper_frames`, `core_objective_evidence_routes`, `core_objective_evidence_units`, `core_objective_logic_chains`, `core_document_profiles`, `core_evidence_anchors`, `core_method_facts`, `core_sample_variants`, `core_test_conditions`, `core_baseline_references`, `core_measurement_results`, `core_characterization_observations`, `core_structure_features`, `core_comparable_results`, `core_collection_comparable_results`, `core_pairwise_comparison_relations`, `core_comparison_rows`, `core_confirmed_goals`, `core_research_understanding_artifacts`, `core_objective_report_artifacts`, `core_material_report_artifacts` |
-| Evaluation and review | 9 | `evaluation_gold_sets`, `evaluation_gold_items`, `evaluation_prediction_snapshots`, `evaluation_prediction_items`, `evaluation_runs`, `evaluation_scores`, `evaluation_failures`, `research_understanding_feedback`, `research_understanding_curations` |
-
-The table count is evidence about the current model, not a target table-count
-requirement. Later migrations may combine or split tables only when an actual
-identity, constraint, or query requires it.
+The ignored local `backend/data/lens.sqlite` snapshot and its legacy Goal
+identity data were intentionally deleted. PostgreSQL is the only runtime
+persistence backend; no maintained path imports or reads the old SQLite data.
+Historical SQLite table names remain only where required by immutable migration
+history and are not a supported data or API contract.
 
 ## Identity Model
 

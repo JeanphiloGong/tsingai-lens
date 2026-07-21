@@ -313,23 +313,6 @@
         "reason": "Synthetic baseline objective."
       }
     ],
-    "confirmed_goals": [
-      {
-        "goal_id": "goal_strength",
-        "collection_id": "col_baseline",
-        "question": "How does heat treatment affect yield strength of Synthetic Alloy A?",
-        "source_type": "research_objective",
-        "material_hints": ["Synthetic Alloy A"],
-        "process_hints": ["heat treatment"],
-        "property_hints": ["yield strength"],
-        "source_objective_id": "objective_strength",
-        "status": "ready",
-        "analysis_error": null,
-        "analysis_progress": {"phase": "completed", "unit": "steps"},
-        "created_at": "2026-01-01T00:03:00+00:00",
-        "updated_at": "2026-01-01T00:04:00+00:00"
-      }
-    ],
     "research_understandings": [
       {
         "schema_version": "research_understanding.v1",

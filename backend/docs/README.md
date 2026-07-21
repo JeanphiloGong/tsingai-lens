@@ -30,8 +30,6 @@ authority page, current-state page, or implementation lineage.
   [`architecture/persistence-model.md`](architecture/persistence-model.md)
 - Local development and operations:
   [`runbooks/backend-ops.md`](runbooks/backend-ops.md)
-- Objective identity offline migration:
-  [`runbooks/objective-identity-migration.md`](runbooks/objective-identity-migration.md)
 - Backend plan-family landing page:
   [`plans/README.md`](plans/README.md)
 - Current backend migration and execution state:
@@ -57,9 +55,6 @@ authority page, current-state page, or implementation lineage.
   authority
 - [`runbooks/backend-ops.md`](runbooks/backend-ops.md)
   Local development and operations runbook
-- [`runbooks/objective-identity-migration.md`](runbooks/objective-identity-migration.md)
-  Dry-run, apply, validation, and recovery contract for the one-way historical
-  Goal-to-Objective import
 
 ## Current State And Plan Families
 

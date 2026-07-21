@@ -5,7 +5,6 @@ from starlette.concurrency import run_in_threadpool
 
 from application.source.reference_workflow_service import (
     SourceReferenceWorkflowResult,
-    SourceReferenceWorkflowService,
 )
 from controllers.schemas.source.reference import (
     SourceReferenceCandidateResponse,
@@ -19,9 +18,6 @@ router = APIRouter(
     prefix="/collections/{collection_id}/references",
     tags=["source-references"],
 )
-reference_workflow_service = SourceReferenceWorkflowService()
-
-
 @router.post(
     "/build",
     response_model=SourceReferenceSummaryResponse,
@@ -34,7 +30,7 @@ async def build_collection_references(
     try:
         request.app.state.collection_service.get_collection(collection_id)
         result = await run_in_threadpool(
-            reference_workflow_service.build_collection_references,
+            request.app.state.reference_workflow_service.build_collection_references,
             collection_id,
         )
     except FileNotFoundError as exc:
@@ -54,7 +50,7 @@ async def get_collection_references(
     try:
         request.app.state.collection_service.get_collection(collection_id)
         result = await run_in_threadpool(
-            reference_workflow_service.read_collection_references,
+            request.app.state.reference_workflow_service.read_collection_references,
             collection_id,
         )
     except FileNotFoundError as exc:

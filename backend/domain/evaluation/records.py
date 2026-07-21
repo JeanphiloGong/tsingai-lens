@@ -363,8 +363,7 @@ class EvaluationRun:
 class ResearchUnderstandingFeedback:
     feedback_id: str
     collection_id: str
-    scope_type: str
-    scope_id: str
+    objective_id: str
     finding_id: str
     claim_id: str | None
     finding_fingerprint: str | None
@@ -379,8 +378,7 @@ class ResearchUnderstandingFeedback:
         return cls(
             feedback_id=_normalize_text(payload.get("feedback_id")) or "",
             collection_id=_normalize_text(payload.get("collection_id")) or "",
-            scope_type=_normalize_text(payload.get("scope_type")) or "",
-            scope_id=_normalize_text(payload.get("scope_id")) or "",
+            objective_id=_normalize_text(payload.get("objective_id")) or "",
             finding_id=_normalize_text(payload.get("finding_id")) or "",
             claim_id=_normalize_text(payload.get("claim_id")),
             finding_fingerprint=_normalize_text(payload.get("finding_fingerprint")),
@@ -403,8 +401,7 @@ class ResearchUnderstandingFeedback:
         return {
             "feedback_id": self.feedback_id,
             "collection_id": self.collection_id,
-            "scope_type": self.scope_type,
-            "scope_id": self.scope_id,
+            "objective_id": self.objective_id,
             "finding_id": self.finding_id,
             "claim_id": self.claim_id,
             "finding_fingerprint": self.finding_fingerprint,
@@ -420,8 +417,7 @@ class ResearchUnderstandingFeedback:
 class ResearchUnderstandingCuration:
     curation_id: str
     collection_id: str
-    scope_type: str
-    scope_id: str
+    objective_id: str
     finding_id: str
     claim_id: str | None
     finding_fingerprint: str | None
@@ -446,8 +442,7 @@ class ResearchUnderstandingCuration:
         return cls(
             curation_id=_normalize_text(payload.get("curation_id")) or "",
             collection_id=_normalize_text(payload.get("collection_id")) or "",
-            scope_type=_normalize_text(payload.get("scope_type")) or "",
-            scope_id=_normalize_text(payload.get("scope_id")) or "",
+            objective_id=_normalize_text(payload.get("objective_id")) or "",
             finding_id=_normalize_text(payload.get("finding_id")) or "",
             claim_id=_normalize_text(payload.get("claim_id")),
             finding_fingerprint=_normalize_text(payload.get("finding_fingerprint")),
@@ -482,8 +477,7 @@ class ResearchUnderstandingCuration:
         return {
             "curation_id": self.curation_id,
             "collection_id": self.collection_id,
-            "scope_type": self.scope_type,
-            "scope_id": self.scope_id,
+            "objective_id": self.objective_id,
             "finding_id": self.finding_id,
             "claim_id": self.claim_id,
             "finding_fingerprint": self.finding_fingerprint,

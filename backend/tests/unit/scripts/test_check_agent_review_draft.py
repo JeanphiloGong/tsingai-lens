@@ -37,7 +37,7 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 def _row(**overrides):
     row = {
         "collection_id": "col-1",
-        "goal_id": "goal-1",
+        "objective_id": "objective-1",
         "finding_id": "finding-1",
         "claim_id": "claim-1",
         "action": "skip",
@@ -96,7 +96,7 @@ def test_check_agent_review_draft_accepts_safe_silver_draft(tmp_path):
     assert summary["goals"] == [
         {
             "collection_id": "col-1",
-            "goal_id": "goal-1",
+            "objective_id": "objective-1",
             "total_rows": 2,
             "agent_reviewed_count": 2,
             "accept_count": 1,
@@ -127,7 +127,7 @@ def test_check_agent_review_draft_accepts_safe_silver_draft(tmp_path):
     text = module.render_text_summary(summary)
     assert "Goal handoff:" in text
     assert (
-        "- goal-1: reviewed=2 accept=1 reject=0 correct=1 unclear=0 "
+        "- objective-1: reviewed=2 accept=1 reject=0 correct=1 unclear=0 "
         "next=human confirm actionable recommendations"
     ) in text
 
@@ -229,7 +229,7 @@ def test_check_agent_review_draft_groups_unresolved_rows_by_goal(tmp_path):
     assert summary["goals"] == [
         {
             "collection_id": "col-1",
-            "goal_id": "goal-1",
+            "objective_id": "objective-1",
             "total_rows": 2,
             "agent_reviewed_count": 1,
             "accept_count": 0,

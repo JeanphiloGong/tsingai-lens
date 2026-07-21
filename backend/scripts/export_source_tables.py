@@ -28,7 +28,9 @@ from infra.persistence.file.object_store import FileObjectStore
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
 )
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from infra.persistence.postgres.source_artifact_repository import (
+    PostgresSourceArtifactRepository,
+)
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.contracts.artifact_schemas import (
     BLOCKS_FINAL_COLUMNS,
@@ -154,8 +156,13 @@ def _load_existing_artifacts(
     collection_dir: Path,
 ) -> dict[str, pd.DataFrame]:
     collection_id = collection_dir.name
-    repository = SqliteSourceArtifactRepository(backend_root / "data" / "lens.sqlite")
-    artifacts = repository.read_collection_artifacts(collection_id)
+    engine = build_database_engine(DatabaseSettings())
+    try:
+        artifacts = PostgresSourceArtifactRepository(
+            build_session_factory(engine)
+        ).read_collection_artifacts(collection_id)
+    finally:
+        engine.dispose()
     if not artifacts.documents:
         raise SystemExit(f"source artifacts not found: {collection_id}")
     return {

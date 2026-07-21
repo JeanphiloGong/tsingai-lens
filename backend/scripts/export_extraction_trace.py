@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 from __future__ import annotations
 
 import argparse
@@ -17,10 +18,20 @@ if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
 
 from application.derived.core_fact_projection import build_core_fact_projection_records
-from infra.persistence.sqlite import (
-    SqliteCoreFactRepository,
-    SqliteSourceArtifactRepository,
+from domain.core.comparison_projection import ComparisonRowProjector
+from infra.persistence.database import (
+    DatabaseSettings,
+    build_database_engine,
+    build_session_factory,
 )
+from infra.persistence.postgres.source_artifact_repository import (
+    PostgresSourceArtifactRepository,
+)
+from infra.persistence.postgres.paper_fact_repository import PostgresPaperFactRepository
+from infra.persistence.postgres.comparison_repository import (
+    PostgresComparisonRepository,
+)
+
 SOURCE_ARTIFACTS = (
     "documents",
     "text_units",
@@ -174,12 +185,24 @@ def _load_artifacts(
     backend_root: Path,
     collection_id: str,
 ) -> dict[str, pd.DataFrame]:
-    db_path = backend_root / "data" / "lens.sqlite"
-    source_artifacts = SqliteSourceArtifactRepository(
-        db_path
-    ).read_collection_artifacts(collection_id)
-    core_facts = SqliteCoreFactRepository(db_path).read_collection_facts(collection_id)
-    projection = build_core_fact_projection_records(core_facts)
+    engine = build_database_engine(DatabaseSettings())
+    try:
+        session_factory = build_session_factory(engine)
+        source_artifacts = PostgresSourceArtifactRepository(
+            session_factory
+        ).read_collection_artifacts(collection_id)
+        paper_facts = PostgresPaperFactRepository(session_factory).read(collection_id)
+        comparison_facts = PostgresComparisonRepository(session_factory).read(
+            collection_id
+        )
+    finally:
+        engine.dispose()
+    comparison_rows = ComparisonRowProjector().project_rows_from_semantic_artifacts(
+        collection_id=collection_id,
+        comparable_results=comparison_facts.comparable_results,
+        scoped_results=comparison_facts.collection_comparable_results,
+    )
+    projection = build_core_fact_projection_records(paper_facts, comparison_rows)
     frames: dict[str, pd.DataFrame] = {}
     source_records = {
         "documents": source_artifacts.documents,
@@ -195,24 +218,26 @@ def _load_artifacts(
             pd.DataFrame([record.to_record() for record in source_records[name]])
         )
     core_records = {
-        "document_profiles": core_facts.document_profiles,
-        "evidence_anchors": core_facts.evidence_anchors,
-        "method_facts": core_facts.method_facts,
-        "sample_variants": core_facts.sample_variants,
-        "test_conditions": core_facts.test_conditions,
-        "baseline_references": core_facts.baseline_references,
-        "measurement_results": core_facts.measurement_results,
-        "characterization_observations": core_facts.characterization_observations,
-        "structure_features": core_facts.structure_features,
-        "comparable_results": core_facts.comparable_results,
-        "collection_comparable_results": core_facts.collection_comparable_results,
+        "document_profiles": paper_facts.document_profiles,
+        "evidence_anchors": paper_facts.evidence_anchors,
+        "method_facts": paper_facts.method_facts,
+        "sample_variants": paper_facts.sample_variants,
+        "test_conditions": paper_facts.test_conditions,
+        "baseline_references": paper_facts.baseline_references,
+        "measurement_results": paper_facts.measurement_results,
+        "characterization_observations": paper_facts.characterization_observations,
+        "structure_features": paper_facts.structure_features,
+        "comparable_results": comparison_facts.comparable_results,
+        "collection_comparable_results": comparison_facts.collection_comparable_results,
     }
     for name, records in core_records.items():
         frames[name] = _normalize_frame(
             pd.DataFrame([record.to_record() for record in records])
         )
     frames["evidence_cards"] = _normalize_frame(pd.DataFrame(projection.evidence_cards))
-    frames["comparison_rows"] = _normalize_frame(pd.DataFrame(projection.comparison_rows))
+    frames["comparison_rows"] = _normalize_frame(
+        pd.DataFrame(projection.comparison_rows)
+    )
     return frames
 
 
@@ -246,9 +271,7 @@ def _build_summary(
         "source_output_dir": str(source_output_dir),
         "trace_dir": str(trace_dir),
         "artifact_rows": {
-            name: int(len(frame))
-            for name, frame in frames.items()
-            if not frame.empty
+            name: int(len(frame)) for name, frame in frames.items() if not frame.empty
         },
         "generated_files": [
             "README.md",
@@ -334,8 +357,7 @@ def _render_source_tables(
             lines.append(
                 "| "
                 + " | ".join(
-                    _md_cell(row.get(key))
-                    for key in ("row_index", "row_text", "page")
+                    _md_cell(row.get(key)) for key in ("row_index", "row_text", "page")
                 )
                 + " |"
             )
@@ -348,9 +370,13 @@ def _render_extraction_trace(
     *,
     document_id: str | None,
 ) -> str:
-    documents = _filter_by_document(frames.get("documents"), document_id, id_column="id")
+    documents = _filter_by_document(
+        frames.get("documents"), document_id, id_column="id"
+    )
     evidence_cards = _filter_by_document(frames.get("evidence_cards"), document_id)
-    measurement_results = _filter_by_document(frames.get("measurement_results"), document_id)
+    measurement_results = _filter_by_document(
+        frames.get("measurement_results"), document_id
+    )
     evidence_anchors = _filter_by_document(frames.get("evidence_anchors"), document_id)
     anchor_by_id = {
         str(row.get("anchor_id") or ""): row
@@ -390,7 +416,9 @@ def _render_extraction_trace(
                 lines.extend(_render_fact_block(card, anchor_by_id))
 
         lines.extend(["### Measurement Results", ""])
-        measurements = _records_where(measurement_results, "document_id", current_document_id)
+        measurements = _records_where(
+            measurement_results, "document_id", current_document_id
+        )
         if not measurements:
             lines.append("_No measurement results._")
             lines.append("")
@@ -493,7 +521,9 @@ def _collect_document_ids(*frames: pd.DataFrame) -> list[str]:
         column = "document_id" if "document_id" in frame.columns else "id"
         if column not in frame.columns:
             continue
-        values.extend(str(value) for value in frame[column].tolist() if str(value).strip())
+        values.extend(
+            str(value) for value in frame[column].tolist() if str(value).strip()
+        )
     return sorted(dict.fromkeys(values))
 
 
@@ -598,7 +628,9 @@ def _csv_value(value: Any) -> str:
 
 def _safe_name(value: Any) -> str:
     text = str(value or "trace").strip()
-    cleaned = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in text)
+    cleaned = "".join(
+        char if char.isalnum() or char in {"-", "_"} else "-" for char in text
+    )
     return cleaned.strip("-_") or "trace"
 
 

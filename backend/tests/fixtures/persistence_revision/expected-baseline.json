@@ -1,130 +1,230 @@
 {
-  "schema_version": "persistence-baseline.v1",
-  "scenario_id": "synthetic-strength-goal",
-  "record_counts": {
-    "collections": 1,
-    "collection_files": 1,
-    "import_manifests": 1,
-    "tasks": 1,
-    "artifacts": 1,
-    "auth_users": 1,
-    "auth_sessions": 1,
-    "source_documents": 1,
-    "source_text_units": 2,
-    "source_blocks": 2,
-    "source_tables": 1,
-    "source_table_rows": 1,
-    "source_table_cells": 1,
-    "source_figures": 0,
-    "source_reference_entries": 1,
-    "core_document_profiles": 1,
-    "core_evidence_anchors": 1,
-    "core_method_facts": 1,
-    "core_sample_variants": 1,
-    "core_test_conditions": 1,
-    "core_baseline_references": 1,
-    "core_measurement_results": 1,
-    "research_objectives": 1,
-    "confirmed_goals": 1,
-    "research_understandings": 1,
-    "goal_sessions": 1,
-    "goal_messages": 2,
-    "experiment_plans": 1,
-    "feedback": 1,
-    "curations": 1,
-    "evaluation_gold_sets": 1,
-    "evaluation_gold_items": 1,
-    "prediction_snapshots": 1,
-    "evaluation_runs": 1
-  },
-  "ordered_ids": {
-    "collections": ["col_baseline"],
-    "tasks": ["task_baseline"],
-    "source_documents": ["doc_strength"],
-    "source_text_units": ["tu_method", "tu_result"],
-    "core_measurement_results": ["result_strength"],
-    "research_objectives": ["objective_strength"],
-    "confirmed_goals": ["goal_strength"],
-    "claims": ["claim_strength"],
-    "goal_messages": ["message_user", "message_assistant"],
-    "feedback": ["feedback_strength"],
-    "curations": ["curation_strength"],
-    "evaluation_runs": ["evaluation_strength"]
-  },
-  "field_sets": {
-    "collection": ["collection_id", "created_at", "description", "name", "status", "updated_at"],
-    "task": ["collection_id", "created_at", "current_stage", "progress", "status", "task_id", "task_type", "updated_at"],
-    "source_document": ["creation_date", "human_readable_id", "id", "metadata", "text", "text_unit_ids", "title"],
-    "measurement_result": ["baseline_id", "characterization_observation_ids", "claim_scope", "collection_id", "document_id", "domain_profile", "epistemic_status", "evidence_anchor_ids", "property_normalized", "result_id", "result_source_type", "result_type", "structure_feature_ids", "test_condition_id", "traceability_status", "unit", "value_payload", "variant_id"],
-    "confirmed_goal": ["analysis_error", "analysis_progress", "collection_id", "created_at", "goal_id", "material_hints", "process_hints", "property_hints", "question", "source_objective_id", "source_type", "status", "updated_at"],
-    "research_understanding": ["claims", "contexts", "evidence_refs", "model_traces", "presentation", "relations", "schema_version", "scope", "state", "summary", "warnings"],
-    "feedback": ["claim_id", "collection_id", "created_at", "feedback_id", "finding_fingerprint", "finding_id", "issue_type", "note", "review_status", "reviewer", "scope_id", "scope_type"],
-    "evaluation_run": ["collection_id", "evaluation_run_id", "fact_source", "failures", "gold_id", "metric_profile", "prediction_snapshot_id", "scores", "status", "summary", "target_layer"]
-  },
   "api_contract": {
     "collection_build": {
+      "current_stage": "artifacts_ready",
       "endpoint": "/api/v1/collections/col_baseline/tasks/build",
       "request_status": 200,
-      "task_id": "task_baseline",
-      "task_type": "build",
       "status": "completed",
-      "current_stage": "artifacts_ready"
-    },
-    "workspace": {
-      "endpoint": "/api/v1/collections/col_baseline/workspace",
-      "status_code": 200,
-      "collection_id": "col_baseline",
-      "file_count": 1,
-      "status_summary": "ready",
-      "latest_task_status": "completed",
-      "artifacts": {
-        "documents_ready": true,
-        "document_profiles_ready": true,
-        "evidence_cards_ready": true,
-        "comparison_rows_ready": false
-      }
+      "task_id": "task_baseline",
+      "task_type": "build"
     },
     "goal_analysis": {
-      "endpoint": "/api/v1/collections/col_baseline/goals/goal_strength/analysis",
-      "status_code": 200,
-      "goal_id": "goal_strength",
-      "status": "ready",
+      "endpoint": "/api/v1/collections/col_baseline/objectives/objective_strength/analysis",
+      "objective_id": "objective_strength",
       "phase": "completed",
-      "understanding_state": "ready",
+      "status": "ready",
+      "status_code": 200,
       "summary": {
         "claim_count": 1,
-        "relation_count": 0,
+        "context_count": 1,
         "evidence_ref_count": 1,
-        "context_count": 1
-      }
+        "relation_count": 0
+      },
+      "understanding_state": "ready"
     },
     "source_trace": {
-      "endpoint": "/api/v1/collections/col_baseline/documents/doc_strength/source",
-      "status_code": 200,
-      "document_id": "doc_strength",
-      "source_filename": "synthetic-strength.txt",
-      "claim_id": "claim_strength",
-      "evidence_ref_id": "evidence_strength",
       "anchor_id": "anchor_strength",
-      "source_record_id": "block_result"
+      "claim_id": "claim_strength",
+      "document_id": "doc_strength",
+      "endpoint": "/api/v1/collections/col_baseline/documents/doc_strength/source",
+      "evidence_ref_id": "evidence_strength",
+      "source_filename": "synthetic-strength.txt",
+      "source_record_id": "block_result",
+      "status_code": 200
+    },
+    "workspace": {
+      "artifacts": {
+        "comparison_rows_ready": false,
+        "document_profiles_ready": true,
+        "documents_ready": true,
+        "evidence_cards_ready": true
+      },
+      "collection_id": "col_baseline",
+      "endpoint": "/api/v1/collections/col_baseline/workspace",
+      "file_count": 1,
+      "latest_task_status": "completed",
+      "status_code": 200,
+      "status_summary": "ready"
     }
   },
   "evidence_traces": [
     {
-      "claim_id": "claim_strength",
-      "evidence_ref_id": "evidence_strength",
       "anchor_id": "anchor_strength",
-      "source_record_kind": "block",
-      "source_record_id": "block_result",
-      "text_unit_id": "tu_result",
+      "claim_id": "claim_strength",
       "document_id": "doc_strength",
+      "evidence_ref_id": "evidence_strength",
       "file_id": "file_strength",
+      "href": "/collections/col_baseline/documents/doc_strength?block_id=block_result",
       "quote": "Result: yield strength reached 620 MPa.",
-      "href": "/collections/col_baseline/documents/doc_strength?block_id=block_result"
+      "source_record_id": "block_result",
+      "source_record_kind": "block",
+      "text_unit_id": "tu_result"
     }
   ],
+  "field_sets": {
+    "collection": [
+      "collection_id",
+      "created_at",
+      "description",
+      "name",
+      "status",
+      "updated_at"
+    ],
+    "evaluation_run": [
+      "collection_id",
+      "evaluation_run_id",
+      "fact_source",
+      "failures",
+      "gold_id",
+      "metric_profile",
+      "prediction_snapshot_id",
+      "scores",
+      "status",
+      "summary",
+      "target_layer"
+    ],
+    "feedback": [
+      "claim_id",
+      "collection_id",
+      "created_at",
+      "feedback_id",
+      "finding_fingerprint",
+      "finding_id",
+      "issue_type",
+      "note",
+      "objective_id",
+      "review_status",
+      "reviewer"
+    ],
+    "measurement_result": [
+      "baseline_id",
+      "characterization_observation_ids",
+      "claim_scope",
+      "collection_id",
+      "document_id",
+      "domain_profile",
+      "epistemic_status",
+      "evidence_anchor_ids",
+      "property_normalized",
+      "result_id",
+      "result_source_type",
+      "result_type",
+      "structure_feature_ids",
+      "test_condition_id",
+      "traceability_status",
+      "unit",
+      "value_payload",
+      "variant_id"
+    ],
+    "research_understanding": [
+      "claims",
+      "contexts",
+      "evidence_refs",
+      "model_traces",
+      "presentation",
+      "relations",
+      "schema_version",
+      "scope",
+      "state",
+      "summary",
+      "warnings"
+    ],
+    "source_document": [
+      "creation_date",
+      "human_readable_id",
+      "id",
+      "metadata",
+      "text",
+      "text_unit_ids",
+      "title"
+    ],
+    "task": [
+      "collection_id",
+      "created_at",
+      "current_stage",
+      "progress",
+      "status",
+      "task_id",
+      "task_type",
+      "updated_at"
+    ]
+  },
   "integrity": {
-    "status": "pass",
-    "orphan_count": 0
-  }
+    "orphan_count": 0,
+    "status": "pass"
+  },
+  "ordered_ids": {
+    "claims": [
+      "claim_strength"
+    ],
+    "collections": [
+      "col_baseline"
+    ],
+    "core_measurement_results": [
+      "result_strength"
+    ],
+    "curations": [
+      "curation_strength"
+    ],
+    "evaluation_runs": [
+      "evaluation_strength"
+    ],
+    "feedback": [
+      "feedback_strength"
+    ],
+    "goal_messages": [
+      "message_user",
+      "message_assistant"
+    ],
+    "research_objectives": [
+      "objective_strength"
+    ],
+    "source_documents": [
+      "doc_strength"
+    ],
+    "source_text_units": [
+      "tu_method",
+      "tu_result"
+    ],
+    "tasks": [
+      "task_baseline"
+    ]
+  },
+  "record_counts": {
+    "artifacts": 1,
+    "auth_sessions": 1,
+    "auth_users": 1,
+    "collection_files": 1,
+    "collections": 1,
+    "core_baseline_references": 1,
+    "core_document_profiles": 1,
+    "core_evidence_anchors": 1,
+    "core_measurement_results": 1,
+    "core_method_facts": 1,
+    "core_sample_variants": 1,
+    "core_test_conditions": 1,
+    "curations": 1,
+    "evaluation_gold_items": 1,
+    "evaluation_gold_sets": 1,
+    "evaluation_runs": 1,
+    "experiment_plans": 1,
+    "feedback": 1,
+    "goal_messages": 2,
+    "goal_sessions": 1,
+    "import_manifests": 1,
+    "prediction_snapshots": 1,
+    "research_objectives": 1,
+    "research_understandings": 1,
+    "source_blocks": 2,
+    "source_documents": 1,
+    "source_figures": 0,
+    "source_reference_entries": 1,
+    "source_table_cells": 1,
+    "source_table_rows": 1,
+    "source_tables": 1,
+    "source_text_units": 2,
+    "tasks": 1
+  },
+  "scenario_id": "synthetic-strength-goal",
+  "schema_version": "persistence-baseline.v1"
 }

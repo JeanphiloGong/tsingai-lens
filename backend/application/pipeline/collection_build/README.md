@@ -14,7 +14,7 @@ not file-backed JSON documents.
 The pipeline layer does not parse documents or extract facts directly. Each
 node delegates to the owning implementation module for one concrete step.
 
-Deep goal analysis is intentionally outside this default build path. Evidence
+Deep Objective analysis is intentionally outside this default build path. Evidence
 routing, evidence unit extraction, logic chains, and research-understanding
-projection run from a confirmed-goal workflow so one oversized goal cannot fail
-the whole collection build.
+synthesis run from a confirmed Objective workflow so one oversized Objective
+cannot fail the whole collection build.

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -22,30 +21,92 @@ from application.core.semantic_build.llm.schemas import (
     StructuredTableMatrixRepair,
 )
 from application.core.semantic_build.research_objective_service import (
-    ResearchObjectiveService,
+    ResearchObjectiveService as _ResearchObjectiveService,
+)
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
+from application.core.research_understanding_service import (
+    ResearchUnderstandingService,
 )
 from tests.support.collection_service import build_test_collection_service
 from domain.core import (
-    ConfirmedGoal,
     DocumentProfile,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
     ObjectiveLogicChain,
     ObjectivePaperFrame,
     PaperSkim,
     ResearchObjective,
-    build_research_objective_id,
 )
 from domain.source import SourceArtifactSet, SourceDocumentNode, SourceDocumentTree
-from infra.persistence.sqlite import SqliteCoreFactRepository
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+from tests.support.objective_understanding_repository import (
+    InMemoryObjectiveUnderstandingRepository,
+)
+
+
+def _build_research_objective_service(
+    *,
+    collection_service,
+    **kwargs,
+) -> _ResearchObjectiveService:
+    source_repository = kwargs.pop("source_artifact_repository", None)
+    if source_repository is None:
+        source_repository = getattr(
+            kwargs.get("document_profile_service"),
+            "source_artifact_repository",
+            None,
+        ) or MemorySourceArtifactRepository()
+    paper_fact_repository = kwargs.pop(
+        "paper_fact_repository",
+        MemoryPaperFactRepository(),
+    )
+    objective_repository = kwargs.pop(
+        "objective_repository",
+        MemoryObjectiveRepository(),
+    )
+    research_understanding_repository = kwargs.pop(
+        "research_understanding_repository",
+        InMemoryObjectiveUnderstandingRepository(),
+    )
+    document_profile_service = kwargs.pop("document_profile_service", None)
+    if document_profile_service is None:
+        document_profile_service = DocumentProfileService(
+            collection_service=collection_service,
+            source_artifact_repository=source_repository,
+            paper_fact_repository=paper_fact_repository,
+        )
+    research_understanding_service = kwargs.pop(
+        "research_understanding_service",
+        ResearchUnderstandingService(
+            source_artifact_repository=source_repository,
+            structured_extractor=kwargs.get("structured_extractor"),
+        ),
+    )
+    return _ResearchObjectiveService(
+        collection_service=collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        research_understanding_repository=research_understanding_repository,
+        document_profile_service=document_profile_service,
+        research_understanding_service=research_understanding_service,
+        **kwargs,
+    )
 
 
 def _seed_document_profiles(
-    service: ResearchObjectiveService,
+    service: _ResearchObjectiveService,
     collection_id: str,
 ) -> None:
-    documents = service.source_artifact_repository.list_documents(collection_id)
+    documents = service.source_artifact_repository.read_collection_artifacts(
+        collection_id
+    ).documents
     profiles: list[DocumentProfile] = []
     for document in documents:
         metadata = dict(document.metadata)
@@ -63,10 +124,45 @@ def _seed_document_profiles(
                 }
             )
         )
-    service.core_fact_repository.replace_collection_document_profiles(
+    service.paper_fact_repository.replace_document_profiles(
         collection_id,
+        "build_test",
         tuple(profiles),
     )
+
+
+def test_research_objective_reads_do_not_trigger_generation(tmp_path):
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    collection_id = collection_service.create_collection("Empty objectives")[
+        "collection_id"
+    ]
+    extractor = _ObjectiveExtractor()
+    service = _build_research_objective_service(
+        collection_service=collection_service,
+        structured_extractor=extractor,
+    )
+
+    assert service.read_paper_skims(collection_id) == ()
+    assert service.read_research_objectives(collection_id) == ()
+    assert service.read_objective_contexts(collection_id) == ()
+    assert extractor.skim_payloads == []
+    assert extractor.discovery_payloads == []
+
+
+def test_memory_objective_repository_requires_explicit_activation():
+    repository = MemoryObjectiveRepository()
+    active = ObjectiveFactSet(research_objectives_ready=True)
+    pending = ObjectiveFactSet()
+
+    repository.replace("col-1", "build_test", active)
+    repository.replace("col-1", "build_pending", pending)
+
+    assert repository.read("col-1") == active
+    assert repository.read("col-1", build_id="build_pending") == pending
+
+    repository.activate("build_pending")
+
+    assert repository.read("col-1") == pending
 
 
 class _ObjectiveExtractor:
@@ -1158,7 +1254,7 @@ def _merge_candidate_values(
 def test_research_objective_service_forces_extractable_objective_route_roles(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1180,7 +1276,7 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
     tmp_path,
     caplog,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -1345,7 +1441,7 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
 
 
 def test_research_objective_table_source_payload_includes_table_cells(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -1418,7 +1514,7 @@ def test_research_objective_table_source_payload_includes_table_cells(tmp_path):
 
 
 def test_research_objective_text_source_payload_uses_document_tree(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -1490,7 +1586,7 @@ def test_research_objective_text_source_payload_uses_document_tree(tmp_path):
 
 
 def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -1646,7 +1742,7 @@ def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_pa
 
 
 def test_objective_paper_frame_payload_filters_unscored_tables(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -1730,7 +1826,7 @@ def test_objective_paper_frame_payload_filters_unscored_tables(tmp_path):
 
 
 def test_deterministic_frame_requires_variable_and_property_axis(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -1800,7 +1896,7 @@ def test_deterministic_frame_requires_variable_and_property_axis(tmp_path):
 
 
 def test_research_objective_text_source_payload_resolves_tree_node_to_block(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -1878,7 +1974,7 @@ def test_research_objective_text_source_payload_resolves_tree_node_to_block(tmp_
 
 
 def test_research_objective_evidence_units_carry_forward_document_state(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -2117,7 +2213,7 @@ def test_research_objective_evidence_units_carry_forward_document_state(tmp_path
 def test_research_objective_evidence_unit_prompt_compacts_long_text_source(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -2194,7 +2290,7 @@ def test_research_objective_evidence_unit_prompt_compacts_long_text_source(
 
 
 def test_research_objective_tree_state_supports_cross_block_logic_chain(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -2460,7 +2556,7 @@ def test_research_objective_tree_state_supports_cross_block_logic_chain(tmp_path
 def test_research_objective_fragmented_table_cells_repair_table_matrix_before_extraction(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -2691,7 +2787,7 @@ def test_research_objective_fragmented_table_cells_repair_table_matrix_before_ex
 def test_research_objective_fragmented_table_matrix_triggers_structural_repair(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -2718,7 +2814,7 @@ def test_research_objective_fragmented_table_matrix_triggers_structural_repair(
 
 
 def test_research_objective_service_inherits_single_objective_material(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -2765,7 +2861,7 @@ def test_research_objective_service_inherits_single_objective_material(tmp_path)
 
 
 def test_research_objective_service_does_not_inherit_ambiguous_material(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -2797,7 +2893,7 @@ def test_research_objective_service_does_not_inherit_ambiguous_material(tmp_path
 def test_research_objective_service_normalizes_result_table_values_to_measurements(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -2870,7 +2966,7 @@ def test_research_objective_service_normalizes_result_table_values_to_measuremen
 def test_research_objective_service_keeps_process_label_numbers_out_of_text_measurements(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -2920,7 +3016,7 @@ def test_research_objective_service_keeps_process_label_numbers_out_of_text_meas
 def test_research_objective_service_carries_route_evidence_role_to_source_refs(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -2964,7 +3060,7 @@ def test_research_objective_service_carries_route_evidence_role_to_source_refs(
 def test_research_objective_service_enriches_legacy_unit_source_refs_from_routes(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3013,7 +3109,7 @@ def test_research_objective_service_enriches_legacy_unit_source_refs_from_routes
 def test_research_objective_service_uses_main_number_after_leading_uncertainty(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3073,7 +3169,7 @@ def test_research_objective_service_uses_main_number_after_leading_uncertainty(
 def test_research_objective_service_keeps_non_ascii_process_headers_out_of_results(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3143,7 +3239,7 @@ def test_research_objective_service_keeps_non_ascii_process_headers_out_of_resul
 def test_research_objective_service_keeps_unrole_result_table_case_as_sample_key(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3205,7 +3301,7 @@ def test_research_objective_service_keeps_unrole_result_table_case_as_sample_key
 def test_research_objective_service_expands_fatigue_and_defect_result_columns(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3281,7 +3377,7 @@ def test_research_objective_service_expands_fatigue_and_defect_result_columns(
 def test_research_objective_service_uses_role_aliases_for_result_process_context(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3347,7 +3443,7 @@ def test_research_objective_service_uses_role_aliases_for_result_process_context
 def test_research_objective_service_uses_specific_role_label_for_abbreviated_result_header(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3393,7 +3489,7 @@ def test_research_objective_service_uses_specific_role_label_for_abbreviated_res
 def test_research_objective_service_uses_matching_result_headers_when_role_is_broad(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3449,7 +3545,7 @@ def test_research_objective_service_uses_matching_result_headers_when_role_is_br
 def test_research_objective_service_keeps_routed_model_metric_columns(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3524,7 +3620,7 @@ def test_research_objective_service_keeps_routed_model_metric_columns(
 def test_research_objective_service_treats_relative_density_as_structural_target(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3612,7 +3708,7 @@ def test_research_objective_service_treats_relative_density_as_structural_target
 def test_research_objective_service_skips_matrix_test_condition_table_fallback(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3638,7 +3734,7 @@ def test_research_objective_service_skips_matrix_test_condition_table_fallback(
 def test_research_objective_service_skips_untyped_table_test_condition_fallback(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3658,7 +3754,7 @@ def test_research_objective_service_skips_untyped_table_test_condition_fallback(
 def test_research_objective_service_skips_off_target_result_table_fallback(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3714,7 +3810,7 @@ def test_research_objective_service_skips_off_target_result_table_fallback(
 def test_research_objective_service_builds_method_conditions_and_binds_measurements(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -3818,7 +3914,7 @@ def test_research_objective_service_builds_method_conditions_and_binds_measureme
 def test_research_objective_service_derives_table_characterization_units(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -3889,7 +3985,7 @@ def test_research_objective_service_derives_table_characterization_units(
 def test_research_objective_service_does_not_keep_text_trends_as_measurements(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3934,7 +4030,7 @@ def test_research_objective_service_does_not_keep_text_trends_as_measurements(
 def test_research_objective_service_keeps_non_numeric_text_characterization(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -3969,7 +4065,7 @@ def test_research_objective_service_keeps_non_numeric_text_characterization(
 def test_research_objective_service_keeps_numeric_density_text_as_measurement(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -4015,7 +4111,7 @@ def test_research_objective_service_keeps_numeric_density_text_as_measurement(
 def test_research_objective_service_expands_respective_density_text_measurements(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -4091,7 +4187,7 @@ def test_research_objective_service_expands_respective_density_text_measurements
 def test_research_objective_service_expands_mapped_density_text_measurements(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -4183,7 +4279,7 @@ def test_research_objective_service_expands_mapped_density_text_measurements(
 def test_research_objective_service_expands_mapped_density_interpretation(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -4241,7 +4337,7 @@ def test_research_objective_service_expands_mapped_density_interpretation(
 def test_research_objective_service_expands_mapped_numeric_text_measurements(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -4305,7 +4401,7 @@ def test_research_objective_service_expands_mapped_numeric_text_measurements(
 def test_research_objective_service_expands_mapped_residual_stress_text_measurements(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -4374,7 +4470,7 @@ def test_research_objective_service_expands_mapped_residual_stress_text_measurem
 def test_research_objective_service_expands_source_text_density_measurements_when_model_misclassifies_unit(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -4458,7 +4554,7 @@ def test_research_objective_service_expands_source_text_density_measurements_whe
 def test_research_objective_service_dedupes_shared_density_measurements(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     corrosion_context = ObjectiveContext.from_mapping(
@@ -4511,7 +4607,7 @@ def test_research_objective_service_dedupes_shared_density_measurements(
 def test_research_objective_service_reclassifies_mechanical_text_trends(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -4546,7 +4642,7 @@ def test_research_objective_service_reclassifies_mechanical_text_trends(
 def test_research_objective_service_reclassifies_off_target_text_measurements(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -4604,7 +4700,7 @@ def test_research_objective_service_reclassifies_off_target_text_measurements(
 def test_research_objective_service_preserves_numeric_text_mechanisms(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -4689,7 +4785,7 @@ def test_research_objective_service_preserves_numeric_text_mechanisms(
 def test_research_objective_service_reclassifies_text_comparison_without_pair_context(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -4726,7 +4822,7 @@ def test_research_objective_service_reclassifies_text_comparison_without_pair_co
 def test_research_objective_service_does_not_expand_text_trends_into_measurements(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -4764,7 +4860,7 @@ def test_research_objective_service_does_not_expand_text_trends_into_measurement
 def test_research_objective_service_expands_result_table_matrix_measurements(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -4866,7 +4962,7 @@ def test_research_objective_service_expands_result_table_matrix_measurements(
 def test_research_objective_service_normalizes_compact_tensile_headers(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -4948,7 +5044,7 @@ def test_research_objective_service_normalizes_compact_tensile_headers(
 def test_research_objective_service_skips_reference_rows_and_keeps_condition_axis(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -5047,7 +5143,7 @@ def test_research_objective_service_skips_reference_rows_and_keeps_condition_axi
 def test_research_objective_service_skips_non_target_result_property_columns(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -5097,7 +5193,7 @@ def test_research_objective_service_skips_non_target_result_property_columns(
 def test_research_objective_service_skips_table_matrix_continuation_header_rows(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -5148,7 +5244,7 @@ def test_research_objective_service_skips_table_matrix_continuation_header_rows(
 def test_research_objective_service_adds_sample_numbers_to_labeled_table_rows(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -5194,7 +5290,7 @@ def test_research_objective_service_adds_sample_numbers_to_labeled_table_rows(
 
 
 def test_research_objective_service_builds_objective_evidence_lens(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -5230,7 +5326,7 @@ def test_research_objective_service_builds_objective_evidence_lens(tmp_path):
 def test_research_objective_service_routes_matching_tables_beyond_seed_documents(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -5282,7 +5378,7 @@ def test_research_objective_service_routes_matching_tables_beyond_seed_documents
 def test_research_objective_service_does_not_route_single_letter_acronym_tables(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -5323,7 +5419,7 @@ def test_research_objective_service_does_not_route_single_letter_acronym_tables(
 def test_research_objective_service_treats_energy_density_only_table_as_condition(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -5363,7 +5459,7 @@ def test_research_objective_service_treats_energy_density_only_table_as_conditio
 def test_research_objective_service_normalizes_archimedes_density_column(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -5385,7 +5481,7 @@ def test_research_objective_service_normalizes_archimedes_density_column(
 def test_research_objective_service_ignores_analysis_purpose_as_table_result(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -5422,7 +5518,7 @@ def test_research_objective_service_ignores_analysis_purpose_as_table_result(
 def test_research_objective_service_recovers_non_seed_condition_and_result_routes(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -5539,7 +5635,7 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
 def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_results(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -5604,7 +5700,7 @@ def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_re
 def test_research_objective_service_keeps_density_out_of_defect_structure_results(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -5645,7 +5741,7 @@ def test_research_objective_service_keeps_density_out_of_defect_structure_result
 def test_research_objective_service_route_payload_includes_objective_evidence_lens(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     context = ObjectiveContext.from_mapping(
@@ -5677,7 +5773,7 @@ def test_research_objective_service_route_payload_includes_objective_evidence_le
 def test_research_objective_service_adds_sample_numbers_to_process_table_rows(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -5730,7 +5826,7 @@ def test_research_objective_service_adds_sample_numbers_to_process_table_rows(
 def test_research_objective_service_keeps_unlabeled_process_table_columns_as_context(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     route = ObjectiveEvidenceRoute.from_mapping(
@@ -5789,7 +5885,7 @@ def test_research_objective_service_keeps_unlabeled_process_table_columns_as_con
 def test_research_objective_service_resolves_measurements_from_process_units(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     measurement = ObjectiveEvidenceUnit.from_mapping(
@@ -5926,7 +6022,7 @@ def test_research_objective_service_resolves_measurements_from_process_units(
 def test_research_objective_service_resolves_case_measurements_from_sample_number_process_units(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     measurement = ObjectiveEvidenceUnit.from_mapping(
@@ -5983,7 +6079,7 @@ def test_research_objective_service_resolves_case_measurements_from_sample_numbe
 def test_research_objective_service_resolves_measurements_from_process_label(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     measurement = ObjectiveEvidenceUnit.from_mapping(
@@ -6086,7 +6182,7 @@ def test_research_objective_service_resolves_measurements_from_process_label(
 def test_research_objective_service_prefers_sample_label_over_row_number_context(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     measurement = ObjectiveEvidenceUnit.from_mapping(
@@ -6191,7 +6287,7 @@ def test_research_objective_service_prefers_sample_label_over_row_number_context
 
 
 def test_research_objective_service_matches_all_unique_specimen_numbers(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     measurement = ObjectiveEvidenceUnit.from_mapping(
@@ -6262,7 +6358,7 @@ def test_research_objective_service_matches_all_unique_specimen_numbers(tmp_path
 def test_research_objective_service_prefers_descriptive_label_over_row_number_context(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     measurement = ObjectiveEvidenceUnit.from_mapping(
@@ -6348,7 +6444,7 @@ def test_research_objective_service_prefers_descriptive_label_over_row_number_co
 def test_research_objective_service_uses_process_context_label_tokens(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     measurement = ObjectiveEvidenceUnit.from_mapping(
@@ -6433,7 +6529,7 @@ def test_research_objective_service_uses_process_context_label_tokens(
 def test_research_objective_service_resolves_measurements_from_process_context(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     measurement = ObjectiveEvidenceUnit.from_mapping(
@@ -6528,7 +6624,7 @@ def test_research_objective_service_resolves_measurements_from_process_context(
 def test_research_objective_service_generates_pairwise_comparison_units(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -6651,10 +6747,10 @@ def test_research_objective_service_generates_pairwise_comparison_units(
     )
 
 
-def test_pairwise_selection_keeps_valid_pairs_when_non_goal_axes_define_groups(
+def test_pairwise_selection_keeps_valid_pairs_when_non_objective_axes_define_groups(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -6765,7 +6861,7 @@ def test_pairwise_selection_keeps_valid_pairs_when_non_goal_axes_define_groups(
 def test_research_objective_service_matches_contextual_property_variants_for_pairwise(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -6826,7 +6922,7 @@ def test_research_objective_service_matches_contextual_property_variants_for_pai
 def test_research_objective_service_generates_pairwise_from_symbol_angle_axes(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -6891,7 +6987,7 @@ def test_research_objective_service_generates_pairwise_from_symbol_angle_axes(
 def test_research_objective_service_selects_large_grid_pairs_from_raw_angle_axes(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -6954,7 +7050,7 @@ def test_research_objective_service_selects_large_grid_pairs_from_raw_angle_axes
 def test_research_objective_service_orders_numeric_axis_comparison_before_value_direction(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -7008,7 +7104,7 @@ def test_research_objective_service_orders_numeric_axis_comparison_before_value_
 def test_research_objective_service_does_not_use_ascii_raw_process_fallback(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -7066,7 +7162,7 @@ def test_research_objective_service_does_not_use_ascii_raw_process_fallback(
 def test_research_objective_service_generates_small_set_multi_axis_comparisons(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -7157,7 +7253,7 @@ def test_research_objective_service_generates_small_set_multi_axis_comparisons(
 def test_research_objective_service_skips_pair_when_unmodeled_hatch_spacing_changes(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -7230,7 +7326,7 @@ def test_research_objective_service_skips_pair_when_unmodeled_hatch_spacing_chan
 def test_research_objective_service_skips_pair_when_treatment_and_energy_input_change(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -7302,7 +7398,7 @@ def test_research_objective_service_skips_pair_when_treatment_and_energy_input_c
 def test_research_objective_service_does_not_promote_ved_when_sample_controls_change(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -7369,7 +7465,7 @@ def test_research_objective_service_does_not_promote_ved_when_sample_controls_ch
 def test_research_objective_service_attributes_derived_ved_change_to_scan_speed(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -7443,7 +7539,7 @@ def test_research_objective_service_attributes_derived_ved_change_to_scan_speed(
 def test_research_objective_service_generates_pairwise_from_sample_condition_axis(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -7571,7 +7667,7 @@ def test_research_objective_service_generates_pairwise_from_sample_condition_axi
 def test_research_objective_service_generates_pairwise_from_process_condition_axis(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -7696,7 +7792,7 @@ def test_research_objective_service_generates_pairwise_from_process_condition_ax
 def test_research_objective_service_limits_pairwise_to_target_properties(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -7777,7 +7873,7 @@ def test_research_objective_service_limits_pairwise_to_target_properties(
 def test_research_objective_service_limits_large_grid_to_adjacent_axis_pairs(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -7851,7 +7947,7 @@ def test_research_objective_service_limits_large_grid_to_adjacent_axis_pairs(
 def test_research_objective_service_caps_large_multiaxis_table_comparisons(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -7968,7 +8064,7 @@ def test_research_objective_service_caps_large_multiaxis_table_comparisons(
 def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlled_specs(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     density_objective_id = "obj-density"
@@ -8166,7 +8262,7 @@ def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlle
 def test_research_objective_service_resolves_ved_fatigue_table_from_printed_label(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -8316,7 +8412,7 @@ def test_research_objective_service_resolves_ved_fatigue_table_from_printed_labe
 def test_research_objective_service_inferrs_sample_and_defect_columns_without_model_roles(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -8469,7 +8565,7 @@ def test_research_objective_service_inferrs_sample_and_defect_columns_without_mo
 
 
 def test_process_route_does_not_treat_result_columns_as_process_context(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -8528,7 +8624,7 @@ def test_process_route_does_not_treat_result_columns_as_process_context(tmp_path
 
 
 def test_process_route_recovers_target_columns_from_mixed_table(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -8590,7 +8686,7 @@ def test_process_route_recovers_target_columns_from_mixed_table(tmp_path):
 def test_research_objective_service_adds_context_hint_route_for_condition_table(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     frame = ObjectivePaperFrame.from_mapping(
@@ -8667,7 +8763,7 @@ def test_research_objective_service_adds_context_hint_route_for_condition_table(
 def test_research_objective_service_ranks_result_text_candidates(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     frame = ObjectivePaperFrame.from_mapping(
@@ -8752,7 +8848,7 @@ def test_research_objective_service_ranks_result_text_candidates(
 def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_support(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     frame = ObjectivePaperFrame.from_mapping(
@@ -8826,7 +8922,7 @@ def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_suppo
 
 
 def test_research_objective_routing_uses_document_tree_order(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -8947,7 +9043,7 @@ def test_research_objective_routing_uses_document_tree_order(tmp_path):
 def test_research_objective_routing_binds_current_source_to_model_decision(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -9002,7 +9098,7 @@ def test_research_objective_routing_binds_current_source_to_model_decision(
 
 
 def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -9089,7 +9185,7 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
 
 
 def test_research_objective_routing_uses_text_hint_not_source_text(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -9161,7 +9257,7 @@ def test_research_objective_routing_uses_text_hint_not_source_text(tmp_path):
 
 
 def test_research_objective_routing_builds_text_candidates_from_document_tree(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -9290,7 +9386,7 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree(tm
 
 
 def test_research_objective_low_relevance_tree_routing_uses_frame_sections(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -9395,7 +9491,7 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections(tmp_p
 def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -9474,7 +9570,7 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text(
 
 
 def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = ResearchObjective.from_mapping(
@@ -9559,7 +9655,7 @@ def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
 def test_research_objective_service_keeps_numeric_mechanism_text_candidates(
     tmp_path,
 ):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     frame = ObjectivePaperFrame.from_mapping(
@@ -9630,7 +9726,7 @@ def test_research_objective_service_keeps_numeric_mechanism_text_candidates(
 
 
 def test_research_objective_service_drops_known_empty_evidence_units(tmp_path):
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     empty_unit = ObjectiveEvidenceUnit.from_mapping(
@@ -9683,18 +9779,22 @@ def test_structured_objective_evidence_unit_wraps_scalar_value_payload():
     }
 
 
-def test_research_objective_service_builds_and_persists_db_records(tmp_path, caplog):
+def test_research_objective_service_builds_and_persists_objective_records(
+    tmp_path,
+    caplog,
+):
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Collection")
     collection_id = collection["collection_id"]
     extractor = _ObjectiveExtractor()
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=collection_service,
         structured_extractor=extractor,
     )
     service.research_understanding_service.structured_extractor = extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -9792,12 +9892,21 @@ def test_research_objective_service_builds_and_persists_db_records(tmp_path, cap
     _seed_document_profiles(service, collection_id)
 
     with caplog.at_level("INFO"):
-        objectives = service.build_research_objectives(collection_id)
+        objectives = service.build_research_objectives(
+            collection_id,
+            build_id="build_test",
+        )
 
     assert len(objectives) == 1
     assert objectives[0].question.startswith("How does heat treatment")
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    facts = service.objective_repository.read(collection_id)
     assert facts.research_objectives_ready is True
+    assert (
+        service.research_understanding_repository.list_objective_understandings(
+            collection_id
+        )
+        == ()
+    )
     assert len(facts.paper_skims) == 2
     assert facts.paper_skims[0].source_filename == "paper-1.pdf"
     assert facts.research_objectives[0].excluded_document_ids == ("paper-2",)
@@ -9972,12 +10081,13 @@ def test_research_objective_service_strengthens_broad_objective_axes(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Strengthening")
     collection_id = collection["collection_id"]
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=collection_service,
         structured_extractor=_BroadObjectiveExtractor(),
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10006,7 +10116,10 @@ def test_research_objective_service_strengthens_broad_objective_axes(tmp_path):
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_research_objectives(collection_id)
+    objectives = service.build_research_objectives(
+        collection_id,
+        build_id="build_test",
+    )
 
     assert len(objectives) == 1
     objective = objectives[0]
@@ -10026,12 +10139,13 @@ def test_research_objective_service_merges_overlapping_mechanical_objectives(
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Merge")
     collection_id = collection["collection_id"]
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=collection_service,
         structured_extractor=_DuplicateMechanicalObjectiveExtractor(),
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10060,7 +10174,10 @@ def test_research_objective_service_merges_overlapping_mechanical_objectives(
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_research_objectives(collection_id)
+    objectives = service.build_research_objectives(
+        collection_id,
+        build_id="build_test",
+    )
 
     assert len(objectives) == 2
     structure_objective = next(
@@ -10092,12 +10209,13 @@ def test_research_objective_service_builds_targeted_objective_contexts(
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Contexts")
     collection_id = collection["collection_id"]
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=collection_service,
         structured_extractor=_DuplicateMechanicalObjectiveExtractor(),
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10178,8 +10296,8 @@ def test_research_objective_service_builds_targeted_objective_contexts(
     )
     _seed_document_profiles(service, collection_id)
 
-    service.build_research_objectives(collection_id)
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    service.build_research_objectives(collection_id, build_id="build_test")
+    facts = service.objective_repository.read(collection_id)
     contexts = facts.objective_contexts
 
     assert len(contexts) == 2
@@ -10358,12 +10476,13 @@ def test_research_objective_service_list_prunes_overbroad_display_axes(
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Display")
     collection_id = collection["collection_id"]
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=collection_service,
         structured_extractor=_OverbroadPersistedObjectiveExtractor(),
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10390,7 +10509,7 @@ def test_research_objective_service_list_prunes_overbroad_display_axes(
     )
     _seed_document_profiles(service, collection_id)
 
-    service.build_research_objectives(collection_id)
+    service.build_research_objectives(collection_id, build_id="build_test")
     workspace = service.list_objective_workspaces(collection_id)
 
     objective = workspace["objectives"][0]
@@ -10472,12 +10591,13 @@ def test_research_objective_service_dedupes_repeated_objective_ids_before_persis
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Duplicate Objectives")
     collection_id = collection["collection_id"]
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=collection_service,
         structured_extractor=_DuplicateObjectiveIdExtractor(),
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10500,88 +10620,31 @@ def test_research_objective_service_dedupes_repeated_objective_ids_before_persis
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_research_objectives(collection_id)
+    objectives = service.build_research_objectives(
+        collection_id,
+        build_id="build_test",
+    )
 
     assert len(objectives) == 1
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    facts = service.objective_repository.read(collection_id)
     assert len(facts.research_objectives) == 1
 
 
-def test_confirmed_goal_analysis_keeps_source_objective_id(tmp_path):
-    service = ResearchObjectiveService(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-        structured_extractor=_ObjectiveExtractor(),
-    )
-    source_objective = ResearchObjective.from_mapping(
-        {
-            "objective_id": "obj_source",
-            "question": "How does heat treatment affect strength?",
-            "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["strength"],
-            "comparison_intent": "Compare heat treatment effects on strength.",
-            "confidence": 0.9,
-        }
-    )
-    goal = ConfirmedGoal.from_mapping(
-        {
-            "collection_id": "col_1",
-            "goal_id": "goal_strength",
-            "question": "How does heat treatment affect strength?",
-            "source_objective_id": "obj_source",
-            "status": "pending",
-        }
-    )
-
-    objective = service._objective_from_confirmed_goal(
-        goal,
-        candidates=(source_objective,),
-    )
-
-    assert objective.objective_id == "obj_source"
-    assert objective.objective_id != goal.goal_id
-
-
-def test_confirmed_goal_analysis_builds_objective_id_for_user_input_goal(tmp_path):
-    service = ResearchObjectiveService(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-        structured_extractor=_ObjectiveExtractor(),
-    )
-    goal = ConfirmedGoal.from_mapping(
-        {
-            "collection_id": "col_1",
-            "goal_id": "goal_custom",
-            "question": "Which coating improves corrosion resistance?",
-            "material_hints": ["316L stainless steel"],
-            "process_hints": ["coating"],
-            "property_hints": ["corrosion resistance"],
-            "status": "pending",
-        }
-    )
-
-    objective = service._objective_from_confirmed_goal(goal, candidates=())
-
-    assert objective.objective_id == build_research_objective_id(goal.question)
-    assert objective.objective_id != goal.goal_id
-    assert objective.material_scope == ("316L stainless steel",)
-    assert objective.process_axes == ("coating",)
-    assert objective.property_axes == ("corrosion resistance",)
-
-
-def test_confirmed_goal_analysis_uses_deterministic_frame_when_frame_model_fails(
+def test_objective_analysis_uses_deterministic_frame_when_frame_model_fails(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    collection = collection_service.create_collection("Goal frame fallback")
+    collection = collection_service.create_collection("Objective frame fallback")
     collection_id = collection["collection_id"]
     extractor = _FailingFrameExtractor()
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=collection_service,
         structured_extractor=extractor,
     )
     service.research_understanding_service.structured_extractor = extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10644,52 +10707,44 @@ def test_confirmed_goal_analysis_uses_deterministic_frame_when_frame_model_fails
             "target_property_axes": ["crystallographic texture", "yield strength"],
         }
     )
-    service.core_fact_repository.replace_collection_research_objectives(
+    service.objective_repository.replace(
         collection_id,
-        (paper_skim,),
-        (objective,),
-        (objective_context,),
-        (),
-        (),
-        (),
-        (),
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            paper_skims=(paper_skim,),
+            research_objectives=(objective,),
+            objective_contexts=(objective_context,),
+        ),
     )
-    goal = ConfirmedGoal.from_mapping(
-        {
-            "collection_id": collection_id,
-            "goal_id": "goal_texture_yield",
-            "question": objective.question,
-            "source_type": "objective_candidate",
-            "source_objective_id": objective.objective_id,
-        }
+    service.objective_repository.confirm_objective(
+        collection_id,
+        objective.objective_id,
     )
 
-    understanding = service.analyze_confirmed_goal(goal)
+    understanding = service.analyze_objective(collection_id, objective.objective_id)
 
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    facts = service.objective_repository.read(collection_id)
     assert extractor.frame_payloads
-    assert len(facts.objective_paper_frames) == 1
-    frame = facts.objective_paper_frames[0]
-    assert frame.relevance == "medium"
-    assert frame.paper_role == "primary_experiment"
-    assert frame.relevant_sections
-    assert facts.objective_evidence_units
-    assert understanding.scope.scope_type == "goal"
+    assert facts.objective_paper_frames == ()
+    assert facts.objective_evidence_units == ()
+    assert understanding.scope.scope_type == "objective"
 
 
-def test_confirmed_goal_analysis_uses_deterministic_route_when_route_model_fails(
+def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    collection = collection_service.create_collection("Goal stage retry")
+    collection = collection_service.create_collection("Objective stage retry")
     collection_id = collection["collection_id"]
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=collection_service,
         structured_extractor=_ObjectiveExtractor(),
     )
     service.research_understanding_service.structured_extractor = service._structured_extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10759,54 +10814,50 @@ def test_confirmed_goal_analysis_uses_deterministic_route_when_route_model_fails
             "target_property_axes": ["corrosion current"],
         }
     )
-    service.core_fact_repository.replace_collection_research_objectives(
+    service.objective_repository.replace(
         collection_id,
-        (paper_skim,),
-        (objective,),
-        (objective_context,),
-        (),
-        (),
-        (),
-        (),
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            paper_skims=(paper_skim,),
+            research_objectives=(objective,),
+            objective_contexts=(objective_context,),
+        ),
     )
-    goal = ConfirmedGoal.from_mapping(
-        {
-            "collection_id": collection_id,
-            "goal_id": "goal_corrosion",
-            "question": objective.question,
-            "source_type": "objective_candidate",
-            "source_objective_id": objective.objective_id,
-        }
+    service.objective_repository.confirm_objective(
+        collection_id,
+        objective.objective_id,
     )
 
     failing_extractor = _FailingRouteExtractor()
     service._structured_extractor = failing_extractor
     service.research_understanding_service.structured_extractor = failing_extractor
-    understanding = service.analyze_confirmed_goal(goal)
+    understanding = service.analyze_objective(collection_id, objective.objective_id)
 
-    assert understanding.scope.scope_type == "goal"
+    assert understanding.scope.scope_type == "objective"
     assert failing_extractor.route_payloads
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
-    assert len(facts.objective_paper_frames) == 1
-    assert facts.objective_evidence_routes
-    assert facts.objective_evidence_units
-    assert facts.objective_logic_chains
+    facts = service.objective_repository.read(collection_id)
+    assert facts.objective_paper_frames == ()
+    assert facts.objective_evidence_routes == ()
+    assert facts.objective_evidence_units == ()
+    assert facts.objective_logic_chains == ()
 
 
-def test_confirmed_goal_analysis_force_rebuild_replaces_stale_goal_stages(
+def test_objective_analysis_does_not_mutate_active_objective_facts(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    collection = collection_service.create_collection("Goal force rebuild")
+    collection = collection_service.create_collection("Objective force rebuild")
     collection_id = collection["collection_id"]
     extractor = _ObjectiveExtractor()
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=collection_service,
         structured_extractor=extractor,
     )
     service.research_understanding_service.structured_extractor = extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10922,40 +10973,33 @@ def test_confirmed_goal_analysis_force_rebuild_replaces_stale_goal_stages(
             "summary": "stale chain",
         }
     )
-    service.core_fact_repository.replace_collection_research_objectives(
+    service.objective_repository.replace(
         collection_id,
-        (paper_skim,),
-        (objective,),
-        (objective_context,),
-        (stale_frame,),
-        (stale_route,),
-        (stale_unit,),
-        (stale_chain,),
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            paper_skims=(paper_skim,),
+            research_objectives=(objective,),
+            objective_contexts=(objective_context,),
+            objective_paper_frames=(stale_frame,),
+            objective_evidence_routes=(stale_route,),
+            objective_evidence_units=(stale_unit,),
+            objective_logic_chains=(stale_chain,),
+        ),
     )
-    goal = ConfirmedGoal.from_mapping(
-        {
-            "collection_id": collection_id,
-            "goal_id": "goal_corrosion",
-            "question": objective.question,
-            "source_type": "objective_candidate",
-            "source_objective_id": objective.objective_id,
-        }
+    active_facts = service.objective_repository.read(collection_id)
+    service.objective_repository.confirm_objective(
+        collection_id,
+        objective.objective_id,
     )
 
-    understanding = service.analyze_confirmed_goal(goal, force_rebuild=True)
+    understanding = service.analyze_objective(collection_id, objective.objective_id)
 
-    facts = service.core_fact_repository.read_collection_facts(collection_id)
+    facts = service.objective_repository.read(collection_id)
     assert extractor.frame_payloads
     assert extractor.route_payloads
-    assert "oeu_stale" not in {
-        unit.evidence_unit_id for unit in facts.objective_evidence_units
-    }
-    assert "stale-block" not in {
-        route.source_ref for route in facts.objective_evidence_routes
-    }
-    assert facts.objective_evidence_units
-    assert facts.objective_logic_chains
-    assert understanding.scope.scope_type == "goal"
+    assert facts == active_facts
+    assert understanding.scope.scope_type == "objective"
 
 
 def _build_duplicate_paper_objectives(
@@ -10965,12 +11009,13 @@ def _build_duplicate_paper_objectives(
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Merge")
     collection_id = collection["collection_id"]
-    service = ResearchObjectiveService(
+    service = _build_research_objective_service(
         collection_service=collection_service,
         structured_extractor=extractor,
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -10998,4 +11043,7 @@ def _build_duplicate_paper_objectives(
         ),
     )
     _seed_document_profiles(service, collection_id)
-    return service.build_research_objectives(collection_id)
+    return service.build_research_objectives(
+        collection_id,
+        build_id="build_test",
+    )

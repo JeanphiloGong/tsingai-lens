@@ -33,7 +33,7 @@ This node owns browser-side helpers that are shared across frontend routes.
   corrections after refresh. The same helper also reads curation-derived gold
   drafts and finding-centered dataset exports for evaluation handoff, including
   review-decision hints that tell the workbench which accept/reject/correct
-  actions are allowed or blocked for a review candidate. Goal Findings retain
+  actions are allowed or blocked for a review candidate. Objective Findings retain
   their synthesis status, shared and incomparable conditions, and per-paper
   contributions so the existing detail view can explain cross-paper support
   without adding a separate frontend resource.
@@ -41,7 +41,7 @@ This node owns browser-side helpers that are shared across frontend routes.
   Collection-bound goal session API helper for copilot context, messages,
   answer source modes, and evidence references
 - `experimentPlans.ts`
-  Goal-scoped experiment plan draft API helper for saving and editing
+  Objective-scoped experiment plan draft API helper for saving and editing
   human-reviewable protocol suggestions produced from grounded copilot answers;
   Goal Copilot saves also carry source mode, review gate, used evidence ids,
   and source-link counts in metadata so protocol drafts remain auditable

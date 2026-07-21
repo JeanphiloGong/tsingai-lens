@@ -58,12 +58,17 @@ EVIDENCE_RESOLUTION_STATUS_VALUES: Final[frozenset[str]] = frozenset(
 LOGIC_CHAIN_SCOPE_VALUES: Final[frozenset[str]] = frozenset(
     {"objective", "paper", "cross_paper"}
 )
-CONFIRMED_GOAL_SOURCE_TYPES: Final[frozenset[str]] = frozenset(
-    {"user_input", "objective_candidate", "benchmark"}
+OBJECTIVE_STATUSES: Final[frozenset[str]] = frozenset(
+    {"candidate", "confirmed", "queued", "running", "ready", "failed"}
 )
-CONFIRMED_GOAL_STATUSES: Final[frozenset[str]] = frozenset(
-    {"pending", "running", "ready", "failed"}
-)
+OBJECTIVE_STATUS_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
+    "candidate": frozenset({"confirmed"}),
+    "confirmed": frozenset({"queued"}),
+    "queued": frozenset({"running", "failed"}),
+    "running": frozenset({"ready", "failed"}),
+    "ready": frozenset({"queued"}),
+    "failed": frozenset({"queued"}),
+}
 _QUESTION_SIGNAL_TERMS: Final[tuple[str, ...]] = (
     "how ",
     "what ",
@@ -163,6 +168,12 @@ class ResearchObjective:
     excluded_document_ids: tuple[str, ...]
     confidence: float
     reason: str | None
+    source_build_id: str | None = None
+    status: str = "candidate"
+    analysis_error: str | None = None
+    analysis_progress: dict[str, Any] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ResearchObjective":
@@ -183,6 +194,18 @@ class ResearchObjective:
             ),
             confidence=normalize_objective_confidence(payload.get("confidence")),
             reason=_normalize_text(payload.get("reason")),
+            source_build_id=_normalize_text(payload.get("source_build_id")),
+            status=_normalize_choice(
+                payload.get("status"),
+                allowed=OBJECTIVE_STATUSES,
+                default="candidate",
+            ),
+            analysis_error=_normalize_text(payload.get("analysis_error")),
+            analysis_progress=_normalize_optional_mapping(
+                payload.get("analysis_progress")
+            ),
+            created_at=_normalize_text(payload.get("created_at")),
+            updated_at=_normalize_text(payload.get("updated_at")),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -199,69 +222,10 @@ class ResearchObjective:
             "reason": self.reason,
         }
 
-
-@dataclass(frozen=True)
-class ConfirmedGoal:
-    goal_id: str
-    collection_id: str
-    question: str
-    source_type: str
-    material_hints: tuple[str, ...]
-    process_hints: tuple[str, ...]
-    property_hints: tuple[str, ...]
-    source_objective_id: str | None
-    status: str
-    analysis_error: str | None
-    analysis_progress: dict[str, Any] | None
-    created_at: str | None
-    updated_at: str | None
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ConfirmedGoal":
-        collection_id = _normalize_text(payload.get("collection_id")) or ""
-        question = _normalize_text(payload.get("question")) or ""
-        source_objective_id = _normalize_text(payload.get("source_objective_id"))
-        goal_id = _normalize_text(payload.get("goal_id")) or build_confirmed_goal_id(
-            collection_id,
-            question,
-            source_objective_id,
-        )
-        return cls(
-            goal_id=goal_id,
-            collection_id=collection_id,
-            question=question,
-            source_type=_normalize_choice(
-                payload.get("source_type"),
-                allowed=CONFIRMED_GOAL_SOURCE_TYPES,
-                default="user_input",
-            ),
-            material_hints=normalize_objective_terms(payload.get("material_hints")),
-            process_hints=normalize_objective_terms(payload.get("process_hints")),
-            property_hints=normalize_objective_terms(payload.get("property_hints")),
-            source_objective_id=source_objective_id,
-            status=_normalize_choice(
-                payload.get("status"),
-                allowed=CONFIRMED_GOAL_STATUSES,
-                default="pending",
-            ),
-            analysis_error=_normalize_text(payload.get("analysis_error")),
-            analysis_progress=_normalize_optional_mapping(
-                payload.get("analysis_progress")
-            ),
-            created_at=_normalize_text(payload.get("created_at")),
-            updated_at=_normalize_text(payload.get("updated_at")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
+    def to_workspace_record(self) -> dict[str, Any]:
         return {
-            "goal_id": self.goal_id,
-            "collection_id": self.collection_id,
-            "question": self.question,
-            "source_type": self.source_type,
-            "material_hints": list(self.material_hints),
-            "process_hints": list(self.process_hints),
-            "property_hints": list(self.property_hints),
-            "source_objective_id": self.source_objective_id,
+            **self.to_record(),
+            "source_build_id": self.source_build_id,
             "status": self.status,
             "analysis_error": self.analysis_error,
             "analysis_progress": (
@@ -627,6 +591,18 @@ class ObjectiveLogicChain:
         }
 
 
+@dataclass(frozen=True)
+class ObjectiveFactSet:
+    research_objectives_ready: bool = False
+    paper_skims: tuple[PaperSkim, ...] = ()
+    research_objectives: tuple[ResearchObjective, ...] = ()
+    objective_contexts: tuple[ObjectiveContext, ...] = ()
+    objective_paper_frames: tuple[ObjectivePaperFrame, ...] = ()
+    objective_evidence_routes: tuple[ObjectiveEvidenceRoute, ...] = ()
+    objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...] = ()
+    objective_logic_chains: tuple[ObjectiveLogicChain, ...] = ()
+
+
 def build_research_objective_id(question: str) -> str:
     normalized_question = (_normalize_text(question) or "unspecified").lower()
     slug = _SLUG_NON_WORD_PATTERN.sub("-", normalized_question).strip("-")
@@ -636,12 +612,9 @@ def build_research_objective_id(question: str) -> str:
     return f"obj_{slug[:72].strip('-')}_{digest}"
 
 
-def build_confirmed_goal_id(
-    collection_id: str,
-    question: str,
-    source_objective_id: str | None = None,
-) -> str:
-    return _build_scoped_id("goal", collection_id, question, source_objective_id)
+def require_objective_status_transition(current: str, target: str) -> None:
+    if target not in OBJECTIVE_STATUS_TRANSITIONS.get(current, frozenset()):
+        raise ValueError(f"invalid objective status transition: {current} -> {target}")
 
 
 def normalize_objective_terms(value: Any) -> tuple[str, ...]:
@@ -790,16 +763,16 @@ def _is_missing(value: Any) -> bool:
 
 
 __all__ = [
-    "CONFIRMED_GOAL_SOURCE_TYPES",
-    "CONFIRMED_GOAL_STATUSES",
-    "ConfirmedGoal",
     "EVIDENCE_RESOLUTION_STATUS_VALUES",
     "EVIDENCE_ROUTE_ROLE_VALUES",
     "EVIDENCE_UNIT_KIND_VALUES",
     "LOGIC_CHAIN_SCOPE_VALUES",
+    "OBJECTIVE_STATUSES",
+    "OBJECTIVE_STATUS_TRANSITIONS",
     "ObjectiveContext",
     "ObjectiveEvidenceRoute",
     "ObjectiveEvidenceUnit",
+    "ObjectiveFactSet",
     "ObjectiveLogicChain",
     "ObjectivePaperFrame",
     "PAPER_RELEVANCE_VALUES",
@@ -807,9 +780,9 @@ __all__ = [
     "PaperSkim",
     "ResearchObjective",
     "SOURCE_KIND_VALUES",
-    "build_confirmed_goal_id",
     "build_research_objective_id",
     "is_question_shaped_objective",
     "normalize_objective_confidence",
     "normalize_objective_terms",
+    "require_objective_status_transition",
 ]

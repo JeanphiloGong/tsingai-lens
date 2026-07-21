@@ -4,10 +4,14 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
-from domain.core import CoreFactSet, EvidenceAnchor, MeasurementResult, SampleVariant
+from domain.core import EvidenceAnchor, MeasurementResult, SampleVariant
+from domain.core.paper_fact import PaperFactSet
 from domain.source import SourceArtifactSet
-from infra.persistence.sqlite import SqliteCoreFactRepository, SqliteSourceArtifactRepository
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
 
 
 def _load_trace_module():
@@ -25,7 +29,7 @@ def _load_trace_module():
     return module
 
 
-def test_export_trace_writes_readable_artifact_views(tmp_path):
+def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
     trace = _load_trace_module()
     backend_root = tmp_path / "backend"
     collection_id = "col-test"
@@ -67,9 +71,11 @@ def test_export_trace_writes_readable_artifact_views(tmp_path):
             ],
         ),
     )
-    SqliteCoreFactRepository(db_path).replace_collection_facts(
+    paper_fact_repository = MemoryPaperFactRepository()
+    paper_fact_repository.replace_paper_facts(
         collection_id,
-        CoreFactSet(
+        "build_test",
+        PaperFactSet(
             paper_facts_ready=True,
             evidence_anchors=(
                 EvidenceAnchor.from_mapping(
@@ -119,6 +125,27 @@ def test_export_trace_writes_readable_artifact_views(tmp_path):
             ),
         ),
     )
+    monkeypatch.setattr(
+        trace,
+        "build_database_engine",
+        lambda _settings: SimpleNamespace(dispose=lambda: None),
+    )
+    monkeypatch.setattr(trace, "build_session_factory", lambda _engine: None)
+    monkeypatch.setattr(
+        trace,
+        "PostgresSourceArtifactRepository",
+        lambda _session_factory: SqliteSourceArtifactRepository(db_path),
+    )
+    monkeypatch.setattr(
+        trace,
+        "PostgresPaperFactRepository",
+        lambda _session_factory: paper_fact_repository,
+    )
+    monkeypatch.setattr(
+        trace,
+        "PostgresComparisonRepository",
+        lambda _session_factory: MemoryComparisonRepository(),
+    )
 
     trace_dir = trace.export_trace(
         backend_root=backend_root,
@@ -131,9 +158,9 @@ def test_export_trace_writes_readable_artifact_views(tmp_path):
     assert summary["artifact_rows"]["evidence_cards"] == 1
     assert (trace_dir / "artifacts" / "tables.json").is_file()
     assert (trace_dir / "artifacts" / "tables.csv").is_file()
-    assert "Table 1 Mechanical Results" in (
-        trace_dir / "source_tables.md"
-    ).read_text(encoding="utf-8")
+    assert "Table 1 Mechanical Results" in (trace_dir / "source_tables.md").read_text(
+        encoding="utf-8"
+    )
     extraction_trace = (trace_dir / "extraction_trace.md").read_text(encoding="utf-8")
     assert "A reached 560 MPa." in extraction_trace
     assert "quote=A | 560" in extraction_trace

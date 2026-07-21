@@ -5,7 +5,6 @@ from typing import Any, Mapping
 from application.source.collection_service import CollectionService
 from domain.evaluation import EvaluationGoldItem, EvaluationGoldSet
 from domain.ports import EvaluationRepository
-from infra.persistence.factory import build_evaluation_repository
 
 
 class EvaluationGoldService:
@@ -14,12 +13,10 @@ class EvaluationGoldService:
     def __init__(
         self,
         collection_service: CollectionService,
-        evaluation_repository: EvaluationRepository | None = None,
+        evaluation_repository: EvaluationRepository,
     ) -> None:
         self.collection_service = collection_service
-        self.evaluation_repository = (
-            evaluation_repository or build_evaluation_repository()
-        )
+        self.evaluation_repository = evaluation_repository
 
     def register_gold_set(
         self,
@@ -47,8 +44,7 @@ class EvaluationGoldService:
             }
         )
         gold_items = tuple(
-            self._gold_item_from_input(gold_set.gold_id, item)
-            for item in items
+            self._gold_item_from_input(gold_set.gold_id, item) for item in items
         )
         self._validate_gold_item_documents(
             collection_id=collection_id,

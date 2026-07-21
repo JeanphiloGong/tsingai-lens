@@ -85,19 +85,24 @@ def check_collection_frontend_projection(
         DEFAULT_FORBIDDEN_OBJECTIVE_DETAIL_TERMS
     ),
 ) -> dict[str, Any]:
-    backend_root = str(DEFAULT_BACKEND_ROOT)
-    if backend_root not in sys.path:
-        sys.path.insert(0, backend_root)
+    backend_root = DEFAULT_BACKEND_ROOT
+    if str(backend_root) not in sys.path:
+        sys.path.insert(0, str(backend_root))
 
     from application.core.research_view_aggregation_service import (  # noqa: PLC0415
         ResearchViewAggregationService,
     )
-    from application.core.workspace_overview_service import WorkspaceService  # noqa: PLC0415
+    from application.core.comparison_service import ComparisonService  # noqa: PLC0415
+    from application.core.research_understanding_service import (  # noqa: PLC0415
+        ResearchUnderstandingService,
+    )
+    from application.core.semantic_build.document_profile_service import (  # noqa: PLC0415
+        DocumentProfileService,
+    )
     from application.core.semantic_build.research_objective_service import (  # noqa: PLC0415
         ResearchObjectiveService,
     )
     from application.source.collection_service import CollectionService  # noqa: PLC0415
-    from application.source.task_service import TaskService  # noqa: PLC0415
     from infra.persistence.database import (  # noqa: PLC0415
         DatabaseSettings,
         build_database_engine,
@@ -107,10 +112,21 @@ def check_collection_frontend_projection(
     from infra.persistence.postgres.collection_repository import (  # noqa: PLC0415
         PostgresCollectionRepository,
     )
-    from infra.persistence.postgres.build_repository import (  # noqa: PLC0415
-        PostgresBuildRepository,
+    from infra.persistence.postgres.comparison_repository import (  # noqa: PLC0415
+        PostgresComparisonRepository,
     )
-
+    from infra.persistence.postgres.paper_fact_repository import (  # noqa: PLC0415
+        PostgresPaperFactRepository,
+    )
+    from infra.persistence.postgres.objective_repository import (  # noqa: PLC0415
+        PostgresObjectiveRepository,
+    )
+    from infra.persistence.postgres.research_understanding_repository import (  # noqa: PLC0415
+        PostgresResearchUnderstandingRepository,
+    )
+    from infra.persistence.postgres.source_artifact_repository import (  # noqa: PLC0415
+        PostgresSourceArtifactRepository,
+    )
     engine = build_database_engine(DatabaseSettings())
     try:
         session_factory = build_session_factory(engine)
@@ -118,22 +134,49 @@ def check_collection_frontend_projection(
             repository=PostgresCollectionRepository(session_factory),
             workspace=FileCollectionWorkspace(),
         )
-        workspace_service = WorkspaceService(
+        source_artifact_repository = PostgresSourceArtifactRepository(session_factory)
+        paper_fact_repository = PostgresPaperFactRepository(session_factory)
+        objective_repository = PostgresObjectiveRepository(session_factory)
+        comparison_repository = PostgresComparisonRepository(session_factory)
+        research_understanding_repository = PostgresResearchUnderstandingRepository(
+            session_factory
+        )
+        document_profile_service = DocumentProfileService(
             collection_service=collection_service,
-            task_service=TaskService(PostgresBuildRepository(session_factory)),
+            source_artifact_repository=source_artifact_repository,
+            paper_fact_repository=paper_fact_repository,
+        )
+        research_understanding_service = ResearchUnderstandingService(
+            source_artifact_repository=source_artifact_repository,
+        )
+        comparison_service = ComparisonService(
+            collection_service=collection_service,
+            paper_fact_repository=paper_fact_repository,
+            objective_repository=objective_repository,
+            comparison_repository=comparison_repository,
+            document_profile_service=document_profile_service,
         )
         objective_service = ResearchObjectiveService(
             collection_service=collection_service,
+            source_artifact_repository=source_artifact_repository,
+            paper_fact_repository=paper_fact_repository,
+            objective_repository=objective_repository,
+            research_understanding_repository=research_understanding_repository,
+            document_profile_service=document_profile_service,
+            research_understanding_service=research_understanding_service,
         )
         objectives = objective_service.list_objective_workspaces(collection_id)
-        material_profile = (
-            ResearchViewAggregationService(
-                collection_service=collection_service,
-                workspace_service=workspace_service,
-            ).get_collection_material_research_view(
-                collection_id,
-                material_id,
-            )
+        material_profile = ResearchViewAggregationService(
+            collection_service=collection_service,
+            source_artifact_repository=source_artifact_repository,
+            paper_fact_repository=paper_fact_repository,
+            objective_repository=objective_repository,
+            research_understanding_repository=research_understanding_repository,
+            comparison_service=comparison_service,
+            research_understanding_service=research_understanding_service,
+        ).get_collection_material_research_view(
+            collection_id,
+            material_id,
         )
         objective_details = [
             objective_service.get_objective_research_view(

@@ -13,7 +13,12 @@ from application.core.semantic_build.llm.prompts import (
     build_table_batch_mentions_prompt,
     build_text_window_extraction_prompt,
 )
-from application.core.semantic_build.paper_facts_service import PaperFactsService
+from application.core.semantic_build.paper_facts_service import (
+    PaperFactsService as _PaperFactsService,
+)
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
 from application.core.semantic_build.llm.schemas import (
     ExtractedTestConditionPayload,
     MeasurementResultPayload,
@@ -41,6 +46,7 @@ from domain.core.comparison import (
     CollectionComparableResult,
     ComparableResult,
     ComparisonAxis,
+    ComparisonFactSet,
     ContextBinding,
     EvidenceTrace,
     NormalizedComparisonContext,
@@ -53,18 +59,67 @@ from domain.core.evidence_backbone import (
     MeasurementResult,
     SampleVariant,
 )
+from domain.core.paper_fact import PaperFactSet
 from domain.core.research_objective import (
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
     ObjectiveLogicChain,
     ResearchObjective,
 )
 from infra.persistence.sqlite import (
-    SqliteCoreFactRepository,
     SqliteSourceArtifactRepository,
 )
+from tests.support.comparison_repository import MemoryComparisonRepository
 from tests.support.collection_service import build_test_collection_service
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+
+
+def test_paper_fact_set_owns_only_reusable_document_facts():
+    facts = PaperFactSet(paper_facts_ready=True)
+
+    assert facts.paper_facts_generated is True
+    assert facts.evidence_cards_generated is True
+    assert facts.evidence_cards_ready is False
+    assert facts.has_paper_facts() is False
+
+
+def _build_paper_facts_service(*, collection_service, **kwargs) -> _PaperFactsService:
+    paper_fact_repository = kwargs.pop(
+        "paper_fact_repository", MemoryPaperFactRepository()
+    )
+    objective_repository = kwargs.pop(
+        "objective_repository",
+        MemoryObjectiveRepository(),
+    )
+    source_repository = kwargs.pop("source_artifact_repository", None)
+    if source_repository is None:
+        source_repository = (
+            getattr(
+                kwargs.get("document_profile_service"),
+                "source_artifact_repository",
+                None,
+            )
+            or MemorySourceArtifactRepository()
+        )
+    document_profile_service = kwargs.pop("document_profile_service", None)
+    if document_profile_service is None:
+        document_profile_service = DocumentProfileService(
+            collection_service=collection_service,
+            source_artifact_repository=source_repository,
+            paper_fact_repository=paper_fact_repository,
+        )
+    return _PaperFactsService(
+        collection_service=collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        document_profile_service=document_profile_service,
+        **kwargs,
+    )
 
 
 def _build_test_comparable_result(
@@ -155,16 +210,14 @@ def _store_core_comparison_artifacts(
     comparable_results: list[ComparableResult],
     scoped_results: list[CollectionComparableResult],
 ) -> None:
-    row_records = ComparisonRowProjector().project_rows_from_semantic_artifacts(
-        collection_id=collection_id,
-        comparable_results=comparable_results,
-        scoped_results=scoped_results,
-    )
-    comparison_service.core_fact_repository.replace_collection_comparison_artifacts(
+    comparison_service.comparison_repository.replace(
         collection_id,
-        tuple(comparable_results),
-        tuple(scoped_results),
-        row_records,
+        "build_test",
+        ComparisonFactSet(
+            comparison_artifacts_ready=True,
+            comparable_results=tuple(comparable_results),
+            collection_comparable_results=tuple(scoped_results),
+        ),
     )
 
 
@@ -178,7 +231,10 @@ class EvidenceOnlyExtractor:
 
     def extract_text_window_mentions(self, payload):  # noqa: ANN001
         text_window = payload.get("text_window") or {}
-        quote = str(text_window.get("text") or "").strip() or "Process conditions were reported."
+        quote = (
+            str(text_window.get("text") or "").strip()
+            or "Process conditions were reported."
+        )
         return StructuredTextWindowMentions(
             method_mentions=[
                 TextWindowMethodMentionPayload(
@@ -210,7 +266,7 @@ class CountingEvidenceExtractor(EvidenceOnlyExtractor):
 
 
 def test_paper_facts_prompt_payloads_exclude_internal_ids(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -268,12 +324,14 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids(tmp_path):
             "table_text": "Sample | Strength\nA | 12 MPa",
             "page": 5,
         },
-        table_rows=[{
-            "table_id": "tbl-1",
-            "row_index": 2,
-            "row_text": "Sample A | 12 MPa | as-built",
-            "heading_path": "Results > Table 1",
-        }],
+        table_rows=[
+            {
+                "table_id": "tbl-1",
+                "row_index": 2,
+                "row_text": "Sample A | 12 MPa | as-built",
+                "heading_path": "Results > Table 1",
+            }
+        ],
         row_cells_by_index={
             2: [
                 {
@@ -324,7 +382,10 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids(tmp_path):
     assert '"row_subjects": [' in table_batch_prompt
     assert '"unit": "MPa"' in table_batch_prompt
     assert "Non-target rows are context only" in table_batch_prompt
-    assert "Use `supporting_text_windows` only when they are required to interpret a row." in table_batch_prompt
+    assert (
+        "Use `supporting_text_windows` only when they are required to interpret a row."
+        in table_batch_prompt
+    )
     assert "Emit at most 2 `row_subjects`" in table_batch_prompt
     assert "Do not emit `confidence`, `epistemic_status`" in table_batch_prompt
     assert '"target_rows"' in table_batch_prompt
@@ -342,7 +403,7 @@ def test_paper_facts_prompt_payloads_exclude_internal_ids(tmp_path):
 
 
 def test_paper_facts_payloads_include_sanitized_objective_context(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective_context = ObjectiveContext.from_mapping(
@@ -430,13 +491,18 @@ def test_paper_facts_payloads_include_sanitized_objective_context(tmp_path):
         table_context={
             "caption_text": "Mechanical properties by scanning speed.",
             "column_headers": ["Sample", "Scanning speed", "Yield strength"],
-            "table_matrix": [["Sample", "Scanning speed", "Yield strength"], ["A", "100", "560"]],
+            "table_matrix": [
+                ["Sample", "Scanning speed", "Yield strength"],
+                ["A", "100", "560"],
+            ],
         },
-        table_rows=[{
-            "table_id": "tbl-internal-1",
-            "row_index": 1,
-            "row_text": "A | 100 | 560",
-        }],
+        table_rows=[
+            {
+                "table_id": "tbl-internal-1",
+                "row_index": 1,
+                "row_text": "A | 100 | 560",
+            }
+        ],
         row_cells_by_index={},
         text_windows=[],
         objective_context=objective_context,
@@ -461,7 +527,7 @@ def test_paper_facts_payloads_include_sanitized_objective_context(tmp_path):
 
 
 def test_paper_facts_selects_objective_context_by_text_and_table_route(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     structural_context = ObjectiveContext.from_mapping(
@@ -566,24 +632,27 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Route Gated Facts")
     collection_id = collection["collection_id"]
-    core_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    objective_repository = MemoryObjectiveRepository()
+    source_repository = MemorySourceArtifactRepository()
+    paper_fact_repository = MemoryPaperFactRepository()
     extractor = CountingEvidenceExtractor()
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
         structured_extractor=extractor,
-        core_fact_repository=core_repository,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
     )
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=collection_service,
         document_profile_service=document_profile_service,
         structured_extractor=extractor,
-        core_fact_repository=core_repository,
+        objective_repository=objective_repository,
         source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
     )
     source_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=[
                 {
@@ -710,6 +779,10 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
             ],
         ),
     )
+    document_profile_service.build_document_profiles(
+        collection_id,
+        build_id="build_test",
+    )
 
     objective = ResearchObjective.from_mapping(
         {
@@ -750,60 +823,62 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
             "chain_payload": {"schema_version": "objective_logic_chain.v1"},
         }
     )
-    core_repository.replace_collection_research_objectives(
+    objective_repository.replace(
         collection_id,
-        (),
-        (objective,),
-        (objective_context,),
-        (),
-        (
-            ObjectiveEvidenceRoute.from_mapping(
-                {
-                    "objective_id": objective.objective_id,
-                    "document_id": "paper-1",
-                    "source_kind": "text_window",
-                    "source_ref": "block-allowed",
-                    "role": "current_experimental_evidence",
-                    "extractable": True,
-                }
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            research_objectives=(objective,),
+            objective_contexts=(objective_context,),
+            objective_evidence_routes=(
+                ObjectiveEvidenceRoute.from_mapping(
+                    {
+                        "objective_id": objective.objective_id,
+                        "document_id": "paper-1",
+                        "source_kind": "text_window",
+                        "source_ref": "block-allowed",
+                        "role": "current_experimental_evidence",
+                        "extractable": True,
+                    }
+                ),
+                ObjectiveEvidenceRoute.from_mapping(
+                    {
+                        "objective_id": objective.objective_id,
+                        "document_id": "paper-1",
+                        "source_kind": "text_window",
+                        "source_ref": "block-excluded",
+                        "role": "low_value_or_irrelevant",
+                        "extractable": False,
+                    }
+                ),
+                ObjectiveEvidenceRoute.from_mapping(
+                    {
+                        "objective_id": objective.objective_id,
+                        "document_id": "paper-1",
+                        "source_kind": "table",
+                        "source_ref": "table-allowed",
+                        "role": "current_experimental_evidence",
+                        "extractable": True,
+                    }
+                ),
+                ObjectiveEvidenceRoute.from_mapping(
+                    {
+                        "objective_id": objective.objective_id,
+                        "document_id": "paper-1",
+                        "source_kind": "table",
+                        "source_ref": "table-excluded",
+                        "role": "low_value_or_irrelevant",
+                        "extractable": False,
+                    }
+                ),
             ),
-            ObjectiveEvidenceRoute.from_mapping(
-                {
-                    "objective_id": objective.objective_id,
-                    "document_id": "paper-1",
-                    "source_kind": "text_window",
-                    "source_ref": "block-excluded",
-                    "role": "low_value_or_irrelevant",
-                    "extractable": False,
-                }
-            ),
-            ObjectiveEvidenceRoute.from_mapping(
-                {
-                    "objective_id": objective.objective_id,
-                    "document_id": "paper-1",
-                    "source_kind": "table",
-                    "source_ref": "table-allowed",
-                    "role": "current_experimental_evidence",
-                    "extractable": True,
-                }
-            ),
-            ObjectiveEvidenceRoute.from_mapping(
-                {
-                    "objective_id": objective.objective_id,
-                    "document_id": "paper-1",
-                    "source_kind": "table",
-                    "source_ref": "table-excluded",
-                    "role": "low_value_or_irrelevant",
-                    "extractable": False,
-                }
-            ),
+            objective_evidence_units=(existing_unit,),
+            objective_logic_chains=(existing_chain,),
         ),
-        (existing_unit,),
-        (existing_chain,),
     )
 
     with caplog.at_level("INFO"):
-        service.build_paper_facts(collection_id)
+        service.build_paper_facts(collection_id, build_id="build_test")
 
     assert len(extractor.text_window_payloads) == 1
     assert extractor.text_window_payloads[0]["text_window"]["text"].startswith(
@@ -815,7 +890,7 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
     assert target_rows[0]["row_summary"] == "Sample A | 560 MPa"
     assert all("balance" not in row["row_summary"] for row in target_rows)
 
-    facts = core_repository.read_collection_facts(collection_id)
+    facts = objective_repository.read(collection_id)
     assert facts.objective_evidence_units == (existing_unit,)
     assert facts.objective_logic_chains == (existing_chain,)
     assert any(
@@ -833,30 +908,32 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
     extractor.text_window_payloads.clear()
     extractor.table_batch_payloads.clear()
     caplog.clear()
-    core_repository.replace_collection_research_objectives(
+    objective_repository.replace(
         collection_id,
-        (),
-        (objective,),
-        (objective_context,),
-        (),
-        (
-            ObjectiveEvidenceRoute.from_mapping(
-                {
-                    "objective_id": objective.objective_id,
-                    "document_id": "paper-1",
-                    "source_kind": "table",
-                    "source_ref": "table-allowed",
-                    "role": "current_experimental_evidence",
-                    "extractable": True,
-                }
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            research_objectives=(objective,),
+            objective_contexts=(objective_context,),
+            objective_evidence_routes=(
+                ObjectiveEvidenceRoute.from_mapping(
+                    {
+                        "objective_id": objective.objective_id,
+                        "document_id": "paper-1",
+                        "source_kind": "table",
+                        "source_ref": "table-allowed",
+                        "role": "current_experimental_evidence",
+                        "extractable": True,
+                    }
+                ),
             ),
+            objective_evidence_units=(existing_unit,),
+            objective_logic_chains=(existing_chain,),
         ),
-        (existing_unit,),
-        (existing_chain,),
     )
 
     with caplog.at_level("INFO"):
-        service.build_paper_facts(collection_id)
+        service.build_paper_facts(collection_id, build_id="build_test")
 
     assert extractor.text_window_payloads == []
     assert len(extractor.table_batch_payloads) == 1
@@ -878,10 +955,10 @@ def test_evidence_cards_use_objective_units_without_paper_facts(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Evidence Cards")
     collection_id = collection["collection_id"]
-    core_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    service = PaperFactsService(
+    objective_repository = MemoryObjectiveRepository()
+    service = _build_paper_facts_service(
         collection_service=collection_service,
-        core_fact_repository=core_repository,
+        objective_repository=objective_repository,
     )
     unit = ObjectiveEvidenceUnit.from_mapping(
         {
@@ -908,15 +985,13 @@ def test_evidence_cards_use_objective_units_without_paper_facts(tmp_path):
             "confidence": 0.88,
         }
     )
-    core_repository.replace_collection_research_objectives(
+    objective_repository.replace(
         collection_id,
-        (),
-        (),
-        (),
-        (),
-        (),
-        (unit,),
-        (),
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            objective_evidence_units=(unit,),
+        ),
     )
 
     def fail_build_paper_facts(collection_id: str):  # noqa: ARG001
@@ -943,7 +1018,7 @@ def test_evidence_cards_use_objective_units_without_paper_facts(tmp_path):
 
 
 def test_document_method_family_conditions_bind_table_results(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     text_windows = [
@@ -1006,10 +1081,7 @@ def test_document_method_family_conditions_bind_table_results(tmp_path):
         "microhardness",
         "density_porosity_microstructure",
     }
-    test_condition_by_type = {
-        row["property_type"]: row
-        for row in test_conditions
-    }
+    test_condition_by_type = {row["property_type"]: row for row in test_conditions}
     tensile_payload = test_condition_by_type["tensile_mechanics"]["condition_payload"]
     assert tensile_payload["standard"] == "ASTM E8M"
     assert tensile_payload["strain_rate_s-1"] == "0.02 mm/min"
@@ -1060,25 +1132,24 @@ def test_document_method_family_conditions_bind_table_results(tmp_path):
         row["property_normalized"]: row["test_condition_id"]
         for row in measurement_results
     }
-    assert condition_ids_by_property["yield_strength"] == test_condition_by_type[
-        "tensile_mechanics"
-    ][
-        "test_condition_id"
-    ]
-    assert condition_ids_by_property["hardness"] == test_condition_by_type[
-        "microhardness"
-    ][
-        "test_condition_id"
-    ]
-    assert condition_ids_by_property["density"] == test_condition_by_type[
-        "density_porosity_microstructure"
-    ][
-        "test_condition_id"
-    ]
+    assert (
+        condition_ids_by_property["yield_strength"]
+        == test_condition_by_type["tensile_mechanics"]["test_condition_id"]
+    )
+    assert (
+        condition_ids_by_property["hardness"]
+        == test_condition_by_type["microhardness"]["test_condition_id"]
+    )
+    assert (
+        condition_ids_by_property["density"]
+        == test_condition_by_type["density_porosity_microstructure"][
+            "test_condition_id"
+        ]
+    )
 
 
 def test_characterization_observations_include_table_derived_pbf_context(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     sample_variants = (
@@ -1162,7 +1233,7 @@ def test_characterization_observations_include_table_derived_pbf_context(tmp_pat
 
 
 def test_table_row_process_context_uses_cell_header_bindings(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1172,8 +1243,16 @@ def test_table_row_process_context_uses_cell_header_bindings(tmp_path):
             {"col_index": 1, "header_path": "Sample number", "cell_text": "5"},
             {"col_index": 2, "header_path": "Hatch space (mm)", "cell_text": "0.111"},
             {"col_index": 3, "header_path": "Scan strategy", "cell_text": "A"},
-            {"col_index": 4, "header_path": "Scanning speed (mm/s)", "cell_text": "0.12"},
-            {"col_index": 5, "header_path": "Energy density (J/mm 3 )", "cell_text": "150"},
+            {
+                "col_index": 4,
+                "header_path": "Scanning speed (mm/s)",
+                "cell_text": "0.12",
+            },
+            {
+                "col_index": 5,
+                "header_path": "Energy density (J/mm 3 )",
+                "cell_text": "150",
+            },
         ],
     )
 
@@ -1184,7 +1263,7 @@ def test_table_row_process_context_uses_cell_header_bindings(tmp_path):
 
 
 def test_table_row_process_context_keeps_p001_process_columns_separate(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1194,8 +1273,16 @@ def test_table_row_process_context_keeps_p001_process_columns_separate(tmp_path)
             {"col_index": 1, "header_path": "Sample number", "cell_text": "9"},
             {"col_index": 2, "header_path": "Hatch space (mm)", "cell_text": "0.12"},
             {"col_index": 3, "header_path": "Scan strategy", "cell_text": "B"},
-            {"col_index": 4, "header_path": "Scanning speed (mm/s)", "cell_text": "0.239"},
-            {"col_index": 5, "header_path": "Energy density (J/mm 3 )", "cell_text": "70"},
+            {
+                "col_index": 4,
+                "header_path": "Scanning speed (mm/s)",
+                "cell_text": "0.239",
+            },
+            {
+                "col_index": 5,
+                "header_path": "Energy density (J/mm 3 )",
+                "cell_text": "70",
+            },
         ],
     )
 
@@ -1206,7 +1293,7 @@ def test_table_row_process_context_keeps_p001_process_columns_separate(tmp_path)
 
 
 def test_text_window_test_conditions_skip_empty_payload(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     text_window = {
@@ -1234,7 +1321,7 @@ def test_text_window_test_conditions_skip_empty_payload(tmp_path):
 
 
 def test_generic_text_samples_are_removed_when_table_samples_exist(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     samples = service._normalize_sample_variant_records(
@@ -1289,7 +1376,10 @@ def test_generic_text_samples_are_removed_when_table_samples_exist(tmp_path):
                 "property_normalized": "density",
                 "result_type": "scalar",
                 "claim_scope": "current_work",
-                "value_payload": {"value": 95.0, "statement": "Relative density was 95%."},
+                "value_payload": {
+                    "value": 95.0,
+                    "statement": "Relative density was 95%.",
+                },
                 "unit": "%",
                 "evidence_anchor_ids": ["anchor-1"],
                 "traceability_status": "direct",
@@ -1309,7 +1399,7 @@ def test_generic_text_samples_are_removed_when_table_samples_exist(tmp_path):
 def test_measurement_results_dedupe_merges_duplicate_scalars_and_drops_statistics(
     tmp_path,
 ):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     measurements = service._normalize_measurement_result_records(
@@ -1322,7 +1412,10 @@ def test_measurement_results_dedupe_merges_duplicate_scalars_and_drops_statistic
                 "property_normalized": "hardness",
                 "result_type": "scalar",
                 "claim_scope": "current_work",
-                "value_payload": {"value": 187.7, "statement": "Microhardness is 187.7 HV."},
+                "value_payload": {
+                    "value": 187.7,
+                    "statement": "Microhardness is 187.7 HV.",
+                },
                 "unit": None,
                 "evidence_anchor_ids": ["anchor-1"],
                 "traceability_status": "direct",
@@ -1336,7 +1429,10 @@ def test_measurement_results_dedupe_merges_duplicate_scalars_and_drops_statistic
                 "property_normalized": "hardness",
                 "result_type": "scalar",
                 "claim_scope": "current_work",
-                "value_payload": {"value": 187.7, "statement": "Microhardness measured at 187.7."},
+                "value_payload": {
+                    "value": 187.7,
+                    "statement": "Microhardness measured at 187.7.",
+                },
                 "unit": "HV",
                 "evidence_anchor_ids": ["anchor-2"],
                 "traceability_status": "direct",
@@ -1452,7 +1548,7 @@ def test_paper_facts_service_reads_extraction_concurrency_from_env(
 ):
     monkeypatch.setenv("CORE_EXTRACTION_MAX_CONCURRENCY", "8")
 
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1466,7 +1562,7 @@ def test_paper_facts_service_falls_back_to_default_concurrency_for_invalid_env(
 ):
     monkeypatch.setenv("CORE_EXTRACTION_MAX_CONCURRENCY", "invalid")
 
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1480,7 +1576,7 @@ def test_paper_facts_service_falls_back_to_default_concurrency_for_invalid_env(
 
 
 def test_table_batch_payload_truncates_supporting_window_text(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1491,12 +1587,14 @@ def test_table_batch_payload_truncates_supporting_window_text(tmp_path):
             "doc_type": "experimental",
         },
         table_context=None,
-        table_rows=[{
-            "table_id": "tbl-1",
-            "row_index": 2,
-            "row_text": "Sample A | 12 MPa | as-built",
-            "heading_path": "Results > Table 1",
-        }],
+        table_rows=[
+            {
+                "table_id": "tbl-1",
+                "row_index": 2,
+                "row_text": "Sample A | 12 MPa | as-built",
+                "heading_path": "Results > Table 1",
+            }
+        ],
         row_cells_by_index={
             2: [
                 {
@@ -1525,7 +1623,7 @@ def test_table_batch_payload_truncates_supporting_window_text(tmp_path):
 
 
 def test_table_batch_payload_includes_source_table_context(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1547,13 +1645,15 @@ def test_table_batch_payload_includes_source_table_context(tmp_path):
             "table_text": "Sample | Yield strength (MPa) | Baseline\nA | 560 | as-built",
             "page": 5,
         },
-        table_rows=[{
-            "table_id": "tbl-1",
-            "row_index": 1,
-            "row_text": "A | 560 | as-built",
-            "heading_path": "Results > Mechanical Properties",
-            "page": 5,
-        }],
+        table_rows=[
+            {
+                "table_id": "tbl-1",
+                "row_index": 1,
+                "row_text": "A | 560 | as-built",
+                "heading_path": "Results > Mechanical Properties",
+                "page": 5,
+            }
+        ],
         row_cells_by_index={
             1: [
                 {
@@ -1590,7 +1690,7 @@ def test_table_batch_payload_includes_source_table_context(tmp_path):
 
 
 def test_table_batching_keeps_small_tables_whole_and_chunks_large_tables(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
 
@@ -1620,7 +1720,7 @@ def test_table_batching_keeps_small_tables_whole_and_chunks_large_tables(tmp_pat
 
 
 def test_table_batch_payload_bounds_large_table_matrix_to_target_rows(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     matrix = [["Sample", "Strength"]]
@@ -1663,7 +1763,7 @@ def test_table_batch_payload_bounds_large_table_matrix_to_target_rows(tmp_path):
 
 
 def test_table_row_binding_repairs_split_lpbf_variant_labels(tmp_path):
-    service = PaperFactsService(
+    service = _build_paper_facts_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     row_cells = [
@@ -1740,13 +1840,20 @@ def test_table_row_binding_repairs_split_lpbf_variant_labels(tmp_path):
 
 
 def test_evidence_service_normalizes_array_backed_condition_contexts(tmp_path):
-    from application.core.semantic_build.document_profile_service import DocumentProfileService
-    from application.core.semantic_build.paper_facts_service import PaperFactsService
+    from application.core.semantic_build.document_profile_service import (
+        DocumentProfileService,
+    )
 
     collection_service = build_test_collection_service(tmp_path / "collections")
-    document_profile_service = DocumentProfileService(collection_service)
-    paper_facts_service = PaperFactsService(
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    document_profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=MemoryPaperFactRepository(),
+    )
+    paper_facts_service = _build_paper_facts_service(
         collection_service=collection_service,
+        source_artifact_repository=source_repository,
         document_profile_service=document_profile_service,
     )
 
@@ -2380,8 +2487,18 @@ def test_comparison_service_lists_corpus_results_without_manifest_cache_artifact
 ):
 
     collection_service = build_test_collection_service(tmp_path / "collections")
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    paper_fact_repository = MemoryPaperFactRepository()
     comparison_service = ComparisonService(
         collection_service=collection_service,
+        document_profile_service=DocumentProfileService(
+            collection_service=collection_service,
+            source_artifact_repository=source_repository,
+            paper_fact_repository=paper_fact_repository,
+        ),
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=MemoryObjectiveRepository(),
+        comparison_repository=MemoryComparisonRepository(),
     )
 
     collection = collection_service.create_collection("Corpus Cache Collection")
@@ -2418,8 +2535,18 @@ def test_comparison_service_reflects_repository_updates_without_manifest_cache(
 ):
 
     collection_service = build_test_collection_service(tmp_path / "collections")
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    paper_fact_repository = MemoryPaperFactRepository()
     comparison_service = ComparisonService(
         collection_service=collection_service,
+        document_profile_service=DocumentProfileService(
+            collection_service=collection_service,
+            source_artifact_repository=source_repository,
+            paper_fact_repository=paper_fact_repository,
+        ),
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=MemoryObjectiveRepository(),
+        comparison_repository=MemoryComparisonRepository(),
     )
 
     collection = collection_service.create_collection("Corpus Refresh Collection")
@@ -2477,8 +2604,8 @@ def test_comparison_service_reflects_repository_updates_without_manifest_cache(
     refreshed_payload = comparison_service.list_corpus_comparable_results()
 
     assert refreshed_payload["total"] == 2
-    assert {
-        item["comparable_result_id"]
-        for item in refreshed_payload["items"]
-    } == {"cres-refresh-1", "cres-refresh-2"}
+    assert {item["comparable_result_id"] for item in refreshed_payload["items"]} == {
+        "cres-refresh-1",
+        "cres-refresh-2",
+    }
     assert not (collection_service.root_dir / "_core_cache").exists()

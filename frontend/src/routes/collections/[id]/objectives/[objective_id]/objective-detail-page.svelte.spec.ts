@@ -72,7 +72,12 @@ function objectivePayload() {
 			process_axes: ['heat treatment'],
 			property_axes: ['yield strength'],
 			comparison_intent: 'Compare as-built and heat-treated LPBF 316L.',
-			confidence: 0.91
+			confidence: 0.91,
+			status: 'ready',
+			analysis_error: null,
+			analysis_progress: null,
+			created_at: '2026-07-20T00:00:00Z',
+			updated_at: '2026-07-20T00:00:00Z'
 		},
 		objective_context: {
 			objective_id: 'obj_1',
@@ -434,9 +439,157 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			if (path === '/api/v1/collections/col_123/research-understanding/feedback') {
 				return jsonResponse({ collection_id: 'col_123', items: [] });
 			}
+			if (path === '/api/v1/collections/col_123/objectives/obj_1/experiment-plans') {
+				return jsonResponse({ collection_id: 'col_123', objective_id: 'obj_1', items: [] });
+			}
 
 			return jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected');
 		});
+	});
+
+	it('confirms a candidate and queues analysis on the same objective', async () => {
+		const payload: any = objectivePayload();
+		payload.objective.status = 'candidate';
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = init?.method ?? 'GET';
+			if (path.endsWith('/research-view')) return jsonResponse(payload);
+			if (path.endsWith('/confirm') && method === 'POST') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					objective: { ...payload.objective, status: 'confirmed' },
+					understanding: null,
+					warnings: []
+				});
+			}
+			if (path.endsWith('/analysis') && method === 'POST') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					objective: {
+						...payload.objective,
+						status: 'queued',
+						analysis_progress: { phase: 'queued', message: 'Objective analysis is queued.' }
+					},
+					understanding: null,
+					warnings: []
+				});
+			}
+			if (path.endsWith('/experiment-plans')) {
+				return jsonResponse({ collection_id: 'col_123', objective_id: 'obj_1', items: [] });
+			}
+			return jsonResponse({ collection_id: 'col_123', items: [] });
+		});
+
+		render(Page);
+		await browserPage.getByRole('button', { name: 'Confirm and analyze' }).click();
+
+		await expect.element(browserPage.getByText('Objective analysis is queued.')).toBeInTheDocument();
+		expect(requestPaths()).toContain('/api/v1/collections/col_123/objectives/obj_1/confirm');
+		expect(requestPaths()).toContain('/api/v1/collections/col_123/objectives/obj_1/analysis');
+	});
+
+	it('shows a failed analysis and retries it on the same objective', async () => {
+		const payload: any = objectivePayload();
+		payload.objective.status = 'failed';
+		payload.objective.analysis_error = 'Evidence extraction failed.';
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = init?.method ?? 'GET';
+			if (path.endsWith('/research-view')) return jsonResponse(payload);
+			if (path.endsWith('/analysis') && method === 'POST') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					objective: {
+						...payload.objective,
+						status: 'queued',
+						analysis_error: null,
+						analysis_progress: { phase: 'queued', message: 'Retry queued.' }
+					},
+					understanding: null,
+					warnings: []
+				});
+			}
+			if (path.endsWith('/experiment-plans')) {
+				return jsonResponse({ collection_id: 'col_123', objective_id: 'obj_1', items: [] });
+			}
+			return jsonResponse({ collection_id: 'col_123', items: [] });
+		});
+
+		render(Page);
+		await expect.element(browserPage.getByText('Evidence extraction failed.')).toBeInTheDocument();
+		await browserPage.getByRole('button', { name: 'Retry analysis' }).click();
+		await expect.element(browserPage.getByText('Retry queued.')).toBeInTheDocument();
+	});
+
+	it('loads and edits experiment plans through the objective route', async () => {
+		const plan = {
+			plan_id: 'plan_1',
+			collection_id: 'col_123',
+			objective_id: 'obj_1',
+			title: 'Heat-treatment validation',
+			content: 'Validate the heat-treatment finding.',
+			status: 'draft',
+			source_message_id: 'message_1',
+			source_links: [{ kind: 'evidence', label: 'Source 1', href: '/collections/col_123/documents/doc_1' }],
+			metadata: { source: 'goal_copilot', source_validity: 'current' },
+			created_by: 'expert@example.com',
+			created_at: '2026-07-20T00:00:00Z',
+			updated_at: '2026-07-20T00:00:00Z'
+		};
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = init?.method ?? 'GET';
+			if (path.endsWith('/research-view')) return jsonResponse(objectivePayload());
+			if (path.endsWith('/experiment-plans') && method === 'GET') {
+				return jsonResponse({ collection_id: 'col_123', objective_id: 'obj_1', items: [plan] });
+			}
+			if (path.endsWith('/experiment-plans/plan_1') && method === 'PATCH') {
+				return jsonResponse({ ...plan, title: 'Updated validation plan' });
+			}
+			return jsonResponse({ collection_id: 'col_123', items: [] });
+		});
+
+		render(Page);
+		await browserPage.getByRole('button', { name: 'Experiment plans' }).click();
+		await browserPage.getByLabelText('Title').fill('Updated validation plan');
+		await browserPage.getByRole('button', { name: 'Save edits' }).click();
+
+		await expect.element(browserPage.getByLabelText('Title')).toHaveValue('Updated validation plan');
+		expect(requestPaths()).toContain(
+			'/api/v1/collections/col_123/objectives/obj_1/experiment-plans/plan_1'
+		);
+	});
+
+	it('keeps an unverified Copilot plan out of ready-for-review status', async () => {
+		const plan = {
+			plan_id: 'plan_1',
+			collection_id: 'col_123',
+			objective_id: 'obj_1',
+			title: 'Heat-treatment validation',
+			content: 'Validate the heat-treatment finding.',
+			status: 'draft',
+			source_message_id: 'message_1',
+			source_links: [],
+			metadata: { source: 'goal_copilot' },
+			created_by: 'expert@example.com',
+			created_at: '2026-07-20T00:00:00Z',
+			updated_at: '2026-07-20T00:00:00Z'
+		};
+		fetchMock.mockImplementation(async (input: string | URL | Request) => {
+			const path = requestPath(input);
+			if (path.endsWith('/research-view')) return jsonResponse(objectivePayload());
+			if (path.endsWith('/experiment-plans')) {
+				return jsonResponse({ collection_id: 'col_123', objective_id: 'obj_1', items: [plan] });
+			}
+			return jsonResponse({ collection_id: 'col_123', items: [] });
+		});
+
+		render(Page);
+		await browserPage.getByRole('button', { name: 'Experiment plans' }).click();
+
+		await expect
+			.element(browserPage.getByRole('option', { name: 'Ready for review' }))
+			.toBeDisabled();
 	});
 
 	it('renders research understanding as the primary view and keeps evidence in audit', async () => {
@@ -453,15 +606,8 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: 'Research understanding' }))
 			.toBeInTheDocument();
 		await expect
-			.element(
-				browserPage
-					.getByRole('region', { name: 'Claims' })
-					.getByText('Heat treatment changes LPBF 316L tensile response.')
-			)
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('P001 · Table 2 · p.5').first()).toBeInTheDocument();
-		await expect.element(browserPage.getByText('sample: HT-SLM').first()).toBeInTheDocument();
-		await expect.element(browserPage.getByText('sample: as-built').first()).toBeInTheDocument();
+			.element(browserPage.getByRole('link', { name: 'Ask Copilot' }))
+			.toHaveAttribute('href', '/collections/col_123/assistant?objective_id=obj_1');
 		await expect
 			.element(browserPage.getByText('Evidence audit and diagnostics'))
 			.toBeInTheDocument();

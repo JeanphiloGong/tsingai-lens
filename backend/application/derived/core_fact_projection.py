@@ -10,7 +10,7 @@ from domain.core.evidence_backbone import (
     MethodFact,
     SampleVariant,
 )
-from domain.core.fact_store import CoreFactSet
+from domain.core.paper_fact import PaperFactSet
 from domain.shared.enums import TRACEABILITY_STATUS_DIRECT, TRACEABILITY_STATUS_MISSING
 
 
@@ -21,35 +21,45 @@ class CoreFactProjectionRecords:
     comparison_rows: tuple[dict[str, Any], ...]
 
 
-def build_core_fact_projection_records(facts: CoreFactSet) -> CoreFactProjectionRecords:
+def build_core_fact_projection_records(
+    paper_facts: PaperFactSet,
+    comparison_rows: tuple[ComparisonRowRecord, ...],
+) -> CoreFactProjectionRecords:
     return CoreFactProjectionRecords(
         document_profiles=tuple(
-            profile.to_record() for profile in facts.document_profiles
+            profile.to_record() for profile in paper_facts.document_profiles
         ),
-        evidence_cards=tuple(_build_evidence_card_records(facts)),
-        comparison_rows=tuple(row.to_record() for row in facts.comparison_rows),
+        evidence_cards=tuple(
+            _build_evidence_card_records(paper_facts, comparison_rows)
+        ),
+        comparison_rows=tuple(row.to_record() for row in comparison_rows),
     )
 
 
-def _build_evidence_card_records(facts: CoreFactSet) -> list[dict[str, Any]]:
+def _build_evidence_card_records(
+    paper_facts: PaperFactSet,
+    comparison_rows: tuple[ComparisonRowRecord, ...],
+) -> list[dict[str, Any]]:
     anchor_lookup = {
         anchor.anchor_id: anchor
-        for anchor in facts.evidence_anchors
+        for anchor in paper_facts.evidence_anchors
         if anchor.anchor_id
     }
     variant_lookup = {
         variant.variant_id: variant
-        for variant in facts.sample_variants
+        for variant in paper_facts.sample_variants
         if variant.variant_id
     }
     document_material_lookup: dict[str, dict[str, Any]] = {}
-    for variant in facts.sample_variants:
+    for variant in paper_facts.sample_variants:
         if not variant.document_id or variant.document_id in document_material_lookup:
             continue
-        document_material_lookup[variant.document_id] = dict(variant.host_material_system)
+        document_material_lookup[variant.document_id] = dict(
+            variant.host_material_system
+        )
 
     records: dict[str, dict[str, Any]] = {}
-    for method in facts.method_facts:
+    for method in paper_facts.method_facts:
         evidence_id = _method_fact_evidence_id(method)
         if not evidence_id:
             continue
@@ -74,7 +84,7 @@ def _build_evidence_card_records(facts: CoreFactSet) -> list[dict[str, Any]]:
             ),
         }
 
-    for result in facts.measurement_results:
+    for result in paper_facts.measurement_results:
         evidence_id = _measurement_result_evidence_id(result)
         if not evidence_id:
             continue
@@ -97,15 +107,18 @@ def _build_evidence_card_records(facts: CoreFactSet) -> list[dict[str, Any]]:
                 "baseline_id": result.baseline_id,
             },
             "confidence": 0.0,
-            "traceability_status": result.traceability_status or TRACEABILITY_STATUS_MISSING,
+            "traceability_status": result.traceability_status
+            or TRACEABILITY_STATUS_MISSING,
         }
 
-    for row in facts.comparison_rows:
+    for row in comparison_rows:
         for evidence_id in row.supporting_evidence_ids:
             if not evidence_id or evidence_id in records:
                 continue
             anchors = _anchor_records(row.supporting_anchor_ids, anchor_lookup)
-            records[evidence_id] = _fallback_evidence_card_record(row, evidence_id, anchors)
+            records[evidence_id] = _fallback_evidence_card_record(
+                row, evidence_id, anchors
+            )
 
     return list(records.values())
 
@@ -159,7 +172,9 @@ def _measurement_claim_text(
         if text:
             return text
     value = result.value_payload.get("value")
-    variant_label = variant.variant_label if variant and variant.variant_label else "sample"
+    variant_label = (
+        variant.variant_label if variant and variant.variant_label else "sample"
+    )
     property_name = result.property_normalized or "property"
     if value is not None and _text(value):
         unit = f" {result.unit}" if result.unit else ""
@@ -178,7 +193,9 @@ def _fallback_evidence_card_record(
         "collection_id": row.collection_id,
         "claim_text": row.result_summary or evidence_id,
         "claim_type": "property",
-        "evidence_source_type": _evidence_source_type(anchors, row.result_source_type or "text"),
+        "evidence_source_type": _evidence_source_type(
+            anchors, row.result_source_type or "text"
+        ),
         "evidence_anchors": anchors,
         "material_system": {"normalized": row.material_system_normalized},
         "condition_context": {

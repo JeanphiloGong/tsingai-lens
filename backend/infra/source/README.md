@@ -8,9 +8,11 @@ and cite.
 
 The Source business records and shared structure logic live in
 `backend/domain/source/`. Infrastructure should parse input files, build those
-domain records, and serialize them into the persisted artifact tables.
-The SQLite Source artifact repository is the structured persistence path; local
-exports and traces are derived from that repository.
+domain records, and return one `SourceArtifactBundle` to the application build
+pipeline. The build pipeline persists document structure to build-versioned
+PostgreSQL rows, writes extracted figure bytes through the existing object
+store, and persists figure metadata plus deterministic references under the
+same pending build before activation.
 
 Source does not extract scientific facts. It does not decide materials,
 samples, methods, measurements, baselines, comparisons, or report content.
@@ -28,8 +30,10 @@ create_source_artifacts
 ```
 
 `load_input_documents` scans the configured input storage and writes a source
-inventory. `create_source_artifacts` reads that inventory, parses each PDF or
-text document, and writes the final Source handoff artifacts.
+inventory. `create_source_artifacts` reads that inventory and parses each PDF
+or text document. It does not construct a repository or persist authoritative
+rows; the application Source node persists its returned bundle with the pending
+collection `build_id`.
 
 After Source finishes, `application/source` starts Core post-processing:
 
@@ -48,7 +52,7 @@ comparison rows
 
 ## Source Artifacts
 
-The final Source artifact family persisted in the Source repository is:
+The final Source artifact family is:
 
 - `documents`
   Document records, source metadata, full text, and text-unit ids.
@@ -59,8 +63,8 @@ The final Source artifact family persisted in the Source repository is:
   character range. Text contained within a figure region is represented by the
   figure artifact instead of being duplicated as body blocks.
 - `figures`
-  Figure rows with captions, heading context, page, bbox, image asset paths,
-  and parser metadata.
+  Figure rows with captions, heading context, page, bbox, immutable object key,
+  SHA-256, MIME type, dimensions, byte size, and parser metadata.
 - `tables`
   The primary complete-table structure with caption, heading, page, bbox,
   headers, `table_matrix`, Markdown, and plain text.
@@ -70,7 +74,8 @@ The final Source artifact family persisted in the Source repository is:
   Cell-level evidence anchors with header paths, unit hints, row and column
   indexes, page, and bbox.
 - `image_assets/`
-  Extracted figure crops referenced by Source figure rows.
+  Parser scratch crops handed to the application pipeline. Product reads use
+  the registered object key and never depend on this directory.
 
 `tables` is the primary table context. `table_rows` and `table_cells` support
 anchoring, UI drilldown, and debugging; they are not replacements for the

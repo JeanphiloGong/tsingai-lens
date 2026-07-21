@@ -12,13 +12,13 @@ from uuid import uuid4
 
 
 DEFAULT_COLLECTION_ID = "col_0cc5013fdb3c"
-DEFAULT_GOAL_IDS = (
-    "goal_0914003ad572",
-    "goal_1a7a26d850b9",
-    "goal_399171646354",
-    "goal_061c9c049e69",
-    "goal_6bf7d2c1030e",
-    "goal_3037e425673a",
+DEFAULT_OBJECTIVE_IDS = (
+    "obj_how-do-build-platform-preheating-temperature-and-build-platform-preheati_a13773ac",
+    "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba",
+    "obj_how-do-laser-power-scanning-speed-energy-density-porosity-level-and-pore_f18da72e",
+    "obj_how-do-scan-strategy-rotation-angles-and-build-orientation-angles-influe_2248ccb8",
+    "obj_how-do-scanning-strategy-scanning-speed-and-energy-density-affect-yield_6d508ef8",
+    "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419",
 )
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 EXPERT_NOTE_PROMPTS = {
@@ -71,10 +71,10 @@ def parse_args() -> argparse.Namespace:
         help="Collection id to prepare.",
     )
     parser.add_argument(
-        "--goal-id",
+        "--objective-id",
         action="append",
-        dest="goal_ids",
-        help="Goal id to prepare. May repeat. Defaults to the local 6-goal 316L set.",
+        dest="objective_ids",
+        help="Objective id to prepare. May repeat. Defaults to the local 316L set.",
     )
     parser.add_argument(
         "--api-base-url",
@@ -98,7 +98,7 @@ def main() -> None:
     args = parse_args()
     result = prepare_goal_review_workspace(
         collection_id=args.collection_id,
-        goal_ids=tuple(args.goal_ids or DEFAULT_GOAL_IDS),
+        objective_ids=tuple(args.objective_ids or DEFAULT_OBJECTIVE_IDS),
         api_base_url=args.api_base_url,
         output_dir=(
             Path(args.output_dir)
@@ -114,7 +114,7 @@ def main() -> None:
 def prepare_goal_review_workspace(
     *,
     collection_id: str,
-    goal_ids: tuple[str, ...] = DEFAULT_GOAL_IDS,
+    objective_ids: tuple[str, ...] = DEFAULT_OBJECTIVE_IDS,
     output_dir: Path,
     api_base_url: str | None = None,
 ) -> dict[str, Any]:
@@ -122,7 +122,7 @@ def prepare_goal_review_workspace(
     dataset_module = _load_dataset_quality_module()
     summary = dataset_module.check_goal_dataset_quality(
         collection_id=collection_id,
-        goal_ids=goal_ids,
+        objective_ids=objective_ids,
         api_base_url=api_base_url,
         include_review_packet=True,
         include_training_export=True,
@@ -131,7 +131,7 @@ def prepare_goal_review_workspace(
     _enrich_goal_questions(
         summary,
         collection_id=collection_id,
-        goal_ids=goal_ids,
+        objective_ids=objective_ids,
         api_base_url=api_base_url,
     )
     files = _write_workspace_files(
@@ -363,9 +363,9 @@ def render_workspace_readme(
 def render_review_commands(summary: dict[str, Any]) -> str:
     collection_id = _text(summary.get("collection_id")) or DEFAULT_COLLECTION_ID
     goal_args = " ".join(
-        f"--goal-id {_shell_quote(_text(goal.get('goal_id')))}"
+        f"--objective-id {_shell_quote(_text(goal.get('objective_id')))}"
         for goal in _mapping_list(summary.get("goals"))
-        if _text(goal.get("goal_id"))
+        if _text(goal.get("objective_id"))
     )
     prepare_goal_args = f" {goal_args}" if goal_args else ""
     return "\n".join(
@@ -464,12 +464,12 @@ def render_review_dashboard(summary: dict[str, Any]) -> str:
         candidates = _mapping_list(packet.get("candidates"))
         if not candidates:
             continue
-        goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        objective_id = _text(packet.get("objective_id")) or _text(goal.get("objective_id"))
         question = _text(goal.get("question"))
         review_url = _text(packet.get("review_url"))
         lines.extend(
             [
-                f"### {_goal_heading(goal_id, question)}",
+                f"### {_goal_heading(objective_id, question)}",
                 "",
                 f"- Candidates: {len(candidates)}",
                 f"- Open review queue: {review_url or 'n/a'}",
@@ -570,7 +570,7 @@ def render_expert_decision_board(summary: dict[str, Any]) -> str:
         "corrected_evidence_ref_ids",
         "collection_id",
         "priority",
-        "goal_id",
+        "objective_id",
         "goal",
         "finding_id",
         "finding",
@@ -589,7 +589,7 @@ def render_expert_decision_board(summary: dict[str, Any]) -> str:
     rows = [_tsv_row(header)]
     for row in _ranked_review_candidates(summary):
         candidate = _mapping(row.get("candidate"))
-        goal_id = _text(row.get("goal_id"))
+        objective_id = _text(row.get("objective_id"))
         suggested = _mapping(candidate.get("suggested_target"))
         suggested_reviewer = _text(suggested.get("reviewer"))
         normalized_reviewer = suggested_reviewer.lower()
@@ -660,7 +660,7 @@ def render_expert_decision_board(summary: dict[str, Any]) -> str:
                     "",
                     _text(summary.get("collection_id")),
                     _text(row.get("priority")),
-                    goal_id,
+                    objective_id,
                     _text(row.get("goal")),
                     _text(candidate.get("finding_id")),
                     _text(candidate.get("statement")),
@@ -709,12 +709,12 @@ def render_review_checklist(summary: dict[str, Any]) -> str:
         if not candidates:
             continue
         has_candidates = True
-        goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        objective_id = _text(packet.get("objective_id")) or _text(goal.get("objective_id"))
         question = _text(goal.get("question"))
         review_url = _text(packet.get("review_url"))
         lines.extend(
             [
-                f"### {_goal_heading(goal_id, question)}",
+                f"### {_goal_heading(objective_id, question)}",
                 "",
                 f"- Open goal review: {_markdown_link('open goal', review_url)}",
                 (
@@ -824,14 +824,14 @@ def render_dataset_readiness_report(summary: dict[str, Any]) -> str:
         "|---|---:|---:|---:|---:|---|",
     ]
     for goal in goals:
-        goal_id = _text(goal.get("goal_id"))
+        objective_id = _text(goal.get("objective_id"))
         question = _text(goal.get("question"))
         next_action = _text(_mapping(goal.get("next_review_action")).get("label"))
         if not next_action:
             next_action = _readiness_next_action(goal)
         lines.append(
             "| "
-            f"{_markdown_cell(_goal_heading(goal_id, question), 120)} | "
+            f"{_markdown_cell(_goal_heading(objective_id, question), 120)} | "
             f"{int(goal.get('training_ready_count') or 0)} | "
             f"{int(goal.get('training_message_ready_count') or 0)} | "
             f"{int(goal.get('protocol_ready_count') or 0)} | "
@@ -863,17 +863,17 @@ def render_expert_satisfaction_report(summary: dict[str, Any]) -> str:
     goals = _mapping_list(summary.get("goals"))
     review_candidate_count = _sum_goal_int(summary, "review_candidate_count")
     missing_training = [
-        _text(goal.get("goal_id"))
+        _text(goal.get("objective_id"))
         for goal in goals
         if int(goal.get("training_ready_count") or 0) == 0
     ]
     missing_messages = [
-        _text(goal.get("goal_id"))
+        _text(goal.get("objective_id"))
         for goal in goals
         if int(goal.get("training_message_ready_count") or 0) == 0
     ]
     missing_protocol = [
-        _text(goal.get("goal_id"))
+        _text(goal.get("objective_id"))
         for goal in goals
         if int(goal.get("protocol_ready_count") or 0) == 0
     ]
@@ -1139,8 +1139,8 @@ def _load_dataset_quality_module():
 
 def _load_findings_projection_module():
     return _load_sibling_module(
-        "check_goal_findings_projection.py",
-        "check_goal_findings_projection",
+        "check_objective_findings_projection.py",
+        "check_objective_findings_projection",
     )
 
 
@@ -1162,26 +1162,30 @@ def _enrich_goal_questions(
     summary: dict[str, Any],
     *,
     collection_id: str,
-    goal_ids: tuple[str, ...],
+    objective_ids: tuple[str, ...],
     api_base_url: str | None,
 ) -> None:
     try:
         findings_module = _load_findings_projection_module()
-        findings_summary = findings_module.check_goal_findings_projection(
+        findings_summary = findings_module.check_objective_findings_projection(
             collection_id=collection_id,
-            goal_ids=goal_ids,
+            objective_ids=objective_ids,
             api_base_url=api_base_url,
         )
     except Exception as exc:  # noqa: BLE001
         summary["goal_question_warning"] = f"goal question lookup failed: {exc}"
         return
+    questions_by_objective = {
+        _text(objective.get("objective_id")): _text(objective.get("question"))
+        for objective in _mapping_list(findings_summary.get("objectives"))
+    }
     questions = {
-        _text(goal.get("goal_id")): _text(goal.get("question"))
-        for goal in _mapping_list(findings_summary.get("goals"))
+        objective_id: questions_by_objective.get(objective_id, "")
+        for objective_id in objective_ids
     }
     for goal in _mapping_list(summary.get("goals")):
-        goal_id = _text(goal.get("goal_id"))
-        question = questions.get(goal_id)
+        objective_id = _text(goal.get("objective_id"))
+        question = questions.get(objective_id)
         if question:
             goal["question"] = question
 
@@ -1245,7 +1249,7 @@ def _ranked_review_candidates(summary: dict[str, Any]) -> list[dict[str, Any]]:
     rows = []
     for goal in _mapping_list(summary.get("goals")):
         packet = _mapping(goal.get("review_packet"))
-        goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        objective_id = _text(packet.get("objective_id")) or _text(goal.get("objective_id"))
         question = _text(goal.get("question"))
         review_url = _text(packet.get("review_url"))
         for candidate in _mapping_list(packet.get("candidates")):
@@ -1255,8 +1259,8 @@ def _ranked_review_candidates(summary: dict[str, Any]) -> list[dict[str, Any]]:
                 {
                     "rank": f"{rank:02d}",
                     "priority": priority,
-                    "goal_id": goal_id,
-                    "goal": _goal_heading(goal_id, question),
+                    "objective_id": objective_id,
+                    "goal": _goal_heading(objective_id, question),
                     "finding": _text(candidate.get("statement")),
                     "action": _text(candidate.get("recommended_action")) or "review",
                     "evidence": _evidence_label(candidate),
@@ -1272,7 +1276,7 @@ def _review_unlock_rows(summary: dict[str, Any]) -> list[dict[str, str]]:
     rows = []
     for goal in _mapping_list(summary.get("goals")):
         packet = _mapping(goal.get("review_packet"))
-        goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        objective_id = _text(packet.get("objective_id")) or _text(goal.get("objective_id"))
         question = _text(goal.get("question"))
         review_url = _text(packet.get("review_url"))
         for candidate in _mapping_list(packet.get("candidates")):
@@ -1297,7 +1301,7 @@ def _review_unlock_rows(summary: dict[str, Any]) -> list[dict[str, str]]:
             open_url = _text(candidate.get("open_url")) or review_url
             rows.append(
                 {
-                    "goal": _goal_heading(goal_id, question),
+                    "goal": _goal_heading(objective_id, question),
                     "finding": _text(candidate.get("statement")),
                     "decision": _text(candidate.get("recommended_action")) or "review",
                     "accept_allowed": "yes" if accept_allowed else "no",
@@ -1517,10 +1521,10 @@ def _table_row_text(row: dict[str, Any], columns: list[str]) -> str:
     )
 
 
-def _goal_heading(goal_id: str, question: str) -> str:
+def _goal_heading(objective_id: str, question: str) -> str:
     if question:
-        return f"{question} ({goal_id})"
-    return goal_id or "n/a"
+        return f"{question} ({objective_id})"
+    return objective_id or "n/a"
 
 
 def _markdown_cell(value: str, limit: int) -> str:

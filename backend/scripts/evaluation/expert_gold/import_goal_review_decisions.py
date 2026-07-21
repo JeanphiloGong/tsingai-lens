@@ -134,20 +134,20 @@ def render_text_summary(summary: dict) -> str:
             for error in errors[:5]
             if isinstance(error, dict)
         )
-    decision_progress = summary.get("decision_progress_by_goal")
+    decision_progress = summary.get("decision_progress_by_objective")
     if isinstance(decision_progress, list) and decision_progress:
         lines.append("Decision progress by goal:")
         for goal in decision_progress:
             if isinstance(goal, dict):
                 lines.extend(_render_decision_progress(goal))
-    affected_goals = summary.get("affected_goals")
-    if isinstance(affected_goals, list) and affected_goals:
-        lines.append("Affected goals:")
-        for goal in affected_goals:
+    affected_objectives = summary.get("affected_objectives")
+    if isinstance(affected_objectives, list) and affected_objectives:
+        lines.append("Affected objectives:")
+        for goal in affected_objectives:
             if isinstance(goal, dict):
                 lines.extend(_render_goal_summary(goal))
     else:
-        lines.append("Affected goals: none")
+        lines.append("Affected objectives: none")
     readiness = summary.get("readiness_summary")
     if isinstance(readiness, dict) and readiness:
         lines.extend(_render_readiness_summary(readiness))
@@ -162,10 +162,10 @@ def _render_readiness_summary(readiness: dict) -> list[str]:
         "Readiness after import:",
         (
             "- "
-            f"goals={readiness.get('goal_count', 0)} "
-            f"training_ready_goals={readiness.get('projected_training_ready_goal_count', 0)} "
-            f"message_ready_goals={readiness.get('projected_training_message_goal_count', 0)} "
-            f"protocol_ready_goals={readiness.get('projected_protocol_ready_goal_count', 0)}"
+            f"objectives={readiness.get('objective_count', 0)} "
+            f"training_ready_objectives={readiness.get('projected_training_ready_objective_count', 0)} "
+            f"message_ready_objectives={readiness.get('projected_training_message_objective_count', 0)} "
+            f"protocol_ready_objectives={readiness.get('projected_protocol_ready_objective_count', 0)}"
         ),
         (
             "- "
@@ -190,7 +190,7 @@ def _render_review_scope_gate(gate: dict) -> list[str]:
         ),
         (
             "- "
-            f"scope={gate.get('scope', 'reviewed_goals')} "
+            f"scope={gate.get('scope', 'reviewed_objectives')} "
             f"actionable={gate.get('actionable_count', 0)} "
             f"skipped={gate.get('skipped_count', 0)} "
             f"training_ready={bool(gate.get('ready_for_training_export'))} "
@@ -209,9 +209,9 @@ def _render_review_scope_gate(gate: dict) -> list[str]:
 
 def _render_decision_progress(goal: dict) -> list[str]:
     collection_id = goal.get("collection_id", "")
-    goal_id = goal.get("goal_id", "")
+    objective_id = goal.get("objective_id", "")
     lines = [
-        f"- {collection_id}/{goal_id}",
+        f"- {collection_id}/{objective_id}",
         (
             "  decisions: "
             f"total={goal.get('total_rows', 0)} "
@@ -263,9 +263,9 @@ def _render_next_review_work_order(work_order: dict) -> list[str]:
 
 def _render_goal_summary(goal: dict) -> list[str]:
     collection_id = goal.get("collection_id", "")
-    goal_id = goal.get("goal_id", "")
+    objective_id = goal.get("objective_id", "")
     lines = [
-        f"- {collection_id}/{goal_id}",
+        f"- {collection_id}/{objective_id}",
         (
             "  now: "
             f"training_ready={goal.get('training_ready_count', 0)} "

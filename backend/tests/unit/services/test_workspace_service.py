@@ -2,22 +2,31 @@ from __future__ import annotations
 
 import pandas as pd
 
-from application.core.semantic_build.document_profile_service import DocumentProfileService
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
 from application.core.workspace_overview_service import WorkspaceService
 from tests.support.collection_service import build_test_collection_service
 from application.source.task_service import TaskService
 from domain.core import (
     CollectionComparableResult,
     ComparableResult,
-    CoreFactSet,
+    ComparisonFactSet,
     DocumentProfile,
     EvidenceAnchor,
     MeasurementResult,
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
 )
+from domain.core.paper_fact import PaperFactSet
 from domain.source import SourceArtifactSet
 from infra.persistence.memory import MemoryBuildRepository
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from infra.source.runtime.source_evidence import build_blocks
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
+from tests.support.source_artifact_repository import MemorySourceArtifactRepository
 
 
 def _write_source_artifacts(
@@ -28,6 +37,7 @@ def _write_source_artifacts(
 ) -> None:
     profile_service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
+        "build_test",
         SourceArtifactSet.from_records(
             documents=documents.to_dict(orient="records"),
             text_units=text_units.to_dict(orient="records"),
@@ -39,11 +49,30 @@ def _write_source_artifacts(
 def test_workspace_service_builds_collection_overview(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
-    workspace_service = WorkspaceService(collection_service, task_service)
+    paper_fact_repository = MemoryPaperFactRepository()
+    comparison_repository = MemoryComparisonRepository()
+    objective_repository = MemoryObjectiveRepository()
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+    )
+    workspace_service = WorkspaceService(
+        collection_service,
+        task_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        comparison_repository=comparison_repository,
+        document_profile_service=profile_service,
+    )
 
     collection = collection_service.create_collection("Composite Workspace")
     collection_id = collection["collection_id"]
-    collection_service.add_file(collection_id, "paper.txt", b"Experimental Section\nMix and anneal.")
+    collection_service.add_file(
+        collection_id, "paper.txt", b"Experimental Section\nMix and anneal."
+    )
 
     task_service.create_task(collection_id, "build")
     task_service.update_task(
@@ -66,10 +95,22 @@ def test_workspace_service_builds_collection_overview(tmp_path):
 def test_workspace_service_includes_document_summary_and_links(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
-    profile_service = DocumentProfileService(collection_service)
+    source_repository = MemorySourceArtifactRepository()
+    paper_fact_repository = MemoryPaperFactRepository()
+    comparison_repository = MemoryComparisonRepository()
+    objective_repository = MemoryObjectiveRepository()
+    profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+    )
     workspace_service = WorkspaceService(
         collection_service,
         task_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        comparison_repository=comparison_repository,
         document_profile_service=profile_service,
     )
     collection = collection_service.create_collection("Profiled Workspace")
@@ -109,7 +150,7 @@ def test_workspace_service_includes_document_summary_and_links(tmp_path):
         ]
     )
     _write_source_artifacts(profile_service, collection_id, documents, text_units)
-    profile_service.build_document_profiles(collection_id)
+    profile_service.build_document_profiles(collection_id, build_id="build_test")
 
     overview = workspace_service.get_workspace_overview(collection_id)
 
@@ -123,8 +164,13 @@ def test_workspace_service_includes_document_summary_and_links(tmp_path):
     assert overview["artifacts"]["blocks_ready"] is True
     assert overview["document_summary"]["total_documents"] == 1
     assert overview["document_summary"]["by_doc_type"]["experimental"] == 1
-    assert overview["links"]["documents"] == f"/api/v1/collections/{collection_id}/documents/profiles"
-    assert overview["links"]["results"] == f"/api/v1/collections/{collection_id}/results"
+    assert (
+        overview["links"]["documents"]
+        == f"/api/v1/collections/{collection_id}/documents/profiles"
+    )
+    assert (
+        overview["links"]["results"] == f"/api/v1/collections/{collection_id}/results"
+    )
     assert overview["capabilities"]["can_view_results"] is False
     assert overview["capabilities"]["can_view_comparable_results"] is False
 
@@ -132,7 +178,24 @@ def test_workspace_service_includes_document_summary_and_links(tmp_path):
 def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
-    workspace_service = WorkspaceService(collection_service, task_service)
+    paper_fact_repository = MemoryPaperFactRepository()
+    comparison_repository = MemoryComparisonRepository()
+    objective_repository = MemoryObjectiveRepository()
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+    )
+    workspace_service = WorkspaceService(
+        collection_service,
+        task_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        comparison_repository=comparison_repository,
+        document_profile_service=profile_service,
+    )
     collection = collection_service.create_collection("Semantic Graph Workspace")
     collection_id = collection["collection_id"]
     collection_service.add_file(
@@ -140,23 +203,27 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
         "paper.txt",
         b"Experimental Section\nConductivity increased after annealing.",
     )
-    workspace_service.core_fact_repository.replace_collection_facts(
+    paper_fact_repository.replace_document_profiles(
         collection_id,
-        CoreFactSet(
-            paper_facts_ready=True,
-            comparison_artifacts_ready=True,
-            document_profiles=(
-                DocumentProfile.from_mapping(
-                    {
-                        "document_id": "paper-1",
-                        "collection_id": collection_id,
-                        "title": "Semantic Graph Paper",
-                        "source_filename": "paper.txt",
-                        "doc_type": "experimental",
-                        "confidence": 0.9,
-                    }
-                ),
+        "build_test",
+        (
+            DocumentProfile.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "collection_id": collection_id,
+                    "title": "Semantic Graph Paper",
+                    "source_filename": "paper.txt",
+                    "doc_type": "experimental",
+                    "confidence": 0.9,
+                }
             ),
+        ),
+    )
+    paper_fact_repository.replace_paper_facts(
+        collection_id,
+        "build_test",
+        PaperFactSet(
+            paper_facts_ready=True,
             evidence_anchors=(
                 EvidenceAnchor.from_mapping(
                     {
@@ -184,28 +251,34 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
                     }
                 ),
             ),
-            comparable_results=(
-                ComparableResult.from_mapping(
-                    {
-                        "comparable_result_id": "cres-1",
-                        "source_result_id": "res-1",
-                        "source_document_id": "paper-1",
-                        "normalized_context": {
-                            "material_system_normalized": "oxide cathode",
-                            "process_normalized": "700 C",
-                            "baseline_normalized": "as-prepared",
-                            "test_condition_normalized": "EIS",
-                        },
-                        "value": {
-                            "property_normalized": "conductivity",
-                            "result_type": "scalar",
-                            "numeric_value": 12.0,
-                            "unit": "mS/cm",
-                            "summary": "12 mS/cm",
-                        },
-                    }
-                ),
-            ),
+        ),
+    )
+    comparable_result = ComparableResult.from_mapping(
+        {
+            "comparable_result_id": "cres-1",
+            "source_result_id": "res-1",
+            "source_document_id": "paper-1",
+            "normalized_context": {
+                "material_system_normalized": "oxide cathode",
+                "process_normalized": "700 C",
+                "baseline_normalized": "as-prepared",
+                "test_condition_normalized": "EIS",
+            },
+            "value": {
+                "property_normalized": "conductivity",
+                "result_type": "scalar",
+                "numeric_value": 12.0,
+                "unit": "mS/cm",
+                "summary": "12 mS/cm",
+            },
+        }
+    )
+    comparison_repository.replace(
+        collection_id,
+        "build_test",
+        ComparisonFactSet(
+            comparison_artifacts_ready=True,
+            comparable_results=(comparable_result,),
             collection_comparable_results=(
                 CollectionComparableResult.from_mapping(
                     {
@@ -228,7 +301,7 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
     assert overview["workflow"]["results"]["status"] == "ready"
     assert overview["workflow"]["comparisons"]["status"] == "ready"
     assert overview["artifacts"]["comparison_rows_generated"] is True
-    assert overview["artifacts"]["comparison_rows_ready"] is False
+    assert overview["artifacts"]["comparison_rows_ready"] is True
     assert overview["artifacts"]["graph_generated"] is True
     assert overview["artifacts"]["graph_ready"] is True
     assert overview["capabilities"]["can_view_graph"] is True
@@ -236,10 +309,77 @@ def test_workspace_service_marks_comparisons_ready_from_core_repository(tmp_path
     assert overview["capabilities"]["can_view_comparable_results"] is True
 
 
+def test_workspace_service_keeps_excluded_comparison_rows_not_ready():
+    collection_id = "col-excluded"
+    comparison_repository = MemoryComparisonRepository()
+    comparison_repository.replace(
+        collection_id,
+        "build_test",
+        ComparisonFactSet(
+            comparison_artifacts_ready=True,
+            comparable_results=(
+                ComparableResult.from_mapping(
+                    {
+                        "comparable_result_id": "cres-excluded",
+                        "source_result_id": "result-1",
+                        "source_document_id": "paper-1",
+                    }
+                ),
+            ),
+            collection_comparable_results=(
+                CollectionComparableResult.from_mapping(
+                    {
+                        "collection_id": collection_id,
+                        "comparable_result_id": "cres-excluded",
+                        "included": False,
+                    }
+                ),
+            ),
+        ),
+    )
+    source_repository = MemorySourceArtifactRepository()
+    workspace_service = WorkspaceService(
+        collection_service=None,  # type: ignore[arg-type]
+        task_service=None,  # type: ignore[arg-type]
+        source_artifact_repository=source_repository,
+        paper_fact_repository=MemoryPaperFactRepository(),
+        objective_repository=MemoryObjectiveRepository(),
+        comparison_repository=comparison_repository,
+        document_profile_service=None,  # type: ignore[arg-type]
+    )
+
+    artifacts = workspace_service._build_artifacts(
+        collection_id,
+        {"updated_at": "2026-07-20T00:00:00+00:00"},
+    )
+
+    assert artifacts["comparison_rows_generated"] is True
+    assert artifacts["comparable_results_ready"] is True
+    assert artifacts["collection_comparable_results_ready"] is True
+    assert artifacts["comparison_rows_ready"] is False
+
+
 def test_workspace_service_marks_objective_units_as_research_view_ready(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     task_service = TaskService(MemoryBuildRepository())
-    workspace_service = WorkspaceService(collection_service, task_service)
+    paper_fact_repository = MemoryPaperFactRepository()
+    comparison_repository = MemoryComparisonRepository()
+    objective_repository = MemoryObjectiveRepository()
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+    )
+    workspace_service = WorkspaceService(
+        collection_service,
+        task_service,
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        comparison_repository=comparison_repository,
+        document_profile_service=profile_service,
+    )
     collection = collection_service.create_collection("Objective Workspace")
     collection_id = collection["collection_id"]
     collection_service.add_file(
@@ -273,26 +413,23 @@ def test_workspace_service_marks_objective_units_as_research_view_ready(tmp_path
                 "property_normalized": "corrosion current density",
                 "value_payload": {"value": 1.2},
                 "unit": "uA/cm2",
-                "source_refs": [
-                    {"source_kind": "table", "source_ref": "table-1"}
-                ],
+                "source_refs": [{"source_kind": "table", "source_ref": "table-1"}],
                 "resolution_status": "resolved",
             }
         ),
     )
-    workspace_service.core_fact_repository.replace_collection_document_profiles(
+    paper_fact_repository.replace_document_profiles(
         collection_id,
+        "build_test",
         document_profiles,
     )
-    workspace_service.core_fact_repository.replace_collection_research_objectives(
+    objective_repository.replace(
         collection_id,
-        paper_skims=(),
-        research_objectives=(),
-        objective_contexts=(),
-        objective_paper_frames=(),
-        objective_evidence_routes=(),
-        objective_evidence_units=objective_evidence_units,
-        objective_logic_chains=(),
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            objective_evidence_units=objective_evidence_units,
+        ),
     )
 
     overview = workspace_service.get_workspace_overview(collection_id)

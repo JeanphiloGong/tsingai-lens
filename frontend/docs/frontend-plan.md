@@ -21,7 +21,12 @@
 - 集合详情：`GET /api/v1/collections/{collection_id}`
 - 集合文件：`GET|POST /api/v1/collections/{collection_id}/files`
 - 工作区概览：`GET /api/v1/collections/{collection_id}/workspace`
-- 研究目标工作区：`GET /api/v1/collections/{collection_id}/objectives`、`GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view`
+- 研究目标工作区：`GET /api/v1/collections/{collection_id}/objectives`、
+  `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/confirm`、
+  `GET|POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`、
+  `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view`、
+  `GET|POST /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans`、
+  `PATCH /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}`
 - 启动构建任务：`POST /api/v1/collections/{collection_id}/tasks/build`
 - 查询任务与产物：`GET /api/v1/collections/{collection_id}/tasks`、`GET /api/v1/tasks/{task_id}`、`GET /api/v1/tasks/{task_id}/artifacts`
 - 结果与文档证据链：`GET /api/v1/collections/{collection_id}/results/{result_id}`、`GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics?include_grouped_projections=true`
@@ -47,12 +52,13 @@
   `/collections/{collection_id}/materials/{material_id}` 材料档案内的 material-scoped graph 承载；集合图谱只提供进入材料档案的导航入口
 - `/collections/{collection_id}/objectives` 和
   `/collections/{collection_id}/objectives/{objective_id}` 是 objective-first
-  工作区入口；它读取 objective list 与 objective research-view，不复用
-  material endpoint 返回目标数据
+  工作区入口；确认、分析、Findings 复核、数据集、Assistant focus 和实验方案都使用同一个
+  `objective_id`，不维护第二套持久化目标身份
 - `/collections/{collection_id}/assistant` 使用同源 `goal-sessions` API，是绑定当前
   collection 的研究助手入口；它必须显示 `collection_grounded`、
   `collection_limited`、`general_fallback`、`general_only` 来源边界，并把材料详情页传入的
-  `material_id` 作为显式 focus context
+  `material_id` 或 Objective 详情页传入的 `objective_id` 作为显式 focus context；
+  goal-session 是对话容器，持久化研究焦点只使用 `focused_objective_id`
 - 报告结果不再是当前浏览器主流程；frontend 不再维护 reports API 客户端或工作区占位入口
 - 遗留调试页 `/upload`、`/index`、`/configs`、`/export` 已从前端路由中移除；
   产品入口统一收敛到 collection workspace 和 `/api/docs`

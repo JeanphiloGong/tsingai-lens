@@ -15,6 +15,7 @@ from application.core.semantic_build.research_objective_service import (
     ResearchObjectivesNotReadyError,
 )
 from controllers.core import research_objectives as objective_controller
+from domain.core import ResearchObjective
 
 
 def _objective_list_payload(collection_id: str = "col-1") -> dict:
@@ -37,7 +38,14 @@ def _objective_list_payload(collection_id: str = "col-1") -> dict:
                 "property_axes": ["corrosion resistance"],
                 "comparison_intent": "Compare as-built and heat-treated samples.",
                 "confidence": 0.87,
+                "status": "confirmed",
+                "analysis_error": None,
+                "analysis_progress": None,
                 "state": "partial",
+                "review_summary": {
+                    "primary_finding_count": 0,
+                    "review_candidate_count": 0,
+                },
                 "paper_frame_count": 2,
                 "evidence_route_count": 0,
                 "evidence_unit_count": 0,
@@ -53,6 +61,10 @@ def _objective_detail_payload(collection_id: str = "col-1") -> dict:
         "collection_id": collection_id,
         "state": "partial",
         "objective": _objective_list_payload(collection_id)["objectives"][0],
+        "review_summary": {
+            "primary_finding_count": 0,
+            "review_candidate_count": 0,
+        },
         "objective_context": {
             "objective_id": "obj-1",
             "question": "How does heat treatment affect corrosion resistance of LPBF 316L?",
@@ -111,6 +123,55 @@ class FakeObjectiveService:
         return _objective_detail_payload(collection_id)
 
 
+class FakeObjectiveAnalysisService:
+    def __init__(self) -> None:
+        self.objective = ResearchObjective.from_mapping(
+            {
+                "objective_id": "obj-1",
+                "question": "How does heat treatment affect corrosion resistance?",
+                "status": "confirmed",
+                "source_build_id": "build-1",
+            }
+        )
+
+    def confirm_objective(self, collection_id: str, objective_id: str) -> dict:
+        return self._payload(collection_id)
+
+    def queue_analysis(self, collection_id: str, objective_id: str) -> dict:
+        self.objective = ResearchObjective.from_mapping(
+            {**self.objective.to_workspace_record(), "status": "queued"}
+        )
+        return self._payload(collection_id)
+
+    def get_analysis(self, collection_id: str, objective_id: str) -> dict:
+        return self._payload(collection_id)
+
+    def run_analysis(self, collection_id: str, objective_id: str) -> dict:
+        return self._payload(collection_id)
+
+    def _payload(self, collection_id: str) -> dict:
+        return {
+            "collection_id": collection_id,
+            "objective": self.objective,
+            "understanding": None,
+            "warnings": [],
+        }
+
+
+class FakeFuture:
+    def add_done_callback(self, callback):
+        self.callback = callback
+
+
+class FakeExecutor:
+    def __init__(self) -> None:
+        self.submissions = []
+
+    def submit(self, func, *args):
+        self.submissions.append((func.__name__, args))
+        return FakeFuture()
+
+
 class NotReadyObjectiveService:
     def list_objective_workspaces(self, collection_id: str) -> dict:
         raise ResearchObjectivesNotReadyError(collection_id)
@@ -137,6 +198,7 @@ def test_objective_routes_return_contract_payload():
         app=SimpleNamespace(
             state=SimpleNamespace(
                 research_objective_service=FakeObjectiveService(),
+                objective_analysis_service=FakeObjectiveAnalysisService(),
             )
         )
     )
@@ -158,6 +220,59 @@ def test_objective_routes_return_contract_payload():
     assert detail.paper_frames[0].document_id == "paper-1"
     assert detail.evidence_units == []
     assert detail.logic_chain is None
+    assert objectives.objectives[0].status == "confirmed"
+    assert detail.review_summary.primary_finding_count == 0
+
+
+def test_objective_confirm_and_analysis_routes_use_one_identity(monkeypatch):
+    analysis_service = FakeObjectiveAnalysisService()
+    executor = FakeExecutor()
+    monkeypatch.setattr(objective_controller, "_objective_analysis_executor", executor)
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(objective_analysis_service=analysis_service)
+        )
+    )
+
+    confirmed = asyncio.run(
+        objective_controller.confirm_collection_objective("col-1", "obj-1", request)
+    )
+    queued = objective_controller.run_collection_objective_analysis(
+        "col-1", "obj-1", request
+    )
+    polled = asyncio.run(
+        objective_controller.get_collection_objective_analysis(
+            "col-1", "obj-1", request
+        )
+    )
+
+    assert confirmed.objective.objective_id == "obj-1"
+    assert queued.objective.status == "queued"
+    assert polled.objective.status == "queued"
+    assert executor.submissions == [
+        ("run_analysis", ("col-1", "obj-1")),
+    ]
+
+
+def test_candidate_cannot_start_analysis_before_confirmation():
+    service = FakeObjectiveAnalysisService()
+    service.objective = ResearchObjective.from_mapping(
+        {**service.objective.to_workspace_record(), "status": "candidate"}
+    )
+
+    def reject_candidate(collection_id, objective_id):
+        raise ValueError("invalid objective status transition: candidate -> queued")
+
+    service.queue_analysis = reject_candidate
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(objective_analysis_service=service))
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        objective_controller.run_collection_objective_analysis(
+            "col-1", "obj-1", request
+        )
+    assert exc_info.value.status_code == 409
 
 
 def test_objective_routes_run_service_in_threadpool(monkeypatch):

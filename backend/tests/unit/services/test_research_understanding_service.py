@@ -2032,8 +2032,8 @@ def test_with_presentation_uses_objective_title_as_recovered_finding_boundary():
             "evidence_refs": [],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {
                         "variable_process_axes": ["heat treatment"]
@@ -3474,7 +3474,7 @@ def test_finding_promotes_matching_preheat_strength_table():
     assert mismatched["comparison_summary"] is None
 
 
-def test_objective_understanding_does_not_recover_mechanical_finding_for_corrosion_goal():
+def test_objective_understanding_does_not_recover_mechanical_finding_for_corrosion_objective():
     slm_mechanical_conclusion = (
         "The SLM samples processed at higher scanning speed exhibited better "
         "densification, refined microstructure, and excellent mechanical "
@@ -4020,7 +4020,7 @@ def test_with_presentation_refreshes_persisted_ved_fatigue_strength_table_summar
                     "status": "supported",
                     "confidence": 0.82,
                     "evidence_ref_ids": ["evref_fatigue_strength_table_row"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["oeu-fatigue-strength"],
                 },
             ],
@@ -4057,7 +4057,7 @@ def test_with_presentation_refreshes_persisted_ved_fatigue_strength_table_summar
                     "status": "supported",
                     "confidence": 0.82,
                     "evidence_ref_ids": ["evref_fatigue_strength_table_row"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["oeu-fatigue-strength"],
                 },
             ],
@@ -4095,8 +4095,8 @@ def test_with_presentation_refreshes_persisted_ved_fatigue_strength_table_summar
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -4504,7 +4504,7 @@ def test_objective_understanding_promotes_experimental_texture_yield_validation_
             "contexts": [
                 {
                     "context_id": "ctx_objective_scope",
-                    "label": "Goal scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -4648,9 +4648,9 @@ def test_with_presentation_excludes_unreferenced_evidence_items():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-density",
-                "goal_id": "goal-density",
+                "objective_id": "objective-density",
                 "title": "How does laser power affect density?",
             },
             "claims": [
@@ -4661,7 +4661,7 @@ def test_with_presentation_excludes_unreferenced_evidence_items():
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                 }
             ],
             "relations": [
@@ -4674,7 +4674,7 @@ def test_with_presentation_excludes_unreferenced_evidence_items():
                     "statement": "Increasing laser power raised relative density to 99.1%.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                 }
             ],
             "evidence_refs": [
@@ -4699,8 +4699,8 @@ def test_with_presentation_excludes_unreferenced_evidence_items():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"variable_process_axes": ["laser power"]},
                     "property_scope": ["density"],
@@ -5343,9 +5343,9 @@ def test_with_presentation_keeps_controlled_axis_out_of_variable_title():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-fatigue",
+                "objective_id": "objective-fatigue",
                 "title": (
                     "How do volumetric energy density and layer thickness "
                     "affect fatigue strength?"
@@ -5363,7 +5363,7 @@ def test_with_presentation_keeps_controlled_axis_out_of_variable_title():
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_fatigue_strength"],
-                    "context_ids": ["ctx_goal", "ctx_fatigue_values"],
+                    "context_ids": ["ctx_objective_scope", "ctx_fatigue_values"],
                     "source_object_ids": ["oeu-fatigue-strength"],
                 }
             ],
@@ -5382,7 +5382,7 @@ def test_with_presentation_keeps_controlled_axis_out_of_variable_title():
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_fatigue_strength"],
-                    "context_ids": ["ctx_goal", "ctx_fatigue_values"],
+                    "context_ids": ["ctx_objective_scope", "ctx_fatigue_values"],
                     "source_object_ids": ["oeu-fatigue-strength"],
                 }
             ],
@@ -5400,8 +5400,8 @@ def test_with_presentation_keeps_controlled_axis_out_of_variable_title():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -5747,9 +5747,9 @@ def test_with_presentation_backfills_persisted_table_evidence_traceability():
         "schema_version": "research_understanding.v1",
         "state": "ready",
         "scope": {
-            "scope_type": "goal",
+            "scope_type": "objective",
             "collection_id": "col-1",
-            "goal_id": "goal-density",
+            "objective_id": "objective-density",
             "title": "How does scan speed affect density?",
         },
         "claims": [
@@ -5936,9 +5936,9 @@ def test_with_presentation_backfills_existing_understanding_without_internal_lab
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How do LPBF and scanning speed affect density?",
             },
             "claims": [
@@ -5948,7 +5948,7 @@ def test_with_presentation_backfills_existing_understanding_without_internal_lab
                     "statement": "Relative density is reported as 99.1%.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_block"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -5966,8 +5966,8 @@ def test_with_presentation_backfills_existing_understanding_without_internal_lab
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["laser power", "scan speed"]
@@ -6040,9 +6040,9 @@ def test_with_presentation_uses_result_specific_direct_evidence_quote():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": (
                     "How does build platform preheating affect "
                     "microstructure?"
@@ -6059,7 +6059,7 @@ def test_with_presentation_uses_result_specific_direct_evidence_quote():
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_preheat"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_preheat"],
                 }
             ],
@@ -6076,7 +6076,7 @@ def test_with_presentation_uses_result_specific_direct_evidence_quote():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_preheat"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_preheat"],
                 }
             ],
@@ -6094,8 +6094,8 @@ def test_with_presentation_uses_result_specific_direct_evidence_quote():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "process": "LPBF",
@@ -6161,9 +6161,9 @@ def test_with_presentation_quote_can_use_adjacent_sentences_for_direct_evidence(
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": (
                     "How does build platform preheating affect "
                     "microstructure?"
@@ -6180,7 +6180,7 @@ def test_with_presentation_quote_can_use_adjacent_sentences_for_direct_evidence(
                     "status": "supported",
                     "confidence": 0.8,
                     "evidence_ref_ids": ["evref_preheat"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_preheat"],
                 }
             ],
@@ -6197,7 +6197,7 @@ def test_with_presentation_quote_can_use_adjacent_sentences_for_direct_evidence(
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_preheat"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_preheat"],
                 }
             ],
@@ -6215,8 +6215,8 @@ def test_with_presentation_quote_can_use_adjacent_sentences_for_direct_evidence(
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "process": "LPBF",
@@ -6279,9 +6279,9 @@ def test_with_presentation_prefers_specific_single_sentence_quote():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does porosity affect pitting corrosion?",
             },
             "claims": [
@@ -6295,7 +6295,7 @@ def test_with_presentation_prefers_specific_single_sentence_quote():
                     "status": "supported",
                     "confidence": 0.82,
                     "evidence_ref_ids": ["evref_corrosion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_corrosion"],
                 }
             ],
@@ -6312,7 +6312,7 @@ def test_with_presentation_prefers_specific_single_sentence_quote():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_corrosion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_corrosion"],
                 }
             ],
@@ -6330,8 +6330,8 @@ def test_with_presentation_prefers_specific_single_sentence_quote():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"process": "SLM"},
                     "property_scope": ["pitting corrosion behavior"],
@@ -6397,9 +6397,9 @@ def test_with_presentation_orders_result_specific_direct_evidence_first():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does porosity affect pitting corrosion?",
             },
             "claims": [
@@ -6415,7 +6415,7 @@ def test_with_presentation_orders_result_specific_direct_evidence_first():
                         "evref_abstract",
                         "evref_result",
                     ],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": [
                         "unit_abstract",
                         "unit_result",
@@ -6437,7 +6437,7 @@ def test_with_presentation_orders_result_specific_direct_evidence_first():
                         "evref_abstract",
                         "evref_result",
                     ],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": [
                         "unit_abstract",
                         "unit_result",
@@ -6468,8 +6468,8 @@ def test_with_presentation_orders_result_specific_direct_evidence_first():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"process": "SLM"},
                     "property_scope": ["pitting corrosion behavior"],
@@ -6538,9 +6538,9 @@ def test_with_presentation_prefers_result_bearing_direct_evidence_source():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": (
                     "How do build platform preheating temperature and build "
                     "platform preheating affect microstructure?"
@@ -6557,7 +6557,7 @@ def test_with_presentation_prefers_result_bearing_direct_evidence_source():
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_abstract"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_abstract"],
                 }
             ],
@@ -6574,7 +6574,7 @@ def test_with_presentation_prefers_result_bearing_direct_evidence_source():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_abstract"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_abstract"],
                 }
             ],
@@ -6601,8 +6601,8 @@ def test_with_presentation_prefers_result_bearing_direct_evidence_source():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "process": "laser beam powder bed fusion",
@@ -6670,9 +6670,9 @@ def test_with_presentation_mechanism_quote_statement_prefers_concrete_result_sen
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": (
                     "How does build platform preheating affect mechanical "
                     "properties?"
@@ -6689,7 +6689,7 @@ def test_with_presentation_mechanism_quote_statement_prefers_concrete_result_sen
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_conclusion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_conclusion"],
                 }
             ],
@@ -6706,7 +6706,7 @@ def test_with_presentation_mechanism_quote_statement_prefers_concrete_result_sen
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_conclusion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_conclusion"],
                 }
             ],
@@ -6724,8 +6724,8 @@ def test_with_presentation_mechanism_quote_statement_prefers_concrete_result_sen
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "process": "laser beam powder bed fusion",
@@ -6824,7 +6824,7 @@ def test_with_presentation_uses_adjacent_result_block_for_lead_in_quote():
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_conclusion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_conclusion"],
                 }
             ],
@@ -6841,7 +6841,7 @@ def test_with_presentation_uses_adjacent_result_block_for_lead_in_quote():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_conclusion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_conclusion"],
                 }
             ],
@@ -6859,8 +6859,8 @@ def test_with_presentation_uses_adjacent_result_block_for_lead_in_quote():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "process": "laser beam powder bed fusion",
@@ -6929,9 +6929,9 @@ def test_with_presentation_filters_measurement_only_density_claim():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How do laser power and scan speed affect density?",
             },
             "claims": [
@@ -6942,7 +6942,7 @@ def test_with_presentation_filters_measurement_only_density_claim():
                     "status": "supported",
                     "confidence": 0.82,
                     "evidence_ref_ids": ["evref_results"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -6956,7 +6956,7 @@ def test_with_presentation_filters_measurement_only_density_claim():
                     "statement": "Laser power and scan speed affect density.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_results"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -6983,8 +6983,8 @@ def test_with_presentation_filters_measurement_only_density_claim():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["laser power", "scan speed"],
@@ -7046,9 +7046,9 @@ def test_with_presentation_statement_aligned_quote_prefers_matching_result_sente
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does VED affect microstructure?",
             },
             "claims": [
@@ -7064,7 +7064,7 @@ def test_with_presentation_statement_aligned_quote_prefers_matching_result_sente
                     "status": "supported",
                     "confidence": 0.8,
                     "evidence_ref_ids": ["evref_ved"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_ved"],
                 }
             ],
@@ -7078,7 +7078,7 @@ def test_with_presentation_statement_aligned_quote_prefers_matching_result_sente
                     "statement": "VED affects microstructure.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_ved"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_ved"],
                 }
             ],
@@ -7096,8 +7096,8 @@ def test_with_presentation_statement_aligned_quote_prefers_matching_result_sente
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"variable_process_axes": ["VED"]},
                     "property_scope": ["microstructure"],
@@ -7124,9 +7124,9 @@ def test_with_presentation_keeps_only_reviewable_direct_relations():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does LPBF affect density?",
             },
             "claims": [
@@ -7136,7 +7136,7 @@ def test_with_presentation_keeps_only_reviewable_direct_relations():
                     "statement": "Laser power increases relative density.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -7150,7 +7150,7 @@ def test_with_presentation_keeps_only_reviewable_direct_relations():
                     "statement": None,
                     "status": "supported",
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 },
                 {
@@ -7162,7 +7162,7 @@ def test_with_presentation_keeps_only_reviewable_direct_relations():
                     "statement": None,
                     "status": "supported",
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 },
                 {
@@ -7174,7 +7174,7 @@ def test_with_presentation_keeps_only_reviewable_direct_relations():
                     "statement": "Build orientation explains texture changes.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_texture"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_texture"],
                 },
             ],
@@ -7201,8 +7201,8 @@ def test_with_presentation_keeps_only_reviewable_direct_relations():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["laser power", "scan speed"]
@@ -7240,9 +7240,9 @@ def test_with_presentation_projects_findings_contract():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does LPBF affect density?",
             },
             "claims": [
@@ -7253,7 +7253,7 @@ def test_with_presentation_projects_findings_contract():
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_density", "evref_density_text"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -7267,7 +7267,7 @@ def test_with_presentation_projects_findings_contract():
                     "statement": None,
                     "status": "supported",
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -7294,8 +7294,8 @@ def test_with_presentation_projects_findings_contract():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["laser power", "scan speed"]
@@ -7412,9 +7412,9 @@ def test_with_presentation_compacts_duplicate_uncategorized_evidence_when_direct
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does heat treatment affect density?",
             },
             "claims": [
@@ -7431,7 +7431,7 @@ def test_with_presentation_compacts_duplicate_uncategorized_evidence_when_direct
                             for duplicate_ref in duplicate_refs
                         ],
                     ],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -7445,7 +7445,7 @@ def test_with_presentation_compacts_duplicate_uncategorized_evidence_when_direct
                     "statement": "Heat treatment type changes density.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_direct_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -7468,8 +7468,8 @@ def test_with_presentation_compacts_duplicate_uncategorized_evidence_when_direct
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"variable_process_axes": ["heat treatment type"]},
                     "property_scope": ["density"],
@@ -7512,9 +7512,9 @@ def test_with_presentation_compacts_same_source_target_across_bundle_roles():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does heat treatment affect density?",
             },
             "claims": [
@@ -7528,7 +7528,7 @@ def test_with_presentation_compacts_same_source_target_across_bundle_roles():
                         "evref_direct_density",
                         "evref_same_table_density",
                     ],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -7542,7 +7542,7 @@ def test_with_presentation_compacts_same_source_target_across_bundle_roles():
                     "statement": "Heat treatment type changes density.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_direct_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -7572,8 +7572,8 @@ def test_with_presentation_compacts_same_source_target_across_bundle_roles():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"variable_process_axes": ["heat treatment type"]},
                     "property_scope": ["density"],
@@ -7605,9 +7605,9 @@ def test_with_presentation_evidence_items_follow_visible_findings():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does preheating affect ductility?",
             },
             "claims": [
@@ -7621,7 +7621,7 @@ def test_with_presentation_evidence_items_follow_visible_findings():
                         "evref_direct",
                         "evref_stale_background",
                     ],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_preheat"],
                 },
                 {
@@ -7631,7 +7631,7 @@ def test_with_presentation_evidence_items_follow_visible_findings():
                     "status": "supported",
                     "confidence": 0.3,
                     "evidence_ref_ids": ["evref_filtered_noise"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_noise"],
                 },
             ],
@@ -7645,7 +7645,7 @@ def test_with_presentation_evidence_items_follow_visible_findings():
                     "statement": "Preheating increases ductility.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_preheat"],
                 },
                 {
@@ -7657,7 +7657,7 @@ def test_with_presentation_evidence_items_follow_visible_findings():
                     "statement": "The paper describes general LPBF background.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_filtered_noise"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_noise"],
                 },
             ],
@@ -7701,8 +7701,8 @@ def test_with_presentation_evidence_items_follow_visible_findings():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -7733,9 +7733,9 @@ def test_with_presentation_filters_boolean_scope_tokens_from_findings():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does preheating affect ductility?",
             },
             "claims": [
@@ -7746,7 +7746,7 @@ def test_with_presentation_filters_boolean_scope_tokens_from_findings():
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_preheat"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_preheat"],
                 }
             ],
@@ -7760,7 +7760,7 @@ def test_with_presentation_filters_boolean_scope_tokens_from_findings():
                     "statement": "Preheating increases ductility.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_preheat"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_preheat"],
                 }
             ],
@@ -7779,8 +7779,8 @@ def test_with_presentation_filters_boolean_scope_tokens_from_findings():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel", "True"],
                     "process_context": {
                         "build_platform_preheating": "True",
@@ -7809,9 +7809,9 @@ def test_with_presentation_compacts_long_finding_scope_summary():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does VED affect density?",
             },
             "claims": [
@@ -7822,7 +7822,7 @@ def test_with_presentation_compacts_long_finding_scope_summary():
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -7836,7 +7836,7 @@ def test_with_presentation_compacts_long_finding_scope_summary():
                     "statement": "VED increases density.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -7854,8 +7854,8 @@ def test_with_presentation_compacts_long_finding_scope_summary():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {
                         "process": "selective laser melting",
@@ -7944,9 +7944,9 @@ def test_with_presentation_filters_generic_finding_scope_tokens():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does porosity affect pitting corrosion?",
             },
             "claims": [
@@ -7957,7 +7957,7 @@ def test_with_presentation_filters_generic_finding_scope_tokens():
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_corrosion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_corrosion"],
                 }
             ],
@@ -7971,7 +7971,7 @@ def test_with_presentation_filters_generic_finding_scope_tokens():
                     "statement": "Porosity increases pitting corrosion sensitivity.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_corrosion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_corrosion"],
                 }
             ],
@@ -7991,8 +7991,8 @@ def test_with_presentation_filters_generic_finding_scope_tokens():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "process": "selective laser melting",
@@ -8023,9 +8023,9 @@ def test_with_presentation_filters_heading_and_broken_sample_scope_tokens():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does heat treatment affect density?",
             },
             "claims": [
@@ -8036,7 +8036,7 @@ def test_with_presentation_filters_heading_and_broken_sample_scope_tokens():
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -8050,7 +8050,7 @@ def test_with_presentation_filters_heading_and_broken_sample_scope_tokens():
                     "statement": "Heat treatment increases density.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -8068,8 +8068,8 @@ def test_with_presentation_filters_heading_and_broken_sample_scope_tokens():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {
                         "process": "selective laser melting",
@@ -8100,9 +8100,9 @@ def test_with_presentation_buckets_finding_evidence_by_role():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does LPBF affect density?",
             },
             "claims": [
@@ -8118,7 +8118,7 @@ def test_with_presentation_buckets_finding_evidence_by_role():
                         "evref_background",
                         "evref_unknown",
                     ],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -8132,7 +8132,7 @@ def test_with_presentation_buckets_finding_evidence_by_role():
                     "statement": None,
                     "status": "supported",
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -8179,8 +8179,8 @@ def test_with_presentation_buckets_finding_evidence_by_role():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"variable_process_axes": ["laser power"]},
                     "property_scope": ["relative density"],
@@ -8236,9 +8236,9 @@ def test_with_presentation_semantic_match_infers_relation_linked_direct_result()
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does preheating affect porosity?",
             },
             "claims": [
@@ -8249,7 +8249,7 @@ def test_with_presentation_semantic_match_infers_relation_linked_direct_result()
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_relation_text", "evref_context_only"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_relation"],
                 }
             ],
@@ -8263,7 +8263,7 @@ def test_with_presentation_semantic_match_infers_relation_linked_direct_result()
                     "statement": "Build platform preheating decreases porosity.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_relation_text"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_relation"],
                 }
             ],
@@ -8293,8 +8293,8 @@ def test_with_presentation_semantic_match_infers_relation_linked_direct_result()
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"process": "LPBF"},
                     "property_scope": ["porosity"],
@@ -8318,9 +8318,9 @@ def test_with_presentation_semantic_gate_keeps_off_target_evidence_uncategorized
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does porosity affect pitting corrosion?",
             },
             "claims": [
@@ -8334,7 +8334,7 @@ def test_with_presentation_semantic_gate_keeps_off_target_evidence_uncategorized
                     "status": "supported",
                     "confidence": 0.82,
                     "evidence_ref_ids": ["evref_density_table"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density_table"],
                 }
             ],
@@ -8351,7 +8351,7 @@ def test_with_presentation_semantic_gate_keeps_off_target_evidence_uncategorized
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_density_table"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density_table"],
                 }
             ],
@@ -8372,8 +8372,8 @@ def test_with_presentation_semantic_gate_keeps_off_target_evidence_uncategorized
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"process": "SLM"},
                     "property_scope": ["pitting corrosion behavior"],
@@ -8416,9 +8416,9 @@ def test_with_presentation_corrosion_statement_recalls_target_matching_relation_
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does porosity affect pitting corrosion?",
             },
             "claims": [
@@ -8432,7 +8432,7 @@ def test_with_presentation_corrosion_statement_recalls_target_matching_relation_
                     "status": "supported",
                     "confidence": 0.82,
                     "evidence_ref_ids": ["evref_density_table"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density_table"],
                 }
             ],
@@ -8452,7 +8452,7 @@ def test_with_presentation_corrosion_statement_recalls_target_matching_relation_
                         "evref_density_table",
                         "evref_corrosion_text",
                     ],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": [
                         "unit_density_table",
                         "unit_corrosion_text",
@@ -8470,7 +8470,7 @@ def test_with_presentation_corrosion_statement_recalls_target_matching_relation_
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_density_table"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density_table"],
                 },
             ],
@@ -8503,8 +8503,8 @@ def test_with_presentation_corrosion_statement_recalls_target_matching_relation_
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"process": "SLM"},
                     "property_scope": ["pitting corrosion behavior"],
@@ -8577,9 +8577,9 @@ def test_with_presentation_corrects_stale_comparison_relation_subject_from_state
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-density",
+                "objective_id": "objective-density",
                 "title": (
                     "How do laser power, scan speed, heat treatment type, and "
                     "heat treatment affect density of stainless steel 316L?"
@@ -8639,7 +8639,7 @@ def test_with_presentation_corrects_stale_comparison_relation_subject_from_state
             "contexts": [
                 {
                     "context_id": "ctx_objective_scope",
-                    "label": "Goal scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {
                         "variable_process_axes": [
@@ -8682,9 +8682,9 @@ def test_with_presentation_does_not_promote_controlled_axis_to_comparison_subjec
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-density",
+                "objective_id": "objective-density",
                 "title": (
                     "How do laser power, scan speed, heat treatment type, and "
                     "heat treatment affect density of stainless steel 316L?"
@@ -8744,7 +8744,7 @@ def test_with_presentation_does_not_promote_controlled_axis_to_comparison_subjec
             "contexts": [
                 {
                     "context_id": "ctx_objective_scope",
-                    "label": "Goal scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {
                         "variable_process_axes": [
@@ -8801,9 +8801,9 @@ def test_with_presentation_keeps_proxy_relations_for_broad_microstructure_target
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": (
                     "How do laser power and scan speed affect microstructure "
                     "and mechanical properties?"
@@ -8939,9 +8939,9 @@ def test_with_presentation_filters_claim_and_evidence_recalibrated_off_axis_rela
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": (
                     "How does build platform preheating affect "
                     "microstructure?"
@@ -9099,9 +9099,9 @@ def test_with_presentation_semantic_match_handles_porosity_pore_variants():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does scan speed affect porosity?",
             },
             "claims": [
@@ -9112,7 +9112,7 @@ def test_with_presentation_semantic_match_handles_porosity_pore_variants():
                     "status": "supported",
                     "confidence": 0.84,
                     "evidence_ref_ids": ["evref_pores"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_pores"],
                 }
             ],
@@ -9126,7 +9126,7 @@ def test_with_presentation_semantic_match_handles_porosity_pore_variants():
                     "statement": "Scan speed changes porosity.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_pores"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_pores"],
                 }
             ],
@@ -9147,8 +9147,8 @@ def test_with_presentation_semantic_match_handles_porosity_pore_variants():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"process": "SLM"},
                     "property_scope": ["porosity"],
@@ -9171,9 +9171,9 @@ def test_with_presentation_assigns_support_grade_from_evidence_quality():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does processing affect density?",
             },
             "claims": [
@@ -9184,7 +9184,7 @@ def test_with_presentation_assigns_support_grade_from_evidence_quality():
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_strong_direct", "evref_strong_mechanism"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_strong"],
                 },
                 {
@@ -9194,7 +9194,7 @@ def test_with_presentation_assigns_support_grade_from_evidence_quality():
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_partial_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_partial"],
                 },
                 {
@@ -9204,7 +9204,7 @@ def test_with_presentation_assigns_support_grade_from_evidence_quality():
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_weak_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_weak"],
                 },
                 {
@@ -9214,7 +9214,7 @@ def test_with_presentation_assigns_support_grade_from_evidence_quality():
                     "status": "conflicted",
                     "confidence": 0.72,
                     "evidence_ref_ids": ["evref_conflict"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_conflict"],
                 },
                 {
@@ -9224,7 +9224,7 @@ def test_with_presentation_assigns_support_grade_from_evidence_quality():
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_background"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_insufficient"],
                 },
             ],
@@ -9238,7 +9238,7 @@ def test_with_presentation_assigns_support_grade_from_evidence_quality():
                     "statement": "Preheating reduces porosity.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_strong_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_strong"],
                 },
                 {
@@ -9250,7 +9250,7 @@ def test_with_presentation_assigns_support_grade_from_evidence_quality():
                     "statement": "Laser power increases relative density.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_partial_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_partial"],
                 },
                 {
@@ -9262,7 +9262,7 @@ def test_with_presentation_assigns_support_grade_from_evidence_quality():
                     "statement": "Energy density has conflicting density effects.",
                     "status": "conflicted",
                     "evidence_ref_ids": ["evref_conflict"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_conflict"],
                 },
                 {
@@ -9274,7 +9274,7 @@ def test_with_presentation_assigns_support_grade_from_evidence_quality():
                     "statement": "Background context suggests possible density effects.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_background"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_insufficient"],
                 },
             ],
@@ -9342,8 +9342,8 @@ def test_with_presentation_assigns_support_grade_from_evidence_quality():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"process": "LPBF"},
                     "property_scope": ["relative density"],
@@ -9372,9 +9372,9 @@ def test_with_presentation_builds_finding_fields_from_mediated_relation():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does preheating affect porosity?",
             },
             "claims": [
@@ -9385,7 +9385,7 @@ def test_with_presentation_builds_finding_fields_from_mediated_relation():
                     "status": "supported",
                     "confidence": 0.88,
                     "evidence_ref_ids": ["evref_direct", "evref_mechanism"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_direct", "unit_mechanism"],
                 }
             ],
@@ -9399,7 +9399,7 @@ def test_with_presentation_builds_finding_fields_from_mediated_relation():
                     "statement": "Preheating reduces porosity through melt pool stabilization.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_direct", "unit_mechanism"],
                 }
             ],
@@ -9427,8 +9427,8 @@ def test_with_presentation_builds_finding_fields_from_mediated_relation():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"process": "LPBF"},
                     "property_scope": ["porosity"],
@@ -9467,9 +9467,9 @@ def test_with_presentation_finding_title_uses_relation_outcome_over_context_medi
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does preheating affect mechanical properties?",
             },
             "claims": [
@@ -9483,7 +9483,7 @@ def test_with_presentation_finding_title_uses_relation_outcome_over_context_medi
                     "status": "supported",
                     "confidence": 0.88,
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_direct"],
                 }
             ],
@@ -9500,7 +9500,7 @@ def test_with_presentation_finding_title_uses_relation_outcome_over_context_medi
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_direct"],
                 }
             ],
@@ -9522,8 +9522,8 @@ def test_with_presentation_finding_title_uses_relation_outcome_over_context_medi
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -9572,9 +9572,9 @@ def test_with_presentation_projects_mechanism_claim_terms_to_mediators():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does preheating affect mechanical properties?",
             },
             "claims": [
@@ -9585,7 +9585,7 @@ def test_with_presentation_projects_mechanism_claim_terms_to_mediators():
                     "status": "supported",
                     "confidence": 0.88,
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_direct"],
                 }
             ],
@@ -9599,7 +9599,7 @@ def test_with_presentation_projects_mechanism_claim_terms_to_mediators():
                     "statement": statement,
                     "status": "supported",
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_direct"],
                 },
                 {
@@ -9611,7 +9611,7 @@ def test_with_presentation_projects_mechanism_claim_terms_to_mediators():
                     "statement": statement,
                     "status": "supported",
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_direct"],
                 },
                 {
@@ -9623,7 +9623,7 @@ def test_with_presentation_projects_mechanism_claim_terms_to_mediators():
                     "statement": statement,
                     "status": "supported",
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_direct"],
                 },
             ],
@@ -9642,8 +9642,8 @@ def test_with_presentation_projects_mechanism_claim_terms_to_mediators():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["build platform preheating"]
@@ -9716,9 +9716,9 @@ def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does preheating affect mechanical properties?",
             },
             "claims": [
@@ -9729,7 +9729,7 @@ def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
                     "status": "supported",
                     "confidence": 0.84,
                     "evidence_ref_ids": ["evref_context"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_context"],
                 },
                 {
@@ -9742,7 +9742,7 @@ def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
                     "status": "supported",
                     "confidence": 0.88,
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_direct"],
                 },
             ],
@@ -9759,7 +9759,7 @@ def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_direct"],
                 }
             ],
@@ -9788,8 +9788,8 @@ def test_with_presentation_finding_order_prioritizes_expert_usable_rows():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["build platform preheating"]
@@ -9910,9 +9910,9 @@ def test_with_presentation_quote_mismatched_finding_is_not_expert_finding():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does preheating affect microstructure?",
             },
             "claims": [
@@ -9925,7 +9925,7 @@ def test_with_presentation_quote_mismatched_finding_is_not_expert_finding():
                     "status": "supported",
                     "confidence": 0.88,
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_direct"],
                 }
             ],
@@ -9942,7 +9942,7 @@ def test_with_presentation_quote_mismatched_finding_is_not_expert_finding():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_direct"],
                 }
             ],
@@ -9964,8 +9964,8 @@ def test_with_presentation_quote_mismatched_finding_is_not_expert_finding():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -10012,9 +10012,9 @@ def test_with_presentation_does_not_report_missing_mechanism_when_direct_evidenc
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does heat treatment affect density and microstructure?",
             },
             "claims": [
@@ -10028,7 +10028,7 @@ def test_with_presentation_does_not_report_missing_mechanism_when_direct_evidenc
                     "status": "supported",
                     "confidence": 0.88,
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_direct"],
                     "warnings": ["needs_expert_review"],
                 }
@@ -10046,7 +10046,7 @@ def test_with_presentation_does_not_report_missing_mechanism_when_direct_evidenc
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_direct"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_direct"],
                 }
             ],
@@ -10069,8 +10069,8 @@ def test_with_presentation_does_not_report_missing_mechanism_when_direct_evidenc
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"variable_process_axes": ["heat treatment"]},
                     "property_scope": ["density", "microstructure"],
@@ -10100,9 +10100,9 @@ def test_with_presentation_quote_aligned_primary_finding_stays_primary():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does porosity affect pitting corrosion?",
             },
             "claims": [
@@ -10116,7 +10116,7 @@ def test_with_presentation_quote_aligned_primary_finding_stays_primary():
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_corrosion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_corrosion"],
                 }
             ],
@@ -10133,7 +10133,7 @@ def test_with_presentation_quote_aligned_primary_finding_stays_primary():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_corrosion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_corrosion"],
                 }
             ],
@@ -10155,8 +10155,8 @@ def test_with_presentation_quote_aligned_primary_finding_stays_primary():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["porosity level"]
@@ -10182,9 +10182,9 @@ def test_with_presentation_uses_numeric_relation_statement_for_symbol_axis_findi
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How do angle axes affect yield strength?",
             },
             "claims": [
@@ -10265,9 +10265,9 @@ def test_with_presentation_comparison_summary_handles_symbol_conditions():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How do angle axes affect yield strength?",
             },
             "claims": [
@@ -10352,9 +10352,9 @@ def test_with_presentation_rewrites_stored_symbol_comparison_with_axis_values():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does build orientation affect yield strength?",
             },
             "claims": [
@@ -10405,7 +10405,7 @@ def test_with_presentation_rewrites_stored_symbol_comparison_with_axis_values():
             "contexts": [
                 {
                     "context_id": "ctx_objective_scope",
-                    "label": "Goal scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -10457,9 +10457,9 @@ def test_with_presentation_comparison_summary_handles_uncertainty_parentheses():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does energy density affect elongation?",
             },
             "claims": [
@@ -10555,9 +10555,9 @@ def test_with_presentation_keeps_table_row_comparison_in_review_when_narrative_p
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": (
                     "How do scanning speed and energy density affect yield "
                     "strength and elongation?"
@@ -10710,9 +10710,9 @@ def test_with_presentation_concrete_variable_replaces_broad_process_display():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does VED affect microstructure?",
             },
             "claims": [
@@ -10726,7 +10726,7 @@ def test_with_presentation_concrete_variable_replaces_broad_process_display():
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_ved"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_ved"],
                 }
             ],
@@ -10743,7 +10743,7 @@ def test_with_presentation_concrete_variable_replaces_broad_process_display():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_ved"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_ved"],
                 }
             ],
@@ -10765,8 +10765,8 @@ def test_with_presentation_concrete_variable_replaces_broad_process_display():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"process": "selective laser melting"},
                     "property_scope": ["microstructure"],
@@ -10791,9 +10791,9 @@ def test_with_presentation_relation_chain_uses_each_display_variable():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How do defects affect pitting corrosion?",
             },
             "claims": [
@@ -10807,7 +10807,7 @@ def test_with_presentation_relation_chain_uses_each_display_variable():
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_corrosion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_corrosion"],
                 }
             ],
@@ -10824,7 +10824,7 @@ def test_with_presentation_relation_chain_uses_each_display_variable():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_corrosion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_corrosion"],
                 },
                 {
@@ -10839,7 +10839,7 @@ def test_with_presentation_relation_chain_uses_each_display_variable():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_corrosion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_corrosion"],
                 },
             ],
@@ -10861,8 +10861,8 @@ def test_with_presentation_relation_chain_uses_each_display_variable():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["porosity level", "pore size"]
@@ -10905,9 +10905,9 @@ def test_with_presentation_specific_outcomes_narrows_mechanical_properties():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does preheating affect properties?",
             },
             "claims": [
@@ -10921,7 +10921,7 @@ def test_with_presentation_specific_outcomes_narrows_mechanical_properties():
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_preheat"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_preheat"],
                 }
             ],
@@ -10938,7 +10938,7 @@ def test_with_presentation_specific_outcomes_narrows_mechanical_properties():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_preheat"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_preheat"],
                 }
             ],
@@ -10957,8 +10957,8 @@ def test_with_presentation_specific_outcomes_narrows_mechanical_properties():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -10989,9 +10989,9 @@ def test_with_presentation_mechanism_quote_statement_keeps_result_only_without_a
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does VED affect density?",
             },
             "claims": [
@@ -11002,7 +11002,7 @@ def test_with_presentation_mechanism_quote_statement_keeps_result_only_without_a
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -11016,7 +11016,7 @@ def test_with_presentation_mechanism_quote_statement_keeps_result_only_without_a
                     "statement": "VED increases density.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -11040,8 +11040,8 @@ def test_with_presentation_mechanism_quote_statement_keeps_result_only_without_a
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"process": "selective laser melting"},
                     "property_scope": ["density"],
@@ -11066,9 +11066,9 @@ def test_with_presentation_specific_outcomes_keeps_broad_bucket_without_property
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does preheating affect properties?",
             },
             "claims": [
@@ -11079,7 +11079,7 @@ def test_with_presentation_specific_outcomes_keeps_broad_bucket_without_property
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_preheat"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_preheat"],
                 }
             ],
@@ -11093,7 +11093,7 @@ def test_with_presentation_specific_outcomes_keeps_broad_bucket_without_property
                     "statement": "Build platform preheating changes mechanical properties.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_preheat"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_preheat"],
                 }
             ],
@@ -11112,8 +11112,8 @@ def test_with_presentation_specific_outcomes_keeps_broad_bucket_without_property
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -11162,9 +11162,9 @@ def test_with_presentation_does_not_promote_density_measurements_to_finding():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does energy density affect density?",
             },
             "claims": [
@@ -11178,7 +11178,7 @@ def test_with_presentation_does_not_promote_density_measurements_to_finding():
                     "status": "supported",
                     "confidence": 0.95,
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                     "needs_review": True,
                 }
@@ -11196,7 +11196,7 @@ def test_with_presentation_does_not_promote_density_measurements_to_finding():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -11218,8 +11218,8 @@ def test_with_presentation_does_not_promote_density_measurements_to_finding():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["laser power", "scan speed"]
@@ -11249,9 +11249,9 @@ def test_with_presentation_quote_derived_statement_uses_microstructure_result():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does VED affect microstructure?",
             },
             "claims": [
@@ -11262,7 +11262,7 @@ def test_with_presentation_quote_derived_statement_uses_microstructure_result():
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_ved"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_ved"],
                     "needs_review": True,
                 }
@@ -11277,7 +11277,7 @@ def test_with_presentation_quote_derived_statement_uses_microstructure_result():
                     "statement": "Selective laser melting affects the as-built structure.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_ved"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_ved"],
                 }
             ],
@@ -11301,8 +11301,8 @@ def test_with_presentation_quote_derived_statement_uses_microstructure_result():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"process": "selective laser melting"},
                     "property_scope": ["microstructure"],
@@ -11330,9 +11330,9 @@ def test_with_presentation_drops_placeholder_relation_chain_segments():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does LPBF affect density?",
             },
             "claims": [
@@ -11343,7 +11343,7 @@ def test_with_presentation_drops_placeholder_relation_chain_segments():
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -11357,7 +11357,7 @@ def test_with_presentation_drops_placeholder_relation_chain_segments():
                     "statement": "LPBF affects relative density.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density"],
                 }
             ],
@@ -11375,8 +11375,8 @@ def test_with_presentation_drops_placeholder_relation_chain_segments():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"process": "LPBF"},
                     "property_scope": ["relative density"],
@@ -11399,9 +11399,9 @@ def test_with_presentation_finding_fields_fall_back_without_relation():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does LPBF affect density?",
             },
             "claims": [
@@ -11456,9 +11456,9 @@ def test_with_presentation_projects_empty_findings_without_claims():
             {
                 "state": "empty",
                 "scope": {
-                    "scope_type": "goal",
+                    "scope_type": "objective",
                     "collection_id": "col-1",
-                    "goal_id": "goal-1",
+                    "objective_id": "objective-1",
                     "title": "No findings yet",
                 },
             }
@@ -11470,7 +11470,7 @@ def test_with_presentation_projects_empty_findings_without_claims():
     assert understanding["presentation"]["findings"] == []
 
 
-def test_with_presentation_does_not_recover_empty_goal_from_source_blocks():
+def test_with_presentation_does_not_recover_empty_objective_synthesis_from_source_blocks():
     source_text = (
         "As pointed out, the defects in PBF-LB materials results in low fatigue "
         "resistance compared to their static properties. The present results "
@@ -11507,9 +11507,9 @@ def test_with_presentation_does_not_recover_empty_goal_from_source_blocks():
         {
             "state": "empty",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-fatigue",
-                "goal_id": "goal-fatigue",
+                "objective_id": "objective-fatigue",
                 "title": (
                     "How do volumetric energy density, laser power, scanning "
                     "speed, hatch spacing, and layer thickness affect defect "
@@ -11524,7 +11524,10 @@ def test_with_presentation_does_not_recover_empty_goal_from_source_blocks():
         }
     )
 
-    understanding = service.with_presentation(stored)
+    understanding = service.with_presentation(
+        stored,
+        recover_source_findings=False,
+    )
 
     assert understanding is not None
     assert understanding["state"] == "empty"
@@ -11619,9 +11622,9 @@ def test_with_presentation_axis_coverage_treats_mechanical_properties_as_parent_
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-preheat",
-                "goal_id": "goal-preheat",
+                "objective_id": "objective-preheat",
                 "title": (
                     "How does build platform preheating affect mechanical "
                     "properties of 316L stainless steel?"
@@ -11638,7 +11641,7 @@ def test_with_presentation_axis_coverage_treats_mechanical_properties_as_parent_
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_preheat_ductility"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_preheat_ductility"],
                     "warnings": [],
                 }
@@ -11657,7 +11660,7 @@ def test_with_presentation_axis_coverage_treats_mechanical_properties_as_parent_
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_preheat_ductility"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_preheat_ductility"],
                 }
             ],
@@ -11679,8 +11682,8 @@ def test_with_presentation_axis_coverage_treats_mechanical_properties_as_parent_
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -11809,9 +11812,9 @@ def test_with_presentation_review_queue_uses_effect_level_risks():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does LPBF affect density?",
             },
             "claims": [
@@ -11888,9 +11891,9 @@ def test_with_presentation_promotes_single_paper_relation_with_aligned_direct_ev
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does porosity affect pitting corrosion?",
             },
             "claims": [
@@ -11903,7 +11906,7 @@ def test_with_presentation_promotes_single_paper_relation_with_aligned_direct_ev
                     "status": "supported",
                     "confidence": 0.88,
                     "evidence_ref_ids": ["evref_corrosion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_corrosion"],
                 }
             ],
@@ -11921,7 +11924,7 @@ def test_with_presentation_promotes_single_paper_relation_with_aligned_direct_ev
                     "status": "supported",
                     "confidence": 0.88,
                     "evidence_ref_ids": ["evref_corrosion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_corrosion"],
                 }
             ],
@@ -11945,8 +11948,8 @@ def test_with_presentation_promotes_single_paper_relation_with_aligned_direct_ev
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["porosity level"]
@@ -11984,9 +11987,9 @@ def test_with_presentation_does_not_merge_cross_paper_measurements_as_finding():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How do laser power and scan speed affect density?",
             },
             "claims": [
@@ -11997,7 +12000,7 @@ def test_with_presentation_does_not_merge_cross_paper_measurements_as_finding():
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_density_low"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density_low"],
                 },
                 {
@@ -12007,7 +12010,7 @@ def test_with_presentation_does_not_merge_cross_paper_measurements_as_finding():
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_density_high"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density_high"],
                 },
             ],
@@ -12021,7 +12024,7 @@ def test_with_presentation_does_not_merge_cross_paper_measurements_as_finding():
                     "statement": "Laser power and scan speed affect density.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_density_low"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density_low"],
                 },
                 {
@@ -12033,7 +12036,7 @@ def test_with_presentation_does_not_merge_cross_paper_measurements_as_finding():
                     "statement": "Laser power and scan speed affect density.",
                     "status": "supported",
                     "evidence_ref_ids": ["evref_density_high"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_density_high"],
                 },
             ],
@@ -12069,8 +12072,8 @@ def test_with_presentation_does_not_merge_cross_paper_measurements_as_finding():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["laser power", "scan speed"]
@@ -12219,9 +12222,9 @@ def test_with_presentation_keeps_same_paper_comparable_finding_when_recovered_ex
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does VED affect fatigue strength?",
             },
             "claims": [
@@ -12359,9 +12362,9 @@ def test_with_presentation_hides_ved_table_row_when_recovered_finding_uses_same_
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does VED affect defect structure and fatigue strength?",
             },
             "claims": [
@@ -12551,9 +12554,9 @@ def test_with_presentation_keeps_numeric_row_direct_evidence_when_recovered_sour
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does heat treatment affect density?",
             },
             "claims": [
@@ -12651,7 +12654,7 @@ def test_with_presentation_keeps_numeric_row_direct_evidence_when_recovered_sour
             "contexts": [
                 {
                     "context_id": "ctx_row",
-                    "label": "Goal scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"variable_process_axes": ["heat treatment"]},
                     "property_scope": ["density"],
@@ -12730,9 +12733,9 @@ def test_with_presentation_keeps_table_row_evidence_out_of_primary_when_discussi
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does laser power affect density?",
             },
             "claims": [
@@ -12826,7 +12829,7 @@ def test_with_presentation_keeps_table_row_evidence_out_of_primary_when_discussi
             "contexts": [
                 {
                     "context_id": "ctx_row",
-                    "label": "Goal scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"variable_process_axes": ["laser power"]},
                     "property_scope": ["density"],
@@ -12914,9 +12917,9 @@ def test_with_presentation_filters_low_delta_table_axis_when_stronger_axis_exist
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-density",
-                "goal_id": "goal-density",
+                "objective_id": "objective-density",
                 "title": (
                     "How do heat treatment, laser power, and scan speed affect "
                     "density and microstructure of stainless steel 316L?"
@@ -12933,7 +12936,7 @@ def test_with_presentation_filters_low_delta_table_axis_when_stronger_axis_exist
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_heat_treatment"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_heat_treatment"],
                 },
                 {
@@ -12947,7 +12950,7 @@ def test_with_presentation_filters_low_delta_table_axis_when_stronger_axis_exist
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_laser_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_laser_density"],
                     "warnings": ["deterministic_relation"],
                 },
@@ -12962,7 +12965,7 @@ def test_with_presentation_filters_low_delta_table_axis_when_stronger_axis_exist
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_laser_density_high_speed"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_laser_density_high_speed"],
                     "warnings": ["deterministic_relation"],
                 },
@@ -12977,7 +12980,7 @@ def test_with_presentation_filters_low_delta_table_axis_when_stronger_axis_exist
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_scan_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_scan_density"],
                     "warnings": ["deterministic_relation"],
                 },
@@ -12995,7 +12998,7 @@ def test_with_presentation_filters_low_delta_table_axis_when_stronger_axis_exist
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_heat_treatment"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_heat_treatment"],
                 },
                 {
@@ -13011,7 +13014,7 @@ def test_with_presentation_filters_low_delta_table_axis_when_stronger_axis_exist
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_laser_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_laser_density"],
                 },
                 {
@@ -13027,7 +13030,7 @@ def test_with_presentation_filters_low_delta_table_axis_when_stronger_axis_exist
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_laser_density_high_speed"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_laser_density_high_speed"],
                 },
                 {
@@ -13043,7 +13046,7 @@ def test_with_presentation_filters_low_delta_table_axis_when_stronger_axis_exist
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_scan_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_scan_density"],
                 },
             ],
@@ -13101,8 +13104,8 @@ def test_with_presentation_filters_low_delta_table_axis_when_stronger_axis_exist
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {
                         "variable_process_axes": [
@@ -13260,9 +13263,9 @@ def test_with_presentation_uses_representative_table_axis_delta_for_filtering():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-density",
-                "goal_id": "goal-density",
+                "objective_id": "objective-density",
                 "title": (
                     "How do laser power and scan speed affect density of "
                     "stainless steel 316L?"
@@ -13283,7 +13286,7 @@ def test_with_presentation_uses_representative_table_axis_delta_for_filtering():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_table"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_laser_density_small"],
                     "warnings": ["deterministic_relation"],
                 },
@@ -13300,7 +13303,7 @@ def test_with_presentation_uses_representative_table_axis_delta_for_filtering():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_table"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_laser_density_large"],
                     "warnings": ["deterministic_relation"],
                 },
@@ -13317,7 +13320,7 @@ def test_with_presentation_uses_representative_table_axis_delta_for_filtering():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_table"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_scan_density"],
                     "warnings": ["deterministic_relation"],
                 },
@@ -13341,8 +13344,8 @@ def test_with_presentation_uses_representative_table_axis_delta_for_filtering():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {
                         "variable_process_axes": ["laser power", "scan speed"],
@@ -13573,9 +13576,9 @@ def test_with_presentation_keeps_distinct_table_review_comparisons_separate():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-density",
-                "goal_id": "goal-density",
+                "objective_id": "objective-density",
                 "title": "How does scan speed affect density?",
             },
             "claims": [
@@ -13590,7 +13593,7 @@ def test_with_presentation_keeps_distinct_table_review_comparisons_separate():
                     "status": "supported",
                     "confidence": 0.82,
                     "evidence_ref_ids": ["evref_scan_density_a"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_scan_density_a"],
                     "warnings": ["deterministic_relation"],
                 },
@@ -13605,7 +13608,7 @@ def test_with_presentation_keeps_distinct_table_review_comparisons_separate():
                     "status": "supported",
                     "confidence": 0.82,
                     "evidence_ref_ids": ["evref_scan_density_b"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_scan_density_b"],
                     "warnings": ["deterministic_relation"],
                 },
@@ -13624,7 +13627,7 @@ def test_with_presentation_keeps_distinct_table_review_comparisons_separate():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_scan_density_a"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_scan_density_a"],
                 },
                 {
@@ -13640,7 +13643,7 @@ def test_with_presentation_keeps_distinct_table_review_comparisons_separate():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_scan_density_b"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_scan_density_b"],
                 },
             ],
@@ -13670,8 +13673,8 @@ def test_with_presentation_keeps_distinct_table_review_comparisons_separate():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {"variable_process_axes": ["scan speed"]},
                     "property_scope": ["density"],
@@ -13743,9 +13746,9 @@ def test_with_presentation_keeps_derived_energy_density_out_of_variable_axes():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-density",
-                "goal_id": "goal-density",
+                "objective_id": "objective-density",
                 "title": "How do laser power and scan speed affect density?",
             },
             "claims": [],
@@ -13763,7 +13766,7 @@ def test_with_presentation_keeps_derived_energy_density_out_of_variable_axes():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_scan_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_scan_density"],
                     "warnings": ["deterministic_relation"],
                 },
@@ -13780,7 +13783,7 @@ def test_with_presentation_keeps_derived_energy_density_out_of_variable_axes():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_power_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_power_density"],
                     "warnings": ["deterministic_relation"],
                 },
@@ -13811,8 +13814,8 @@ def test_with_presentation_keeps_derived_energy_density_out_of_variable_axes():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {
                         "variable_process_axes": ["laser power", "scan speed"],
@@ -13971,9 +13974,9 @@ def test_with_presentation_filters_multi_axis_table_row_comparison_from_findings
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-density",
-                "goal_id": "goal-density",
+                "objective_id": "objective-density",
                 "title": "How does scan speed affect density?",
             },
             "claims": [
@@ -14028,8 +14031,8 @@ def test_with_presentation_filters_multi_axis_table_row_comparison_from_findings
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {"variable_process_axes": ["scan speed"]},
                     "property_scope": ["density"],
@@ -14082,9 +14085,9 @@ def test_with_presentation_filters_low_magnitude_table_row_candidate_from_findin
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-density",
-                "goal_id": "goal-density",
+                "objective_id": "objective-density",
                 "title": "How do laser power and scan speed affect density?",
             },
             "claims": [],
@@ -14123,8 +14126,8 @@ def test_with_presentation_filters_low_magnitude_table_row_candidate_from_findin
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {
                         "variable_process_axes": ["laser power", "scan speed"],
@@ -14195,9 +14198,9 @@ def test_with_presentation_keeps_uts_table_when_text_only_supports_yield_and_elo
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-preheat",
-                "goal_id": "goal-preheat",
+                "objective_id": "objective-preheat",
                 "title": "How does build-platform preheating affect tensile properties?",
             },
             "claims": [],
@@ -14255,7 +14258,7 @@ def test_with_presentation_keeps_uts_table_when_text_only_supports_yield_and_elo
             "contexts": [
                 {
                     "context_id": "ctx_objective_scope",
-                    "label": "Goal scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -14288,9 +14291,9 @@ def test_with_presentation_filters_negligible_uts_table_comparison():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-preheat",
-                "goal_id": "goal-preheat",
+                "objective_id": "objective-preheat",
                 "title": "How does build-platform preheating affect tensile properties?",
             },
             "claims": [],
@@ -14333,7 +14336,7 @@ def test_with_presentation_filters_negligible_uts_table_comparison():
             "contexts": [
                 {
                     "context_id": "ctx_objective_scope",
-                    "label": "Goal scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -14374,9 +14377,9 @@ def test_with_presentation_filters_small_density_table_candidate_from_findings()
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-density",
-                "goal_id": "goal-density",
+                "objective_id": "objective-density",
                 "title": "How do heat treatment and scan speed affect density?",
             },
             "claims": [],
@@ -14571,9 +14574,9 @@ def test_with_presentation_keeps_table_direct_result_when_same_paper_text_mentio
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-density",
-                "goal_id": "goal-density",
+                "objective_id": "objective-density",
                 "title": (
                     "How do heat treatment, laser power, and scan speed affect "
                     "density and microstructure of stainless steel 316L?"
@@ -14591,7 +14594,7 @@ def test_with_presentation_keeps_table_direct_result_when_same_paper_text_mentio
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_laser_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_laser_density"],
                     "warnings": ["deterministic_relation"],
                 },
@@ -14610,7 +14613,7 @@ def test_with_presentation_keeps_table_direct_result_when_same_paper_text_mentio
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_laser_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_laser_density"],
                     "warnings": ["deterministic_relation"],
                 },
@@ -14645,8 +14648,8 @@ def test_with_presentation_keeps_table_direct_result_when_same_paper_text_mentio
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {
                         "variable_process_axes": [
@@ -14698,9 +14701,9 @@ def test_with_presentation_filters_specimen_label_as_finding_axis():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-density",
-                "goal_id": "goal-density",
+                "objective_id": "objective-density",
                 "title": "How do processing variables affect density?",
             },
             "claims": [
@@ -14714,7 +14717,7 @@ def test_with_presentation_filters_specimen_label_as_finding_axis():
                     "status": "supported",
                     "confidence": 0.62,
                     "evidence_ref_ids": ["evref_specimens_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_specimens_density"],
                     "warnings": ["deterministic_relation"],
                 },
@@ -14732,7 +14735,7 @@ def test_with_presentation_filters_specimen_label_as_finding_axis():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_specimens_density"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_specimens_density"],
                     "warnings": ["deterministic_relation"],
                 },
@@ -14752,8 +14755,8 @@ def test_with_presentation_filters_specimen_label_as_finding_axis():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {},
                     "property_scope": ["density"],
@@ -14800,9 +14803,9 @@ def test_with_presentation_dedupes_same_table_direct_evidence_for_finding():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-density",
-                "goal_id": "goal-density",
+                "objective_id": "objective-density",
                 "title": "How do laser power and scan speed affect density?",
             },
             "claims": [
@@ -14819,7 +14822,7 @@ def test_with_presentation_dedupes_same_table_direct_evidence_for_finding():
                         "evref_laser_density",
                         "evref_scan_density",
                     ],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_laser_density"],
                 },
             ],
@@ -14839,7 +14842,7 @@ def test_with_presentation_dedupes_same_table_direct_evidence_for_finding():
                         "evref_laser_density",
                         "evref_scan_density",
                     ],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_laser_density"],
                 },
             ],
@@ -14875,8 +14878,8 @@ def test_with_presentation_dedupes_same_table_direct_evidence_for_finding():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {
                         "variable_process_axes": ["laser power", "scan speed"],
@@ -14926,9 +14929,9 @@ def test_with_presentation_scope_summary_keeps_direct_evidence_conditions():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-1",
-                "goal_id": "goal-1",
+                "objective_id": "objective-1",
                 "title": "How does VED affect fatigue strength?",
             },
             "claims": [
@@ -14942,7 +14945,7 @@ def test_with_presentation_scope_summary_keeps_direct_evidence_conditions():
                     "status": "supported",
                     "confidence": 0.86,
                     "evidence_ref_ids": ["evref_ved_fatigue"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_ved_fatigue"],
                 }
             ],
@@ -14959,7 +14962,7 @@ def test_with_presentation_scope_summary_keeps_direct_evidence_conditions():
                     ),
                     "status": "supported",
                     "evidence_ref_ids": ["evref_ved_fatigue"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["unit_ved_fatigue"],
                 }
             ],
@@ -14978,8 +14981,8 @@ def test_with_presentation_scope_summary_keeps_direct_evidence_conditions():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["volumetric energy density"]
@@ -15342,9 +15345,9 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-density",
-                "goal_id": "goal-density",
+                "objective_id": "objective-density",
                 "title": (
                     "How do heat treatment type and laser power affect "
                     "density of stainless steel 316L?"
@@ -15362,7 +15365,7 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
                     "status": "supported",
                     "confidence": 0.95,
                     "evidence_ref_ids": ["evref_heat_density"],
-                    "context_ids": ["ctx_goal", "ctx_comparison"],
+                    "context_ids": ["ctx_objective_scope", "ctx_comparison"],
                     "source_object_ids": ["oeu_heat_density"],
                     "warnings": [],
                 }
@@ -15382,7 +15385,7 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
                     "status": "supported",
                     "confidence": 0.95,
                     "evidence_ref_ids": ["evref_heat_density"],
-                    "context_ids": ["ctx_goal", "ctx_comparison"],
+                    "context_ids": ["ctx_objective_scope", "ctx_comparison"],
                     "source_object_ids": ["oeu_heat_density"],
                 }
             ],
@@ -15403,8 +15406,8 @@ def test_with_presentation_projects_traceable_table_comparison_as_finding():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {
                         "variable_process_axes": [
@@ -15597,9 +15600,9 @@ def test_with_presentation_table_audit_keeps_decimal_from_to_endpoint_rows():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-mechanical",
-                "goal_id": "goal-mechanical",
+                "objective_id": "objective-mechanical",
                 "title": "How does energy density affect elongation?",
             },
             "claims": [
@@ -15614,7 +15617,7 @@ def test_with_presentation_table_audit_keeps_decimal_from_to_endpoint_rows():
                     "status": "supported",
                     "confidence": 0.87,
                     "evidence_ref_ids": ["evref_elongation"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["oeu_elongation"],
                     "warnings": [],
                 }
@@ -15634,7 +15637,7 @@ def test_with_presentation_table_audit_keeps_decimal_from_to_endpoint_rows():
                     "status": "supported",
                     "confidence": 0.87,
                     "evidence_ref_ids": ["evref_elongation"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["oeu_elongation"],
                 }
             ],
@@ -15655,8 +15658,8 @@ def test_with_presentation_table_audit_keeps_decimal_from_to_endpoint_rows():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["stainless steel 316L"],
                     "process_context": {
                         "variable_process_axes": ["energy density"],
@@ -15733,9 +15736,9 @@ def test_with_presentation_table_quote_does_not_mislabel_short_rows():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-short-row",
-                "goal_id": "goal-short-row",
+                "objective_id": "objective-short-row",
                 "title": "How does A affect C?",
             },
             "claims": [
@@ -15770,7 +15773,7 @@ def test_with_presentation_table_quote_does_not_mislabel_short_rows():
             "contexts": [
                 {
                     "context_id": "ctx_short_row",
-                    "label": "Goal scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"variable_process_axes": ["A"]},
                     "property_scope": ["C"],
@@ -15827,9 +15830,9 @@ def test_table_quote_preserves_repeated_cells_for_alignment():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-repeated-row",
-                "goal_id": "goal-repeated-row",
+                "objective_id": "objective-repeated-row",
                 "title": "How does condition affect density?",
             },
             "claims": [
@@ -15864,7 +15867,7 @@ def test_table_quote_preserves_repeated_cells_for_alignment():
             "contexts": [
                 {
                     "context_id": "ctx_repeated_row",
-                    "label": "Goal scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {"variable_process_axes": ["condition number"]},
                     "property_scope": ["density"],
@@ -15944,9 +15947,9 @@ def test_with_presentation_does_not_promote_table_only_semantic_relation():
         {
             "state": "limited",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-semantic-table",
-                "goal_id": "goal-semantic-table",
+                "objective_id": "objective-semantic-table",
                 "title": "How does scanning speed affect elongation?",
             },
             "claims": [],
@@ -15965,7 +15968,7 @@ def test_with_presentation_does_not_promote_table_only_semantic_relation():
                     "status": "supported",
                     "confidence": 0.7,
                     "evidence_ref_ids": ["evref_mechanical_table"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["oeu_mechanical_table"],
                     "warnings": ["semantic_relation"],
                 }
@@ -15984,8 +15987,8 @@ def test_with_presentation_does_not_promote_table_only_semantic_relation():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["scanning speed"]
@@ -16011,9 +16014,9 @@ def test_with_presentation_does_not_promote_unanchored_numeric_semantic_relation
         {
             "state": "limited",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-semantic-range",
-                "goal_id": "goal-semantic-range",
+                "objective_id": "objective-semantic-range",
                 "title": "How does scan rotation affect yield strength?",
             },
             "claims": [],
@@ -16032,7 +16035,7 @@ def test_with_presentation_does_not_promote_unanchored_numeric_semantic_relation
                     "status": "supported",
                     "confidence": 0.7,
                     "evidence_ref_ids": ["evref_prediction_table"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["oeu_prediction_table"],
                     "warnings": ["semantic_relation"],
                 }
@@ -16051,8 +16054,8 @@ def test_with_presentation_does_not_promote_unanchored_numeric_semantic_relation
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -16080,9 +16083,9 @@ def test_with_presentation_does_not_attach_semantic_relation_extra_evidence_to_c
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-preheat-evidence",
-                "goal_id": "goal-preheat-evidence",
+                "objective_id": "objective-preheat-evidence",
                 "title": "How does build platform preheating affect ductility?",
             },
             "claims": [
@@ -16093,7 +16096,7 @@ def test_with_presentation_does_not_attach_semantic_relation_extra_evidence_to_c
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_preheat"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["oeu_preheat"],
                     "warnings": [],
                 }
@@ -16109,7 +16112,7 @@ def test_with_presentation_does_not_attach_semantic_relation_extra_evidence_to_c
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_preheat"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["oeu_preheat"],
                     "warnings": [],
                 },
@@ -16126,7 +16129,7 @@ def test_with_presentation_does_not_attach_semantic_relation_extra_evidence_to_c
                     "status": "supported",
                     "confidence": 0.8,
                     "evidence_ref_ids": ["evref_preheat", "evref_unrelated_ved"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["oeu_preheat", "oeu_unrelated_ved"],
                     "warnings": ["semantic_relation"],
                 },
@@ -16160,8 +16163,8 @@ def test_with_presentation_does_not_attach_semantic_relation_extra_evidence_to_c
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["build platform preheating"]
@@ -16238,7 +16241,7 @@ def test_with_presentation_projects_property_axis_relation_as_finding():
                     "status": "supported",
                     "confidence": 0.9,
                     "evidence_ref_ids": ["evref_porosity_corrosion"],
-                    "context_ids": ["ctx_goal"],
+                    "context_ids": ["ctx_objective_scope"],
                     "source_object_ids": ["oeu_porosity_corrosion"],
                 }
             ],
@@ -16261,8 +16264,8 @@ def test_with_presentation_projects_property_axis_relation_as_finding():
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "process_context_axes": ["selective laser melting"],
@@ -16299,7 +16302,7 @@ def test_with_presentation_projects_property_axis_relation_as_finding():
     assert "passive film" in evidence_by_id[direct_refs[0]]["quote"]
 
 
-def test_objective_understanding_recovers_specific_mechanical_property_table_for_scanning_speed_goal():
+def test_objective_understanding_recovers_specific_mechanical_property_table_for_scanning_speed_objective():
     conclusion_text = (
         "The SLM samples processed at higher scanning speed exhibited better "
         "densification, refined microstructure, and excellent mechanical "
@@ -16817,8 +16820,8 @@ def test_with_presentation_refreshes_persisted_recovered_mechanical_table_summar
             ],
             "contexts": [
                 {
-                    "context_id": "ctx_goal",
-                    "label": "Goal scope",
+                    "context_id": "ctx_objective_scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -16917,9 +16920,9 @@ def test_with_presentation_comparison_summary_extracts_percent_delta_finding():
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-preheat",
-                "goal_id": "goal-preheat",
+                "objective_id": "objective-preheat",
                 "title": "How does build platform preheating affect ductility?",
             },
             "claims": [
@@ -16973,7 +16976,7 @@ def test_with_presentation_comparison_summary_extracts_percent_delta_finding():
             "contexts": [
                 {
                     "context_id": "ctx_preheat",
-                    "label": "Goal scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": [
@@ -17011,9 +17014,9 @@ def test_with_presentation_comparison_summary_extracts_embedded_from_to_result()
         {
             "state": "ready",
             "scope": {
-                "scope_type": "goal",
+                "scope_type": "objective",
                 "collection_id": "col-ved",
-                "goal_id": "goal-ved",
+                "objective_id": "objective-ved",
                 "title": "How does VED affect defect structure?",
             },
             "claims": [
@@ -17066,7 +17069,7 @@ def test_with_presentation_comparison_summary_extracts_embedded_from_to_result()
             "contexts": [
                 {
                     "context_id": "ctx_ved",
-                    "label": "Goal scope",
+                    "label": "Objective scope",
                     "material_scope": ["316L stainless steel"],
                     "process_context": {
                         "variable_process_axes": ["volumetric energy density"]

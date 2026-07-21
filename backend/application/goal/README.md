@@ -9,8 +9,8 @@ The active runtime path is a lightweight session over one collection:
 2. accept plain natural-language messages
 3. read existing Core or Core-derived artifacts when grounded context is allowed
 4. prefer actionable expert-curated `training_ready` research-understanding
-   Findings when the session is focused on a confirmed goal or objective
-5. save human-editable experiment plan drafts from goal-focused chat answers
+   Findings when the session is focused on an Objective
+5. save human-editable experiment plan drafts from Objective-focused chat answers
 6. label the answer source as collection-grounded, collection-limited, general
    fallback, or general-only
 
@@ -21,26 +21,26 @@ The conversation domain model lives in `domain/goal/session.py`. It owns the
 core chat records and source-boundary rules for `GoalSessionRecord`,
 `GoalMessageRecord`, and `GoalSourceLink`. This package remains responsible for
 orchestration: reading Core artifacts, calling the LLM, and persisting the
-domain records through the Goal session repository port. The default SQLite
-storage engine is owned by `infra/persistence/sqlite/`; this package does not
-own database connections, SQL, schema initialization, or row encoding.
+domain records through the Goal session repository port. Persistence is owned
+by `infra/persistence/`; this package does not own database connections, SQL,
+schema initialization, or row encoding.
 
 - `session_service.py`
   Primary current conversation service. It persists session context, retrieves
   collection artifacts before grounded answers, prioritizes actionable curated
-  Findings for goal-focused experiment or protocol questions, filters out
+  Findings for Objective-focused experiment or protocol questions, filters out
   unsupported/conflicted/insufficient reviewed findings as protocol sources,
   limits cited protocol sources to curated Findings when they are available,
   preserves each Finding's paper-level or cross-paper generalization boundary
   in the prompt context, and labels general fallback separately from collection
   evidence.
 - `experiment_plan_service.py`
-  Persists goal-scoped experiment plan drafts generated from chat answers. When
-  a draft references a chat message, the service verifies that the message is a
-  same-user, same-goal, collection-grounded assistant answer with auditable
+  Persists Objective-scoped experiment plan drafts generated from chat answers.
+  When a draft references a chat message, the service verifies that the message
+  is a same-user, same-Objective, collection-grounded assistant answer with auditable
   evidence links, exact protocol-source Finding fingerprints, and no
   review-blocking warnings. Plan reads compare those fingerprints with the
-  current goal dataset; stale or unverified Copilot drafts remain auditable but
+  current Objective dataset; stale or unverified Copilot drafts remain auditable but
   cannot enter `ready_for_review`. These drafts are
   human-editable Goal Consumer outputs, not replacements for the conditional
   Protocol browsing branch.

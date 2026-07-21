@@ -1,27 +1,45 @@
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.task_service import TaskService
 from domain.core import (
     CollectionComparableResult,
     ComparableResult,
-    ComparisonRowRecord,
-    CoreFactSet,
+    ComparisonFactSet,
     DocumentProfile,
     EvidenceAnchor,
     MeasurementResult,
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
+)
+from domain.core.paper_fact import PaperFactSet
+from domain.core.objective_comparison_projection import (
+    project_objective_comparison_semantics,
 )
 from domain.source import SourceArtifactSet
 from infra.persistence.memory import MemoryBuildRepository
 from infra.persistence.sqlite import (
-    SqliteCoreFactRepository,
     SqliteSourceArtifactRepository,
 )
+from tests.support.comparison_repository import MemoryComparisonRepository
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 
 def test_artifact_registry_ignores_absent_legacy_graph_outputs(tmp_path):
-    artifact_registry = ArtifactRegistryService(MemoryBuildRepository())
+    source_repository = Mock()
+    source_repository.read_collection_artifacts.return_value = SourceArtifactSet()
+    paper_repository = MemoryPaperFactRepository()
+    comparison_repository = MemoryComparisonRepository()
+    artifact_registry = ArtifactRegistryService(
+        MemoryBuildRepository(),
+        source_artifact_repository=source_repository,
+        paper_fact_repository=paper_repository,
+        objective_repository=MemoryObjectiveRepository(),
+        comparison_repository=comparison_repository,
+    )
 
     payload = artifact_registry.build_registry("col_demo", tmp_path / "output")
 
@@ -39,7 +57,8 @@ def test_artifact_registry_marks_core_readiness_from_repositories(tmp_path):
     collection_id = "col_demo"
     db_path = tmp_path / "lens.sqlite"
     source_repository = SqliteSourceArtifactRepository(db_path)
-    core_repository = SqliteCoreFactRepository(db_path)
+    comparison_repository = MemoryComparisonRepository()
+    paper_repository = MemoryPaperFactRepository()
     source_repository.replace_collection_artifacts(
         collection_id,
         SourceArtifactSet.from_records(
@@ -60,23 +79,31 @@ def test_artifact_registry_marks_core_readiness_from_repositories(tmp_path):
             ],
         ),
     )
-    core_repository.replace_collection_facts(
+    structure_repository = Mock()
+    structure_repository.read_collection_artifacts.return_value = (
+        source_repository.read_collection_artifacts(collection_id)
+    )
+    paper_repository.replace_document_profiles(
         collection_id,
-        CoreFactSet(
-            paper_facts_ready=True,
-            comparison_artifacts_ready=True,
-            document_profiles=(
-                DocumentProfile.from_mapping(
-                    {
-                        "document_id": "paper-1",
-                        "collection_id": collection_id,
-                        "title": "Core Paper",
-                        "source_filename": "paper.txt",
-                        "doc_type": "experimental",
-                        "confidence": 0.91,
-                    }
-                ),
+        "build_test",
+        (
+            DocumentProfile.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "collection_id": collection_id,
+                    "title": "Core Paper",
+                    "source_filename": "paper.txt",
+                    "doc_type": "experimental",
+                    "confidence": 0.91,
+                }
             ),
+        ),
+    )
+    paper_repository.replace_paper_facts(
+        collection_id,
+        "build_test",
+        PaperFactSet(
+            paper_facts_ready=True,
             evidence_anchors=(
                 EvidenceAnchor.from_mapping(
                     {
@@ -104,28 +131,34 @@ def test_artifact_registry_marks_core_readiness_from_repositories(tmp_path):
                     }
                 ),
             ),
-            comparable_results=(
-                ComparableResult.from_mapping(
-                    {
-                        "comparable_result_id": "cres-1",
-                        "source_result_id": "res-1",
-                        "source_document_id": "paper-1",
-                        "normalized_context": {
-                            "material_system_normalized": "oxide cathode",
-                            "process_normalized": "700 C",
-                            "baseline_normalized": "as-prepared",
-                            "test_condition_normalized": "EIS",
-                        },
-                        "value": {
-                            "property_normalized": "conductivity",
-                            "result_type": "scalar",
-                            "numeric_value": 12.0,
-                            "unit": "mS/cm",
-                            "summary": "12 mS/cm",
-                        },
-                    }
-                ),
-            ),
+        ),
+    )
+    comparable_result = ComparableResult.from_mapping(
+        {
+            "comparable_result_id": "cres-1",
+            "source_result_id": "res-1",
+            "source_document_id": "paper-1",
+            "normalized_context": {
+                "material_system_normalized": "oxide cathode",
+                "process_normalized": "700 C",
+                "baseline_normalized": "as-prepared",
+                "test_condition_normalized": "EIS",
+            },
+            "value": {
+                "property_normalized": "conductivity",
+                "result_type": "scalar",
+                "numeric_value": 12.0,
+                "unit": "mS/cm",
+                "summary": "12 mS/cm",
+            },
+        }
+    )
+    comparison_repository.replace(
+        collection_id,
+        "build_test",
+        ComparisonFactSet(
+            comparison_artifacts_ready=True,
+            comparable_results=(comparable_result,),
             collection_comparable_results=(
                 CollectionComparableResult.from_mapping(
                     {
@@ -144,8 +177,10 @@ def test_artifact_registry_marks_core_readiness_from_repositories(tmp_path):
     )
     artifact_registry = ArtifactRegistryService(
         MemoryBuildRepository(),
-        source_artifact_repository=source_repository,
-        core_fact_repository=core_repository,
+        source_artifact_repository=structure_repository,
+        paper_fact_repository=paper_repository,
+        objective_repository=MemoryObjectiveRepository(),
+        comparison_repository=comparison_repository,
     )
 
     payload = artifact_registry.build_registry(collection_id, tmp_path / "output")
@@ -161,11 +196,58 @@ def test_artifact_registry_marks_core_readiness_from_repositories(tmp_path):
     assert payload["figures_ready"] is True
 
 
+def test_artifact_registry_keeps_excluded_comparison_rows_not_ready(tmp_path):
+    collection_id = "col-excluded"
+    comparison_repository = MemoryComparisonRepository()
+    comparison_repository.replace(
+        collection_id,
+        "build_test",
+        ComparisonFactSet(
+            comparison_artifacts_ready=True,
+            comparable_results=(
+                ComparableResult.from_mapping(
+                    {
+                        "comparable_result_id": "cres-excluded",
+                        "source_result_id": "result-1",
+                        "source_document_id": "paper-1",
+                    }
+                ),
+            ),
+            collection_comparable_results=(
+                CollectionComparableResult.from_mapping(
+                    {
+                        "collection_id": collection_id,
+                        "comparable_result_id": "cres-excluded",
+                        "included": False,
+                    }
+                ),
+            ),
+        ),
+    )
+    source_repository = Mock()
+    source_repository.read_collection_artifacts.return_value = SourceArtifactSet()
+    artifact_registry = ArtifactRegistryService(
+        MemoryBuildRepository(),
+        source_artifact_repository=source_repository,
+        paper_fact_repository=MemoryPaperFactRepository(),
+        objective_repository=MemoryObjectiveRepository(),
+        comparison_repository=comparison_repository,
+    )
+
+    payload = artifact_registry.build_registry(collection_id, tmp_path / "output")
+
+    assert payload["comparison_rows_generated"] is True
+    assert payload["comparable_results_ready"] is True
+    assert payload["collection_comparable_results_ready"] is True
+    assert payload["comparison_rows_ready"] is False
+
+
 def test_artifact_registry_marks_objective_units_as_evidence_cards(tmp_path):
     collection_id = "col_demo"
     db_path = tmp_path / "lens.sqlite"
     source_repository = SqliteSourceArtifactRepository(db_path)
-    core_repository = SqliteCoreFactRepository(db_path)
+    comparison_repository = MemoryComparisonRepository()
+    paper_repository = MemoryPaperFactRepository()
     source_repository.replace_collection_artifacts(
         collection_id,
         SourceArtifactSet.from_records(
@@ -177,6 +259,10 @@ def test_artifact_registry_marks_objective_units_as_evidence_cards(tmp_path):
                 }
             ],
         ),
+    )
+    structure_repository = Mock()
+    structure_repository.read_collection_artifacts.return_value = (
+        source_repository.read_collection_artifacts(collection_id)
     )
     document_profiles = (
         DocumentProfile.from_mapping(
@@ -209,52 +295,39 @@ def test_artifact_registry_marks_objective_units_as_evidence_cards(tmp_path):
             }
         ),
     )
-    comparison_rows = (
-        ComparisonRowRecord.from_mapping(
-            {
-                "row_id": "row-1",
-                "collection_id": collection_id,
-                "comparable_result_id": "objective:oeu-1",
-                "source_document_id": "paper-1",
-                "variant_label": "as-built",
-                "result_type": "scalar",
-                "result_summary": "1.2 uA/cm2",
-                "supporting_evidence_ids": ["oeu-1"],
-                "material_system_normalized": "316L stainless steel",
-                "process_normalized": "LPBF",
-                "property_normalized": "corrosion current density",
-                "baseline_normalized": "unspecified baseline",
-                "test_condition_normalized": "method: polarization",
-                "comparability_status": "comparable",
-                "value": 1.2,
-                "unit": "uA/cm2",
-            }
-        ),
-    )
-    core_repository.replace_collection_document_profiles(
+    paper_repository.replace_document_profiles(
         collection_id,
+        "build_test",
         document_profiles,
     )
-    core_repository.replace_collection_research_objectives(
+    objective_repository = MemoryObjectiveRepository()
+    objective_repository.replace(
         collection_id,
-        paper_skims=(),
-        research_objectives=(),
-        objective_contexts=(),
-        objective_paper_frames=(),
-        objective_evidence_routes=(),
-        objective_evidence_units=objective_evidence_units,
-        objective_logic_chains=(),
+        "build_test",
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            objective_evidence_units=objective_evidence_units,
+        ),
     )
-    core_repository.replace_collection_comparison_artifacts(
+    semantics = project_objective_comparison_semantics(
+        collection_id=collection_id,
+        evidence_units=objective_evidence_units,
+    )
+    comparison_repository.replace(
         collection_id,
-        comparable_results=(),
-        collection_comparable_results=(),
-        comparison_rows=comparison_rows,
+        "build_test",
+        ComparisonFactSet(
+            comparison_artifacts_ready=True,
+            comparable_results=semantics.comparable_results,
+            collection_comparable_results=semantics.collection_comparable_results,
+        ),
     )
     artifact_registry = ArtifactRegistryService(
         MemoryBuildRepository(),
-        source_artifact_repository=source_repository,
-        core_fact_repository=core_repository,
+        source_artifact_repository=structure_repository,
+        paper_fact_repository=paper_repository,
+        objective_repository=objective_repository,
+        comparison_repository=comparison_repository,
     )
 
     payload = artifact_registry.build_registry(collection_id, tmp_path / "output")
@@ -294,7 +367,8 @@ def test_artifact_registry_persists_version_rows_and_rebuilds_task_projection(
     )
     db_path = tmp_path / "lens.sqlite"
     source_repository = SqliteSourceArtifactRepository(db_path)
-    core_repository = SqliteCoreFactRepository(db_path)
+    comparison_repository = MemoryComparisonRepository()
+    paper_repository = MemoryPaperFactRepository()
     source_repository.replace_collection_artifacts(
         collection_id,
         SourceArtifactSet.from_records(
@@ -307,10 +381,16 @@ def test_artifact_registry_persists_version_rows_and_rebuilds_task_projection(
             ]
         ),
     )
+    structure_repository = Mock()
+    structure_repository.read_collection_artifacts.return_value = (
+        source_repository.read_collection_artifacts(collection_id)
+    )
     registry = ArtifactRegistryService(
         repository,
-        source_artifact_repository=source_repository,
-        core_fact_repository=core_repository,
+        source_artifact_repository=structure_repository,
+        paper_fact_repository=paper_repository,
+        objective_repository=MemoryObjectiveRepository(),
+        comparison_repository=comparison_repository,
     )
 
     registered = registry.register(

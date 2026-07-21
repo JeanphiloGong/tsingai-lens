@@ -17,13 +17,13 @@ from urllib.error import HTTPError, URLError
 
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_COLLECTION_ID = "col_0cc5013fdb3c"
-DEFAULT_GOAL_IDS = (
-    "goal_0914003ad572",
-    "goal_1a7a26d850b9",
-    "goal_399171646354",
-    "goal_061c9c049e69",
-    "goal_6bf7d2c1030e",
-    "goal_3037e425673a",
+DEFAULT_OBJECTIVE_IDS = (
+    "obj_how-do-build-platform-preheating-temperature-and-build-platform-preheati_a13773ac",
+    "obj_how-do-laser-power-scan-speed-heat-treatment-type-and-heat-treatment-par_f189a6ba",
+    "obj_how-do-laser-power-scanning-speed-energy-density-porosity-level-and-pore_f18da72e",
+    "obj_how-do-scan-strategy-rotation-angles-and-build-orientation-angles-influe_2248ccb8",
+    "obj_how-do-scanning-strategy-scanning-speed-and-energy-density-affect-yield_6d508ef8",
+    "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419",
 )
 REVIEW_PACKET_QUOTE_LIMIT = 360
 REVIEW_ACTION_OPTIONS = ("accept", "reject", "correct", "skip")
@@ -105,10 +105,10 @@ def parse_args() -> argparse.Namespace:
         help="Collection id to check.",
     )
     parser.add_argument(
-        "--goal-id",
+        "--objective-id",
         action="append",
-        dest="goal_ids",
-        help="Goal id to check. May repeat. Defaults to the local 6-goal 316L set.",
+        dest="objective_ids",
+        help="Objective id to check. May repeat. Defaults to the local 316L set.",
     )
     parser.add_argument(
         "--api-base-url",
@@ -157,7 +157,7 @@ def main() -> None:
     args = parse_args()
     summary = check_goal_dataset_quality(
         collection_id=args.collection_id,
-        goal_ids=tuple(args.goal_ids or DEFAULT_GOAL_IDS),
+        objective_ids=tuple(args.objective_ids or DEFAULT_OBJECTIVE_IDS),
         api_base_url=args.api_base_url,
         require_training_ready=args.require_training_ready,
         include_review_packet=args.format
@@ -203,7 +203,7 @@ def write_stdout(output: str) -> None:
 def check_goal_dataset_quality(
     *,
     collection_id: str,
-    goal_ids: tuple[str, ...] = DEFAULT_GOAL_IDS,
+    objective_ids: tuple[str, ...] = DEFAULT_OBJECTIVE_IDS,
     api_base_url: str | None = None,
     require_training_ready: bool = False,
     include_review_packet: bool = False,
@@ -217,22 +217,22 @@ def check_goal_dataset_quality(
     cookie = _api_login_cookie(api_base_url.rstrip("/")) if api_base_url else ""
     goal_summaries = []
     checks: list[dict[str, str]] = []
-    for goal_id in goal_ids:
+    for objective_id in objective_ids:
         dataset = (
             fetch_goal_dataset_from_api(
                 api_base_url=api_base_url.rstrip("/"),
                 collection_id=collection_id,
-                goal_id=goal_id,
+                objective_id=objective_id,
                 cookie=cookie,
             )
             if api_base_url
-            else _local_goal_dataset(collection_id, goal_id)
+            else _local_goal_dataset(collection_id, objective_id)
         )
         goal_summary = evaluate_goal_dataset_payload(
             dataset,
             require_training_ready=require_training_ready,
         )
-        goal_summary["goal_id"] = goal_id
+        goal_summary["objective_id"] = objective_id
         if include_review_packet:
             goal_summary["review_packet"] = build_goal_review_packet(
                 dataset,
@@ -251,35 +251,69 @@ def check_goal_dataset_quality(
         if any(check["status"] == "fail" for check in checks)
         else "pass",
         "collection_id": collection_id,
-        "goal_count": len(goal_ids),
+        "goal_count": len(objective_ids),
         "goals": goal_summaries,
         "checks": checks,
     }
 
 
-def _local_goal_dataset(collection_id: str, goal_id: str) -> dict[str, Any]:
+def _local_goal_dataset(collection_id: str, objective_id: str) -> dict[str, Any]:
     with contextlib.redirect_stdout(io.StringIO()):
         from application.evaluation import ResearchUnderstandingFeedbackService  # noqa: PLC0415
-
-        return ResearchUnderstandingFeedbackService().export_dataset(
-            collection_id=collection_id,
-            scope_type="goal",
-            scope_id=goal_id,
+        from application.core.research_understanding_service import (  # noqa: PLC0415
+            ResearchUnderstandingService,
         )
+        from infra.persistence.database import (  # noqa: PLC0415
+            DatabaseSettings,
+            build_database_engine,
+            build_session_factory,
+        )
+        from infra.persistence.postgres.research_understanding_repository import (  # noqa: PLC0415
+            PostgresResearchUnderstandingRepository,
+        )
+        from infra.persistence.postgres.research_understanding_review_repository import (  # noqa: PLC0415
+            PostgresResearchUnderstandingReviewRepository,
+        )
+        from infra.persistence.postgres.source_artifact_repository import (  # noqa: PLC0415
+            PostgresSourceArtifactRepository,
+        )
+
+        engine = build_database_engine(DatabaseSettings())
+        try:
+            session_factory = build_session_factory(engine)
+            service = ResearchUnderstandingFeedbackService(
+                review_repository=PostgresResearchUnderstandingReviewRepository(
+                    session_factory
+                ),
+                research_understanding_repository=(
+                    PostgresResearchUnderstandingRepository(session_factory)
+                ),
+                research_understanding_service=ResearchUnderstandingService(
+                    source_artifact_repository=PostgresSourceArtifactRepository(
+                        session_factory
+                    )
+                ),
+            )
+            return service.export_dataset(
+                collection_id=collection_id,
+                objective_id=objective_id,
+            )
+        finally:
+            engine.dispose()
 
 
 def fetch_goal_dataset_from_api(
     *,
     api_base_url: str,
     collection_id: str,
-    goal_id: str,
+    objective_id: str,
     cookie: str,
 ) -> dict[str, Any]:
     return _api_json_request(
         api_base_url,
         (
             f"/api/v1/collections/{collection_id}/research-understanding/dataset"
-            f"?scope_type=goal&scope_id={goal_id}"
+            f"?objective_id={objective_id}"
         ),
         cookie=cookie,
     )
@@ -346,7 +380,7 @@ def evaluate_goal_dataset_payload(
     *,
     require_training_ready: bool = False,
 ) -> dict[str, Any]:
-    goal_id = str(dataset.get("scope_id") or "")
+    objective_id = str(dataset.get("objective_id") or "")
     quality = _mapping(dataset.get("quality_summary"))
     warning_counts = _mapping(quality.get("warning_counts"))
     items = _mapping_list(dataset.get("items"))
@@ -366,13 +400,13 @@ def evaluate_goal_dataset_payload(
     ]
     checks = [
         _check(
-            goal_id,
+            objective_id,
             "dataset exports at least one sample",
             bool(items),
             f"items={len(items)}",
         ),
         _check(
-            goal_id,
+            objective_id,
             "dataset has at least one active sample",
             bool(active_items),
             (
@@ -381,7 +415,7 @@ def evaluate_goal_dataset_payload(
             ),
         ),
         _check(
-            goal_id,
+            objective_id,
             "dataset has no unavailable or failed traces",
             not warning_counts.get("unavailable_trace")
             and not warning_counts.get("failed_trace"),
@@ -391,7 +425,7 @@ def evaluate_goal_dataset_payload(
             ),
         ),
         _check(
-            goal_id,
+            objective_id,
             "active samples include text input blocks",
             all(_has_text_input_block(item) for item in active_items),
             _sample_failure_detail(
@@ -399,7 +433,7 @@ def evaluate_goal_dataset_payload(
             ),
         ),
         _check(
-            goal_id,
+            objective_id,
             "active samples include traceable training evidence",
             all(_has_traceable_training_evidence(item) for item in active_items),
             _sample_failure_detail(
@@ -409,7 +443,7 @@ def evaluate_goal_dataset_payload(
             ),
         ),
         _check(
-            goal_id,
+            objective_id,
             "training-ready samples include expert target",
             all(_mapping(item.get("expert_target")) for item in training_ready_items),
             _sample_failure_detail(
@@ -419,13 +453,13 @@ def evaluate_goal_dataset_payload(
             ),
         ),
         _check(
-            goal_id,
+            objective_id,
             "training-ready samples include fine-tuning messages",
             all(_has_fine_tuning_messages(item) for item in training_ready_items),
             _training_message_failure_detail(training_ready_items),
         ),
         _check(
-            goal_id,
+            objective_id,
             "training-ready samples include protocol design inputs",
             all(_has_protocol_design_inputs(item) for item in training_ready_items),
             _sample_failure_detail(
@@ -439,14 +473,14 @@ def evaluate_goal_dataset_payload(
         checks.insert(
             2,
             _check(
-                goal_id,
+                objective_id,
                 "dataset has at least one training-ready sample",
                 bool(training_ready_items),
                 f"training_ready={len(training_ready_items)}",
             ),
         )
     return {
-        "goal_id": goal_id,
+        "objective_id": objective_id,
         "item_count": len(items),
         "training_ready_count": len(training_ready_items),
         "training_message_ready_count": len(training_message_ready_items),
@@ -511,7 +545,7 @@ def build_goal_review_packet(
     *,
     collection_id: str,
 ) -> dict[str, Any]:
-    goal_id = _text(dataset.get("scope_id"))
+    objective_id = _text(dataset.get("objective_id"))
     candidates = []
     for item in _mapping_list(dataset.get("items")):
         if _text(item.get("dataset_use_status")) != "review_candidate":
@@ -547,7 +581,7 @@ def build_goal_review_packet(
                 "label_status": _text(item.get("label_status")),
                 "open_url": _goal_review_url(
                     collection_id,
-                    goal_id,
+                    objective_id,
                     finding_id=finding_id,
                 ),
                 "presentation_bucket": _text(item.get("presentation_bucket")),
@@ -592,8 +626,8 @@ def build_goal_review_packet(
             }
         )
     return {
-        "goal_id": goal_id,
-        "review_url": _goal_review_url(collection_id, goal_id),
+        "objective_id": objective_id,
+        "review_url": _goal_review_url(collection_id, objective_id),
         "candidate_count": len(candidates),
         "risk_summary": _review_risk_summary(candidates),
         "candidates": candidates,
@@ -625,7 +659,7 @@ def build_goal_training_message_export(
             row["metadata"] = _training_export_metadata(dataset, item)
         rows.append(row)
     return {
-        "goal_id": _text(dataset.get("scope_id")),
+        "objective_id": _text(dataset.get("objective_id")),
         "row_count": len(rows),
         "rows": rows,
     }
@@ -640,8 +674,7 @@ def _training_export_metadata(
     evidence_refs = _mapping_list(item.get("training_evidence_refs"))
     return {
         "collection_id": _text(dataset.get("collection_id")),
-        "scope_type": _text(dataset.get("scope_type")),
-        "goal_id": _text(dataset.get("scope_id")),
+        "objective_id": _text(dataset.get("objective_id")),
         "sample_id": _text(item.get("sample_id")),
         "finding_id": _text(item.get("finding_id")),
         "claim_id": _text(item.get("claim_id")),
@@ -706,7 +739,7 @@ def render_review_packet_summary(summary: dict[str, Any]) -> str:
         lines.extend(
             [
                 "",
-                f"Goal {packet.get('goal_id')}: {len(candidates)} review candidate(s)",
+                f"Goal {packet.get('objective_id')}: {len(candidates)} review candidate(s)",
                 f"Open: {packet.get('review_url')}",
             ]
         )
@@ -831,12 +864,12 @@ def render_review_jsonl_summary(summary: dict[str, Any]) -> str:
     collection_id = _text(summary.get("collection_id"))
     for goal in _mapping_list(summary.get("goals")):
         packet = _mapping(goal.get("review_packet"))
-        goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        objective_id = _text(packet.get("objective_id")) or _text(goal.get("objective_id"))
         for candidate in _mapping_list(packet.get("candidates")):
             rows.append(
                 {
                     "collection_id": collection_id,
-                    "goal_id": goal_id,
+                    "objective_id": objective_id,
                     "sample_id": _text(candidate.get("sample_id")),
                     "finding_id": _text(candidate.get("finding_id")),
                     "claim_id": _text(candidate.get("claim_id")),
@@ -898,7 +931,7 @@ def render_decision_template_summary(summary: dict[str, Any]) -> str:
     collection_id = _text(summary.get("collection_id"))
     for goal in _mapping_list(summary.get("goals")):
         packet = _mapping(goal.get("review_packet"))
-        goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        objective_id = _text(packet.get("objective_id")) or _text(goal.get("objective_id"))
         for candidate in _mapping_list(packet.get("candidates")):
             evidence = _mapping_list(candidate.get("evidence"))
             suggested = _mapping(candidate.get("suggested_target"))
@@ -911,7 +944,7 @@ def render_decision_template_summary(summary: dict[str, Any]) -> str:
             rows.append(
                 {
                     "collection_id": collection_id,
-                    "goal_id": goal_id,
+                    "objective_id": objective_id,
                     "finding_id": _text(candidate.get("finding_id")),
                     "claim_id": _text(candidate.get("claim_id")),
                     "action": "skip",
@@ -1008,13 +1041,13 @@ def render_agent_review_prompt_jsonl_summary(summary: dict[str, Any]) -> str:
     collection_id = _text(summary.get("collection_id"))
     for goal in _mapping_list(summary.get("goals")):
         packet = _mapping(goal.get("review_packet"))
-        goal_id = _text(packet.get("goal_id")) or _text(goal.get("goal_id"))
+        objective_id = _text(packet.get("objective_id")) or _text(goal.get("objective_id"))
         for candidate in _mapping_list(packet.get("candidates")):
             rows.append(
                 {
                     "task": "review_lens_research_finding",
                     "collection_id": collection_id,
-                    "goal_id": goal_id,
+                    "objective_id": objective_id,
                     "finding_id": _text(candidate.get("finding_id")),
                     "claim_id": _text(candidate.get("claim_id")),
                     "open_url": _text(candidate.get("open_url"))
@@ -1755,14 +1788,14 @@ def _clip(value: Any, limit: int = REVIEW_PACKET_QUOTE_LIMIT) -> str:
 
 def _goal_review_url(
     collection_id: str,
-    goal_id: str,
+    objective_id: str,
     *,
     finding_id: str = "",
 ) -> str:
     params = {"review": "queue"}
     if finding_id:
         params["finding_id"] = finding_id
-    return f"/collections/{collection_id}/goals/{goal_id}?{urlencode(params)}"
+    return f"/collections/{collection_id}/objectives/{objective_id}?{urlencode(params)}"
 
 
 def _short_review_href(value: Any) -> str:
@@ -1803,10 +1836,10 @@ def _jsonl(rows: list[dict[str, Any]]) -> str:
     return f"{body}\n" if body else ""
 
 
-def _check(goal_id: str, name: str, passed: bool, detail: str) -> dict[str, str]:
+def _check(objective_id: str, name: str, passed: bool, detail: str) -> dict[str, str]:
     return {
         "status": "pass" if passed else "fail",
-        "goal_id": goal_id,
+        "objective_id": objective_id,
         "name": name,
         "detail": detail,
     }

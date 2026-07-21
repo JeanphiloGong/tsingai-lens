@@ -11,13 +11,20 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from application.core.comparison_service import ComparisonService
+from application.core.semantic_build.document_profile_service import (
+    DocumentProfileService,
+)
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from tests.support.collection_service import build_test_collection_service
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 from controllers.core import comparable_results as comparable_results_controller
 from domain.core import (
     CollectionComparableResult,
     ComparableResult,
-    CoreFactSet,
+    ComparisonFactSet,
 )
+from tests.support.comparison_repository import MemoryComparisonRepository
 from domain.core.comparison import (
     build_collection_assessment_input_fingerprint,
 )
@@ -119,17 +126,16 @@ def _store_core_comparable_result_facts(
     comparable_results: list[dict],
     scoped_results: list[dict],
 ) -> None:
-    comparison_service.core_fact_repository.replace_collection_facts(
+    comparison_service.comparison_repository.replace(
         collection_id,
-        CoreFactSet(
-            paper_facts_ready=True,
+        "build_test",
+        ComparisonFactSet(
             comparison_artifacts_ready=True,
             comparable_results=tuple(
                 ComparableResult.from_mapping(row) for row in comparable_results
             ),
             collection_comparable_results=tuple(
-                CollectionComparableResult.from_mapping(row)
-                for row in scoped_results
+                CollectionComparableResult.from_mapping(row) for row in scoped_results
             ),
         ),
     )
@@ -138,7 +144,19 @@ def _store_core_comparable_result_facts(
 @pytest.fixture()
 def comparable_result_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    comparison_service = ComparisonService(collection_service)
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    paper_fact_repository = MemoryPaperFactRepository()
+    comparison_service = ComparisonService(
+        collection_service,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=MemoryObjectiveRepository(),
+        comparison_repository=MemoryComparisonRepository(),
+        document_profile_service=DocumentProfileService(
+            collection_service,
+            source_artifact_repository=source_repository,
+            paper_fact_repository=paper_fact_repository,
+        ),
+    )
 
     request = SimpleNamespace(
         app=SimpleNamespace(
@@ -153,7 +171,9 @@ def test_comparable_results_route_returns_200_without_row_cache(
     comparable_result_services,
 ):
     collection_service, comparison_service, request = comparable_result_services
-    collection = collection_service.create_collection(name="Comparable Results Collection")
+    collection = collection_service.create_collection(
+        name="Comparable Results Collection"
+    )
     collection_id = collection["collection_id"]
 
     comparable_result, scoped_result = _build_semantic_comparison_record(

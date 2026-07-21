@@ -32,7 +32,6 @@ export type ResearchUnderstandingState = 'empty' | 'partial' | 'ready' | 'limite
 export type ResearchUnderstandingScope = {
 	scope_type: string;
 	collection_id: string;
-	goal_id?: string | null;
 	material_id: string | null;
 	objective_id: string | null;
 	document_id: string | null;
@@ -292,8 +291,7 @@ export type ResearchUnderstandingFeedbackIssueType =
 	| 'unclear_statement'
 	| 'other';
 export type ResearchUnderstandingFeedbackCreate = {
-	scope_type: string;
-	scope_id: string;
+	objective_id: string;
 	finding_id: string;
 	claim_id?: string | null;
 	review_status: ResearchUnderstandingFeedbackStatus;
@@ -308,14 +306,12 @@ export type ResearchUnderstandingFeedback = ResearchUnderstandingFeedbackCreate 
 	created_at: string;
 };
 export type ResearchUnderstandingFeedbackFilters = {
-	scope_type?: string;
-	scope_id?: string;
+	objective_id?: string;
 	finding_id?: string;
 	claim_id?: string;
 };
 export type ResearchUnderstandingCurationCreate = {
-	scope_type: string;
-	scope_id: string;
+	objective_id: string;
 	finding_id: string;
 	claim_id?: string | null;
 	curated_claim_type: string;
@@ -340,8 +336,7 @@ export type ResearchUnderstandingCuration = ResearchUnderstandingCurationCreate 
 	updated_at: string;
 };
 export type ResearchUnderstandingCurationFilters = {
-	scope_type?: string;
-	scope_id?: string;
+	objective_id?: string;
 	finding_id?: string;
 	claim_id?: string;
 };
@@ -362,8 +357,8 @@ export type ResearchUnderstandingReviewDecisionImportResponse = {
 	errors: Record<string, unknown>[];
 	warnings: Record<string, unknown>[];
 	review_progress: Record<string, unknown>;
-	decision_progress_by_goal: Record<string, unknown>[];
-	affected_goals: Record<string, unknown>[];
+	decision_progress_by_objective: Record<string, unknown>[];
+	affected_objectives: Record<string, unknown>[];
 	readiness_summary: Record<string, unknown>;
 	review_scope_gate: Record<string, unknown>;
 };
@@ -378,8 +373,7 @@ export type ResearchUnderstandingGoldDraftItem = {
 };
 export type ResearchUnderstandingGoldDraft = {
 	collection_id: string;
-	scope_type: string;
-	scope_id: string;
+	objective_id: string;
 	gold_id: string;
 	target_layer: string;
 	metric_profile: string;
@@ -387,8 +381,7 @@ export type ResearchUnderstandingGoldDraft = {
 	items: ResearchUnderstandingGoldDraftItem[];
 };
 export type ResearchUnderstandingGoldDraftFilters = {
-	scope_type: string;
-	scope_id: string;
+	objective_id: string;
 };
 export type ResearchUnderstandingDatasetLabelStatus = 'candidate' | 'silver' | 'gold' | 'rejected';
 export type ResearchUnderstandingDatasetUseStatus =
@@ -406,13 +399,11 @@ export type ResearchUnderstandingDatasetExportFormat =
 	| 'agent_review_prompt_jsonl'
 	| 'review_packet';
 export type ResearchUnderstandingDatasetFilters = {
-	scope_type: string;
-	scope_id: string;
+	objective_id: string;
 	label_status?: ResearchUnderstandingDatasetLabelStatus;
 	dataset_use_status?: ResearchUnderstandingDatasetUseStatus;
 };
 export type ResearchUnderstandingCollectionDatasetFilters = {
-	scope_type: string;
 	label_status?: ResearchUnderstandingDatasetLabelStatus;
 	dataset_use_status?: ResearchUnderstandingDatasetUseStatus;
 };
@@ -489,8 +480,7 @@ export type ResearchUnderstandingDataset = {
 	schema_version: string;
 	dataset_id: string;
 	collection_id: string;
-	scope_type: string;
-	scope_id: string;
+	objective_id: string | null;
 	task_type: string;
 	metric_profile: string;
 	label_status_filter: ResearchUnderstandingDatasetLabelStatus | null;
@@ -683,6 +673,28 @@ export type ObjectiveWorkspaceReadiness = {
 	logic_chain_ready: boolean;
 };
 
+export type ObjectiveStatus =
+	| 'candidate'
+	| 'confirmed'
+	| 'queued'
+	| 'running'
+	| 'ready'
+	| 'failed';
+export type ObjectiveAnalysisProgress = {
+	phase: string;
+	current: number | null;
+	total: number | null;
+	unit: string | null;
+	message: string | null;
+	active_document_id: string | null;
+	active_document_title: string | null;
+	active_source_filename: string | null;
+};
+export type ObjectiveReviewSummary = {
+	primary_finding_count: number;
+	review_candidate_count: number;
+};
+
 export type ObjectiveSummary = {
 	objective_id: string;
 	question: string;
@@ -691,10 +703,16 @@ export type ObjectiveSummary = {
 	property_axes: string[];
 	comparison_intent: string | null;
 	confidence: number;
+	status: ObjectiveStatus;
+	analysis_error: string | null;
+	analysis_progress: ObjectiveAnalysisProgress | null;
+	created_at: string | null;
+	updated_at: string | null;
 };
 
 export type ObjectiveListItem = ObjectiveSummary & {
 	state: ResearchViewState;
+	review_summary: ObjectiveReviewSummary;
 	paper_frame_count: number;
 	evidence_route_count: number;
 	evidence_unit_count: number;
@@ -794,6 +812,7 @@ export type ObjectiveResearchView = {
 	collection_id: string;
 	state: ResearchViewState;
 	objective: ObjectiveSummary;
+	review_summary: ObjectiveReviewSummary;
 	objective_context: ObjectiveContext | null;
 	readiness: ObjectiveWorkspaceReadiness;
 	paper_frames: ObjectivePaperFrame[];
@@ -805,43 +824,10 @@ export type ObjectiveResearchView = {
 	warnings: ResearchViewWarning[];
 };
 
-export type ConfirmedGoalStatus = 'pending' | 'running' | 'ready' | 'failed';
-export type GoalAnalysisProgress = {
-	phase: string;
-	current: number | null;
-	total: number | null;
-	unit: string | null;
-	message: string | null;
-	active_document_id: string | null;
-	active_document_title: string | null;
-	active_source_filename: string | null;
-	active_objective_id: string | null;
-};
-export type ConfirmedGoal = {
-	goal_id: string;
+export type ObjectiveAnalysis = {
 	collection_id: string;
-	question: string;
-	source_type: string;
-	material_hints: string[];
-	process_hints: string[];
-	property_hints: string[];
-	source_objective_id: string | null;
-	status: ConfirmedGoalStatus;
-	analysis_error: string | null;
-	analysis_progress: GoalAnalysisProgress | null;
-	created_at: string | null;
-	updated_at: string | null;
-};
-export type ConfirmedGoalList = {
-	collection_id: string;
-	goals: ConfirmedGoal[];
-};
-export type GoalAnalysis = {
-	collection_id: string;
-	goal: ConfirmedGoal;
+	objective: ObjectiveSummary;
 	understanding: ResearchUnderstanding | null;
-	pipeline_nodes: Record<string, Record<string, unknown>>;
-	errors: string[];
 	warnings: string[];
 };
 
@@ -1190,7 +1176,7 @@ function conditionAxisText(value: unknown): string {
 }
 
 function warningFromText(message: string, index: number): ResearchViewWarning {
-	return {
+		return {
 		warning_id: `warning_${index + 1}`,
 		severity: 'warning',
 		scope: 'unknown',
@@ -1238,8 +1224,7 @@ function normalizeResearchUnderstandingDataset(value: unknown): ResearchUndersta
 		schema_version: toText(record?.schema_version, 'research_understanding_dataset.v1'),
 		dataset_id: toText(record?.dataset_id),
 		collection_id: toText(record?.collection_id),
-		scope_type: toText(record?.scope_type),
-		scope_id: toText(record?.scope_id),
+			objective_id: nonEmptyText(record?.objective_id),
 		task_type: toText(record?.task_type, 'research_understanding_finding'),
 		metric_profile: toText(record?.metric_profile),
 		label_status_filter:
@@ -1347,11 +1332,10 @@ function normalizeResearchUnderstandingFeedback(
 	if (!record) return null;
 	const feedbackId = toText(record.feedback_id);
 	if (!feedbackId) return null;
-	return {
-		feedback_id: feedbackId,
-		collection_id: toText(record.collection_id),
-		scope_type: toText(record.scope_type),
-		scope_id: toText(record.scope_id),
+		return {
+			feedback_id: feedbackId,
+			collection_id: toText(record.collection_id),
+			objective_id: toText(record.objective_id),
 		finding_id: toText(record.finding_id),
 		claim_id: toText(record.claim_id) || null,
 		finding_fingerprint: toText(record.finding_fingerprint) || null,
@@ -1370,11 +1354,10 @@ function normalizeResearchUnderstandingCuration(
 	if (!record) return null;
 	const curationId = toText(record.curation_id);
 	if (!curationId) return null;
-	return {
-		curation_id: curationId,
-		collection_id: toText(record.collection_id),
-		scope_type: toText(record.scope_type),
-		scope_id: toText(record.scope_id),
+		return {
+			curation_id: curationId,
+			collection_id: toText(record.collection_id),
+			objective_id: toText(record.objective_id),
 		finding_id: toText(record.finding_id),
 		claim_id: toText(record.claim_id) || null,
 		finding_fingerprint: toText(record.finding_fingerprint) || null,
@@ -1570,11 +1553,10 @@ function normalizeResearchUnderstanding(value: unknown): ResearchUnderstanding |
 
 function normalizeResearchUnderstandingScope(value: unknown): ResearchUnderstandingScope {
 	const record = asRecord(value);
-	return {
-		scope_type: toText(record?.scope_type, 'collection'),
-		collection_id: toText(record?.collection_id),
-		goal_id: nonEmptyText(record?.goal_id),
-		material_id: nonEmptyText(record?.material_id),
+		return {
+			scope_type: toText(record?.scope_type, 'collection'),
+			collection_id: toText(record?.collection_id),
+			material_id: nonEmptyText(record?.material_id),
 		objective_id: nonEmptyText(record?.objective_id),
 		document_id: nonEmptyText(record?.document_id),
 		title: nonEmptyText(record?.title)
@@ -2238,6 +2220,36 @@ function normalizeObjectiveReadiness(value: unknown): ObjectiveWorkspaceReadines
 	};
 }
 
+function normalizeObjectiveStatus(value: unknown): ObjectiveStatus {
+	const status = toText(value) as ObjectiveStatus;
+	return ['candidate', 'confirmed', 'queued', 'running', 'ready', 'failed'].includes(status)
+		? status
+		: 'candidate';
+}
+
+function normalizeObjectiveAnalysisProgress(value: unknown): ObjectiveAnalysisProgress | null {
+	const record = asRecord(value);
+	if (!record || !toText(record.phase)) return null;
+	return {
+		phase: toText(record.phase),
+		current: toOptionalNumber(record.current),
+		total: toOptionalNumber(record.total),
+		unit: nonEmptyText(record.unit),
+		message: nonEmptyText(record.message),
+		active_document_id: nonEmptyText(record.active_document_id),
+		active_document_title: nonEmptyText(record.active_document_title),
+		active_source_filename: nonEmptyText(record.active_source_filename)
+	};
+}
+
+function normalizeObjectiveReviewSummary(value: unknown): ObjectiveReviewSummary {
+	const record = asRecord(value);
+	return {
+		primary_finding_count: toNumber(record?.primary_finding_count),
+		review_candidate_count: toNumber(record?.review_candidate_count)
+	};
+}
+
 function normalizeObjectiveSummary(value: unknown): ObjectiveSummary | null {
 	const record = asRecord(value);
 	if (!record) return null;
@@ -2253,7 +2265,12 @@ function normalizeObjectiveSummary(value: unknown): ObjectiveSummary | null {
 		process_axes: toStringList(record.process_axes ?? record.processes),
 		property_axes: toStringList(record.property_axes ?? record.properties),
 		comparison_intent: nonEmptyText(record.comparison_intent ?? record.intent),
-		confidence: toNumber(record.confidence)
+		confidence: toNumber(record.confidence),
+		status: normalizeObjectiveStatus(record.status),
+		analysis_error: nonEmptyText(record.analysis_error),
+		analysis_progress: normalizeObjectiveAnalysisProgress(record.analysis_progress),
+		created_at: nonEmptyText(record.created_at),
+		updated_at: nonEmptyText(record.updated_at)
 	};
 }
 
@@ -2265,6 +2282,7 @@ function normalizeObjectiveListItem(value: unknown): ObjectiveListItem | null {
 	return {
 		...summary,
 		state: normalizeResearchState(record.state, 'partial'),
+		review_summary: normalizeObjectiveReviewSummary(record.review_summary),
 		paper_frame_count: toNumber(record.paper_frame_count ?? record.frame_count),
 		evidence_route_count: toNumber(record.evidence_route_count ?? record.route_count),
 		evidence_unit_count: toNumber(record.evidence_unit_count ?? record.unit_count),
@@ -2880,7 +2898,12 @@ export function normalizeObjectiveResearchView(
 		process_axes: [],
 		property_axes: [],
 		comparison_intent: null,
-		confidence: 0
+		confidence: 0,
+		status: 'candidate',
+		analysis_error: null,
+		analysis_progress: null,
+		created_at: null,
+		updated_at: null
 	};
 	const paperFrames = asArray(record?.paper_frames)
 		.map((item) => normalizeObjectivePaperFrame(item))
@@ -2896,6 +2919,7 @@ export function normalizeObjectiveResearchView(
 		collection_id: toText(record?.collection_id, collectionId),
 		state: normalizeResearchState(record?.state, paperFrames.length ? 'partial' : 'empty'),
 		objective,
+		review_summary: normalizeObjectiveReviewSummary(record?.review_summary),
 		objective_context: normalizeObjectiveContext(record?.objective_context),
 		readiness: normalizeObjectiveReadiness(record?.readiness),
 		paper_frames: paperFrames,
@@ -2966,123 +2990,59 @@ export async function fetchObjectiveResearchView(
 	return normalizeObjectiveResearchView(data, collectionId, objectiveId);
 }
 
-function normalizeConfirmedGoal(value: unknown): ConfirmedGoal {
+function normalizeObjectiveAnalysis(value: unknown, collectionId: string): ObjectiveAnalysis {
 	const record = asRecord(value) ?? {};
-	return {
-		goal_id: toText(record.goal_id),
-		collection_id: toText(record.collection_id),
-		question: toText(record.question),
-		source_type: toText(record.source_type, 'user_input'),
-		material_hints: toStringList(record.material_hints),
-		process_hints: toStringList(record.process_hints),
-		property_hints: toStringList(record.property_hints),
-		source_objective_id: nonEmptyText(record.source_objective_id),
-		status: normalizeConfirmedGoalStatus(record.status),
-		analysis_error: nonEmptyText(record.analysis_error),
-		analysis_progress: normalizeGoalAnalysisProgress(record.analysis_progress),
-		created_at: nonEmptyText(record.created_at),
-		updated_at: nonEmptyText(record.updated_at)
-	};
-}
-
-function normalizeGoalAnalysisProgress(value: unknown): GoalAnalysisProgress | null {
-	const record = asRecord(value);
-	if (!record) return null;
-	const phase = toText(record.phase);
-	if (!phase) return null;
-	return {
-		phase,
-		current: toOptionalNumber(record.current),
-		total: toOptionalNumber(record.total),
-		unit: nonEmptyText(record.unit),
-		message: nonEmptyText(record.message),
-		active_document_id: nonEmptyText(record.active_document_id),
-		active_document_title: nonEmptyText(record.active_document_title),
-		active_source_filename: nonEmptyText(record.active_source_filename),
-		active_objective_id: nonEmptyText(record.active_objective_id)
-	};
-}
-
-function normalizeConfirmedGoalStatus(value: unknown): ConfirmedGoalStatus {
-	const status = toText(value) as ConfirmedGoalStatus;
-	return ['pending', 'running', 'ready', 'failed'].includes(status) ? status : 'pending';
-}
-
-function normalizeConfirmedGoalList(value: unknown, collectionId: string): ConfirmedGoalList {
-	const record = asRecord(value) ?? {};
+	const objective = normalizeObjectiveSummary(record.objective);
 	return {
 		collection_id: toText(record.collection_id, collectionId),
-		goals: normalizeObjectList(value, 'goals').map((item) => normalizeConfirmedGoal(item))
-	};
-}
-
-function normalizeGoalAnalysis(value: unknown, collectionId: string): GoalAnalysis {
-	const record = asRecord(value) ?? {};
-	return {
-		collection_id: toText(record.collection_id, collectionId),
-		goal: normalizeConfirmedGoal(record.goal),
+		objective:
+			objective ??
+			({
+				objective_id: '',
+				question: '',
+				material_scope: [],
+				process_axes: [],
+				property_axes: [],
+				comparison_intent: null,
+				confidence: 0,
+				status: 'candidate',
+				analysis_error: null,
+				analysis_progress: null,
+				created_at: null,
+				updated_at: null
+			} satisfies ObjectiveSummary),
 		understanding: normalizeResearchUnderstanding(record.understanding),
-		pipeline_nodes: normalizePipelineNodes(record.pipeline_nodes),
-		errors: toStringList(record.errors),
 		warnings: toStringList(record.warnings)
 	};
 }
 
-function normalizePipelineNodes(value: unknown): Record<string, Record<string, unknown>> {
-	const record = normalizeUnknownRecord(value);
-	return Object.fromEntries(
-		Object.entries(record)
-			.map(([key, node]) => [key, normalizeUnknownRecord(node)])
-			.filter(([key]) => Boolean(key))
-	);
-}
-
-export async function createConfirmedGoalFromObjective(
-	collectionId: string,
-	objective: ObjectiveListItem
-): Promise<ConfirmedGoal> {
+export async function confirmObjective(collectionId: string, objectiveId: string) {
 	const encodedCollection = encodeURIComponent(collectionId);
-	const data = await requestJson(`/collections/${encodedCollection}/goals`, {
-		method: 'POST',
-		body: JSON.stringify({
-			question: objective.question,
-			source_type: 'objective_candidate',
-			source_objective_id: objective.objective_id,
-			material_hints: objective.material_scope,
-			process_hints: objective.process_axes,
-			property_hints: objective.property_axes
-		})
-	});
-	return normalizeConfirmedGoal(data);
-}
-
-export async function fetchConfirmedGoals(collectionId: string): Promise<ConfirmedGoalList> {
-	const encodedCollection = encodeURIComponent(collectionId);
-	const data = await requestJson(`/collections/${encodedCollection}/goals`);
-	return normalizeConfirmedGoalList(data, collectionId);
-}
-
-export async function runGoalAnalysis(
-	collectionId: string,
-	goalId: string
-): Promise<GoalAnalysis> {
-	const encodedCollection = encodeURIComponent(collectionId);
-	const encodedGoal = encodeURIComponent(goalId);
+	const encodedObjective = encodeURIComponent(objectiveId);
 	const data = await requestJson(
-		`/collections/${encodedCollection}/goals/${encodedGoal}/analysis`,
+		`/collections/${encodedCollection}/objectives/${encodedObjective}/confirm`,
 		{ method: 'POST' }
 	);
-	return normalizeGoalAnalysis(data, collectionId);
+	return normalizeObjectiveAnalysis(data, collectionId);
 }
 
-export async function fetchGoalAnalysis(
-	collectionId: string,
-	goalId: string
-): Promise<GoalAnalysis> {
+export async function runObjectiveAnalysis(collectionId: string, objectiveId: string) {
 	const encodedCollection = encodeURIComponent(collectionId);
-	const encodedGoal = encodeURIComponent(goalId);
-	const data = await requestJson(`/collections/${encodedCollection}/goals/${encodedGoal}/analysis`);
-	return normalizeGoalAnalysis(data, collectionId);
+	const encodedObjective = encodeURIComponent(objectiveId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/objectives/${encodedObjective}/analysis`,
+		{ method: 'POST' }
+	);
+	return normalizeObjectiveAnalysis(data, collectionId);
+}
+
+export async function fetchObjectiveAnalysis(collectionId: string, objectiveId: string) {
+	const encodedCollection = encodeURIComponent(collectionId);
+	const encodedObjective = encodeURIComponent(objectiveId);
+	const data = await requestJson(
+		`/collections/${encodedCollection}/objectives/${encodedObjective}/analysis`
+	);
+	return normalizeObjectiveAnalysis(data, collectionId);
 }
 
 export async function createResearchUnderstandingFeedback(
@@ -3102,8 +3062,7 @@ export async function fetchResearchUnderstandingFeedback(
 ): Promise<ResearchUnderstandingFeedback[]> {
 	const encodedCollection = encodeURIComponent(collectionId);
 	const params = new URLSearchParams();
-	if (filters.scope_type) params.set('scope_type', filters.scope_type);
-	if (filters.scope_id) params.set('scope_id', filters.scope_id);
+	if (filters.objective_id) params.set('objective_id', filters.objective_id);
 	if (filters.finding_id) params.set('finding_id', filters.finding_id);
 	if (filters.claim_id) params.set('claim_id', filters.claim_id);
 	const suffix = params.toString() ? `?${params.toString()}` : '';
@@ -3130,8 +3089,7 @@ export async function fetchResearchUnderstandingCurations(
 ): Promise<ResearchUnderstandingCuration[]> {
 	const encodedCollection = encodeURIComponent(collectionId);
 	const params = new URLSearchParams();
-	if (filters.scope_type) params.set('scope_type', filters.scope_type);
-	if (filters.scope_id) params.set('scope_id', filters.scope_id);
+	if (filters.objective_id) params.set('objective_id', filters.objective_id);
 	if (filters.finding_id) params.set('finding_id', filters.finding_id);
 	if (filters.claim_id) params.set('claim_id', filters.claim_id);
 	const suffix = params.toString() ? `?${params.toString()}` : '';
@@ -3161,8 +3119,7 @@ export async function exportResearchUnderstandingGoldDraft(
 ): Promise<ResearchUnderstandingGoldDraft> {
 	const encodedCollection = encodeURIComponent(collectionId);
 	const params = new URLSearchParams();
-	params.set('scope_type', filters.scope_type);
-	params.set('scope_id', filters.scope_id);
+	params.set('objective_id', filters.objective_id);
 	return requestJson(
 		`/collections/${encodedCollection}/research-understanding/gold-draft?${params.toString()}`
 	) as Promise<ResearchUnderstandingGoldDraft>;
@@ -3173,8 +3130,7 @@ function researchUnderstandingDatasetParams(
 	format?: ResearchUnderstandingDatasetExportFormat
 ): URLSearchParams {
 	const params = new URLSearchParams();
-	params.set('scope_type', filters.scope_type);
-	params.set('scope_id', filters.scope_id);
+	params.set('objective_id', filters.objective_id);
 	if (filters.label_status) params.set('label_status', filters.label_status);
 	if (filters.dataset_use_status) params.set('dataset_use_status', filters.dataset_use_status);
 	if (format) params.set('format', format);
@@ -3198,7 +3154,6 @@ export function researchUnderstandingCollectionDatasetUrl(
 ): string {
 	const encodedCollection = encodeURIComponent(collectionId);
 	const params = new URLSearchParams();
-	params.set('scope_type', filters.scope_type);
 	if (filters.label_status) params.set('label_status', filters.label_status);
 	if (filters.dataset_use_status) params.set('dataset_use_status', filters.dataset_use_status);
 	params.set('format', format);
@@ -3223,7 +3178,6 @@ export async function fetchResearchUnderstandingCollectionDataset(
 ): Promise<ResearchUnderstandingDataset> {
 	const encodedCollection = encodeURIComponent(collectionId);
 	const params = new URLSearchParams();
-	params.set('scope_type', filters.scope_type);
 	if (filters.label_status) params.set('label_status', filters.label_status);
 	if (filters.dataset_use_status) params.set('dataset_use_status', filters.dataset_use_status);
 	const data = await requestJson(

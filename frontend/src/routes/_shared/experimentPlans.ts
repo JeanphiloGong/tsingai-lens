@@ -6,7 +6,7 @@ export type ExperimentPlanStatus = 'draft' | 'ready_for_review' | 'archived';
 export type ExperimentPlan = {
 	plan_id: string;
 	collection_id: string;
-	goal_id: string;
+	objective_id: string;
 	title: string;
 	content: string;
 	status: ExperimentPlanStatus;
@@ -20,7 +20,7 @@ export type ExperimentPlan = {
 
 export type ExperimentPlanList = {
 	collection_id: string;
-	goal_id: string;
+	objective_id: string;
 	items: ExperimentPlan[];
 };
 
@@ -38,19 +38,19 @@ type UpdateExperimentPlanOptions = {
 	status: ExperimentPlanStatus;
 };
 
-function experimentPlanPath(collectionId: string, goalId: string, planId = '') {
-	const base = `/collections/${encodeURIComponent(collectionId)}/goals/${encodeURIComponent(
-		goalId
+function experimentPlanPath(collectionId: string, objectiveId: string, planId = '') {
+	const base = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(
+		objectiveId
 	)}/experiment-plans`;
 	return planId ? `${base}/${encodeURIComponent(planId)}` : base;
 }
 
 export async function createExperimentPlan(
 	collectionId: string,
-	goalId: string,
+	objectiveId: string,
 	options: CreateExperimentPlanOptions
 ) {
-	return (await requestJson(experimentPlanPath(collectionId, goalId), {
+	return (await requestJson(experimentPlanPath(collectionId, objectiveId), {
 		method: 'POST',
 		body: JSON.stringify({
 			title: options.title,
@@ -62,19 +62,19 @@ export async function createExperimentPlan(
 	})) as ExperimentPlan;
 }
 
-export async function fetchExperimentPlans(collectionId: string, goalId: string) {
-	return (await requestJson(experimentPlanPath(collectionId, goalId), {
+export async function fetchExperimentPlans(collectionId: string, objectiveId: string) {
+	return (await requestJson(experimentPlanPath(collectionId, objectiveId), {
 		method: 'GET'
 	})) as ExperimentPlanList;
 }
 
 export async function updateExperimentPlan(
 	collectionId: string,
-	goalId: string,
+	objectiveId: string,
 	planId: string,
 	options: UpdateExperimentPlanOptions
 ) {
-	return (await requestJson(experimentPlanPath(collectionId, goalId, planId), {
+	return (await requestJson(experimentPlanPath(collectionId, objectiveId, planId), {
 		method: 'PATCH',
 		body: JSON.stringify(options)
 	})) as ExperimentPlan;

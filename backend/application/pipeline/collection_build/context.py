@@ -8,10 +8,12 @@ from typing import Any
 @dataclass
 class CollectionBuildContext:
     task_id: str
+    build_id: str
     collection_id: str
     task_service: Any
     collection_service: Any
     artifact_registry_service: Any
+    source_artifact_repository: Any
     config: Any | None = None
     output_dir: Path | None = None
     method: Any | None = None

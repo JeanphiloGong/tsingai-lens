@@ -5,8 +5,7 @@ import math
 from typing import Any, Iterable, Mapping
 
 from domain.ports import SourceArtifactRepository
-from domain.source import SourceArtifactSet
-from infra.persistence.factory import build_source_artifact_repository
+from domain.source import SourceArtifactSet, SourceDocumentTree
 
 
 SourceRecord = dict[str, Any]
@@ -14,9 +13,13 @@ SourceRecord = dict[str, Any]
 
 def load_collection_inputs(
     collection_id: str,
-    source_artifact_repository: SourceArtifactRepository | None = None,
+    source_artifact_repository: SourceArtifactRepository,
+    *,
+    build_id: str | None = None,
 ) -> tuple[tuple[SourceRecord, ...], tuple[SourceRecord, ...] | None]:
-    artifacts = _load_source_artifacts(collection_id, source_artifact_repository)
+    artifacts = _load_source_artifacts(
+        collection_id, source_artifact_repository, build_id=build_id
+    )
     documents = _records(document.to_record() for document in artifacts.documents)
     text_units = _records(text_unit.to_record() for text_unit in artifacts.text_units)
     return documents, text_units or None
@@ -24,59 +27,95 @@ def load_collection_inputs(
 
 def load_blocks_artifact(
     collection_id: str,
-    source_artifact_repository: SourceArtifactRepository | None = None,
+    source_artifact_repository: SourceArtifactRepository,
+    *,
+    build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
-    artifacts = _load_source_artifacts(collection_id, source_artifact_repository)
+    artifacts = _load_source_artifacts(
+        collection_id, source_artifact_repository, build_id=build_id
+    )
     return _records(block.to_record() for block in artifacts.blocks)
 
 
 def load_table_rows_artifact(
     collection_id: str,
-    source_artifact_repository: SourceArtifactRepository | None = None,
+    source_artifact_repository: SourceArtifactRepository,
+    *,
+    build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
-    artifacts = _load_source_artifacts(collection_id, source_artifact_repository)
+    artifacts = _load_source_artifacts(
+        collection_id, source_artifact_repository, build_id=build_id
+    )
     return _records(row.to_record() for row in artifacts.table_rows)
 
 
 def load_table_cells_artifact(
     collection_id: str,
-    source_artifact_repository: SourceArtifactRepository | None = None,
+    source_artifact_repository: SourceArtifactRepository,
+    *,
+    build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
-    artifacts = _load_source_artifacts(collection_id, source_artifact_repository)
+    artifacts = _load_source_artifacts(
+        collection_id, source_artifact_repository, build_id=build_id
+    )
     return _records(cell.to_record() for cell in artifacts.table_cells)
 
 
 def load_figures_artifact(
     collection_id: str,
-    source_artifact_repository: SourceArtifactRepository | None = None,
+    source_artifact_repository: SourceArtifactRepository,
 ) -> tuple[SourceRecord, ...]:
-    artifacts = _load_source_artifacts(collection_id, source_artifact_repository)
-    return _records(figure.to_record() for figure in artifacts.figures)
+    return _records(
+        figure.to_record()
+        for figure in source_artifact_repository.list_figures(collection_id)
+    )
 
 
 def load_tables_artifact(
     collection_id: str,
-    source_artifact_repository: SourceArtifactRepository | None = None,
+    source_artifact_repository: SourceArtifactRepository,
+    *,
+    build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
-    artifacts = _load_source_artifacts(collection_id, source_artifact_repository)
+    artifacts = _load_source_artifacts(
+        collection_id, source_artifact_repository, build_id=build_id
+    )
     return _records(table.to_record() for table in artifacts.tables)
 
 
 def load_document_tree(
     collection_id: str,
     document_id: str,
-    source_artifact_repository: SourceArtifactRepository | None = None,
-) -> SourceRecord:
-    repository = source_artifact_repository or build_source_artifact_repository()
-    return repository.read_document_tree(collection_id, document_id).to_record()
+    source_artifact_repository: SourceArtifactRepository,
+    *,
+    build_id: str | None = None,
+) -> SourceDocumentTree:
+    if build_id is None:
+        return source_artifact_repository.read_document_tree(
+            collection_id,
+            document_id,
+        )
+    return source_artifact_repository.read_document_tree(
+        collection_id,
+        document_id,
+        build_id=build_id,
+    )
 
 
 def _load_source_artifacts(
     collection_id: str,
-    source_artifact_repository: SourceArtifactRepository | None = None,
+    source_artifact_repository: SourceArtifactRepository,
+    *,
+    build_id: str | None = None,
 ) -> SourceArtifactSet:
-    repository = source_artifact_repository or build_source_artifact_repository()
-    artifacts = repository.read_collection_artifacts(collection_id)
+    artifacts = (
+        source_artifact_repository.read_collection_artifacts(
+            collection_id,
+            build_id=build_id,
+        )
+        if build_id is not None
+        else source_artifact_repository.read_collection_artifacts(collection_id)
+    )
     if not artifacts.documents:
         raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
     return artifacts

@@ -12,7 +12,7 @@ EXPERIMENT_PLAN_STATUSES = {"draft", "ready_for_review", "archived"}
 class ExperimentPlanRecord:
     plan_id: str
     collection_id: str
-    goal_id: str
+    objective_id: str
     title: str
     content: str
     status: ExperimentPlanStatus
@@ -29,7 +29,7 @@ class ExperimentPlanRecord:
         return cls(
             plan_id=_required_text(payload.get("plan_id"), "plan_id"),
             collection_id=_required_text(payload.get("collection_id"), "collection_id"),
-            goal_id=_required_text(payload.get("goal_id"), "goal_id"),
+            objective_id=_required_text(payload.get("objective_id"), "objective_id"),
             title=_required_text(payload.get("title"), "title"),
             content=_required_text(payload.get("content"), "content"),
             status=normalize_experiment_plan_status(payload.get("status")),
@@ -69,7 +69,7 @@ class ExperimentPlanRecord:
         return {
             "plan_id": self.plan_id,
             "collection_id": self.collection_id,
-            "goal_id": self.goal_id,
+            "objective_id": self.objective_id,
             "title": self.title,
             "content": self.content,
             "status": self.status,

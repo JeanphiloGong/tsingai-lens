@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from hashlib import sha256
 from types import SimpleNamespace
 
+import pandas as pd
+
 from application.pipeline.collection_build.context import CollectionBuildContext
+from application.pipeline.collection_build.nodes import source_artifacts
 from application.pipeline.collection_build.definitions import (
     COLLECTION_BUILD_NODE_DEFINITIONS,
     CollectionBuildNodeDefinition,
@@ -12,6 +16,7 @@ from application.pipeline.collection_build.definitions import (
     OBJECTIVE_CANDIDATES,
 )
 from application.pipeline.collection_build.runner import CollectionBuildPipelineRunner
+from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 
 
 class MemoryTaskService:
@@ -35,10 +40,12 @@ class MemoryTaskService:
 def build_context(task_service: MemoryTaskService) -> CollectionBuildContext:
     return CollectionBuildContext(
         task_id="task_1",
+        build_id="build_1",
         collection_id="col_1",
         task_service=task_service,
         collection_service=SimpleNamespace(),
         artifact_registry_service=SimpleNamespace(),
+        source_artifact_repository=SimpleNamespace(),
     )
 
 
@@ -77,6 +84,101 @@ def test_collection_build_pipeline_runner_runs_ready_nodes_in_definition_order()
     assert result["pipeline_nodes"]["first"]["status"] == "succeeded"
     assert result["pipeline_nodes"]["second"]["status"] == "succeeded"
     assert task_service.record["pipeline_nodes"]["second"]["status"] == "succeeded"
+
+
+def test_source_node_persists_figure_metadata_and_references_before_activation():
+    content = b"figure-bytes"
+    digest = sha256(content).hexdigest()
+    bundle = SourceArtifactBundle(
+        documents=pd.DataFrame(
+            [
+                {
+                    "id": "doc-1",
+                    "title": "Paper",
+                    "text": "Prior work [1].\nReferences\n[1] Smith A. Paper. 2024.",
+                }
+            ]
+        ),
+        text_units=pd.DataFrame(),
+        blocks=pd.DataFrame(
+            [
+                {
+                    "block_id": "body",
+                    "document_id": "doc-1",
+                    "block_type": "paragraph",
+                    "block_order": 1,
+                    "text": "Prior work [1].",
+                },
+                {
+                    "block_id": "references-heading",
+                    "document_id": "doc-1",
+                    "block_type": "heading",
+                    "block_order": 2,
+                    "text": "References",
+                },
+                {
+                    "block_id": "reference-1",
+                    "document_id": "doc-1",
+                    "block_type": "paragraph",
+                    "block_order": 3,
+                    "text": "[1] Smith A. Paper. 2024.",
+                },
+            ]
+        ),
+        figures=pd.DataFrame(
+            [
+                {
+                    "figure_id": "figure-1",
+                    "document_id": "doc-1",
+                    "figure_order": 1,
+                    "image_path": "image_assets/figure-1.png",
+                    "image_mime_type": "image/png",
+                    "asset_sha256": digest,
+                }
+            ]
+        ),
+        tables=pd.DataFrame(),
+        table_rows=pd.DataFrame(),
+        table_cells=pd.DataFrame(),
+        figure_assets={"image_assets/figure-1.png": content},
+    )
+    calls = []
+
+    async def build_source_artifacts(**kwargs):  # noqa: ANN003, ARG001
+        return [SimpleNamespace(result=bundle, errors=[])]
+
+    def replace_artifacts(collection_id, build_id, artifacts):  # noqa: ANN001
+        calls.append(("artifacts", collection_id, build_id, artifacts))
+
+    def replace_references(collection_id, build_id, references):  # noqa: ANN001
+        calls.append(("references", collection_id, build_id, references))
+
+    context = CollectionBuildContext(
+        task_id="task-1",
+        build_id="build-1",
+        collection_id="col-1",
+        task_service=SimpleNamespace(),
+        collection_service=SimpleNamespace(
+            write_figure_asset=lambda *args: (
+                f"col-1/objects/source/build-1/figures/{digest}.png"
+            )
+        ),
+        artifact_registry_service=SimpleNamespace(),
+        source_artifact_repository=SimpleNamespace(
+            replace_collection_artifacts=replace_artifacts,
+            replace_collection_references=replace_references,
+        ),
+        services={"build_source_artifacts": build_source_artifacts},
+    )
+
+    result = asyncio.run(source_artifacts.run(context))
+
+    assert [call[0] for call in calls] == ["artifacts", "references"]
+    assert calls[0][3].figures[0].image_path.endswith(f"{digest}.png")
+    assert calls[0][3].figures[0].image_size_bytes == len(content)
+    assert len(calls[1][3].entries) == 1
+    assert len(calls[1][3].mentions) == 1
+    assert result["figure_count"] == 1
 
 
 def test_collection_build_pipeline_runner_skips_downstream_nodes_after_failure():
@@ -265,7 +367,9 @@ def test_collection_build_pipeline_runner_rejects_wait_for_before_terminal():
 
 
 def test_default_collection_build_pipeline_stops_after_objective_candidates():
-    node_ids = tuple(definition.node_id for definition in COLLECTION_BUILD_NODE_DEFINITIONS)
+    node_ids = tuple(
+        definition.node_id for definition in COLLECTION_BUILD_NODE_DEFINITIONS
+    )
     finalize = next(
         definition
         for definition in COLLECTION_BUILD_NODE_DEFINITIONS

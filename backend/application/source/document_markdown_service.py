@@ -16,7 +16,7 @@ from domain.source import (
     SourceTable,
     render_markdown_table,
 )
-from infra.persistence.factory import build_source_artifact_repository
+from application.source.artifact_input_service import load_document_tree
 from infra.source.runtime.mapping.text_quality import (
     is_garbled_pdf_text,
     normalize_display_text,
@@ -47,7 +47,9 @@ class SourceFigureImageNotFoundError(FileNotFoundError):
         self.collection_id = collection_id
         self.document_id = document_id
         self.figure_id = figure_id
-        super().__init__(f"figure image not found: {collection_id}/{document_id}/{figure_id}")
+        super().__init__(
+            f"figure image not found: {collection_id}/{document_id}/{figure_id}"
+        )
 
 
 class SourceFigureImageUnavailableError(RuntimeError):
@@ -76,15 +78,10 @@ class DocumentMarkdownService:
     def __init__(
         self,
         collection_service: CollectionService,
-        source_artifact_repository: SourceArtifactRepository | None = None,
+        source_artifact_repository: SourceArtifactRepository,
     ) -> None:
         self.collection_service = collection_service
-        self.source_artifact_repository = (
-            source_artifact_repository
-            or build_source_artifact_repository(
-                self.collection_service.root_dir.parent / "lens.sqlite"
-            )
-        )
+        self.source_artifact_repository = source_artifact_repository
 
     def get_document_markdown(
         self,
@@ -94,9 +91,10 @@ class DocumentMarkdownService:
         self.collection_service.get_collection(collection_id)
         artifacts = self._load_source_artifacts(collection_id)
         document = self._find_document(artifacts, collection_id, document_id)
-        document_tree = self.source_artifact_repository.read_document_tree(
+        document_tree = load_document_tree(
             collection_id,
             document_id,
+            self.source_artifact_repository,
         )
         display_names = self._document_display_names(collection_id, document)
 
@@ -151,20 +149,21 @@ class DocumentMarkdownService:
             None,
         )
         if figure is None:
-            raise SourceFigureImageNotFoundError(collection_id, document_key, figure_key)
+            raise SourceFigureImageNotFoundError(
+                collection_id, document_key, figure_key
+            )
         image_path = self._normalize_text(figure.image_path)
         if not image_path:
-            raise SourceFigureImageUnavailableError(collection_id, document_key, figure_key)
+            raise SourceFigureImageUnavailableError(
+                collection_id, document_key, figure_key
+            )
 
-        paths = self.collection_service.get_paths(collection_id)
-        output_dir = paths.output_dir.resolve()
-        candidate = Path(image_path)
-        if candidate.is_absolute():
-            asset_path = candidate.resolve()
-        else:
-            asset_path = (paths.output_dir / candidate).resolve()
         try:
-            asset_path.relative_to(output_dir)
+            content = self.collection_service.read_figure_asset(
+                collection_id,
+                image_path,
+                self._normalize_text(figure.asset_sha256),
+            )
         except ValueError as exc:
             raise SourceFigureImageUnavailableError(
                 collection_id,
@@ -173,15 +172,26 @@ class DocumentMarkdownService:
                 code="figure_image_path_invalid",
                 message="The extracted figure image path is invalid.",
             ) from exc
-        if not asset_path.is_file():
-            raise SourceFigureImageUnavailableError(collection_id, document_key, figure_key)
+        except (FileNotFoundError, OSError) as exc:
+            raise SourceFigureImageUnavailableError(
+                collection_id,
+                document_key,
+                figure_key,
+            ) from exc
+        if (
+            figure.image_size_bytes is not None
+            and len(content) != figure.image_size_bytes
+        ):
+            raise SourceFigureImageUnavailableError(
+                collection_id, document_key, figure_key
+            )
         media_type = (
-            self._normalize_text(figure.image_mime_type)
-            or "application/octet-stream"
+            self._normalize_text(figure.image_mime_type) or "application/octet-stream"
         )
+        image_suffix = Path(image_path).suffix.lower()
         return {
-            "path": asset_path,
-            "filename": asset_path.name,
+            "content": content,
+            "filename": f"{figure_key}{image_suffix}",
             "media_type": media_type,
         }
 
@@ -443,9 +453,10 @@ class DocumentMarkdownService:
             caption_markdown = f"**Figure.** {caption}"
         elif label:
             caption_markdown = f"**{label}.**"
-        return "\n\n".join(
-            part for part in (image_markdown, caption_markdown) if part
-        ) or None
+        return (
+            "\n\n".join(part for part in (image_markdown, caption_markdown) if part)
+            or None
+        )
 
     def _figure_image_available(
         self,
@@ -568,9 +579,7 @@ class DocumentMarkdownService:
         )
         title = self._normalize_text(document.title)
         display_title = (
-            stored_to_original.get(title, title)
-            if title
-            else display_source_filename
+            stored_to_original.get(title, title) if title else display_source_filename
         )
         if display_source_filename and display_title == display_source_filename:
             display_title = display_source_filename

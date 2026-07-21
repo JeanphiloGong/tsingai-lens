@@ -566,7 +566,7 @@
 		0,
 		selectedRelations.length - selectedReadableRelations.length
 	);
-	$: selectedScopeId = scopeId(understanding);
+	$: selectedObjectiveId = understanding?.scope.objective_id ?? '';
 	$: selectedReviewTargetId = selectedFinding?.finding_id ?? selectedClaim?.claim_id ?? '';
 	$: selectedReviewFallbackId =
 		selectedFinding && selectedFinding.claim_id !== selectedReviewTargetId
@@ -702,12 +702,12 @@
 		curationError = '';
 	}
 	$: curationScopeKey =
-		understanding && selectedScopeId
-			? `${collectionId}:${understanding.scope.scope_type}:${selectedScopeId}`
+		understanding && selectedObjectiveId
+			? `${collectionId}:objective:${selectedObjectiveId}`
 			: '';
 	$: currentDatasetScopeKey =
-		understanding && collectionId && selectedScopeId
-			? `${collectionId}:${understanding.scope.scope_type}:${selectedScopeId}`
+		understanding && collectionId && selectedObjectiveId
+			? `${collectionId}:objective:${selectedObjectiveId}`
 			: '';
 	$: if (
 		initialFocus &&
@@ -727,13 +727,12 @@
 		appliedInitialFindingKey = `${currentDatasetScopeKey}:${initialFindingId}`;
 		void applyInitialFindingFocus(initialFindingId);
 	}
-	$: currentCollectionDatasetScopeKey =
-		understanding?.scope.scope_type === 'goal' && collectionId ? `${collectionId}:goal` : '';
-	$: goalCopilotHref =
-		understanding?.scope.scope_type === 'goal' && collectionId && selectedScopeId
+	$: currentCollectionDatasetScopeKey = selectedObjectiveId && collectionId ? collectionId : '';
+	$: objectiveCopilotHref =
+		collectionId && selectedObjectiveId
 			? `${resolve('/collections/[id]/assistant', {
 					id: collectionId
-				})}?goal_id=${encodeURIComponent(selectedScopeId)}`
+				})}?objective_id=${encodeURIComponent(selectedObjectiveId)}`
 			: '';
 	$: if (currentDatasetScopeKey && currentDatasetScopeKey !== datasetScopeKey) {
 		void loadDatasetSummary(currentDatasetScopeKey);
@@ -2262,7 +2261,7 @@
 		if (
 			!understanding ||
 			!collectionId ||
-			!selectedScopeId ||
+				!selectedObjectiveId ||
 			!reviewerReady ||
 			!findingCanAccept(finding)
 		)
@@ -2272,8 +2271,7 @@
 		feedbackError = '';
 		try {
 			const feedback = await createResearchUnderstandingFeedback(collectionId, {
-				scope_type: understanding.scope.scope_type,
-				scope_id: selectedScopeId,
+					objective_id: selectedObjectiveId,
 				finding_id: finding.finding_id,
 				claim_id: finding.claim_id,
 				review_status: 'correct',
@@ -2787,24 +2785,8 @@
 			.join(' · ');
 	}
 
-	function scopeId(currentUnderstanding: ResearchUnderstanding | null) {
-		const scope = currentUnderstanding?.scope;
-		return (
-			scope?.goal_id ||
-			scope?.objective_id ||
-			scope?.material_id ||
-			scope?.document_id ||
-			scope?.collection_id ||
-			''
-		);
-	}
-
 	function datasetFilters() {
-		if (!understanding || !selectedScopeId) return null;
-		return {
-			scope_type: understanding.scope.scope_type,
-			scope_id: selectedScopeId
-		};
+		return selectedObjectiveId ? { objective_id: selectedObjectiveId } : null;
 	}
 
 	function trainingDatasetDownloadUrl() {
@@ -3391,13 +3373,12 @@
 	}
 
 	async function loadCurationsForScope(scopeKey: string) {
-		if (!understanding || !collectionId || !selectedScopeId) return;
+		if (!understanding || !collectionId || !selectedObjectiveId) return;
 		loadedCurationScopeKey = scopeKey;
 		curationLoadError = '';
 		try {
 			const curations = await fetchResearchUnderstandingCurations(collectionId, {
-				scope_type: understanding.scope.scope_type,
-				scope_id: selectedScopeId
+				objective_id: selectedObjectiveId
 			});
 			curationsByTargetId = new Map(
 				curations
@@ -3416,13 +3397,12 @@
 	}
 
 	async function loadFeedbackForScope(scopeKey: string) {
-		if (!understanding || !collectionId || !selectedScopeId) return;
+		if (!understanding || !collectionId || !selectedObjectiveId) return;
 		loadedFeedbackScopeKey = scopeKey;
 		feedbackLoadError = '';
 		try {
 			const feedback = await fetchResearchUnderstandingFeedback(collectionId, {
-				scope_type: understanding.scope.scope_type,
-				scope_id: selectedScopeId
+				objective_id: selectedObjectiveId
 			});
 			const next = new Map<string, ResearchUnderstandingFeedback[]>();
 			for (const item of feedback) {
@@ -3470,7 +3450,7 @@
 	}
 
 	async function loadCollectionDatasetSummary(scopeKey: string, force = false) {
-		if (!collectionId || understanding?.scope.scope_type !== 'goal') return;
+		if (!collectionId || !selectedObjectiveId) return;
 		if (force) {
 			collectionDatasetScopeKey = '';
 		}
@@ -3479,9 +3459,7 @@
 		collectionDatasetLoading = true;
 		collectionDatasetError = '';
 		try {
-			const nextDatasetSummary = await fetchResearchUnderstandingCollectionDataset(collectionId, {
-				scope_type: 'goal'
-			});
+			const nextDatasetSummary = await fetchResearchUnderstandingCollectionDataset(collectionId, {});
 			if (requestSequence === collectionDatasetRequestSequence) {
 				collectionDatasetSummary = nextDatasetSummary;
 			}
@@ -3612,8 +3590,8 @@
 		return parts.length ? parts.join(' · ') : JSON.stringify(record);
 	}
 
-	function reviewImportGoalProgressText(record: Record<string, unknown>) {
-		return $t('research.understanding.reviewImportGoalProgress', {
+	function reviewImportObjectiveProgressText(record: Record<string, unknown>) {
+		return $t('research.understanding.reviewImportObjectiveProgress', {
 			actionable: Number(record.actionable_count ?? 0),
 			skipped: Number(record.skipped_count ?? 0),
 			accept: Number(record.accept_count ?? 0),
@@ -3622,8 +3600,8 @@
 		});
 	}
 
-	function reviewImportAffectedGoalReadinessText(record: Record<string, unknown>) {
-		return $t('research.understanding.reviewImportAffectedGoalReadiness', {
+	function reviewImportAffectedObjectiveReadinessText(record: Record<string, unknown>) {
+		return $t('research.understanding.reviewImportAffectedObjectiveReadiness', {
 			training: Number(record.training_ready_count ?? 0),
 			messages: Number(record.training_message_count ?? 0),
 			protocol: Number(record.protocol_ready_count ?? 0),
@@ -3632,8 +3610,8 @@
 		});
 	}
 
-	function reviewImportAffectedGoalPendingText(record: Record<string, unknown>) {
-		return $t('research.understanding.reviewImportAffectedGoalPending', {
+	function reviewImportAffectedObjectivePendingText(record: Record<string, unknown>) {
+		return $t('research.understanding.reviewImportAffectedObjectivePending', {
 			actionable: Number(record.pending_actionable_count ?? 0),
 			accept: Number(record.pending_accept_count ?? 0),
 			reject: Number(record.pending_reject_count ?? 0),
@@ -3641,8 +3619,8 @@
 		});
 	}
 
-	function reviewImportAffectedGoalProjectedText(record: Record<string, unknown>) {
-		return $t('research.understanding.reviewImportAffectedGoalProjected', {
+	function reviewImportAffectedObjectiveProjectedText(record: Record<string, unknown>) {
+		return $t('research.understanding.reviewImportAffectedObjectiveProjected', {
 			training: Number(record.projected_training_ready_count ?? record.training_ready_count ?? 0),
 			review: Number(record.projected_review_candidate_count ?? record.review_candidate_count ?? 0),
 			rejected: Number(record.projected_rejected_count ?? record.rejected_count ?? 0)
@@ -3741,10 +3719,10 @@
 			: [];
 	}
 
-	function reviewImportGoalLabel(record: Record<string, unknown>) {
-		return typeof record.goal_id === 'string' && record.goal_id
-			? formatShortIdentifier(record.goal_id)
-			: $t('research.understanding.reviewImportUnknownGoal');
+	function reviewImportObjectiveLabel(record: Record<string, unknown>) {
+		return typeof record.objective_id === 'string' && record.objective_id
+			? formatShortIdentifier(record.objective_id)
+			: $t('research.understanding.reviewImportUnknownObjective');
 	}
 
 	function reviewImportNextFindingLabel(record: Record<string, unknown>) {
@@ -3804,7 +3782,7 @@
 	}
 
 	async function submitClaimFeedback(options: { openNext?: boolean } = {}) {
-		if (!understanding || !selectedReviewTargetId || !collectionId || !selectedScopeId) return;
+		if (!understanding || !selectedReviewTargetId || !collectionId || !selectedObjectiveId) return;
 		if (!reviewerReady) return;
 		if (feedbackNoteMissing) {
 			feedbackError = $t('research.understanding.feedbackNoteRequiredError');
@@ -3816,8 +3794,7 @@
 		feedbackError = '';
 		try {
 			const feedback = await createResearchUnderstandingFeedback(collectionId, {
-				scope_type: understanding.scope.scope_type,
-				scope_id: selectedScopeId,
+				objective_id: selectedObjectiveId,
 				finding_id: selectedReviewTargetId,
 				claim_id: selectedClaim?.claim_id ?? selectedFinding?.claim_id ?? null,
 				review_status: feedbackStatus,
@@ -3851,7 +3828,7 @@
 	}
 
 	async function submitClaimCuration(options: { openNext?: boolean } = {}) {
-		if (!understanding || !selectedReviewTargetId || !collectionId || !selectedScopeId) return;
+		if (!understanding || !selectedReviewTargetId || !collectionId || !selectedObjectiveId) return;
 		if (!curationStatement.trim() || !reviewerReady) return;
 		const currentFindingId = selectedFinding?.finding_id ?? '';
 		curationSubmitting = true;
@@ -3859,8 +3836,7 @@
 		curationError = '';
 		try {
 			const curation = await createResearchUnderstandingCuration(collectionId, {
-				scope_type: understanding.scope.scope_type,
-				scope_id: selectedScopeId,
+				objective_id: selectedObjectiveId,
 				finding_id: selectedReviewTargetId,
 				claim_id: selectedClaim?.claim_id ?? selectedFinding?.claim_id ?? null,
 				curated_claim_type: curationClaimType,
@@ -4222,9 +4198,9 @@
 						<button type="button" on:click={openDatasetExport}>
 							{$t('research.understanding.reviewLoopOpenDataset')}
 						</button>
-						{#if goalCopilotHref}
-							{#if datasetProtocolReadySampleCount > 0}
-								<a class="research-understanding-workbench__review-loop-link" href={goalCopilotHref}>
+							{#if objectiveCopilotHref}
+								{#if datasetProtocolReadySampleCount > 0}
+									<a class="research-understanding-workbench__review-loop-link" href={objectiveCopilotHref}>
 									{$t('research.understanding.reviewLoopDraftProtocol')}
 								</a>
 							{:else}
@@ -4773,32 +4749,32 @@
 												{/if}
 											</div>
 										{/if}
-										{#if reviewImportSummary.decision_progress_by_goal.length}
+											{#if reviewImportSummary.decision_progress_by_objective.length}
 											<div class="research-understanding-workbench__review-import-progress">
-												<strong>{$t('research.understanding.reviewImportGoalProgressTitle')}</strong>
+												<strong>{$t('research.understanding.reviewImportObjectiveProgressTitle')}</strong>
 												<ul>
-													{#each reviewImportSummary.decision_progress_by_goal as goalProgress, index (`goal-progress-${index}`)}
+													{#each reviewImportSummary.decision_progress_by_objective as objectiveProgress, index (`objective-progress-${index}`)}
 														<li>
-															<span>{reviewImportGoalLabel(goalProgress)}</span>
-															<small>{reviewImportGoalProgressText(goalProgress)}</small>
-															{#if reviewImportNextFindingLabel(goalProgress)}
+															<span>{reviewImportObjectiveLabel(objectiveProgress)}</span>
+															<small>{reviewImportObjectiveProgressText(objectiveProgress)}</small>
+															{#if reviewImportNextFindingLabel(objectiveProgress)}
 																<small>
 																	{$t('research.understanding.reviewImportNextFinding', {
-																		finding: reviewImportNextFindingLabel(goalProgress)
+																		finding: reviewImportNextFindingLabel(objectiveProgress)
 																	})}
 																</small>
-																{#if reviewImportNextFinding(goalProgress)}
+																{#if reviewImportNextFinding(objectiveProgress)}
 																	<button
 																		type="button"
 																		class="research-understanding-workbench__review-import-next"
 																		aria-label={$t(
 																			'research.understanding.reviewImportOpenNextFinding',
 																			{
-																				finding: reviewImportNextFindingLabel(goalProgress)
+																				finding: reviewImportNextFindingLabel(objectiveProgress)
 																			}
 																		)}
 																		on:click={() =>
-																			openFindingDetail(reviewImportNextFindingId(goalProgress))}
+																			openFindingDetail(reviewImportNextFindingId(objectiveProgress))}
 																	>
 																		{$t('research.understanding.reviewLoopOpenNextFinding')}
 																	</button>
@@ -4809,16 +4785,16 @@
 												</ul>
 											</div>
 										{/if}
-										{#if reviewImportSummary.affected_goals.length}
+											{#if reviewImportSummary.affected_objectives.length}
 											<div class="research-understanding-workbench__review-import-progress">
-												<strong>{$t('research.understanding.reviewImportAffectedGoalsTitle')}</strong>
+												<strong>{$t('research.understanding.reviewImportAffectedObjectivesTitle')}</strong>
 												<ul>
-													{#each reviewImportSummary.affected_goals as goalReadiness, index (`goal-readiness-${index}`)}
+													{#each reviewImportSummary.affected_objectives as objectiveReadiness, index (`objective-readiness-${index}`)}
 														<li>
-															<span>{reviewImportGoalLabel(goalReadiness)}</span>
-															<small>{reviewImportAffectedGoalReadinessText(goalReadiness)}</small>
-															<small>{reviewImportAffectedGoalPendingText(goalReadiness)}</small>
-															<small>{reviewImportAffectedGoalProjectedText(goalReadiness)}</small>
+															<span>{reviewImportObjectiveLabel(objectiveReadiness)}</span>
+															<small>{reviewImportAffectedObjectiveReadinessText(objectiveReadiness)}</small>
+															<small>{reviewImportAffectedObjectivePendingText(objectiveReadiness)}</small>
+															<small>{reviewImportAffectedObjectiveProjectedText(objectiveReadiness)}</small>
 														</li>
 													{/each}
 												</ul>
@@ -4851,7 +4827,7 @@
 										{$t('research.understanding.datasetTrainingMessagesNote')}
 									</p>
 								{/if}
-								{#if understanding.scope.scope_type === 'goal'}
+									{#if selectedObjectiveId}
 									<div class="research-understanding-workbench__dataset-collection">
 										<strong>{$t('research.understanding.collectionDatasetSummary')}</strong>
 										{#if collectionDatasetLoading}

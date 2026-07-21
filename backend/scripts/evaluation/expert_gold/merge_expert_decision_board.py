@@ -70,7 +70,7 @@ def merge_expert_decision_board(
     for line_number, board_row in enumerate(board_rows, start=2):
         key = _board_key(board_row)
         if not key[1] or not key[2]:
-            errors.append(f"line {line_number}: goal_id and finding_id are required")
+            errors.append(f"line {line_number}: objective_id and finding_id are required")
             continue
         if key not in indexed:
             errors.append(
@@ -123,7 +123,7 @@ def read_tsv(path: Path) -> list[dict[str, str]]:
         reader = csv.DictReader(handle, delimiter="\t")
         missing = [
             field
-            for field in ("collection_id", "goal_id", "finding_id", "expert_action")
+            for field in ("collection_id", "objective_id", "finding_id", "expert_action")
             if field not in (reader.fieldnames or [])
         ]
         if missing:
@@ -142,7 +142,7 @@ def _index_template_rows(
         key = _row_key(row)
         if not key[1] or not key[2]:
             raise ValueError(
-                f"template line {line_number}: goal_id and finding_id are required"
+                f"template line {line_number}: objective_id and finding_id are required"
             )
         if key in indexed:
             raise ValueError(f"template line {line_number}: duplicate finding row")
@@ -228,7 +228,7 @@ def _accept_allowed(
 def _board_key(row: dict[str, str]) -> tuple[str, str, str]:
     return (
         _text(row.get("collection_id")),
-        _text(row.get("goal_id")),
+        _text(row.get("objective_id")),
         _text(row.get("finding_id")),
     )
 
@@ -236,7 +236,7 @@ def _board_key(row: dict[str, str]) -> tuple[str, str, str]:
 def _row_key(row: dict[str, Any]) -> tuple[str, str, str]:
     return (
         _text(row.get("collection_id")),
-        _text(row.get("goal_id")),
+        _text(row.get("objective_id")),
         _text(row.get("finding_id")),
     )
 

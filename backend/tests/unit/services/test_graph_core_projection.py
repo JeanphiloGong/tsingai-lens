@@ -3,15 +3,22 @@ from __future__ import annotations
 import sys
 from types import SimpleNamespace
 
+import pytest
+
+from application.core.comparison_service import ComparisonService
 from application.derived.graph_projection_service import load_core_graph_payload
+from domain.core import ComparisonFactSet, EvidenceAnchor
 from domain.core.document_profile import DocumentProfile
-from domain.core.fact_store import CoreFactSet
+from domain.core.paper_fact import PaperFactSet
 from domain.core.research_objective import (
     ObjectiveEvidenceUnit,
+    ObjectiveFactSet,
     ObjectiveLogicChain,
     ResearchObjective,
 )
-from infra.persistence.sqlite import SqliteCoreFactRepository
+from tests.support.comparison_repository import MemoryComparisonRepository
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 
 def _profile(document_id: str = "paper-1") -> dict:
@@ -101,16 +108,29 @@ def _logic_chain() -> dict:
     }
 
 
-def _core_graph_fact_set(collection_id: str) -> CoreFactSet:
-    return CoreFactSet(
+def _core_graph_fact_set(collection_id: str) -> ObjectiveFactSet:
+    return ObjectiveFactSet(
         research_objectives_ready=True,
-        document_profiles=(DocumentProfile.from_mapping(_profile()),),
         research_objectives=(ResearchObjective.from_mapping(_objective()),),
         objective_evidence_units=(
             ObjectiveEvidenceUnit.from_mapping(_measurement_unit()),
             ObjectiveEvidenceUnit.from_mapping(_comparison_unit()),
         ),
         objective_logic_chains=(ObjectiveLogicChain.from_mapping(_logic_chain()),),
+    )
+
+
+def _comparison_service(
+    collection_service,
+    paper_fact_repository,
+    objective_repository,
+) -> ComparisonService:
+    return ComparisonService(
+        collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        comparison_repository=MemoryComparisonRepository(),
+        document_profile_service=SimpleNamespace(),
     )
 
 
@@ -261,14 +281,10 @@ def test_core_projection_reuses_material_system_across_objectives():
     material_id = material_node["id"]
     assert sum(1 for edge in edges if edge["target"] == material_id) == 2
     assert {
-        edge["edge_description"]
-        for edge in edges
-        if edge["target"] == material_id
+        edge["edge_description"] for edge in edges if edge["target"] == material_id
     } == {"objective_to_material_system"}
     assert {
-        edge["logic_chain_id"]
-        for edge in edges
-        if edge["target"] == material_id
+        edge["logic_chain_id"] for edge in edges if edge["target"] == material_id
     } == {"chain-1", "chain-2"}
 
 
@@ -374,6 +390,7 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
     try:
         import fastapi  # noqa: F401
     except ImportError:
+
         class _HTTPException(Exception):
             def __init__(self, status_code: int, detail):  # noqa: ANN001
                 self.status_code = status_code
@@ -391,25 +408,26 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
     from tests.support.collection_service import build_test_collection_service
 
     collection_service = build_test_collection_service(tmp_path / "collections")
-    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    monkeypatch.setattr(graph_service, "core_fact_repository", core_fact_repository)
+    paper_fact_repository = MemoryPaperFactRepository()
+    objective_repository = MemoryObjectiveRepository()
+    comparison_service = _comparison_service(
+        collection_service,
+        paper_fact_repository,
+        objective_repository,
+    )
 
     collection = collection_service.create_collection("Objective Graph Collection")
     collection_id = collection["collection_id"]
 
-    core_fact_repository.replace_collection_research_objectives(
+    objective_repository.replace(
         collection_id,
-        paper_skims=(),
-        research_objectives=_core_graph_fact_set(collection_id).research_objectives,
-        objective_contexts=(),
-        objective_paper_frames=(),
-        objective_evidence_routes=(),
-        objective_evidence_units=_core_graph_fact_set(collection_id).objective_evidence_units,
-        objective_logic_chains=_core_graph_fact_set(collection_id).objective_logic_chains,
+        "build_test",
+        _core_graph_fact_set(collection_id),
     )
-    core_fact_repository.replace_collection_document_profiles(
+    paper_fact_repository.replace_document_profiles(
         collection_id,
-        _core_graph_fact_set(collection_id).document_profiles,
+        "build_test",
+        (DocumentProfile.from_mapping(_profile()),),
     )
 
     payload = graph_service.get_collection_graph(
@@ -417,6 +435,9 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
         max_nodes=40,
         min_weight=0.0,
         collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        comparison_service=comparison_service,
     )
 
     assert payload["collection_id"] == collection_id
@@ -435,6 +456,9 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
         max_nodes=40,
         min_weight=0.0,
         collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        comparison_service=comparison_service,
     )
 
     assert filename == f"{collection_id}.graphml"
@@ -444,10 +468,70 @@ def test_graph_service_serves_objective_projection_without_comparison_rows(
     assert b"semantic_chain_step_to_step" in graphml_bytes
 
 
+def test_graph_service_rejects_ready_but_empty_comparison_projection(tmp_path):
+    import application.derived.graph_service as graph_service
+
+    from tests.support.collection_service import build_test_collection_service
+
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    paper_fact_repository = MemoryPaperFactRepository()
+    objective_repository = MemoryObjectiveRepository()
+    comparison_repository = MemoryComparisonRepository()
+    comparison_service = ComparisonService(
+        collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        comparison_repository=comparison_repository,
+        document_profile_service=SimpleNamespace(),
+    )
+    collection = collection_service.create_collection("Empty Comparison Graph")
+    collection_id = collection["collection_id"]
+    paper_fact_repository.replace_document_profiles(
+        collection_id,
+        "build_test",
+        (DocumentProfile.from_mapping(_profile()),),
+    )
+    paper_fact_repository.replace_paper_facts(
+        collection_id,
+        "build_test",
+        PaperFactSet(
+            paper_facts_ready=True,
+            evidence_anchors=(
+                EvidenceAnchor.from_mapping(
+                    {
+                        "anchor_id": "anchor-1",
+                        "document_id": "paper-1",
+                        "locator_type": "text",
+                        "source_type": "text",
+                        "quote": "A measured result.",
+                    }
+                ),
+            ),
+        ),
+    )
+    comparison_repository.replace(
+        collection_id,
+        "build_test",
+        ComparisonFactSet(comparison_artifacts_ready=True),
+    )
+
+    with pytest.raises(graph_service.GraphNotReadyError):
+        graph_service.get_collection_graph(
+            collection_id=collection_id,
+            max_nodes=40,
+            min_weight=0.0,
+            collection_service=collection_service,
+            paper_fact_repository=paper_fact_repository,
+            objective_repository=objective_repository,
+            comparison_service=comparison_service,
+        )
+
+
 def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
     try:
         import fastapi  # noqa: F401
     except ImportError:
+
         class _HTTPException(Exception):
             def __init__(self, status_code: int, detail):  # noqa: ANN001
                 self.status_code = status_code
@@ -465,31 +549,35 @@ def test_graph_service_returns_one_hop_neighbors(monkeypatch, tmp_path):
     from tests.support.collection_service import build_test_collection_service
 
     collection_service = build_test_collection_service(tmp_path / "collections")
-    core_fact_repository = SqliteCoreFactRepository(tmp_path / "lens.sqlite")
-    monkeypatch.setattr(graph_service, "core_fact_repository", core_fact_repository)
+    paper_fact_repository = MemoryPaperFactRepository()
+    objective_repository = MemoryObjectiveRepository()
+    comparison_service = _comparison_service(
+        collection_service,
+        paper_fact_repository,
+        objective_repository,
+    )
 
     collection = collection_service.create_collection("Graph Neighborhood Collection")
     collection_id = collection["collection_id"]
     fact_set = _core_graph_fact_set(collection_id)
-    core_fact_repository.replace_collection_research_objectives(
+    objective_repository.replace(
         collection_id,
-        paper_skims=(),
-        research_objectives=fact_set.research_objectives,
-        objective_contexts=(),
-        objective_paper_frames=(),
-        objective_evidence_routes=(),
-        objective_evidence_units=fact_set.objective_evidence_units,
-        objective_logic_chains=fact_set.objective_logic_chains,
+        "build_test",
+        fact_set,
     )
-    core_fact_repository.replace_collection_document_profiles(
+    paper_fact_repository.replace_document_profiles(
         collection_id,
-        fact_set.document_profiles,
+        "build_test",
+        (DocumentProfile.from_mapping(_profile()),),
     )
 
     payload = graph_service.get_collection_graph_neighbors(
         collection_id=collection_id,
         node_id="step:chain-1:measurement_results",
         collection_service=collection_service,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        comparison_service=comparison_service,
     )
 
     assert payload["collection_id"] == collection_id

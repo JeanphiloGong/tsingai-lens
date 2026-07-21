@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from hashlib import sha256
 
 import pytest
 
@@ -11,6 +12,7 @@ from application.source.document_markdown_service import (
     SourceDocumentNotFoundError,
 )
 from domain.source import SourceArtifactSet
+from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from infra.source.ingestion.normalized_import import (
     NormalizedImportBatch,
     NormalizedImportDocument,
@@ -20,7 +22,11 @@ from infra.source.ingestion.normalized_import import (
 
 def _build_markdown_service(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    return collection_service, DocumentMarkdownService(collection_service)
+    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    return collection_service, DocumentMarkdownService(
+        collection_service,
+        source_artifact_repository=source_repository,
+    )
 
 
 def test_document_markdown_service_projects_source_blocks_and_tables(tmp_path):
@@ -184,13 +190,22 @@ def test_document_markdown_service_projects_figure_images(tmp_path):
     collection_service, markdown_service = _build_markdown_service(tmp_path)
     collection = collection_service.create_collection("Figure Markdown Collection")
     collection_id = collection["collection_id"]
-    figure_asset = (
+    scratch_asset = (
         collection_service.get_paths(collection_id).output_dir
         / "image_assets"
         / "fig-1.png"
     )
-    figure_asset.parent.mkdir(parents=True, exist_ok=True)
-    figure_asset.write_bytes(b"fake-png")
+    scratch_asset.parent.mkdir(parents=True, exist_ok=True)
+    scratch_asset.write_bytes(b"fake-png")
+    asset_sha256 = sha256(b"fake-png").hexdigest()
+    storage_key = collection_service.write_figure_asset(
+        collection_id,
+        "build-figure",
+        "image_assets/fig-1.png",
+        b"fake-png",
+        asset_sha256,
+    )
+    scratch_asset.unlink()
     markdown_service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         SourceArtifactSet.from_records(
@@ -210,10 +225,12 @@ def test_document_markdown_service_projects_figure_images(tmp_path):
                     "caption_text": "Fig. 1. Microstructure after annealing.",
                     "page": 4,
                     "heading_path": "Results",
-                    "image_path": "image_assets/fig-1.png",
+                    "image_path": storage_key,
                     "image_mime_type": "image/png",
                     "image_width": 640,
                     "image_height": 360,
+                    "asset_sha256": asset_sha256,
+                    "image_size_bytes": len(b"fake-png"),
                 }
             ],
         ),
@@ -237,6 +254,7 @@ def test_document_markdown_service_keeps_caption_when_figure_image_file_is_missi
     collection_service, markdown_service = _build_markdown_service(tmp_path)
     collection = collection_service.create_collection("Missing Figure Asset Collection")
     collection_id = collection["collection_id"]
+    missing_sha256 = sha256(b"missing").hexdigest()
     markdown_service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         SourceArtifactSet.from_records(
@@ -250,8 +268,13 @@ def test_document_markdown_service_keeps_caption_when_figure_image_file_is_missi
                     "caption_text": "Fig. 1. Microstructure after annealing.",
                     "page": 4,
                     "heading_path": "Results",
-                    "image_path": "image_assets/missing-fig-1.png",
+                    "image_path": (
+                        f"{collection_id}/objects/source/build-figure/figures/"
+                        f"{missing_sha256}.png"
+                    ),
                     "image_mime_type": "image/png",
+                    "asset_sha256": missing_sha256,
+                    "image_size_bytes": len(b"missing"),
                 }
             ],
         ),

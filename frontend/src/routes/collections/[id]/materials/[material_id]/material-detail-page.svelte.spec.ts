@@ -428,6 +428,91 @@ function materialProfilePayload() {
 				relation_count: 1,
 				evidence_ref_count: 1,
 				context_count: 1
+			},
+			presentation: {
+				summary: {
+					title: '316L stainless steel',
+					material_scope: ['316L stainless steel'],
+					variable_axes: ['scan strategy'],
+					property_scope: ['hardness'],
+					claim_count: 1,
+					relation_count: 1,
+					evidence_count: 1,
+					context_count: 1,
+					review_queue_count: 0,
+					primary_finding_count: 1,
+					review_queue_finding_count: 0,
+					collection_document_count: 1,
+					axis_coverage: { variables: [], properties: [] }
+				},
+				effects: [],
+				findings: [
+					{
+						finding_id: 'finding:S001',
+						claim_id: 'claim_material_hardness',
+						title: 'S001 hardness finding',
+						statement: 'S001 keeps hardness tied to tensile testing and table evidence.',
+						variables: ['scan strategy'],
+						mediators: [],
+						outcomes: ['hardness'],
+						direction: 'observed',
+						scope_summary: '316L stainless steel, LPBF/SLM',
+						support_grade: 'strong',
+						review_status: 'reviewed',
+						confidence: 0.95,
+						paper_count: 1,
+						evidence_count: 1,
+						evidence_ref_ids: ['ev_hardness_s001'],
+						context_ids: ['ctx_material_scope'],
+						relation_ids: [],
+						relation_chain: [],
+						evidence_bundle: {
+							direct_result: ['ev_hardness_s001'],
+							mechanism: [],
+							condition_context: [],
+							background: [],
+							conflict: [],
+							noise: [],
+							uncategorized: []
+						},
+						comparison_summary: null,
+						expert_use_status: 'accepted',
+						dataset_use_status: 'training_ready',
+						generalization_status: 'paper_level_only',
+						generalization_note: '',
+						evidence_gap_summary: '',
+						upgrade_actions: [],
+						related_review_finding_ids: [],
+						review_reasons: [],
+						warnings: [],
+						synthesis_status: '',
+						common_conditions: [],
+						incomparable_conditions: [],
+						paper_contributions: []
+					}
+				],
+				evidence_items: [
+					{
+						evidence_ref_id: 'ev_hardness_s001',
+						document_id: 'doc_1',
+						title: 'Paper A · Table 2',
+						source_label: 'Paper A · Table 2',
+						source_kind: 'table',
+						source_ref: 'Table 2',
+						block_type: 'table',
+						heading_path: null,
+						page: null,
+						quote: null,
+						source_text: null,
+						value_summary: 'Hardness 215.6',
+						table_audit: null,
+						traceability_status: 'traceable',
+						evidence_role: 'direct_result',
+						confidence: 0.95,
+						href: null
+					}
+				],
+				context_summaries: []
 			}
 		}
 	};
@@ -472,6 +557,10 @@ describe('collections/[id]/materials/[material_id]/+page.svelte', () => {
 					.first()
 			)
 			.toBeInTheDocument();
+		await browserPage
+			.getByText('S001 keeps hardness tied to tensile testing and table evidence.')
+			.first()
+			.click();
 		await expect.element(browserPage.getByText('Paper A · Table 2').first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Material questions' }))

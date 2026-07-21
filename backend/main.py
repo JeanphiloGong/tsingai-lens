@@ -346,7 +346,7 @@ def create_app(
 
     app = FastAPI(
         title="TsingAI-Lens API",
-        version="0.10.1",
+        version="0.11.0",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",

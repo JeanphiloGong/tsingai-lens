@@ -50,6 +50,7 @@ _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
 _TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 4096
+_OBJECTIVE_EVIDENCE_UNIT_MAX_COMPLETION_TOKENS = 4096
 _TRACE_TEXT_LIMIT = 8000
 _TRACE_JSON_LIMIT = 12000
 _SUPPORTED_EXTRACTION_MODES = {
@@ -400,6 +401,10 @@ class CoreLLMStructuredExtractor:
             "messages": messages,
             **self._provider_request_options(),
         }
+        if response_model is StructuredObjectiveEvidenceUnits:
+            request_kwargs["max_completion_tokens"] = (
+                _OBJECTIVE_EVIDENCE_UNIT_MAX_COMPLETION_TOKENS
+            )
         completion = self.client.chat.completions.create(
             **request_kwargs,
         )
@@ -441,6 +446,10 @@ class CoreLLMStructuredExtractor:
         if response_model is StructuredTableBatchMentions:
             request_kwargs["max_completion_tokens"] = (
                 _TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS
+            )
+        elif response_model is StructuredObjectiveEvidenceUnits:
+            request_kwargs["max_completion_tokens"] = (
+                _OBJECTIVE_EVIDENCE_UNIT_MAX_COMPLETION_TOKENS
             )
         completion = self.client.beta.chat.completions.parse(**request_kwargs)
         if not completion.choices:

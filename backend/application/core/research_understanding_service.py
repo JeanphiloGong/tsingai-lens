@@ -6021,10 +6021,12 @@ class ResearchUnderstandingService:
         slug = _text(spec.get("slug"))
         if not block_id or not document_id or not slug:
             return {}
-        evidence_ref_id = f"evref_recovered_{slug}_{block_id}"
-        claim_id = f"claim_recovered_{slug}_{block_id}"
-        relation_id = f"rel_recovered_{slug}_{block_id}"
-        context_id = f"ctx_recovered_{slug}_{block_id}"
+        evidence_ref_id = _bounded_recovered_id(
+            "evref_recovered", slug, block_id
+        )
+        claim_id = _bounded_recovered_id("claim_recovered", slug, block_id)
+        relation_id = _bounded_recovered_id("rel_recovered", slug, block_id)
+        context_id = _bounded_recovered_id("ctx_recovered", slug, block_id)
         material_scope = _strings(
             objective_context.get("material_scope") or objective.get("material_scope")
         )
@@ -6067,7 +6069,9 @@ class ResearchUnderstandingService:
             condition_block_id = _text(condition_block.block_id)
             if not condition_block_id:
                 continue
-            condition_ref_id = f"evref_recovered_{slug}_condition_{condition_block_id}"
+            condition_ref_id = _bounded_recovered_id(
+                "evref_recovered", slug, "condition", condition_block_id
+            )
             evidence_ref_ids.append(condition_ref_id)
             condition_quote = _short_text(_text(condition_block.text), limit=900)
             evidence_refs.append(
@@ -6108,8 +6112,8 @@ class ResearchUnderstandingService:
             supporting_block_id = _text(supporting_block.block_id)
             if not supporting_block_id:
                 continue
-            supporting_ref_id = (
-                f"evref_recovered_{slug}_mechanics_{supporting_block_id}"
+            supporting_ref_id = _bounded_recovered_id(
+                "evref_recovered", slug, "mechanics", supporting_block_id
             )
             evidence_ref_ids.append(supporting_ref_id)
             supporting_quote = (
@@ -6169,8 +6173,8 @@ class ResearchUnderstandingService:
             supporting_table_id = _text(supporting_table.table_id)
             if not supporting_table_id:
                 continue
-            supporting_ref_id = (
-                f"evref_recovered_{slug}_{ref_kind}_{supporting_table_id}"
+            supporting_ref_id = _bounded_recovered_id(
+                "evref_recovered", slug, ref_kind, supporting_table_id
             )
             evidence_ref_ids.append(supporting_ref_id)
             supporting_quote = (
@@ -6590,10 +6594,18 @@ class ResearchUnderstandingService:
         document_id = _text(block.document_id)
         if not block_id or not document_id:
             return {}
-        evidence_ref_id = f"evref_recovered_preheating_ductility_{block_id}"
-        claim_id = f"claim_recovered_preheating_ductility_{block_id}"
-        relation_id = f"rel_recovered_preheating_ductility_{block_id}"
-        context_id = f"ctx_recovered_preheating_ductility_{block_id}"
+        evidence_ref_id = _bounded_recovered_id(
+            "evref_recovered_preheating_ductility", block_id
+        )
+        claim_id = _bounded_recovered_id(
+            "claim_recovered_preheating_ductility", block_id
+        )
+        relation_id = _bounded_recovered_id(
+            "rel_recovered_preheating_ductility", block_id
+        )
+        context_id = _bounded_recovered_id(
+            "ctx_recovered_preheating_ductility", block_id
+        )
         quote = _short_text(_text(block.text), limit=420)
         statement = (
             "Preheating the build platform to 150 °C increased ductility by "
@@ -7109,10 +7121,18 @@ class ResearchUnderstandingService:
         document_id = _text(block.document_id)
         if not block_id or not document_id:
             return {}
-        evidence_ref_id = f"evref_recovered_porosity_corrosion_{block_id}"
-        claim_id = f"claim_recovered_porosity_corrosion_{block_id}"
-        relation_id = f"rel_recovered_porosity_corrosion_{block_id}"
-        context_id = f"ctx_recovered_porosity_corrosion_{block_id}"
+        evidence_ref_id = _bounded_recovered_id(
+            "evref_recovered_porosity_corrosion", block_id
+        )
+        claim_id = _bounded_recovered_id(
+            "claim_recovered_porosity_corrosion", block_id
+        )
+        relation_id = _bounded_recovered_id(
+            "rel_recovered_porosity_corrosion", block_id
+        )
+        context_id = _bounded_recovered_id(
+            "ctx_recovered_porosity_corrosion", block_id
+        )
         quote = _short_text(_text(block.text), limit=900)
         process_conditions_not_isolated = (
             self._porosity_corrosion_process_conditions_not_isolated(
@@ -15643,7 +15663,7 @@ class ResearchUnderstandingService:
                 ],
             }
         return {
-            "finding_id": f"finding_{claim_id}",
+            "finding_id": _bounded_recovered_id("finding", claim_id),
             "claim_id": claim_id,
             "title": self._finding_title(
                 variables=display_variables,
@@ -19834,6 +19854,14 @@ class ResearchUnderstandingService:
             or bool(_strings(claim.get("warnings")))
             or not bool(_strings(claim.get("evidence_ref_ids")))
         )
+
+
+def _bounded_recovered_id(prefix: str, *parts: str) -> str:
+    candidate = "_".join([prefix, *(part for part in parts if part)])
+    if len(candidate) <= 128:
+        return candidate
+    digest = sha1(candidate.encode("utf-8")).hexdigest()[:16]
+    return f"{prefix}_{digest}"
 
 
 def _stable_ref_id(

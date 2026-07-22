@@ -121,6 +121,53 @@ def _presentation_review_finding_by_claim_id(
     )
 
 
+def test_recovered_object_ids_stay_within_persistence_limit_for_long_source_ids():
+    service = ResearchUnderstandingService(
+        structured_extractor=_FakeSemanticExtractor()
+    )
+    block = SourceBlock(
+        block_id="blk_" + "long-source-locator-" * 12,
+        document_id="paper-1",
+        block_type="paragraph",
+        text="Energy density affected the microstructure of 316L.",
+        block_order=1,
+        page=3,
+        heading_path="Results",
+    )
+
+    recovered = service._recovered_spec_finding(
+        block,
+        collection_id="collection-1",
+        objective_context={"material_scope": ["316L stainless steel"]},
+        objective={},
+        spec={
+            "slug": "energy_density_microstructure",
+            "statement": "Energy density affected the microstructure of 316L.",
+            "process_axes": ["energy density"],
+            "property_scope": ["microstructure"],
+        },
+    )
+
+    identifiers = [
+        recovered["claim"]["claim_id"],
+        recovered["relation"]["relation_id"],
+        recovered["context"]["context_id"],
+        *(ref["evidence_ref_id"] for ref in recovered["evidence_refs"]),
+    ]
+    assert all(len(identifier) <= 128 for identifier in identifiers)
+    assert recovered["evidence_ref"]["fact_ids"] == [
+        recovered["claim"]["claim_id"]
+    ]
+    assert (
+        recovered["claim"]["claim_id"]
+        == understanding_module._bounded_recovered_id(
+            "claim_recovered",
+            "energy_density_microstructure",
+            block.block_id,
+        )
+    )
+
+
 def _oversized_relation_payload(unit_count: int = 28) -> dict:
     long_details = " ".join(
         f"metallography preparation route and measurement caveat {index}"

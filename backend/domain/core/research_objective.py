@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha1
 import json
 import math
@@ -206,6 +206,85 @@ class ResearchObjective:
             ),
             created_at=_normalize_text(payload.get("created_at")),
             updated_at=_normalize_text(payload.get("updated_at")),
+        )
+
+    def confirm(self) -> "ResearchObjective":
+        return self._transition("confirmed")
+
+    def queue(self) -> "ResearchObjective":
+        return self._transition(
+            "queued",
+            analysis_error=None,
+            analysis_progress={
+                "phase": "queued",
+                "unit": "steps",
+                "message": "Objective analysis is queued.",
+            },
+        )
+
+    def start(self) -> "ResearchObjective":
+        return self._transition(
+            "running",
+            analysis_error=None,
+            analysis_progress={
+                "phase": "objective_analysis_started",
+                "unit": "steps",
+                "message": "Objective analysis has started.",
+            },
+        )
+
+    def update_progress(
+        self,
+        analysis_progress: Mapping[str, Any],
+    ) -> "ResearchObjective":
+        if self.status != "running":
+            raise ValueError(
+                f"cannot update objective progress while status is {self.status}"
+            )
+        if not analysis_progress:
+            raise ValueError("objective analysis progress must not be empty")
+        return replace(self, analysis_progress=dict(analysis_progress))
+
+    def complete(self) -> "ResearchObjective":
+        return self._transition(
+            "ready",
+            analysis_error=None,
+            analysis_progress={
+                "phase": "objective_analysis_completed",
+                "unit": "steps",
+                "message": "Objective analysis has completed.",
+            },
+        )
+
+    def fail(self, error: str) -> "ResearchObjective":
+        normalized_error = str(error or "").strip()
+        if not normalized_error:
+            raise ValueError("objective analysis error must not be empty")
+        return self._transition(
+            "failed",
+            analysis_error=normalized_error,
+            analysis_progress={
+                "phase": "objective_analysis_failed",
+                "unit": "steps",
+                "message": "Objective analysis has failed.",
+            },
+        )
+
+    def _transition(
+        self,
+        target: str,
+        *,
+        analysis_error: str | None = None,
+        analysis_progress: Mapping[str, Any] | None = None,
+    ) -> "ResearchObjective":
+        require_objective_status_transition(self.status, target)
+        return replace(
+            self,
+            status=target,
+            analysis_error=analysis_error,
+            analysis_progress=(
+                dict(analysis_progress) if analysis_progress is not None else None
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:

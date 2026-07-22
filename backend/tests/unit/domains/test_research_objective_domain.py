@@ -128,6 +128,78 @@ def test_objective_lifecycle_rejects_undeclared_transitions(
         require_objective_status_transition(current, target)
 
 
+def test_research_objective_lifecycle_operations_are_immutable() -> None:
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "objective-1",
+            "question": "How does heat treatment affect strength?",
+        }
+    )
+
+    confirmed = objective.confirm()
+    queued = confirmed.queue()
+    running = queued.start()
+    progressing = running.update_progress(
+        {"phase": "routing", "unit": "routes", "current": 2, "total": 4}
+    )
+    ready = progressing.complete()
+
+    assert objective.status == "candidate"
+    assert confirmed.status == "confirmed"
+    assert queued.analysis_progress == {
+        "phase": "queued",
+        "unit": "steps",
+        "message": "Objective analysis is queued.",
+    }
+    assert running.status == "running"
+    assert progressing.analysis_progress == {
+        "phase": "routing",
+        "unit": "routes",
+        "current": 2,
+        "total": 4,
+    }
+    assert ready.status == "ready"
+    assert ready.analysis_error is None
+
+
+def test_research_objective_fail_requires_error_and_supports_retry() -> None:
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "objective-1",
+            "question": "How does heat treatment affect strength?",
+            "status": "running",
+        }
+    )
+
+    failed = objective.fail("provider timed out")
+    retried = failed.queue()
+
+    assert failed.status == "failed"
+    assert failed.analysis_error == "provider timed out"
+    assert failed.analysis_progress["phase"] == "objective_analysis_failed"
+    assert retried.status == "queued"
+    assert retried.analysis_error is None
+
+    with pytest.raises(ValueError, match="must not be empty"):
+        objective.fail("  ")
+
+
+def test_research_objective_progress_requires_running_state() -> None:
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "objective-1",
+            "question": "How does heat treatment affect strength?",
+        }
+    )
+
+    with pytest.raises(ValueError, match="status is candidate"):
+        objective.update_progress({"phase": "routing"})
+
+    running = objective.confirm().queue().start()
+    with pytest.raises(ValueError, match="must not be empty"):
+        running.update_progress({})
+
+
 def test_paper_skim_normalizes_missing_and_repeated_values() -> None:
     skim = PaperSkim.from_mapping(
         {

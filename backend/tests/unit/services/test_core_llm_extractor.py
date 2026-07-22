@@ -998,7 +998,7 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_objective_
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
-    client = _FakeOpenAIClient("unused", parsed=StructuredObjectiveEvidenceUnits())
+    client = _FakeOpenAIClient('{"evidence_units": []}')
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
     units = extractor.extract_objective_evidence_units(
@@ -1011,9 +1011,11 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_objective_
     )
 
     assert units == StructuredObjectiveEvidenceUnits()
-    parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is StructuredObjectiveEvidenceUnits
-    assert parse_call["max_completion_tokens"] == 4096
+    assert client.beta.chat.completions.calls == []
+    text_call = client.chat.completions.calls[0]
+    assert text_call["max_completion_tokens"] == 4096
+    assert "JSON schema:" in text_call["messages"][1]["content"]
+    assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
 
 
 def test_core_llm_extractor_validates_lightweight_table_batch_mentions():

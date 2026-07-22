@@ -284,7 +284,11 @@ class CoreLLMStructuredExtractor:
         started_at = perf_counter()
         trace_extraction_mode = self.extraction_mode
         try:
-            if self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE:
+            use_provider_parse = (
+                self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE
+                and response_model is not StructuredObjectiveEvidenceUnits
+            )
+            if use_provider_parse:
                 try:
                     parsed, raw_content = self._parse_provider_structured_response(
                         messages=messages,
@@ -312,14 +316,18 @@ class CoreLLMStructuredExtractor:
                         f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
                     )
             else:
+                if self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE:
+                    messages = self._build_messages(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        response_model=response_model,
+                        include_schema=True,
+                    )
+                    trace_extraction_mode = _EXTRACTION_MODE_JSON_TEXT
                 parsed, raw_content = self._parse_json_text_response(
                     messages=messages,
                     response_model=response_model,
                 )
-                if self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE:
-                    trace_extraction_mode = (
-                        f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
-                    )
         except Exception:
             elapsed_s = perf_counter() - started_at
             self.last_trace = self._build_trace(

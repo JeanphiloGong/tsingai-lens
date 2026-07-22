@@ -32,6 +32,7 @@ from domain.shared.enums import (
 
 
 _SKIPPED_RESOLUTION_STATUSES = {"rejected", "skipped"}
+_SKIPPED_EVIDENCE_STATES = {"candidate", "rejected", "failed"}
 
 
 def project_objective_comparison_rows(
@@ -90,6 +91,7 @@ def project_objective_comparison_semantics(
 def _is_projectable_measurement(unit: ObjectiveEvidenceUnit) -> bool:
     return (
         unit.unit_kind == "measurement"
+        and unit.selection_status not in _SKIPPED_EVIDENCE_STATES
         and unit.resolution_status not in _SKIPPED_RESOLUTION_STATUSES
         and _has_explicit_measurement_value(unit)
     )

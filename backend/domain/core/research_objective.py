@@ -55,6 +55,16 @@ EVIDENCE_UNIT_KIND_VALUES: Final[frozenset[str]] = frozenset(
 EVIDENCE_RESOLUTION_STATUS_VALUES: Final[frozenset[str]] = frozenset(
     {"resolved", "partial", "unresolved", "skipped", "unknown"}
 )
+OBJECTIVE_EVIDENCE_STATES: Final[frozenset[str]] = frozenset(
+    {"candidate", "selected", "extracted", "rejected", "failed"}
+)
+OBJECTIVE_EVIDENCE_STATE_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
+    "candidate": frozenset({"selected", "extracted", "rejected", "failed"}),
+    "selected": frozenset({"extracted", "rejected", "failed"}),
+    "extracted": frozenset(),
+    "rejected": frozenset(),
+    "failed": frozenset(),
+}
 LOGIC_CHAIN_SCOPE_VALUES: Final[frozenset[str]] = frozenset(
     {"objective", "paper", "cross_paper"}
 )
@@ -524,6 +534,11 @@ class ObjectiveEvidenceUnit:
     evidence_unit_id: str
     objective_id: str
     document_id: str
+    source_kind: str | None
+    source_ref: str | None
+    evidence_role: str | None
+    selection_reason: str | None
+    selection_status: str
     unit_kind: str
     property_normalized: str | None
     material_system: dict[str, Any]
@@ -554,6 +569,7 @@ class ObjectiveEvidenceUnit:
         )
         property_normalized = _normalize_text(payload.get("property_normalized"))
         source_refs = _normalize_mapping_sequence(payload.get("source_refs"))
+        first_source_ref = source_refs[0] if source_refs else {}
         return cls(
             evidence_unit_id=_normalize_text(payload.get("evidence_unit_id"))
             or _build_scoped_id(
@@ -567,6 +583,21 @@ class ObjectiveEvidenceUnit:
             ),
             objective_id=objective_id,
             document_id=document_id,
+            source_kind=(
+                _normalize_text(payload.get("source_kind"))
+                or _normalize_text(first_source_ref.get("source_kind"))
+            ),
+            source_ref=(
+                _normalize_text(payload.get("source_ref"))
+                or _normalize_text(first_source_ref.get("source_ref"))
+            ),
+            evidence_role=_normalize_text(payload.get("evidence_role")),
+            selection_reason=_normalize_text(payload.get("selection_reason")),
+            selection_status=_normalize_choice(
+                payload.get("selection_status"),
+                allowed=OBJECTIVE_EVIDENCE_STATES,
+                default="extracted",
+            ),
             unit_kind=unit_kind,
             property_normalized=property_normalized,
             material_system=_normalize_mapping(payload.get("material_system")),
@@ -591,11 +622,69 @@ class ObjectiveEvidenceUnit:
             confidence=normalize_objective_confidence(payload.get("confidence")),
         )
 
+    def select(
+        self,
+        *,
+        evidence_role: str,
+        reason: str | None = None,
+    ) -> "ObjectiveEvidenceUnit":
+        return self._evidence_transition(
+            "selected",
+            evidence_role=evidence_role,
+            selection_reason=reason,
+        )
+
+    def mark_extracted(self) -> "ObjectiveEvidenceUnit":
+        return self._evidence_transition("extracted")
+
+    def reject(self, reason: str | None = None) -> "ObjectiveEvidenceUnit":
+        return self._evidence_transition(
+            "rejected",
+            selection_reason=reason or self.selection_reason,
+        )
+
+    def fail(self, reason: str) -> "ObjectiveEvidenceUnit":
+        normalized_reason = str(reason or "").strip()
+        if not normalized_reason:
+            raise ValueError("objective evidence failure reason must not be empty")
+        return self._evidence_transition(
+            "failed",
+            selection_reason=normalized_reason,
+        )
+
+    def _evidence_transition(
+        self,
+        target: str,
+        *,
+        evidence_role: str | None = None,
+        selection_reason: str | None = None,
+    ) -> "ObjectiveEvidenceUnit":
+        allowed_targets = OBJECTIVE_EVIDENCE_STATE_TRANSITIONS.get(
+            self.selection_status,
+            frozenset(),
+        )
+        if target not in allowed_targets:
+            raise ValueError(
+                "invalid objective evidence transition: "
+                f"{self.selection_status} -> {target}"
+            )
+        return replace(
+            self,
+            selection_status=target,
+            evidence_role=evidence_role or self.evidence_role,
+            selection_reason=selection_reason,
+        )
+
     def to_record(self) -> dict[str, Any]:
         return {
             "evidence_unit_id": self.evidence_unit_id,
             "objective_id": self.objective_id,
             "document_id": self.document_id,
+            "source_kind": self.source_kind,
+            "source_ref": self.source_ref,
+            "evidence_role": self.evidence_role,
+            "selection_reason": self.selection_reason,
+            "selection_status": self.selection_status,
             "unit_kind": self.unit_kind,
             "property_normalized": self.property_normalized,
             "material_system": dict(self.material_system),

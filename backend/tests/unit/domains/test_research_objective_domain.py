@@ -200,6 +200,55 @@ def test_research_objective_progress_requires_running_state() -> None:
         running.update_progress({})
 
 
+def test_objective_evidence_carries_selection_and_extraction_state() -> None:
+    evidence = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "objective_id": "obj-1",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-3",
+            "selection_status": "candidate",
+            "unit_kind": "measurement",
+            "property_normalized": "elongation",
+            "value_payload": {"value": 12.0},
+        }
+    )
+
+    selected = evidence.select(
+        evidence_role="current_experimental_evidence",
+        reason="Target result table for the objective.",
+    )
+    extracted = selected.mark_extracted()
+
+    assert evidence.selection_status == "candidate"
+    assert selected.selection_status == "selected"
+    assert selected.source_kind == "table"
+    assert selected.source_ref == "table-3"
+    assert selected.evidence_role == "current_experimental_evidence"
+    assert selected.selection_reason == "Target result table for the objective."
+    assert extracted.selection_status == "extracted"
+    assert extracted.value_payload == {"value": 12.0}
+
+
+def test_objective_evidence_rejects_invalid_state_transitions() -> None:
+    evidence = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "objective_id": "obj-1",
+            "document_id": "paper-1",
+            "selection_status": "candidate",
+        }
+    )
+
+    rejected = evidence.reject("Background-only table.")
+    assert rejected.selection_status == "rejected"
+    assert rejected.selection_reason == "Background-only table."
+
+    with pytest.raises(ValueError, match="rejected -> extracted"):
+        rejected.mark_extracted()
+    with pytest.raises(ValueError, match="must not be empty"):
+        evidence.fail("  ")
+
+
 def test_paper_skim_normalizes_missing_and_repeated_values() -> None:
     skim = PaperSkim.from_mapping(
         {

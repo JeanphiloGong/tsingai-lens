@@ -52,6 +52,19 @@ def test_project_objective_material_rows_preserves_unit_contexts():
             "resolution_status": "skipped",
         }
     )
+    candidate = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-candidate",
+            "objective_id": "obj-corrosion",
+            "document_id": "paper-1",
+            "selection_status": "candidate",
+            "unit_kind": "measurement",
+            "material_system": {"name": "316L stainless steel"},
+            "property_normalized": "pitting potential",
+            "value_payload": {"value": 0.2},
+            "resolution_status": "resolved",
+        }
+    )
     contaminated_text_measurement = ObjectiveEvidenceUnit.from_mapping(
         {
             "evidence_unit_id": "oeu-text-ductility",
@@ -73,7 +86,13 @@ def test_project_objective_material_rows_preserves_unit_contexts():
     )
 
     rows = project_objective_material_rows(
-        (measurement, process_context, skipped, contaminated_text_measurement)
+        (
+            measurement,
+            process_context,
+            skipped,
+            candidate,
+            contaminated_text_measurement,
+        )
     )
 
     assert [row.evidence_unit_id for row in rows] == [

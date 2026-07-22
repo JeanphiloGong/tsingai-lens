@@ -46,6 +46,18 @@ def test_project_objective_comparison_rows_from_measurement_units():
                     "resolution_status": "skipped",
                 }
             ),
+            ObjectiveEvidenceUnit.from_mapping(
+                {
+                    "evidence_unit_id": "oeu-candidate",
+                    "objective_id": "obj-corrosion",
+                    "document_id": "paper-1",
+                    "selection_status": "candidate",
+                    "unit_kind": "measurement",
+                    "property_normalized": "pitting potential",
+                    "value_payload": {"value": 0.2},
+                    "resolution_status": "resolved",
+                }
+            ),
         ),
     )
 

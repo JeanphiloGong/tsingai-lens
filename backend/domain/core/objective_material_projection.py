@@ -9,6 +9,7 @@ from domain.core.research_objective import ObjectiveEvidenceUnit
 
 
 _SKIPPED_RESOLUTION_STATUSES = {"rejected", "skipped"}
+_SKIPPED_EVIDENCE_STATES = {"candidate", "rejected", "failed"}
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,8 @@ def project_objective_material_rows(
 ) -> tuple[ObjectiveMaterialProjectionRow, ...]:
     rows: list[ObjectiveMaterialProjectionRow] = []
     for unit in evidence_units:
+        if unit.selection_status in _SKIPPED_EVIDENCE_STATES:
+            continue
         if unit.resolution_status in _SKIPPED_RESOLUTION_STATUSES:
             continue
         if not _has_material_projection_payload(unit):

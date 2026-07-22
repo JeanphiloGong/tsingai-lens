@@ -747,7 +747,7 @@ def test_core_llm_extractor_validates_objective_evidence_units_response():
     assert isinstance(units, StructuredObjectiveEvidenceUnits)
     assert units.evidence_units[0].unit_kind == "measurement"
     assert units.evidence_units[0].resolution_status == "resolved"
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 4096
+    assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
 
 
 def test_objective_evidence_unit_prompt_limits_text_routes_to_one_unit():
@@ -1013,7 +1013,7 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_objective_
     assert units == StructuredObjectiveEvidenceUnits()
     assert client.beta.chat.completions.calls == []
     text_call = client.chat.completions.calls[0]
-    assert text_call["max_completion_tokens"] == 4096
+    assert text_call["max_completion_tokens"] == 1024
     assert "JSON schema:" in text_call["messages"][1]["content"]
     assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
 

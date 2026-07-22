@@ -771,6 +771,11 @@ export type ObjectiveEvidenceUnit = {
 	objective_id: string;
 	document_id: string;
 	unit_kind: string;
+	source_kind: string | null;
+	source_ref: string | null;
+	evidence_role: string | null;
+	selection_reason: string | null;
+	selection_status: string;
 	property_normalized: string | null;
 	material_system: Record<string, unknown>;
 	sample_context: Record<string, unknown>;
@@ -2375,6 +2380,11 @@ function normalizeObjectiveEvidenceUnit(value: unknown): ObjectiveEvidenceUnit |
 		objective_id: toText(record.objective_id),
 		document_id: toText(record.document_id ?? record.paper_id),
 		unit_kind: toText(record.unit_kind, 'unknown'),
+		source_kind: nonEmptyText(record.source_kind),
+		source_ref: nonEmptyText(record.source_ref),
+		evidence_role: nonEmptyText(record.evidence_role),
+		selection_reason: nonEmptyText(record.selection_reason),
+		selection_status: toText(record.selection_status, 'extracted'),
 		property_normalized: nonEmptyText(record.property_normalized),
 		material_system: normalizeUnknownRecord(record.material_system),
 		sample_context: normalizeUnknownRecord(record.sample_context),

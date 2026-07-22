@@ -162,6 +162,14 @@ class ObjectiveEvidenceUnitResponse(BaseModel):
     objective_id: str = Field(..., description="Stable objective ID")
     document_id: str = Field(..., description="Source document ID")
     unit_kind: str = Field(..., description="Evidence unit kind")
+    source_kind: str | None = Field(default=None, description="Canonical source kind")
+    source_ref: str | None = Field(default=None, description="Canonical source reference")
+    evidence_role: str | None = Field(default=None, description="Evidence role")
+    selection_reason: str | None = Field(default=None, description="Evidence selection reason")
+    selection_status: str = Field(
+        default="extracted",
+        description="Evidence selection lifecycle status",
+    )
     property_normalized: str | None = Field(
         default=None,
         description="Normalized property",

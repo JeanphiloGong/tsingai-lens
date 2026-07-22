@@ -1362,11 +1362,16 @@ describe('research view shared helpers', () => {
 						extractable: true
 					}
 				],
-				evidence_units: [
+					evidence_units: [
 					{
 						evidence_unit_id: 'oeu_1',
 						document_id: 'doc_1',
 						unit_kind: 'measurement',
+						source_kind: 'table',
+						source_ref: 'table-1',
+						evidence_role: 'current_experimental_evidence',
+						selection_reason: 'Target result table.',
+						selection_status: 'extracted',
 						property_normalized: 'corrosion_current_density',
 						value_payload: { source_value_text: '0.4 uA/cm2' },
 						sample_context: { label: 'heat-treated' },
@@ -1396,6 +1401,10 @@ describe('research view shared helpers', () => {
 		expect(objectiveView.evidence_units[0]).toMatchObject({
 			evidence_unit_id: 'oeu_1',
 			unit_kind: 'measurement',
+			source_kind: 'table',
+			source_ref: 'table-1',
+			evidence_role: 'current_experimental_evidence',
+			selection_status: 'extracted',
 			property_normalized: 'corrosion_current_density',
 			value_payload: { source_value_text: '0.4 uA/cm2' },
 			sample_context: { label: 'heat-treated' },

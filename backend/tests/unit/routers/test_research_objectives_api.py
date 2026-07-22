@@ -15,6 +15,7 @@ from application.core.semantic_build.research_objective_service import (
     ResearchObjectivesNotReadyError,
 )
 from controllers.core import research_objectives as objective_controller
+from controllers.schemas.core.research_objectives import ObjectiveEvidenceUnitResponse
 from domain.core import ResearchObjective
 
 
@@ -222,6 +223,24 @@ def test_objective_routes_return_contract_payload():
     assert detail.logic_chain is None
     assert objectives.objectives[0].status == "confirmed"
     assert detail.review_summary.primary_finding_count == 0
+
+
+def test_objective_evidence_response_exposes_unified_selection_metadata():
+    response = ObjectiveEvidenceUnitResponse(
+        evidence_unit_id="oeu-1",
+        objective_id="obj-1",
+        document_id="paper-1",
+        unit_kind="measurement",
+        source_kind="table",
+        source_ref="table-1",
+        evidence_role="current_experimental_evidence",
+        selection_reason="Target result table.",
+        selection_status="extracted",
+        resolution_status="resolved",
+    )
+
+    assert response.model_dump()["source_ref"] == "table-1"
+    assert response.model_dump()["selection_status"] == "extracted"
 
 
 def test_objective_confirm_and_analysis_routes_use_one_identity(monkeypatch):

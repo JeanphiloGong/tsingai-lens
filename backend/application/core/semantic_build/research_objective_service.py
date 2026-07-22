@@ -713,10 +713,6 @@ class ResearchObjectiveService:
             objective_evidence_units,
             objective_context=context,
         )
-        evidence_unit_records = self._evidence_units_with_route_evidence_roles(
-            evidence_units,
-            routes=objective_evidence_routes,
-        )
         logic_chain = self._objective_detail_logic_chain(
             objective=workspace.objective,
             objective_context=workspace.objective_context,
@@ -727,10 +723,7 @@ class ResearchObjectiveService:
         )
         workspace = replace(
             workspace,
-            evidence_units=tuple(
-                ObjectiveEvidenceUnit.from_mapping(record)
-                for record in evidence_unit_records
-            ),
+            evidence_units=evidence_units,
             logic_chain=logic_chain,
         )
         understanding = ResearchUnderstanding.from_mapping(
@@ -739,59 +732,6 @@ class ResearchObjectiveService:
             )
         )
         return understanding
-
-    def _evidence_units_with_route_evidence_roles(
-        self,
-        units: tuple[ObjectiveEvidenceUnit, ...],
-        *,
-        routes: tuple[ObjectiveEvidenceRoute, ...],
-    ) -> list[dict[str, Any]]:
-        lookup = self._route_evidence_role_lookup(routes)
-        return [
-            self._evidence_unit_with_route_evidence_role(unit, lookup=lookup)
-            for unit in units
-        ]
-
-    def _route_evidence_role_lookup(
-        self,
-        routes: tuple[ObjectiveEvidenceRoute, ...],
-    ) -> dict[tuple[str, str, str], str]:
-        lookup: dict[tuple[str, str, str], str] = {}
-        for route in routes:
-            evidence_role = str(route.join_plan.get("evidence_role") or "").strip()
-            if not evidence_role:
-                continue
-            lookup[("route_id", route.route_id, "")] = evidence_role
-            lookup[("source_ref", route.source_kind, route.source_ref)] = evidence_role
-        return lookup
-
-    def _evidence_unit_with_route_evidence_role(
-        self,
-        unit: ObjectiveEvidenceUnit,
-        *,
-        lookup: dict[tuple[str, str, str], str],
-    ) -> dict[str, Any]:
-        record = unit.to_record()
-        source_refs = []
-        changed = False
-        for source_ref in record.get("source_refs") or []:
-            ref = dict(source_ref)
-            if ref.get("evidence_role"):
-                source_refs.append(ref)
-                continue
-            route_id = str(ref.get("route_id") or "").strip()
-            evidence_role = lookup.get(("route_id", route_id, "")) if route_id else None
-            if not evidence_role:
-                source_kind = str(ref.get("source_kind") or "").strip()
-                source_ref_id = str(ref.get("source_ref") or "").strip()
-                evidence_role = lookup.get(("source_ref", source_kind, source_ref_id))
-            if evidence_role:
-                ref["evidence_role"] = evidence_role
-                changed = True
-            source_refs.append(ref)
-        if changed:
-            record["source_refs"] = source_refs
-        return record
 
     def _build_objective_candidate_inputs(
         self,

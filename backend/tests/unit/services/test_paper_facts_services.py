@@ -808,6 +808,23 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
             "evidence_unit_id": "oeu-existing",
             "objective_id": objective.objective_id,
             "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-allowed",
+            "evidence_role": "direct_support",
+            "unit_kind": "measurement",
+            "property_normalized": "yield_strength",
+            "value_payload": {"value": 560},
+            "resolution_status": "resolved",
+        }
+    )
+    existing_table_unit = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "oeu-existing-table",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-allowed",
+            "evidence_role": "direct_support",
             "unit_kind": "measurement",
             "property_normalized": "yield_strength",
             "value_payload": {"value": 560},
@@ -819,7 +836,10 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
             "logic_chain_id": "olc-existing",
             "objective_id": objective.objective_id,
             "chain_scope": "objective",
-            "evidence_unit_ids": [existing_unit.evidence_unit_id],
+                "evidence_unit_ids": [
+                    existing_unit.evidence_unit_id,
+                    existing_table_unit.evidence_unit_id,
+                ],
             "chain_payload": {"schema_version": "objective_logic_chain.v1"},
         }
     )
@@ -872,7 +892,7 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
                     }
                 ),
             ),
-            objective_evidence_units=(existing_unit,),
+            objective_evidence_units=(existing_unit, existing_table_unit),
             objective_logic_chains=(existing_chain,),
         ),
     )
@@ -891,12 +911,12 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
     assert all("balance" not in row["row_summary"] for row in target_rows)
 
     facts = objective_repository.read(collection_id)
-    assert facts.objective_evidence_units == (existing_unit,)
+    assert facts.objective_evidence_units == (existing_unit, existing_table_unit)
     assert facts.objective_logic_chains == (existing_chain,)
     assert any(
-        "Paper facts objective route gate loaded" in record.message
-        and "text_window_routes=1" in record.message
-        and "table_routes=1" in record.message
+        "Paper facts objective evidence gate loaded" in record.message
+        and "text_window_sources=1" in record.message
+        and "table_sources=1" in record.message
         for record in caplog.records
     )
     assert any(
@@ -927,7 +947,7 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
                     }
                 ),
             ),
-            objective_evidence_units=(existing_unit,),
+            objective_evidence_units=(existing_table_unit,),
             objective_logic_chains=(existing_chain,),
         ),
     )
@@ -938,9 +958,9 @@ def test_paper_facts_build_uses_objective_routes_to_gate_legacy_extraction(
     assert extractor.text_window_payloads == []
     assert len(extractor.table_batch_payloads) == 1
     assert any(
-        "Paper facts objective route gate loaded" in record.message
-        and "text_window_routes=0" in record.message
-        and "table_routes=1" in record.message
+        "Paper facts objective evidence gate loaded" in record.message
+        and "text_window_sources=0" in record.message
+        and "table_sources=1" in record.message
         for record in caplog.records
     )
     assert any(

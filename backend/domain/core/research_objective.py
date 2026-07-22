@@ -591,8 +591,14 @@ class ObjectiveEvidenceUnit:
                 _normalize_text(payload.get("source_ref"))
                 or _normalize_text(first_source_ref.get("source_ref"))
             ),
-            evidence_role=_normalize_text(payload.get("evidence_role")),
-            selection_reason=_normalize_text(payload.get("selection_reason")),
+            evidence_role=(
+                _normalize_text(payload.get("evidence_role"))
+                or _normalize_text(first_source_ref.get("evidence_role"))
+            ),
+            selection_reason=(
+                _normalize_text(payload.get("selection_reason"))
+                or _normalize_text(first_source_ref.get("selection_reason"))
+            ),
             selection_status=_normalize_choice(
                 payload.get("selection_status"),
                 allowed=OBJECTIVE_EVIDENCE_STATES,

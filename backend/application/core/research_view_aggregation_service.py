@@ -2491,8 +2491,7 @@ class ResearchViewAggregationService:
             for index, source_ref_value in enumerate(source_refs):
                 source_ref = self._as_mapping(source_ref_value)
                 source_id = (
-                    self._safe_text(source_ref.get("route_id"))
-                    or self._safe_text(source_ref.get("source_ref"))
+                    self._safe_text(source_ref.get("source_ref"))
                     or str(index)
                 )
                 evidence_ref_id = f"eref:{fact_id}:{self._slug(source_id)}"

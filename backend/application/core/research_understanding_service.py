@@ -8362,7 +8362,6 @@ class ResearchUnderstandingService:
         source_ref_label = (
             _text(source.get("display_label"))
             or _text(source.get("source_ref"))
-            or _text(source.get("route_id"))
         )
         document_id = (
             _text(source.get("document_id"))
@@ -8410,7 +8409,6 @@ class ResearchUnderstandingService:
                 key: value
                 for key, value in {
                     "source_ref": source_ref_id,
-                    "route_id": _text(source.get("route_id")),
                     "source_kind": source_kind,
                     "page": page,
                 }.items()

@@ -127,6 +127,9 @@ def test_core_llm_extractor_validates_json_text_response():
     assert len(client.chat.completions.calls) == 1
     assert client.beta.chat.completions.calls == []
     assert "JSON schema:" in client.chat.completions.calls[0]["messages"][1]["content"]
+    assert client.chat.completions.calls[0]["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
 
 
 def test_core_llm_extractor_ignores_top_level_extra_json_text_fields():
@@ -177,6 +180,9 @@ def test_core_llm_extractor_defaults_to_provider_parse_mode(monkeypatch):
     parse_call = client.beta.chat.completions.calls[0]
     assert parse_call["response_format"] is StructuredTextWindowMentions
     assert "JSON schema:" not in parse_call["messages"][1]["content"]
+    assert parse_call["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
 
 
 def test_core_llm_extractor_captures_provider_parse_trace_for_relations():
@@ -942,6 +948,27 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_batc
     parse_call = client.beta.chat.completions.calls[0]
     assert parse_call["response_format"] is StructuredTableBatchMentions
     assert parse_call["max_completion_tokens"] == 4096
+    assert parse_call["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
+
+
+def test_core_llm_extractor_can_opt_in_to_provider_thinking(monkeypatch):
+    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
+    monkeypatch.setenv("LLM_ENABLE_THINKING", "true")
+    client = _FakeOpenAIClient("unused", parsed=StructuredTableBatchMentions())
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    extractor.extract_table_batch_mentions(
+        {
+            "document_title": "LPBF Paper",
+            "document_profile": {"doc_type": "experimental"},
+            "target_rows": [],
+            "supporting_text_windows": [],
+        }
+    )
+
+    assert "extra_body" not in client.beta.chat.completions.calls[0]
 
 
 def test_core_llm_extractor_does_not_cap_provider_parse_completion_tokens_for_objective_routes(

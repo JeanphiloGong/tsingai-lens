@@ -72,6 +72,12 @@ class CoreLLMStructuredExtractor:
     ) -> None:
         self.model = (model or os.getenv("LLM_MODEL", "gpt-4o-mini")).strip() or "gpt-4o-mini"
         self.extraction_mode = self._resolve_extraction_mode(extraction_mode)
+        self.enable_thinking = os.getenv("LLM_ENABLE_THINKING", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         self.last_trace: dict[str, Any] | None = None
         self.client = client or OpenAI(
             api_key=(api_key or os.getenv("LLM_API_KEY", "").strip() or "not-needed"),
@@ -388,10 +394,14 @@ class CoreLLMStructuredExtractor:
         messages: list[dict[str, str]],
         response_model: type[BaseModel],
     ) -> tuple[BaseModel, str | None]:
+        request_kwargs = {
+            "model": self.model,
+            "temperature": 0,
+            "messages": messages,
+            **self._provider_request_options(),
+        }
         completion = self.client.chat.completions.create(
-            model=self.model,
-            temperature=0,
-            messages=messages,
+            **request_kwargs,
         )
         raw_content = self._coerce_message_content(
             completion.choices[0].message.content if completion.choices else None
@@ -426,6 +436,7 @@ class CoreLLMStructuredExtractor:
             "temperature": 0,
             "messages": messages,
             "response_format": response_model,
+            **self._provider_request_options(),
         }
         if response_model is StructuredTableBatchMentions:
             request_kwargs["max_completion_tokens"] = (
@@ -446,6 +457,17 @@ class CoreLLMStructuredExtractor:
         if isinstance(parsed, response_model):
             return parsed, raw_content
         return response_model.model_validate(parsed), raw_content
+
+    def _provider_request_options(self) -> dict[str, Any]:
+        if self.enable_thinking:
+            return {}
+        return {
+            "extra_body": {
+                "chat_template_kwargs": {
+                    "enable_thinking": False,
+                }
+            }
+        }
 
     def consume_last_trace(self) -> dict[str, Any] | None:
         trace = self.last_trace

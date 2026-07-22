@@ -7,6 +7,7 @@ from domain.core import (
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
+    ObjectiveAnalysisWorkspace,
     ObjectiveLogicChain,
     ObjectivePaperFrame,
     PaperSkim,
@@ -247,6 +248,116 @@ def test_objective_evidence_rejects_invalid_state_transitions() -> None:
         rejected.mark_extracted()
     with pytest.raises(ValueError, match="must not be empty"):
         evidence.fail("  ")
+
+
+def test_objective_analysis_workspace_round_trips_bounded_state() -> None:
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-1",
+            "question": "How does heat treatment affect strength?",
+            "status": "running",
+        }
+    )
+    context = ObjectiveContext.from_mapping(
+        {
+            "objective_id": "obj-1",
+            "target_property_axes": ["strength"],
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-1",
+            "document_id": "paper-1",
+            "relevance": "high",
+        }
+    )
+    evidence = ObjectiveEvidenceUnit.from_mapping(
+        {
+            "evidence_unit_id": "evidence-1",
+            "objective_id": "obj-1",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "unit_kind": "measurement",
+            "property_normalized": "strength",
+        }
+    )
+    chain = ObjectiveLogicChain.from_mapping(
+        {
+            "logic_chain_id": "chain-1",
+            "objective_id": "obj-1",
+            "chain_scope": "objective",
+            "evidence_unit_ids": ["evidence-1"],
+            "summary": "Heat treatment changes strength.",
+        }
+    )
+
+    workspace = ObjectiveAnalysisWorkspace(
+        collection_id="collection-1",
+        objective=objective,
+        objective_context=context,
+        paper_frames=(frame,),
+        evidence_units=(evidence,),
+        logic_chain=chain,
+    )
+    restored = ObjectiveAnalysisWorkspace.from_mapping(workspace.to_record())
+
+    assert restored.collection_id == "collection-1"
+    assert restored.objective.status == "running"
+    assert restored.paper_frames == (frame,)
+    assert restored.evidence_units == (evidence,)
+    assert restored.logic_chain == chain
+    assert "evidence_routes" not in restored.to_record()
+
+
+def test_objective_analysis_workspace_rejects_cross_objective_members() -> None:
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-1",
+            "question": "How does heat treatment affect strength?",
+        }
+    )
+    frame = ObjectivePaperFrame.from_mapping(
+        {
+            "objective_id": "obj-2",
+            "document_id": "paper-1",
+        }
+    )
+
+    with pytest.raises(ValueError, match="wrong objective"):
+        ObjectiveAnalysisWorkspace(
+            collection_id="collection-1",
+            objective=objective,
+            objective_context=None,
+            paper_frames=(frame,),
+            evidence_units=(),
+            logic_chain=None,
+        )
+
+
+def test_objective_analysis_workspace_rejects_unbound_logic_chain() -> None:
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-1",
+            "question": "How does heat treatment affect strength?",
+        }
+    )
+    chain = ObjectiveLogicChain.from_mapping(
+        {
+            "objective_id": "obj-1",
+            "evidence_unit_ids": ["missing-evidence"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="missing evidence units"):
+        ObjectiveAnalysisWorkspace(
+            collection_id="collection-1",
+            objective=objective,
+            objective_context=None,
+            paper_frames=(),
+            evidence_units=(),
+            logic_chain=chain,
+        )
 
 
 def test_paper_skim_normalizes_missing_and_repeated_values() -> None:

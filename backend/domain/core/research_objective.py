@@ -771,6 +771,113 @@ class ObjectiveFactSet:
     objective_logic_chains: tuple[ObjectiveLogicChain, ...] = ()
 
 
+@dataclass(frozen=True)
+class ObjectiveAnalysisWorkspace:
+    """Bounded analysis state for one objective run."""
+
+    collection_id: str
+    objective: ResearchObjective
+    objective_context: ObjectiveContext | None
+    paper_frames: tuple[ObjectivePaperFrame, ...]
+    evidence_units: tuple[ObjectiveEvidenceUnit, ...]
+    logic_chain: ObjectiveLogicChain | None
+
+    def __post_init__(self) -> None:
+        objective_id = self.objective.objective_id
+        if not _normalize_text(self.collection_id):
+            raise ValueError("objective analysis workspace requires collection_id")
+        if self.objective_context is not None and (
+            self.objective_context.objective_id != objective_id
+        ):
+            raise ValueError("objective context does not belong to objective")
+        members = (*self.paper_frames, *self.evidence_units)
+        if any(member.objective_id != objective_id for member in members):
+            raise ValueError("objective analysis workspace member has wrong objective")
+        if self.logic_chain is not None:
+            if self.logic_chain.objective_id != objective_id:
+                raise ValueError("objective logic chain does not belong to objective")
+            evidence_ids = {unit.evidence_unit_id for unit in self.evidence_units}
+            missing_ids = set(self.logic_chain.evidence_unit_ids) - evidence_ids
+            if missing_ids:
+                raise ValueError(
+                    "objective logic chain references missing evidence units: "
+                    + ", ".join(sorted(missing_ids))
+                )
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ObjectiveAnalysisWorkspace":
+        objective_payload = payload.get("objective")
+        objective = (
+            objective_payload
+            if isinstance(objective_payload, ResearchObjective)
+            else ResearchObjective.from_mapping(
+                _normalize_mapping(objective_payload)
+            )
+        )
+        context_payload = payload.get("objective_context")
+        objective_context = (
+            context_payload
+            if isinstance(context_payload, ObjectiveContext)
+            else (
+                ObjectiveContext.from_mapping(_normalize_mapping(context_payload))
+                if isinstance(context_payload, Mapping)
+                else None
+            )
+        )
+        paper_frames = tuple(
+            frame
+            if isinstance(frame, ObjectivePaperFrame)
+            else ObjectivePaperFrame.from_mapping(_normalize_mapping(frame))
+            for frame in payload.get("paper_frames") or ()
+            if isinstance(frame, (ObjectivePaperFrame, Mapping))
+        )
+        evidence_units = tuple(
+            unit
+            if isinstance(unit, ObjectiveEvidenceUnit)
+            else ObjectiveEvidenceUnit.from_mapping(_normalize_mapping(unit))
+            for unit in payload.get("evidence_units") or ()
+            if isinstance(unit, (ObjectiveEvidenceUnit, Mapping))
+        )
+        logic_chain_payload = payload.get("logic_chain")
+        logic_chain = (
+            logic_chain_payload
+            if isinstance(logic_chain_payload, ObjectiveLogicChain)
+            else (
+                ObjectiveLogicChain.from_mapping(
+                    _normalize_mapping(logic_chain_payload)
+                )
+                if isinstance(logic_chain_payload, Mapping)
+                else None
+            )
+        )
+        return cls(
+            collection_id=_normalize_text(payload.get("collection_id")) or "",
+            objective=objective,
+            objective_context=objective_context,
+            paper_frames=paper_frames,
+            evidence_units=evidence_units,
+            logic_chain=logic_chain,
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "collection_id": self.collection_id,
+            "objective": self.objective.to_workspace_record(),
+            "objective_context": (
+                self.objective_context.to_record()
+                if self.objective_context is not None
+                else None
+            ),
+            "paper_frames": [frame.to_record() for frame in self.paper_frames],
+            "evidence_units": [unit.to_record() for unit in self.evidence_units],
+            "logic_chain": (
+                self.logic_chain.to_record()
+                if self.logic_chain is not None
+                else None
+            ),
+        }
+
+
 def build_research_objective_id(question: str) -> str:
     normalized_question = (_normalize_text(question) or "unspecified").lower()
     slug = _SLUG_NON_WORD_PATTERN.sub("-", normalized_question).strip("-")
@@ -938,6 +1045,7 @@ __all__ = [
     "OBJECTIVE_STATUSES",
     "OBJECTIVE_STATUS_TRANSITIONS",
     "ObjectiveContext",
+    "ObjectiveAnalysisWorkspace",
     "ObjectiveEvidenceRoute",
     "ObjectiveEvidenceUnit",
     "ObjectiveFactSet",

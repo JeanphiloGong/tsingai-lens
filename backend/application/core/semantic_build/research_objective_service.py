@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from difflib import SequenceMatcher
 from hashlib import sha1
 import json
@@ -17,6 +18,7 @@ from application.core.semantic_build.document_profile_service import (
 from application.core.research_understanding_service import ResearchUnderstandingService
 from application.source.collection_service import CollectionService
 from domain.core import (
+    ObjectiveAnalysisWorkspace,
     ObjectiveContext,
     ObjectiveEvidenceRoute,
     ObjectiveEvidenceUnit,
@@ -634,20 +636,25 @@ class ResearchObjectiveService:
             collection_id,
             build_id=objective.source_build_id,
         )
-        source_facts = self.objective_repository.read(
-            collection_id,
-            build_id=objective.source_build_id,
-        )
         objective_contexts = self._build_objective_contexts(
             paper_skims=objective_inputs["paper_skims"],
             objectives=(objective,),
             tables=objective_inputs["artifacts"].tables,
         )
+        context = objective_contexts[0] if objective_contexts else None
+        workspace = ObjectiveAnalysisWorkspace(
+            collection_id=collection_id,
+            objective=objective,
+            objective_context=context,
+            paper_frames=(),
+            evidence_units=(),
+            logic_chain=None,
+        )
         objective_paper_frames = self._build_objective_paper_frames(
             collection_id=collection_id,
             extractor=objective_inputs["extractor"],
             objectives=(objective,),
-            objective_contexts=objective_contexts,
+            objective_contexts=(context,) if context is not None else (),
             paper_skims=objective_inputs["paper_skims"],
             documents=objective_inputs["artifacts"].documents,
             profiles_by_document_id=objective_inputs["profiles_by_document_id"],
@@ -658,12 +665,15 @@ class ResearchObjectiveService:
             ],
             progress_callback=progress_callback,
         )
+        workspace = replace(workspace, paper_frames=objective_paper_frames)
         objective_evidence_routes = self._build_objective_evidence_routes(
             collection_id=collection_id,
             extractor=objective_inputs["extractor"],
-            objectives=(objective,),
-            objective_contexts=objective_contexts,
-            objective_paper_frames=objective_paper_frames,
+            objectives=(workspace.objective,),
+            objective_contexts=(workspace.objective_context,)
+            if workspace.objective_context is not None
+            else (),
+            objective_paper_frames=workspace.paper_frames,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
             document_trees_by_document_id=objective_inputs[
@@ -674,9 +684,11 @@ class ResearchObjectiveService:
         objective_evidence_units = self._build_objective_evidence_units(
             collection_id=collection_id,
             extractor=objective_inputs["extractor"],
-            objectives=(objective,),
-            objective_contexts=objective_contexts,
-            objective_paper_frames=objective_paper_frames,
+            objectives=(workspace.objective,),
+            objective_contexts=(workspace.objective_context,)
+            if workspace.objective_context is not None
+            else (),
+            objective_paper_frames=workspace.paper_frames,
             objective_evidence_routes=objective_evidence_routes,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
@@ -690,12 +702,13 @@ class ResearchObjectiveService:
         )
         objective_logic_chains = self._build_objective_logic_chains(
             collection_id=collection_id,
-            objectives=(objective,),
-            objective_contexts=objective_contexts,
+            objectives=(workspace.objective,),
+            objective_contexts=(workspace.objective_context,)
+            if workspace.objective_context is not None
+            else (),
             objective_evidence_units=objective_evidence_units,
             progress_callback=progress_callback,
         )
-        context = objective_contexts[0] if objective_contexts else None
         evidence_units = self._objective_detail_evidence_units(
             objective_evidence_units,
             objective_context=context,
@@ -705,34 +718,24 @@ class ResearchObjectiveService:
             routes=objective_evidence_routes,
         )
         logic_chain = self._objective_detail_logic_chain(
-            objective=objective,
-            objective_context=context,
+            objective=workspace.objective,
+            objective_context=workspace.objective_context,
             source_logic_chain=self._select_objective_logic_chain(
                 objective_logic_chains
             ),
             evidence_units=evidence_units,
         )
+        workspace = replace(
+            workspace,
+            evidence_units=tuple(
+                ObjectiveEvidenceUnit.from_mapping(record)
+                for record in evidence_unit_records
+            ),
+            logic_chain=logic_chain,
+        )
         understanding = ResearchUnderstanding.from_mapping(
             self.research_understanding_service.synthesize_objective_understanding(
-                {
-                    "collection_id": collection_id,
-                    "objective": objective.to_record(),
-                    "objective_context": (
-                        context.to_record() if context is not None else None
-                    ),
-                    "paper_frames": self._objective_paper_frame_views(
-                        list(objective_paper_frames),
-                        collection_id=collection_id,
-                        facts=source_facts,
-                    ),
-                    "evidence_routes": [
-                        route.to_record() for route in objective_evidence_routes
-                    ],
-                    "evidence_units": evidence_unit_records,
-                    "logic_chain": (
-                        logic_chain.to_record() if logic_chain is not None else None
-                    ),
-                }
+                workspace.to_record()
             )
         )
         return understanding

@@ -842,7 +842,10 @@ class ResearchObjectiveService:
             objective
             for objective in (
                 self._normalize_research_objective(
-                    ResearchObjective.from_mapping(item.model_dump()),
+                    self._canonicalize_objective_document_ids(
+                        ResearchObjective.from_mapping(item.model_dump()),
+                        documents=artifacts.documents,
+                    ),
                     skim_by_document_id=skim_by_document_id,
                     paper_skims=tuple(paper_skims),
                 )
@@ -895,6 +898,55 @@ class ResearchObjectiveService:
             "research_objectives": research_objectives,
             "objective_contexts": objective_contexts,
         }
+
+    def _canonicalize_objective_document_ids(
+        self,
+        objective: ResearchObjective,
+        *,
+        documents: Iterable[Any],
+    ) -> ResearchObjective:
+        """Keep model-produced document references within the current build."""
+        aliases: dict[str, str] = {}
+        canonical_ids: set[str] = set()
+        for document in documents:
+            document_id = str(getattr(document, "document_id", "") or "").strip()
+            if not document_id:
+                continue
+            canonical_ids.add(document_id)
+            metadata = getattr(document, "metadata", {}) or {}
+            for key in (
+                "source_filename",
+                "original_filename",
+                "stored_filename",
+                "source_path",
+            ):
+                value = str(metadata.get(key) or "").strip()
+                if value:
+                    aliases[value] = document_id
+                    aliases[value.rsplit("/", 1)[-1]] = document_id
+
+        def canonicalize(values: Iterable[str]) -> list[str]:
+            result: list[str] = []
+            seen: set[str] = set()
+            for value in values:
+                normalized = str(value or "").strip()
+                document_id = (
+                    normalized
+                    if normalized in canonical_ids
+                    else aliases.get(normalized)
+                    or aliases.get(normalized.rsplit("/", 1)[-1])
+                )
+                if document_id and document_id not in seen:
+                    seen.add(document_id)
+                    result.append(document_id)
+            return result
+
+        payload = objective.to_record()
+        payload["seed_document_ids"] = canonicalize(objective.seed_document_ids)
+        payload["excluded_document_ids"] = canonicalize(
+            objective.excluded_document_ids
+        )
+        return ResearchObjective.from_mapping(payload)
 
     def _build_objective_analysis_inputs(
         self,

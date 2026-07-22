@@ -1251,6 +1251,41 @@ def _merge_candidate_values(
             merged.append(text)
     return merged
 
+
+def test_research_objective_service_canonicalizes_model_document_references(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "seed_document_ids": ["stored/P003.pdf", "canonical-1", "unknown"],
+            "excluded_document_ids": ["paper-2.pdf"],
+        }
+    )
+    documents = [
+        SimpleNamespace(
+            document_id="canonical-1",
+            metadata={"source_path": "stored/P003.pdf"},
+        ),
+        SimpleNamespace(
+            document_id="canonical-2",
+            metadata={"source_filename": "paper-2.pdf"},
+        ),
+    ]
+
+    normalized = service._canonicalize_objective_document_ids(
+        objective,
+        documents=documents,
+    )
+
+    assert normalized.seed_document_ids == ("canonical-1",)
+    assert normalized.excluded_document_ids == ("canonical-2",)
+
+
 def test_research_objective_service_forces_extractable_objective_route_roles(
     tmp_path,
 ):

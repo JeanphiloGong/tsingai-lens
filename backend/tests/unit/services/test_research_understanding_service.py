@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 from application.core import research_understanding_service as understanding_module
 from application.core.research_understanding_service import (
@@ -66,6 +67,12 @@ class _FailingSemanticExtractor:
         trace = self.trace
         self.trace = None
         return trace
+
+
+class _EmptyFindingSynthesisExtractor(_FakeSemanticExtractor):
+    def synthesize_research_understanding_findings(self, payload: dict):
+        self.payloads.append(payload)
+        return SimpleNamespace(findings=[])
 
 
 class _FakeSemanticRelations:
@@ -180,6 +187,72 @@ def _oversized_relation_payload(unit_count: int = 28) -> dict:
             "summary": "LPBF process parameters affect relative density.",
         },
     }
+
+
+def test_synthesis_recovers_source_findings_when_model_presentation_is_empty(
+    monkeypatch,
+):
+    service = ResearchUnderstandingService(
+        structured_extractor=_EmptyFindingSynthesisExtractor(),
+    )
+    payload = _oversized_relation_payload(4)
+    base = ResearchUnderstanding.empty(
+        scope_type="objective",
+        collection_id="col-1",
+        objective_id="obj-density",
+        title="LPBF density",
+    ).to_record()
+    recovered = dict(base)
+    recovered["presentation"] = {
+        "primary_findings": [{"finding_id": "finding-recovered"}],
+        "review_queue_findings": [],
+    }
+    calls: list[bool] = []
+
+    def fake_with_presentation(understanding, *, recover_source_findings=True):
+        calls.append(recover_source_findings)
+        return recovered if recover_source_findings else base
+
+    monkeypatch.setattr(service, "with_presentation", fake_with_presentation)
+
+    result = service.synthesize_objective_understanding(payload)
+
+    assert calls == [False, True]
+    assert result["presentation"]["primary_findings"] == [
+        {"finding_id": "finding-recovered"}
+    ]
+
+
+def test_synthesis_keeps_model_findings_without_recovery(monkeypatch):
+    service = ResearchUnderstandingService(
+        structured_extractor=_EmptyFindingSynthesisExtractor(),
+    )
+    payload = _oversized_relation_payload(4)
+    base = ResearchUnderstanding.empty(
+        scope_type="objective",
+        collection_id="col-1",
+        objective_id="obj-density",
+        title="LPBF density",
+    ).to_record()
+    model_presented = dict(base)
+    model_presented["presentation"] = {
+        "primary_findings": [{"finding_id": "finding-model"}],
+        "review_queue_findings": [],
+    }
+    calls: list[bool] = []
+
+    def fake_with_presentation(understanding, *, recover_source_findings=True):
+        calls.append(recover_source_findings)
+        return model_presented
+
+    monkeypatch.setattr(service, "with_presentation", fake_with_presentation)
+
+    result = service.synthesize_objective_understanding(payload)
+
+    assert calls == [False]
+    assert result["presentation"]["primary_findings"] == [
+        {"finding_id": "finding-model"}
+    ]
 
 
 def test_objective_understanding_projects_claims_relations_and_evidence_refs():

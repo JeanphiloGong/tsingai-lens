@@ -253,7 +253,7 @@ class ResearchUnderstandingService:
         claims = self._dedupe_claims_for_understanding(claims)
         relations = _dedupe_by_id(relations, "relation_id")
         state = self._state_for(claims, relations, evidence_refs)
-        return self.with_presentation(
+        presented = self.with_presentation(
             ResearchUnderstanding.from_mapping(
                 {
                     "state": state,
@@ -277,6 +277,23 @@ class ResearchUnderstandingService:
             ),
             recover_source_findings=not synthesize_findings,
         ) or {}
+        if synthesize_findings:
+            presentation = _mapping(presented.get("presentation"))
+            if not (
+                _mapping_list(presentation.get("primary_findings"))
+                or _mapping_list(presentation.get("review_queue_findings"))
+            ):
+                logger.warning(
+                    "objective Finding synthesis produced no displayable findings; "
+                    "using source-backed recovery collection_id=%s objective_id=%s",
+                    collection_id,
+                    objective_id,
+                )
+                presented = self.with_presentation(
+                    presented,
+                    recover_source_findings=True,
+                ) or presented
+        return presented
 
     def build_material_understanding(
         self,

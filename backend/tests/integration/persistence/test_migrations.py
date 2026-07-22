@@ -16,7 +16,7 @@ from infra.persistence.postgres.base import Base
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260721_0017"
+HEAD_REVISION = "20260722_0018"
 EXPECTED_TABLES = {
     "alembic_version",
     "artifact_versions",

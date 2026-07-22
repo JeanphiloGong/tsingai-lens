@@ -419,6 +419,10 @@ class ObjectiveEvidenceUnitRecord(Base):
     __tablename__ = "objective_evidence_units"
     __table_args__ = (
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
+        CheckConstraint(
+            "selection_status IN ('candidate', 'selected', 'extracted', 'rejected', 'failed')",
+            name="selection_status_valid",
+        ),
         ForeignKeyConstraint(
             ["collection_id", "build_id", "objective_id"],
             [
@@ -454,6 +458,13 @@ class ObjectiveEvidenceUnitRecord(Base):
     source_document_id: Mapped[str] = mapped_column(String(128), nullable=False)
     unit_order: Mapped[int] = mapped_column(Integer, nullable=False)
     unit_kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_role: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    selection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    selection_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="extracted"
+    )
     property_normalized: Mapped[str | None] = mapped_column(Text, nullable=True)
     material_system: Mapped[dict[str, Any]] = mapped_column(
         _JSON_DOCUMENT, nullable=False

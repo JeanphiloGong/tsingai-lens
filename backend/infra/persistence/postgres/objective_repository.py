@@ -67,6 +67,16 @@ class PostgresObjectiveRepository:
                 session, collection_id, build_id
             )
 
+            for link_table in (
+                objective_logic_chain_unit_links,
+                objective_unit_anchor_links,
+                objective_unit_source_refs,
+                objective_frame_table_links,
+                objective_document_links,
+            ):
+                session.execute(
+                    delete(link_table).where(link_table.c.build_id == build_id)
+                )
             session.execute(
                 delete(ObjectiveBuild).where(ObjectiveBuild.build_id == build_id)
             )
@@ -633,6 +643,11 @@ class PostgresObjectiveRepository:
             source_document_id=item.document_id,
             unit_order=position,
             unit_kind=item.unit_kind,
+            source_kind=item.source_kind,
+            source_ref=item.source_ref,
+            evidence_role=item.evidence_role,
+            selection_reason=item.selection_reason,
+            selection_status=item.selection_status,
             property_normalized=item.property_normalized,
             material_system=dict(item.material_system),
             sample_context=dict(item.sample_context),
@@ -885,6 +900,11 @@ class PostgresObjectiveRepository:
                 "objective_id": row.objective_id,
                 "document_id": row.source_document_id,
                 "unit_kind": row.unit_kind,
+                "source_kind": row.source_kind,
+                "source_ref": row.source_ref,
+                "evidence_role": row.evidence_role,
+                "selection_reason": row.selection_reason,
+                "selection_status": row.selection_status,
                 "property_normalized": row.property_normalized,
                 "material_system": row.material_system,
                 "sample_context": row.sample_context,

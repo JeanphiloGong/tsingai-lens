@@ -1973,6 +1973,40 @@ def test_research_objective_text_source_payload_resolves_tree_node_to_block(tmp_
     }
 
 
+def test_research_objective_prompt_source_uses_cells_without_duplicate_matrix(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    source = {
+        "source_kind": "table",
+        "source_ref": "table-1",
+        "document_id": "paper-1",
+        "page": 4,
+        "caption_text": "Measured density",
+        "heading_path": "Results",
+        "column_headers": ["sample", "density"],
+        "table_matrix": [["sample", "density"], ["A", "99.6"]],
+        "table_cells": [
+            {
+                "row_index": 1,
+                "col_index": 0,
+                "header_path": "sample",
+                "cell_text": "A",
+            }
+        ],
+    }
+
+    projected = service._objective_evidence_prompt_source(source)
+
+    assert "table_matrix" not in projected
+    assert projected["table_cells"] == source["table_cells"]
+
+    fallback = service._objective_evidence_prompt_source(
+        {key: value for key, value in source.items() if key != "table_cells"}
+    )
+    assert fallback["table_matrix"] == [["sample", "density"], ["A", "99.6"]]
+
+
 def test_research_objective_evidence_units_carry_forward_document_state(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),

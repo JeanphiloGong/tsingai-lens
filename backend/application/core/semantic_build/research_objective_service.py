@@ -8466,7 +8466,8 @@ class ResearchObjectiveService:
     ) -> dict[str, Any]:
         source_kind = str(source.get("source_kind") or "")
         if source_kind == "table":
-            return {
+            compact_cells = self._objective_evidence_prompt_table_cells(source)
+            payload = {
                 "source_kind": "table",
                 "source_ref": str(source.get("source_ref") or ""),
                 "document_id": source.get("document_id"),
@@ -8480,9 +8481,13 @@ class ResearchObjectiveService:
                     for value in source.get("column_headers", []) or []
                     if str(value).strip()
                 ],
-                "table_matrix": self._objective_evidence_prompt_table_matrix(source),
-                "table_cells": self._objective_evidence_prompt_table_cells(source),
+                "table_cells": compact_cells,
             }
+            if not compact_cells:
+                payload["table_matrix"] = self._objective_evidence_prompt_table_matrix(
+                    source
+                )
+            return payload
         if source_kind == "text_window":
             return {
                 "source_kind": "text_window",

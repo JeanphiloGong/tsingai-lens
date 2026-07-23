@@ -3,6 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,
@@ -28,6 +30,9 @@ from application.core.semantic_build.research_objective_service import (
     PaperAnalysisFrame,
     ResearchObjectiveService as _ResearchObjectiveService,
 )
+from application.core.semantic_build.objective_analysis_lens import (
+    ObjectiveAnalysisLens,
+)
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
 )
@@ -36,7 +41,6 @@ from tests.support.collection_service import build_test_collection_service
 from domain.core import (
     DocumentProfile,
     ObjectiveAnalysis,
-    ObjectiveContext,
     ObjectiveFactSet,
     PaperSkim,
     ResearchObjective,
@@ -1379,7 +1383,7 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "question": objective.question,
@@ -1692,7 +1696,7 @@ def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_pa
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": objective.objective_id,
             "question": objective.question,
@@ -1848,7 +1852,7 @@ def test_objective_paper_frame_payload_filters_unscored_tables(tmp_path):
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": objective.objective_id,
             "question": objective.question,
@@ -1932,7 +1936,7 @@ def test_deterministic_frame_requires_variable_and_property_axis(tmp_path):
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": objective.objective_id,
             "question": objective.question,
@@ -2111,7 +2115,7 @@ def test_research_objective_evidences_carry_forward_document_state(tmp_path):
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-heat",
             "question": objective.question,
@@ -2427,7 +2431,7 @@ def test_research_objective_tree_state_supports_cross_block_evidence_context(tmp
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-heat",
             "question": objective.question,
@@ -2682,7 +2686,7 @@ def test_research_objective_fragmented_table_cells_repair_table_matrix_before_ex
             "confidence": 0.88,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "target_property_axes": ["relative density"],
@@ -2929,7 +2933,7 @@ def test_research_objective_service_inherits_single_objective_material(tmp_path)
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "material_scope": ["316L stainless steel"],
@@ -2976,7 +2980,7 @@ def test_research_objective_service_does_not_inherit_ambiguous_material(tmp_path
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-multi-material",
             "material_scope": ["316L stainless steel", "Ti-6Al-4V"],
@@ -3026,7 +3030,7 @@ def test_research_objective_service_normalizes_result_table_values_to_measuremen
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": ["yield strength"],
@@ -3092,7 +3096,7 @@ def test_research_objective_service_keeps_process_label_numbers_out_of_text_meas
             "confidence": 0.72,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": ["elongation"],
@@ -3150,7 +3154,7 @@ def test_research_objective_service_carries_route_evidence_role_to_source_refs(
             "page": 6,
             "text": "LoF defects located at melt pool boundaries were observed.",
         },
-        objective_context=ObjectiveContext.from_mapping(
+        objective_context=ObjectiveAnalysisLens.from_mapping(
             {
                 "objective_id": "obj-corrosion",
                 "target_property_axes": ["pitting corrosion behavior"],
@@ -3218,7 +3222,7 @@ def test_research_objective_service_uses_main_number_after_leading_uncertainty(
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": ["hardness", "yield strength"],
@@ -3278,7 +3282,7 @@ def test_research_objective_service_keeps_non_ascii_process_headers_out_of_resul
             },
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-texture",
             "variable_process_axes": [
@@ -3347,7 +3351,7 @@ def test_research_objective_service_keeps_unrole_result_table_case_as_sample_key
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-texture",
             "variable_process_axes": [
@@ -3411,7 +3415,7 @@ def test_research_objective_service_expands_fatigue_and_defect_result_columns(
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-fatigue",
             "variable_process_axes": [
@@ -3486,7 +3490,7 @@ def test_research_objective_service_uses_role_aliases_for_result_process_context
             },
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-texture",
             "variable_process_axes": [
@@ -3551,7 +3555,7 @@ def test_research_objective_service_uses_specific_role_label_for_abbreviated_res
             "confidence": 0.82,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": ["elongation"],
@@ -3598,7 +3602,7 @@ def test_research_objective_service_uses_matching_result_headers_when_role_is_br
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "target_property_axes": ["densification"],
@@ -3656,7 +3660,7 @@ def test_research_objective_service_keeps_routed_model_metric_columns(
             "confidence": 0.82,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-texture",
             "target_property_axes": [
@@ -3733,7 +3737,7 @@ def test_research_objective_service_treats_relative_density_as_structural_target
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "variable_process_axes": [
@@ -3903,7 +3907,7 @@ def test_research_objective_service_builds_method_conditions_and_binds_measureme
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": ["yield strength", "microhardness"],
@@ -4007,7 +4011,7 @@ def test_research_objective_service_derives_table_characterization_units(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "target_property_axes": ["densification", "microstructure"],
@@ -4383,7 +4387,7 @@ def test_research_objective_service_expands_mapped_density_interpretation(
             "confidence": 0.72,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "question": "How do laser power and scan speed affect density?",
@@ -4647,13 +4651,13 @@ def test_research_objective_service_dedupes_shared_density_measurements(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    corrosion_context = ObjectiveContext.from_mapping(
+    corrosion_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-corrosion",
             "target_property_axes": ["corrosion potential", "pitting potential"],
         }
     )
-    mechanical_context = ObjectiveContext.from_mapping(
+    mechanical_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": [
@@ -4746,13 +4750,13 @@ def test_research_objective_service_reclassifies_off_target_text_measurements(
             "confidence": 0.72,
         }
     )
-    microstructure_context = ObjectiveContext.from_mapping(
+    microstructure_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-microstructure",
             "target_property_axes": ["microstructure"],
         }
     )
-    mechanical_context = ObjectiveContext.from_mapping(
+    mechanical_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": ["yield strength", "elongation"],
@@ -4804,7 +4808,7 @@ def test_research_objective_service_preserves_numeric_text_mechanisms(
             "confidence": 0.72,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-preheat",
             "target_property_axes": [
@@ -4973,7 +4977,7 @@ def test_research_objective_service_expands_result_table_matrix_measurements(
             "confidence": 0.8,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": [
@@ -5072,7 +5076,7 @@ def test_research_objective_service_normalizes_compact_tensile_headers(
             "confidence": 0.82,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-preheat",
             "target_property_axes": [
@@ -5154,7 +5158,7 @@ def test_research_objective_service_skips_reference_rows_and_keeps_condition_axi
             "confidence": 0.82,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-preheat",
             "variable_process_axes": ["build platform preheating"],
@@ -5253,7 +5257,7 @@ def test_research_objective_service_skips_non_target_result_property_columns(
             "confidence": 0.76,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-preheat",
             "target_property_axes": [
@@ -5352,7 +5356,7 @@ def test_research_objective_service_adds_sample_numbers_to_labeled_table_rows(
             "confidence": 0.8,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "target_property_axes": ["density"],
@@ -5379,7 +5383,7 @@ def test_research_objective_service_adds_sample_numbers_to_labeled_table_rows(
     ]
 
 
-def test_research_objective_service_builds_objective_evidence_lens(tmp_path):
+def test_research_objective_service_builds_objective_analysis_lens(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
@@ -5396,21 +5400,39 @@ def test_research_objective_service_builds_objective_evidence_lens(tmp_path):
         }
     )
 
-    lens = service._build_objective_evidence_lens(
-        objective=objective,
-        variable_process_axes=["laser power"],
-        process_context_axes=["SLM"],
-        target_property_axes=["pitting potential"],
-        excluded_property_axes=["yield strength"],
-    )
+    lens = service._build_objective_analysis_lenses(
+        paper_skims=(
+            PaperSkim.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "changed_variables": ["laser power"],
+                }
+            ),
+        ),
+        objectives=(objective,),
+        tables=(),
+    )[0]
 
-    assert lens["target_outcome_axes"] == ["pitting potential"]
-    assert lens["mediator_axes"] == ["porosity", "pore", "pore size"]
-    assert lens["variable_process_axes"] == ["laser power"]
-    assert lens["context_axes"] == ["316L stainless steel", "SLM"]
-    assert lens["excluded_axes"] == ["yield strength"]
-    assert any("target_outcome_axis" in rule for rule in lens["direct_support_rules"])
-    assert any("Mediator axes" in rule for rule in lens["direct_support_rules"])
+    assert lens.target_property_axes == ("pitting potential",)
+    assert lens.mediator_axes == ("porosity", "pore", "pore size")
+    assert lens.variable_process_axes == ("laser power",)
+    assert lens.process_context_axes == ("SLM",)
+    assert any("target_outcome_axis" in rule for rule in lens.direct_support_rules)
+    assert any("Mediator axes" in rule for rule in lens.direct_support_rules)
+
+
+@pytest.mark.parametrize(
+    "obsolete_field",
+    ["objective_evidence_lens", "extraction_guidance"],
+)
+def test_objective_analysis_lens_rejects_obsolete_nested_fields(obsolete_field):
+    with pytest.raises(ValueError, match="obsolete Objective analysis lens fields"):
+        ObjectiveAnalysisLens.from_mapping(
+            {
+                "objective_id": "obj-corrosion",
+                obsolete_field: {},
+            }
+        )
 
 
 def test_research_objective_service_routes_matching_tables_beyond_seed_documents(
@@ -5453,7 +5475,7 @@ def test_research_objective_service_routes_matching_tables_beyond_seed_documents
     )
 
     assert {
-        (hint["document_id"], hint["table_id"], hint["role"])
+        (hint.document_id, hint.table_id, hint.role)
         for hint in hints
     } == {
         ("paper-seed", "tbl-seed-density", "result_table"),
@@ -5503,7 +5525,7 @@ def test_research_objective_service_does_not_route_single_letter_acronym_tables(
         variable_process_axes=["scan speed"],
     )
 
-    assert hints == []
+    assert hints == ()
 
 
 def test_research_objective_service_treats_energy_density_only_table_as_condition(
@@ -5542,8 +5564,8 @@ def test_research_objective_service_treats_energy_density_only_table_as_conditio
     )
 
     assert len(hints) == 1
-    assert hints[0]["role"] == "condition_context"
-    assert hints[0]["matched_property_axes"] == []
+    assert hints[0].role == "condition_context"
+    assert hints[0].matched_property_axes == ()
 
 
 def test_research_objective_service_normalizes_archimedes_density_column(
@@ -5552,7 +5574,7 @@ def test_research_objective_service_normalizes_archimedes_density_column(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "question": "How does volumetric energy density affect density?",
@@ -5602,7 +5624,7 @@ def test_research_objective_service_ignores_analysis_purpose_as_table_result(
         variable_process_axes=["heat treatment"],
     )
 
-    assert hints == []
+    assert hints == ()
 
 
 def test_research_objective_service_recovers_non_seed_condition_and_result_routes(
@@ -5673,7 +5695,7 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
         target_property_axes=list(objective.property_axes),
         variable_process_axes=list(objective.process_axes),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": objective.objective_id,
             "question": objective.question,
@@ -5779,7 +5801,7 @@ def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_re
     )
 
     assert {
-        (hint["table_id"], hint["role"], tuple(hint["matched_property_axes"]))
+        (hint.table_id, hint.role, hint.matched_property_axes)
         for hint in hints
     } == {
         ("tbl-electrochemical", "result_table", ("pitting corrosion behavior",)),
@@ -5825,39 +5847,32 @@ def test_research_objective_service_keeps_density_out_of_defect_structure_result
         variable_process_axes=["volumetric energy density"],
     )
 
-    assert all(hint["role"] != "result_table" for hint in hints)
+    assert all(hint.role != "result_table" for hint in hints)
 
 
-def test_research_objective_service_route_payload_includes_objective_evidence_lens(
+def test_research_objective_service_route_payload_uses_flat_analysis_lens(
     tmp_path,
 ):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    context = ObjectiveContext.from_mapping(
+    context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-corrosion",
             "question": "How does porosity affect pitting corrosion?",
             "target_property_axes": ["pitting potential"],
-            "objective_evidence_lens": {
-                "target_outcome_axes": ["pitting potential"],
-                "mediator_axes": ["porosity"],
-                "variable_process_axes": [],
-                "context_axes": ["316L stainless steel"],
-                "excluded_axes": [],
-                "direct_support_rules": [
-                    "Direct support must explicitly report a target outcome."
-                ],
-            },
+            "mediator_axes": ["porosity"],
+            "direct_support_rules": [
+                "Direct support must explicitly report a target outcome."
+            ],
         }
     )
 
     payload = service._route_prompt_objective_context_record(context)
 
-    assert payload["objective_evidence_lens"]["target_outcome_axes"] == [
-        "pitting potential"
-    ]
-    assert payload["objective_evidence_lens"]["mediator_axes"] == ["porosity"]
+    assert payload["target_property_axes"] == ["pitting potential"]
+    assert payload["mediator_axes"] == ["porosity"]
+    assert "objective_evidence_lens" not in payload
 
 
 def test_research_objective_service_adds_sample_numbers_to_process_table_rows(
@@ -5933,7 +5948,7 @@ def test_research_objective_service_keeps_unlabeled_process_table_columns_as_con
             "confidence": 0.8,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-process",
             "variable_process_axes": [
@@ -6717,7 +6732,7 @@ def test_research_objective_service_generates_pairwise_comparison_units(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "question": "How do process axes affect yield strength?",
@@ -6843,7 +6858,7 @@ def test_pairwise_selection_keeps_valid_pairs_when_non_objective_axes_define_gro
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "question": "How does scan speed affect density?",
@@ -6954,7 +6969,7 @@ def test_research_objective_service_matches_contextual_property_variants_for_pai
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-yield",
             "variable_process_axes": ["scan strategy rotation angle"],
@@ -7015,7 +7030,7 @@ def test_research_objective_service_generates_pairwise_from_symbol_angle_axes(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-texture",
             "variable_process_axes": [
@@ -7080,7 +7095,7 @@ def test_research_objective_service_selects_large_grid_pairs_from_raw_angle_axes
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-yield",
             "variable_process_axes": ["scan strategy rotation angle"],
@@ -7143,7 +7158,7 @@ def test_research_objective_service_orders_numeric_axis_comparison_before_value_
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-ved",
             "variable_process_axes": ["volumetric energy density"],
@@ -7197,7 +7212,7 @@ def test_research_objective_service_does_not_use_ascii_raw_process_fallback(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-yield",
             "variable_process_axes": ["scan strategy rotation angle"],
@@ -7255,7 +7270,7 @@ def test_research_objective_service_generates_small_set_multi_axis_comparisons(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "question": "How do laser power and scan speed affect density?",
@@ -7346,7 +7361,7 @@ def test_research_objective_service_skips_pair_when_unmodeled_hatch_spacing_chan
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "variable_process_axes": [
@@ -7419,7 +7434,7 @@ def test_research_objective_service_skips_pair_when_treatment_and_energy_input_c
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "variable_process_axes": ["energy density", "scanning speed"],
@@ -7491,7 +7506,7 @@ def test_research_objective_service_does_not_promote_ved_when_sample_controls_ch
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-elongation",
             "variable_process_axes": ["energy density"],
@@ -7558,7 +7573,7 @@ def test_research_objective_service_attributes_derived_ved_change_to_scan_speed(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "variable_process_axes": [
@@ -7632,7 +7647,7 @@ def test_research_objective_service_generates_pairwise_from_sample_condition_axi
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-preheat",
             "question": "How does build platform preheating affect tensile properties?",
@@ -7760,7 +7775,7 @@ def test_research_objective_service_generates_pairwise_from_process_condition_ax
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-preheat",
             "question": "How does build platform preheating affect tensile properties?",
@@ -7885,7 +7900,7 @@ def test_research_objective_service_limits_pairwise_to_target_properties(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-corrosion",
             "question": "How do process axes affect corrosion potential?",
@@ -7966,7 +7981,7 @@ def test_research_objective_service_limits_large_grid_to_adjacent_axis_pairs(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-grid",
             "question": "How do laser power and scan speed affect yield strength?",
@@ -8040,7 +8055,7 @@ def test_research_objective_service_caps_large_multiaxis_table_comparisons(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-large-table",
             "question": (
@@ -8159,7 +8174,7 @@ def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlle
     )
     density_objective_id = "obj-density"
     mechanical_objective_id = "obj-mechanical"
-    density_context = ObjectiveContext.from_mapping(
+    density_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": density_objective_id,
             "question": "How do process axes affect densification?",
@@ -8171,7 +8186,7 @@ def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlle
             "target_property_axes": ["densification", "microstructure"],
         }
     )
-    mechanical_context = ObjectiveContext.from_mapping(
+    mechanical_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": mechanical_objective_id,
             "question": "How do process axes affect mechanical properties?",
@@ -8355,7 +8370,7 @@ def test_research_objective_service_resolves_ved_fatigue_table_from_printed_labe
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-fatigue",
             "question": (
@@ -8505,7 +8520,7 @@ def test_research_objective_service_inferrs_sample_and_defect_columns_without_mo
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-fatigue",
             "question": (
@@ -8658,7 +8673,7 @@ def test_process_route_does_not_treat_result_columns_as_process_context(tmp_path
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-fatigue",
             "variable_process_axes": [
@@ -8717,7 +8732,7 @@ def test_process_route_recovers_target_columns_from_mixed_table(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-fatigue",
             "variable_process_axes": ["volumetric energy density"],
@@ -8789,7 +8804,7 @@ def test_research_objective_service_adds_context_hint_route_for_condition_table(
             "excluded_tables": ["table-1"],
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "question": "How do processing parameters affect yield strength?",
@@ -8868,7 +8883,7 @@ def test_research_objective_service_ranks_result_text_candidates(
             "relevant_sections": ["Paper title"],
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-structure",
             "material_scope": ["316L stainless steel"],
@@ -8952,23 +8967,17 @@ def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_suppo
             "measured_property_scope": ["pitting corrosion"],
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-corrosion",
             "material_scope": ["316L stainless steel"],
             "variable_process_axes": ["laser power"],
             "process_context_axes": ["SLM"],
             "target_property_axes": ["pitting potential"],
-            "objective_evidence_lens": {
-                "target_outcome_axes": ["pitting potential"],
-                "mediator_axes": ["porosity", "pore size", "lack of fusion"],
-                "variable_process_axes": ["laser power"],
-                "context_axes": ["316L stainless steel", "SLM"],
-                "excluded_axes": [],
-                "direct_support_rules": [
-                    "Direct support must explicitly report a target outcome."
-                ],
-            },
+            "mediator_axes": ["porosity", "pore size", "lack of fusion"],
+            "direct_support_rules": [
+                "Direct support must explicitly report a target outcome."
+            ],
         }
     )
     candidates = [
@@ -9202,7 +9211,7 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-heat",
             "question": objective.question,
@@ -9217,7 +9226,6 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
                     "reason": "Large hint text should not enter routing prompt.",
                 }
             ],
-            "extraction_guidance": {"large": "x" * 1000},
             "confidence": 0.8,
         }
     )

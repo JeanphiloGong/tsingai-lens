@@ -57,11 +57,7 @@ from domain.core.evidence_backbone import (
 )
 from domain.core.document_profile import DocumentProfile
 from domain.core.paper_fact import PaperFactSet
-from domain.core.research_objective import (
-    ObjectiveContext,
-)
 from domain.ports import (
-    ObjectiveRepository,
     PaperFactRepository,
     SourceArtifactRepository,
 )
@@ -752,7 +748,6 @@ class PaperFactsService:
                         source_filename=source_filename,
                         profile=profile,
                         text_window=text_window,
-                        objective_context=None,
                     ),
                 }
                 for text_window in doc_text_windows
@@ -882,8 +877,6 @@ class PaperFactsService:
                             table_rows=batch_rows,
                             row_cells_by_index=row_cells_by_index,
                             text_windows=all_doc_text_windows,
-                            objective_context=None,
-                            objective_table_route=None,
                         ),
                     }
                 )
@@ -1254,15 +1247,6 @@ class PaperFactsService:
             or facts.characterization_observations
             or facts.structure_features
         )
-
-    def _load_objective_contexts(
-        self,
-        collection_id: str,
-    ) -> tuple[ObjectiveContext, ...]:
-        facts = self.objective_repository.read(collection_id)
-        if not facts.research_objectives_ready:
-            return ()
-        return facts.objective_contexts
 
     def _records_to_records(
         self,
@@ -1845,7 +1829,6 @@ class PaperFactsService:
         source_filename: str | None,
         profile: dict[str, Any],
         text_window: dict[str, Any],
-        objective_context: ObjectiveContext | None = None,
     ) -> dict[str, Any]:
         payload = {
             "document_title": title,
@@ -1860,10 +1843,6 @@ class PaperFactsService:
                 "page": self._safe_int(text_window.get("page")),
             },
         }
-        if objective_context is not None:
-            payload["objective_context"] = self._build_objective_context_payload(
-                objective_context,
-            )
         return payload
 
     def _build_table_batch_extraction_payload(
@@ -1876,8 +1855,6 @@ class PaperFactsService:
         table_rows: list[dict[str, Any]],
         row_cells_by_index: dict[int | None, list[dict[str, Any]]],
         text_windows: list[dict[str, Any]],
-        objective_context: ObjectiveContext | None = None,
-        objective_table_route: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         supporting_text_windows = self._select_batch_supporting_text_windows(
             text_windows=text_windows,
@@ -1912,56 +1889,7 @@ class PaperFactsService:
                 for window in supporting_text_windows
             ],
         }
-        if objective_context is not None:
-            payload["objective_context"] = self._build_objective_context_payload(
-                objective_context,
-                table_route=objective_table_route,
-            )
         return payload
-
-    def _build_objective_context_payload(
-        self,
-        objective_context: ObjectiveContext,
-        *,
-        table_route: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        route_payload = self._build_objective_table_route_payload(table_route)
-        return {
-            "focus": objective_context.question,
-            "material_scope": list(objective_context.material_scope),
-            "variable_process_axes": list(objective_context.variable_process_axes),
-            "process_context_axes": list(objective_context.process_context_axes),
-            "target_property_axes": list(objective_context.target_property_axes),
-            "excluded_property_axes": list(objective_context.excluded_property_axes),
-            "objective_evidence_lens": dict(objective_context.objective_evidence_lens),
-            "routing_hints": [route_payload] if route_payload else [],
-            "extraction_guidance": dict(objective_context.extraction_guidance),
-            "confidence": objective_context.confidence,
-        }
-
-    def _build_objective_table_route_payload(
-        self,
-        table_route: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
-        if not table_route:
-            return {}
-        payload = {
-            "role": self._normalize_scalar_text(table_route.get("role")),
-            "strength": self._normalize_scalar_text(table_route.get("strength")),
-            "matched_property_axes": self._normalize_list(
-                table_route.get("matched_property_axes")
-            ),
-            "matched_variable_process_axes": self._normalize_list(
-                table_route.get("matched_variable_process_axes")
-            ),
-            "reason": self._normalize_scalar_text(table_route.get("reason")),
-            "caption_text": self._normalize_scalar_text(table_route.get("caption_text")),
-        }
-        return {
-            key: value
-            for key, value in payload.items()
-            if value not in (None, "", [])
-        }
 
     def _build_table_batch_target_row_payload(
         self,
@@ -4309,192 +4237,6 @@ class PaperFactsService:
             current_table_rows.append(row)
         flush_table_rows()
         return batches
-
-    def _select_text_window_objective_context(
-        self,
-        objective_contexts: tuple[ObjectiveContext, ...],
-        *,
-        text_window: dict[str, Any],
-    ) -> ObjectiveContext | None:
-        if not objective_contexts:
-            return None
-        text = " ".join(
-            part
-            for part in (
-                self._normalize_scalar_text(text_window.get("heading")),
-                self._normalize_scalar_text(text_window.get("heading_path")),
-                self._normalize_scalar_text(text_window.get("text")),
-            )
-            if part
-        )
-        return self._select_best_objective_context(objective_contexts, text)
-
-    def _select_table_batch_objective_context(
-        self,
-        objective_contexts: tuple[ObjectiveContext, ...],
-        *,
-        document_id: str,
-        table_id: str,
-        table_context: dict[str, Any] | None,
-        table_rows: list[dict[str, Any]],
-        row_cells_by_index: dict[int | None, list[dict[str, Any]]],
-    ) -> tuple[ObjectiveContext | None, Mapping[str, Any] | None]:
-        if not objective_contexts:
-            return None, None
-
-        route_candidates: list[tuple[int, int, ObjectiveContext, Mapping[str, Any]]] = []
-        table_text = self._build_objective_table_match_text(
-            table_context=table_context,
-            table_rows=table_rows,
-            row_cells_by_index=row_cells_by_index,
-        )
-        for context_index, context in enumerate(objective_contexts):
-            for route in context.routing_hints:
-                route_table_id = self._normalize_scalar_text(route.get("table_id"))
-                if route_table_id != table_id:
-                    continue
-                route_document_id = self._normalize_scalar_text(route.get("document_id"))
-                if route_document_id and route_document_id != document_id:
-                    continue
-                score = self._score_objective_table_route(route)
-                score += self._score_objective_context_for_text(context, table_text)
-                route_candidates.append((score, -context_index, context, route))
-        if route_candidates:
-            _, _, selected_context, selected_route = max(
-                route_candidates,
-                key=lambda item: (item[0], item[1]),
-            )
-            return selected_context, selected_route
-
-        selected_context = self._select_best_objective_context(
-            objective_contexts,
-            table_text,
-        )
-        return selected_context, None
-
-    def _select_best_objective_context(
-        self,
-        objective_contexts: tuple[ObjectiveContext, ...],
-        text: str,
-    ) -> ObjectiveContext | None:
-        if len(objective_contexts) == 1:
-            return objective_contexts[0]
-        scored = [
-            (self._score_objective_context_for_text(context, text), -index, context)
-            for index, context in enumerate(objective_contexts)
-        ]
-        positive_scores = [item for item in scored if item[0] > 0]
-        if not positive_scores:
-            return None
-        positive_scores.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        best_score = positive_scores[0][0]
-        if len(positive_scores) > 1 and positive_scores[1][0] == best_score:
-            return None
-        return positive_scores[0][2]
-
-    def _score_objective_table_route(self, route: Mapping[str, Any]) -> int:
-        role = self._normalize_scalar_text(route.get("role"))
-        strength = self._normalize_scalar_text(route.get("strength"))
-        score = 0
-        if role == "result_table":
-            score += 100
-        elif role == "condition_context":
-            score += 50
-        if strength == "strong":
-            score += 20
-        elif strength == "medium":
-            score += 10
-        score += 5 * len(self._normalize_list(route.get("matched_property_axes")))
-        score += 2 * len(self._normalize_list(route.get("matched_variable_process_axes")))
-        return score
-
-    def _score_objective_context_for_text(
-        self,
-        objective_context: ObjectiveContext,
-        text: str,
-    ) -> int:
-        score = 0
-        score += 3 * self._count_objective_terms_in_text(
-            objective_context.target_property_axes,
-            text,
-        )
-        score += 2 * self._count_objective_terms_in_text(
-            objective_context.variable_process_axes,
-            text,
-        )
-        score += 2 * self._count_objective_terms_in_text(
-            objective_context.material_scope,
-            text,
-        )
-        score += self._count_objective_terms_in_text(
-            objective_context.process_context_axes,
-            text,
-        )
-        return score
-
-    def _count_objective_terms_in_text(
-        self,
-        terms: tuple[str, ...],
-        text: str,
-    ) -> int:
-        text_key = self._objective_context_match_key(text)
-        if not text_key:
-            return 0
-        text_tokens = set(text_key.split())
-        return sum(
-            1
-            for term in terms
-            if self._objective_term_matches_text(
-                term,
-                text_key=text_key,
-                text_tokens=text_tokens,
-            )
-        )
-
-    def _objective_term_matches_text(
-        self,
-        term: str,
-        *,
-        text_key: str,
-        text_tokens: set[str],
-    ) -> bool:
-        term_key = self._objective_context_match_key(term)
-        if not term_key:
-            return False
-        if term_key in text_key:
-            return True
-        term_tokens = term_key.split()
-        if term_tokens and all(token in text_tokens for token in term_tokens):
-            return True
-        acronym = "".join(token[0] for token in term_tokens if token)
-        return bool(len(acronym) > 1 and acronym in text_tokens)
-
-    def _objective_context_match_key(self, value: Any) -> str:
-        text = self._normalize_scalar_text(value) or ""
-        return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
-
-    def _build_objective_table_match_text(
-        self,
-        *,
-        table_context: dict[str, Any] | None,
-        table_rows: list[dict[str, Any]],
-        row_cells_by_index: dict[int | None, list[dict[str, Any]]],
-    ) -> str:
-        parts = [
-            self._normalize_scalar_text((table_context or {}).get("caption_text")),
-            self._normalize_scalar_text((table_context or {}).get("heading_path")),
-            self._normalize_scalar_text((table_context or {}).get("table_text")),
-        ]
-        for header in (table_context or {}).get("column_headers") or []:
-            parts.append(self._normalize_scalar_text(header))
-        for row in table_rows:
-            row_index = self._safe_int(row.get("row_index"))
-            parts.append(self._normalize_scalar_text(row.get("row_text")))
-            for cell in row_cells_by_index.get(row_index, []):
-                parts.append(self._normalize_scalar_text(cell.get("header_path")))
-                parts.append(self._normalize_scalar_text(cell.get("cell_text")))
-                parts.append(self._normalize_scalar_text(cell.get("unit_hint")))
-        return " ".join(part for part in parts if part)
 
     def _score_text_window_for_extraction(
         self,

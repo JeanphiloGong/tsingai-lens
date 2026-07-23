@@ -17,7 +17,7 @@ from application.core.semantic_build.document_profile_service import (
 from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveService,
 )
-from application.core.research_understanding_service import ResearchUnderstandingService
+from application.core.finding_synthesis_service import FindingSynthesisService
 from tests.support.collection_service import build_test_collection_service
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
 from application.source.task_service import TaskService
@@ -36,9 +36,6 @@ from infra.source.runtime.source_evidence import (
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
-from tests.support.objective_understanding_repository import (
-    InMemoryObjectiveUnderstandingRepository,
-)
 
 
 class DummyWorkflowOutput:
@@ -207,7 +204,6 @@ def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN0
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
     comparison_repository = MemoryComparisonRepository()
-    research_understanding_repository = InMemoryObjectiveUnderstandingRepository()
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
         source_artifact_repository=source_repository,
@@ -218,17 +214,13 @@ def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN0
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        research_understanding_repository=research_understanding_repository,
         document_profile_service=document_profile_service,
-        research_understanding_service=ResearchUnderstandingService(
-            source_artifact_repository=source_repository,
-        ),
+        finding_synthesis_service=FindingSynthesisService(),
     )
     artifact_registry = ArtifactRegistryService(
         build_repository,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
-        objective_repository=objective_repository,
         comparison_repository=comparison_repository,
     )
     runner = CollectionBuildPipelineService(
@@ -342,7 +334,7 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
     assert artifacts["table_rows_ready"] is False
     assert artifacts["table_cells_generated"] is True
     assert artifacts["table_cells_ready"] is False
-    objective_facts = artifact_registry.objective_repository.read(
+    objective_facts = runner.research_objective_service.objective_repository.read(
         collection["collection_id"],
         build_id=artifact_registry.repository.read_build(task["task_id"]).build_id,
     )

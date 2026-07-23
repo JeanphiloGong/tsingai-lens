@@ -34,7 +34,7 @@ def _request(service, user_id: str = "expert-a"):
     )
 
 
-class _ResearchUnderstandingFeedbackService:
+class _FindingFeedbackService:
     def export_dataset(self, **kwargs):  # noqa: ANN003, ANN201
         return {
             "collection_id": kwargs["collection_id"],
@@ -114,8 +114,8 @@ def test_experiment_plan_routes_create_list_and_update():
     service = ExperimentPlanService(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        research_understanding_feedback_service=(
-            _ResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _FindingFeedbackService()
         ),
     )
     request = _request(service)

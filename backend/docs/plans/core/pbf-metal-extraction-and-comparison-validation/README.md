@@ -66,10 +66,6 @@ The family keeps multiple live pages because this local subject now needs:
 - [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
   Earlier structured-extraction cutover plan that this wave narrows and
   hardens
-- [`../research-objective-first/p001-remaining-gold-gap-repair-plan.md`](../research-objective-first/p001-remaining-gold-gap-repair-plan.md)
-  Research-objective-first follow-up plan that uses the P001 gold milestone to
-  repair method-family conditions, pairwise comparison relations, and
-  characterization observations
 - [`../../../architecture/core-comparison/current-state.md`](../../../architecture/core-comparison/current-state.md)
   Current implemented comparison-semantic substrate
 - [`../../backend-wide/materials-comparison-v2/implementation-plan.md`](../../backend-wide/materials-comparison-v2/implementation-plan.md)

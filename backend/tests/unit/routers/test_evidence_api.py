@@ -35,7 +35,6 @@ def evidence_services(tmp_path):
         collection_service=collection_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
-        objective_repository=MemoryObjectiveRepository(),
         document_profile_service=document_profile_service,
     )
 

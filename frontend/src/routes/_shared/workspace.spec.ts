@@ -249,4 +249,32 @@ describe('workspace shared helpers', () => {
 
 		expect(getCollectionWorkspaceState(workspace)).toBe('failed');
 	});
+
+	it('keeps active artifact views available after a later partial build', async () => {
+		requestJson.mockResolvedValue(
+			buildWorkspacePayload({
+				workflow: {
+					results: 'not_started',
+					evidence: 'not_started',
+					comparisons: 'not_started'
+				},
+				latest_task: {
+					task_id: 'task_partial',
+					collection_id: 'col_123',
+					task_type: 'build',
+					status: 'partial_success',
+					current_stage: 'artifacts_ready',
+					progress_percent: 100,
+					errors: ['document_profiles: stale retry failed.'],
+					warnings: [],
+					created_at: '2026-07-19T05:23:33Z',
+					updated_at: '2026-07-19T05:24:42Z'
+				}
+			})
+		);
+
+		const workspace = await fetchWorkspaceOverview('col_123');
+
+		expect(getCollectionWorkspaceState(workspace)).toBe('ready_with_limits');
+	});
 });

@@ -4,11 +4,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from controllers.schemas.core.research_understanding import (
-    ResearchUnderstandingResponse,
-)
-
-
 ResearchViewState = Literal["empty", "processing", "partial", "ready", "failed"]
 ResearchViewSeverity = Literal["info", "warning", "error"]
 EvidenceBackedValueStatus = Literal[
@@ -481,10 +476,6 @@ class MaterialProfileResponse(BaseModel):
     evidence_refs: list[EvidenceReferenceResponse] = Field(
         default_factory=list,
         description="支撑证据",
-    )
-    understanding: ResearchUnderstandingResponse | None = Field(
-        default=None,
-        description="Claim/relation/evidence/context projection for review and AI grounding",
     )
     debug_links: dict[str, str | None] = Field(default_factory=dict, description="调试链接")
     warnings: list[ResearchViewWarningResponse] = Field(

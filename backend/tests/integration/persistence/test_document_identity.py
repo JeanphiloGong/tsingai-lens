@@ -22,6 +22,7 @@ from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
 )
+from tests.integration.persistence.database_cleanup import reset_postgres_schema
 from infra.persistence.postgres.models.collection import CollectionFile, StoredObject
 
 
@@ -213,9 +214,9 @@ def test_postgresql_enforces_document_membership_contract() -> None:
 
     engine = create_engine(url)
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    reset_postgres_schema(engine)
     with engine.begin() as connection:
         config.attributes["connection"] = connection
-        command.downgrade(config, "base")
         command.upgrade(config, "head")
     sessions = build_session_factory(engine)
     auth = PostgresAuthRepository(sessions)
@@ -275,7 +276,5 @@ def test_postgresql_enforces_document_membership_contract() -> None:
                     )
                 )
     finally:
-        with engine.begin() as connection:
-            config.attributes["connection"] = connection
-            command.downgrade(config, "base")
+        reset_postgres_schema(engine)
         engine.dispose()

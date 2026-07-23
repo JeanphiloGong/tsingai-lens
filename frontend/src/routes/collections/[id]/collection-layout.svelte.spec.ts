@@ -15,7 +15,8 @@ const {
 	collectionStore,
 	setCollectionStatus,
 	fetchCollectionMock,
-	fetchCollectionsMock
+	fetchCollectionsMock,
+	fetchWorkspaceMock
 } =
 	vi.hoisted(() => {
 		const pageSubscribers = new Set<(value: CollectionLayoutPageState) => void>();
@@ -62,7 +63,8 @@ const {
 				emitCollections();
 			},
 			fetchCollectionMock: vi.fn(),
-			fetchCollectionsMock: vi.fn()
+			fetchCollectionsMock: vi.fn(),
+			fetchWorkspaceMock: vi.fn()
 		};
 	});
 
@@ -86,9 +88,7 @@ vi.mock('../../_shared/workspace', async (importActual) => {
 
 	return {
 		...actual,
-		fetchWorkspaceOverview: vi.fn(async () => {
-			throw new Error('workspace unavailable');
-		})
+		fetchWorkspaceOverview: fetchWorkspaceMock
 	};
 });
 
@@ -103,8 +103,10 @@ describe('collections/[id]/+layout.svelte', () => {
 		setCollectionStatus('ready');
 		fetchCollectionMock.mockReset();
 		fetchCollectionsMock.mockReset();
+		fetchWorkspaceMock.mockReset();
 		fetchCollectionMock.mockResolvedValue(null);
 		fetchCollectionsMock.mockResolvedValue(null);
+		fetchWorkspaceMock.mockRejectedValue(new Error('workspace unavailable'));
 	});
 
 	it('places the material dossier entry under the More menu', async () => {
@@ -161,6 +163,94 @@ describe('collections/[id]/+layout.svelte', () => {
 			'href',
 			'/collections/col_123'
 		);
+	});
+
+	it('keeps published objective routes open when a later build failed', async () => {
+		setCollectionStatus('failed');
+		setPage({
+			params: { id: 'col_123' },
+			url: new URL('http://localhost/collections/col_123/objectives/obj_1')
+		});
+		fetchWorkspaceMock.mockResolvedValue({
+			collection: { collection_id: 'col_123', name: 'Battery papers', status: 'partial_success' },
+			file_count: 2,
+			workflow: {
+				documents: 'ready',
+				results: 'not_started',
+				evidence: 'not_started',
+				comparisons: 'not_started',
+				graph: 'not_started'
+			},
+			artifacts: { documents_ready: true, document_profiles_ready: true },
+			document_summary: { total_documents: 2 },
+			warnings: [],
+			latest_task: { status: 'partial_success' },
+			links: {}
+		});
+
+		render(Layout);
+
+		await vi.waitFor(() => {
+			expect(document.querySelector('.collection-locked-surface')).toBeNull();
+		});
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Objectives' }))
+			.not.toHaveAttribute('aria-disabled');
+	});
+
+	it('shows a newly queued build while the loaded workspace is still stale', async () => {
+		setCollectionStatus('processing');
+		fetchWorkspaceMock.mockResolvedValue({
+			collection: { collection_id: 'col_123', name: 'Battery papers', status: 'uploaded' },
+			file_count: 2,
+			workflow: {
+				documents: 'not_started',
+				results: 'not_started',
+				evidence: 'not_started',
+				comparisons: 'not_started',
+				graph: 'not_started'
+			},
+			artifacts: {},
+			document_summary: { total_documents: 2 },
+			warnings: [],
+			latest_task: null,
+			links: {}
+		});
+
+		render(Layout);
+
+		await vi.waitFor(() => {
+			expect(document.querySelector('.collection-meta-row')?.textContent).toContain('Processing');
+		});
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Objectives' }))
+			.toHaveAttribute('aria-disabled', 'true');
+	});
+
+	it('shows a completed build while the loaded overview workspace is still stale', async () => {
+		setCollectionStatus('ready');
+		fetchWorkspaceMock.mockResolvedValue({
+			collection: { collection_id: 'col_123', name: 'Battery papers', status: 'uploaded' },
+			file_count: 2,
+			workflow: {
+				documents: 'not_started',
+				results: 'not_started',
+				evidence: 'not_started',
+				comparisons: 'not_started',
+				graph: 'not_started'
+			},
+			artifacts: {},
+			document_summary: { total_documents: 2 },
+			warnings: [],
+			latest_task: null,
+			links: {}
+		});
+
+		render(Layout);
+
+		await vi.waitFor(() => {
+			expect(document.querySelector('.collection-meta-row')?.textContent).toContain('Complete');
+		});
 	});
 
 	it('marks More active on material routes', async () => {

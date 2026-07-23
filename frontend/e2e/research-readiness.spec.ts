@@ -119,6 +119,11 @@ async function mockResearchApis(page: Page) {
 		if (!path.startsWith('/api/v1/')) {
 			return route.continue();
 		}
+		if (path === '/api/v1/auth/me') {
+			return route.fulfill(
+				json({ user: { user_id: 'user_1', email: 'reader@example.com', display_name: 'Reader' } })
+			);
+		}
 
 		if (path === '/api/v1/collections') {
 			return route.fulfill(json({ items: [collectionPayload()] }));

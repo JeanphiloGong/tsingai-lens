@@ -5,7 +5,7 @@ from hashlib import sha1
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
-from application.evaluation import ResearchUnderstandingFeedbackService
+from application.evaluation import FindingFeedbackService
 from application.goal.protocol_contract import (
     proposed_design_choices_are_source_independent,
     ved_design_is_scientifically_consistent,
@@ -37,13 +37,11 @@ class ExperimentPlanService:
         self,
         repository: ExperimentPlanRepository,
         goal_session_repository: GoalSessionRepository,
-        research_understanding_feedback_service: ResearchUnderstandingFeedbackService,
+        finding_feedback_service: FindingFeedbackService,
     ) -> None:
         self.repository = repository
         self.goal_session_repository = goal_session_repository
-        self.research_understanding_feedback_service = (
-            research_understanding_feedback_service
-        )
+        self.finding_feedback_service = finding_feedback_service
 
     def create_plan(
         self,
@@ -265,7 +263,7 @@ class ExperimentPlanService:
         objective_id: str,
     ) -> tuple[Mapping[str, Any], ...] | None:
         try:
-            dataset = self.research_understanding_feedback_service.export_dataset(
+            dataset = self.finding_feedback_service.export_dataset(
                 collection_id=collection_id,
                 objective_id=objective_id,
             )

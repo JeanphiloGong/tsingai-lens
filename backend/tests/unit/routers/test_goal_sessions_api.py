@@ -15,14 +15,10 @@ from application.core.comparison_service import ComparisonService
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
 )
-from application.core.research_understanding_service import ResearchUnderstandingService
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
 )
 from application.core.semantic_build.paper_facts_service import PaperFactsService
-from application.core.semantic_build.research_objective_service import (
-    ResearchObjectiveService,
-)
 from application.core.workspace_overview_service import WorkspaceService
 from application.source.task_service import TaskService
 from tests.support.collection_service import build_test_collection_service
@@ -83,17 +79,7 @@ class _FakeLLMClient:
         self.chat = _FakeChat(content)
 
 
-class _EmptyResearchUnderstandingRepository:
-    backend_name = "memory"
-
-    def read_objective_understanding(self, collection_id, objective_id):
-        return None
-
-    def list_objective_understandings(self, collection_id):
-        return ()
-
-
-class _EmptyResearchUnderstandingFeedbackService:
+class _EmptyFindingFeedbackService:
     def export_dataset(self, **kwargs):  # noqa: ANN003, ANN201
         return {
             "collection_id": kwargs["collection_id"],
@@ -109,7 +95,6 @@ def goal_session_services(tmp_path):
     task_service = TaskService(MemoryBuildRepository())
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     paper_fact_repository = MemoryPaperFactRepository()
-    research_understanding_repository = _EmptyResearchUnderstandingRepository()
     comparison_repository = MemoryComparisonRepository()
     objective_repository = MemoryObjectiveRepository()
     document_profile_service = DocumentProfileService(
@@ -117,31 +102,17 @@ def goal_session_services(tmp_path):
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
     )
-    research_understanding_service = ResearchUnderstandingService(
-        source_artifact_repository=source_repository,
-    )
     workspace_service = WorkspaceService(
         collection_service=collection_service,
         task_service=task_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
-        objective_repository=objective_repository,
         comparison_repository=comparison_repository,
         document_profile_service=document_profile_service,
-    )
-    research_objective_service = ResearchObjectiveService(
-        collection_service=collection_service,
-        source_artifact_repository=source_repository,
-        paper_fact_repository=paper_fact_repository,
-        objective_repository=objective_repository,
-        research_understanding_repository=research_understanding_repository,
-        document_profile_service=document_profile_service,
-        research_understanding_service=research_understanding_service,
     )
     comparison_service = ComparisonService(
         collection_service=collection_service,
         paper_fact_repository=paper_fact_repository,
-        objective_repository=objective_repository,
         comparison_repository=comparison_repository,
         document_profile_service=document_profile_service,
     )
@@ -149,25 +120,21 @@ def goal_session_services(tmp_path):
         collection_service=collection_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
-        objective_repository=objective_repository,
         document_profile_service=document_profile_service,
     )
     service = GoalSessionService(
         collection_service=collection_service,
         research_view_service=ResearchViewAggregationService(
             collection_service=collection_service,
-            source_artifact_repository=source_repository,
             paper_fact_repository=paper_fact_repository,
-            objective_repository=objective_repository,
             comparison_service=comparison_service,
-            research_understanding_service=research_understanding_service,
         ),
         workspace_service=workspace_service,
-        research_objective_service=research_objective_service,
+        objective_repository=objective_repository,
         comparison_service=comparison_service,
         paper_facts_service=paper_facts_service,
-        research_understanding_feedback_service=(
-            _EmptyResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _EmptyFindingFeedbackService()
         ),
         goal_session_repository=InMemoryObjectiveWorkspaceRepository(),
         llm_client=_FakeLLMClient("General background."),

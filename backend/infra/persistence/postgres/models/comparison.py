@@ -49,10 +49,7 @@ class ComparableResultRecord(Base):
     __tablename__ = "comparable_results"
     __table_args__ = (
         CheckConstraint(
-            "(source_kind = 'paper_measurement' AND paper_result_id IS NOT NULL "
-            "AND objective_evidence_unit_id IS NULL) OR "
-            "(source_kind = 'objective_evidence_unit' "
-            "AND paper_result_id IS NULL AND objective_evidence_unit_id IS NOT NULL)",
+            "source_kind = 'paper_measurement' AND paper_result_id IS NOT NULL",
             name="typed_source_valid",
         ),
         ForeignKeyConstraint(
@@ -81,16 +78,6 @@ class ComparableResultRecord(Base):
             name="fk_comparable_results_paper_result",
             ondelete="RESTRICT",
         ),
-        ForeignKeyConstraint(
-            ["collection_id", "build_id", "objective_evidence_unit_id"],
-            [
-                "objective_evidence_units.collection_id",
-                "objective_evidence_units.build_id",
-                "objective_evidence_units.evidence_unit_id",
-            ],
-            name="fk_comparable_results_objective_unit",
-            ondelete="RESTRICT",
-        ),
     )
 
     build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -99,9 +86,6 @@ class ComparableResultRecord(Base):
     result_order: Mapped[int] = mapped_column(Integer, nullable=False)
     source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
     paper_result_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    objective_evidence_unit_id: Mapped[str | None] = mapped_column(
-        String(128), nullable=True
-    )
     source_document_id: Mapped[str] = mapped_column(String(128), nullable=False)
     variant_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     baseline_id: Mapped[str | None] = mapped_column(String(128), nullable=True)

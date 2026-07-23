@@ -14,8 +14,8 @@
 	} from '../../../_shared/goalSessions';
 	import { t } from '../../../_shared/i18n';
 	import {
-		fetchResearchUnderstandingDataset,
-		type ResearchUnderstandingDataset
+		fetchObjectiveFindingDataset,
+		type FindingDataset
 	} from '../../../_shared/researchView';
 
 	type StoredGoalSession = {
@@ -60,7 +60,7 @@
 	let readinessError = '';
 	let input = '';
 	let loadedKey = '';
-	let objectiveDatasetSummary: ResearchUnderstandingDataset | null = null;
+	let objectiveDatasetSummary: FindingDataset | null = null;
 	let objectiveDatasetLoading = false;
 	let readinessText = '';
 
@@ -71,13 +71,17 @@
 	$: loadKey = `${collectionId}:${queryMaterialId}:${queryPaperId}:${queryObjectiveId}`;
 	$: activeSessionId = session?.session_id ?? '';
 	$: objectiveTrainingReadyCount =
-		objectiveDatasetSummary?.quality_summary.training_ready_sample_count ?? 0;
+		objectiveDatasetSummary?.items.filter((item) => item.dataset_use_status === 'training_ready')
+			.length ?? 0;
 	$: objectiveTrainingMessageCount =
-		objectiveDatasetSummary?.quality_summary.training_message_sample_count ?? 0;
+		objectiveDatasetSummary?.items.filter((item) => item.training_messages.length > 0).length ?? 0;
 	$: objectiveProtocolReadyCount =
-		objectiveDatasetSummary?.quality_summary.protocol_ready_sample_count ?? 0;
+		objectiveDatasetSummary?.items.filter(
+			(item) => item.dataset_use_status === 'training_ready' && item.training_messages.length > 0
+		).length ?? 0;
 	$: objectiveReviewCandidateCount =
-		objectiveDatasetSummary?.quality_summary.review_candidate_sample_count ?? 0;
+		objectiveDatasetSummary?.items.filter((item) => item.dataset_use_status === 'review_candidate')
+			.length ?? 0;
 	$: objectiveProtocolReady = objectiveProtocolReadyCount > 0;
 	$: nextReviewAction = nextReviewActionForDisplay(objectiveDatasetSummary);
 	$: objectiveReviewLinkHref = objectiveReviewHref(
@@ -274,9 +278,10 @@
 		}
 		objectiveDatasetLoading = true;
 		try {
-			const dataset = await fetchResearchUnderstandingDataset(activeCollectionId, {
-				objective_id: activeObjectiveId
-			});
+			const dataset = await fetchObjectiveFindingDataset(
+				activeCollectionId,
+				activeObjectiveId
+			);
 			objectiveDatasetSummary = dataset;
 		} catch (err) {
 			readinessError = errorMessage(err);
@@ -364,23 +369,11 @@
 		void sendMessage($t('goalCopilot.experimentReadiness.protocolPrompt'));
 	}
 
-	function nextReviewActionForDisplay(dataset: ResearchUnderstandingDataset | null) {
+	function nextReviewActionForDisplay(dataset: FindingDataset | null) {
 		if (!dataset) return '';
-		const nextFindingId = dataset.quality_summary.next_review_finding_id;
-		const sample =
-			(nextFindingId
-				? dataset.items.find(
-						(item) =>
-							item.finding_id === nextFindingId &&
-							item.dataset_use_status === 'review_candidate'
-					)
-				: null) ??
-			dataset.items.find((item) => item.dataset_use_status === 'review_candidate') ??
-			null;
-		const code = sample?.review_action?.code ?? '';
-		if (!code) return '';
-		const localized = $t(`research.objectives.goalReviewRecommendedActions.${code}`);
-		return localized.startsWith('research.') ? (sample?.review_action?.label ?? '') : localized;
+		return dataset.items.some((item) => item.dataset_use_status === 'review_candidate')
+			? $t('goalCopilot.experimentReadiness.reviewFindings')
+			: '';
 	}
 
 	function objectiveReviewHref(

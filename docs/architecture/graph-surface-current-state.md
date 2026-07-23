@@ -33,7 +33,7 @@ Lens v1 product hierarchy.
 1. The graph page is a web workspace route at `/collections/:id/graph`.
 2. The graph remains a secondary analysis surface, not the Lens v1 primary
    acceptance path.
-3. The research-direction page owns scientific answers and logic-chain review.
+3. The Objective page owns scientific Findings and their Evidence review.
 4. The graph page owns relationship navigation, neighborhood exploration, and
    anomaly discovery.
 5. The browser should not infer scientific relationships from raw text fields;
@@ -68,10 +68,11 @@ relationship navigation and evidence-neighborhood exploration tool.
 
 ### Position Relative To Research Direction
 
-The research-direction workspace answers:
+The Objective Finding workspace answers:
 
 ```text
-What does this research objective prove, and is the evidence chain complete?
+What does this research Objective support, under which conditions, and can each
+Finding be traced to exact Evidence?
 ```
 
 The graph page answers:
@@ -81,9 +82,9 @@ How are the collection objects connected, which relationship should I inspect,
 and where are the suspicious or high-value drilldown paths?
 ```
 
-The graph may later include Lens-native objective-first nodes, but it should
-still remain a navigation/exploration surface rather than replacing the
-logic-chain workspace.
+The graph includes Objective nodes where the projection has stable ownership,
+but it remains a navigation/exploration surface rather than replacing the
+Finding workspace.
 
 ### Current-Stage Object Model
 
@@ -91,15 +92,13 @@ The current graph should stabilize around the existing collection graph
 projection:
 
 - `document`
+- `objective`
 - `evidence`
 - `comparison`
 - `material`
 - `property`
 - `test_condition`
 - `baseline`
-- `variant`
-- `process`
-- review or unknown buckets when the backend cannot resolve a stable type
 
 Each node should expose:
 
@@ -122,41 +121,9 @@ Each edge should expose:
 - warning state when the relation is inferred, unresolved, truncated, or lacks
   source support
 
-### Future Lens-Native Object Model
-
-After objective-first data is stable, the graph projection can become more
-Lens-native. That future graph may add or promote:
-
-- `ResearchObjective`
-- `Paper`
-- `ObjectiveEvidenceUnit`
-- `Sample`
-- `ProcessContext`
-- `TestCondition`
-- `Measurement`
-- `Comparison`
-- `Characterization`
-- `Interpretation`
-- `Gap`
-- `Conflict`
-- `Source`
-
-That future shape can express:
-
-```text
-research objective
--> paper
--> sample / process condition
--> test condition
--> measurement result
--> comparison relation
--> interpretation / conflict / gap
--> source evidence
-```
-
-This future model must still treat the graph as a navigation and anomaly
-surface. The research-direction workspace remains the place where the final
-logic chain is reviewed.
+The graph does not persist its own scientific object model. New node types may
+be added only when they project a canonical backend record with stable source
+and detail links.
 
 ### Backend / Frontend Coordination
 

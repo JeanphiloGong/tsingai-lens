@@ -59,8 +59,6 @@ from domain.core.document_profile import DocumentProfile
 from domain.core.paper_fact import PaperFactSet
 from domain.core.research_objective import (
     ObjectiveContext,
-    ObjectiveEvidenceUnit,
-    ObjectiveFactSet,
 )
 from domain.ports import (
     ObjectiveRepository,
@@ -434,14 +432,12 @@ class PaperFactsService:
         collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
-        objective_repository: ObjectiveRepository,
         document_profile_service: DocumentProfileService,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.document_profile_service = document_profile_service
         self._structured_extractor = structured_extractor
-        self.objective_repository = objective_repository
         self.paper_fact_repository = paper_fact_repository
         self.source_artifact_repository = source_artifact_repository
 
@@ -568,10 +564,6 @@ class PaperFactsService:
         }
 
     def read_evidence_cards(self, collection_id: str) -> tuple[dict[str, Any], ...]:
-        facts = self.objective_repository.read(collection_id)
-        cards = self._objective_evidence_cards_from_facts(collection_id, facts)
-        if cards:
-            return cards
         records = self.read_paper_fact_records(collection_id)
         return self._normalize_card_records(
             self._legacy_evidence_cards_from_records(collection_id, records),
@@ -599,18 +591,6 @@ class PaperFactsService:
         except DocumentProfilesNotReadyError as exc:
             raise PaperFactsNotReadyError(collection_id) from exc
 
-        objective_facts = self.objective_repository.read(
-            collection_id,
-            build_id=build_id,
-        )
-        objective_contexts = (
-            objective_facts.objective_contexts
-            if objective_facts.research_objectives_ready
-            else ()
-        )
-        objective_evidence_gate = self._build_objective_evidence_gate(
-            objective_facts.objective_evidence_units
-        )
         try:
             documents, text_units = load_collection_inputs(
                 collection_id,
@@ -664,31 +644,17 @@ class PaperFactsService:
             grouped_row_cells = self._group_table_cells_by_row(
                 table_cells_by_doc.get(candidate_document_id, [])
             )
-            if objective_evidence_gate is None:
-                selected_text_windows = self._select_text_windows_for_extraction(
-                    text_windows=candidate_text_windows,
-                    profile=candidate_profile,
-                    has_table_rows=bool(candidate_table_rows),
-                )
-            else:
-                selected_text_windows = self._select_evidence_gated_text_windows(
-                    text_windows=candidate_text_windows,
-                    document_id=candidate_document_id,
-                    evidence_gate=objective_evidence_gate,
-                )
+            selected_text_windows = self._select_text_windows_for_extraction(
+                text_windows=candidate_text_windows,
+                profile=candidate_profile,
+                has_table_rows=bool(candidate_table_rows),
+            )
             if str(candidate_profile.get("doc_type") or "") == DOC_TYPE_REVIEW:
                 selected_table_rows: list[dict[str, Any]] = []
-            elif objective_evidence_gate is None:
+            else:
                 selected_table_rows = self._select_table_rows_for_extraction(
                     table_rows=candidate_table_rows,
                     grouped_row_cells=grouped_row_cells,
-                )
-            else:
-                selected_table_rows = self._select_evidence_gated_table_rows(
-                    table_rows=candidate_table_rows,
-                    document_id=candidate_document_id,
-                    grouped_row_cells=grouped_row_cells,
-                    evidence_gate=objective_evidence_gate,
                 )
             selected_table_row_batches = self._batch_table_rows_for_extraction(
                 selected_table_rows
@@ -730,28 +696,6 @@ class PaperFactsService:
             collection_id,
             max_extraction_concurrency,
         )
-        if objective_contexts:
-            logger.info(
-                "Paper facts objective contexts loaded collection_id=%s objective_context_count=%s",
-                collection_id,
-                len(objective_contexts),
-            )
-        if objective_evidence_gate is not None:
-            text_route_count = sum(
-                len(document_gate["text_windows"])
-                for document_gate in objective_evidence_gate.values()
-            )
-            table_route_count = sum(
-                len(document_gate["tables"])
-                for document_gate in objective_evidence_gate.values()
-            )
-            logger.info(
-                "Paper facts objective evidence gate loaded collection_id=%s document_count=%s text_window_sources=%s table_sources=%s",
-                collection_id,
-                len(objective_evidence_gate),
-                text_route_count,
-                table_route_count,
-            )
 
         for document_position, row in enumerate(document_records, start=1):
             document_id = str(row.get("paper_id") or "")
@@ -808,10 +752,7 @@ class PaperFactsService:
                         source_filename=source_filename,
                         profile=profile,
                         text_window=text_window,
-                        objective_context=self._select_text_window_objective_context(
-                            objective_contexts,
-                            text_window=text_window,
-                        ),
+                        objective_context=None,
                     ),
                 }
                 for text_window in doc_text_windows
@@ -927,16 +868,6 @@ class PaperFactsService:
                     )
                     for row in batch_rows
                 }
-                objective_context, objective_table_route = (
-                    self._select_table_batch_objective_context(
-                        objective_contexts,
-                        document_id=document_id,
-                        table_id=table_id,
-                        table_context=table_context,
-                        table_rows=batch_rows,
-                        row_cells_by_index=row_cells_by_index,
-                    )
-                )
                 table_batch_jobs.append(
                     {
                         "rows": batch_rows,
@@ -951,8 +882,8 @@ class PaperFactsService:
                             table_rows=batch_rows,
                             row_cells_by_index=row_cells_by_index,
                             text_windows=all_doc_text_windows,
-                            objective_context=objective_context,
-                            objective_table_route=objective_table_route,
+                            objective_context=None,
+                            objective_table_route=None,
                         ),
                     }
                 )
@@ -1212,13 +1143,8 @@ class PaperFactsService:
                 structure_features=structure_features,
             ),
         )
-        objective_evidence_units = self.objective_repository.read(
-            collection_id,
-            build_id=build_id,
-        ).objective_evidence_units
-
         logger.info(
-            "Paper facts extraction finished collection_id=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurement_results=%s characterization_observations=%s structure_features=%s objective_evidence_units=%s",
+            "Paper facts extraction finished collection_id=%s evidence_anchors=%s method_facts=%s sample_variants=%s test_conditions=%s baselines=%s measurement_results=%s characterization_observations=%s structure_features=%s",
             collection_id,
             len(evidence_anchors),
             len(method_facts),
@@ -1228,7 +1154,6 @@ class PaperFactsService:
             len(measurement_results),
             len(characterization),
             len(structure_features),
-            len(objective_evidence_units),
         )
         return {
             "evidence_anchors": evidence_anchors,
@@ -1239,9 +1164,6 @@ class PaperFactsService:
             "measurement_results": measurement_results,
             "characterization_observations": characterization,
             "structure_features": structure_features,
-            "objective_evidence_units": tuple(
-                unit.to_record() for unit in objective_evidence_units
-            ),
         }
 
     def build_evidence_cards(
@@ -1249,17 +1171,6 @@ class PaperFactsService:
         collection_id: str,
     ) -> tuple[dict[str, Any], ...]:
         self.collection_service.get_collection(collection_id)
-        objective_facts = self.objective_repository.read(collection_id)
-        cards_table = self._objective_evidence_cards_from_facts(
-            collection_id, objective_facts
-        )
-        if cards_table:
-            logger.info(
-                "Objective evidence view derivation finished collection_id=%s evidence_cards=%s",
-                collection_id,
-                len(cards_table),
-            )
-            return cards_table
         paper_facts = self.paper_fact_repository.read(collection_id)
         if not self._paper_fact_records_available(paper_facts):
             raise PaperFactsNotReadyError(collection_id)
@@ -1271,18 +1182,6 @@ class PaperFactsService:
             len(cards_table),
         )
         return cards_table
-
-    def _objective_evidence_cards_from_facts(
-        self,
-        collection_id: str,
-        facts: ObjectiveFactSet,
-    ) -> tuple[dict[str, Any], ...]:
-        if not facts.objective_evidence_units:
-            return ()
-        return self._derive_objective_evidence_card_records(
-            collection_id=collection_id,
-            objective_evidence_units=facts.objective_evidence_units,
-        )
 
     def _legacy_evidence_cards_from_records(
         self,
@@ -1298,220 +1197,6 @@ class PaperFactsService:
             baseline_references=records["baseline_references"],
             measurement_results=records["measurement_results"],
         )
-
-    def _derive_objective_evidence_card_records(
-        self,
-        *,
-        collection_id: str,
-        objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...],
-    ) -> tuple[dict[str, Any], ...]:
-        rows: list[dict[str, Any]] = []
-        for unit in objective_evidence_units:
-            if unit.resolution_status in {"rejected", "skipped"}:
-                continue
-            claim_text = self._objective_evidence_claim_text(unit)
-            if not claim_text:
-                continue
-            rows.append(
-                {
-                    "evidence_id": f"ev_objective_{unit.evidence_unit_id}",
-                    "document_id": unit.document_id,
-                    "collection_id": collection_id,
-                    "claim_text": claim_text,
-                    "claim_type": self._objective_evidence_claim_type(unit),
-                    "evidence_source_type": self._objective_evidence_source_type(unit),
-                    "evidence_anchors": self._objective_evidence_anchor_payloads(
-                        unit
-                    ),
-                    "material_system": self._normalize_material_system_payload(
-                        self._objective_material_system_payload(unit.material_system)
-                    ),
-                    "condition_context": self._objective_condition_context(unit),
-                    "confidence": unit.confidence,
-                    "traceability_status": self._objective_traceability_status(unit),
-                }
-            )
-        return self._normalize_card_records(rows, collection_id)
-
-    def _objective_evidence_claim_text(
-        self,
-        unit: ObjectiveEvidenceUnit,
-    ) -> str:
-        interpretation = self._normalize_scalar_text(unit.interpretation)
-        if interpretation:
-            return interpretation
-        sample_label = self._objective_sample_label(unit.sample_context)
-        property_name = self._normalize_scalar_text(unit.property_normalized)
-        value = self._objective_value_summary(unit.value_payload, unit.unit)
-        if unit.unit_kind in {"measurement", "comparison"}:
-            subject = sample_label or "sample"
-            if value and property_name:
-                return f"{subject} reported {property_name} of {value}."
-            if property_name:
-                return f"{subject} reported {property_name}."
-        if unit.unit_kind == "process_context":
-            process = self._objective_mapping_summary(unit.process_context)
-            subject = sample_label or "sample"
-            return f"{subject} used {process or 'the reported process context'}."
-        if unit.unit_kind == "test_condition":
-            condition = self._objective_mapping_summary(
-                unit.test_condition or unit.resolved_condition
-            )
-            return f"Testing used {condition or 'the reported condition'}."
-        return self._objective_mapping_summary(unit.value_payload) or (
-            f"Objective evidence unit {unit.evidence_unit_id} was reported."
-        )
-
-    def _objective_evidence_claim_type(
-        self,
-        unit: ObjectiveEvidenceUnit,
-    ) -> str:
-        if unit.unit_kind in {"measurement", "comparison"}:
-            return "property"
-        if unit.unit_kind == "process_context":
-            return "process"
-        if unit.unit_kind == "test_condition":
-            return "test"
-        return "qualitative"
-
-    def _objective_evidence_source_type(
-        self,
-        unit: ObjectiveEvidenceUnit,
-    ) -> str:
-        for source_ref in unit.source_refs:
-            source_kind = self._normalize_scalar_text(source_ref.get("source_kind"))
-            if source_kind in _EVIDENCE_SOURCE_TYPES:
-                return source_kind
-            if source_kind == "text_window":
-                return "text"
-        return "text"
-
-    def _objective_evidence_anchor_payloads(
-        self,
-        unit: ObjectiveEvidenceUnit,
-    ) -> list[dict[str, Any]]:
-        anchors: list[dict[str, Any]] = []
-        source_refs = list(unit.source_refs)
-        anchor_ids = list(unit.evidence_anchor_ids)
-        if not source_refs and anchor_ids:
-            source_refs = [{"source_kind": "text", "source_ref": None}]
-        for index, source_ref in enumerate(source_refs):
-            source_kind = self._normalize_scalar_text(source_ref.get("source_kind"))
-            source_ref_id = self._normalize_scalar_text(source_ref.get("source_ref"))
-            source_type = (
-                source_kind
-                if source_kind in _EVIDENCE_SOURCE_TYPES
-                else "text"
-            )
-            anchor_id = (
-                anchor_ids[index]
-                if index < len(anchor_ids)
-                else f"anchor_{unit.evidence_unit_id}_{index + 1}"
-            )
-            anchor = {
-                "anchor_id": anchor_id,
-                "document_id": unit.document_id,
-                "source_type": source_type,
-                "section_id": source_ref_id,
-                "page": source_ref.get("page"),
-            }
-            if source_kind == "text_window":
-                anchor["block_id"] = source_ref_id
-            elif source_kind == "table":
-                anchor["figure_or_table"] = source_ref_id
-            anchors.append(anchor)
-        return anchors
-
-    def _objective_condition_context(
-        self,
-        unit: ObjectiveEvidenceUnit,
-    ) -> dict[str, Any]:
-        condition = unit.test_condition or unit.resolved_condition
-        return self._normalize_condition_context_payload(
-            {
-                "process": unit.process_context,
-                "baseline": {
-                    "control": self._objective_mapping_summary(
-                        unit.baseline_context
-                    ),
-                },
-                "test": {
-                    "method": self._normalize_scalar_text(condition.get("method")),
-                    "methods": [
-                        value
-                        for value in (
-                            self._normalize_scalar_text(value)
-                            for value in condition.values()
-                        )
-                        if value
-                    ],
-                },
-            }
-        )
-
-    def _objective_material_system_payload(
-        self,
-        material_system: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        payload = dict(material_system)
-        if "family" not in payload:
-            payload["family"] = (
-                self._normalize_scalar_text(payload.get("name"))
-                or self._normalize_scalar_text(payload.get("material_system"))
-                or self._normalize_scalar_text(payload.get("material"))
-            )
-        return payload
-
-    def _objective_traceability_status(
-        self,
-        unit: ObjectiveEvidenceUnit,
-    ) -> str:
-        if unit.evidence_anchor_ids:
-            return TRACEABILITY_STATUS_DIRECT
-        if unit.source_refs:
-            return TRACEABILITY_STATUS_PARTIAL
-        return TRACEABILITY_STATUS_MISSING
-
-    def _objective_sample_label(
-        self,
-        sample_context: Mapping[str, Any],
-    ) -> str | None:
-        for key in (
-            "sample",
-            "sample_label",
-            "variant_label",
-            "sample_name",
-            "specimen",
-            "condition",
-            "sample_id",
-        ):
-            if value := self._normalize_scalar_text(sample_context.get(key)):
-                return value
-        return None
-
-    def _objective_value_summary(
-        self,
-        value_payload: Mapping[str, Any],
-        unit: str | None,
-    ) -> str | None:
-        display = self._normalize_scalar_text(value_payload.get("source_value_text"))
-        if not display:
-            value = value_payload.get("value")
-            display = self._normalize_scalar_text(value)
-        if display and unit and unit not in display:
-            return f"{display} {unit}"
-        return display
-
-    def _objective_mapping_summary(
-        self,
-        payload: Mapping[str, Any],
-    ) -> str | None:
-        parts = [
-            f"{key}: {value}"
-            for key, value in payload.items()
-            if self._normalize_scalar_text(value)
-        ]
-        return "; ".join(parts) if parts else None
 
     def _load_paper_fact_records(
         self,
@@ -4498,13 +4183,13 @@ class PaperFactsService:
 
     def _build_objective_evidence_gate(
         self,
-        evidence_units: tuple[ObjectiveEvidenceUnit, ...],
+        evidence_items: tuple[ObjectiveEvidence, ...],
     ) -> dict[str, dict[str, set[str]]] | None:
-        if not evidence_units:
+        if not evidence_items:
             return None
 
         evidence_gate: dict[str, dict[str, set[str]]] = {}
-        for unit in evidence_units:
+        for unit in evidence_items:
             if unit.selection_status in {"rejected", "failed"}:
                 continue
             document_id = self._normalize_scalar_text(unit.document_id)

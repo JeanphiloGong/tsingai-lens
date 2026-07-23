@@ -31,8 +31,8 @@ class ObjectiveSession(Base):
         ForeignKeyConstraint(
             ["collection_id", "focused_objective_id"],
             [
-                "research_objective_lifecycles.collection_id",
-                "research_objective_lifecycles.objective_id",
+                "research_objectives.collection_id",
+                "research_objectives.objective_id",
             ],
             name="fk_objective_sessions_focus",
             ondelete="SET NULL",
@@ -98,8 +98,8 @@ class ObjectiveExperimentPlan(Base):
         ForeignKeyConstraint(
             ["collection_id", "objective_id"],
             [
-                "research_objective_lifecycles.collection_id",
-                "research_objective_lifecycles.objective_id",
+                "research_objectives.collection_id",
+                "research_objectives.objective_id",
             ],
             name="fk_objective_experiment_plans_objective",
             ondelete="CASCADE",

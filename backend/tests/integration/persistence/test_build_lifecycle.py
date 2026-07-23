@@ -26,6 +26,7 @@ from infra.persistence.postgres.build_repository import PostgresBuildRepository
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
 )
+from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -293,9 +294,7 @@ def test_postgresql_serializes_concurrent_successful_activation() -> None:
     engine = create_engine(url)
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
     try:
-        with engine.begin() as connection:
-            config.attributes["connection"] = connection
-            command.downgrade(config, "base")
+        reset_postgres_schema(engine)
         repository, _collections = _prepare_database(engine)
         first = _task("task_first", created_at="2026-07-19T10:00:00+00:00")
         second = _task("task_second", created_at="2026-07-19T10:01:00+00:00")
@@ -327,7 +326,5 @@ def test_postgresql_serializes_concurrent_successful_activation() -> None:
             repository.read_active_build("col_builds").build_id == second_build.build_id
         )
     finally:
-        with engine.begin() as connection:
-            config.attributes["connection"] = connection
-            command.downgrade(config, "base")
+        reset_postgres_schema(engine)
         engine.dispose()

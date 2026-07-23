@@ -163,7 +163,6 @@ def comparison_services(tmp_path):
     comparison_service = ComparisonService(
         collection_service=collection_service,
         paper_fact_repository=paper_fact_repository,
-        objective_repository=MemoryObjectiveRepository(),
         comparison_repository=MemoryComparisonRepository(),
         document_profile_service=document_profile_service,
     )

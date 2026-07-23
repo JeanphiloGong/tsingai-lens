@@ -17,15 +17,15 @@ EVALUATION_FAILURE_TYPES: Final[frozenset[str]] = frozenset(
         "evidence_trace_missing",
         "comparison_value_mismatch",
         "comparison_direction_mismatch",
-        "missing_required_claim",
+        "missing_required_finding",
         "forbidden_overclaim",
         "evidence_not_grounded",
     }
 )
-RESEARCH_UNDERSTANDING_REVIEW_STATUSES: Final[frozenset[str]] = frozenset(
+FINDING_REVIEW_STATUSES: Final[frozenset[str]] = frozenset(
     {"correct", "incorrect", "partial", "unclear"}
 )
-RESEARCH_UNDERSTANDING_ISSUE_TYPES: Final[frozenset[str]] = frozenset(
+FINDING_ISSUE_TYPES: Final[frozenset[str]] = frozenset(
     {
         "none",
         "evidence_not_grounded",
@@ -41,10 +41,7 @@ RESEARCH_UNDERSTANDING_ISSUE_TYPES: Final[frozenset[str]] = frozenset(
         "other",
     }
 )
-RESEARCH_UNDERSTANDING_CLAIM_TYPES: Final[frozenset[str]] = frozenset(
-    {"finding", "measurement", "comparison", "mechanism", "limitation", "context"}
-)
-RESEARCH_UNDERSTANDING_CLAIM_STATUSES: Final[frozenset[str]] = frozenset(
+FINDING_CURATION_STATUSES: Final[frozenset[str]] = frozenset(
     {"supported", "limited", "conflicted", "unsupported"}
 )
 
@@ -360,36 +357,40 @@ class EvaluationRun:
 
 
 @dataclass(frozen=True)
-class ResearchUnderstandingFeedback:
+class FindingFeedback:
     feedback_id: str
     collection_id: str
     objective_id: str
+    analysis_version: int
     finding_id: str
-    claim_id: str | None
-    finding_fingerprint: str | None
     review_status: str
     issue_type: str
     note: str | None
     reviewer: str | None
     created_at: str
 
+    def __post_init__(self) -> None:
+        if not self.collection_id or not self.objective_id or not self.finding_id:
+            raise ValueError("finding feedback requires objective and finding identity")
+        if self.analysis_version < 1:
+            raise ValueError("finding feedback requires a positive analysis_version")
+
     @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ResearchUnderstandingFeedback":
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "FindingFeedback":
         return cls(
             feedback_id=_normalize_text(payload.get("feedback_id")) or "",
             collection_id=_normalize_text(payload.get("collection_id")) or "",
             objective_id=_normalize_text(payload.get("objective_id")) or "",
+            analysis_version=int(payload.get("analysis_version") or 0),
             finding_id=_normalize_text(payload.get("finding_id")) or "",
-            claim_id=_normalize_text(payload.get("claim_id")),
-            finding_fingerprint=_normalize_text(payload.get("finding_fingerprint")),
             review_status=_normalize_choice(
                 payload.get("review_status"),
-                allowed=RESEARCH_UNDERSTANDING_REVIEW_STATUSES,
+                allowed=FINDING_REVIEW_STATUSES,
                 default="unclear",
             ),
             issue_type=_normalize_choice(
                 payload.get("issue_type"),
-                allowed=RESEARCH_UNDERSTANDING_ISSUE_TYPES,
+                allowed=FINDING_ISSUE_TYPES,
                 default="other",
             ),
             note=_normalize_text(payload.get("note")),
@@ -402,9 +403,8 @@ class ResearchUnderstandingFeedback:
             "feedback_id": self.feedback_id,
             "collection_id": self.collection_id,
             "objective_id": self.objective_id,
+            "analysis_version": self.analysis_version,
             "finding_id": self.finding_id,
-            "claim_id": self.claim_id,
-            "finding_fingerprint": self.finding_fingerprint,
             "review_status": self.review_status,
             "issue_type": self.issue_type,
             "note": self.note,
@@ -414,14 +414,12 @@ class ResearchUnderstandingFeedback:
 
 
 @dataclass(frozen=True)
-class ResearchUnderstandingCuration:
+class FindingCuration:
     curation_id: str
     collection_id: str
     objective_id: str
+    analysis_version: int
     finding_id: str
-    claim_id: str | None
-    finding_fingerprint: str | None
-    curated_claim_type: str
     curated_status: str
     curated_statement: str
     curated_support_grade: str | None
@@ -431,29 +429,28 @@ class ResearchUnderstandingCuration:
     curated_outcomes: tuple[str, ...]
     curated_direction: str | None
     curated_scope_summary: str | None
-    curated_evidence_ref_ids: tuple[str, ...]
-    curated_context_ids: tuple[str, ...]
+    curated_evidence_ids: tuple[str, ...]
     note: str | None
     reviewer: str | None
     updated_at: str
 
+    def __post_init__(self) -> None:
+        if not self.collection_id or not self.objective_id or not self.finding_id:
+            raise ValueError("finding curation requires objective and finding identity")
+        if self.analysis_version < 1:
+            raise ValueError("finding curation requires a positive analysis_version")
+
     @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ResearchUnderstandingCuration":
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "FindingCuration":
         return cls(
             curation_id=_normalize_text(payload.get("curation_id")) or "",
             collection_id=_normalize_text(payload.get("collection_id")) or "",
             objective_id=_normalize_text(payload.get("objective_id")) or "",
+            analysis_version=int(payload.get("analysis_version") or 0),
             finding_id=_normalize_text(payload.get("finding_id")) or "",
-            claim_id=_normalize_text(payload.get("claim_id")),
-            finding_fingerprint=_normalize_text(payload.get("finding_fingerprint")),
-            curated_claim_type=_normalize_choice(
-                payload.get("curated_claim_type"),
-                allowed=RESEARCH_UNDERSTANDING_CLAIM_TYPES,
-                default="finding",
-            ),
             curated_status=_normalize_choice(
                 payload.get("curated_status"),
-                allowed=RESEARCH_UNDERSTANDING_CLAIM_STATUSES,
+                allowed=FINDING_CURATION_STATUSES,
                 default="limited",
             ),
             curated_statement=_normalize_text(payload.get("curated_statement")) or "",
@@ -464,10 +461,9 @@ class ResearchUnderstandingCuration:
             curated_outcomes=_normalize_text_tuple(payload.get("curated_outcomes")),
             curated_direction=_normalize_text(payload.get("curated_direction")),
             curated_scope_summary=_normalize_text(payload.get("curated_scope_summary")),
-            curated_evidence_ref_ids=_normalize_text_tuple(
-                payload.get("curated_evidence_ref_ids")
+            curated_evidence_ids=_normalize_text_tuple(
+                payload.get("curated_evidence_ids")
             ),
-            curated_context_ids=_normalize_text_tuple(payload.get("curated_context_ids")),
             note=_normalize_text(payload.get("note")),
             reviewer=_normalize_text(payload.get("reviewer")),
             updated_at=_normalize_text(payload.get("updated_at")) or "",
@@ -478,10 +474,8 @@ class ResearchUnderstandingCuration:
             "curation_id": self.curation_id,
             "collection_id": self.collection_id,
             "objective_id": self.objective_id,
+            "analysis_version": self.analysis_version,
             "finding_id": self.finding_id,
-            "claim_id": self.claim_id,
-            "finding_fingerprint": self.finding_fingerprint,
-            "curated_claim_type": self.curated_claim_type,
             "curated_status": self.curated_status,
             "curated_statement": self.curated_statement,
             "curated_support_grade": self.curated_support_grade,
@@ -491,8 +485,7 @@ class ResearchUnderstandingCuration:
             "curated_outcomes": list(self.curated_outcomes),
             "curated_direction": self.curated_direction,
             "curated_scope_summary": self.curated_scope_summary,
-            "curated_evidence_ref_ids": list(self.curated_evidence_ref_ids),
-            "curated_context_ids": list(self.curated_context_ids),
+            "curated_evidence_ids": list(self.curated_evidence_ids),
             "note": self.note,
             "reviewer": self.reviewer,
             "updated_at": self.updated_at,

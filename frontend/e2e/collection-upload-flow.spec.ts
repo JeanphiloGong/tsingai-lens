@@ -167,6 +167,11 @@ async function mockUploadApis(page: Page) {
 		if (!path.startsWith('/api/v1/')) {
 			return route.continue();
 		}
+		if (path === '/api/v1/auth/me') {
+			return route.fulfill(
+				json({ user: { user_id: 'user_1', email: 'reader@example.com', display_name: 'Reader' } })
+			);
+		}
 
 		if (path === '/api/v1/collections' && route.request().method() === 'GET') {
 			return route.fulfill(json({ items: [] }));
@@ -281,7 +286,7 @@ test('collection upload flow exposes the next usable workspace state', async ({ 
 	await expect(page.getByRole('heading', { name: 'Processing in progress' })).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Enter comparison' })).toHaveCount(0);
 	await expect(page.locator('.collection-meta-row').getByText('Processing')).toBeVisible();
-	await expect(page.getByText('Current progress')).toBeVisible();
+	await expect(page.getByText('Estimated progress')).toBeVisible();
 	await expect(page.getByText('8%')).toBeVisible();
 	await expect(page.locator('#upload').getByRole('button', { name: 'Upload' })).toBeDisabled();
 	await expect(page.locator('#upload').getByRole('button', { name: 'Start processing' })).toBeDisabled();

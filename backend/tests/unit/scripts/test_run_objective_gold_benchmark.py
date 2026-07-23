@@ -99,7 +99,7 @@ def test_objective_quality_gate_reports_failed_thresholds():
     }
 
 
-def test_objective_benchmark_generates_research_objective_target_report(
+def test_objective_benchmark_generates_canonical_prediction_report(
     tmp_path,
     monkeypatch,
 ):
@@ -134,20 +134,6 @@ def test_objective_benchmark_generates_research_objective_target_report(
         )
         return output_path
 
-    def fake_build_research_objective_target_prediction(
-        *,
-        prediction_bundle_path,
-        output_path,
-        report_path,
-    ):
-        assert prediction_bundle_path == tmp_path / "objective_prediction_bundle.json"
-        output_path.write_text('{"evidence_scope": {}}', encoding="utf-8")
-        report_path.write_text(
-            json.dumps({"quality_gate": {"status": "fail"}}),
-            encoding="utf-8",
-        )
-        return output_path
-
     monkeypatch.setattr(
         benchmark.convert_expert_gold,
         "convert_expert_gold",
@@ -163,12 +149,6 @@ def test_objective_benchmark_generates_research_objective_target_report(
         "evaluate_gold_vs_prediction",
         fake_evaluate_gold_vs_prediction,
     )
-    monkeypatch.setattr(
-        benchmark.build_research_objective_target_prediction,
-        "build_research_objective_target_prediction",
-        fake_build_research_objective_target_prediction,
-    )
-
     summary = benchmark.run_objective_gold_benchmark(
         backend_root=tmp_path,
         collection_id="col_test",
@@ -179,15 +159,10 @@ def test_objective_benchmark_generates_research_objective_target_report(
     assert summary["prediction_bundle"] == str(
         tmp_path / "objective_prediction_bundle.json"
     )
-    assert summary["research_objective_target_prediction"] == str(
-        tmp_path / "research_objective_target_prediction.json"
+    assert summary["evaluation_report"] == str(
+        tmp_path / "objective_evaluation_report.json"
     )
-    assert summary["research_objective_target_report"] == str(
-        tmp_path / "research_objective_target_report.json"
-    )
-    assert summary["research_objective_target"] == {
-        "quality_gate": {"status": "fail"}
-    }
+    assert summary["summary"] == {"paper_count": 1}
 
 
 def test_objective_benchmark_reports_duplicate_prediction_mappings():

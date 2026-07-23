@@ -8,8 +8,8 @@ The active runtime path is a lightweight session over one collection:
 1. create a goal session bound to `collection_id`
 2. accept plain natural-language messages
 3. read existing Core or Core-derived artifacts when grounded context is allowed
-4. prefer actionable expert-curated `training_ready` research-understanding
-   Findings when the session is focused on an Objective
+4. prefer actionable expert-curated, training-ready published Findings when
+   the session is focused on an Objective
 5. save human-editable experiment plan drafts from Objective-focused chat answers
 6. label the answer source as collection-grounded, collection-limited, general
    fallback, or general-only

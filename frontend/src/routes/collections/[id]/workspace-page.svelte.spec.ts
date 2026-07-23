@@ -230,10 +230,10 @@ describe('collections/[id]/+page.svelte', () => {
 				collection_id: 'col_123',
 				task_type: 'build',
 				status: 'running',
-				current_stage: 'objective_evidence_units_started',
+				current_stage: 'objective_paper_skim_started',
 				progress_percent: 76,
 				progress_detail: {
-					phase: 'objective_evidence_units_started',
+					phase: 'objective_paper_skim_started',
 					current: 18,
 					total: 1036,
 					unit: 'routes',

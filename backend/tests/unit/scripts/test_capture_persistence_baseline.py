@@ -35,9 +35,7 @@ def test_capture_baseline_rejects_missing_required_family() -> None:
 
 def test_capture_baseline_rejects_orphaned_evidence_anchor() -> None:
     scenario = deepcopy(json.loads(SCENARIO_PATH.read_text(encoding="utf-8")))
-    scenario["records"]["research_understandings"][0]["evidence_refs"][0][
-        "anchor_ids"
-    ] = ["anchor_missing"]
+    scenario["records"]["objective_evidence"][0]["anchor_ids"] = ["anchor_missing"]
 
     with pytest.raises(ValueError, match="unresolved evidence anchor: anchor_missing"):
         capture_baseline(scenario)

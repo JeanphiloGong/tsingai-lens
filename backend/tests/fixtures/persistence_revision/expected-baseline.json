@@ -8,26 +8,22 @@
       "task_id": "task_baseline",
       "task_type": "build"
     },
-    "goal_analysis": {
+    "objective_analysis": {
+      "analysis_version": 1,
       "endpoint": "/api/v1/collections/col_baseline/objectives/objective_strength/analysis",
+      "evidence_count": 1,
+      "finding_count": 1,
       "objective_id": "objective_strength",
       "phase": "completed",
-      "status": "ready",
-      "status_code": 200,
-      "summary": {
-        "claim_count": 1,
-        "context_count": 1,
-        "evidence_ref_count": 1,
-        "relation_count": 0
-      },
-      "understanding_state": "ready"
+      "status": "succeeded",
+      "status_code": 200
     },
     "source_trace": {
       "anchor_id": "anchor_strength",
-      "claim_id": "claim_strength",
       "document_id": "doc_strength",
       "endpoint": "/api/v1/collections/col_baseline/documents/doc_strength/source",
-      "evidence_ref_id": "evidence_strength",
+      "evidence_id": "evidence_strength",
+      "finding_id": "finding_strength",
       "source_filename": "synthetic-strength.txt",
       "source_record_id": "block_result",
       "status_code": 200
@@ -50,11 +46,10 @@
   "evidence_traces": [
     {
       "anchor_id": "anchor_strength",
-      "claim_id": "claim_strength",
       "document_id": "doc_strength",
-      "evidence_ref_id": "evidence_strength",
+      "evidence_id": "evidence_strength",
       "file_id": "file_strength",
-      "href": "/collections/col_baseline/documents/doc_strength?block_id=block_result",
+      "finding_id": "finding_strength",
       "quote": "Result: yield strength reached 620 MPa.",
       "source_record_id": "block_result",
       "source_record_kind": "block",
@@ -84,11 +79,10 @@
       "target_layer"
     ],
     "feedback": [
-      "claim_id",
+      "analysis_version",
       "collection_id",
       "created_at",
       "feedback_id",
-      "finding_fingerprint",
       "finding_id",
       "issue_type",
       "note",
@@ -116,18 +110,26 @@
       "value_payload",
       "variant_id"
     ],
-    "research_understanding": [
-      "claims",
-      "contexts",
-      "evidence_refs",
-      "model_traces",
-      "presentation",
+    "objective_finding": [
+      "analysis_version",
+      "collection_id",
+      "confidence",
+      "context",
+      "derivation",
+      "direction",
+      "display_rank",
+      "evidence_strength",
+      "finding_id",
+      "finding_level",
+      "generalization_status",
+      "mediators",
+      "objective_id",
+      "outcomes",
+      "paper_count",
       "relations",
-      "schema_version",
-      "scope",
-      "state",
-      "summary",
-      "warnings"
+      "scope_summary",
+      "statement",
+      "variables"
     ],
     "source_document": [
       "creation_date",
@@ -154,9 +156,6 @@
     "status": "pass"
   },
   "ordered_ids": {
-    "claims": [
-      "claim_strength"
-    ],
     "collections": [
       "col_baseline"
     ],
@@ -175,6 +174,12 @@
     "goal_messages": [
       "message_user",
       "message_assistant"
+    ],
+    "objective_evidence": [
+      "evidence_strength"
+    ],
+    "objective_findings": [
+      "finding_strength"
     ],
     "research_objectives": [
       "objective_strength"
@@ -212,9 +217,12 @@
     "goal_messages": 2,
     "goal_sessions": 1,
     "import_manifests": 1,
+    "objective_analyses": 1,
+    "objective_evidence": 1,
+    "objective_findings": 1,
+    "objective_paper_contributions": 1,
     "prediction_snapshots": 1,
     "research_objectives": 1,
-    "research_understandings": 1,
     "source_blocks": 2,
     "source_documents": 1,
     "source_figures": 0,

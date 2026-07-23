@@ -38,8 +38,8 @@
 
 	cytoscape.use(fcose);
 
-	type LayoutName = 'logic_chain' | 'fcose' | 'cose' | 'grid' | 'circle';
-	type GraphViewMode = 'objective_chain' | 'material_centric' | 'full';
+	type LayoutName = 'layered' | 'fcose' | 'cose' | 'grid' | 'circle';
+	type GraphViewMode = 'material_centric' | 'full';
 	type SelectedNode = GraphNode & {
 		kind: GraphNodeType | 'unknown';
 		resourceId: string | null;
@@ -76,8 +76,8 @@
 
 	let maxNodes = defaultMaxNodes;
 	let minWeight = defaultMinWeight;
-	let viewMode: GraphViewMode = 'objective_chain';
-	let layoutName: LayoutName = 'logic_chain';
+	let viewMode: GraphViewMode = 'full';
+	let layoutName: LayoutName = 'layered';
 	let searchQuery = '';
 	let visibleNodeTypes: Partial<Record<GraphNodeType, boolean>> = buildDefaultVisibleTypes();
 	let visibleNodes = 0;
@@ -121,8 +121,8 @@
 	function resetControlState() {
 		maxNodes = defaultMaxNodes;
 		minWeight = defaultMinWeight;
-		viewMode = 'objective_chain';
-		layoutName = 'logic_chain';
+		viewMode = 'full';
+		layoutName = 'layered';
 		searchQuery = '';
 		visibleNodeTypes = buildDefaultVisibleTypes();
 	}
@@ -150,18 +150,6 @@
 		if (!cy) return;
 		const visible = visibleGraphElements();
 		if (!visible || visible.empty()) return;
-		if (isNarrowGraphCanvas()) {
-			fitVisibleGraph(visible, animate);
-			return;
-		}
-		if (viewMode === 'material_centric') {
-			fitVisibleGraph(visible, animate);
-			return;
-		}
-		if (viewMode !== 'full' && layoutName === 'logic_chain') {
-			fitLogicChainGraph(visible, animate);
-			return;
-		}
 		fitVisibleGraph(visible, animate);
 	}
 
@@ -179,39 +167,11 @@
 		cy.fit(visible, padding);
 	}
 
-	function fitLogicChainGraph(visible: CollectionReturnValue, animate = true) {
-		if (!cy) return;
-		const objective = visible.nodes('[entityType = "objective"]').first();
-		const material = visible.nodes('[entityType = "material_system"]').first();
-		const scope = visible.nodes('[entityType = "material_scope"]').first();
-		const firstRow =
-			viewMode === 'material_centric'
-				? material.union(objective).filter((element) => !element.empty())
-				: objective.union(material).union(scope).filter((element) => !element.empty());
-		const target = firstRow.length ? firstRow : visible;
-		const zoom = 0.88;
-		if (animate) {
-			cy.animate({
-				center: { eles: target },
-				zoom,
-				duration: graphAnimationDuration,
-				easing: 'ease-out-cubic'
-			});
-			return;
-		}
-		cy.center(target);
-		cy.zoom(zoom);
-	}
-
 	function graphFitPadding() {
 		if (!graphContainer) return graphPadding;
 		if (graphContainer.clientWidth < 520) return 36;
 		if (graphContainer.clientWidth < 760) return 48;
 		return graphPadding;
-	}
-
-	function isNarrowGraphCanvas() {
-		return Boolean(graphContainer && graphContainer.clientWidth < 560);
 	}
 
 	function centerGraph() {
@@ -259,13 +219,13 @@
 	function canvasTitleKey() {
 		if (viewMode === 'material_centric') return 'graph.canvas.materialTitle';
 		if (viewMode === 'full') return 'graph.canvas.fullTitle';
-		return 'graph.canvas.title';
+		return 'graph.canvas.fullTitle';
 	}
 
 	function canvasAriaLabelKey() {
 		if (viewMode === 'material_centric') return 'graph.canvas.materialAriaLabel';
 		if (viewMode === 'full') return 'graph.canvas.fullAriaLabel';
-		return 'graph.canvas.ariaLabel';
+		return 'graph.canvas.fullAriaLabel';
 	}
 
 	async function renderGraph(focusNodeId: string | null = null) {
@@ -275,7 +235,7 @@
 		}
 		if (!graphContainer) return;
 
-		const previousPositions = layoutName === 'logic_chain' ? undefined : currentPositions();
+		const previousPositions = layoutName === 'layered' ? undefined : currentPositions();
 		const payload = buildVisibleGraphPayload();
 		disposeRenderer();
 		clearSelection(false);
@@ -424,10 +384,6 @@
 			detail_rows: Array.isArray(node.data('detailRows')) ? node.data('detailRows') : [],
 			objective_id:
 				typeof node.data('objectiveId') === 'string' ? String(node.data('objectiveId')) : null,
-			logic_chain_id:
-				typeof node.data('logicChainId') === 'string'
-					? String(node.data('logicChainId'))
-					: null,
 			degree: Number(node.data('degree') ?? 0),
 			kind: parsed.kind === 'unknown' ? entityType : parsed.kind,
 			resourceId: parsed.resourceId || null,
@@ -645,7 +601,7 @@
 	function detailRowSourceHref(row: Record<string, unknown>) {
 		const documentId = typeof row.document_id === 'string' ? row.document_id : '';
 		if (!documentId) return null;
-		const evidenceId = typeof row.evidence_unit_id === 'string' ? row.evidence_unit_id : null;
+		const evidenceId = typeof row.evidence_id === 'string' ? row.evidence_id : null;
 		return buildDocumentViewerHref(collectionId, documentId, {
 			evidenceId,
 			returnTo: `/collections/${encodeURIComponent(collectionId)}/graph`
@@ -916,9 +872,8 @@
 								disabled={graphLoading}
 								on:change={handleViewModeChange}
 							>
-								<option value="objective_chain">{$t('graph.viewMode.keyChain')}</option>
-								<option value="material_centric">{$t('graph.viewMode.materialCentric')}</option>
-								<option value="full">{$t('graph.viewMode.full')}</option>
+									<option value="material_centric">{$t('graph.viewMode.materialCentric')}</option>
+									<option value="full">{$t('graph.viewMode.full')}</option>
 							</select>
 						</label>
 						<label class="graph-control-field" for="graph-max-nodes">
@@ -956,7 +911,7 @@
 								disabled={graphLoading}
 								on:change={handleLayout}
 							>
-								<option value="logic_chain">{$t('graph.layout.logicChain')}</option>
+									<option value="layered">{$t('graph.layout.layered')}</option>
 								<option value="fcose">{$t('graph.layout.fcose')}</option>
 								<option value="cose">{$t('graph.layout.cose')}</option>
 								<option value="grid">{$t('graph.layout.grid')}</option>

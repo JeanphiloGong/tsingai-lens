@@ -13,10 +13,11 @@ from sqlalchemy import Column, Integer, Table, create_engine, inspect, text
 from sqlalchemy.engine import URL, make_url
 
 from infra.persistence.postgres.base import Base
+from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260722_0018"
+HEAD_REVISION = "20260722_0019"
 EXPECTED_TABLES = {
     "alembic_version",
     "artifact_versions",
@@ -47,21 +48,24 @@ EXPECTED_TABLES = {
     "evaluation_prediction_snapshots",
     "evaluation_runs",
     "evaluation_scores",
+    "finding_curation_records",
+    "finding_feedback_records",
+    "objective_analyses",
+    "objective_build_candidates",
     "objective_builds",
-    "objective_contexts",
-    "objective_document_links",
-    "objective_evidence_routes",
-    "objective_evidence_units",
+    "objective_document_scope",
+    "objective_evidence",
     "objective_experiment_plans",
-    "objective_frame_table_links",
-    "objective_logic_chain_unit_links",
-    "objective_logic_chains",
+    "objective_finding_contexts",
+    "objective_finding_derivations",
+    "objective_finding_evidence_links",
+    "objective_finding_relation_evidence_links",
+    "objective_finding_relations",
+    "objective_findings",
     "objective_messages",
-    "objective_paper_frames",
+    "objective_paper_contributions",
     "objective_paper_skims",
     "objective_sessions",
-    "objective_unit_anchor_links",
-    "objective_unit_source_refs",
     "paper_fact_baseline_evidence_anchors",
     "paper_fact_baseline_references",
     "paper_fact_builds",
@@ -85,20 +89,6 @@ EXPECTED_TABLES = {
     "pairwise_comparison_anchor_links",
     "pairwise_comparison_relations",
     "research_objectives",
-    "research_claim_context_links",
-    "research_claim_evidence_links",
-    "research_claims",
-    "research_contexts",
-    "research_evidence_refs",
-    "research_finding_evidence_links",
-    "research_findings",
-    "research_relation_context_links",
-    "research_relation_evidence_links",
-    "research_relations",
-    "research_objective_lifecycles",
-    "research_understanding_curation_records",
-    "research_understanding_feedback_records",
-    "research_understandings",
     "source_block_text_units",
     "source_blocks",
     "source_documents",
@@ -117,7 +107,7 @@ EXPECTED_TABLES = {
 }
 
 
-def test_empty_database_upgrades_checks_downgrades_and_upgrades_again(
+def test_empty_database_upgrades_and_rejects_irreversible_downgrade(
     tmp_path,
 ) -> None:
     engine = create_engine(
@@ -145,17 +135,8 @@ def test_empty_database_upgrades_checks_downgrades_and_upgrades_again(
             assert inspect(connection).get_table_names() == sorted(EXPECTED_TABLES)
             command.check(config)
 
-            command.downgrade(config, "base")
-
-            assert MigrationContext.configure(connection).get_current_revision() is None
-            assert inspect(connection).get_table_names() == ["alembic_version"]
-
-            command.upgrade(config, "head")
-
-            assert (
-                MigrationContext.configure(connection).get_current_revision()
-                == HEAD_REVISION
-            )
+            with pytest.raises(NotImplementedError, match="irreversible"):
+                command.downgrade(config, "20260722_0018")
     finally:
         engine.dispose()
 
@@ -175,11 +156,9 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
     engine = create_engine(url)
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
     try:
+        reset_postgres_schema(engine)
         with engine.begin() as connection:
             config.attributes["connection"] = connection
-            command.downgrade(config, "base")
-            assert MigrationContext.configure(connection).get_current_revision() is None
-
             command.upgrade(config, "head")
             assert (
                 MigrationContext.configure(connection).get_current_revision()
@@ -188,19 +167,8 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
             assert set(inspect(connection).get_table_names()) == EXPECTED_TABLES
             command.check(config)
 
-            command.downgrade(config, "base")
-            assert MigrationContext.configure(connection).get_current_revision() is None
-            assert inspect(connection).get_table_names() == ["alembic_version"]
-
-            command.upgrade(config, "head")
-            assert (
-                MigrationContext.configure(connection).get_current_revision()
-                == HEAD_REVISION
-            )
     finally:
-        with engine.begin() as connection:
-            config.attributes["connection"] = connection
-            command.downgrade(config, "base")
+        reset_postgres_schema(engine)
         engine.dispose()
 
 
@@ -301,7 +269,7 @@ def test_document_version_migration_backfills_existing_file_provenance(
                     },
                 )
 
-            command.upgrade(config, "head")
+            command.upgrade(config, "20260722_0018")
 
             assert connection.scalar(text("SELECT count(*) FROM documents")) == 1
             assert (
@@ -355,7 +323,7 @@ def test_document_version_migration_backfills_existing_file_provenance(
                 )
             } == {"col_backfill_a": 2, "col_backfill_b": 1}
 
-            command.upgrade(config, "head")
+            command.upgrade(config, "20260722_0018")
 
             assert connection.scalar(text("SELECT count(*) FROM documents")) == 1
             assert (

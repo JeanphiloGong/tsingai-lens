@@ -8,11 +8,11 @@ from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
-    StructuredObjectiveEvidenceRoute,
-    StructuredObjectiveEvidenceRoutes,
-    StructuredObjectiveEvidenceUnit,
-    StructuredObjectiveEvidenceUnits,
-    StructuredObjectivePaperFrame,
+    StructuredEvidenceSelection,
+    StructuredEvidenceSelections,
+    StructuredEvidenceExtraction,
+    StructuredEvidenceExtractions,
+    StructuredPaperContributionDraft,
     StructuredPaperSkim,
     StructuredResearchObjective,
     StructuredResearchObjectives,
@@ -313,10 +313,10 @@ class FakeCoreLLMStructuredExtractor:
             ]
         )
 
-    def frame_objective_paper(
+    def assess_objective_paper(
         self,
         payload: dict[str, Any],
-    ) -> StructuredObjectivePaperFrame:
+    ) -> StructuredPaperContributionDraft:
         objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
         paper_skim = payload.get("paper_skim") if isinstance(payload.get("paper_skim"), dict) else {}
         document = payload.get("document") if isinstance(payload.get("document"), dict) else {}
@@ -332,7 +332,7 @@ class FakeCoreLLMStructuredExtractor:
             if str(value).strip()
         }
         if document_id in excluded_document_ids or paper_skim.get("doc_role") == "review":
-            return StructuredObjectivePaperFrame(
+            return StructuredPaperContributionDraft(
                 relevance="irrelevant",
                 paper_role="review",
                 background="Paper does not directly support the objective.",
@@ -375,7 +375,7 @@ class FakeCoreLLMStructuredExtractor:
             for item in payload.get("section_snippets", [])
             if isinstance(item, dict) and item.get("section_label")
         ]
-        return StructuredObjectivePaperFrame(
+        return StructuredPaperContributionDraft(
             relevance="high" if paper_skim else "uncertain",
             paper_role="primary_experiment",
             background="Paper directly supports the objective.",
@@ -400,10 +400,10 @@ class FakeCoreLLMStructuredExtractor:
             excluded_tables=excluded_tables,
         )
 
-    def route_objective_evidence(
+    def select_objective_evidence(
         self,
         payload: dict[str, Any],
-    ) -> StructuredObjectiveEvidenceRoutes:
+    ) -> StructuredEvidenceSelections:
         objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
         property_axes = [
             str(value).lower()
@@ -413,7 +413,7 @@ class FakeCoreLLMStructuredExtractor:
         if not isinstance(payload.get("current_source"), dict):
             raise ValueError("objective evidence routing requires current_source")
         candidates = [payload["current_source"]]
-        routes: list[StructuredObjectiveEvidenceRoute] = []
+        routes: list[StructuredEvidenceSelection] = []
         for candidate in candidates:
             if not isinstance(candidate, dict):
                 continue
@@ -423,10 +423,9 @@ class FakeCoreLLMStructuredExtractor:
                 continue
             if candidate.get("frame_status") == "excluded":
                 routes.append(
-                    StructuredObjectiveEvidenceRoute(
+                    StructuredEvidenceSelection(
                         role="low_value_or_irrelevant",
                         extractable=False,
-                        reason="Excluded by objective paper frame.",
                         confidence=0.7,
                     )
                 )
@@ -461,32 +460,30 @@ class FakeCoreLLMStructuredExtractor:
                     else "process_or_treatment"
                 )
                 routes.append(
-                    StructuredObjectiveEvidenceRoute(
+                    StructuredEvidenceSelection(
                         role=role,
                         extractable=True,
-                        reason="Table is relevant to the active objective.",
                         confidence=0.82,
                     )
                 )
                 continue
             routes.append(
-                StructuredObjectiveEvidenceRoute(
+                StructuredEvidenceSelection(
                     role="process_or_treatment",
                     extractable=True,
-                    reason="Text window is in a relevant objective section.",
                     confidence=0.72,
                 )
             )
-        return StructuredObjectiveEvidenceRoutes(routes=routes)
+        return StructuredEvidenceSelections(selections=routes)
 
-    def extract_objective_evidence_units(
+    def extract_objective_evidence(
         self,
         payload: dict[str, Any],
-    ) -> StructuredObjectiveEvidenceUnits:
+    ) -> StructuredEvidenceExtractions:
         route = payload.get("evidence_route")
         source = payload.get("source")
         if not isinstance(route, dict) or not isinstance(source, dict):
-            return StructuredObjectiveEvidenceUnits()
+            return StructuredEvidenceExtractions()
         if route.get("source_kind") == "table":
             headers = [
                 str(value)
@@ -511,7 +508,7 @@ class FakeCoreLLMStructuredExtractor:
                 ),
                 headers[-1] if headers else "value",
             )
-            units: list[StructuredObjectiveEvidenceUnit] = []
+            extractions: list[StructuredEvidenceExtraction] = []
             for row in matrix[1:]:
                 if not isinstance(row, list) or len(row) < 2:
                     continue
@@ -519,9 +516,9 @@ class FakeCoreLLMStructuredExtractor:
                 value_text = str(row[-1]).strip()
                 if not sample_label or not value_text:
                     continue
-                units.append(
-                    StructuredObjectiveEvidenceUnit(
-                        unit_kind="measurement",
+                extractions.append(
+                    StructuredEvidenceExtraction(
+                        evidence_kind="measurement",
                         property_normalized=property_header,
                         sample_context={"label": sample_label},
                         value_payload={"source_value_text": value_text},
@@ -530,19 +527,19 @@ class FakeCoreLLMStructuredExtractor:
                         confidence=0.78,
                     )
                 )
-            return StructuredObjectiveEvidenceUnits(evidence_units=units)
+            return StructuredEvidenceExtractions(extractions=extractions)
         if route.get("source_kind") == "text_window" and source.get("text"):
-            return StructuredObjectiveEvidenceUnits(
-                evidence_units=[
-                    StructuredObjectiveEvidenceUnit(
-                        unit_kind="process_context",
+            return StructuredEvidenceExtractions(
+                extractions=[
+                    StructuredEvidenceExtraction(
+                        evidence_kind="process_context",
                         value_payload={"statement": str(source.get("text"))[:160]},
                         resolution_status="partial",
                         confidence=0.7,
                     )
                 ]
             )
-        return StructuredObjectiveEvidenceUnits()
+        return StructuredEvidenceExtractions()
 
     def extract_text_window_mentions(self, payload: dict[str, Any]) -> StructuredTextWindowMentions:
         document_title = str(payload.get("document_title") or "")

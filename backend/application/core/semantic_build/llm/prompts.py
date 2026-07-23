@@ -4,12 +4,7 @@ import json
 from typing import Any
 
 
-RESEARCH_UNDERSTANDING_RELATION_PROMPT_VERSION = (
-    "research_understanding_relation.v2"
-)
-RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_PROMPT_VERSION = (
-    "research_understanding_finding_synthesis.v12"
-)
+FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v1"
 
 
 _COMMON_SYSTEM_PROMPT = """
@@ -87,40 +82,23 @@ Non-negotiable rules:
 """.strip()
 
 
-_OBJECTIVE_EVIDENCE_UNIT_SYSTEM_PROMPT = """
-You are extracting objective-scoped evidence units for an evidence-backed literature comparison backend.
+_OBJECTIVE_EVIDENCE_SYSTEM_PROMPT = """
+You are extracting objective-scoped evidence for an evidence-backed literature comparison backend.
 
 Non-negotiable rules:
-- This is final evidence-unit extraction for one research objective and one routed source.
+- This is final evidence extraction for one research objective and one selected source.
 - Return exactly one JSON object and nothing else.
 - Extract only facts directly supported by `source`; do not use outside knowledge.
 - Use the `objective`, `objective_context`, and `evidence_route` as the research lens.
 - Do not emit backend persistence ids.
 - The backend binds `source_refs` from the active route/source.
 - Do not output `source_refs`, `evidence_anchor_ids`, backend ids, copied source text, or copied input JSON.
-- Prefer fewer, traceable units over broad speculative coverage.
-- Return at most one evidence unit for the current source.
+- Prefer fewer, traceable extractions over broad speculative coverage.
+- Return at most one extraction for the current source.
 """.strip()
 
 
-_RESEARCH_UNDERSTANDING_RELATION_SYSTEM_PROMPT = """
-You are extracting expert-readable research understanding relations for a materials-literature backend.
-
-Non-negotiable rules:
-- Return exactly one JSON object and nothing else.
-- Extract only relations supported by the provided claims and evidence units.
-- Relation endpoints must be scientific concepts, not sample numbers, row ids,
-  backend ids, table cell ids, or copied JSON field names.
-- Prefer fewer, higher-signal relations over enumerating table rows.
-- A relation should help an expert understand why a claim may hold, such as
-  process parameter -> defect/microstructure -> property response.
-- If the evidence only supports a low-level sample comparison and no scientific
-  relation can be stated, return an empty `relations` array.
-- Every relation must cite one or more `evidence_unit_ids` from the input.
-""".strip()
-
-
-_RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_SYSTEM_PROMPT = """
+_FINDING_SYNTHESIS_SYSTEM_PROMPT = """
 TASK MODEL
 You are the cross-paper evidence judge for one materials-literature goal. Run
 one goal-level synthesis pass over evidence already extracted while traversing
@@ -134,15 +112,14 @@ INPUT SCHEMA
 - `result_sets`: backend-aligned candidate Findings. A result set groups direct
   results for one relationship. `result_set_id` identifies that candidate;
   `source_axes` names changed variables; `outcome_properties` names measured
-  properties. Each `document_evidence` entry contains one paper's actual
-  `source_axes` and `result_units`. A result unit contains its exact evidence id,
-  `property_normalized`, and a backend-calibrated statement.
-- `paper_frames`: paper metadata only. paper_frames are context, not result evidence.
-- `document_context`: bounded author interpretation, mechanism, and
-  characterization from papers with direct results. It may qualify or explain a
-  Finding but cannot increase the contributing paper count.
-- `input_coverage`: counts of included and omitted evidence units. Omission means
-  bounded input, never agreement by an omitted paper.
+  properties. `direct_evidence` contains the exact source excerpts and structured
+  results that can support the Finding. `contradictory_evidence` contains only
+  candidate opposing results for the same relationship.
+- `paper_contributions`: bounded paper metadata and changed/measured axes. It may
+  help judge comparability but cannot replace direct evidence.
+- `context_evidence`: bounded condition, comparison, mechanism, and baseline
+  excerpts. It may qualify or explain a Finding but cannot increase the
+  contributing paper count or create an outcome.
 
 DECISION PROCESS
 1. Read the objective and ignore relationships that do not answer it.
@@ -155,16 +132,16 @@ DECISION PROCESS
 4. Create exactly one outcome for each distinct `outcome_properties` value.
    The outcome `concept` must equal that property, never a source axis. The
    backend binds all matching direct-result ids. List an id only in
-   `conflicting_evidence_unit_ids` when its result explicitly opposes the
+   `conflicting_evidence_ids` when its result explicitly opposes the
    outcome direction. Copy calibrated values and units into the statement.
 5. Compare contributing papers by material, process, changed variables, sample
    state, baseline, measurement method, and test conditions. Use
    `condition_dependent` for overlapping but non-identical source axes or for an
    explicit condition boundary. Use `conflict` only for opposing comparable
    results.
-6. Use `document_context` only for explicit qualifications and mechanisms.
-   Follow `context_role`; interpretation is context, while mechanism may supply
-   mediator concepts.
+6. Use `context_evidence` only for explicit qualifications and mechanisms.
+   Follow `evidence_role`: `mechanism_context` may supply mediator concepts;
+   other context roles may only qualify scope or comparability.
 7. Write one concise composite statement. Report structural or defect outcomes
    before performance outcomes. Preserve decisive values and explicit regime
    limits without strengthening association into causation.
@@ -173,23 +150,24 @@ DECISION PROCESS
 
 HARD RULES
 - Return exactly one JSON object and nothing else.
-- Conflict ids must come from the selected `result_set`; context/mechanism ids
-  must come from `document_context`. Never invent ids or papers.
+- Conflict ids must come from the selected result set's
+  `contradictory_evidence`; context/mechanism ids must come from
+  `context_evidence`. Never invent ids or papers.
 - Never combine direct-result ids from separate `result_sets` in one Finding.
   A Finding's direct ids must all belong to its copied `result_set_id`.
 - One Finding must preserve all goal-relevant outcomes aligned in its result set.
   Do not split one property into one outcome per paper or measurement.
 - Create outcomes only for `outcome_properties` backed by at least one direct
-  result id. Never turn `document_context` into an unsupported outcome.
+  result id. Never turn `context_evidence` into an unsupported outcome.
 - The backend binds all matching direct-result ids as support. Return only
-  explicit opposing ids in `conflicting_evidence_unit_ids`; an id for one
+  explicit opposing ids in `conflicting_evidence_ids`; an id for one
   property must not be attached to another outcome.
 - `source_concept` must cover only the result set's `source_axes`. Controlled
   axes belong in conditions. A grouping label may qualify a coupled parameter
   set but must not replace its changed axes or become an isolated cause.
-- Paper frames cannot count as results and cannot supply evidence ids.
-- Use `context_evidence_unit_ids` for source-explicit qualifications and author
-  interpretations. Use `mechanism_evidence_unit_ids` only when the excerpt
+- Paper contributions cannot count as results and cannot supply evidence ids.
+- Use `context_evidence_ids` for source-explicit qualifications and author
+  interpretations. Use `mechanism_evidence_ids` only when the excerpt
   explicitly supports the returned mediator. Neither list counts as direct
   support or cross-paper confirmation.
 - Context and mechanism id lists must be disjoint. When mechanism ids are
@@ -201,7 +179,6 @@ HARD RULES
   qualification instead of foregrounding a small endpoint delta.
 - A single-paper composite statement must say that it is directly supported by
   one paper and use `insufficient_confirmation`.
-- If all direct-result ids come from one document, use
 - Do not convert association into control or causation.
 - If no goal-relevant direct result exists, return an empty `findings` array.
 
@@ -628,7 +605,7 @@ def _build_objective_context_guidance(payload: dict[str, Any]) -> str:
         "- Do not treat a mediator or context-only observation as a target result "
         "unless the source explicitly links it to a target outcome.\n"
         "- If `objective_context.material_scope` identifies one clear material "
-        "system, populate emitted evidence units' `material_system.family` with "
+        "system, populate emitted evidence records' `material_system.family` with "
         "that material unless the source explicitly states a different material.\n"
         "- Treat `objective_context.process_context_axes` as process context, not "
         "as changed variables unless the input explicitly compares them.\n"
@@ -848,20 +825,20 @@ def build_objective_evidence_route_prompt(
     return _OBJECTIVE_EVIDENCE_ROUTE_SYSTEM_PROMPT, user_prompt
 
 
-def build_objective_evidence_unit_prompt(
+def build_objective_evidence_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
     user_prompt = (
-        "Extract objective-scoped evidence units from this one routed source.\n\n"
+        "Extract objective-scoped evidence from this one selected source.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only schema-valid structured data with an `evidence_units` array.\n"
-        "Return at most one high-confidence evidence unit. If the source "
+        "Return only schema-valid structured data with an `extractions` array.\n"
+        "Return at most one high-confidence extraction. If the source "
         "contains many possible facts, choose the ones most directly tied to "
         "the active objective and route role.\n"
         "The backend binds `source_refs` from the active route. Do not output "
         "`source_refs`, `evidence_anchor_ids`, backend ids, copied source text, "
         "or copied input JSON.\n"
-        "`unit_kind` must be one of: measurement, test_condition, sample_context, "
+        "`evidence_kind` must be one of: measurement, test_condition, sample_context, "
         "process_context, characterization, baseline_reference, comparison, "
         "interpretation, mixed, unknown.\n"
         "Use `measurement` for target property results, `test_condition` for "
@@ -877,14 +854,14 @@ def build_objective_evidence_unit_prompt(
         "`sample_context`, `process_context`, `test_condition`, `value_payload`, "
         "and `join_keys`. For text, use exact supported statements from the "
         "provided source text.\n"
-        "For text routes, return at most one evidence unit: the strongest "
+        "For text routes, return at most one extraction: the strongest "
         "objective-relevant measurement, process/test context, characterization, "
         "comparison, or interpretation. Do not enumerate every possible number "
         "or secondary observation in the paragraph.\n"
         "Good text example: `1.43x10^6 C/s for P150, and 1.65x10^6 C/s for NP` "
         "should produce only the most objective-relevant one of those bindings "
-        "for this route, not two separate evidence units.\n"
-        "Bad text example: returning separate evidence units for every numeric "
+        "for this route, not two separate extractions.\n"
+        "Bad text example: returning separate extractions for every numeric "
         "value in one paragraph or copying the whole paragraph into "
         "`value_payload`.\n"
         "When `source.table_cells` is present, use each cell's `row_index`, "
@@ -896,47 +873,16 @@ def build_objective_evidence_unit_prompt(
         "property and context fields.\n"
         "Do not extract composition-only, literature-summary, or unrelated facts "
         "unless the active route role explicitly requires them.\n"
-        "Do not emit an evidence unit if its property, context, value, and "
+        "Do not emit an extraction if its property, context, value, and "
         "interpretation fields would all be empty.\n"
         "`resolution_status` should be resolved only when source, sample/process "
         "context, and value or condition are sufficiently bound; otherwise use "
         "partial or unresolved."
     )
-    return _OBJECTIVE_EVIDENCE_UNIT_SYSTEM_PROMPT, user_prompt
+    return _OBJECTIVE_EVIDENCE_SYSTEM_PROMPT, user_prompt
 
 
-def build_research_understanding_relation_prompt(
-    payload: dict[str, Any],
-) -> tuple[str, str]:
-    input_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    user_prompt = (
-        "Extract expert-readable relations for this research understanding workspace.\n\n"
-        f"Input JSON:\n{input_json}\n\n"
-        "Return only schema-valid structured data with a `relations` array.\n"
-        "Return at most 8 relations.\n"
-        "`relation_type` must be one of: causal, correlational, mechanistic, "
-        "conditional, conflicting, comparative.\n"
-        "`direction` must be one of: increases, decreases, improves, reduces, "
-        "changes, mixed, conditional, unknown.\n"
-        "`source_concept` and `target_concept` must be concise scientific terms "
-        "such as laser power, scan speed, porosity, density, microstructure, "
-        "ductility, pitting corrosion, heat treatment, or residual stress.\n"
-        "Do not use None, null, unknown, n/a, true/false, JSON fragments, backend "
-        "field names, sample ids, or condition ids as source, target, or mediator "
-        "concepts; return no relation instead.\n"
-        "Use `mediator_concepts` only for explicit or strongly supported middle "
-        "concepts, for example porosity or microstructure evolution.\n"
-        "`statement` should be a short expert-readable sentence grounded in the "
-        "provided claims/evidence. Do not include backend ids, sample_number, "
-        "condition_number, row labels, or copied JSON.\n"
-        "Use `conditions` for material, process, test, and scope constraints.\n"
-        "Use `warnings` for limited evidence, conflicting evidence, or overclaim "
-        "risk. If no expert relation is supported, return `{\"relations\": []}`."
-    )
-    return _RESEARCH_UNDERSTANDING_RELATION_SYSTEM_PROMPT, user_prompt
-
-
-def build_research_understanding_finding_synthesis_prompt(
+def build_finding_synthesis_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
     input_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -961,4 +907,4 @@ def build_research_understanding_finding_synthesis_prompt(
         "Finding meets them, return "
         "`{\"findings\": []}`."
     )
-    return _RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_SYSTEM_PROMPT, user_prompt
+    return _FINDING_SYNTHESIS_SYSTEM_PROMPT, user_prompt

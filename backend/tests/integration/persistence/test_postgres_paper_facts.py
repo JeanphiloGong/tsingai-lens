@@ -47,6 +47,7 @@ from tests.integration.persistence.test_postgres_source_artifacts import (
     _real_shape_artifacts,
     _task,
 )
+from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
 
@@ -457,9 +458,9 @@ def test_postgresql_enforces_paper_fact_contract() -> None:
     engine = create_engine(url)
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
     try:
+        reset_postgres_schema(engine)
         with engine.begin() as connection:
             config.attributes["connection"] = connection
-            command.downgrade(config, "base")
             command.upgrade(config, "head")
         sessions = build_session_factory(engine)
         PostgresAuthRepository(sessions).add_user(
@@ -569,8 +570,5 @@ def test_postgresql_enforces_paper_fact_contract() -> None:
             )
         assert repository.read("col_source") == facts
     finally:
-        with engine.begin() as connection:
-            connection.execute(text("TRUNCATE TABLE collections CASCADE"))
-            config.attributes["connection"] = connection
-            command.downgrade(config, "base")
+        reset_postgres_schema(engine)
         engine.dispose()

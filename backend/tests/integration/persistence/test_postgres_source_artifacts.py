@@ -45,6 +45,7 @@ from infra.persistence.postgres.models.source import SourceDocument as SourceDoc
 from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
+from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -733,9 +734,9 @@ def test_postgresql_enforces_source_structure_contract() -> None:
     engine = create_engine(url)
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
     try:
+        reset_postgres_schema(engine)
         with engine.begin() as connection:
             config.attributes["connection"] = connection
-            command.downgrade(config, "base")
             command.upgrade(config, "head")
         sessions = build_session_factory(engine)
         PostgresAuthRepository(sessions).add_user(
@@ -837,8 +838,5 @@ def test_postgresql_enforces_source_structure_contract() -> None:
             )
         assert repository.list_documents("col_source")[0].title == "Paper"
     finally:
-        with engine.begin() as connection:
-            connection.execute(text("DELETE FROM collections"))
-            config.attributes["connection"] = connection
-            command.downgrade(config, "base")
+        reset_postgres_schema(engine)
         engine.dispose()

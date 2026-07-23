@@ -13,7 +13,6 @@ from application.core.semantic_build.document_profile_service import (
 from application.source.task_service import TaskService
 from domain.ports import (
     ComparisonRepository,
-    ObjectiveRepository,
     PaperFactRepository,
     SourceArtifactRepository,
 )
@@ -28,14 +27,12 @@ class WorkspaceService:
         task_service: TaskService,
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
-        objective_repository: ObjectiveRepository,
         comparison_repository: ComparisonRepository,
         document_profile_service: DocumentProfileService,
     ) -> None:
         self.collection_service = collection_service
         self.task_service = task_service
         self.paper_fact_repository = paper_fact_repository
-        self.objective_repository = objective_repository
         self.comparison_repository = comparison_repository
         self.source_artifact_repository = source_artifact_repository
         self.document_profile_service = document_profile_service
@@ -45,15 +42,9 @@ class WorkspaceService:
             collection_id
         )
         paper_facts = self.paper_fact_repository.read(collection_id)
-        objective_facts = self.objective_repository.read(collection_id)
         comparison_facts = self.comparison_repository.read(collection_id)
-        objective_evidence_ready = bool(objective_facts.objective_evidence_units)
-        evidence_cards_generated = bool(
-            paper_facts.paper_facts_generated or objective_evidence_ready
-        )
-        evidence_cards_ready = bool(
-            paper_facts.evidence_cards_ready or objective_evidence_ready
-        )
+        evidence_cards_generated = paper_facts.paper_facts_generated
+        evidence_cards_ready = paper_facts.evidence_cards_ready
         comparison_rows_ready = bool(
             comparison_facts.comparable_results
             and any(
@@ -64,18 +55,13 @@ class WorkspaceService:
         graph_generated = bool(
             paper_facts.document_profiles
             and evidence_cards_generated
-            and (
-                objective_evidence_ready
-                or comparison_facts.comparison_artifacts_generated
-            )
+            and comparison_facts.comparison_artifacts_generated
         )
         graph_ready = bool(
             paper_facts.document_profiles
             and evidence_cards_ready
             and (
-                objective_evidence_ready
-                or objective_facts.objective_logic_chains
-                or comparison_facts.comparable_results
+                comparison_facts.comparable_results
                 or comparison_facts.collection_comparable_results
             )
         )

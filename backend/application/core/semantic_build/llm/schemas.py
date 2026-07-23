@@ -79,7 +79,7 @@ _OBJECTIVE_EVIDENCE_ROUTE_ROLES = {
     "modeling_or_prediction",
     "low_value_or_irrelevant",
 }
-_OBJECTIVE_EVIDENCE_UNIT_KINDS = {
+_OBJECTIVE_EVIDENCE_KINDS = {
     "measurement",
     "test_condition",
     "sample_context",
@@ -98,15 +98,7 @@ _OBJECTIVE_EVIDENCE_RESOLUTION_STATUSES = {
     "skipped",
     "unknown",
 }
-_RESEARCH_UNDERSTANDING_RELATION_TYPES = {
-    "causal",
-    "correlational",
-    "mechanistic",
-    "conditional",
-    "conflicting",
-    "comparative",
-}
-_RESEARCH_UNDERSTANDING_DIRECTIONS = {
+_FINDING_DIRECTIONS = {
     "increases",
     "decreases",
     "improves",
@@ -116,7 +108,7 @@ _RESEARCH_UNDERSTANDING_DIRECTIONS = {
     "conditional",
     "unknown",
 }
-_RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_STATUSES = {
+_FINDING_SYNTHESIS_STATUSES = {
     "agreement",
     "conflict",
     "condition_dependent",
@@ -799,7 +791,7 @@ class StructuredObjectiveMergeGroup(_StrictModel):
         return _normalize_list_container(value)
 
 
-class StructuredObjectivePaperFrame(_StrictModel):
+class StructuredPaperContributionDraft(_StrictModel):
     relevance: Literal["high", "medium", "low", "irrelevant", "uncertain"] = (
         "uncertain"
     )
@@ -855,7 +847,7 @@ class StructuredObjectivePaperFrame(_StrictModel):
         )
 
 
-class StructuredObjectiveEvidenceRoute(_StrictModel):
+class StructuredEvidenceSelection(_StrictModel):
     role: Literal[
         "current_experimental_evidence",
         "process_or_treatment",
@@ -879,20 +871,20 @@ class StructuredObjectiveEvidenceRoute(_StrictModel):
         )
 
 
-class StructuredObjectiveEvidenceRoutes(_StrictModel):
-    routes: list[StructuredObjectiveEvidenceRoute] = Field(
+class StructuredEvidenceSelections(_StrictModel):
+    selections: list[StructuredEvidenceSelection] = Field(
         default_factory=list,
         max_length=1,
     )
 
-    @field_validator("routes", mode="before")
+    @field_validator("selections", mode="before")
     @classmethod
-    def _normalize_routes(cls, value: object) -> object:
+    def _normalize_selections(cls, value: object) -> object:
         return _normalize_list_container(value)
 
 
-class StructuredObjectiveEvidenceUnit(_StrictModel):
-    unit_kind: Literal[
+class StructuredEvidenceExtraction(_StrictModel):
+    evidence_kind: Literal[
         "measurement",
         "test_condition",
         "sample_context",
@@ -924,12 +916,12 @@ class StructuredObjectiveEvidenceUnit(_StrictModel):
     ] = "partial"
     confidence: float = 0.0
 
-    @field_validator("unit_kind", mode="before")
+    @field_validator("evidence_kind", mode="before")
     @classmethod
-    def _normalize_unit_kind(cls, value: object) -> str:
+    def _normalize_evidence_kind(cls, value: object) -> str:
         return _normalize_underscored_choice(
             value,
-            allowed=_OBJECTIVE_EVIDENCE_UNIT_KINDS,
+            allowed=_OBJECTIVE_EVIDENCE_KINDS,
             default="unknown",
         )
 
@@ -967,78 +959,19 @@ class StructuredObjectiveEvidenceUnit(_StrictModel):
         return {}
 
 
-class StructuredObjectiveEvidenceUnits(_StrictModel):
-    evidence_units: list[StructuredObjectiveEvidenceUnit] = Field(
+class StructuredEvidenceExtractions(_StrictModel):
+    extractions: list[StructuredEvidenceExtraction] = Field(
         default_factory=list,
         max_length=1,
     )
 
-    @field_validator("evidence_units", mode="before")
+    @field_validator("extractions", mode="before")
     @classmethod
-    def _normalize_evidence_units(cls, value: object) -> object:
+    def _normalize_extractions(cls, value: object) -> object:
         return _normalize_list_container(value)
 
 
-class StructuredResearchUnderstandingRelation(_StrictModel):
-    relation_type: Literal[
-        "causal",
-        "correlational",
-        "mechanistic",
-        "conditional",
-        "conflicting",
-        "comparative",
-    ] = "conditional"
-    source_concept: str
-    target_concept: str
-    mediator_concepts: list[str] = Field(default_factory=list, max_length=5)
-    direction: Literal[
-        "increases",
-        "decreases",
-        "improves",
-        "reduces",
-        "changes",
-        "mixed",
-        "conditional",
-        "unknown",
-    ] = "unknown"
-    statement: str
-    conditions: list[str] = Field(default_factory=list, max_length=8)
-    evidence_unit_ids: list[str] = Field(default_factory=list, max_length=12)
-    confidence: float = 0.0
-    warnings: list[str] = Field(default_factory=list, max_length=6)
-
-    @field_validator("relation_type", mode="before")
-    @classmethod
-    def _normalize_relation_type(cls, value: object) -> str:
-        return _normalize_underscored_choice(
-            value,
-            allowed=_RESEARCH_UNDERSTANDING_RELATION_TYPES,
-            default="conditional",
-        )
-
-    @field_validator("direction", mode="before")
-    @classmethod
-    def _normalize_direction(cls, value: object) -> str:
-        return _normalize_underscored_choice(
-            value,
-            allowed=_RESEARCH_UNDERSTANDING_DIRECTIONS,
-            default="unknown",
-        )
-
-
-class StructuredResearchUnderstandingRelations(_StrictModel):
-    relations: list[StructuredResearchUnderstandingRelation] = Field(
-        default_factory=list,
-        max_length=8,
-    )
-
-    @field_validator("relations", mode="before")
-    @classmethod
-    def _normalize_relations(cls, value: object) -> object:
-        return _normalize_list_container(value)
-
-
-class StructuredResearchUnderstandingFindingOutcome(_StrictModel):
+class StructuredFindingSynthesisOutcome(_StrictModel):
     concept: str
     direction: Literal[
         "increases",
@@ -1051,22 +984,22 @@ class StructuredResearchUnderstandingFindingOutcome(_StrictModel):
         "unknown",
     ] = "unknown"
     statement: str
-    conflicting_evidence_unit_ids: list[str] = Field(default_factory=list, max_length=16)
+    conflicting_evidence_ids: list[str] = Field(default_factory=list, max_length=16)
 
     @field_validator("direction", mode="before")
     @classmethod
     def _normalize_direction(cls, value: object) -> str:
         return _normalize_underscored_choice(
             value,
-            allowed=_RESEARCH_UNDERSTANDING_DIRECTIONS,
+            allowed=_FINDING_DIRECTIONS,
             default="unknown",
         )
 
 
-class StructuredResearchUnderstandingFinding(_StrictModel):
+class StructuredFindingSynthesisItem(_StrictModel):
     result_set_id: str = Field(min_length=1)
     source_concept: str
-    outcomes: list[StructuredResearchUnderstandingFindingOutcome] = Field(
+    outcomes: list[StructuredFindingSynthesisOutcome] = Field(
         min_length=1,
         max_length=8,
     )
@@ -1078,8 +1011,8 @@ class StructuredResearchUnderstandingFinding(_StrictModel):
         "condition_dependent",
         "insufficient_confirmation",
     ] = "insufficient_confirmation"
-    context_evidence_unit_ids: list[str] = Field(default_factory=list, max_length=16)
-    mechanism_evidence_unit_ids: list[str] = Field(default_factory=list, max_length=16)
+    context_evidence_ids: list[str] = Field(default_factory=list, max_length=16)
+    mechanism_evidence_ids: list[str] = Field(default_factory=list, max_length=16)
     common_conditions: list[str] = Field(default_factory=list, max_length=10)
     incomparable_conditions: list[str] = Field(default_factory=list, max_length=10)
     confidence: float = 0.0
@@ -1090,13 +1023,13 @@ class StructuredResearchUnderstandingFinding(_StrictModel):
     def _normalize_synthesis_status(cls, value: object) -> str:
         return _normalize_underscored_choice(
             value,
-            allowed=_RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_STATUSES,
+            allowed=_FINDING_SYNTHESIS_STATUSES,
             default="insufficient_confirmation",
         )
 
 
-class StructuredResearchUnderstandingFindings(_StrictModel):
-    findings: list[StructuredResearchUnderstandingFinding] = Field(
+class StructuredFindingSynthesis(_StrictModel):
+    findings: list[StructuredFindingSynthesisItem] = Field(
         default_factory=list,
         max_length=6,
     )

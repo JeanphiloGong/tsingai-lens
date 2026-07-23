@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 from hashlib import sha1
 import json
@@ -15,24 +15,26 @@ from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
-from application.core.research_understanding_service import ResearchUnderstandingService
+from application.core.finding_synthesis_service import FindingSynthesisService
 from application.source.collection_service import CollectionService
 from domain.core import (
-    ObjectiveAnalysisWorkspace,
+    Finding,
+    FindingContext,
+    FindingDerivation,
+    FindingRelation,
+    ObjectiveAnalysis,
     ObjectiveContext,
-    ObjectiveEvidenceRoute,
-    ObjectiveEvidenceUnit,
+    ObjectiveEvidence,
     ObjectiveFactSet,
-    ObjectiveLogicChain,
-    ObjectivePaperFrame,
+    PaperContribution,
     PaperSkim,
     ResearchObjective,
-    ResearchUnderstanding,
     build_research_objective_id,
     is_question_shaped_objective,
+    normalize_objective_confidence,
+    normalize_objective_terms,
 )
 from domain.ports import (
-    ResearchUnderstandingRepository,
     ObjectiveRepository,
     PaperFactRepository,
     SourceArtifactRepository,
@@ -51,6 +53,276 @@ from .llm.schemas import (
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
+
+
+@dataclass(frozen=True)
+class ObjectiveAnalysisArtifacts:
+    """Canonical values produced by one versioned Objective analysis run."""
+
+    contributions: tuple[PaperContribution, ...]
+    evidence_records: tuple[ObjectiveEvidence, ...]
+    findings: tuple[Finding, ...]
+
+
+@dataclass(frozen=True)
+class PaperAnalysisFrame:
+    """Transient paper traversal state; never persisted or exposed by the API."""
+
+    objective_id: str
+    document_id: str
+    relevance: str
+    paper_role: str
+    background: str | None
+    material_match: tuple[str, ...]
+    changed_variables: tuple[str, ...]
+    measured_property_scope: tuple[str, ...]
+    test_environment_scope: tuple[str, ...]
+    relevant_sections: tuple[str, ...]
+    relevant_tables: tuple[str, ...]
+    excluded_tables: tuple[str, ...]
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperAnalysisFrame":
+        return cls(
+            objective_id=_transient_text(payload.get("objective_id")),
+            document_id=_transient_text(
+                payload.get("document_id") or payload.get("paper_id")
+            ),
+            relevance=_transient_text(payload.get("relevance")) or "uncertain",
+            paper_role=_transient_text(payload.get("paper_role")) or "uncertain",
+            background=_transient_optional_text(payload.get("background")),
+            material_match=normalize_objective_terms(payload.get("material_match")),
+            changed_variables=normalize_objective_terms(
+                payload.get("changed_variables")
+            ),
+            measured_property_scope=normalize_objective_terms(
+                payload.get("measured_property_scope")
+            ),
+            test_environment_scope=normalize_objective_terms(
+                payload.get("test_environment_scope")
+            ),
+            relevant_sections=normalize_objective_terms(
+                payload.get("relevant_sections")
+            ),
+            relevant_tables=normalize_objective_terms(payload.get("relevant_tables")),
+            excluded_tables=normalize_objective_terms(payload.get("excluded_tables")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "objective_id": self.objective_id,
+            "document_id": self.document_id,
+            "relevance": self.relevance,
+            "paper_role": self.paper_role,
+            "background": self.background,
+            "material_match": list(self.material_match),
+            "changed_variables": list(self.changed_variables),
+            "measured_property_scope": list(self.measured_property_scope),
+            "test_environment_scope": list(self.test_environment_scope),
+            "relevant_sections": list(self.relevant_sections),
+            "relevant_tables": list(self.relevant_tables),
+            "excluded_tables": list(self.excluded_tables),
+        }
+
+
+@dataclass(frozen=True)
+class EvidenceCandidate:
+    """Transient source-selection decision keyed by its stable Source locator."""
+
+    objective_id: str
+    document_id: str
+    source_kind: str
+    source_ref: str
+    role: str
+    extractable: bool
+    reason: str | None
+    table_schema: dict[str, Any]
+    column_roles: dict[str, Any]
+    join_keys: dict[str, Any]
+    join_plan: dict[str, Any]
+    confidence: float
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvidenceCandidate":
+        return cls(
+            objective_id=_transient_text(payload.get("objective_id")),
+            document_id=_transient_text(
+                payload.get("document_id") or payload.get("paper_id")
+            ),
+            source_kind=_transient_text(payload.get("source_kind")) or "text_window",
+            source_ref=_transient_text(payload.get("source_ref")),
+            role=_transient_text(payload.get("role")) or "low_value_or_irrelevant",
+            extractable=bool(payload.get("extractable")),
+            reason=_transient_optional_text(payload.get("reason")),
+            table_schema=_transient_mapping(payload.get("table_schema")),
+            column_roles=_transient_mapping(payload.get("column_roles")),
+            join_keys=_transient_mapping(payload.get("join_keys")),
+            join_plan=_transient_mapping(payload.get("join_plan")),
+            confidence=normalize_objective_confidence(payload.get("confidence")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "objective_id": self.objective_id,
+            "document_id": self.document_id,
+            "source_kind": self.source_kind,
+            "source_ref": self.source_ref,
+            "role": self.role,
+            "extractable": self.extractable,
+            "reason": self.reason,
+            "table_schema": dict(self.table_schema),
+            "column_roles": dict(self.column_roles),
+            "join_keys": dict(self.join_keys),
+            "join_plan": dict(self.join_plan),
+            "confidence": self.confidence,
+        }
+
+
+@dataclass(frozen=True)
+class ExtractedEvidenceDraft:
+    """Transient structured extraction before Source text is attached."""
+
+    evidence_id: str
+    objective_id: str
+    document_id: str
+    source_kind: str | None
+    source_ref: str | None
+    evidence_role: str | None
+    selection_reason: str | None
+    selection_status: str
+    evidence_kind: str
+    property_normalized: str | None
+    material_system: dict[str, Any]
+    sample_context: dict[str, Any]
+    process_context: dict[str, Any]
+    resolved_condition: dict[str, Any]
+    test_condition: dict[str, Any]
+    value_payload: dict[str, Any]
+    unit: str | None
+    baseline_context: dict[str, Any]
+    interpretation: str | None
+    source_refs: tuple[dict[str, Any], ...]
+    evidence_anchor_ids: tuple[str, ...]
+    join_keys: dict[str, Any]
+    resolution_status: str
+    confidence: float
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ExtractedEvidenceDraft":
+        source_refs = _transient_mapping_tuple(payload.get("source_refs"))
+        first_source_ref = source_refs[0] if source_refs else {}
+        objective_id = _transient_text(payload.get("objective_id"))
+        document_id = _transient_text(
+            payload.get("document_id") or payload.get("paper_id")
+        )
+        source_kind = _transient_optional_text(
+            payload.get("source_kind") or first_source_ref.get("source_kind")
+        )
+        source_ref = _transient_optional_text(
+            payload.get("source_ref") or first_source_ref.get("source_ref")
+        )
+        evidence_kind = _transient_text(payload.get("evidence_kind")) or "unknown"
+        property_normalized = _transient_optional_text(
+            payload.get("property_normalized")
+        )
+        evidence_id = _transient_optional_text(payload.get("evidence_id"))
+        if evidence_id is None:
+            identity = json.dumps(
+                [
+                    objective_id,
+                    document_id,
+                    evidence_kind,
+                    property_normalized,
+                    source_refs,
+                    payload.get("value_payload"),
+                ],
+                ensure_ascii=True,
+                sort_keys=True,
+                default=str,
+            )
+            evidence_id = f"evd_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
+        return cls(
+            evidence_id=evidence_id,
+            objective_id=objective_id,
+            document_id=document_id,
+            source_kind=source_kind,
+            source_ref=source_ref,
+            evidence_role=_transient_optional_text(
+                payload.get("evidence_role") or first_source_ref.get("evidence_role")
+            ),
+            selection_reason=_transient_optional_text(
+                payload.get("selection_reason")
+                or first_source_ref.get("selection_reason")
+            ),
+            selection_status=_transient_text(payload.get("selection_status"))
+            or "extracted",
+            evidence_kind=evidence_kind,
+            property_normalized=property_normalized,
+            material_system=_transient_mapping(payload.get("material_system")),
+            sample_context=_transient_mapping(payload.get("sample_context")),
+            process_context=_transient_mapping(payload.get("process_context")),
+            resolved_condition=_transient_mapping(payload.get("resolved_condition")),
+            test_condition=_transient_mapping(payload.get("test_condition")),
+            value_payload=_transient_mapping(payload.get("value_payload")),
+            unit=_transient_optional_text(payload.get("unit")),
+            baseline_context=_transient_mapping(payload.get("baseline_context")),
+            interpretation=_transient_optional_text(payload.get("interpretation")),
+            source_refs=source_refs,
+            evidence_anchor_ids=normalize_objective_terms(
+                payload.get("evidence_anchor_ids") or payload.get("anchor_ids")
+            ),
+            join_keys=_transient_mapping(payload.get("join_keys")),
+            resolution_status=_transient_text(payload.get("resolution_status"))
+            or "unknown",
+            confidence=normalize_objective_confidence(payload.get("confidence")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "evidence_id": self.evidence_id,
+            "objective_id": self.objective_id,
+            "document_id": self.document_id,
+            "source_kind": self.source_kind,
+            "source_ref": self.source_ref,
+            "evidence_role": self.evidence_role,
+            "selection_reason": self.selection_reason,
+            "selection_status": self.selection_status,
+            "evidence_kind": self.evidence_kind,
+            "property_normalized": self.property_normalized,
+            "material_system": dict(self.material_system),
+            "sample_context": dict(self.sample_context),
+            "process_context": dict(self.process_context),
+            "resolved_condition": dict(self.resolved_condition),
+            "test_condition": dict(self.test_condition),
+            "value_payload": dict(self.value_payload),
+            "unit": self.unit,
+            "baseline_context": dict(self.baseline_context),
+            "interpretation": self.interpretation,
+            "source_refs": [dict(item) for item in self.source_refs],
+            "evidence_anchor_ids": list(self.evidence_anchor_ids),
+            "join_keys": dict(self.join_keys),
+            "resolution_status": self.resolution_status,
+            "confidence": self.confidence,
+        }
+
+
+def _transient_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _transient_optional_text(value: Any) -> str | None:
+    text = _transient_text(value)
+    return text or None
+
+
+def _transient_mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _transient_mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(dict(item) for item in value if isinstance(item, Mapping))
 
 _SKIM_TEXT_PREVIEW_CHARS = 4000
 _SKIM_HEADING_LIMIT = 16
@@ -349,19 +621,17 @@ class ResearchObjectiveService:
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
         objective_repository: ObjectiveRepository,
-        research_understanding_repository: ResearchUnderstandingRepository,
         document_profile_service: DocumentProfileService,
-        research_understanding_service: ResearchUnderstandingService,
+        finding_synthesis_service: FindingSynthesisService,
         structured_extractor: CoreLLMStructuredExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
         self._structured_extractor = structured_extractor
         self.paper_fact_repository = paper_fact_repository
         self.objective_repository = objective_repository
-        self.research_understanding_repository = research_understanding_repository
         self.source_artifact_repository = source_artifact_repository
         self.document_profile_service = document_profile_service
-        self.research_understanding_service = research_understanding_service
+        self.finding_synthesis_service = finding_synthesis_service
 
     def read_paper_skims(self, collection_id: str) -> tuple[PaperSkim, ...]:
         self.collection_service.get_collection(collection_id)
@@ -373,220 +643,6 @@ class ResearchObjectiveService:
     ) -> tuple[ResearchObjective, ...]:
         self.collection_service.get_collection(collection_id)
         return self.objective_repository.read(collection_id).research_objectives
-
-    def read_objective_contexts(
-        self,
-        collection_id: str,
-    ) -> tuple[ObjectiveContext, ...]:
-        self.collection_service.get_collection(collection_id)
-        return self.objective_repository.read(collection_id).objective_contexts
-
-    def list_objective_workspaces(self, collection_id: str) -> dict[str, Any]:
-        active_facts = self._read_objective_workspace_facts(collection_id)
-        objectives = []
-        for objective in self.objective_repository.list_objective_workspaces(
-            collection_id
-        ):
-            facts = self.objective_repository.read(
-                collection_id,
-                build_id=objective.source_build_id,
-            )
-            objectives.append(
-                self._objective_list_item(
-                    self._display_objective_from_facts(objective, facts=facts),
-                    facts=facts,
-                    understanding=self._read_objective_understanding(
-                        collection_id,
-                        objective.objective_id,
-                    ),
-                )
-            )
-        return {
-            "collection_id": collection_id,
-            "state": self._objective_collection_state(
-                facts=active_facts,
-                objectives=objectives,
-            ),
-            "readiness": self._objective_workspace_readiness(active_facts),
-            "objectives": objectives,
-            "warnings": [],
-        }
-
-    def get_objective_research_view(
-        self,
-        collection_id: str,
-        objective_id: str,
-    ) -> dict[str, Any]:
-        self._read_objective_workspace_facts(collection_id)
-        objective = self.objective_repository.read_objective_workspace(
-            collection_id,
-            objective_id,
-        )
-        if objective is None:
-            raise ResearchObjectiveNotFoundError(collection_id, objective_id)
-        facts = self.objective_repository.read(
-            collection_id,
-            build_id=objective.source_build_id,
-        )
-        objective = self._display_objective_from_facts(objective, facts=facts)
-
-        context = next(
-            (
-                candidate
-                for candidate in facts.objective_contexts
-                if candidate.objective_id == objective_id
-            ),
-            None,
-        )
-        frames = [
-            frame
-            for frame in facts.objective_paper_frames
-            if frame.objective_id == objective_id
-        ]
-        routes = [
-            route.to_record()
-            for route in facts.objective_evidence_routes
-            if route.objective_id == objective_id
-        ]
-        raw_evidence_units = [
-            unit
-            for unit in facts.objective_evidence_units
-            if unit.objective_id == objective_id
-        ]
-        evidence_units = self._objective_detail_evidence_units(
-            tuple(raw_evidence_units),
-            objective_context=context,
-        )
-        logic_chains = [
-            chain
-            for chain in facts.objective_logic_chains
-            if chain.objective_id == objective_id
-        ]
-        logic_chain = self._objective_detail_logic_chain(
-            objective=objective,
-            objective_context=context,
-            source_logic_chain=self._select_objective_logic_chain(logic_chains),
-            evidence_units=evidence_units,
-        )
-        frame_views = self._objective_paper_frame_views(
-            frames,
-            collection_id=collection_id,
-            facts=facts,
-        )
-        payload = {
-            "collection_id": collection_id,
-            "state": self._objective_detail_state(objective.status),
-            "objective": objective.to_workspace_record(),
-            "objective_context": context.to_record() if context is not None else None,
-            "readiness": self._objective_workspace_readiness(
-                facts,
-                objective_id=objective_id,
-            ),
-            "paper_frames": frame_views,
-            "evidence_routes": routes,
-            "evidence_units": [unit.to_record() for unit in evidence_units],
-            "logic_chain": logic_chain.to_record() if logic_chain is not None else None,
-            "existing_comparison_rows": [],
-            "warnings": [],
-        }
-        understanding = self._read_objective_understanding(collection_id, objective_id)
-        payload["understanding"] = understanding
-        payload["review_summary"] = self._objective_review_summary(understanding)
-        return payload
-
-    def build_research_objectives(
-        self,
-        collection_id: str,
-        progress_callback: ProgressCallback | None = None,
-        *,
-        build_id: str,
-    ) -> tuple[ResearchObjective, ...]:
-        objective_inputs = self._build_objective_candidate_inputs(
-            collection_id,
-            progress_callback=progress_callback,
-            build_id=build_id,
-        )
-        artifacts = objective_inputs["artifacts"]
-        profiles_by_document_id = objective_inputs["profiles_by_document_id"]
-        blocks_by_document_id = objective_inputs["blocks_by_document_id"]
-        tables_by_document_id = objective_inputs["tables_by_document_id"]
-        table_cells_by_document_id = objective_inputs["table_cells_by_document_id"]
-        document_trees_by_document_id = objective_inputs[
-            "document_trees_by_document_id"
-        ]
-        extractor = objective_inputs["extractor"]
-        paper_skims = objective_inputs["paper_skims"]
-        research_objectives = objective_inputs["research_objectives"]
-        objective_contexts = objective_inputs["objective_contexts"]
-
-        objective_paper_frames = self._build_objective_paper_frames(
-            collection_id=collection_id,
-            extractor=extractor,
-            objectives=research_objectives,
-            objective_contexts=objective_contexts,
-            paper_skims=paper_skims,
-            documents=artifacts.documents,
-            profiles_by_document_id=profiles_by_document_id,
-            blocks_by_document_id=blocks_by_document_id,
-            tables_by_document_id=tables_by_document_id,
-            document_trees_by_document_id=document_trees_by_document_id,
-            progress_callback=progress_callback,
-        )
-        objective_evidence_routes = self._build_objective_evidence_routes(
-            collection_id=collection_id,
-            extractor=extractor,
-            objectives=research_objectives,
-            objective_contexts=objective_contexts,
-            objective_paper_frames=objective_paper_frames,
-            blocks_by_document_id=blocks_by_document_id,
-            tables_by_document_id=tables_by_document_id,
-            document_trees_by_document_id=document_trees_by_document_id,
-            progress_callback=progress_callback,
-        )
-        objective_evidence_units = self._build_objective_evidence_units(
-            collection_id=collection_id,
-            extractor=extractor,
-            objectives=research_objectives,
-            objective_contexts=objective_contexts,
-            objective_paper_frames=objective_paper_frames,
-            objective_evidence_routes=objective_evidence_routes,
-            blocks_by_document_id=blocks_by_document_id,
-            tables_by_document_id=tables_by_document_id,
-            document_trees_by_document_id=document_trees_by_document_id,
-            table_cells_by_document_id=table_cells_by_document_id,
-            progress_callback=progress_callback,
-        )
-        objective_logic_chains = self._build_objective_logic_chains(
-            collection_id=collection_id,
-            objectives=research_objectives,
-            objective_contexts=objective_contexts,
-            objective_evidence_units=objective_evidence_units,
-            progress_callback=progress_callback,
-        )
-
-        self.objective_repository.replace(
-            collection_id,
-            build_id,
-            ObjectiveFactSet(
-                research_objectives_ready=True,
-                paper_skims=paper_skims,
-                research_objectives=research_objectives,
-                objective_contexts=objective_contexts,
-                objective_paper_frames=objective_paper_frames,
-                objective_evidence_routes=objective_evidence_routes,
-                objective_evidence_units=objective_evidence_units,
-                objective_logic_chains=objective_logic_chains,
-            ),
-        )
-        logger.info(
-            "Research objective build finished collection_id=%s paper_skim_count=%s objective_count=%s objective_evidence_units=%s objective_logic_chains=%s",
-            collection_id,
-            len(paper_skims),
-            len(research_objectives),
-            len(objective_evidence_units),
-            len(objective_logic_chains),
-        )
-        return research_objectives
 
     def build_objective_candidates(
         self,
@@ -607,7 +663,6 @@ class ResearchObjectiveService:
                 research_objectives_ready=True,
                 paper_skims=objective_inputs["paper_skims"],
                 research_objectives=objective_inputs["research_objectives"],
-                objective_contexts=objective_inputs["objective_contexts"],
             ),
         )
         logger.info(
@@ -621,20 +676,21 @@ class ResearchObjectiveService:
     def analyze_objective(
         self,
         collection_id: str,
-        objective_id: str,
+        analysis: ObjectiveAnalysis,
         progress_callback: ProgressCallback | None = None,
-    ) -> ResearchUnderstanding:
-        objective = self.objective_repository.read_objective_workspace(
-            collection_id,
-            objective_id,
+    ) -> ObjectiveAnalysisArtifacts:
+        if analysis.collection_id != collection_id:
+            raise ValueError("analysis belongs to another collection")
+        objective = self.objective_repository.read_objective(
+            collection_id, analysis.objective_id
         )
         if objective is None:
-            raise ResearchObjectiveNotFoundError(collection_id, objective_id)
-        if objective.source_build_id is None:
-            raise RuntimeError(f"research objective has no source build: {objective_id}")
+            raise ResearchObjectiveNotFoundError(collection_id, analysis.objective_id)
+        if objective.active_analysis_version != analysis.analysis_version:
+            raise ValueError("analysis is not the active objective version")
         objective_inputs = self._build_objective_analysis_inputs(
             collection_id,
-            build_id=objective.source_build_id,
+            build_id=analysis.source_build_id,
         )
         objective_contexts = self._build_objective_contexts(
             paper_skims=objective_inputs["paper_skims"],
@@ -642,15 +698,7 @@ class ResearchObjectiveService:
             tables=objective_inputs["artifacts"].tables,
         )
         context = objective_contexts[0] if objective_contexts else None
-        workspace = ObjectiveAnalysisWorkspace(
-            collection_id=collection_id,
-            objective=objective,
-            objective_context=context,
-            paper_frames=(),
-            evidence_units=(),
-            logic_chain=None,
-        )
-        objective_paper_frames = self._build_objective_paper_frames(
+        paper_frames = self._build_objective_paper_frames(
             collection_id=collection_id,
             extractor=objective_inputs["extractor"],
             objectives=(objective,),
@@ -665,15 +713,12 @@ class ResearchObjectiveService:
             ],
             progress_callback=progress_callback,
         )
-        workspace = replace(workspace, paper_frames=objective_paper_frames)
-        objective_evidence_routes = self._build_objective_evidence_routes(
+        evidence_candidates = self._build_objective_evidence_routes(
             collection_id=collection_id,
             extractor=objective_inputs["extractor"],
-            objectives=(workspace.objective,),
-            objective_contexts=(workspace.objective_context,)
-            if workspace.objective_context is not None
-            else (),
-            objective_paper_frames=workspace.paper_frames,
+            objectives=(objective,),
+            objective_contexts=(context,) if context is not None else (),
+            objective_paper_frames=paper_frames,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
             document_trees_by_document_id=objective_inputs[
@@ -681,15 +726,13 @@ class ResearchObjectiveService:
             ],
             progress_callback=progress_callback,
         )
-        objective_evidence_units = self._build_objective_evidence_units(
+        evidence_drafts = self._build_objective_evidence(
             collection_id=collection_id,
             extractor=objective_inputs["extractor"],
-            objectives=(workspace.objective,),
-            objective_contexts=(workspace.objective_context,)
-            if workspace.objective_context is not None
-            else (),
-            objective_paper_frames=workspace.paper_frames,
-            objective_evidence_routes=objective_evidence_routes,
+            objectives=(objective,),
+            objective_contexts=(context,) if context is not None else (),
+            objective_paper_frames=paper_frames,
+            objective_evidence_routes=evidence_candidates,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
             document_trees_by_document_id=objective_inputs[
@@ -700,38 +743,273 @@ class ResearchObjectiveService:
             ],
             progress_callback=progress_callback,
         )
-        objective_logic_chains = self._build_objective_logic_chains(
-            collection_id=collection_id,
-            objectives=(workspace.objective,),
-            objective_contexts=(workspace.objective_context,)
-            if workspace.objective_context is not None
-            else (),
-            objective_evidence_units=objective_evidence_units,
-            progress_callback=progress_callback,
-        )
-        evidence_units = self._objective_detail_evidence_units(
-            objective_evidence_units,
+        evidence_drafts = self._objective_detail_evidence(
+            evidence_drafts,
             objective_context=context,
         )
-        logic_chain = self._objective_detail_logic_chain(
-            objective=workspace.objective,
-            objective_context=workspace.objective_context,
-            source_logic_chain=self._select_objective_logic_chain(
-                objective_logic_chains
-            ),
-            evidence_units=evidence_units,
+        contributions = self._analysis_contributions(
+            collection_id=collection_id,
+            analysis=analysis,
+            frames=paper_frames,
         )
-        workspace = replace(
-            workspace,
-            evidence_units=evidence_units,
-            logic_chain=logic_chain,
+        evidence_records = self._analysis_evidence_records(
+            collection_id=collection_id,
+            analysis=analysis,
+            drafts=evidence_drafts,
+            blocks_by_document_id=objective_inputs["blocks_by_document_id"],
+            tables_by_document_id=objective_inputs["tables_by_document_id"],
+            figures_by_document_id=objective_inputs["figures_by_document_id"],
         )
-        understanding = ResearchUnderstanding.from_mapping(
-            self.research_understanding_service.synthesize_objective_understanding(
-                workspace.to_record()
+        findings = self.finding_synthesis_service.synthesize(
+            collection_id=collection_id,
+            objective=objective,
+            analysis=analysis,
+            contributions=contributions,
+            evidence_records=evidence_records,
+        )
+        return ObjectiveAnalysisArtifacts(
+            contributions=contributions,
+            evidence_records=evidence_records,
+            findings=findings,
+        )
+
+    def _analysis_contributions(
+        self,
+        *,
+        collection_id: str,
+        analysis: ObjectiveAnalysis,
+        frames: tuple[PaperAnalysisFrame, ...],
+    ) -> tuple[PaperContribution, ...]:
+        contributions: list[PaperContribution] = []
+        for frame in frames:
+            excluded = frame.relevance == "irrelevant" or frame.paper_role == "irrelevant"
+            contributions.append(
+                PaperContribution(
+                    collection_id=collection_id,
+                    objective_id=analysis.objective_id,
+                    analysis_version=analysis.analysis_version,
+                    document_id=frame.document_id,
+                    analysis_status="excluded" if excluded else "analyzed",
+                    relevance=frame.relevance,
+                    paper_role=frame.paper_role,
+                    contribution_summary=frame.background,
+                    material_match=frame.material_match,
+                    changed_variables=frame.changed_variables,
+                    measured_property_scope=frame.measured_property_scope,
+                    test_environment_scope=frame.test_environment_scope,
+                    exclusion_reason=(
+                        frame.background or "Paper is not relevant to this objective."
+                        if excluded
+                        else None
+                    ),
+                    warnings=(),
+                    confidence=1.0 if frame.relevance == "high" else 0.7,
+                )
             )
-        )
-        return understanding
+        return tuple(contributions)
+
+    def _analysis_evidence_records(
+        self,
+        *,
+        collection_id: str,
+        analysis: ObjectiveAnalysis,
+        drafts: tuple[ExtractedEvidenceDraft, ...],
+        blocks_by_document_id: Mapping[str, list[Any]],
+        tables_by_document_id: Mapping[str, list[Any]],
+        figures_by_document_id: Mapping[str, list[Any]],
+    ) -> tuple[ObjectiveEvidence, ...]:
+        records: list[ObjectiveEvidence] = []
+        seen: set[str] = set()
+        for draft in drafts:
+            source = self._canonical_evidence_source(
+                draft,
+                blocks_by_document_id=blocks_by_document_id,
+                tables_by_document_id=tables_by_document_id,
+                figures_by_document_id=figures_by_document_id,
+            )
+            if source is None or draft.evidence_id in seen:
+                continue
+            seen.add(draft.evidence_id)
+            evidence_role = self._canonical_evidence_role(draft)
+            evidence_kind = self._canonical_evidence_kind(draft.evidence_kind)
+            records.append(
+                ObjectiveEvidence(
+                    collection_id=collection_id,
+                    objective_id=analysis.objective_id,
+                    analysis_version=analysis.analysis_version,
+                    evidence_id=draft.evidence_id[:128],
+                    document_id=draft.document_id,
+                    source_kind=source["source_kind"],
+                    source_ref=source["source_ref"],
+                    source_excerpt=source["source_excerpt"],
+                    page_numbers=source["page_numbers"],
+                    related_source_refs=source["related_source_refs"],
+                    evidence_role=evidence_role,
+                    selection_status="extracted",
+                    selection_reason=draft.selection_reason,
+                    evidence_kind=evidence_kind,
+                    property_normalized=draft.property_normalized,
+                    material_system=dict(draft.material_system),
+                    sample_context=dict(draft.sample_context),
+                    process_context=dict(draft.process_context),
+                    test_condition=dict(draft.test_condition),
+                    resolved_condition=dict(draft.resolved_condition),
+                    value_payload=dict(draft.value_payload),
+                    unit=draft.unit,
+                    baseline_context=dict(draft.baseline_context),
+                    interpretation=draft.interpretation,
+                    join_keys=dict(draft.join_keys),
+                    anchor_ids=draft.evidence_anchor_ids,
+                    resolution_status=(
+                        draft.resolution_status
+                        if draft.resolution_status in {"resolved", "partial"}
+                        else "partial"
+                    ),
+                    failure_reason=None,
+                    confidence=draft.confidence,
+                )
+            )
+        return tuple(records)
+
+    def _canonical_evidence_source(
+        self,
+        draft: ExtractedEvidenceDraft,
+        *,
+        blocks_by_document_id: Mapping[str, list[Any]],
+        tables_by_document_id: Mapping[str, list[Any]],
+        figures_by_document_id: Mapping[str, list[Any]],
+    ) -> dict[str, Any] | None:
+        candidates = [
+            {
+                "source_kind": draft.source_kind,
+                "source_ref": draft.source_ref,
+            },
+            *[dict(value) for value in draft.source_refs],
+        ]
+        related: list[dict[str, Any]] = []
+        for candidate in candidates:
+            source_kind = _transient_text(candidate.get("source_kind"))
+            source_ref = _transient_text(candidate.get("source_ref"))
+            if not source_ref:
+                continue
+            normalized_kind = "text_window" if source_kind in {"block", "text"} else source_kind
+            located = self._source_excerpt_for_locator(
+                document_id=draft.document_id,
+                source_kind=normalized_kind,
+                source_ref=source_ref,
+                blocks_by_document_id=blocks_by_document_id,
+                tables_by_document_id=tables_by_document_id,
+                figures_by_document_id=figures_by_document_id,
+            )
+            locator = {
+                "source_kind": normalized_kind or "text_window",
+                "source_ref": source_ref,
+            }
+            page = candidate.get("page")
+            if page not in (None, ""):
+                locator["page"] = page
+            related.append(locator)
+            if located is None:
+                continue
+            return {
+                "source_kind": located["source_kind"],
+                "source_ref": source_ref,
+                "source_excerpt": located["source_excerpt"],
+                "page_numbers": ((located["page"],) if located["page"] else ()),
+                "related_source_refs": tuple(related),
+            }
+        return None
+
+    @staticmethod
+    def _source_excerpt_for_locator(
+        *,
+        document_id: str,
+        source_kind: str,
+        source_ref: str,
+        blocks_by_document_id: Mapping[str, list[Any]],
+        tables_by_document_id: Mapping[str, list[Any]],
+        figures_by_document_id: Mapping[str, list[Any]],
+    ) -> dict[str, Any] | None:
+        if source_kind == "text_window":
+            for block in blocks_by_document_id.get(document_id, []):
+                if str(getattr(block, "block_id", "")) == source_ref:
+                    text = str(getattr(block, "text", "")).strip()
+                    if text:
+                        return {
+                            "source_kind": "text_window",
+                            "source_excerpt": text[:12_000],
+                            "page": getattr(block, "page", None),
+                        }
+        elif source_kind == "table":
+            for table in tables_by_document_id.get(document_id, []):
+                if str(getattr(table, "table_id", "")) == source_ref:
+                    record = table.to_record()
+                    text = str(
+                        record.get("table_markdown")
+                        or record.get("table_text")
+                        or record.get("caption_text")
+                        or ""
+                    ).strip()
+                    if text:
+                        return {
+                            "source_kind": "table",
+                            "source_excerpt": text[:12_000],
+                            "page": getattr(table, "page", None),
+                        }
+        elif source_kind == "figure":
+            for figure in figures_by_document_id.get(document_id, []):
+                if str(getattr(figure, "figure_id", "")) == source_ref:
+                    text = str(getattr(figure, "caption_text", "") or "").strip()
+                    if text:
+                        return {
+                            "source_kind": "figure",
+                            "source_excerpt": text[:12_000],
+                            "page": getattr(figure, "page", None),
+                        }
+        return None
+
+    @staticmethod
+    def _canonical_evidence_role(draft: ExtractedEvidenceDraft) -> str:
+        role = _transient_text(draft.evidence_role)
+        if role in {
+            "direct_result",
+            "condition_context",
+            "mechanism_context",
+            "baseline_context",
+            "comparison_context",
+            "background_context",
+            "contradictory_result",
+            "irrelevant",
+        }:
+            return role
+        if role == "mediator_context" or draft.evidence_kind == "characterization":
+            return "mechanism_context"
+        if role == "background_context":
+            return "background_context"
+        if draft.evidence_kind in {"test_condition", "sample_context", "process_context"}:
+            return "condition_context"
+        if draft.evidence_kind == "baseline_reference":
+            return "baseline_context"
+        if draft.evidence_kind in {"measurement", "comparison", "interpretation"}:
+            return "direct_result"
+        return "background_context"
+
+    @staticmethod
+    def _canonical_evidence_kind(evidence_kind: str) -> str:
+        if evidence_kind in {
+            "measurement",
+            "test_condition",
+            "sample_context",
+            "process_context",
+            "characterization",
+            "baseline_reference",
+            "comparison",
+            "interpretation",
+            "mixed",
+            "unknown",
+        }:
+            return evidence_kind
+        return "unknown"
 
     def _build_objective_candidate_inputs(
         self,
@@ -841,13 +1119,18 @@ class ResearchObjectiveService:
         research_objectives = tuple(
             objective
             for objective in (
-                self._normalize_research_objective(
-                    self._canonicalize_objective_document_ids(
-                        ResearchObjective.from_mapping(item.model_dump()),
-                        documents=artifacts.documents,
+                self._canonicalize_objective_document_ids(
+                    self._normalize_research_objective(
+                        ResearchObjective.from_mapping(
+                            {
+                                **item.model_dump(),
+                                "collection_id": collection_id,
+                            }
+                        ),
+                        skim_by_document_id=skim_by_document_id,
+                        paper_skims=tuple(paper_skims),
                     ),
-                    skim_by_document_id=skim_by_document_id,
-                    paper_skims=tuple(paper_skims),
+                    documents=artifacts.documents,
                 )
                 for item in parsed_objectives.objectives
             )
@@ -964,7 +1247,6 @@ class ResearchObjectiveService:
                 **source_inputs,
                 "paper_skims": facts.paper_skims,
                 "research_objectives": facts.research_objectives,
-                "objective_contexts": facts.objective_contexts,
             }
         raise ResearchObjectivesNotReadyError(collection_id)
 
@@ -1023,79 +1305,26 @@ class ResearchObjectiveService:
                 progress_detail.get("phase"),
             )
 
-    def _read_objective_workspace_facts(self, collection_id: str):
-        self.collection_service.get_collection(collection_id)
-        facts = self.objective_repository.read(collection_id)
-        if facts.research_objectives_ready:
-            return facts
-        if not self.collection_service.list_files(collection_id):
-            return facts
-        raise ResearchObjectivesNotReadyError(collection_id)
-
-    def _objective_workspace_readiness(
+    def _objective_detail_evidence(
         self,
-        facts,
-        *,
-        objective_id: str | None = None,
-    ) -> dict[str, bool]:
-        frames = self._filter_objective_records(
-            facts.objective_paper_frames,
-            objective_id=objective_id,
-        )
-        routes = self._filter_objective_records(
-            facts.objective_evidence_routes,
-            objective_id=objective_id,
-        )
-        evidence_units = self._filter_objective_records(
-            facts.objective_evidence_units,
-            objective_id=objective_id,
-        )
-        logic_chains = self._filter_objective_records(
-            facts.objective_logic_chains,
-            objective_id=objective_id,
-        )
-        return {
-            "objectives_ready": bool(facts.research_objectives_ready),
-            "frames_ready": bool(frames),
-            "routes_ready": bool(routes),
-            "evidence_units_ready": bool(evidence_units),
-            "logic_chain_ready": bool(logic_chains),
-        }
-
-    def _filter_objective_records(
-        self,
-        records,
-        *,
-        objective_id: str | None,
-    ) -> tuple[Any, ...]:
-        if objective_id is None:
-            return tuple(records)
-        return tuple(
-            record
-            for record in records
-            if getattr(record, "objective_id", None) == objective_id
-        )
-
-    def _objective_detail_evidence_units(
-        self,
-        evidence_units: tuple[ObjectiveEvidenceUnit, ...],
+        evidence_items: tuple[ExtractedEvidenceDraft, ...],
         *,
         objective_context: ObjectiveContext | None,
-    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+    ) -> tuple[ExtractedEvidenceDraft, ...]:
         if (
             objective_context is None
             or not objective_context.target_property_axes
-            or not evidence_units
+            or not evidence_items
         ):
-            return evidence_units
+            return evidence_items
         target_axes = self._objective_target_property_axes(objective_context)
         if not target_axes:
-            return evidence_units
+            return evidence_items
 
         target_units = tuple(
             unit
-            for unit in evidence_units
-            if self._objective_evidence_unit_matches_target_property(
+            for unit in evidence_items
+            if self._objective_evidence_matches_target_property(
                 unit,
                 target_axes=target_axes,
             )
@@ -1113,12 +1342,12 @@ class ResearchObjectiveService:
             for source_ref in unit.source_refs
             if source_ref.get("source_ref")
         }
-        selected_ids = {unit.evidence_unit_id for unit in target_units}
+        selected_ids = {unit.evidence_id for unit in target_units}
         selected = list(target_units)
-        for unit in evidence_units:
-            if unit.evidence_unit_id in selected_ids or unit.property_normalized:
+        for unit in evidence_items:
+            if unit.evidence_id in selected_ids or unit.property_normalized:
                 continue
-            if unit.unit_kind not in {
+            if unit.evidence_kind not in {
                 "process_context",
                 "sample_context",
                 "test_condition",
@@ -1136,19 +1365,19 @@ class ResearchObjectiveService:
                 not source_refs or bool(source_refs & target_source_refs)
             ):
                 selected.append(unit)
-                selected_ids.add(unit.evidence_unit_id)
+                selected_ids.add(unit.evidence_id)
         return tuple(selected)
 
-    def _objective_evidence_unit_matches_target_property(
+    def _objective_evidence_matches_target_property(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
         *,
         target_axes: tuple[str, ...],
     ) -> bool:
-        if self._objective_evidence_unit_is_relative_change_interpretation(unit):
+        if self._objective_evidence_is_relative_change_interpretation(unit):
             return False
         if (
-            unit.unit_kind == "measurement"
+            unit.evidence_kind == "measurement"
             and self._objective_measurement_numeric_value(unit) is None
         ):
             return False
@@ -1157,7 +1386,7 @@ class ResearchObjectiveService:
             target_axes=target_axes,
         ):
             return True
-        if unit.unit_kind in {"test_condition", "sample_context", "process_context"}:
+        if unit.evidence_kind in {"test_condition", "sample_context", "process_context"}:
             return False
         text = " ".join(
             value
@@ -1172,11 +1401,11 @@ class ResearchObjectiveService:
             for axis in target_axes
         )
 
-    def _objective_evidence_unit_is_relative_change_interpretation(
+    def _objective_evidence_is_relative_change_interpretation(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
     ) -> bool:
-        if unit.unit_kind != "interpretation" or unit.baseline_context:
+        if unit.evidence_kind != "interpretation" or unit.baseline_context:
             return False
         text = " ".join(
             value
@@ -1232,184 +1461,6 @@ class ResearchObjectiveService:
             for expanded_axis in expanded_axes
         )
 
-    def _objective_detail_logic_chain(
-        self,
-        *,
-        objective: ResearchObjective,
-        objective_context: ObjectiveContext | None,
-        source_logic_chain: ObjectiveLogicChain | None,
-        evidence_units: tuple[ObjectiveEvidenceUnit, ...],
-    ) -> ObjectiveLogicChain | None:
-        if source_logic_chain is None or not evidence_units:
-            return None
-        chain_payload = self._objective_logic_chain_payload(
-            objective=objective,
-            objective_context=objective_context,
-            units=evidence_units,
-        )
-        return ObjectiveLogicChain.from_mapping(
-            {
-                "logic_chain_id": source_logic_chain.logic_chain_id,
-                "objective_id": objective.objective_id,
-                "chain_scope": source_logic_chain.chain_scope,
-                "document_id": source_logic_chain.document_id,
-                "question": objective.question,
-                "evidence_unit_ids": [
-                    unit.evidence_unit_id
-                    for unit in evidence_units
-                ],
-                "chain_payload": chain_payload,
-                "summary": self._objective_logic_chain_summary(chain_payload),
-                "confidence": source_logic_chain.confidence,
-            }
-        )
-
-
-    def _objective_list_item(
-        self,
-        objective: ResearchObjective,
-        *,
-        facts,
-        understanding,
-    ) -> dict[str, Any]:
-        frames = self._filter_objective_records(
-            facts.objective_paper_frames,
-            objective_id=objective.objective_id,
-        )
-        routes = self._filter_objective_records(
-            facts.objective_evidence_routes,
-            objective_id=objective.objective_id,
-        )
-        evidence_units = self._filter_objective_records(
-            facts.objective_evidence_units,
-            objective_id=objective.objective_id,
-        )
-        logic_chains = self._filter_objective_records(
-            facts.objective_logic_chains,
-            objective_id=objective.objective_id,
-        )
-        record = objective.to_workspace_record()
-        record.update(
-            {
-                "state": self._objective_detail_state(objective.status),
-                "review_summary": self._objective_review_summary(understanding),
-                "paper_frame_count": len(frames),
-                "evidence_route_count": len(routes),
-                "evidence_unit_count": len(evidence_units),
-                "logic_chain_count": len(logic_chains),
-            }
-        )
-        return record
-
-    def _display_objective_from_facts(
-        self,
-        objective: ResearchObjective,
-        *,
-        facts,
-    ) -> ResearchObjective:
-        evidence_units = self._filter_objective_records(
-            facts.objective_evidence_units,
-            objective_id=objective.objective_id,
-        )
-        context = next(
-            (
-                candidate
-                for candidate in facts.objective_contexts
-                if candidate.objective_id == objective.objective_id
-            ),
-            None,
-        )
-        process_axes = self._display_process_axes(
-            objective,
-            context=context,
-            evidence_units=evidence_units,
-        )
-        property_axes = (
-            list(context.target_property_axes)
-            if context is not None and context.target_property_axes
-            else list(objective.property_axes)
-        )
-        if (
-            tuple(process_axes) == objective.process_axes
-            and tuple(property_axes) == objective.property_axes
-        ):
-            return objective
-        payload = objective.to_record()
-        payload["process_axes"] = process_axes
-        payload["property_axes"] = property_axes
-        payload["question"] = self._build_research_objective_question(payload)
-        payload["comparison_intent"] = self._build_comparison_intent(payload)
-        payload.update(
-            {
-                "source_build_id": objective.source_build_id,
-                "status": objective.status,
-                "analysis_error": objective.analysis_error,
-                "analysis_progress": objective.analysis_progress,
-                "created_at": objective.created_at,
-                "updated_at": objective.updated_at,
-            }
-        )
-        return ResearchObjective.from_mapping(payload)
-
-    def _display_process_axes(
-        self,
-        objective: ResearchObjective,
-        *,
-        context: ObjectiveContext | None,
-        evidence_units,
-    ) -> list[str]:
-        candidate_axes: list[str] = []
-        if context is not None:
-            candidate_axes.extend(context.variable_process_axes)
-            candidate_axes.extend(context.process_context_axes)
-        if not candidate_axes:
-            candidate_axes.extend(objective.process_axes)
-        observed_keys = self._objective_observed_process_axis_keys(evidence_units)
-        selected: list[str] = []
-        seen: set[str] = set()
-        for axis in candidate_axes:
-            key = self._axis_key(axis)
-            if not key:
-                continue
-            if observed_keys and not self._process_axis_matches_observed_key(
-                key,
-                observed_keys,
-            ):
-                continue
-            self._append_unique_axis(selected, seen, axis)
-        if selected:
-            return selected[:6]
-        return list(objective.process_axes[:6])
-
-    def _objective_observed_process_axis_keys(self, evidence_units) -> set[str]:
-        keys: set[str] = set()
-        for unit in evidence_units:
-            for mapping in (unit.process_context, unit.resolved_condition):
-                for key, value in mapping.items():
-                    if self._has_observed_evidence_value(value):
-                        keys.add(self._axis_key(key))
-                    if isinstance(value, str):
-                        keys.add(self._axis_key(value))
-        return {key for key in keys if key}
-
-    def _process_axis_matches_observed_key(
-        self,
-        axis_key: str,
-        observed_keys: set[str],
-    ) -> bool:
-        axis_tokens = self._axis_token_set(axis_key)
-        if not axis_tokens:
-            return False
-        for observed_key in observed_keys:
-            if axis_key == observed_key:
-                return True
-            observed_tokens = self._axis_token_set(observed_key)
-            if axis_tokens.issubset(observed_tokens) or observed_tokens.issubset(
-                axis_tokens
-            ):
-                return True
-        return False
-
     def _has_observed_evidence_value(self, value: Any) -> bool:
         if value in (None, "", [], {}):
             return False
@@ -1424,109 +1475,6 @@ class ResearchObjectiveService:
         }:
             return False
         return True
-
-    def _objective_collection_state(
-        self,
-        *,
-        facts,
-        objectives: list[dict[str, Any]],
-    ) -> str:
-        if not objectives:
-            return "empty"
-        if any(objective["state"] == "ready" for objective in objectives):
-            return "ready"
-        if any(
-            objective["state"] in {"partial", "processing"}
-            for objective in objectives
-        ):
-            return "partial"
-        if facts.research_objectives_ready:
-            return "partial"
-        return "empty"
-
-    @staticmethod
-    def _objective_detail_state(status: str) -> str:
-        if status in {"queued", "running"}:
-            return "processing"
-        if status == "ready":
-            return "ready"
-        if status == "failed":
-            return "failed"
-        return "partial"
-
-    def _read_objective_understanding(
-        self,
-        collection_id: str,
-        objective_id: str,
-    ) -> dict[str, Any] | None:
-        understanding = self.research_understanding_repository.read_objective_understanding(
-            collection_id,
-            objective_id,
-        )
-        return self.research_understanding_service.with_presentation(
-            understanding,
-            recover_source_findings=False,
-        )
-
-    @staticmethod
-    def _objective_review_summary(understanding) -> dict[str, int]:
-        presentation = (understanding or {}).get("presentation") or {}
-        return {
-            "primary_finding_count": len(presentation.get("primary_findings") or []),
-            "review_candidate_count": len(
-                presentation.get("review_queue_findings") or []
-            ),
-        }
-
-    def _select_objective_logic_chain(self, logic_chains):
-        for chain in logic_chains:
-            if chain.chain_scope == "objective":
-                return chain
-        return logic_chains[0] if logic_chains else None
-
-    def _objective_paper_frame_views(
-        self,
-        frames: list[ObjectivePaperFrame],
-        *,
-        collection_id: str,
-        facts,
-    ) -> list[dict[str, Any]]:
-        metadata_by_document_id = self._objective_document_metadata(
-            collection_id,
-            facts,
-        )
-        return [
-            {
-                **frame.to_record(),
-                "title": metadata_by_document_id.get(frame.document_id, {}).get("title"),
-                "source_filename": metadata_by_document_id.get(
-                    frame.document_id,
-                    {},
-                ).get("source_filename"),
-            }
-            for frame in frames
-        ]
-
-    def _objective_document_metadata(
-        self,
-        collection_id: str,
-        facts,
-    ) -> dict[str, dict[str, str | None]]:
-        metadata: dict[str, dict[str, str | None]] = {}
-        for skim in facts.paper_skims:
-            metadata[skim.document_id] = {
-                "title": skim.title,
-                "source_filename": skim.source_filename,
-            }
-        for profile in self.paper_fact_repository.read(collection_id).document_profiles:
-            metadata[profile.document_id] = {
-                "title": profile.title or metadata.get(profile.document_id, {}).get("title"),
-                "source_filename": (
-                    profile.source_filename
-                    or metadata.get(profile.document_id, {}).get("source_filename")
-                ),
-            }
-        return metadata
 
     def _progress_document_metadata(
         self,
@@ -1555,7 +1503,7 @@ class ResearchObjectiveService:
         tables_by_document_id: dict[str, list[Any]],
         document_trees_by_document_id: dict[str, SourceDocumentTree],
         progress_callback: ProgressCallback | None = None,
-    ) -> tuple[ObjectivePaperFrame, ...]:
+    ) -> tuple[PaperAnalysisFrame, ...]:
         context_by_objective_id = {
             context.objective_id: context
             for context in objective_contexts
@@ -1565,7 +1513,7 @@ class ResearchObjectiveService:
             for skim in paper_skims
             if skim.document_id
         }
-        frames: list[ObjectivePaperFrame] = []
+        frames: list[PaperAnalysisFrame] = []
         logger.info(
             "Research objective paper framing started collection_id=%s objective_count=%s document_count=%s",
             collection_id,
@@ -1627,7 +1575,7 @@ class ResearchObjectiveService:
                     document_tree=document_trees_by_document_id.get(document_id),
                 )
                 try:
-                    parsed = extractor.frame_objective_paper(payload)
+                    parsed = extractor.assess_objective_paper(payload)
                     record = parsed.model_dump()
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
@@ -1672,7 +1620,7 @@ class ResearchObjectiveService:
                         "excluded_tables": excluded_tables,
                     }
                 )
-                frame = ObjectivePaperFrame.from_mapping(record)
+                frame = PaperAnalysisFrame.from_mapping(record)
                 frames.append(frame)
                 logger.info(
                     "Research objective paper framing document finished collection_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s relevance=%s paper_role=%s relevant_tables=%s excluded_tables=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s",
@@ -1705,12 +1653,12 @@ class ResearchObjectiveService:
         extractor: CoreLLMStructuredExtractor,
         objectives: tuple[ResearchObjective, ...],
         objective_contexts: tuple[ObjectiveContext, ...],
-        objective_paper_frames: tuple[ObjectivePaperFrame, ...],
+        objective_paper_frames: tuple[PaperAnalysisFrame, ...],
         blocks_by_document_id: dict[str, list[Any]],
         tables_by_document_id: dict[str, list[Any]],
         document_trees_by_document_id: dict[str, SourceDocumentTree],
         progress_callback: ProgressCallback | None = None,
-    ) -> tuple[ObjectiveEvidenceRoute, ...]:
+    ) -> tuple[EvidenceCandidate, ...]:
         objective_by_id = {
             objective.objective_id: objective
             for objective in objectives
@@ -1719,7 +1667,7 @@ class ResearchObjectiveService:
             context.objective_id: context
             for context in objective_contexts
         }
-        routes: list[ObjectiveEvidenceRoute] = []
+        routes: list[EvidenceCandidate] = []
         seen: set[tuple[str, str, str, str, str]] = set()
         logger.info(
             "Research objective evidence routing started collection_id=%s frame_count=%s",
@@ -1745,11 +1693,11 @@ class ResearchObjectiveService:
                 active_objective_id=frame.objective_id,
             )
             logger.info(
-                "Research objective evidence routing frame started collection_id=%s objective_id=%s document_id=%s frame_id=%s frame_position=%s frame_count=%s relevance=%s completed_frames=%s remaining_frames=%s",
+                "Research objective evidence routing frame started collection_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s relevance=%s completed_frames=%s remaining_frames=%s",
                 collection_id,
                 frame.objective_id,
                 frame.document_id,
-                frame.frame_id,
+                frame.document_id,
                 frame_position,
                 frame_count,
                 frame.relevance,
@@ -1758,11 +1706,11 @@ class ResearchObjectiveService:
             )
             if frame.relevance == "irrelevant":
                 logger.info(
-                    "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s frame_id=%s frame_position=%s frame_count=%s reason=irrelevant completed_frames=%s remaining_frames=%s",
+                    "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s reason=irrelevant completed_frames=%s remaining_frames=%s",
                     collection_id,
                     frame.objective_id,
                     frame.document_id,
-                    frame.frame_id,
+                    frame.document_id,
                     frame_position,
                     frame_count,
                     frame_position,
@@ -1772,11 +1720,11 @@ class ResearchObjectiveService:
             objective = objective_by_id.get(frame.objective_id)
             if objective is None:
                 logger.info(
-                    "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s frame_id=%s frame_position=%s frame_count=%s reason=missing_objective completed_frames=%s remaining_frames=%s",
+                    "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s reason=missing_objective completed_frames=%s remaining_frames=%s",
                     collection_id,
                     frame.objective_id,
                     frame.document_id,
-                    frame.frame_id,
+                    frame.document_id,
                     frame_position,
                     frame_count,
                     frame_position,
@@ -1791,11 +1739,11 @@ class ResearchObjectiveService:
             )
             if not source_candidates:
                 logger.info(
-                    "Research objective evidence routing frame finished collection_id=%s objective_id=%s document_id=%s frame_id=%s frame_position=%s frame_count=%s source_candidate_count=0 route_count=0 extractable_route_count=0 completed_frames=%s remaining_frames=%s",
+                    "Research objective evidence routing frame finished collection_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s source_candidate_count=0 route_count=0 extractable_route_count=0 completed_frames=%s remaining_frames=%s",
                     collection_id,
                     frame.objective_id,
                     frame.document_id,
-                    frame.frame_id,
+                    frame.document_id,
                     frame_position,
                     frame_count,
                     frame_position,
@@ -1820,7 +1768,7 @@ class ResearchObjectiveService:
                     if route_key not in seen:
                         seen.add(route_key)
                         routes.append(
-                            ObjectiveEvidenceRoute.from_mapping(
+                            EvidenceCandidate.from_mapping(
                                 {
                                     "objective_id": frame.objective_id,
                                     "document_id": frame.document_id,
@@ -1852,8 +1800,8 @@ class ResearchObjectiveService:
                     "current_source": self._route_prompt_current_source(candidate),
                 }
                 try:
-                    parsed = extractor.route_objective_evidence(payload)
-                    route_records = [item.model_dump() for item in parsed.routes[:1]]
+                    parsed = extractor.select_objective_evidence(payload)
+                    route_records = [item.model_dump() for item in parsed.selections[:1]]
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
                         "Research objective evidence routing model failed; using deterministic route collection_id=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s",
@@ -1893,7 +1841,7 @@ class ResearchObjectiveService:
                     if route_key in seen:
                         continue
                     seen.add(route_key)
-                    routes.append(ObjectiveEvidenceRoute.from_mapping(record))
+                    routes.append(EvidenceCandidate.from_mapping(record))
             self._append_objective_context_hint_routes(
                 routes=routes,
                 seen=seen,
@@ -1910,11 +1858,11 @@ class ResearchObjectiveService:
             )
             frame_routes = routes[frame_route_count_before:]
             logger.info(
-                "Research objective evidence routing frame finished collection_id=%s objective_id=%s document_id=%s frame_id=%s frame_position=%s frame_count=%s source_candidate_count=%s route_count=%s extractable_route_count=%s completed_frames=%s remaining_frames=%s",
+                "Research objective evidence routing frame finished collection_id=%s objective_id=%s document_id=%s document_id=%s frame_position=%s frame_count=%s source_candidate_count=%s route_count=%s extractable_route_count=%s completed_frames=%s remaining_frames=%s",
                 collection_id,
                 frame.objective_id,
                 frame.document_id,
-                frame.frame_id,
+                frame.document_id,
                 frame_position,
                 frame_count,
                 len(source_candidates),
@@ -1963,7 +1911,7 @@ class ResearchObjectiveService:
         self,
         *,
         record: dict[str, Any],
-        frame: ObjectivePaperFrame,
+        frame: PaperAnalysisFrame,
         objective_context: ObjectiveContext | None,
         route_candidate: Mapping[str, Any],
     ) -> dict[str, Any]:
@@ -2023,9 +1971,9 @@ class ResearchObjectiveService:
     def _append_objective_context_hint_routes(
         self,
         *,
-        routes: list[ObjectiveEvidenceRoute],
+        routes: list[EvidenceCandidate],
         seen: set[tuple[str, str, str, str, str]],
-        frame: ObjectivePaperFrame,
+        frame: PaperAnalysisFrame,
         objective_context: ObjectiveContext | None,
         candidate_by_key: dict[tuple[str, str], dict[str, Any]],
     ) -> None:
@@ -2056,7 +2004,7 @@ class ResearchObjectiveService:
             seen.add(route_key)
             table_schema = self._route_table_schema_record(candidate=candidate)
             routes.append(
-                ObjectiveEvidenceRoute.from_mapping(
+                EvidenceCandidate.from_mapping(
                     {
                         "objective_id": frame.objective_id,
                         "document_id": frame.document_id,
@@ -2110,10 +2058,10 @@ class ResearchObjectiveService:
 
     def _route_prompt_paper_frame_record(
         self,
-        frame: ObjectivePaperFrame,
+        frame: PaperAnalysisFrame,
     ) -> dict[str, Any]:
         return {
-            "frame_id": frame.frame_id,
+            "document_id": frame.document_id,
             "objective_id": frame.objective_id,
             "document_id": frame.document_id,
             "relevance": frame.relevance,
@@ -2218,9 +2166,9 @@ class ResearchObjectiveService:
     def _append_ranked_text_hint_routes(
         self,
         *,
-        routes: list[ObjectiveEvidenceRoute],
+        routes: list[EvidenceCandidate],
         seen: set[tuple[str, str, str, str, str]],
-        frame: ObjectivePaperFrame,
+        frame: PaperAnalysisFrame,
         objective_context: ObjectiveContext | None,
         source_candidates: list[dict[str, Any]],
     ) -> None:
@@ -2272,7 +2220,7 @@ class ResearchObjectiveService:
                 continue
             seen.add(route_key)
             routes.append(
-                ObjectiveEvidenceRoute.from_mapping(
+                EvidenceCandidate.from_mapping(
                     {
                         "objective_id": frame.objective_id,
                         "document_id": frame.document_id,
@@ -2327,7 +2275,7 @@ class ResearchObjectiveService:
     def _text_hint_route_role(
         self,
         *,
-        frame: ObjectivePaperFrame,
+        frame: PaperAnalysisFrame,
         candidate: dict[str, Any],
         evidence_role: str = "direct_support",
     ) -> str:
@@ -2469,21 +2417,21 @@ class ResearchObjectiveService:
             )
         )
 
-    def _build_objective_evidence_units(
+    def _build_objective_evidence(
         self,
         *,
         collection_id: str,
         extractor: CoreLLMStructuredExtractor,
         objectives: tuple[ResearchObjective, ...],
         objective_contexts: tuple[ObjectiveContext, ...],
-        objective_paper_frames: tuple[ObjectivePaperFrame, ...],
-        objective_evidence_routes: tuple[ObjectiveEvidenceRoute, ...],
+        objective_paper_frames: tuple[PaperAnalysisFrame, ...],
+        objective_evidence_routes: tuple[EvidenceCandidate, ...],
         blocks_by_document_id: dict[str, list[Any]],
         tables_by_document_id: dict[str, list[Any]],
         document_trees_by_document_id: dict[str, SourceDocumentTree],
         table_cells_by_document_id: dict[str, list[Any]] | None = None,
         progress_callback: ProgressCallback | None = None,
-    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+    ) -> tuple[ExtractedEvidenceDraft, ...]:
         objective_by_id = {
             objective.objective_id: objective
             for objective in objectives
@@ -2505,15 +2453,15 @@ class ResearchObjectiveService:
             document_trees_by_document_id=document_trees_by_document_id,
         )
         logger.info(
-            "Research objective evidence-unit extraction started collection_id=%s route_count=%s extractable_route_count=%s",
+            "Research objective evidence extraction started collection_id=%s route_count=%s extractable_route_count=%s",
             collection_id,
             len(objective_evidence_routes),
             len(extractable_routes),
         )
-        units: list[ObjectiveEvidenceUnit] = []
+        units: list[ExtractedEvidenceDraft] = []
         seen: set[str] = set()
-        document_state_units: dict[tuple[str, str], list[ObjectiveEvidenceUnit]] = {}
-        llm_evidence_unit_unavailable = False
+        document_state_units: dict[tuple[str, str], list[ExtractedEvidenceDraft]] = {}
+        llm_evidence_unavailable = False
         llm_table_repair_unavailable = False
         document_metadata = self._progress_document_metadata(
             document_trees_by_document_id=document_trees_by_document_id,
@@ -2522,11 +2470,11 @@ class ResearchObjectiveService:
             route_document_metadata = document_metadata.get(route.document_id, {})
             self._notify_progress(
                 progress_callback,
-                phase="objective_evidence_units_started",
+                phase="objective_evidence_extraction_started",
                 current=route_position,
                 total=len(extractable_routes),
-                unit="routes",
-                message="Extracting objective evidence units from routed sources.",
+                unit="selections",
+                message="Extracting objective evidence from selected sources.",
                 active_document_id=route.document_id,
                 active_document_title=route_document_metadata.get("title"),
                 active_source_filename=route_document_metadata.get("source_filename"),
@@ -2535,9 +2483,9 @@ class ResearchObjectiveService:
             objective = objective_by_id.get(route.objective_id)
             if objective is None:
                 logger.info(
-                    "Research objective evidence-unit extraction route skipped collection_id=%s route_id=%s reason=missing_objective route_position=%s route_count=%s",
+                    "Research objective evidence extraction route skipped collection_id=%s source_ref=%s reason=missing_objective route_position=%s route_count=%s",
                     collection_id,
-                    route.route_id,
+                    route.source_ref,
                     route_position,
                     len(extractable_routes),
                 )
@@ -2554,9 +2502,9 @@ class ResearchObjectiveService:
             )
             if not source:
                 logger.info(
-                    "Research objective evidence-unit extraction route skipped collection_id=%s route_id=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s reason=missing_source route_position=%s route_count=%s",
+                    "Research objective evidence extraction route skipped collection_id=%s source_ref=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s reason=missing_source route_position=%s route_count=%s",
                     collection_id,
-                    route.route_id,
+                    route.source_ref,
                     route.objective_id,
                     route.document_id,
                     route.source_kind,
@@ -2604,7 +2552,7 @@ class ResearchObjectiveService:
             )
             payload["source"] = self._objective_evidence_prompt_source(source)
             route_unit_start = len(units)
-            route_records = self._objective_table_matrix_evidence_unit_records(
+            route_records = self._objective_table_matrix_evidence_records(
                 route=route,
                 source=source,
                 objective_context=objective_context,
@@ -2622,16 +2570,16 @@ class ResearchObjectiveService:
             if (
                 (not route_records or needs_structural_repair)
                 and not self._objective_table_route_should_skip_llm_fallback(route)
-                and not llm_evidence_unit_unavailable
+                and not llm_evidence_unavailable
             ):
                 try:
-                    parsed = extractor.extract_objective_evidence_units(payload)
+                    parsed = extractor.extract_objective_evidence(payload)
                 except Exception as exc:
-                    llm_evidence_unit_unavailable = isinstance(exc, OpenAIError)
+                    llm_evidence_unavailable = isinstance(exc, OpenAIError)
                     logger.exception(
-                        "Research objective evidence-unit extraction route failed collection_id=%s route_id=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s completed_routes=%s remaining_routes=%s provider_unavailable=%s",
+                        "Research objective evidence extraction route failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s completed_routes=%s remaining_routes=%s provider_unavailable=%s",
                         collection_id,
-                        route.route_id,
+                        route.source_ref,
                         route.objective_id,
                         route.document_id,
                         route.source_kind,
@@ -2640,15 +2588,15 @@ class ResearchObjectiveService:
                         len(extractable_routes),
                         route_position - 1,
                         max(len(extractable_routes) - route_position, 0),
-                        llm_evidence_unit_unavailable,
+                        llm_evidence_unavailable,
                     )
                     if not route_records:
                         continue
                 else:
                     llm_route_records = tuple(
                         record
-                        for item in parsed.evidence_units
-                        for record in self._objective_evidence_unit_records_from_extracted(
+                        for item in parsed.extractions
+                        for record in self._objective_evidence_records_from_extracted(
                             route=route,
                             source=source,
                             objective_context=objective_context,
@@ -2660,21 +2608,21 @@ class ResearchObjectiveService:
                         llm_records=llm_route_records,
                     )
             for record in route_records:
-                unit = ObjectiveEvidenceUnit.from_mapping(record)
-                if not self._objective_evidence_unit_has_payload(unit):
+                unit = ExtractedEvidenceDraft.from_mapping(record)
+                if not self._objective_evidence_has_payload(unit):
                     continue
-                if unit.evidence_unit_id in seen:
+                if unit.evidence_id in seen:
                     continue
-                seen.add(unit.evidence_unit_id)
+                seen.add(unit.evidence_id)
                 units.append(unit)
                 document_state_units.setdefault(
                     (unit.objective_id, unit.document_id),
                     [],
                 ).append(unit)
             logger.info(
-                "Research objective evidence-unit extraction route finished collection_id=%s route_id=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s evidence_units=%s completed_routes=%s remaining_routes=%s",
+                "Research objective evidence extraction route finished collection_id=%s source_ref=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s extractions=%s completed_routes=%s remaining_routes=%s",
                 collection_id,
-                route.route_id,
+                route.source_ref,
                 route.objective_id,
                 route.document_id,
                 route.source_kind,
@@ -2690,18 +2638,18 @@ class ResearchObjectiveService:
             objective_paper_frames=objective_paper_frames,
             blocks_by_document_id=blocks_by_document_id,
         ):
-            if not self._objective_evidence_unit_has_payload(unit):
+            if not self._objective_evidence_has_payload(unit):
                 continue
-            if unit.evidence_unit_id in seen:
+            if unit.evidence_id in seen:
                 continue
-            seen.add(unit.evidence_unit_id)
+            seen.add(unit.evidence_id)
             units.append(unit)
         logger.info(
-            "Research objective evidence-unit extraction finished collection_id=%s objective_evidence_units=%s",
+            "Research objective evidence extraction finished collection_id=%s objective_extractions=%s",
             collection_id,
             len(units),
         )
-        resolved_units = self._resolve_objective_evidence_unit_contexts(tuple(units))
+        resolved_units = self._resolve_objective_evidence_contexts(tuple(units))
         resolved_units = self._inherit_objective_material_systems(
             resolved_units,
             objectives=objectives,
@@ -2734,7 +2682,7 @@ class ResearchObjectiveService:
 
     def _objective_table_route_should_skip_llm_fallback(
         self,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
     ) -> bool:
         return route.source_kind == "table"
 
@@ -2743,7 +2691,7 @@ class ResearchObjectiveService:
         *,
         collection_id: str,
         extractor: CoreLLMStructuredExtractor,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         source: dict[str, Any],
         llm_unavailable: bool = False,
     ) -> tuple[dict[str, Any], bool]:
@@ -2762,9 +2710,9 @@ class ResearchObjectiveService:
             parsed = extractor.repair_table_matrix(repair_payload)
         except Exception:
             logger.exception(
-                "Research objective table matrix repair failed collection_id=%s route_id=%s objective_id=%s document_id=%s source_ref=%s",
+                "Research objective table matrix repair failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_ref=%s",
                 collection_id,
-                route.route_id,
+                route.source_ref,
                 route.objective_id,
                 route.document_id,
                 route.source_ref,
@@ -2820,7 +2768,7 @@ class ResearchObjectiveService:
     def _build_objective_table_matrix_repair_payload(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         source: dict[str, Any],
     ) -> dict[str, Any]:
         compact_source = {
@@ -3019,7 +2967,7 @@ class ResearchObjectiveService:
     def _objective_table_source_needs_llm_structural_repair(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         source: dict[str, Any],
     ) -> bool:
         if route.source_kind != "table":
@@ -3134,7 +3082,7 @@ class ResearchObjectiveService:
         if raw_value in (None, "", [], {}):
             return None
         return (
-            str(record.get("unit_kind") or "").strip().casefold(),
+            str(record.get("evidence_kind") or "").strip().casefold(),
             str(record.get("property_normalized") or "").strip().casefold(),
             str(record.get("unit") or "").strip().casefold(),
             str(raw_value).strip().casefold(),
@@ -3164,9 +3112,9 @@ class ResearchObjectiveService:
         self,
         *,
         objective_contexts: tuple[ObjectiveContext, ...],
-        objective_paper_frames: tuple[ObjectivePaperFrame, ...],
+        objective_paper_frames: tuple[PaperAnalysisFrame, ...],
         blocks_by_document_id: dict[str, list[Any]],
-    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+    ) -> tuple[ExtractedEvidenceDraft, ...]:
         context_by_objective_id = {
             context.objective_id: context
             for context in objective_contexts
@@ -3202,14 +3150,14 @@ class ResearchObjectiveService:
                 }
                 records.append(
                     {
-                        "evidence_unit_id": self._objective_method_family_unit_id(
+                        "evidence_id": self._objective_method_family_unit_id(
                             objective_id=frame.objective_id,
                             document_id=frame.document_id,
                             family=family,
                         ),
                         "objective_id": frame.objective_id,
                         "document_id": frame.document_id,
-                        "unit_kind": "test_condition",
+                        "evidence_kind": "test_condition",
                         "property_normalized": family,
                         "test_condition": {
                             "method_family": family,
@@ -3230,7 +3178,7 @@ class ResearchObjectiveService:
                         "confidence": 0.86,
                     }
                 )
-        return tuple(ObjectiveEvidenceUnit.from_mapping(record) for record in records)
+        return tuple(ExtractedEvidenceDraft.from_mapping(record) for record in records)
 
     def _objective_method_families_for_context(
         self,
@@ -3529,11 +3477,11 @@ class ResearchObjectiveService:
 
     def _inherit_objective_material_systems(
         self,
-        units: tuple[ObjectiveEvidenceUnit, ...],
+        units: tuple[ExtractedEvidenceDraft, ...],
         *,
         objectives: tuple[ResearchObjective, ...] = (),
         objective_contexts: tuple[ObjectiveContext, ...],
-    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+    ) -> tuple[ExtractedEvidenceDraft, ...]:
         context_materials = {
             objective.objective_id: self._single_material_system_from_scope(
                 objective.material_scope
@@ -3552,7 +3500,7 @@ class ResearchObjectiveService:
         if not any(context_materials.values()):
             return units
 
-        resolved_units: list[ObjectiveEvidenceUnit] = []
+        resolved_units: list[ExtractedEvidenceDraft] = []
         for unit in units:
             if self._has_observed_evidence_value(unit.material_system):
                 resolved_units.append(unit)
@@ -3563,7 +3511,7 @@ class ResearchObjectiveService:
                 continue
             record = unit.to_record()
             record["material_system"] = material_system
-            resolved_units.append(ObjectiveEvidenceUnit.from_mapping(record))
+            resolved_units.append(ExtractedEvidenceDraft.from_mapping(record))
         return tuple(resolved_units)
 
     def _single_material_system_from_scope(
@@ -3585,8 +3533,8 @@ class ResearchObjectiveService:
 
     def _attach_objective_method_test_conditions_to_measurements(
         self,
-        units: tuple[ObjectiveEvidenceUnit, ...],
-    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        units: tuple[ExtractedEvidenceDraft, ...],
+    ) -> tuple[ExtractedEvidenceDraft, ...]:
         method_conditions = {
             (
                 unit.objective_id,
@@ -3594,15 +3542,15 @@ class ResearchObjectiveService:
                 str(unit.property_normalized or ""),
             ): unit
             for unit in units
-            if unit.unit_kind == "test_condition"
+            if unit.evidence_kind == "test_condition"
             and unit.property_normalized in _OBJECTIVE_METHOD_FAMILY_PROPERTY_TYPES
         }
         if not method_conditions:
             return units
 
-        resolved_units: list[ObjectiveEvidenceUnit] = []
+        resolved_units: list[ExtractedEvidenceDraft] = []
         for unit in units:
-            if unit.unit_kind != "measurement" or unit.test_condition:
+            if unit.evidence_kind != "measurement" or unit.test_condition:
                 resolved_units.append(unit)
                 continue
             family = self._objective_method_family_for_property(
@@ -3623,21 +3571,21 @@ class ResearchObjectiveService:
                     "test_condition": dict(condition.test_condition),
                     "resolved_condition": {
                         **unit.resolved_condition,
-                        "test_condition_unit_id": condition.evidence_unit_id,
+                        "test_condition_unit_id": condition.evidence_id,
                         "test_condition_family": family,
                     },
                     "resolution_status": "resolved",
                 }
             )
-            resolved_units.append(ObjectiveEvidenceUnit.from_mapping(record))
+            resolved_units.append(ExtractedEvidenceDraft.from_mapping(record))
         return tuple(resolved_units)
 
     def _build_objective_table_characterization_units(
         self,
         *,
-        units: tuple[ObjectiveEvidenceUnit, ...],
+        units: tuple[ExtractedEvidenceDraft, ...],
         objective_contexts: tuple[ObjectiveContext, ...],
-    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+    ) -> tuple[ExtractedEvidenceDraft, ...]:
         objective_ids_with_characterization_target = {
             context.objective_id
             for context in objective_contexts
@@ -3646,9 +3594,9 @@ class ResearchObjectiveService:
                 for axis in context.target_property_axes
             )
         }
-        density_units_by_scope: dict[tuple[str, str], list[ObjectiveEvidenceUnit]] = {}
+        density_units_by_scope: dict[tuple[str, str], list[ExtractedEvidenceDraft]] = {}
         for unit in units:
-            if unit.unit_kind != "measurement":
+            if unit.evidence_kind != "measurement":
                 continue
             if unit.objective_id not in objective_ids_with_characterization_target:
                 continue
@@ -3682,14 +3630,14 @@ class ResearchObjectiveService:
                     density_units=density_units,
                 )
             )
-        return tuple(ObjectiveEvidenceUnit.from_mapping(record) for record in records)
+        return tuple(ExtractedEvidenceDraft.from_mapping(record) for record in records)
 
     def _objective_density_characterization_records(
         self,
         *,
         objective_id: str,
         document_id: str,
-        density_units: list[ObjectiveEvidenceUnit],
+        density_units: list[ExtractedEvidenceDraft],
     ) -> list[dict[str, Any]]:
         values = [
             (unit, self._objective_measurement_numeric_value(unit))
@@ -3754,9 +3702,9 @@ class ResearchObjectiveService:
         *,
         objective_id: str,
         document_id: str,
-        density_units: list[ObjectiveEvidenceUnit],
+        density_units: list[ExtractedEvidenceDraft],
     ) -> list[dict[str, Any]]:
-        units_by_strategy: dict[str, list[ObjectiveEvidenceUnit]] = {}
+        units_by_strategy: dict[str, list[ExtractedEvidenceDraft]] = {}
         for unit in density_units:
             strategy = self._objective_process_value(
                 unit.process_context,
@@ -3833,10 +3781,10 @@ class ResearchObjectiveService:
             )
         )
         return {
-            "evidence_unit_id": f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}",
+            "evidence_id": f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}",
             "objective_id": objective_id,
             "document_id": document_id,
-            "unit_kind": "characterization",
+            "evidence_kind": "characterization",
             "property_normalized": property_normalized,
             "sample_context": sample_context,
             "process_context": process_context or {},
@@ -3895,20 +3843,20 @@ class ResearchObjectiveService:
                 deduped.append(dict(ref))
         return tuple(deduped)
 
-    def _resolve_objective_evidence_unit_contexts(
+    def _resolve_objective_evidence_contexts(
         self,
-        units: tuple[ObjectiveEvidenceUnit, ...],
-    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        units: tuple[ExtractedEvidenceDraft, ...],
+    ) -> tuple[ExtractedEvidenceDraft, ...]:
         context_units_by_key: dict[
             tuple[str, str, tuple[tuple[str, str], ...]],
-            list[ObjectiveEvidenceUnit],
+            list[ExtractedEvidenceDraft],
         ] = {}
         context_units_by_scope: dict[
             tuple[str, str],
-            list[ObjectiveEvidenceUnit],
+            list[ExtractedEvidenceDraft],
         ] = {}
         for unit in units:
-            if unit.unit_kind == "measurement":
+            if unit.evidence_kind == "measurement":
                 continue
             if not unit.process_context and not unit.test_condition:
                 continue
@@ -3922,9 +3870,9 @@ class ResearchObjectiveService:
                     [],
                 ).append(unit)
 
-        resolved_units: list[ObjectiveEvidenceUnit] = []
+        resolved_units: list[ExtractedEvidenceDraft] = []
         for unit in units:
-            if unit.unit_kind != "measurement":
+            if unit.evidence_kind != "measurement":
                 resolved_units.append(unit)
                 continue
             context_units = self._matching_objective_context_units(
@@ -3973,13 +3921,13 @@ class ResearchObjectiveService:
                 continue
             resolved_condition = dict(unit.resolved_condition)
             if len(context_units) == 1:
-                resolved_condition["context_unit_id"] = context_units[0].evidence_unit_id
+                resolved_condition["context_unit_id"] = context_units[0].evidence_id
                 resolved_condition["matched_sample_context"] = dict(
                     context_units[0].sample_context
                 )
             else:
                 resolved_condition["context_unit_ids"] = [
-                    context_unit.evidence_unit_id for context_unit in context_units
+                    context_unit.evidence_id for context_unit in context_units
                 ]
                 resolved_condition["matched_sample_contexts"] = [
                     dict(context_unit.sample_context) for context_unit in context_units
@@ -3995,15 +3943,15 @@ class ResearchObjectiveService:
                     "resolution_status": "resolved",
                 }
             )
-            resolved_units.append(ObjectiveEvidenceUnit.from_mapping(record))
+            resolved_units.append(ExtractedEvidenceDraft.from_mapping(record))
         return tuple(resolved_units)
 
     def _dedupe_shared_density_measurements(
         self,
-        units: tuple[ObjectiveEvidenceUnit, ...],
+        units: tuple[ExtractedEvidenceDraft, ...],
         *,
         context_by_objective_id: dict[str, ObjectiveContext],
-    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+    ) -> tuple[ExtractedEvidenceDraft, ...]:
         best_by_key: dict[tuple[str, str, str, float, str], tuple[int, int]] = {}
         duplicate_keys: set[tuple[str, str, str, float, str]] = set()
         for index, unit in enumerate(units):
@@ -4029,7 +3977,7 @@ class ResearchObjectiveService:
             for key, (_score, index) in best_by_key.items()
             if key in duplicate_keys
         }
-        deduped: list[ObjectiveEvidenceUnit] = []
+        deduped: list[ExtractedEvidenceDraft] = []
         for index, unit in enumerate(units):
             key = self._shared_density_measurement_key(unit)
             if (
@@ -4043,9 +3991,9 @@ class ResearchObjectiveService:
 
     def _shared_density_measurement_key(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
     ) -> tuple[str, str, str, float, str] | None:
-        if unit.unit_kind != "measurement":
+        if unit.evidence_kind != "measurement":
             return None
         property_key = self._normalize_property_label(unit.property_normalized)
         if property_key not in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
@@ -4066,7 +4014,7 @@ class ResearchObjectiveService:
 
     def _shared_density_measurement_objective_score(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
         *,
         objective_context: ObjectiveContext | None,
     ) -> int:
@@ -4115,17 +4063,17 @@ class ResearchObjectiveService:
     def _matching_objective_context_units(
         self,
         *,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
         context_units_by_key: dict[
             tuple[str, str, tuple[tuple[str, str], ...]],
-            list[ObjectiveEvidenceUnit],
+            list[ExtractedEvidenceDraft],
         ],
         context_units_by_scope: dict[
             tuple[str, str],
-            list[ObjectiveEvidenceUnit],
+            list[ExtractedEvidenceDraft],
         ],
-    ) -> tuple[ObjectiveEvidenceUnit, ...]:
-        matched: list[ObjectiveEvidenceUnit] = []
+    ) -> tuple[ExtractedEvidenceDraft, ...]:
+        matched: list[ExtractedEvidenceDraft] = []
         scope_candidates = context_units_by_scope.get(
             (unit.objective_id, unit.document_id),
             [],
@@ -4152,7 +4100,7 @@ class ResearchObjectiveService:
             process_context_candidates = [
                 candidate
                 for candidate in candidates
-                if candidate.unit_kind == "process_context"
+                if candidate.evidence_kind == "process_context"
             ]
             if len(process_context_candidates) == 1:
                 matched.extend(process_context_candidates)
@@ -4168,14 +4116,14 @@ class ResearchObjectiveService:
 
     def _dedupe_objective_context_units(
         self,
-        units: list[ObjectiveEvidenceUnit],
-    ) -> tuple[ObjectiveEvidenceUnit, ...]:
-        deduped: list[ObjectiveEvidenceUnit] = []
+        units: list[ExtractedEvidenceDraft],
+    ) -> tuple[ExtractedEvidenceDraft, ...]:
+        deduped: list[ExtractedEvidenceDraft] = []
         seen: set[str] = set()
         for unit in units:
             if not unit.process_context and not unit.test_condition:
                 continue
-            key = unit.evidence_unit_id
+            key = unit.evidence_id
             if key in seen:
                 continue
             seen.add(key)
@@ -4184,7 +4132,7 @@ class ResearchObjectiveService:
 
     def _merged_objective_context_sample_context(
         self,
-        units: tuple[ObjectiveEvidenceUnit, ...],
+        units: tuple[ExtractedEvidenceDraft, ...],
     ) -> dict[str, Any]:
         merged: dict[str, Any] = {}
         for unit in units:
@@ -4234,9 +4182,9 @@ class ResearchObjectiveService:
     def _matching_objective_process_label_context_unit(
         self,
         *,
-        unit: ObjectiveEvidenceUnit,
-        candidates: list[ObjectiveEvidenceUnit],
-    ) -> ObjectiveEvidenceUnit | None:
+        unit: ExtractedEvidenceDraft,
+        candidates: list[ExtractedEvidenceDraft],
+    ) -> ExtractedEvidenceDraft | None:
         match_fragments = [
             str(value).strip()
             for value in (
@@ -4251,7 +4199,7 @@ class ResearchObjectiveService:
         for fragment in match_fragments:
             match_numbers.update(self._objective_numeric_match_tokens(fragment))
         match_text = self._objective_match_text(" ".join(match_fragments))
-        scored: list[tuple[int, ObjectiveEvidenceUnit]] = []
+        scored: list[tuple[int, ExtractedEvidenceDraft]] = []
         for candidate in candidates:
             if not candidate.process_context:
                 continue
@@ -4280,7 +4228,7 @@ class ResearchObjectiveService:
             "sample_no",
             "sample_number",
         }
-        labeled_winners: list[tuple[ObjectiveEvidenceUnit, set[str]]] = []
+        labeled_winners: list[tuple[ExtractedEvidenceDraft, set[str]]] = []
         for candidate in winners:
             candidate_label_tokens = self._objective_context_label_tokens(
                 candidate.sample_context,
@@ -4426,10 +4374,10 @@ class ResearchObjectiveService:
 
     def _build_objective_pairwise_comparison_units(
         self,
-        units: tuple[ObjectiveEvidenceUnit, ...],
+        units: tuple[ExtractedEvidenceDraft, ...],
         *,
         objective_contexts: tuple[ObjectiveContext, ...],
-    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+    ) -> tuple[ExtractedEvidenceDraft, ...]:
         context_by_objective_id = {
             context.objective_id: context
             for context in objective_contexts
@@ -4437,11 +4385,11 @@ class ResearchObjectiveService:
         existing_keys = {
             self._objective_comparison_pair_key(unit)
             for unit in units
-            if unit.unit_kind == "comparison"
+            if unit.evidence_kind == "comparison"
         }
         measurements_by_key: dict[
             tuple[str, str, str, str | None],
-            list[ObjectiveEvidenceUnit],
+            list[ExtractedEvidenceDraft],
         ] = {}
         allowed_pair_specs_by_scope = self._objective_pairwise_allowed_specs(
             units,
@@ -4449,7 +4397,7 @@ class ResearchObjectiveService:
         )
         for unit in units:
             objective_context = context_by_objective_id.get(unit.objective_id)
-            if unit.unit_kind != "measurement":
+            if unit.evidence_kind != "measurement":
                 continue
             if (
                 not unit.property_normalized
@@ -4472,7 +4420,7 @@ class ResearchObjectiveService:
                 [],
             ).append(unit)
 
-        generated: list[ObjectiveEvidenceUnit] = []
+        generated: list[ExtractedEvidenceDraft] = []
         generated_keys: set[tuple[str, str, str, str, str, str]] = set()
         for (
             objective_id,
@@ -4526,8 +4474,8 @@ class ResearchObjectiveService:
 
     def _select_objective_comparison_units(
         self,
-        units: tuple[ObjectiveEvidenceUnit, ...],
-    ) -> tuple[ObjectiveEvidenceUnit, ...]:
+        units: tuple[ExtractedEvidenceDraft, ...],
+    ) -> tuple[ExtractedEvidenceDraft, ...]:
         if not units:
             return ()
         scope_counts: dict[tuple[str, str], int] = {}
@@ -4540,7 +4488,7 @@ class ResearchObjectiveService:
         ):
             return units
 
-        grouped_units: dict[tuple[str, str, str, str], list[ObjectiveEvidenceUnit]] = {}
+        grouped_units: dict[tuple[str, str, str, str], list[ExtractedEvidenceDraft]] = {}
         for unit in units:
             scope_key = (unit.objective_id, unit.document_id)
             if scope_counts.get(scope_key, 0) <= _OBJECTIVE_PAIRWISE_LARGE_SCOPE_LIMIT:
@@ -4560,7 +4508,7 @@ class ResearchObjectiveService:
         selected_ids: set[str] = set()
         for group in grouped_units.values():
             selected_ids.update(
-                unit.evidence_unit_id
+                unit.evidence_id
                 for unit in sorted(
                     group,
                     key=self._objective_comparison_unit_selection_key,
@@ -4572,12 +4520,12 @@ class ResearchObjectiveService:
             for unit in units
             if scope_counts.get((unit.objective_id, unit.document_id), 0)
             <= _OBJECTIVE_PAIRWISE_LARGE_SCOPE_LIMIT
-            or unit.evidence_unit_id in selected_ids
+            or unit.evidence_id in selected_ids
         )
 
     def _objective_comparison_unit_selection_key(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
     ) -> tuple[int, float, str, str, str]:
         controlled_axes = unit.value_payload.get("controlled_axes")
         controlled_axis_count = (
@@ -4601,19 +4549,19 @@ class ResearchObjectiveService:
             -delta,
             self._objective_sample_identity_key(unit.sample_context),
             self._objective_sample_identity_key(baseline_sample_context),
-            unit.evidence_unit_id,
+            unit.evidence_id,
         )
 
     def _objective_pairwise_allowed_specs(
         self,
-        units: tuple[ObjectiveEvidenceUnit, ...],
+        units: tuple[ExtractedEvidenceDraft, ...],
         *,
         context_by_objective_id: dict[str, ObjectiveContext],
     ) -> dict[tuple[str, str], set[tuple[str, str, str]]]:
         numeric_measurements = tuple(
             unit
             for unit in units
-            if unit.unit_kind == "measurement"
+            if unit.evidence_kind == "measurement"
             and unit.property_normalized
             and unit.sample_context
             and self._objective_unit_has_pairwise_context(unit)
@@ -4626,10 +4574,10 @@ class ResearchObjectiveService:
         document_density_values = self._objective_document_density_values(
             numeric_measurements
         )
-        samples_by_scope: dict[tuple[str, str], dict[str, ObjectiveEvidenceUnit]] = {}
+        samples_by_scope: dict[tuple[str, str], dict[str, ExtractedEvidenceDraft]] = {}
         results_by_scope: dict[
             tuple[str, str],
-            dict[tuple[str, str], ObjectiveEvidenceUnit],
+            dict[tuple[str, str], ExtractedEvidenceDraft],
         ] = {}
         for unit in numeric_measurements:
             sample_key = self._objective_sample_identity_key(unit.sample_context)
@@ -4659,8 +4607,8 @@ class ResearchObjectiveService:
         self,
         *,
         document_id: str,
-        samples: list[ObjectiveEvidenceUnit],
-        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+        samples: list[ExtractedEvidenceDraft],
+        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
         document_density_values: dict[tuple[str, str], float],
         objective_context: ObjectiveContext | None,
     ) -> set[tuple[str, str, str]]:
@@ -4799,8 +4747,8 @@ class ResearchObjectiveService:
     def _select_objective_adjacent_axis_relation_specs(
         self,
         *,
-        samples: list[ObjectiveEvidenceUnit],
-        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+        samples: list[ExtractedEvidenceDraft],
+        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
         objective_context: ObjectiveContext | None,
     ) -> set[tuple[str, str, str]]:
         if objective_context is None:
@@ -4812,7 +4760,7 @@ class ResearchObjectiveService:
         )
         if not axes:
             return set()
-        sample_rows: list[tuple[ObjectiveEvidenceUnit, str, dict[str, str]]] = []
+        sample_rows: list[tuple[ExtractedEvidenceDraft, str, dict[str, str]]] = []
         observed_raw_axes: set[str] = set()
         for sample in samples:
             sample_key = self._objective_sample_identity_key(sample.sample_context)
@@ -4831,7 +4779,7 @@ class ResearchObjectiveService:
         }
         selected_specs: set[tuple[str, str, str]] = set()
         for axis in axes:
-            grouped: dict[tuple[tuple[str, str], ...], list[tuple[ObjectiveEvidenceUnit, str, str]]] = {}
+            grouped: dict[tuple[tuple[str, str], ...], list[tuple[ExtractedEvidenceDraft, str, str]]] = {}
             for sample, sample_key, axis_values in sample_rows:
                 if axis not in axis_values:
                     continue
@@ -4875,10 +4823,10 @@ class ResearchObjectiveService:
     def _select_objective_primary_axis_relation_specs(
         self,
         *,
-        sample_rows: list[tuple[ObjectiveEvidenceUnit, str, dict[str, str]]],
+        sample_rows: list[tuple[ExtractedEvidenceDraft, str, dict[str, str]]],
         axes: tuple[str | None, ...],
         property_names: set[str],
-        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
     ) -> set[tuple[str, str, str]]:
         primary_axis = next(
             (
@@ -4921,8 +4869,8 @@ class ResearchObjectiveService:
     def _objective_all_pairwise_relation_specs(
         self,
         *,
-        samples: list[ObjectiveEvidenceUnit],
-        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+        samples: list[ExtractedEvidenceDraft],
+        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
     ) -> set[tuple[str, str, str]]:
         specs: set[tuple[str, str, str]] = set()
         property_names = {
@@ -4957,7 +4905,7 @@ class ResearchObjectiveService:
         group: list[dict[str, Any]],
         primary_strategy: str,
         density_values: dict[str, float],
-        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
     ) -> None:
         density_ordered = sorted(
             group,
@@ -5017,7 +4965,7 @@ class ResearchObjectiveService:
         *,
         group: list[dict[str, Any]],
         primary_sample_key: str,
-        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
     ) -> None:
         primary_sample = next(
             (item for item in group if item["sample_key"] == primary_sample_key),
@@ -5044,10 +4992,10 @@ class ResearchObjectiveService:
         self,
         selected_specs: set[tuple[str, str, str]],
         *,
-        current: ObjectiveEvidenceUnit,
-        reference: ObjectiveEvidenceUnit,
+        current: ExtractedEvidenceDraft,
+        reference: ExtractedEvidenceDraft,
         property_name: str,
-        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
     ) -> None:
         current_value, reference_value = self._objective_pairwise_result_values(
             left=current,
@@ -5071,10 +5019,10 @@ class ResearchObjectiveService:
         self,
         selected_specs: set[tuple[str, str, str]],
         *,
-        left: ObjectiveEvidenceUnit,
-        right: ObjectiveEvidenceUnit,
+        left: ExtractedEvidenceDraft,
+        right: ExtractedEvidenceDraft,
         property_name: str,
-        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
         min_abs_delta: float = 0.0,
     ) -> None:
         left_value, right_value = self._objective_pairwise_result_values(
@@ -5100,10 +5048,10 @@ class ResearchObjectiveService:
     def _objective_pairwise_result_values(
         self,
         *,
-        left: ObjectiveEvidenceUnit,
-        right: ObjectiveEvidenceUnit,
+        left: ExtractedEvidenceDraft,
+        right: ExtractedEvidenceDraft,
         property_name: str,
-        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
     ) -> tuple[float | None, float | None]:
         return (
             self._objective_pairwise_result_value(
@@ -5123,7 +5071,7 @@ class ResearchObjectiveService:
         *,
         sample_key: str,
         property_name: str,
-        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
     ) -> float | None:
         unit = result_lookup.get((sample_key, property_name))
         if unit is None:
@@ -5132,10 +5080,10 @@ class ResearchObjectiveService:
 
     def _objective_density_property_for_pair(
         self,
-        left: ObjectiveEvidenceUnit,
-        right: ObjectiveEvidenceUnit,
+        left: ExtractedEvidenceDraft,
+        right: ExtractedEvidenceDraft,
         *,
-        result_lookup: dict[tuple[str, str], ObjectiveEvidenceUnit],
+        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
     ) -> str | None:
         left_key = self._objective_sample_identity_key(left.sample_context)
         right_key = self._objective_sample_identity_key(right.sample_context)
@@ -5149,7 +5097,7 @@ class ResearchObjectiveService:
 
     def _objective_document_density_values(
         self,
-        measurements: tuple[ObjectiveEvidenceUnit, ...],
+        measurements: tuple[ExtractedEvidenceDraft, ...],
     ) -> dict[tuple[str, str], float]:
         values: dict[tuple[str, str], float] = {}
         for unit in measurements:
@@ -5193,7 +5141,7 @@ class ResearchObjectiveService:
 
     def _objective_unit_matches_target_property(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
         *,
         objective_context: ObjectiveContext | None,
     ) -> bool:
@@ -5215,8 +5163,8 @@ class ResearchObjectiveService:
 
     def _objective_pairwise_relation_spec_key(
         self,
-        left: ObjectiveEvidenceUnit,
-        right: ObjectiveEvidenceUnit,
+        left: ExtractedEvidenceDraft,
+        right: ExtractedEvidenceDraft,
         *,
         property_name: str | None = None,
     ) -> tuple[str, str, str]:
@@ -5231,8 +5179,8 @@ class ResearchObjectiveService:
     def _objective_single_changed_axis(
         self,
         *,
-        current: ObjectiveEvidenceUnit,
-        baseline: ObjectiveEvidenceUnit,
+        current: ExtractedEvidenceDraft,
+        baseline: ExtractedEvidenceDraft,
         objective_context: ObjectiveContext | None,
         allow_multi_axis: bool = False,
     ) -> str | None:
@@ -5282,7 +5230,7 @@ class ResearchObjectiveService:
 
     def _objective_pairwise_process_axis_values(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
         *,
         objective_context: ObjectiveContext | None,
     ) -> dict[str, str]:
@@ -5328,7 +5276,7 @@ class ResearchObjectiveService:
         self,
         axis: str,
         *,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
         objective_context: ObjectiveContext | None,
     ) -> bool:
         response_axes = {
@@ -5442,13 +5390,13 @@ class ResearchObjectiveService:
 
     def _objective_unit_has_pairwise_context(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
     ) -> bool:
         return bool(unit.process_context or self._objective_sample_axis_values(unit))
 
     def _objective_sample_axis_values(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
     ) -> dict[str, str]:
         axis_values: dict[str, str] = {}
         for key, value in unit.sample_context.items():
@@ -5477,7 +5425,7 @@ class ResearchObjectiveService:
 
     def _objective_process_axis_values(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
         *,
         objective_context: ObjectiveContext | None,
     ) -> dict[str, str]:
@@ -5545,11 +5493,11 @@ class ResearchObjectiveService:
     def _objective_pairwise_comparison_unit(
         self,
         *,
-        first: ObjectiveEvidenceUnit,
-        second: ObjectiveEvidenceUnit,
+        first: ExtractedEvidenceDraft,
+        second: ExtractedEvidenceDraft,
         comparison_axis: str,
         objective_context: ObjectiveContext | None,
-    ) -> ObjectiveEvidenceUnit:
+    ) -> ExtractedEvidenceDraft:
         first_value = self._objective_measurement_numeric_value(first)
         second_value = self._objective_measurement_numeric_value(second)
         if first_value is None or second_value is None:
@@ -5576,18 +5524,18 @@ class ResearchObjectiveService:
                 current.document_id,
                 str(current.property_normalized or ""),
                 comparison_axis,
-                current.evidence_unit_id,
-                baseline.evidence_unit_id,
+                current.evidence_id,
+                baseline.evidence_id,
             )
         )
-        return ObjectiveEvidenceUnit.from_mapping(
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": (
+                "evidence_id": (
                     f"oeu_cmp_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
                 ),
                 "objective_id": current.objective_id,
                 "document_id": current.document_id,
-                "unit_kind": "comparison",
+                "evidence_kind": "comparison",
                 "property_normalized": current.property_normalized,
                 "material_system": current.material_system or baseline.material_system,
                 "sample_context": dict(current.sample_context),
@@ -5608,8 +5556,8 @@ class ResearchObjectiveService:
                     ),
                     "comparison_axis": comparison_axis,
                     "controlled_axes": controlled_axes,
-                    "current_evidence_unit_id": current.evidence_unit_id,
-                    "baseline_evidence_unit_id": baseline.evidence_unit_id,
+                    "current_evidence_id": current.evidence_id,
+                    "baseline_evidence_id": baseline.evidence_id,
                 },
                 "unit": current.unit or baseline.unit,
                 "baseline_context": {
@@ -5620,7 +5568,7 @@ class ResearchObjectiveService:
                     "source_value_text": baseline.value_payload.get(
                         "source_value_text"
                     ),
-                    "evidence_unit_id": baseline.evidence_unit_id,
+                    "evidence_id": baseline.evidence_id,
                 },
                 "source_refs": self._dedupe_chain_items(
                     [
@@ -5637,8 +5585,8 @@ class ResearchObjectiveService:
                 "join_keys": {
                     "comparison_axis": comparison_axis,
                     "controlled_axes": controlled_axes,
-                    "current_measurement_id": current.evidence_unit_id,
-                    "baseline_measurement_id": baseline.evidence_unit_id,
+                    "current_measurement_id": current.evidence_id,
+                    "baseline_measurement_id": baseline.evidence_id,
                 },
                 "resolution_status": "resolved",
                 "confidence": min(current.confidence, baseline.confidence),
@@ -5648,8 +5596,8 @@ class ResearchObjectiveService:
     def _objective_comparison_controlled_axes(
         self,
         *,
-        current: ObjectiveEvidenceUnit,
-        baseline: ObjectiveEvidenceUnit,
+        current: ExtractedEvidenceDraft,
+        baseline: ExtractedEvidenceDraft,
         comparison_axis: str,
         objective_context: ObjectiveContext | None,
     ) -> list[dict[str, str]]:
@@ -5684,7 +5632,7 @@ class ResearchObjectiveService:
 
     def _objective_comparison_axis_value_map(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
         *,
         objective_context: ObjectiveContext | None,
     ) -> dict[str, dict[str, str]]:
@@ -5709,11 +5657,11 @@ class ResearchObjectiveService:
     def _ordered_objective_comparison_pair(
         self,
         *,
-        first: ObjectiveEvidenceUnit,
-        second: ObjectiveEvidenceUnit,
+        first: ExtractedEvidenceDraft,
+        second: ExtractedEvidenceDraft,
         comparison_axis: str,
         objective_context: ObjectiveContext | None,
-    ) -> tuple[ObjectiveEvidenceUnit, ObjectiveEvidenceUnit]:
+    ) -> tuple[ExtractedEvidenceDraft, ExtractedEvidenceDraft]:
         first_axis_value = self._objective_comparison_axis_value(
             first,
             comparison_axis=comparison_axis,
@@ -5745,7 +5693,7 @@ class ResearchObjectiveService:
 
     def _objective_comparison_axis_value(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
         *,
         comparison_axis: str,
         objective_context: ObjectiveContext | None,
@@ -5771,7 +5719,7 @@ class ResearchObjectiveService:
 
     def _objective_comparison_pair_key(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
     ) -> tuple[str, str, str, str, str, str]:
         baseline_context = unit.baseline_context
         baseline_sample_context = baseline_context.get("sample_context")
@@ -5884,7 +5832,7 @@ class ResearchObjectiveService:
     def _build_objective_route_source_payload(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         blocks: list[Any],
         tables: list[Any],
         document_tree: SourceDocumentTree | None = None,
@@ -5971,7 +5919,7 @@ class ResearchObjectiveService:
     def _route_text_block_id(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         document_tree: SourceDocumentTree | None,
     ) -> str:
         if document_tree is None:
@@ -5989,7 +5937,7 @@ class ResearchObjectiveService:
     def _build_objective_tree_text_source_payload(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         document_tree: SourceDocumentTree | None,
     ) -> dict[str, Any]:
         if document_tree is None:
@@ -6018,10 +5966,10 @@ class ResearchObjectiveService:
             "text": text[:_OBJECTIVE_EVIDENCE_TEXT_CHARS],
         }
 
-    def _objective_table_matrix_evidence_unit_records(
+    def _objective_table_matrix_evidence_records(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         source: dict[str, Any],
         objective_context: ObjectiveContext | None,
     ) -> tuple[dict[str, Any], ...]:
@@ -6134,7 +6082,7 @@ class ResearchObjectiveService:
     def _objective_result_table_matrix_records(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         source: dict[str, Any],
         objective_context: ObjectiveContext | None,
         headers: tuple[str, ...],
@@ -6199,14 +6147,14 @@ class ResearchObjectiveService:
                     value_payload["value"] = numeric_value
                 records.append(
                     {
-                        "evidence_unit_id": self._objective_matrix_unit_id(
+                        "evidence_id": self._objective_matrix_unit_id(
                             route=route,
                             row_index=row_index,
                             column=result_column,
                         ),
                         "objective_id": route.objective_id,
                         "document_id": route.document_id,
-                        "unit_kind": "measurement",
+                        "evidence_kind": "measurement",
                         "property_normalized": property_normalized,
                         "sample_context": row_context["sample_context"],
                         "process_context": row_context["process_context"],
@@ -6230,7 +6178,7 @@ class ResearchObjectiveService:
     def _objective_process_table_matrix_records(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         source: dict[str, Any],
         objective_context: ObjectiveContext | None,
         headers: tuple[str, ...],
@@ -6254,14 +6202,14 @@ class ResearchObjectiveService:
                 continue
             records.append(
                 {
-                    "evidence_unit_id": self._objective_matrix_unit_id(
+                    "evidence_id": self._objective_matrix_unit_id(
                         route=route,
                         row_index=row_index,
                         column="process_context",
                     ),
                     "objective_id": route.objective_id,
                     "document_id": route.document_id,
-                    "unit_kind": "process_context",
+                    "evidence_kind": "process_context",
                     "sample_context": row_context["sample_context"],
                     "process_context": row_context["process_context"],
                     "test_condition": row_context["test_condition"],
@@ -6294,7 +6242,7 @@ class ResearchObjectiveService:
     def _objective_table_row_context(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         row_values: dict[str, str],
         result_columns: set[str],
         objective_context: ObjectiveContext | None,
@@ -6372,7 +6320,7 @@ class ResearchObjectiveService:
     def _objective_table_column_is_process_context(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         column: str,
         role: str,
         objective_context: ObjectiveContext | None,
@@ -6421,7 +6369,7 @@ class ResearchObjectiveService:
     def _objective_result_table_row_is_reference_context(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         row_values: dict[str, str],
         result_columns: set[str],
     ) -> bool:
@@ -6543,7 +6491,7 @@ class ResearchObjectiveService:
     def _objective_table_join_keys(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         row_values: dict[str, str],
     ) -> dict[str, Any]:
         if route.join_keys:
@@ -6578,17 +6526,17 @@ class ResearchObjectiveService:
     def _objective_matrix_unit_id(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         row_index: int,
         column: str,
     ) -> str:
-        seed = "|".join((route.route_id, str(row_index), column))
+        seed = "|".join((route.source_ref, str(row_index), column))
         return f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
 
-    def _objective_evidence_unit_records_from_extracted(
+    def _objective_evidence_records_from_extracted(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         source: dict[str, Any],
         objective_context: ObjectiveContext | None,
         extracted_record: dict[str, Any],
@@ -6630,14 +6578,14 @@ class ResearchObjectiveService:
         )
         if (
             route.source_kind == "text_window"
-            and record.get("unit_kind") == "measurement"
+            and record.get("evidence_kind") == "measurement"
             and not self._objective_text_measurement_matches_context(
                 record.get("property_normalized"),
                 objective_context=objective_context,
             )
         ):
             normalized = dict(record)
-            normalized["unit_kind"] = (
+            normalized["evidence_kind"] = (
                 "characterization"
                 if self._objective_text_numeric_mechanism_property(
                     record.get("property_normalized")
@@ -6645,7 +6593,7 @@ class ResearchObjectiveService:
                 else "interpretation"
             )
             return (normalized,)
-        if route.source_kind == "text_window" and record.get("unit_kind") != "measurement":
+        if route.source_kind == "text_window" and record.get("evidence_kind") != "measurement":
             return (record,)
 
         if route.role != "current_experimental_evidence":
@@ -6683,7 +6631,7 @@ class ResearchObjectiveService:
             normalized = dict(record)
             normalized.update(
                 {
-                    "unit_kind": "measurement",
+                    "evidence_kind": "measurement",
                     "property_normalized": (
                         record.get("property_normalized") or property_normalized
                     ),
@@ -6706,10 +6654,10 @@ class ResearchObjectiveService:
         internal_keys = {
             "collection_id",
             "document_id",
-            "evidence_unit_id",
-            "frame_id",
+            "evidence_id",
+            "document_id",
             "objective_id",
-            "route_id",
+            "source_ref",
             "source_id",
             "source_kind",
             "source_ref",
@@ -6732,12 +6680,12 @@ class ResearchObjectiveService:
     def _normalize_text_evidence_unit_record(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         record: dict[str, Any],
     ) -> dict[str, Any]:
         if route.source_kind != "text_window":
             return record
-        if record.get("unit_kind") == "comparison":
+        if record.get("evidence_kind") == "comparison":
             value_payload = (
                 record.get("value_payload")
                 if isinstance(record.get("value_payload"), dict)
@@ -6751,17 +6699,17 @@ class ResearchObjectiveService:
             if not value_payload and not baseline_context:
                 normalized = dict(record)
                 if route.role == "characterization":
-                    normalized["unit_kind"] = "characterization"
+                    normalized["evidence_kind"] = "characterization"
                 else:
-                    normalized["unit_kind"] = "interpretation"
+                    normalized["evidence_kind"] = "interpretation"
                 return normalized
-        if record.get("unit_kind") == "characterization":
+        if record.get("evidence_kind") == "characterization":
             normalized = self._numeric_text_characterization_measurement_record(
                 record,
             )
             if normalized is not None:
                 return normalized
-        if record.get("unit_kind") != "measurement":
+        if record.get("evidence_kind") != "measurement":
             return record
         value_payload = (
             record.get("value_payload")
@@ -6774,9 +6722,9 @@ class ResearchObjectiveService:
         if route.role == "characterization" and self._objective_property_is_characterization(
             record.get("property_normalized")
         ):
-            normalized["unit_kind"] = "characterization"
+            normalized["evidence_kind"] = "characterization"
         else:
-            normalized["unit_kind"] = "interpretation"
+            normalized["evidence_kind"] = "interpretation"
         if not normalized.get("interpretation"):
             normalized["interpretation"] = self._value_payload_text(value_payload)
         return normalized
@@ -6878,7 +6826,7 @@ class ResearchObjectiveService:
         )
         if source_respective_items:
             source_record = dict(record)
-            source_record["evidence_unit_id"] = (
+            source_record["evidence_id"] = (
                 self._source_text_density_record_base_id(record)
             )
             source_record["process_context"] = {}
@@ -6896,10 +6844,10 @@ class ResearchObjectiveService:
                     start=1,
                 )
             )
-        unit_kind = record.get("unit_kind")
-        if unit_kind not in {"characterization", "interpretation"}:
+        evidence_kind = record.get("evidence_kind")
+        if evidence_kind not in {"characterization", "interpretation"}:
             return ()
-        if unit_kind == "interpretation" and self._normalize_property_label(
+        if evidence_kind == "interpretation" and self._normalize_property_label(
             record.get("property_normalized")
         ) not in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
             return ()
@@ -7034,20 +6982,20 @@ class ResearchObjectiveService:
         if item_index is not None:
             seed = "|".join(
                 (
-                    str(record.get("evidence_unit_id") or ""),
+                    str(record.get("evidence_id") or ""),
                     str(item_index),
                     str(sample_context or {}),
                     str(raw_value),
                 )
             )
-            normalized["evidence_unit_id"] = (
+            normalized["evidence_id"] = (
                 f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
             )
         if sample_context is not None:
             normalized["sample_context"] = dict(sample_context)
         normalized.update(
             {
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": property_normalized,
                 "value_payload": {
                     "source_value_text": str(raw_value),
@@ -7216,7 +7164,7 @@ class ResearchObjectiveService:
     def _objective_result_value_items(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         objective_context: ObjectiveContext | None,
         value_payload: dict[str, Any],
     ) -> tuple[tuple[str, Any], ...]:
@@ -7254,7 +7202,7 @@ class ResearchObjectiveService:
 
     def _objective_route_result_columns(
         self,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         *,
         objective_context: ObjectiveContext | None = None,
     ) -> set[str]:
@@ -7322,7 +7270,7 @@ class ResearchObjectiveService:
     def _objective_result_column_property_label(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         result_column: str,
         objective_context: ObjectiveContext | None,
     ) -> str:
@@ -7601,11 +7549,11 @@ class ResearchObjectiveService:
     def _objective_route_source_refs(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         source: dict[str, Any],
     ) -> tuple[dict[str, Any], ...]:
         ref = {
-            "route_id": route.route_id,
+            "source_ref": route.source_ref,
             "source_kind": route.source_kind,
             "source_ref": route.source_ref,
             "role": route.role,
@@ -7620,11 +7568,11 @@ class ResearchObjectiveService:
             },
         )
 
-    def _objective_evidence_unit_has_payload(
+    def _objective_evidence_has_payload(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
     ) -> bool:
-        if unit.unit_kind in {
+        if unit.evidence_kind in {
             "characterization",
             "comparison",
             "interpretation",
@@ -7649,368 +7597,9 @@ class ResearchObjectiveService:
             )
         )
 
-    def _build_objective_logic_chains(
-        self,
-        *,
-        collection_id: str,
-        objectives: tuple[ResearchObjective, ...],
-        objective_contexts: tuple[ObjectiveContext, ...],
-        objective_evidence_units: tuple[ObjectiveEvidenceUnit, ...],
-        progress_callback: ProgressCallback | None = None,
-    ) -> tuple[ObjectiveLogicChain, ...]:
-        context_by_objective_id = {
-            context.objective_id: context
-            for context in objective_contexts
-        }
-        units_by_objective_id: dict[str, list[ObjectiveEvidenceUnit]] = {}
-        for unit in objective_evidence_units:
-            units_by_objective_id.setdefault(unit.objective_id, []).append(unit)
-        logger.info(
-            "Research objective logic-chain assembly started collection_id=%s objective_count=%s objective_evidence_units=%s",
-            collection_id,
-            len(objectives),
-            len(objective_evidence_units),
-        )
-        chains: list[ObjectiveLogicChain] = []
-        objective_count = len(objectives)
-        for objective_position, objective in enumerate(objectives, start=1):
-            self._notify_progress(
-                progress_callback,
-                phase="objective_logic_chains_started",
-                current=objective_position,
-                total=objective_count,
-                unit="objectives",
-                message="Assembling objective logic chains from extracted evidence.",
-                active_objective_id=objective.objective_id,
-            )
-            units = tuple(units_by_objective_id.get(objective.objective_id, ()))
-            if not units:
-                continue
-            chain_payload = self._objective_logic_chain_payload(
-                objective=objective,
-                objective_context=context_by_objective_id.get(objective.objective_id),
-                units=units,
-            )
-            chains.append(
-                ObjectiveLogicChain.from_mapping(
-                    {
-                        "objective_id": objective.objective_id,
-                        "chain_scope": "objective",
-                        "question": objective.question,
-                        "evidence_unit_ids": [
-                            unit.evidence_unit_id
-                            for unit in units
-                        ],
-                        "chain_payload": chain_payload,
-                        "summary": self._objective_logic_chain_summary(chain_payload),
-                        "confidence": objective.confidence,
-                    }
-                )
-            )
-            logger.info(
-                "Research objective logic-chain assembly objective finished collection_id=%s objective_id=%s evidence_unit_count=%s",
-                collection_id,
-                objective.objective_id,
-                len(units),
-            )
-        logger.info(
-            "Research objective logic-chain assembly finished collection_id=%s logic_chain_count=%s",
-            collection_id,
-            len(chains),
-        )
-        return tuple(chains)
-
-    def _objective_logic_chain_payload(
-        self,
-        *,
-        objective: ResearchObjective,
-        objective_context: ObjectiveContext | None,
-        units: tuple[ObjectiveEvidenceUnit, ...],
-    ) -> dict[str, Any]:
-        counts_by_kind: dict[str, int] = {}
-        document_ids: list[str] = []
-        for unit in units:
-            counts_by_kind[unit.unit_kind] = counts_by_kind.get(unit.unit_kind, 0) + 1
-            if unit.document_id not in document_ids:
-                document_ids.append(unit.document_id)
-        evidence_unit_ids_by_role = self._objective_evidence_unit_ids_by_role(units)
-        paper_chains = [
-            self._objective_paper_logic_chain(
-                document_id=document_id,
-                units=tuple(unit for unit in units if unit.document_id == document_id),
-            )
-            for document_id in document_ids
-        ]
-        cross_paper = self._objective_cross_paper_logic(
-            paper_chains=paper_chains,
-            units=units,
-        )
-        return {
-            "schema_version": "objective_logic_chain.v1",
-            "objective": objective.to_record(),
-            "context": objective_context.to_record() if objective_context else {},
-            "unit_counts_by_kind": counts_by_kind,
-            "document_ids": document_ids,
-            "evidence_unit_ids_by_role": evidence_unit_ids_by_role,
-            "steps": self._objective_logic_chain_steps(
-                objective=objective,
-                objective_context=objective_context,
-                evidence_unit_ids_by_role=evidence_unit_ids_by_role,
-                cross_paper=cross_paper,
-            ),
-            "paper_chains": paper_chains,
-            "cross_paper": cross_paper,
-        }
-
-    def _objective_paper_logic_chain(
-        self,
-        *,
-        document_id: str,
-        units: tuple[ObjectiveEvidenceUnit, ...],
-    ) -> dict[str, Any]:
-        measurements = tuple(unit for unit in units if unit.unit_kind == "measurement")
-        test_conditions = tuple(
-            unit for unit in units if unit.unit_kind == "test_condition"
-        )
-        sample_process_units = tuple(
-            unit
-            for unit in units
-            if unit.unit_kind in {"sample_context", "process_context", "measurement"}
-            and (unit.sample_context or unit.process_context)
-        )
-        characterization = tuple(
-            unit for unit in units if unit.unit_kind == "characterization"
-        )
-        comparisons = tuple(unit for unit in units if unit.unit_kind == "comparison")
-        interpretations = tuple(
-            unit for unit in units if unit.unit_kind == "interpretation"
-        )
-        return {
-            "document_id": document_id,
-            "evidence_unit_ids": [unit.evidence_unit_id for unit in units],
-            "sample_and_process_contexts": self._dedupe_chain_items(
-                [
-                    self._objective_sample_process_chain_item(unit)
-                    for unit in sample_process_units
-                ]
-            ),
-            "test_conditions": [
-                self._objective_logic_unit_reference(unit)
-                for unit in test_conditions
-            ],
-            "characterization_observations": [
-                self._objective_logic_unit_reference(unit)
-                for unit in characterization
-            ],
-            "measurement_results": [
-                self._objective_logic_unit_reference(unit)
-                for unit in measurements
-            ],
-            "comparisons": [
-                self._objective_logic_unit_reference(unit)
-                for unit in comparisons
-            ],
-            "author_interpretations": [
-                self._objective_logic_unit_reference(unit)
-                for unit in interpretations
-            ],
-            "resolution": {
-                "measurement_count": len(measurements),
-                "resolved_measurement_count": sum(
-                    1
-                    for unit in measurements
-                    if unit.resolution_status == "resolved"
-                ),
-                "test_condition_count": len(test_conditions),
-                "characterization_count": len(characterization),
-                "comparison_count": len(comparisons),
-                "gaps": self._objective_paper_logic_gaps(
-                    measurements=measurements,
-                    test_conditions=test_conditions,
-                    sample_process_units=sample_process_units,
-                    characterization=characterization,
-                    comparisons=comparisons,
-                ),
-            },
-        }
-
-    def _objective_evidence_unit_ids_by_role(
-        self,
-        units: tuple[ObjectiveEvidenceUnit, ...],
-    ) -> dict[str, list[str]]:
-        roles = {
-            "sample_and_process_context": [],
-            "test_and_characterization": [],
-            "measurements": [],
-            "comparisons": [],
-            "interpretations": [],
-            "other": [],
-        }
-        for unit in units:
-            if unit.unit_kind in {"sample_context", "process_context"}:
-                roles["sample_and_process_context"].append(unit.evidence_unit_id)
-            elif unit.unit_kind == "test_condition":
-                roles["test_and_characterization"].append(unit.evidence_unit_id)
-            elif unit.unit_kind == "characterization":
-                roles["test_and_characterization"].append(unit.evidence_unit_id)
-            elif unit.unit_kind == "measurement":
-                roles["measurements"].append(unit.evidence_unit_id)
-                if unit.sample_context or unit.process_context:
-                    roles["sample_and_process_context"].append(unit.evidence_unit_id)
-                if unit.test_condition:
-                    roles["test_and_characterization"].append(unit.evidence_unit_id)
-            elif unit.unit_kind == "comparison":
-                roles["comparisons"].append(unit.evidence_unit_id)
-            elif unit.unit_kind == "interpretation":
-                roles["interpretations"].append(unit.evidence_unit_id)
-            else:
-                roles["other"].append(unit.evidence_unit_id)
-        return {
-            role: self._dedupe_preserving_order(unit_ids)
-            for role, unit_ids in roles.items()
-            if unit_ids
-        }
-
-    def _objective_logic_chain_steps(
-        self,
-        *,
-        objective: ResearchObjective,
-        objective_context: ObjectiveContext | None,
-        evidence_unit_ids_by_role: dict[str, list[str]],
-        cross_paper: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        return [
-            {
-                "step_role": "research_objective",
-                "question": objective.question,
-                "material_scope": list(objective.material_scope),
-                "target_property_axes": (
-                    list(objective_context.target_property_axes)
-                    if objective_context is not None
-                    else []
-                ),
-            },
-            {
-                "step_role": "sample_and_process_context",
-                "evidence_unit_ids": evidence_unit_ids_by_role.get(
-                    "sample_and_process_context",
-                    [],
-                ),
-            },
-            {
-                "step_role": "test_and_characterization",
-                "evidence_unit_ids": evidence_unit_ids_by_role.get(
-                    "test_and_characterization",
-                    [],
-                ),
-            },
-            {
-                "step_role": "measurement_results",
-                "evidence_unit_ids": evidence_unit_ids_by_role.get("measurements", []),
-                "measured_properties": cross_paper.get("measured_properties", []),
-                "measurement_value_ranges": cross_paper.get(
-                    "measurement_value_ranges",
-                    [],
-                ),
-            },
-            {
-                "step_role": "comparison_and_interpretation",
-                "evidence_unit_ids": [
-                    *evidence_unit_ids_by_role.get("comparisons", []),
-                    *evidence_unit_ids_by_role.get("interpretations", []),
-                ],
-            },
-            {
-                "step_role": "cross_paper_resolution",
-                "document_count": cross_paper.get("document_count", 0),
-                "gaps": cross_paper.get("gaps", []),
-            },
-        ]
-
-    def _objective_cross_paper_logic(
-        self,
-        *,
-        paper_chains: list[dict[str, Any]],
-        units: tuple[ObjectiveEvidenceUnit, ...],
-    ) -> dict[str, Any]:
-        measurements = tuple(unit for unit in units if unit.unit_kind == "measurement")
-        comparisons = tuple(unit for unit in units if unit.unit_kind == "comparison")
-        gaps = []
-        if not comparisons:
-            gaps.append("comparison_units_missing")
-        if any(
-            unit.resolution_status != "resolved"
-            for unit in measurements
-        ):
-            gaps.append("unresolved_measurements_present")
-        measurement_value_ranges = self._objective_measurement_value_ranges(
-            measurements
-        )
-        return {
-            "document_count": len(paper_chains),
-            "measured_properties": self._dedupe_preserving_order(
-                [
-                    unit.property_normalized
-                    for unit in measurements
-                    if unit.property_normalized
-                ]
-            ),
-            "sample_labels": self._dedupe_preserving_order(
-                [
-                    str(unit.sample_context.get("label"))
-                    for unit in units
-                    if unit.sample_context.get("label")
-                ]
-            ),
-            "resolved_measurement_count": sum(
-                1
-                for unit in measurements
-                if unit.resolution_status == "resolved"
-            ),
-            "comparison_unit_count": len(comparisons),
-            "comparison_ready": bool(comparisons),
-            "measurement_range_ready": bool(measurement_value_ranges),
-            "measurement_value_ranges": measurement_value_ranges,
-            "gaps": gaps,
-        }
-
-    def _objective_measurement_value_ranges(
-        self,
-        measurements: tuple[ObjectiveEvidenceUnit, ...],
-    ) -> list[dict[str, Any]]:
-        grouped: dict[str, list[ObjectiveEvidenceUnit]] = {}
-        for unit in measurements:
-            if self._objective_measurement_numeric_value(unit) is None:
-                continue
-            grouped.setdefault(unit.property_normalized or "measurement", []).append(
-                unit
-            )
-
-        ranges: list[dict[str, Any]] = []
-        for property_name, property_units in grouped.items():
-            sorted_units = sorted(
-                property_units,
-                key=lambda unit: (
-                    self._objective_measurement_numeric_value(unit) or 0.0,
-                    unit.evidence_unit_id,
-                ),
-            )
-            min_unit = sorted_units[0]
-            max_unit = sorted_units[-1]
-            ranges.append(
-                {
-                    "property_normalized": property_name,
-                    "measurement_count": len(property_units),
-                    "min": self._objective_measurement_range_point(min_unit),
-                    "max": self._objective_measurement_range_point(max_unit),
-                    "unit": min_unit.unit or max_unit.unit,
-                }
-            )
-        return ranges
-
     def _objective_measurement_numeric_value(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
     ) -> float | None:
         for key in ("value", "numeric_value", "normalized_value", "current_value"):
             value = unit.value_payload.get(key)
@@ -8023,163 +7612,6 @@ class ResearchObjectiveService:
         if self._source_value_text_is_atomic_numeric(source_value):
             return self._coerce_number(source_value)
         return None
-
-    def _objective_measurement_range_point(
-        self,
-        unit: ObjectiveEvidenceUnit,
-    ) -> dict[str, Any]:
-        return {
-            key: value
-            for key, value in {
-                "evidence_unit_id": unit.evidence_unit_id,
-                "value": self._objective_measurement_numeric_value(unit),
-                "source_value_text": unit.value_payload.get("source_value_text"),
-                "sample_context": dict(unit.sample_context),
-                "process_context": dict(unit.process_context),
-                "test_condition": dict(unit.test_condition),
-                "source_refs": [dict(source_ref) for source_ref in unit.source_refs],
-            }.items()
-            if value not in (None, "", [], {})
-        }
-
-    def _objective_paper_logic_gaps(
-        self,
-        *,
-        measurements: tuple[ObjectiveEvidenceUnit, ...],
-        test_conditions: tuple[ObjectiveEvidenceUnit, ...],
-        sample_process_units: tuple[ObjectiveEvidenceUnit, ...],
-        characterization: tuple[ObjectiveEvidenceUnit, ...],
-        comparisons: tuple[ObjectiveEvidenceUnit, ...],
-    ) -> list[str]:
-        gaps = []
-        if not sample_process_units:
-            gaps.append("sample_or_process_context_missing")
-        if not test_conditions and not any(unit.test_condition for unit in measurements):
-            gaps.append("test_condition_missing")
-        if not measurements:
-            gaps.append("measurement_results_missing")
-        if not characterization:
-            gaps.append("characterization_observations_missing")
-        if not comparisons:
-            gaps.append("comparison_units_missing")
-        return gaps
-
-    def _objective_sample_process_chain_item(
-        self,
-        unit: ObjectiveEvidenceUnit,
-    ) -> dict[str, Any]:
-        return {
-            key: value
-            for key, value in {
-                "evidence_unit_id": unit.evidence_unit_id,
-                "document_id": unit.document_id,
-                "sample_context": dict(unit.sample_context),
-                "process_context": dict(unit.process_context),
-                "join_keys": dict(unit.join_keys),
-                "source_refs": [dict(source_ref) for source_ref in unit.source_refs],
-                "resolution_status": unit.resolution_status,
-            }.items()
-            if value not in (None, "", [], {})
-        }
-
-    def _objective_logic_unit_reference(
-        self,
-        unit: ObjectiveEvidenceUnit,
-    ) -> dict[str, Any]:
-        return {
-            key: value
-            for key, value in {
-                "evidence_unit_id": unit.evidence_unit_id,
-                "document_id": unit.document_id,
-                "unit_kind": unit.unit_kind,
-                "property_normalized": unit.property_normalized,
-                "material_system": dict(unit.material_system),
-                "sample_context": dict(unit.sample_context),
-                "process_context": dict(unit.process_context),
-                "test_condition": dict(unit.test_condition),
-                "value_payload": dict(unit.value_payload),
-                "unit": unit.unit,
-                "baseline_context": dict(unit.baseline_context),
-                "interpretation": unit.interpretation,
-                "source_refs": [dict(source_ref) for source_ref in unit.source_refs],
-                "evidence_anchor_ids": list(unit.evidence_anchor_ids),
-                "join_keys": dict(unit.join_keys),
-                "resolution_status": unit.resolution_status,
-                "confidence": unit.confidence,
-            }.items()
-            if value not in (None, "", [], {})
-        }
-
-    def _objective_logic_chain_summary(
-        self,
-        chain_payload: dict[str, Any],
-    ) -> str:
-        objective = chain_payload.get("objective", {})
-        question = (
-            objective.get("question")
-            if isinstance(objective, dict)
-            else None
-        )
-        counts = chain_payload.get("unit_counts_by_kind", {})
-        measurement_count = counts.get("measurement", 0) if isinstance(counts, dict) else 0
-        document_ids = chain_payload.get("document_ids", [])
-        document_count = len(document_ids) if isinstance(document_ids, list) else 0
-        cross_paper = chain_payload.get("cross_paper", {})
-        value_ranges = (
-            cross_paper.get("measurement_value_ranges", [])
-            if isinstance(cross_paper, dict)
-            else []
-        )
-        range_summary = self._objective_logic_chain_range_summary(value_ranges)
-        if range_summary:
-            return (
-                f"{question or 'Objective'}: {measurement_count} measurement "
-                f"unit(s) across {document_count} document(s); {range_summary}."
-            )
-        return (
-            f"{question or 'Objective'}: assembled {measurement_count} "
-            f"measurement unit(s) across {document_count} document(s)."
-        )
-
-    def _objective_logic_chain_range_summary(
-        self,
-        value_ranges: Any,
-    ) -> str:
-        if not isinstance(value_ranges, list):
-            return ""
-        pieces: list[str] = []
-        for value_range in value_ranges[:5]:
-            if not isinstance(value_range, dict):
-                continue
-            property_name = str(value_range.get("property_normalized") or "").strip()
-            min_point = value_range.get("min")
-            max_point = value_range.get("max")
-            if (
-                not property_name
-                or not isinstance(min_point, dict)
-                or not isinstance(max_point, dict)
-            ):
-                continue
-            unit = str(value_range.get("unit") or "").strip()
-            min_value = (
-                min_point.get("value")
-                if unit
-                else min_point.get("source_value_text") or min_point.get("value")
-            )
-            max_value = (
-                max_point.get("value")
-                if unit
-                else max_point.get("source_value_text") or max_point.get("value")
-            )
-            if min_value in (None, "") or max_value in (None, ""):
-                continue
-            suffix = (
-                f" {unit}"
-                if unit and unit not in {str(min_value), str(max_value)}
-                else ""
-            )
-            pieces.append(f"{property_name} range {min_value}-{max_value}{suffix}")
-        return "; ".join(pieces)
 
     def _dedupe_chain_items(
         self,
@@ -8212,7 +7644,7 @@ class ResearchObjectiveService:
     def _build_route_source_candidates(
         self,
         *,
-        frame: ObjectivePaperFrame,
+        frame: PaperAnalysisFrame,
         blocks: list[Any],
         tables: list[Any],
         document_tree: SourceDocumentTree | None = None,
@@ -8428,10 +7860,10 @@ class ResearchObjectiveService:
 
     def _tree_order_objective_routes(
         self,
-        routes: tuple[ObjectiveEvidenceRoute, ...],
+        routes: tuple[EvidenceCandidate, ...],
         *,
         document_trees_by_document_id: dict[str, SourceDocumentTree],
-    ) -> tuple[ObjectiveEvidenceRoute, ...]:
+    ) -> tuple[EvidenceCandidate, ...]:
         return tuple(
             sorted(
                 routes,
@@ -8440,14 +7872,14 @@ class ResearchObjectiveService:
                         route,
                         document_trees_by_document_id=document_trees_by_document_id,
                     ),
-                    route.route_id,
+                    route.source_ref,
                 ),
             )
         )
 
     def _route_tree_order(
         self,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         *,
         document_trees_by_document_id: dict[str, SourceDocumentTree],
     ) -> int:
@@ -8479,7 +7911,7 @@ class ResearchObjectiveService:
     def _source_candidate_from_route(
         self,
         *,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
         source: dict[str, Any],
         document_tree: SourceDocumentTree | None,
     ) -> dict[str, Any]:
@@ -8496,7 +7928,7 @@ class ResearchObjectiveService:
 
     def _objective_evidence_prompt_route_record(
         self,
-        route: ObjectiveEvidenceRoute,
+        route: EvidenceCandidate,
     ) -> dict[str, Any]:
         return {
             "objective_id": route.objective_id,
@@ -8609,13 +8041,13 @@ class ResearchObjectiveService:
 
     def _objective_document_state_payload(
         self,
-        units: list[ObjectiveEvidenceUnit],
+        units: list[ExtractedEvidenceDraft],
     ) -> dict[str, Any]:
         if not units:
             return self._empty_objective_document_state()
         counts_by_kind: dict[str, int] = {}
         for unit in units:
-            counts_by_kind[unit.unit_kind] = counts_by_kind.get(unit.unit_kind, 0) + 1
+            counts_by_kind[unit.evidence_kind] = counts_by_kind.get(unit.evidence_kind, 0) + 1
         return {
             "schema_version": "objective_document_state.v1",
             "evidence_counts_by_kind": counts_by_kind,
@@ -8637,7 +8069,7 @@ class ResearchObjectiveService:
 
     def _objective_state_items(
         self,
-        units: list[ObjectiveEvidenceUnit],
+        units: list[ExtractedEvidenceDraft],
         *,
         field_name: str,
     ) -> list[dict[str, Any]]:
@@ -8648,8 +8080,8 @@ class ResearchObjectiveService:
             if not value:
                 continue
             item = {
-                "evidence_unit_id": unit.evidence_unit_id,
-                "unit_kind": unit.unit_kind,
+                "evidence_id": unit.evidence_id,
+                "evidence_kind": unit.evidence_kind,
                 "value": self._compact_objective_state_mapping(value),
                 "source_refs": [dict(ref) for ref in unit.source_refs[:2]],
             }
@@ -8664,15 +8096,15 @@ class ResearchObjectiveService:
 
     def _objective_state_measurements(
         self,
-        units: list[ObjectiveEvidenceUnit],
+        units: list[ExtractedEvidenceDraft],
     ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         for unit in reversed(units):
-            if unit.unit_kind != "measurement":
+            if unit.evidence_kind != "measurement":
                 continue
             items.append(
                 {
-                    "evidence_unit_id": unit.evidence_unit_id,
+                    "evidence_id": unit.evidence_id,
                     "property_normalized": unit.property_normalized,
                     "sample_context": self._compact_objective_state_mapping(
                         unit.sample_context
@@ -8695,7 +8127,7 @@ class ResearchObjectiveService:
 
     def _objective_state_open_joins(
         self,
-        units: list[ObjectiveEvidenceUnit],
+        units: list[ExtractedEvidenceDraft],
     ) -> list[dict[str, Any]]:
         joins: list[dict[str, Any]] = []
         for unit in reversed(units):
@@ -8705,8 +8137,8 @@ class ResearchObjectiveService:
                 continue
             joins.append(
                 {
-                    "evidence_unit_id": unit.evidence_unit_id,
-                    "unit_kind": unit.unit_kind,
+                    "evidence_id": unit.evidence_id,
+                    "evidence_kind": unit.evidence_kind,
                     "sample_context": self._compact_objective_state_mapping(
                         unit.sample_context
                     ),
@@ -8720,14 +8152,14 @@ class ResearchObjectiveService:
 
     def _objective_state_missing_context(
         self,
-        unit: ObjectiveEvidenceUnit,
+        unit: ExtractedEvidenceDraft,
     ) -> list[str]:
         missing: list[str] = []
         if not unit.process_context:
             missing.append("process_context")
-        if unit.unit_kind == "measurement" and not unit.value_payload:
+        if unit.evidence_kind == "measurement" and not unit.value_payload:
             missing.append("value_payload")
-        if unit.unit_kind == "measurement" and not unit.test_condition:
+        if unit.evidence_kind == "measurement" and not unit.test_condition:
             missing.append("test_condition")
         return missing
 
@@ -8756,7 +8188,7 @@ class ResearchObjectiveService:
     def _build_ranked_route_text_candidates(
         self,
         *,
-        frame: ObjectivePaperFrame,
+        frame: PaperAnalysisFrame,
         blocks: list[Any],
         limit: int,
     ) -> list[dict[str, Any]]:
@@ -8809,7 +8241,7 @@ class ResearchObjectiveService:
     def _build_tree_route_text_candidates(
         self,
         *,
-        frame: ObjectivePaperFrame,
+        frame: PaperAnalysisFrame,
         blocks: list[Any],
         document_tree: SourceDocumentTree,
     ) -> list[dict[str, Any]]:
@@ -8889,7 +8321,7 @@ class ResearchObjectiveService:
     def _bounded_tree_route_text_candidates(
         self,
         *,
-        frame: ObjectivePaperFrame,
+        frame: PaperAnalysisFrame,
         scored_candidates: list[tuple[int, int, dict[str, Any]]],
     ) -> list[tuple[int, int, dict[str, Any]]]:
         if len(scored_candidates) <= _ROUTE_TEXT_CANDIDATE_LIMIT:
@@ -8978,7 +8410,7 @@ class ResearchObjectiveService:
 
     def _route_text_candidates_use_frame_sections(
         self,
-        frame: ObjectivePaperFrame,
+        frame: PaperAnalysisFrame,
     ) -> bool:
         if not frame.relevant_sections:
             return False
@@ -8990,7 +8422,7 @@ class ResearchObjectiveService:
         self,
         *,
         section_label: str,
-        frame: ObjectivePaperFrame,
+        frame: PaperAnalysisFrame,
     ) -> bool:
         section_key = self._objective_column_key(section_label)
         if not section_key:
@@ -9035,7 +8467,7 @@ class ResearchObjectiveService:
     def _route_text_candidate_score(
         self,
         *,
-        frame: ObjectivePaperFrame,
+        frame: PaperAnalysisFrame,
         block_type: str,
         section_label: str,
         text: str,
@@ -10630,6 +10062,7 @@ class ResearchObjectiveService:
                 return None
 
             payload = {
+                "collection_id": source_objectives[0].collection_id,
                 "objective_id": build_research_objective_id(group.question),
                 "question": group.question,
                 "material_scope": material_scope,
@@ -11005,6 +10438,7 @@ class ResearchObjectiveService:
         if len(objectives) == 1:
             return objectives[0]
         payload = {
+            "collection_id": objectives[0].collection_id,
             "material_scope": self._merge_objective_axes(objectives, "material_scope"),
             "process_axes": self._merge_objective_axes(objectives, "process_axes"),
             "property_axes": self._merge_objective_axes(objectives, "property_axes"),

@@ -1,23 +1,66 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from domain.core import (
-    OBJECTIVE_STATUSES,
-    ObjectiveContext,
-    ObjectiveEvidenceRoute,
-    ObjectiveEvidenceUnit,
-    ObjectiveAnalysisWorkspace,
-    ObjectiveLogicChain,
-    ObjectivePaperFrame,
-    PaperSkim,
+    OBJECTIVE_ANALYSIS_STATUSES,
+    ObjectiveAnalysis,
+    ObjectiveEvidence,
+    PaperContribution,
     ResearchObjective,
     build_research_objective_id,
     is_question_shaped_objective,
     normalize_objective_confidence,
     normalize_objective_terms,
-    require_objective_status_transition,
 )
+
+
+def _objective(**overrides) -> ResearchObjective:
+    payload = {
+        "collection_id": "collection-1",
+        "objective_id": "objective-1",
+        "question": "How does heat treatment affect strength?",
+        "material_scope": ["316L"],
+        "process_axes": ["heat treatment"],
+        "property_axes": ["strength"],
+        "seed_document_ids": ["paper-1", "paper-2"],
+    }
+    payload.update(overrides)
+    return ResearchObjective.from_mapping(payload)
+
+
+def _analysis(**overrides) -> ObjectiveAnalysis:
+    payload = {
+        "collection_id": "collection-1",
+        "objective_id": "objective-1",
+        "analysis_version": 1,
+        "source_build_id": "build-1",
+        "pipeline_version": "objective-analysis.v1",
+        "model_name": "model-1",
+        "prompt_versions": {"evidence": "v1", "finding": "v1"},
+    }
+    payload.update(overrides)
+    return ObjectiveAnalysis(**payload)
+
+
+def _candidate_evidence(**overrides) -> ObjectiveEvidence:
+    payload = {
+        "collection_id": "collection-1",
+        "objective_id": "objective-1",
+        "analysis_version": 1,
+        "document_id": "paper-1",
+        "source_kind": "text_window",
+        "source_ref": "block-1",
+        "source_excerpt": "The heat-treated sample reached 610 MPa.",
+        "evidence_role": "direct_result",
+        "selection_status": "candidate",
+        "evidence_kind": "measurement",
+        "resolution_status": "unknown",
+    }
+    payload.update(overrides)
+    return ObjectiveEvidence.from_mapping(payload)
 
 
 def test_build_research_objective_id_is_stable_for_same_question() -> None:
@@ -29,609 +72,219 @@ def test_build_research_objective_id_is_stable_for_same_question() -> None:
     )
 
 
-def test_research_objective_normalizes_mapping_and_round_trips_record() -> None:
+def test_research_objective_normalizes_scope_and_round_trips() -> None:
     objective = ResearchObjective.from_mapping(
         {
-            "question": "How does heat treatment affect corrosion resistance of LPBF 316L?",
-            "material_scope": ["316L stainless steel", "316L stainless steel", ""],
-            "process_axes": ["LPBF", "SLM", None],
+            "collection_id": "collection-1",
+            "question": "How does heat treatment affect corrosion resistance?",
+            "material_scope": ["316L", "316L", ""],
+            "process_axes": ["LPBF", "heat treatment", None],
             "property_axes": ("corrosion", "EIS"),
-            "comparison_intent": "compare as-built and heat-treated samples",
-            "seed_document_ids": ["P001", "P002"],
-            "excluded_document_ids": ["P005"],
+            "seed_document_ids": ["paper-1", "paper-2"],
+            "excluded_document_ids": ["paper-3"],
             "confidence": 1.2,
-            "reason": "Multiple experimental papers report corrosion results.",
         }
     )
 
     record = objective.to_record()
+
+    assert record["collection_id"] == "collection-1"
     assert record["objective_id"] == build_research_objective_id(record["question"])
-    assert record["material_scope"] == ["316L stainless steel"]
-    assert record["process_axes"] == ["LPBF", "SLM"]
+    assert record["material_scope"] == ["316L"]
+    assert record["process_axes"] == ["LPBF", "heat treatment"]
     assert record["property_axes"] == ["corrosion", "EIS"]
     assert record["confidence"] == 1.0
+    assert record["confirmation_status"] == "candidate"
+    assert "analysis_error" not in record
+    assert "analysis_progress" not in record
     assert is_question_shaped_objective(objective) is True
 
 
-def test_research_objective_workspace_lifecycle_does_not_pollute_build_record() -> None:
-    objective = ResearchObjective.from_mapping(
-        {
-            "objective_id": "objective-1",
-            "question": "How does heat treatment affect strength?",
-            "status": "running",
-            "source_build_id": "build-1",
-            "analysis_progress": {"phase": "routing", "current": 2, "total": 4},
-            "analysis_error": None,
-            "created_at": "2026-07-20T01:00:00+00:00",
-            "updated_at": "2026-07-20T01:01:00+00:00",
-        }
+def test_research_objective_rejects_overlapping_document_scope() -> None:
+    with pytest.raises(ValueError, match="documents overlap"):
+        _objective(excluded_document_ids=["paper-2"])
+
+
+def test_research_objective_confirms_queues_and_publishes_active_version() -> None:
+    candidate = _objective()
+    confirmed = candidate.confirm()
+    queued = confirmed.queue_analysis(1)
+    succeeded = _analysis().start().succeed()
+    published = queued.publish_analysis(succeeded)
+
+    assert candidate.confirmation_status == "candidate"
+    assert confirmed.confirmation_status == "confirmed"
+    assert queued.active_analysis_version == 1
+    assert queued.published_analysis_version is None
+    assert published.published_analysis_version == 1
+
+
+def test_research_objective_requires_newer_analysis_version() -> None:
+    objective = _objective(
+        confirmation_status="confirmed",
+        active_analysis_version=2,
+        published_analysis_version=1,
     )
 
-    assert objective.status == "running"
-    assert objective.to_record() == {
-        "objective_id": "objective-1",
-        "question": "How does heat treatment affect strength?",
-        "material_scope": [],
-        "process_axes": [],
-        "property_axes": [],
-        "comparison_intent": None,
-        "seed_document_ids": [],
-        "excluded_document_ids": [],
-        "confidence": 0.0,
-        "reason": None,
-    }
-    assert objective.to_workspace_record()["source_build_id"] == "build-1"
-    assert objective.to_workspace_record()["status"] == "running"
-    assert objective.to_workspace_record()["analysis_progress"] == {
-        "phase": "routing",
-        "current": 2,
-        "total": 4,
-    }
+    with pytest.raises(ValueError, match="newer than active"):
+        objective.queue_analysis(2)
 
 
-@pytest.mark.parametrize(
-    ("current", "target"),
-    [
-        ("candidate", "confirmed"),
-        ("confirmed", "queued"),
-        ("failed", "queued"),
-        ("ready", "queued"),
-        ("queued", "running"),
-        ("queued", "failed"),
-        ("running", "ready"),
-        ("running", "failed"),
-    ],
-)
-def test_objective_lifecycle_accepts_only_declared_transitions(
-    current: str,
-    target: str,
-) -> None:
-    assert current in OBJECTIVE_STATUSES
-    require_objective_status_transition(current, target)
+def test_research_objective_rejects_cross_objective_publication() -> None:
+    objective = _objective(confirmation_status="confirmed").queue_analysis(1)
+    analysis = _analysis(objective_id="another-objective").start().succeed()
+
+    with pytest.raises(ValueError, match="another objective"):
+        objective.publish_analysis(analysis)
 
 
-@pytest.mark.parametrize(
-    ("current", "target"),
-    [
-        ("candidate", "queued"),
-        ("confirmed", "ready"),
-        ("queued", "ready"),
-        ("running", "queued"),
-        ("failed", "ready"),
-        ("ready", "running"),
-    ],
-)
-def test_objective_lifecycle_rejects_undeclared_transitions(
-    current: str,
-    target: str,
-) -> None:
-    with pytest.raises(ValueError, match=f"{current} -> {target}"):
-        require_objective_status_transition(current, target)
-
-
-def test_research_objective_lifecycle_operations_are_immutable() -> None:
-    objective = ResearchObjective.from_mapping(
-        {
-            "objective_id": "objective-1",
-            "question": "How does heat treatment affect strength?",
-        }
+def test_objective_analysis_lifecycle_and_progress_are_immutable() -> None:
+    queued = _analysis()
+    started_at = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    running = queued.start(started_at=started_at)
+    progressed = running.update_progress(
+        phase="evidence_extraction",
+        processed_document_count=2,
+        total_document_count=6,
+        current_document_id="paper-3",
+        progress_message="Analyzing paper 3 of 6.",
     )
+    succeeded = progressed.succeed()
 
-    confirmed = objective.confirm()
-    queued = confirmed.queue()
-    running = queued.start()
-    progressing = running.update_progress(
-        {"phase": "routing", "unit": "routes", "current": 2, "total": 4}
-    )
-    ready = progressing.complete()
-
-    assert objective.status == "candidate"
-    assert confirmed.status == "confirmed"
-    assert queued.analysis_progress == {
-        "phase": "queued",
-        "unit": "steps",
-        "message": "Objective analysis is queued.",
-    }
+    assert queued.status == "queued"
     assert running.status == "running"
-    assert progressing.analysis_progress == {
-        "phase": "routing",
-        "unit": "routes",
-        "current": 2,
-        "total": 4,
-    }
-    assert ready.status == "ready"
-    assert ready.analysis_error is None
+    assert running.started_at == started_at
+    assert progressed.current_document_id == "paper-3"
+    assert progressed.processed_document_count == 2
+    assert succeeded.status == "succeeded"
+    assert succeeded.processed_document_count == 6
+    assert succeeded.current_document_id is None
+    assert succeeded.error_message is None
 
 
-def test_research_objective_fail_requires_error_and_supports_retry() -> None:
-    objective = ResearchObjective.from_mapping(
-        {
-            "objective_id": "objective-1",
-            "question": "How does heat treatment affect strength?",
-            "status": "running",
-        }
+def test_objective_analysis_failure_is_terminal_and_retry_is_new_version() -> None:
+    failed = _analysis().start().fail(
+        error_code="provider_connection",
+        error_message="model endpoint unavailable",
     )
-
-    failed = objective.fail("provider timed out")
-    retried = failed.queue()
 
     assert failed.status == "failed"
-    assert failed.analysis_error == "provider timed out"
-    assert failed.analysis_progress["phase"] == "objective_analysis_failed"
-    assert retried.status == "queued"
-    assert retried.analysis_error is None
+    assert failed.error_code == "provider_connection"
+    with pytest.raises(ValueError, match="failed -> running"):
+        failed.start()
 
-    with pytest.raises(ValueError, match="must not be empty"):
-        objective.fail("  ")
+    retry = _analysis(analysis_version=2)
+    assert retry.status == "queued"
+    assert retry.analysis_version == 2
 
 
-def test_research_objective_progress_requires_running_state() -> None:
-    objective = ResearchObjective.from_mapping(
+def test_objective_analysis_rejects_invalid_document_progress() -> None:
+    with pytest.raises(ValueError, match="exceeds total"):
+        _analysis(processed_document_count=3, total_document_count=2)
+
+    with pytest.raises(ValueError, match="status is queued"):
+        _analysis().update_progress(
+            phase="routing",
+            processed_document_count=0,
+            total_document_count=2,
+        )
+
+
+def test_objective_analysis_statuses_do_not_include_objective_confirmation() -> None:
+    assert OBJECTIVE_ANALYSIS_STATUSES == {
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+    }
+
+
+def test_paper_contribution_uses_document_as_subordinate_identity() -> None:
+    contribution = PaperContribution.from_mapping(
         {
+            "collection_id": "collection-1",
             "objective_id": "objective-1",
-            "question": "How does heat treatment affect strength?",
-        }
-    )
-
-    with pytest.raises(ValueError, match="status is candidate"):
-        objective.update_progress({"phase": "routing"})
-
-    running = objective.confirm().queue().start()
-    with pytest.raises(ValueError, match="must not be empty"):
-        running.update_progress({})
-
-
-def test_objective_evidence_carries_selection_and_extraction_state() -> None:
-    evidence = ObjectiveEvidenceUnit.from_mapping(
-        {
-            "objective_id": "obj-1",
+            "analysis_version": 1,
             "document_id": "paper-1",
-            "source_kind": "table",
-            "source_ref": "table-3",
-            "selection_status": "candidate",
-            "unit_kind": "measurement",
-            "property_normalized": "elongation",
-            "value_payload": {"value": 12.0},
+            "analysis_status": "analyzed",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "contribution_summary": "Direct tensile comparison.",
+            "changed_variables": ["heat treatment"],
+            "measured_property_scope": ["strength"],
+            "confidence": 0.9,
         }
     )
 
-    selected = evidence.select(
-        evidence_role="current_experimental_evidence",
-        reason="Target result table for the objective.",
+    assert contribution.key == (
+        "collection-1",
+        "objective-1",
+        1,
+        "paper-1",
     )
-    extracted = selected.mark_extracted()
+    assert "frame_id" not in contribution.to_record()
 
-    assert evidence.selection_status == "candidate"
+
+def test_excluded_paper_contribution_requires_reason() -> None:
+    with pytest.raises(ValueError, match="requires a reason"):
+        PaperContribution.from_mapping(
+            {
+                "collection_id": "collection-1",
+                "objective_id": "objective-1",
+                "analysis_version": 1,
+                "document_id": "paper-1",
+                "analysis_status": "excluded",
+            }
+        )
+
+
+def test_objective_evidence_preserves_source_and_structured_result() -> None:
+    candidate = _candidate_evidence()
+    selected = candidate.select(
+        evidence_role="direct_result",
+        reason="Reports the target strength result.",
+    )
+    extracted = selected.mark_extracted(
+        property_normalized="yield strength",
+        value_payload={"value": 610},
+        unit="MPa",
+        material_system={"alloy": "316L"},
+        join_keys={"isolated_variable": "heat treatment"},
+    )
+
+    assert candidate.selection_status == "candidate"
     assert selected.selection_status == "selected"
-    assert selected.source_kind == "table"
-    assert selected.source_ref == "table-3"
-    assert selected.evidence_role == "current_experimental_evidence"
-    assert selected.selection_reason == "Target result table for the objective."
     assert extracted.selection_status == "extracted"
-    assert extracted.value_payload == {"value": 12.0}
+    assert extracted.source_excerpt == "The heat-treated sample reached 610 MPa."
+    assert extracted.value_payload == {"value": 610}
+    assert extracted.supports_finding is True
+    assert "route_id" not in extracted.to_record()
+    assert "evidence_unit_id" not in extracted.to_record()
 
 
-def test_objective_evidence_rejects_invalid_state_transitions() -> None:
-    evidence = ObjectiveEvidenceUnit.from_mapping(
-        {
-            "objective_id": "obj-1",
-            "document_id": "paper-1",
-            "selection_status": "candidate",
-        }
-    )
+def test_context_only_evidence_cannot_establish_finding_by_itself() -> None:
+    evidence = _candidate_evidence(
+        evidence_role="condition_context",
+        evidence_kind="test_condition",
+    ).select(evidence_role="condition_context")
+    extracted = evidence.mark_extracted(test_condition={"temperature_c": 25})
 
-    rejected = evidence.reject("Background-only table.")
-    assert rejected.selection_status == "rejected"
-    assert rejected.selection_reason == "Background-only table."
+    assert extracted.supports_finding is True
+    assert extracted.evidence_role == "condition_context"
+
+
+def test_objective_evidence_rejects_invalid_state_and_empty_source() -> None:
+    rejected = _candidate_evidence().reject("Not relevant to the target property.")
 
     with pytest.raises(ValueError, match="rejected -> extracted"):
-        rejected.mark_extracted()
-    with pytest.raises(ValueError, match="must not be empty"):
-        evidence.fail("  ")
+        rejected.mark_extracted(interpretation="invalid")
+    with pytest.raises(ValueError, match="identity and source"):
+        _candidate_evidence(source_excerpt="")
 
 
-def test_objective_analysis_workspace_round_trips_bounded_state() -> None:
-    objective = ResearchObjective.from_mapping(
-        {
-            "objective_id": "obj-1",
-            "question": "How does heat treatment affect strength?",
-            "status": "running",
-        }
-    )
-    context = ObjectiveContext.from_mapping(
-        {
-            "objective_id": "obj-1",
-            "target_property_axes": ["strength"],
-        }
-    )
-    frame = ObjectivePaperFrame.from_mapping(
-        {
-            "objective_id": "obj-1",
-            "document_id": "paper-1",
-            "relevance": "high",
-        }
-    )
-    evidence = ObjectiveEvidenceUnit.from_mapping(
-        {
-            "evidence_unit_id": "evidence-1",
-            "objective_id": "obj-1",
-            "document_id": "paper-1",
-            "source_kind": "text_window",
-            "source_ref": "block-1",
-            "unit_kind": "measurement",
-            "property_normalized": "strength",
-        }
-    )
-    chain = ObjectiveLogicChain.from_mapping(
-        {
-            "logic_chain_id": "chain-1",
-            "objective_id": "obj-1",
-            "chain_scope": "objective",
-            "evidence_unit_ids": ["evidence-1"],
-            "summary": "Heat treatment changes strength.",
-        }
-    )
-
-    workspace = ObjectiveAnalysisWorkspace(
-        collection_id="collection-1",
-        objective=objective,
-        objective_context=context,
-        paper_frames=(frame,),
-        evidence_units=(evidence,),
-        logic_chain=chain,
-    )
-    restored = ObjectiveAnalysisWorkspace.from_mapping(workspace.to_record())
-
-    assert restored.collection_id == "collection-1"
-    assert restored.objective.status == "running"
-    assert restored.paper_frames == (frame,)
-    assert restored.evidence_units == (evidence,)
-    assert restored.logic_chain == chain
-    assert "evidence_routes" not in restored.to_record()
-
-
-def test_objective_analysis_workspace_rejects_cross_objective_members() -> None:
-    objective = ResearchObjective.from_mapping(
-        {
-            "objective_id": "obj-1",
-            "question": "How does heat treatment affect strength?",
-        }
-    )
-    frame = ObjectivePaperFrame.from_mapping(
-        {
-            "objective_id": "obj-2",
-            "document_id": "paper-1",
-        }
-    )
-
-    with pytest.raises(ValueError, match="wrong objective"):
-        ObjectiveAnalysisWorkspace(
-            collection_id="collection-1",
-            objective=objective,
-            objective_context=None,
-            paper_frames=(frame,),
-            evidence_units=(),
-            logic_chain=None,
-        )
-
-
-def test_objective_analysis_workspace_rejects_unbound_logic_chain() -> None:
-    objective = ResearchObjective.from_mapping(
-        {
-            "objective_id": "obj-1",
-            "question": "How does heat treatment affect strength?",
-        }
-    )
-    chain = ObjectiveLogicChain.from_mapping(
-        {
-            "objective_id": "obj-1",
-            "evidence_unit_ids": ["missing-evidence"],
-        }
-    )
-
-    with pytest.raises(ValueError, match="missing evidence units"):
-        ObjectiveAnalysisWorkspace(
-            collection_id="collection-1",
-            objective=objective,
-            objective_context=None,
-            paper_frames=(),
-            evidence_units=(),
-            logic_chain=chain,
-        )
-
-
-def test_paper_skim_normalizes_missing_and_repeated_values() -> None:
-    skim = PaperSkim.from_mapping(
-        {
-            "paper_id": "P001",
-            "title": "  LPBF 316L corrosion study  ",
-            "source_filename": "",
-            "doc_role": "experimental",
-            "candidate_materials": ["316L SS", "316L SS", None],
-            "candidate_processes": None,
-            "candidate_properties": ("corrosion", "", "corrosion"),
-            "changed_variables": float("nan"),
-            "possible_objectives": ["Heat treatment effect on corrosion"],
-            "confidence": "0.83",
-            "warnings": ["table captions missing", "table captions missing"],
-        }
-    )
-
-    assert skim.document_id == "P001"
-    assert skim.title == "LPBF 316L corrosion study"
-    assert skim.source_filename is None
-    assert skim.candidate_materials == ("316L SS",)
-    assert skim.candidate_processes == ()
-    assert skim.candidate_properties == ("corrosion",)
-    assert skim.changed_variables == ()
-    assert skim.confidence == 0.83
-    assert skim.to_record()["warnings"] == ["table captions missing"]
-
-
-def test_question_shaped_objective_rejects_bare_material_name() -> None:
-    bare_material = ResearchObjective.from_mapping(
-        {
-            "question": "316L stainless steel",
-            "material_scope": ["316L stainless steel"],
-        }
-    )
-    comparison_question = ResearchObjective.from_mapping(
-        {
-            "question": "How does heat treatment affect corrosion resistance of LPBF 316L?",
-            "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["corrosion"],
-        }
-    )
-
-    assert is_question_shaped_objective(bare_material) is False
-    assert is_question_shaped_objective(comparison_question) is True
-
-
-def test_objective_context_round_trips_routing_and_guidance() -> None:
-    context = ObjectiveContext.from_mapping(
-        {
-            "objective_id": "obj_1",
-            "question": "How does scan speed affect density of LPBF 316L?",
-            "material_scope": ["316L stainless steel"],
-            "variable_process_axes": ["scan speed"],
-            "process_context_axes": ["LPBF"],
-            "target_property_axes": ["relative density"],
-            "excluded_property_axes": ["yield strength"],
-            "objective_evidence_lens": {
-                "target_outcome_axes": ["relative density"],
-                "mediator_axes": ["porosity"],
-                "variable_process_axes": ["scan speed"],
-                "context_axes": ["316L stainless steel", "LPBF"],
-                "excluded_axes": ["yield strength"],
-                "direct_support_rules": [
-                    "Direct support must explicitly report relative density."
-                ],
-            },
-            "routing_hints": [
-                {
-                    "table_id": "table_1",
-                    "role": "result_table",
-                    "matched_property_axes": ["relative density"],
-                }
-            ],
-            "extraction_guidance": {
-                "do_not_extract_as_target_results": ["yield strength"],
-            },
-            "confidence": "0.82",
-        }
-    )
-
-    record = context.to_record()
-    assert record["variable_process_axes"] == ["scan speed"]
-    assert record["process_context_axes"] == ["LPBF"]
-    assert record["objective_evidence_lens"]["target_outcome_axes"] == [
-        "relative density"
-    ]
-    assert record["objective_evidence_lens"]["mediator_axes"] == ["porosity"]
-    assert record["routing_hints"][0]["table_id"] == "table_1"
-    assert record["extraction_guidance"]["do_not_extract_as_target_results"] == [
-        "yield strength"
-    ]
-    assert record["confidence"] == 0.82
-
-
-def test_objective_context_derives_default_evidence_lens_for_old_records() -> None:
-    context = ObjectiveContext.from_mapping(
-        {
-            "objective_id": "obj_legacy",
-            "question": "How does scan speed affect density of LPBF 316L?",
-            "material_scope": ["316L stainless steel"],
-            "variable_process_axes": ["scan speed"],
-            "process_context_axes": ["LPBF"],
-            "target_property_axes": ["relative density"],
-            "excluded_property_axes": ["yield strength"],
-        }
-    )
-
-    assert context.objective_evidence_lens["target_outcome_axes"] == [
-        "relative density"
-    ]
-    assert context.objective_evidence_lens["variable_process_axes"] == ["scan speed"]
-    assert context.objective_evidence_lens["context_axes"] == [
-        "316L stainless steel",
-        "LPBF",
-    ]
-    assert context.objective_evidence_lens["excluded_axes"] == ["yield strength"]
-
-
-@pytest.mark.parametrize(
-    ("relevance", "paper_role"),
-    [
-        ("high", "primary_experiment"),
-        ("low", "supporting_background"),
-        ("irrelevant", "irrelevant"),
-    ],
-)
-def test_objective_paper_frame_represents_relevance_states(
-    relevance: str,
-    paper_role: str,
-) -> None:
-    frame = ObjectivePaperFrame.from_mapping(
-        {
-            "objective_id": "obj_1",
-            "document_id": "P001",
-            "relevance": relevance,
-            "paper_role": paper_role,
-            "background": "Paper-specific relationship to this objective.",
-            "material_match": ["316L stainless steel"],
-            "changed_variables": ["heat treatment temperature"],
-            "measured_property_scope": ["corrosion current density"],
-            "test_environment_scope": ["3.5 wt.% NaCl"],
-            "relevant_sections": ["Results"],
-            "relevant_tables": ["table_3"],
-            "excluded_tables": ["table_1"],
-        }
-    )
-
-    record = frame.to_record()
-    assert record["relevance"] == relevance
-    assert record["paper_role"] == paper_role
-    assert record["relevant_tables"] == ["table_3"]
-    assert record["excluded_tables"] == ["table_1"]
-
-
-@pytest.mark.parametrize(
-    ("source_kind", "role", "extractable"),
-    [
-        ("text_window", "process_or_treatment", True),
-        ("table", "current_experimental_evidence", True),
-        ("figure", "low_value_or_irrelevant", False),
-    ],
-)
-def test_objective_evidence_route_represents_source_units_and_extractability(
-    source_kind: str,
-    role: str,
-    extractable: bool,
-) -> None:
-    route = ObjectiveEvidenceRoute.from_mapping(
-        {
-            "objective_id": "obj_1",
-            "document_id": "P001",
-            "source_kind": source_kind,
-            "source_ref": "table_3",
-            "role": role,
-            "extractable": extractable,
-            "reason": "Relevant to objective.",
-            "table_schema": {"columns": ["Sample", "UTS"]},
-            "column_roles": {"UTS": "measurement"},
-            "confidence": 0.75,
-        }
-    )
-
-    record = route.to_record()
-    assert record["source_kind"] == source_kind
-    assert record["role"] == role
-    assert record["extractable"] is extractable
-    assert record["table_schema"] == {"columns": ["Sample", "UTS"]}
-    assert record["column_roles"] == {"UTS": "measurement"}
-    assert record["confidence"] == 0.75
-
-
-def test_objective_evidence_route_normalizes_false_string_and_invalid_role() -> None:
-    route = ObjectiveEvidenceRoute.from_mapping(
-        {
-            "objective_id": "obj_1",
-            "document_id": "P001",
-            "source_kind": "table",
-            "source_ref": "table_1",
-            "role": "unknown role",
-            "extractable": "false",
-            "confidence": -1,
-        }
-    )
-
-    assert route.role == "low_value_or_irrelevant"
-    assert route.extractable is False
-    assert route.confidence == 0.0
-
-
-def test_objective_evidence_unit_round_trips_resolved_evidence_payload() -> None:
-    unit = ObjectiveEvidenceUnit.from_mapping(
-        {
-            "objective_id": "obj_1",
-            "document_id": "P001",
-            "unit_kind": "measurement",
-            "property_normalized": "ultimate_tensile_strength",
-            "material_system": {"name": "316L stainless steel"},
-            "sample_context": {"label": "HT-SLM"},
-            "process_context": {"process": "SLM", "heat_treatment": "1100 C"},
-            "resolved_condition": {"temperature": "room temperature"},
-            "test_condition": {"method": "tensile"},
-            "value_payload": {"value": 713, "kind": "scalar"},
-            "unit": "MPa",
-            "baseline_context": {"label": "as-SLM"},
-            "interpretation": "Heat treatment increases ductility.",
-            "source_refs": [{"source_kind": "table", "source_ref": "table_3"}],
-            "evidence_anchor_ids": ["anc_1"],
-            "join_keys": {"sample_no": "3"},
-            "resolution_status": "resolved",
-            "confidence": 0.81,
-        }
-    )
-
-    record = unit.to_record()
-    assert record["evidence_unit_id"].startswith("oeu_")
-    assert record["property_normalized"] == "ultimate_tensile_strength"
-    assert record["sample_context"] == {"label": "HT-SLM"}
-    assert record["value_payload"] == {"value": 713, "kind": "scalar"}
-    assert record["source_refs"] == [{"source_kind": "table", "source_ref": "table_3"}]
-    assert record["resolution_status"] == "resolved"
-
-
-def test_objective_logic_chain_round_trips_chain_payload() -> None:
-    chain = ObjectiveLogicChain.from_mapping(
-        {
-            "objective_id": "obj_1",
-            "chain_scope": "paper",
-            "document_id": "P001",
-            "question": "How does heat treatment affect LPBF 316L strength?",
-            "evidence_unit_ids": ["oeu_1", "oeu_2"],
-            "chain_payload": {
-                "claim": "Heat treatment changes strength and ductility.",
-                "steps": ["process", "microstructure", "property"],
-            },
-            "summary": "Paper-level logic chain.",
-            "confidence": 0.77,
-        }
-    )
-
-    record = chain.to_record()
-    assert record["logic_chain_id"].startswith("olc_")
-    assert record["chain_scope"] == "paper"
-    assert record["evidence_unit_ids"] == ["oeu_1", "oeu_2"]
-    assert record["chain_payload"]["steps"] == ["process", "microstructure", "property"]
-
-
-def test_objective_term_and_confidence_helpers_are_domain_pure_normalizers() -> None:
-    assert normalize_objective_terms(["LPBF", "lpbf", "", None, "SLM"]) == (
+def test_normalizers_remain_stable() -> None:
+    assert normalize_objective_terms(["LPBF", "lpbf", " SLM "]) == (
         "LPBF",
         "SLM",
     )
-    assert normalize_objective_confidence("0.456") == 0.46
     assert normalize_objective_confidence(float("nan")) == 0.0

@@ -28,11 +28,13 @@ from infra.persistence.postgres.models.collection import (
     CollectionImportDocument,
     StoredObject,
 )
+from infra.persistence.postgres.models.build import CollectionBuild
 from infra.persistence.postgres.models.document import (
     CollectionDocument,
     Document,
     DocumentVersion,
 )
+from infra.persistence.postgres.models.source import SourceDocument
 
 
 class PostgresCollectionRepository:
@@ -396,6 +398,16 @@ class PostgresCollectionRepository:
                 membership.document_version_id for membership in memberships
             }
             document_ids = {membership.document_id for membership in memberships}
+            session.execute(
+                delete(SourceDocument).where(
+                    SourceDocument.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(CollectionBuild).where(
+                    CollectionBuild.collection_id == collection_id
+                )
+            )
             session.execute(
                 delete(CollectionImportDocument).where(
                     CollectionImportDocument.collection_id == collection_id

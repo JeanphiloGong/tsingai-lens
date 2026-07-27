@@ -29,12 +29,49 @@ from infra.persistence.postgres.models.collection import (
     StoredObject,
 )
 from infra.persistence.postgres.models.build import CollectionBuild
+from infra.persistence.postgres.models.comparison import (
+    CollectionComparableResultRecord,
+    ComparableResultRecord,
+    ComparisonBuild,
+    PairwiseComparisonRelationRecord,
+    comparable_result_anchor_links,
+    comparable_result_evidence_links,
+    comparable_result_feature_links,
+    comparable_result_observation_links,
+    pairwise_comparison_anchor_links,
+)
 from infra.persistence.postgres.models.document import (
     CollectionDocument,
     Document,
     DocumentVersion,
 )
-from infra.persistence.postgres.models.source import SourceDocument
+from infra.persistence.postgres.models.evaluation import (
+    EvaluationGoldSetRecord,
+    EvaluationPredictionSnapshotRecord,
+    EvaluationRunRecord,
+)
+from infra.persistence.postgres.models.objective import (
+    ObjectiveAnalysisRecord,
+    ObjectiveBuild,
+    ObjectivePaperContributionRecord,
+    ObjectivePaperSkim,
+    ObjectiveResearchRecord,
+    objective_build_candidates,
+    objective_document_scope,
+    objective_finding_evidence_links,
+    objective_finding_relation_evidence_links,
+)
+from infra.persistence.postgres.models.objective_workspace import (
+    ObjectiveExperimentPlan,
+    ObjectiveSession,
+)
+from infra.persistence.postgres.models.source import (
+    SourceDocument,
+    SourceReferenceCandidate,
+    SourceReferenceEntry,
+    SourceReferenceMention,
+    SourceReferenceResolution,
+)
 
 
 class PostgresCollectionRepository:
@@ -398,6 +435,140 @@ class PostgresCollectionRepository:
                 membership.document_version_id for membership in memberships
             }
             document_ids = {membership.document_id for membership in memberships}
+            build_ids = tuple(
+                session.scalars(
+                    select(CollectionBuild.build_id).where(
+                        CollectionBuild.collection_id == collection_id
+                    )
+                )
+            )
+
+            # Remove collection-scoped derived records before their RESTRICTed
+            # source/build parents. Everything remains in this transaction.
+            session.execute(
+                delete(objective_finding_relation_evidence_links).where(
+                    objective_finding_relation_evidence_links.c.collection_id
+                    == collection_id
+                )
+            )
+            session.execute(
+                delete(objective_finding_evidence_links).where(
+                    objective_finding_evidence_links.c.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(ObjectivePaperContributionRecord).where(
+                    ObjectivePaperContributionRecord.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(ObjectiveAnalysisRecord).where(
+                    ObjectiveAnalysisRecord.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(objective_build_candidates).where(
+                    objective_build_candidates.c.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(objective_document_scope).where(
+                    objective_document_scope.c.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(ObjectivePaperSkim).where(
+                    ObjectivePaperSkim.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(ObjectiveBuild).where(
+                    ObjectiveBuild.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(ObjectiveExperimentPlan).where(
+                    ObjectiveExperimentPlan.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(ObjectiveSession).where(
+                    ObjectiveSession.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(ObjectiveResearchRecord).where(
+                    ObjectiveResearchRecord.collection_id == collection_id
+                )
+            )
+
+            for table in (
+                pairwise_comparison_anchor_links,
+                comparable_result_anchor_links,
+                comparable_result_evidence_links,
+                comparable_result_feature_links,
+                comparable_result_observation_links,
+            ):
+                if build_ids:
+                    session.execute(delete(table).where(table.c.build_id.in_(build_ids)))
+            if build_ids:
+                session.execute(
+                    delete(CollectionComparableResultRecord).where(
+                        CollectionComparableResultRecord.build_id.in_(build_ids)
+                    )
+                )
+                session.execute(
+                    delete(PairwiseComparisonRelationRecord).where(
+                        PairwiseComparisonRelationRecord.build_id.in_(build_ids)
+                    )
+                )
+                session.execute(
+                    delete(ComparableResultRecord).where(
+                        ComparableResultRecord.build_id.in_(build_ids)
+                    )
+                )
+                session.execute(
+                    delete(ComparisonBuild).where(
+                        ComparisonBuild.build_id.in_(build_ids)
+                    )
+                )
+
+            session.execute(
+                delete(EvaluationRunRecord).where(
+                    EvaluationRunRecord.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(EvaluationGoldSetRecord).where(
+                    EvaluationGoldSetRecord.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(EvaluationPredictionSnapshotRecord).where(
+                    EvaluationPredictionSnapshotRecord.collection_id
+                    == collection_id
+                )
+            )
+            session.execute(
+                delete(SourceReferenceCandidate).where(
+                    SourceReferenceCandidate.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(SourceReferenceResolution).where(
+                    SourceReferenceResolution.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(SourceReferenceMention).where(
+                    SourceReferenceMention.collection_id == collection_id
+                )
+            )
+            session.execute(
+                delete(SourceReferenceEntry).where(
+                    SourceReferenceEntry.collection_id == collection_id
+                )
+            )
             session.execute(
                 delete(SourceDocument).where(
                     SourceDocument.collection_id == collection_id

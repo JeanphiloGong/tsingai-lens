@@ -7,7 +7,6 @@ from uuid import uuid4
 from domain.ports import (
     BuildRepository,
     ComparisonRepository,
-    ObjectiveRepository,
     PaperFactRepository,
     SourceArtifactRepository,
 )
@@ -108,13 +107,11 @@ class ArtifactRegistryService:
         repository: BuildRepository,
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
-        objective_repository: ObjectiveRepository,
         comparison_repository: ComparisonRepository,
     ) -> None:
         self.repository = repository
         self.source_artifact_repository = source_artifact_repository
         self.paper_fact_repository = paper_fact_repository
-        self.objective_repository = objective_repository
         self.comparison_repository = comparison_repository
 
     def build_registry(
@@ -139,21 +136,12 @@ class ArtifactRegistryService:
             collection_id,
             build_id=build_id,
         )
-        objective_facts = self.objective_repository.read(
-            collection_id,
-            build_id=build_id,
-        )
         comparison_facts = self.comparison_repository.read(
             collection_id,
             build_id=build_id,
         )
-        objective_evidence_ready = bool(objective_facts.objective_evidence_units)
-        evidence_cards_generated = bool(
-            paper_facts.paper_facts_generated or objective_evidence_ready
-        )
-        evidence_cards_ready = bool(
-            paper_facts.evidence_cards_ready or objective_evidence_ready
-        )
+        evidence_cards_generated = paper_facts.paper_facts_generated
+        evidence_cards_ready = paper_facts.evidence_cards_ready
         comparison_rows_ready = bool(
             comparison_facts.comparable_results
             and any(

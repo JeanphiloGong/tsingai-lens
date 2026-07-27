@@ -1,49 +1,37 @@
 # Shared Route Support
 
-This node owns browser-side helpers that are shared across frontend routes.
-
-## Scope
-
-- same-origin API request helpers
-- collection, file, task, graph, goal-session, research-view, and workspace
-  clients
-- i18n and theme support
-- shared route notices and utility functions
+This node owns browser-side helpers shared across frontend routes.
 
 ## Responsibilities
 
-- keep route data access consistent with the `/api/*` and `/api/v1/*` contract
-- centralize browser error handling, including redirecting expired sessions to
-  login, and shared formatting logic
-- prevent route components from duplicating API and state-shaping helpers
+- keep requests on the same-origin `/api/*` and `/api/v1/*` contract;
+- centralize authentication expiry and API error handling;
+- expose typed clients for collection, Source, Core, Objective, comparison,
+  assistant, and workspace resources;
+- keep formatting, translations, graph projection, and task-state shaping out
+  of route components.
 
 ## Important Files
 
 - `api.ts`
-  Base request helpers
+  Base request helpers and shared HTTP error behavior.
 - `collections.ts`, `files.ts`, `tasks.ts`
-  Domain-specific API wrappers
+  Collection import, build, and progress contracts.
 - `researchView.ts`
-  Research-view aggregation contract helper for material summaries, material
-  profiles, research understandings, research objectives, objective paper
-  frames, paper coverage, sample matrices, comparable groups, condition series,
-  evidence-backed values, and expert feedback/curation requests for
-  research-understanding claims. Claim feedback and curations are read back by
-  scope so the workbench can show saved expert review history and expert
-  corrections after refresh. The same helper also reads curation-derived gold
-  drafts and finding-centered dataset exports for evaluation handoff, including
-  review-decision hints that tell the workbench which accept/reject/correct
-  actions are allowed or blocked for a review candidate. Objective Findings retain
-  their synthesis status, shared and incomparable conditions, and per-paper
-  contributions so the existing detail view can explain cross-paper support
-  without adding a separate frontend resource.
+  Material/document aggregation plus the canonical Objective API client. The
+  Objective flow reads summary/analysis state, paginated Findings, one Finding
+  detail, and paginated versioned Evidence. Feedback, curation, and dataset
+  export use only `(collection_id, objective_id, analysis_version, finding_id)`.
+- `graph.ts`
+  Browser graph projection for Objective, document, Evidence, comparison,
+  material, property, test-condition, and baseline nodes.
 - `goalSessions.ts`
-  Collection-bound goal session API helper for copilot context, messages,
-  answer source modes, and evidence references
+  Collection-bound assistant sessions and Finding-grounded messages.
 - `experimentPlans.ts`
-  Objective-scoped experiment plan draft API helper for saving and editing
-  human-reviewable protocol suggestions produced from grounded copilot answers;
-  Goal Copilot saves also carry source mode, review gate, used evidence ids,
-  and source-link counts in metadata so protocol drafts remain auditable
+  Objective-scoped, human-editable experiment-plan drafts grounded in reviewed
+  Finding Evidence.
 - `i18n.ts`
-  Shared translations and labels
+  Shared labels for active routes and states.
+
+There is one browser contract. Do not add alternate API origins, compatibility
+normalizers, or parallel Objective result types.

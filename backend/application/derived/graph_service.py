@@ -93,17 +93,11 @@ def load_graph_payload(
         )
     except ComparisonRowsNotReadyError:
         comparison_projection = None
-    evidence_cards_ready = bool(
-        paper_facts.evidence_cards_ready or objective_facts.objective_evidence_units
-    )
+    evidence_cards_ready = paper_facts.evidence_cards_ready
     graph_ready = bool(
         paper_facts.document_profiles
         and evidence_cards_ready
-        and (
-            objective_facts.objective_evidence_units
-            or objective_facts.objective_logic_chains
-            or bool(comparison_projection and comparison_projection.comparison_rows)
-        )
+        and bool(comparison_projection and comparison_projection.comparison_rows)
     )
     if not graph_ready:
         raise GraphNotReadyError(
@@ -114,7 +108,6 @@ def load_graph_payload(
             ),
             missing_artifacts=_missing_core_graph_inputs(
                 paper_facts,
-                objective_facts,
                 comparison_projection,
             ),
         )
@@ -130,12 +123,6 @@ def load_graph_payload(
         research_objectives=tuple(
             objective.to_record() for objective in objective_facts.research_objectives
         ),
-        objective_evidence_units=tuple(
-            unit.to_record() for unit in objective_facts.objective_evidence_units
-        ),
-        objective_logic_chains=tuple(
-            chain.to_record() for chain in objective_facts.objective_logic_chains
-        ),
         max_nodes=max_nodes,
         min_weight=min_weight,
         evidence_cards=projection.evidence_cards,
@@ -145,21 +132,14 @@ def load_graph_payload(
 
 def _missing_core_graph_inputs(
     paper_facts: Any,
-    objective_facts: Any,
     comparison_projection: Any,
 ) -> list[str]:
     missing: list[str] = []
     if not paper_facts.document_profiles:
         missing.append("core_fact_repository.document_profiles")
-    if not (
-        paper_facts.evidence_cards_ready or objective_facts.objective_evidence_units
-    ):
+    if not paper_facts.evidence_cards_ready:
         missing.append("core_fact_repository.evidence_cards")
-    if not (
-        objective_facts.objective_evidence_units
-        or objective_facts.objective_logic_chains
-        or bool(comparison_projection and comparison_projection.comparison_rows)
-    ):
+    if not bool(comparison_projection and comparison_projection.comparison_rows):
         missing.append("core_fact_repository.comparison_artifacts")
     return missing or ["core_fact_repository.comparison_artifacts"]
 

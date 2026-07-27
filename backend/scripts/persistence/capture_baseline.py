@@ -33,7 +33,10 @@ REQUIRED_FAMILIES = (
     "core_baseline_references",
     "core_measurement_results",
     "research_objectives",
-    "research_understandings",
+    "objective_analyses",
+    "objective_paper_contributions",
+    "objective_evidence",
+    "objective_findings",
     "goal_sessions",
     "goal_messages",
     "experiment_plans",
@@ -57,14 +60,10 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"missing required record family: {family}")
         if not isinstance(records[family], list):
             raise ValueError(f"record family must be a list: {family}")
-
-    non_empty_families = tuple(
-        family for family in REQUIRED_FAMILIES if family != "source_figures"
-    )
-    for family in non_empty_families:
-        if not records[family]:
+        if family != "source_figures" and not records[family]:
             raise ValueError(f"required record family is empty: {family}")
 
+    collections = {item["collection_id"]: item for item in records["collections"]}
     documents = {item["id"]: item for item in records["source_documents"]}
     text_units = {item["id"]: item for item in records["source_text_units"]}
     blocks = {item["block_id"]: item for item in records["source_blocks"]}
@@ -74,129 +73,93 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
     anchors = {
         item["anchor_id"]: item for item in records["core_evidence_anchors"]
     }
-    measurements = {
-        item["result_id"]: item for item in records["core_measurement_results"]
-    }
     objectives = {
-        item["objective_id"]: item for item in records["research_objectives"]
+        (item["collection_id"], item["objective_id"]): item
+        for item in records["research_objectives"]
     }
-    collections = {
-        item["collection_id"]: item for item in records["collections"]
+    analyses = {
+        (item["collection_id"], item["objective_id"], item["analysis_version"]): item
+        for item in records["objective_analyses"]
+    }
+    evidence_by_key = {
+        (
+            item["collection_id"],
+            item["objective_id"],
+            item["analysis_version"],
+            item["evidence_id"],
+        ): item
+        for item in records["objective_evidence"]
+    }
+    findings_by_key = {
+        (
+            item["collection_id"],
+            item["objective_id"],
+            item["analysis_version"],
+            item["finding_id"],
+        ): item
+        for item in records["objective_findings"]
     }
 
-    evidence_traces: list[dict[str, Any]] = []
-    claim_ids: list[str] = []
-    claims_by_id: dict[str, dict[str, Any]] = {}
-    evidence_refs_by_id: dict[str, dict[str, Any]] = {}
-    contexts_by_id: dict[str, dict[str, Any]] = {}
-    for understanding in records["research_understandings"]:
-        evidence_refs = {
-            item["evidence_ref_id"]: item
-            for item in understanding.get("evidence_refs", [])
-        }
-        contexts = {
-            item["context_id"]: item for item in understanding.get("contexts", [])
-        }
-        evidence_refs_by_id.update(evidence_refs)
-        contexts_by_id.update(contexts)
-        for claim in understanding.get("claims", []):
-            claim_id = claim["claim_id"]
-            claim_ids.append(claim_id)
-            claims_by_id[claim_id] = claim
-            for evidence_ref_id in claim.get("evidence_ref_ids", []):
-                evidence_ref = evidence_refs.get(evidence_ref_id)
-                if evidence_ref is None:
-                    raise ValueError(
-                        f"unresolved claim evidence reference: {evidence_ref_id}"
-                    )
-                for fact_id in evidence_ref.get("fact_ids", []):
-                    if fact_id not in measurements:
-                        raise ValueError(f"unresolved evidence fact: {fact_id}")
-                for context_id in claim.get("context_ids", []):
-                    if context_id not in contexts:
-                        raise ValueError(f"unresolved claim context: {context_id}")
-                for anchor_id in evidence_ref.get("anchor_ids", []):
-                    anchor = anchors.get(anchor_id)
-                    if anchor is None:
-                        raise ValueError(f"unresolved evidence anchor: {anchor_id}")
-                    document_id = evidence_ref.get("document_id") or anchor.get(
-                        "document_id"
-                    )
-                    if document_id not in documents:
-                        raise ValueError(
-                            f"unresolved evidence document: {document_id}"
-                        )
-                    source_record_id = anchor.get("block_id")
-                    source_block = blocks.get(source_record_id)
-                    if source_block is None:
-                        raise ValueError(
-                            f"unresolved evidence source block: {source_record_id}"
-                        )
-                    text_unit_id = anchor.get("snippet_id")
-                    if not text_unit_id:
-                        block_text_units = source_block.get("text_unit_ids") or []
-                        text_unit_id = block_text_units[0] if block_text_units else None
-                    if text_unit_id not in text_units:
-                        raise ValueError(
-                            f"unresolved evidence text unit: {text_unit_id}"
-                        )
-                    source_file = files_by_document.get(document_id)
-                    if source_file is None:
-                        raise ValueError(
-                            f"unresolved evidence collection file: {document_id}"
-                        )
-                    evidence_traces.append(
-                        {
-                            "claim_id": claim_id,
-                            "evidence_ref_id": evidence_ref_id,
-                            "anchor_id": anchor_id,
-                            "source_record_kind": "block",
-                            "source_record_id": source_record_id,
-                            "text_unit_id": text_unit_id,
-                            "document_id": document_id,
-                            "file_id": source_file["file_id"],
-                            "quote": evidence_ref.get("quote") or anchor.get("quote"),
-                            "href": evidence_ref.get("href"),
-                        }
-                    )
-
-    for item in records["feedback"]:
-        claim_id = item.get("claim_id")
-        if claim_id and claim_id not in claims_by_id:
-            raise ValueError(f"unresolved feedback claim: {claim_id}")
-    for item in records["curations"]:
-        claim_id = item.get("claim_id")
-        if claim_id and claim_id not in claims_by_id:
-            raise ValueError(f"unresolved curation claim: {claim_id}")
-        for evidence_ref_id in item.get("curated_evidence_ref_ids", []):
-            if evidence_ref_id not in evidence_refs_by_id:
-                raise ValueError(
-                    f"unresolved curation evidence reference: {evidence_ref_id}"
+    traces: list[dict[str, Any]] = []
+    for finding_key, finding in findings_by_key.items():
+        collection_id, objective_id, analysis_version, finding_id = finding_key
+        if (collection_id, objective_id) not in objectives:
+            raise ValueError(f"unresolved finding objective: {objective_id}")
+        if (collection_id, objective_id, analysis_version) not in analyses:
+            raise ValueError(f"unresolved finding analysis version: {analysis_version}")
+        derivation = finding.get("derivation") or {}
+        supporting_ids = derivation.get("supporting_evidence_ids") or []
+        if not supporting_ids:
+            raise ValueError(f"finding has no supporting evidence: {finding_id}")
+        for evidence_id in supporting_ids:
+            evidence = evidence_by_key.get(
+                (collection_id, objective_id, analysis_version, evidence_id)
+            )
+            if evidence is None:
+                raise ValueError(f"unresolved finding evidence: {evidence_id}")
+            if evidence.get("evidence_role") != "direct_result":
+                raise ValueError(f"non-direct finding evidence: {evidence_id}")
+            traces.append(
+                _source_trace(
+                    finding_id=finding_id,
+                    evidence=evidence,
+                    documents=documents,
+                    blocks=blocks,
+                    text_units=text_units,
+                    anchors=anchors,
+                    files_by_document=files_by_document,
                 )
-        for context_id in item.get("curated_context_ids", []):
-            if context_id not in contexts_by_id:
-                raise ValueError(f"unresolved curation context: {context_id}")
+            )
 
+    for family in ("feedback", "curations"):
+        for item in records[family]:
+            key = (
+                item.get("collection_id"),
+                item.get("objective_id"),
+                item.get("analysis_version"),
+                item.get("finding_id"),
+            )
+            if key not in findings_by_key:
+                raise ValueError(f"unresolved {family[:-1]} finding: {key[-1]}")
+            for evidence_id in item.get("curated_evidence_ids", []):
+                evidence_key = (*key[:3], evidence_id)
+                if evidence_key not in evidence_by_key:
+                    raise ValueError(f"unresolved curation evidence: {evidence_id}")
+
+    if not traces:
+        raise ValueError("scenario has no complete Finding evidence trace")
     collection = records["collections"][0]
     task = records["tasks"][0]
     artifacts = records["artifacts"][0]
     objective = records["research_objectives"][0]
-    understanding = next(
+    analysis = analyses[
         (
-            item
-            for item in records["research_understandings"]
-            if item.get("scope", {}).get("objective_id")
-            == objective["objective_id"]
-        ),
-        None,
-    )
-    if understanding is None:
-        raise ValueError(
-            f"missing understanding for objective: {objective['objective_id']}"
+            objective["collection_id"],
+            objective["objective_id"],
+            objective["published_analysis_version"],
         )
-    if not evidence_traces:
-        raise ValueError("scenario has no complete evidence trace")
-    trace = evidence_traces[0]
+    ]
+    trace = traces[0]
     source_profile = next(
         (
             item
@@ -217,42 +180,34 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
         "source_text_units": "id",
         "core_measurement_results": "result_id",
         "research_objectives": "objective_id",
+        "objective_evidence": "evidence_id",
+        "objective_findings": "finding_id",
         "goal_messages": "message_id",
         "feedback": "feedback_id",
         "curations": "curation_id",
         "evaluation_runs": "evaluation_run_id",
     }
-    ordered_ids = {
-        family: [item[id_field] for item in records[family]]
-        for family, id_field in id_fields.items()
-    }
-    ordered_ids["claims"] = claim_ids
-
     field_sources = {
-        "collection": records["collections"][0],
-        "task": records["tasks"][0],
+        "collection": collection,
+        "task": task,
         "source_document": records["source_documents"][0],
         "measurement_result": records["core_measurement_results"][0],
-        "research_understanding": records["research_understandings"][0],
+        "objective_finding": records["objective_findings"][0],
         "feedback": records["feedback"][0],
         "evaluation_run": records["evaluation_runs"][0],
     }
-    summary = understanding.get("summary") or {
-        "claim_count": len(understanding.get("claims", [])),
-        "relation_count": len(understanding.get("relations", [])),
-        "evidence_ref_count": len(understanding.get("evidence_refs", [])),
-        "context_count": len(understanding.get("contexts", [])),
-    }
     collection_id = collection["collection_id"]
     document_id = trace["document_id"]
-
     return {
         "schema_version": "persistence-baseline.v1",
         "scenario_id": scenario["scenario_id"],
         "record_counts": {
             family: len(records[family]) for family in REQUIRED_FAMILIES
         },
-        "ordered_ids": ordered_ids,
+        "ordered_ids": {
+            family: [item[id_field] for item in records[family]]
+            for family, id_field in id_fields.items()
+        },
         "field_sets": {
             name: sorted(payload) for name, payload in field_sources.items()
         },
@@ -282,17 +237,18 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
                     )
                 },
             },
-            "goal_analysis": {
+            "objective_analysis": {
                 "endpoint": (
                     f"/api/v1/collections/{collection_id}/objectives/"
                     f"{objective['objective_id']}/analysis"
                 ),
                 "status_code": 200,
                 "objective_id": objective["objective_id"],
-                "status": "ready",
-                "phase": "completed",
-                "understanding_state": understanding["state"],
-                "summary": summary,
+                "analysis_version": analysis["analysis_version"],
+                "status": analysis["status"],
+                "phase": analysis["phase"],
+                "finding_count": len(records["objective_findings"]),
+                "evidence_count": len(records["objective_evidence"]),
             },
             "source_trace": {
                 "endpoint": (
@@ -302,14 +258,59 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
                 "status_code": 200,
                 "document_id": document_id,
                 "source_filename": source_profile["source_filename"],
-                "claim_id": trace["claim_id"],
-                "evidence_ref_id": trace["evidence_ref_id"],
+                "finding_id": trace["finding_id"],
+                "evidence_id": trace["evidence_id"],
                 "anchor_id": trace["anchor_id"],
                 "source_record_id": trace["source_record_id"],
             },
         },
-        "evidence_traces": evidence_traces,
+        "evidence_traces": traces,
         "integrity": {"status": "pass", "orphan_count": 0},
+    }
+
+
+def _source_trace(
+    *,
+    finding_id: str,
+    evidence: dict[str, Any],
+    documents: dict[str, dict[str, Any]],
+    blocks: dict[str, dict[str, Any]],
+    text_units: dict[str, dict[str, Any]],
+    anchors: dict[str, dict[str, Any]],
+    files_by_document: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    document_id = evidence.get("document_id")
+    if document_id not in documents:
+        raise ValueError(f"unresolved evidence document: {document_id}")
+    source_record_id = evidence.get("source_ref")
+    source_block = blocks.get(source_record_id)
+    if source_block is None:
+        raise ValueError(f"unresolved evidence source block: {source_record_id}")
+    text_unit_ids = source_block.get("text_unit_ids") or []
+    text_unit_id = text_unit_ids[0] if text_unit_ids else None
+    if text_unit_id not in text_units:
+        raise ValueError(f"unresolved evidence text unit: {text_unit_id}")
+    source_file = files_by_document.get(document_id)
+    if source_file is None:
+        raise ValueError(f"unresolved evidence collection file: {document_id}")
+    anchor_ids = evidence.get("anchor_ids") or []
+    anchor_id = anchor_ids[0] if anchor_ids else None
+    if anchor_id not in anchors:
+        raise ValueError(f"unresolved evidence anchor: {anchor_id}")
+    if evidence.get("source_excerpt") not in (source_block.get("text") or ""):
+        raise ValueError(
+            f"evidence excerpt does not resolve to source block: {evidence['evidence_id']}"
+        )
+    return {
+        "finding_id": finding_id,
+        "evidence_id": evidence["evidence_id"],
+        "anchor_id": anchor_id,
+        "source_record_kind": "block",
+        "source_record_id": source_record_id,
+        "text_unit_id": text_unit_id,
+        "document_id": document_id,
+        "file_id": source_file["file_id"],
+        "quote": evidence["source_excerpt"],
     }
 
 

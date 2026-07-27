@@ -13,7 +13,6 @@ from domain.core import (
     MethodFact,
     ObjectiveFactSet,
     ResearchObjective,
-    ResearchUnderstanding,
     SampleVariant,
     TestCondition as CoreTestCondition,
 )
@@ -23,8 +22,8 @@ from domain.evaluation import (
     EvaluationGoldSet,
     EvaluationPredictionSnapshot,
     EvaluationRun,
-    ResearchUnderstandingCuration,
-    ResearchUnderstandingFeedback,
+    FindingCuration,
+    FindingFeedback,
 )
 from domain.goal import ExperimentPlanRecord
 from domain.source import (
@@ -55,9 +54,6 @@ from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
 from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
-from tests.support.objective_understanding_repository import (
-    InMemoryObjectiveUnderstandingRepository,
-)
 from tests.support.objective_workspace_repository import (
     InMemoryObjectiveWorkspaceRepository,
 )
@@ -90,12 +86,10 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
     comparison_repository = MemoryComparisonRepository()
-    research_understanding_repository = InMemoryObjectiveUnderstandingRepository()
     artifact_registry_service = ArtifactRegistryService(
         build_repository,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
-        objective_repository=objective_repository,
         comparison_repository=comparison_repository,
     )
     goal_session_repository = InMemoryObjectiveWorkspaceRepository()
@@ -241,10 +235,12 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         collection_id,
         "build_baseline",
         ObjectiveFactSet(
-            research_objectives=tuple(
-                ResearchObjective.from_mapping(item)
-                for item in records["research_objectives"]
-            ),
+                research_objectives=tuple(
+                    ResearchObjective.from_mapping(
+                        {"collection_id": collection_id, **item}
+                    )
+                    for item in records["research_objectives"]
+                ),
         ),
     )
     paper_fact_repository.replace_document_profiles(
@@ -285,13 +281,6 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
             ),
         ),
     )
-    for item in records["research_understandings"]:
-        research_understanding_repository.upsert_objective_understanding(
-            collection_id,
-            item["scope"]["objective_id"],
-            ResearchUnderstanding.from_mapping(item),
-        )
-
     goal_session_repository.write_session(records["goal_sessions"][0])
     goal_session_repository.write_messages(
         records["goal_sessions"][0]["session_id"],
@@ -317,11 +306,11 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     )
     for item in records["feedback"]:
         review_repository.upsert_feedback(
-            ResearchUnderstandingFeedback.from_mapping(item)
+            FindingFeedback.from_mapping(item)
         )
     for item in records["curations"]:
         review_repository.upsert_curation(
-            ResearchUnderstandingCuration.from_mapping(item)
+            FindingCuration.from_mapping(item)
         )
 
     observed = deepcopy(scenario)
@@ -415,12 +404,6 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         ],
         "research_objectives": [
             item.to_record() for item in objective_facts.research_objectives
-        ],
-        "research_understandings": [
-            item.to_record()
-            for item in research_understanding_repository.list_objective_understandings(
-                collection_id
-            )
         ],
     }
     for family, actual_items in core_families.items():

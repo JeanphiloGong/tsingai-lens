@@ -37,9 +37,6 @@ from infra.source.runtime.source_evidence import (
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
-from tests.support.objective_understanding_repository import (
-    InMemoryObjectiveUnderstandingRepository,
-)
 from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
 from tests.support.objective_workspace_repository import (
     InMemoryObjectiveWorkspaceRepository,
@@ -709,10 +706,6 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     from main import create_app
 
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
-    monkeypatch.setattr(
-        "main.ResearchUnderstandingService",
-        lambda **_kwargs: SimpleNamespace(with_presentation=lambda value: value),
-    )
     monkeypatch.setattr("main.GoalSessionService", lambda **_kwargs: object())
 
     build_repository = MemoryBuildRepository()
@@ -721,8 +714,7 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
     comparison_repository = MemoryComparisonRepository()
-    research_understanding_repository = InMemoryObjectiveUnderstandingRepository()
-    research_understanding_review_repository = InMemoryObjectiveReviewRepository()
+    finding_review_repository = InMemoryObjectiveReviewRepository()
     objective_workspace_repository = InMemoryObjectiveWorkspaceRepository()
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
@@ -741,10 +733,7 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
             paper_fact_repository=paper_fact_repository,
             objective_repository=objective_repository,
             comparison_repository=comparison_repository,
-            research_understanding_repository=research_understanding_repository,
-            research_understanding_review_repository=(
-                research_understanding_review_repository
-            ),
+            finding_review_repository=finding_review_repository,
             goal_session_repository=objective_workspace_repository,
             experiment_plan_repository=objective_workspace_repository,
         )

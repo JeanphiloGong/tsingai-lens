@@ -40,11 +40,14 @@
 	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveDocumentCount } : null;
 	$: documentCount = effectiveDocumentCount;
 	$: storeReadinessState = readinessFromCollectionStatus(storeCollection?.status);
-	$: readinessState = storeReadinessState
-		? storeReadinessState
-		: stateWorkspace
-			? getOverviewReadinessState(stateWorkspace)
-			: null;
+	$: currentPath = $page.url.pathname;
+	$: isOverviewRoute = currentPath === `/collections/${collectionId}`;
+	$: readinessState =
+		isOverviewRoute && (storeReadinessState === 'processing' || storeReadinessState === 'ready')
+			? storeReadinessState
+			: stateWorkspace
+				? getOverviewReadinessState(stateWorkspace)
+				: storeReadinessState;
 	$: statusLabel = readinessState
 		? $t(`overview.readinessLabels.${readinessState}`)
 		: formatStatus(collection?.status);
@@ -57,8 +60,6 @@
 		$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`) ||
 		$page.url.pathname.startsWith(`/collections/${collectionId}/results`);
 	$: downstreamUnlocked = readinessState === 'ready';
-	$: currentPath = $page.url.pathname;
-	$: isOverviewRoute = currentPath === `/collections/${collectionId}`;
 	$: lockReason = buildLockReason(readinessState);
 	$: readinessKnown = Boolean(readinessState);
 	$: showLockedSurface =

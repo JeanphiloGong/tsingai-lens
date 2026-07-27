@@ -13,31 +13,28 @@ from pydantic import BaseModel, ValidationError
 from .schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
-    StructuredObjectiveEvidenceRoutes,
-    StructuredObjectiveEvidenceUnits,
+    StructuredEvidenceSelections,
+    StructuredEvidenceExtractions,
     StructuredObjectiveMergePlan,
-    StructuredObjectivePaperFrame,
+    StructuredPaperContributionDraft,
     StructuredPaperSkim,
-    StructuredResearchUnderstandingRelations,
-    StructuredResearchUnderstandingFindings,
+    StructuredFindingSynthesis,
     StructuredResearchObjectives,
     StructuredTableBatchMentions,
     StructuredTableMatrixRepair,
     StructuredTextWindowMentions,
 )
 from .prompts import (
-    RESEARCH_UNDERSTANDING_RELATION_PROMPT_VERSION,
-    RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_PROMPT_VERSION,
+    FINDING_SYNTHESIS_PROMPT_VERSION,
     build_document_profile_prompt,
-    build_objective_evidence_unit_prompt,
+    build_objective_evidence_prompt,
     build_objective_evidence_route_prompt,
     build_objective_paper_frame_prompt,
     build_paper_skim_prompt,
     build_research_axis_canonicalization_prompt,
     build_research_objective_discovery_prompt,
     build_research_objective_merge_prompt,
-    build_research_understanding_relation_prompt,
-    build_research_understanding_finding_synthesis_prompt,
+    build_finding_synthesis_prompt,
     build_table_batch_mentions_prompt,
     build_table_matrix_repair_prompt,
     build_text_window_extraction_prompt,
@@ -50,6 +47,10 @@ _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
 _TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 4096
+_DOCUMENT_PROFILE_MAX_COMPLETION_TOKENS = 1024
+_OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS = 512
+_OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS = 1024
+_FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS = 2048
 _TRACE_TEXT_LIMIT = 8000
 _TRACE_JSON_LIMIT = 12000
 _SUPPORTED_EXTRACTION_MODES = {
@@ -72,6 +73,12 @@ class CoreLLMStructuredExtractor:
     ) -> None:
         self.model = (model or os.getenv("LLM_MODEL", "gpt-4o-mini")).strip() or "gpt-4o-mini"
         self.extraction_mode = self._resolve_extraction_mode(extraction_mode)
+        self.enable_thinking = os.getenv("LLM_ENABLE_THINKING", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         self.last_trace: dict[str, Any] | None = None
         self.client = client or OpenAI(
             api_key=(api_key or os.getenv("LLM_API_KEY", "").strip() or "not-needed"),
@@ -180,82 +187,64 @@ class CoreLLMStructuredExtractor:
             raise TypeError("unexpected research axis canonicalization response type")
         return response
 
-    def frame_objective_paper(
+    def assess_objective_paper(
         self,
         payload: dict[str, Any],
-    ) -> StructuredObjectivePaperFrame:
+    ) -> StructuredPaperContributionDraft:
         system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredObjectivePaperFrame,
+            response_model=StructuredPaperContributionDraft,
         )
-        if not isinstance(response, StructuredObjectivePaperFrame):
+        if not isinstance(response, StructuredPaperContributionDraft):
             raise TypeError("unexpected objective paper frame response type")
         return response
 
-    def route_objective_evidence(
+    def select_objective_evidence(
         self,
         payload: dict[str, Any],
-    ) -> StructuredObjectiveEvidenceRoutes:
+    ) -> StructuredEvidenceSelections:
         if not isinstance(payload.get("current_source"), dict):
             raise ValueError("objective evidence routing requires current_source")
         system_prompt, user_prompt = build_objective_evidence_route_prompt(payload)
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredObjectiveEvidenceRoutes,
+            response_model=StructuredEvidenceSelections,
         )
-        if not isinstance(response, StructuredObjectiveEvidenceRoutes):
+        if not isinstance(response, StructuredEvidenceSelections):
             raise TypeError("unexpected objective evidence route response type")
         return response
 
-    def extract_objective_evidence_units(
+    def extract_objective_evidence(
         self,
         payload: dict[str, Any],
-    ) -> StructuredObjectiveEvidenceUnits:
-        system_prompt, user_prompt = build_objective_evidence_unit_prompt(payload)
+    ) -> StructuredEvidenceExtractions:
+        system_prompt, user_prompt = build_objective_evidence_prompt(payload)
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredObjectiveEvidenceUnits,
+            response_model=StructuredEvidenceExtractions,
         )
-        if not isinstance(response, StructuredObjectiveEvidenceUnits):
-            raise TypeError("unexpected objective evidence unit response type")
+        if not isinstance(response, StructuredEvidenceExtractions):
+            raise TypeError("unexpected objective evidence extraction response type")
         return response
 
-    def extract_research_understanding_relations(
+    def synthesize_findings(
         self,
         payload: dict[str, Any],
-    ) -> StructuredResearchUnderstandingRelations:
-        system_prompt, user_prompt = build_research_understanding_relation_prompt(payload)
+    ) -> StructuredFindingSynthesis:
+        system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredResearchUnderstandingRelations,
-            task_type="research_understanding_relation",
-            prompt_version=RESEARCH_UNDERSTANDING_RELATION_PROMPT_VERSION,
+            response_model=StructuredFindingSynthesis,
+            task_type="finding_synthesis",
+            prompt_version=FINDING_SYNTHESIS_PROMPT_VERSION,
         )
-        if not isinstance(response, StructuredResearchUnderstandingRelations):
-            raise TypeError("unexpected research understanding relations response type")
-        return response
-
-    def synthesize_research_understanding_findings(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredResearchUnderstandingFindings:
-        system_prompt, user_prompt = (
-            build_research_understanding_finding_synthesis_prompt(payload)
-        )
-        response = self._parse_structured_response(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredResearchUnderstandingFindings,
-            task_type="research_understanding_finding_synthesis",
-            prompt_version=RESEARCH_UNDERSTANDING_FINDING_SYNTHESIS_PROMPT_VERSION,
-        )
-        if not isinstance(response, StructuredResearchUnderstandingFindings):
-            raise TypeError("unexpected research understanding Findings response type")
+        if not isinstance(response, StructuredFindingSynthesis):
+            raise TypeError("unexpected Finding synthesis response type")
         return response
 
     def _parse_structured_response(
@@ -277,7 +266,13 @@ class CoreLLMStructuredExtractor:
         started_at = perf_counter()
         trace_extraction_mode = self.extraction_mode
         try:
-            if self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE:
+            use_provider_parse = (
+                self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE
+                and response_model is not StructuredEvidenceExtractions
+                and response_model is not StructuredDocumentProfile
+                and response_model is not StructuredEvidenceSelections
+            )
+            if use_provider_parse:
                 try:
                     parsed, raw_content = self._parse_provider_structured_response(
                         messages=messages,
@@ -305,14 +300,18 @@ class CoreLLMStructuredExtractor:
                         f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
                     )
             else:
+                if self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE:
+                    messages = self._build_messages(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        response_model=response_model,
+                        include_schema=True,
+                    )
+                    trace_extraction_mode = _EXTRACTION_MODE_JSON_TEXT
                 parsed, raw_content = self._parse_json_text_response(
                     messages=messages,
                     response_model=response_model,
                 )
-                if self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE:
-                    trace_extraction_mode = (
-                        f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
-                    )
         except Exception:
             elapsed_s = perf_counter() - started_at
             self.last_trace = self._build_trace(
@@ -388,10 +387,30 @@ class CoreLLMStructuredExtractor:
         messages: list[dict[str, str]],
         response_model: type[BaseModel],
     ) -> tuple[BaseModel, str | None]:
+        request_kwargs = {
+            "model": self.model,
+            "temperature": 0,
+            "messages": messages,
+            **self._provider_request_options(),
+        }
+        if response_model is StructuredDocumentProfile:
+            request_kwargs["max_completion_tokens"] = (
+                _DOCUMENT_PROFILE_MAX_COMPLETION_TOKENS
+            )
+        elif response_model is StructuredEvidenceSelections:
+            request_kwargs["max_completion_tokens"] = (
+                _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS
+            )
+        elif response_model is StructuredEvidenceExtractions:
+            request_kwargs["max_completion_tokens"] = (
+                _OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS
+            )
+        elif response_model is StructuredFindingSynthesis:
+            request_kwargs["max_completion_tokens"] = (
+                _FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS
+            )
         completion = self.client.chat.completions.create(
-            model=self.model,
-            temperature=0,
-            messages=messages,
+            **request_kwargs,
         )
         raw_content = self._coerce_message_content(
             completion.choices[0].message.content if completion.choices else None
@@ -426,10 +445,27 @@ class CoreLLMStructuredExtractor:
             "temperature": 0,
             "messages": messages,
             "response_format": response_model,
+            **self._provider_request_options(),
         }
         if response_model is StructuredTableBatchMentions:
             request_kwargs["max_completion_tokens"] = (
                 _TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS
+            )
+        elif response_model is StructuredDocumentProfile:
+            request_kwargs["max_completion_tokens"] = (
+                _DOCUMENT_PROFILE_MAX_COMPLETION_TOKENS
+            )
+        elif response_model is StructuredEvidenceSelections:
+            request_kwargs["max_completion_tokens"] = (
+                _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS
+            )
+        elif response_model is StructuredEvidenceExtractions:
+            request_kwargs["max_completion_tokens"] = (
+                _OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS
+            )
+        elif response_model is StructuredFindingSynthesis:
+            request_kwargs["max_completion_tokens"] = (
+                _FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS
             )
         completion = self.client.beta.chat.completions.parse(**request_kwargs)
         if not completion.choices:
@@ -446,6 +482,17 @@ class CoreLLMStructuredExtractor:
         if isinstance(parsed, response_model):
             return parsed, raw_content
         return response_model.model_validate(parsed), raw_content
+
+    def _provider_request_options(self) -> dict[str, Any]:
+        if self.enable_thinking:
+            return {}
+        return {
+            "extra_body": {
+                "chat_template_kwargs": {
+                    "enable_thinking": False,
+                }
+            }
+        }
 
     def consume_last_trace(self) -> dict[str, Any] | None:
         trace = self.last_trace

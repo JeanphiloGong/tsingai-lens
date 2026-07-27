@@ -1,60 +1,47 @@
 # Core Semantic Build LLM
 
-This package owns the Core-side LLM contract for semantic build.
-
-It defines the prompt text, structured schemas, and extractor orchestration
-used to turn Source structural artifacts into Core semantic extraction inputs
-for `document_profiles`, `research_objectives`, objective evidence units, and
-`paper_facts`. It also owns the final Objective Finding synthesis prompt.
-One structured call compares bounded transient result sets and returns
-evidence-bound agreement, conflict, condition-dependent, or
-insufficient-confirmation Findings. Each returned Finding has one source
-concept and `outcomes[]`, so one controlled process contrast can retain several
-measured results without being split into unrelated conclusions.
-
-It does not own:
-
-- Source structural artifact production
-- Core artifact materialization, deduplication, or persistence
-- downstream comparison, report, graph, or protocol projection
+This package owns Core prompt text, response schemas, and provider-call
+orchestration.
 
 ## Local Components
 
 - `prompts.py`
-  prompt builders for document-profile, objective, text-window, table-row, and
-  objective-level Finding synthesis
+  Builds document-profile, Objective candidate, paper-contribution, Evidence
+  extraction, paper-fact, and Finding synthesis prompts.
 - `schemas.py`
-  structured response models for the Core extraction contract
+  Defines strict Pydantic response models for each model call.
 - `extractor.py`
-  provider call orchestration and response parsing for the Core extraction path
+  Executes provider structured parsing or the explicitly selected JSON-text
+  path, validates responses, records traces, and applies bounded completion
+  budgets.
 
-The objective-level synthesis is not a paper-Finding aggregation stage. Candidate
-papers have already been traversed before this call. The model receives
-eligible direct-result units aligned by exact process conditions, with
-source-document provenance retained inside each result set, plus separately
-bounded condition and mechanism context. Each outcome must cite its own direct
-evidence-unit ids; condition and mechanism ids are returned in their dedicated
-fields. The backend reorients reverse-stored comparisons, removes dominated
-contrasts, validates model numbers against selected evidence, and calibrates a
-Finding statement back to the aligned direct results when needed. Prompt v11
-asks for structural results before performance results, keeps narrow-range
-regime qualifications out of the headline effect, and makes a one-paper
-boundary explicit. The backend also collapses duplicate model candidates that
-cite the same direct-result unit set. If the model omits context, calibration
-may restore only same-document qualification or mechanism units that explicitly
-match a selected outcome. Only cited `direct_result` units count toward
-`paper_count`. The backend requires an explicit source axis and target property
-and grants eligibility only to `high` or `medium`
-`primary_experiment`/`mixed` paper frames; low-relevance and background papers
-remain visible as traversal context but cannot independently support a Finding.
+## Objective Calls
 
-The default extraction mode is `provider_parse`, which uses the configured
-OpenAI-compatible provider's structured parse endpoint. Set
-`CORE_LLM_EXTRACTION_MODE=json_text` only when the provider does not support
-structured parsing and the caller accepts local JSON text parsing risk.
+The Objective path performs three model-owned decisions:
 
-## Local Docs
+1. classify one paper's contribution to the confirmed Objective;
+2. extract structured Evidence from bounded Source windows, tables, or figures;
+3. synthesize Findings from eligible direct results and bounded context.
 
-- [`docs/structured-extraction/README.md`](docs/structured-extraction/README.md)
-  live plan family for the structured-extraction cutover, boundary cleanup,
-  and prompt-hardening work under this package
+The model never assigns database ownership. Backend code binds collection,
+Objective, analysis version, document, Source locator, and deterministic IDs.
+Prompts return `extractions` for Evidence extraction and Findings for final
+synthesis; they do not return persisted route, unit, logic-chain, Claim, or
+workspace identities.
+
+The Finding response must preserve:
+
+- variables, mediators, outcomes, and direction;
+- paper or cross-paper level;
+- applicability context and limitations;
+- supporting and contradicting Evidence references;
+- agreement, conflict, condition dependence, or insufficient confirmation.
+
+Model output is always validated against the version-local Evidence set.
+Causal relations additionally require direct Evidence that marks the asserted
+variable as isolated.
+
+## Boundary
+
+This package does not own Source parsing, persistence, HTTP schemas, feedback,
+curation, dataset export, or frontend presentation.

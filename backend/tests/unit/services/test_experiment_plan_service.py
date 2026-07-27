@@ -56,7 +56,7 @@ def _protocol_source_item(
     }
 
 
-class _ResearchUnderstandingFeedbackService:
+class _FindingFeedbackService:
     def __init__(self, items: list[dict] | None = None) -> None:
         self.items = list(items if items is not None else [_protocol_source_item()])
 
@@ -72,8 +72,8 @@ def _experiment_plan_service(
     *,
     repository: InMemoryObjectiveWorkspaceRepository,
     goal_session_repository: InMemoryObjectiveWorkspaceRepository | None = None,
-    research_understanding_feedback_service: (
-        _ResearchUnderstandingFeedbackService | None
+    finding_feedback_service: (
+        _FindingFeedbackService | None
     ) = None,
 ) -> ExperimentPlanService:
     return ExperimentPlanService(
@@ -81,9 +81,9 @@ def _experiment_plan_service(
         goal_session_repository=(
             goal_session_repository or InMemoryObjectiveWorkspaceRepository()
         ),
-        research_understanding_feedback_service=(
-            research_understanding_feedback_service
-            or _ResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            finding_feedback_service
+            or _FindingFeedbackService()
         ),
     )
 
@@ -169,8 +169,8 @@ def test_experiment_plan_service_saves_and_lists_objective_scoped_drafts(tmp_pat
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        research_understanding_feedback_service=(
-            _ResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _FindingFeedbackService()
         ),
     )
 
@@ -228,11 +228,11 @@ def test_experiment_plan_service_marks_changed_sources_stale_and_blocks_review(
         review_gate="protocol_ready_findings",
         content=_structured_protocol(),
     )
-    feedback_service = _ResearchUnderstandingFeedbackService()
+    feedback_service = _FindingFeedbackService()
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        research_understanding_feedback_service=feedback_service,
+        finding_feedback_service=feedback_service,
     )
     draft = service.create_plan(
         collection_id="col_1",
@@ -320,8 +320,8 @@ def test_experiment_plan_service_marks_existing_inconsistent_ved_plan_stale(
     )
     service = _experiment_plan_service(
         repository=repository,
-        research_understanding_feedback_service=(
-            _ResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _FindingFeedbackService()
         ),
     )
 
@@ -371,8 +371,8 @@ def test_experiment_plan_service_marks_legacy_source_without_snapshot_unverified
     )
     service = _experiment_plan_service(
         repository=repository,
-        research_understanding_feedback_service=(
-            _ResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _FindingFeedbackService()
         ),
     )
 
@@ -395,8 +395,8 @@ def test_experiment_plan_service_rejects_unstructured_goal_copilot_plan(tmp_path
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        research_understanding_feedback_service=(
-            _ResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _FindingFeedbackService()
         ),
     )
 
@@ -519,8 +519,8 @@ def test_experiment_plan_service_rejects_ved_plan_without_operational_constituen
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        research_understanding_feedback_service=(
-            _ResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _FindingFeedbackService()
         ),
     )
 
@@ -550,8 +550,8 @@ def test_experiment_plan_service_rejects_ved_only_isolation_claim(tmp_path):
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        research_understanding_feedback_service=(
-            _ResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _FindingFeedbackService()
         ),
     )
 
@@ -583,8 +583,8 @@ def test_experiment_plan_service_rejects_ved_only_effect_as_validation_target(
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        research_understanding_feedback_service=(
-            _ResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _FindingFeedbackService()
         ),
     )
 
@@ -627,8 +627,8 @@ Coupled VED parameter sets were associated with fatigue strength [Source 1].
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        research_understanding_feedback_service=(
-            _ResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _FindingFeedbackService()
         ),
     )
 
@@ -848,8 +848,8 @@ def test_experiment_plan_service_preserves_copilot_traceability_on_update(tmp_pa
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        research_understanding_feedback_service=(
-            _ResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _FindingFeedbackService()
         ),
     )
     draft = service.create_plan(
@@ -964,8 +964,8 @@ def test_experiment_plan_service_rejects_ved_conflict_added_by_plan_edit(tmp_pat
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        research_understanding_feedback_service=(
-            _ResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _FindingFeedbackService()
         ),
     )
     draft = service.create_plan(

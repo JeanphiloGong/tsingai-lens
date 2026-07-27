@@ -3,41 +3,45 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
-    StructuredObjectiveEvidenceRoute,
-    StructuredObjectiveEvidenceRoutes,
-    StructuredObjectiveEvidenceUnit,
-    StructuredObjectiveEvidenceUnits,
+    StructuredEvidenceSelection,
+    StructuredEvidenceSelections,
+    StructuredEvidenceExtraction,
+    StructuredEvidenceExtractions,
+    StructuredFindingSynthesis,
+    StructuredFindingSynthesisItem,
+    StructuredFindingSynthesisOutcome,
     StructuredObjectiveMergeGroup,
     StructuredObjectiveMergePlan,
-    StructuredObjectivePaperFrame,
+    StructuredPaperContributionDraft,
     StructuredPaperSkim,
-    StructuredResearchUnderstandingRelations,
     StructuredResearchObjective,
     StructuredResearchObjectives,
     StructuredTableMatrixRepair,
 )
 from application.core.semantic_build.research_objective_service import (
+    EvidenceCandidate,
+    ExtractedEvidenceDraft,
+    PaperAnalysisFrame,
     ResearchObjectiveService as _ResearchObjectiveService,
+)
+from application.core.semantic_build.objective_analysis_lens import (
+    ObjectiveAnalysisLens,
 )
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
 )
-from application.core.research_understanding_service import (
-    ResearchUnderstandingService,
-)
+from application.core.finding_synthesis_service import FindingSynthesisService
 from tests.support.collection_service import build_test_collection_service
 from domain.core import (
     DocumentProfile,
-    ObjectiveContext,
-    ObjectiveEvidenceRoute,
-    ObjectiveEvidenceUnit,
+    ObjectiveAnalysis,
     ObjectiveFactSet,
-    ObjectiveLogicChain,
-    ObjectivePaperFrame,
     PaperSkim,
     ResearchObjective,
 )
@@ -45,9 +49,12 @@ from domain.source import SourceArtifactSet, SourceDocumentNode, SourceDocumentT
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.source_artifact_repository import MemorySourceArtifactRepository
-from tests.support.objective_understanding_repository import (
-    InMemoryObjectiveUnderstandingRepository,
-)
+
+
+def _research_objective(payload: dict[str, Any]) -> ResearchObjective:
+    return ResearchObjective.from_mapping(
+        {"collection_id": "collection-test", **payload}
+    )
 
 
 def _build_research_objective_service(
@@ -70,10 +77,6 @@ def _build_research_objective_service(
         "objective_repository",
         MemoryObjectiveRepository(),
     )
-    research_understanding_repository = kwargs.pop(
-        "research_understanding_repository",
-        InMemoryObjectiveUnderstandingRepository(),
-    )
     document_profile_service = kwargs.pop("document_profile_service", None)
     if document_profile_service is None:
         document_profile_service = DocumentProfileService(
@@ -81,10 +84,9 @@ def _build_research_objective_service(
             source_artifact_repository=source_repository,
             paper_fact_repository=paper_fact_repository,
         )
-    research_understanding_service = kwargs.pop(
-        "research_understanding_service",
-        ResearchUnderstandingService(
-            source_artifact_repository=source_repository,
+    finding_synthesis_service = kwargs.pop(
+        "finding_synthesis_service",
+        FindingSynthesisService(
             structured_extractor=kwargs.get("structured_extractor"),
         ),
     )
@@ -93,9 +95,8 @@ def _build_research_objective_service(
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
         objective_repository=objective_repository,
-        research_understanding_repository=research_understanding_repository,
         document_profile_service=document_profile_service,
-        research_understanding_service=research_understanding_service,
+        finding_synthesis_service=finding_synthesis_service,
         **kwargs,
     )
 
@@ -131,6 +132,28 @@ def _seed_document_profiles(
     )
 
 
+def _queue_running_analysis(
+    service: _ResearchObjectiveService,
+    collection_id: str,
+    objective_id: str,
+) -> ObjectiveAnalysis:
+    service.objective_repository.confirm_objective(collection_id, objective_id)
+    _, queued = service.objective_repository.queue_analysis(
+        collection_id,
+        objective_id,
+        pipeline_version="test.v1",
+        model_name="test-model",
+        prompt_versions={},
+    )
+    claimed = service.objective_repository.claim_analysis(
+        collection_id,
+        objective_id,
+        queued.analysis_version,
+    )
+    assert claimed is not None
+    return claimed
+
+
 def test_research_objective_reads_do_not_trigger_generation(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection_id = collection_service.create_collection("Empty objectives")[
@@ -144,7 +167,6 @@ def test_research_objective_reads_do_not_trigger_generation(tmp_path):
 
     assert service.read_paper_skims(collection_id) == ()
     assert service.read_research_objectives(collection_id) == ()
-    assert service.read_objective_contexts(collection_id) == ()
     assert extractor.skim_payloads == []
     assert extractor.discovery_payloads == []
 
@@ -174,6 +196,7 @@ class _ObjectiveExtractor:
         self.frame_payloads: list[dict[str, Any]] = []
         self.route_payloads: list[dict[str, Any]] = []
         self.unit_payloads: list[dict[str, Any]] = []
+        self.finding_payloads: list[dict[str, Any]] = []
 
     def extract_document_profile(
         self,
@@ -287,10 +310,10 @@ class _ObjectiveExtractor:
             ]
         )
 
-    def frame_objective_paper(
+    def assess_objective_paper(
         self,
         payload: dict[str, Any],
-    ) -> StructuredObjectivePaperFrame:
+    ) -> StructuredPaperContributionDraft:
         self.frame_payloads.append(payload)
         objective = payload["objective"]
         document = payload["document"]
@@ -298,7 +321,7 @@ class _ObjectiveExtractor:
         document_id = str(document.get("document_id") or "")
         table_summaries = payload["table_summaries"]
         if document_id in objective.get("excluded_document_ids", ()):
-            return StructuredObjectivePaperFrame(
+            return StructuredPaperContributionDraft(
                 relevance="irrelevant",
                 paper_role="review",
                 background="Excluded by objective discovery.",
@@ -326,7 +349,7 @@ class _ObjectiveExtractor:
             for item in payload["section_snippets"]
             if item.get("section_label")
         ]
-        return StructuredObjectivePaperFrame(
+        return StructuredPaperContributionDraft(
             relevance="high",
             paper_role="primary_experiment",
             background="Paper directly supports the active research objective.",
@@ -363,20 +386,20 @@ class _ObjectiveExtractor:
                 table_ids.append(str(table["table_id"]))
         return table_ids
 
-    def route_objective_evidence(
+    def select_objective_evidence(
         self,
         payload: dict[str, Any],
-    ) -> StructuredObjectiveEvidenceRoutes:
+    ) -> StructuredEvidenceSelections:
         self.route_payloads.append(payload)
         objective = payload["objective"]
         if not isinstance(payload.get("current_source"), dict):
             raise ValueError("objective evidence routing requires current_source")
         candidates = [payload["current_source"]]
-        routes: list[StructuredObjectiveEvidenceRoute] = []
+        routes: list[StructuredEvidenceSelection] = []
         for candidate in candidates:
             if candidate["frame_status"] == "excluded":
                 routes.append(
-                    StructuredObjectiveEvidenceRoute(
+                    StructuredEvidenceSelection(
                         role="low_value_or_irrelevant",
                         extractable=False,
                         confidence=0.7,
@@ -385,7 +408,7 @@ class _ObjectiveExtractor:
                 continue
             if candidate["source_kind"] == "text_window":
                 routes.append(
-                    StructuredObjectiveEvidenceRoute(
+                    StructuredEvidenceSelection(
                         role="process_or_treatment",
                         extractable=True,
                         confidence=0.72,
@@ -419,26 +442,26 @@ class _ObjectiveExtractor:
                 else "process_or_treatment"
             )
             routes.append(
-                StructuredObjectiveEvidenceRoute(
+                StructuredEvidenceSelection(
                     role=role,
                     extractable=True,
                     confidence=0.82,
                 )
             )
-        return StructuredObjectiveEvidenceRoutes(routes=routes)
+        return StructuredEvidenceSelections(selections=routes)
 
-    def extract_objective_evidence_units(
+    def extract_objective_evidence(
         self,
         payload: dict[str, Any],
-    ) -> StructuredObjectiveEvidenceUnits:
+    ) -> StructuredEvidenceExtractions:
         self.unit_payloads.append(payload)
         route = payload["evidence_route"]
         source = payload["source"]
         if route["source_kind"] == "table":
-            return StructuredObjectiveEvidenceUnits(
-                evidence_units=[
-                    StructuredObjectiveEvidenceUnit(
-                        unit_kind="measurement",
+            return StructuredEvidenceExtractions(
+                extractions=[
+                    StructuredEvidenceExtraction(
+                        evidence_kind="measurement",
                         property_normalized="corrosion current",
                         material_system={"family": "316L stainless steel"},
                         sample_context={"label": "as-built"},
@@ -453,8 +476,8 @@ class _ObjectiveExtractor:
                         resolution_status="resolved",
                         confidence=0.86,
                     ),
-                    StructuredObjectiveEvidenceUnit(
-                        unit_kind="measurement",
+                    StructuredEvidenceExtraction(
+                        evidence_kind="measurement",
                         property_normalized="corrosion current",
                         material_system={"family": "316L stainless steel"},
                         sample_context={"label": "heat-treated"},
@@ -475,10 +498,10 @@ class _ObjectiveExtractor:
                 ]
             )
         if source.get("text"):
-            return StructuredObjectiveEvidenceUnits(
-                evidence_units=[
-                    StructuredObjectiveEvidenceUnit(
-                        unit_kind="process_context",
+            return StructuredEvidenceExtractions(
+                extractions=[
+                    StructuredEvidenceExtraction(
+                        evidence_kind="process_context",
                         property_normalized=None,
                         material_system={"family": "316L stainless steel"},
                         sample_context={"comparison": "before and after heat treatment"},
@@ -494,29 +517,65 @@ class _ObjectiveExtractor:
                     )
                 ]
             )
-        return StructuredObjectiveEvidenceUnits()
+        return StructuredEvidenceExtractions()
 
-    def extract_research_understanding_relations(
+    def synthesize_findings(
         self,
         payload: dict[str, Any],
-    ) -> StructuredResearchUnderstandingRelations:
-        return StructuredResearchUnderstandingRelations(relations=[])
+    ) -> StructuredFindingSynthesis:
+        self.finding_payloads.append(payload)
+        findings: list[StructuredFindingSynthesisItem] = []
+        for result_set in payload.get("result_sets", [])[:6]:
+            source_axes = [
+                str(value).strip()
+                for value in result_set.get("source_axes", [])
+                if str(value).strip()
+            ]
+            outcomes = [
+                str(value).strip()
+                for value in result_set.get("outcome_properties", [])
+                if str(value).strip()
+            ]
+            if not source_axes or not outcomes:
+                continue
+            source_concept = " + ".join(source_axes)
+            findings.append(
+                StructuredFindingSynthesisItem(
+                    result_set_id=str(result_set["result_set_id"]),
+                    source_concept=source_concept,
+                    outcomes=[
+                        StructuredFindingSynthesisOutcome(
+                            concept=outcome,
+                            direction="changes",
+                            statement=f"{source_concept} changes {outcome}.",
+                        )
+                        for outcome in outcomes
+                    ],
+                    statement=(
+                        f"{source_concept} changes {', '.join(outcomes)} in the "
+                        "reported paper conditions."
+                    ),
+                    synthesis_status="insufficient_confirmation",
+                    confidence=0.82,
+                )
+            )
+        return StructuredFindingSynthesis(findings=findings)
 
 
 class _FailingRouteExtractor(_ObjectiveExtractor):
-    def route_objective_evidence(
+    def select_objective_evidence(
         self,
         payload: dict[str, Any],
-    ) -> StructuredObjectiveEvidenceRoutes:
+    ) -> StructuredEvidenceSelections:
         self.route_payloads.append(payload)
         raise RuntimeError("route model failed")
 
 
 class _FailingFrameExtractor(_ObjectiveExtractor):
-    def frame_objective_paper(
+    def assess_objective_paper(
         self,
         payload: dict[str, Any],
-    ) -> StructuredObjectivePaperFrame:
+    ) -> StructuredPaperContributionDraft:
         self.frame_payloads.append(payload)
         raise RuntimeError("frame model failed")
 
@@ -1054,15 +1113,15 @@ class _OverbroadPersistedObjectiveExtractor(_DuplicateMechanicalObjectiveExtract
             warnings=[],
         )
 
-    def extract_objective_evidence_units(
+    def extract_objective_evidence(
         self,
         payload: dict[str, Any],
-    ) -> StructuredObjectiveEvidenceUnits:
+    ) -> StructuredEvidenceExtractions:
         self.unit_payloads.append(payload)
-        return StructuredObjectiveEvidenceUnits(
-            evidence_units=[
-                StructuredObjectiveEvidenceUnit(
-                    unit_kind="measurement",
+        return StructuredEvidenceExtractions(
+            extractions=[
+                StructuredEvidenceExtraction(
+                    evidence_kind="measurement",
                     property_normalized="yield strength",
                     material_system={"family": "316L stainless steel"},
                     sample_context={"label": "S1"},
@@ -1251,6 +1310,41 @@ def _merge_candidate_values(
             merged.append(text)
     return merged
 
+
+def test_research_objective_service_canonicalizes_model_document_references(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "seed_document_ids": ["stored/P003.pdf", "canonical-1", "unknown"],
+            "excluded_document_ids": ["paper-2.pdf"],
+        }
+    )
+    documents = [
+        SimpleNamespace(
+            document_id="canonical-1",
+            metadata={"source_path": "stored/P003.pdf"},
+        ),
+        SimpleNamespace(
+            document_id="canonical-2",
+            metadata={"source_filename": "paper-2.pdf"},
+        ),
+    ]
+
+    normalized = service._canonicalize_objective_document_ids(
+        objective,
+        documents=documents,
+    )
+
+    assert normalized.seed_document_ids == ("canonical-1",)
+    assert normalized.excluded_document_ids == ("canonical-2",)
+
+
 def test_research_objective_service_forces_extractable_objective_route_roles(
     tmp_path,
 ):
@@ -1279,7 +1373,7 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-density",
             "question": "How does laser power affect relative density?",
@@ -1289,7 +1383,7 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "question": objective.question,
@@ -1300,7 +1394,7 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
             "confidence": 0.9,
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -1309,7 +1403,7 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
             "relevant_tables": ["table-1"],
         }
     )
-    table_route = ObjectiveEvidenceRoute.from_mapping(
+    table_route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -1324,7 +1418,7 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
             "confidence": 0.85,
         }
     )
-    failing_text_route = ObjectiveEvidenceRoute.from_mapping(
+    failing_text_route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -1335,7 +1429,7 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
             "confidence": 0.75,
         }
     )
-    succeeding_text_route = ObjectiveEvidenceRoute.from_mapping(
+    succeeding_text_route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -1351,17 +1445,17 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
         def __init__(self) -> None:
             self.unit_payloads: list[dict[str, Any]] = []
 
-        def extract_objective_evidence_units(
+        def extract_objective_evidence(
             self,
             payload: dict[str, Any],
-        ) -> StructuredObjectiveEvidenceUnits:
+        ) -> StructuredEvidenceExtractions:
             self.unit_payloads.append(payload)
             if payload["evidence_route"]["source_ref"] == "block-1":
                 raise RuntimeError("malformed objective evidence JSON")
-            return StructuredObjectiveEvidenceUnits(
-                evidence_units=[
-                    StructuredObjectiveEvidenceUnit(
-                        unit_kind="measurement",
+            return StructuredEvidenceExtractions(
+                extractions=[
+                    StructuredEvidenceExtraction(
+                        evidence_kind="measurement",
                         property_normalized="relative density",
                         material_system={"family": "316L stainless steel"},
                         sample_context={"label": "S2"},
@@ -1409,7 +1503,7 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
     )
 
     with caplog.at_level("ERROR"):
-        units = service._build_objective_evidence_units(
+        units = service._build_objective_evidence(
             collection_id="col-test",
             extractor=extractor,
             objectives=(objective,),
@@ -1425,7 +1519,7 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
             document_trees_by_document_id={},
         )
 
-    measurements = [unit for unit in units if unit.unit_kind == "measurement"]
+    measurements = [unit for unit in units if unit.evidence_kind == "measurement"]
     assert len(measurements) == 2
     assert {unit.property_normalized for unit in measurements} == {"relative density"}
     assert {unit.value_payload["value"] for unit in measurements} == {98.1, 99.5}
@@ -1434,8 +1528,8 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
         "block-2",
     ]
     assert any(
-        "Research objective evidence-unit extraction route failed" in record.message
-        and failing_text_route.route_id in record.message
+        "Research objective evidence extraction route failed" in record.message
+        and failing_text_route.source_ref in record.message
         for record in caplog.records
     )
 
@@ -1444,7 +1538,7 @@ def test_research_objective_table_source_payload_includes_table_cells(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -1517,7 +1611,7 @@ def test_research_objective_text_source_payload_uses_document_tree(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -1589,7 +1683,7 @@ def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_pa
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-texture-yield",
             "question": (
@@ -1602,7 +1696,7 @@ def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_pa
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": objective.objective_id,
             "question": objective.question,
@@ -1745,7 +1839,7 @@ def test_objective_paper_frame_payload_filters_unscored_tables(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-texture-yield",
             "question": (
@@ -1758,7 +1852,7 @@ def test_objective_paper_frame_payload_filters_unscored_tables(tmp_path):
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": objective.objective_id,
             "question": objective.question,
@@ -1829,7 +1923,7 @@ def test_deterministic_frame_requires_variable_and_property_axis(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-texture-yield",
             "question": (
@@ -1842,7 +1936,7 @@ def test_deterministic_frame_requires_variable_and_property_axis(tmp_path):
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": objective.objective_id,
             "question": objective.question,
@@ -1899,7 +1993,7 @@ def test_research_objective_text_source_payload_resolves_tree_node_to_block(tmp_
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -1973,11 +2067,45 @@ def test_research_objective_text_source_payload_resolves_tree_node_to_block(tmp_
     }
 
 
-def test_research_objective_evidence_units_carry_forward_document_state(tmp_path):
+def test_research_objective_prompt_source_uses_cells_without_duplicate_matrix(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    source = {
+        "source_kind": "table",
+        "source_ref": "table-1",
+        "document_id": "paper-1",
+        "page": 4,
+        "caption_text": "Measured density",
+        "heading_path": "Results",
+        "column_headers": ["sample", "density"],
+        "table_matrix": [["sample", "density"], ["A", "99.6"]],
+        "table_cells": [
+            {
+                "row_index": 1,
+                "col_index": 0,
+                "header_path": "sample",
+                "cell_text": "A",
+            }
+        ],
+    }
+
+    projected = service._objective_evidence_prompt_source(source)
+
+    assert "table_matrix" not in projected
+    assert projected["table_cells"] == source["table_cells"]
+
+    fallback = service._objective_evidence_prompt_source(
+        {key: value for key, value in source.items() if key != "table_cells"}
+    )
+    assert fallback["table_matrix"] == [["sample", "density"], ["A", "99.6"]]
+
+
+def test_research_objective_evidences_carry_forward_document_state(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
         {
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
@@ -1987,7 +2115,7 @@ def test_research_objective_evidence_units_carry_forward_document_state(tmp_path
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-heat",
             "question": objective.question,
@@ -1997,7 +2125,7 @@ def test_research_objective_evidence_units_carry_forward_document_state(tmp_path
             "confidence": 0.9,
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -2005,7 +2133,7 @@ def test_research_objective_evidence_units_carry_forward_document_state(tmp_path
             "paper_role": "primary_experiment",
         }
     )
-    method_route = ObjectiveEvidenceRoute.from_mapping(
+    method_route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -2016,7 +2144,7 @@ def test_research_objective_evidence_units_carry_forward_document_state(tmp_path
             "confidence": 0.82,
         }
     )
-    result_route = ObjectiveEvidenceRoute.from_mapping(
+    result_route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -2107,17 +2235,17 @@ def test_research_objective_evidence_units_carry_forward_document_state(tmp_path
         def __init__(self) -> None:
             self.unit_payloads: list[dict[str, Any]] = []
 
-        def extract_objective_evidence_units(
+        def extract_objective_evidence(
             self,
             payload: dict[str, Any],
-        ) -> StructuredObjectiveEvidenceUnits:
+        ) -> StructuredEvidenceExtractions:
             self.unit_payloads.append(payload)
             source_ref = payload["evidence_route"]["source_ref"]
             if source_ref == "methods":
-                return StructuredObjectiveEvidenceUnits(
-                    evidence_units=[
-                        StructuredObjectiveEvidenceUnit(
-                            unit_kind="process_context",
+                return StructuredEvidenceExtractions(
+                    extractions=[
+                        StructuredEvidenceExtraction(
+                            evidence_kind="process_context",
                             sample_context={"sample": "S1"},
                             process_context={"aging_temperature_c": 650},
                             value_payload={"statement": "S1 aged at 650 C"},
@@ -2136,10 +2264,10 @@ def test_research_objective_evidence_units_carry_forward_document_state(tmp_path
                 )
             state = payload["document_state"]
             process_context = state["process_contexts"][0]["value"]
-            return StructuredObjectiveEvidenceUnits(
-                evidence_units=[
-                    StructuredObjectiveEvidenceUnit(
-                        unit_kind="measurement",
+            return StructuredEvidenceExtractions(
+                extractions=[
+                    StructuredEvidenceExtraction(
+                        evidence_kind="measurement",
                         property_normalized="yield strength",
                         sample_context={"sample": "S1"},
                         process_context=dict(process_context),
@@ -2157,7 +2285,7 @@ def test_research_objective_evidence_units_carry_forward_document_state(tmp_path
 
     extractor = StatefulUnitExtractor()
 
-    units = service._build_objective_evidence_units(
+    units = service._build_objective_evidence(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -2195,7 +2323,7 @@ def test_research_objective_evidence_units_carry_forward_document_state(tmp_path
     }
     assert "routing_hints" not in extractor.unit_payloads[0]["objective_context"]
     assert set(extractor.unit_payloads[0]["paper_frame"]) == {
-        "frame_id",
+        "document_id",
         "objective_id",
         "document_id",
         "relevance",
@@ -2205,18 +2333,18 @@ def test_research_objective_evidence_units_carry_forward_document_state(tmp_path
         "measured_property_scope",
         "test_environment_scope",
     }
-    measurements = [unit for unit in units if unit.unit_kind == "measurement"]
+    measurements = [unit for unit in units if unit.evidence_kind == "measurement"]
     assert len(measurements) == 1
     assert measurements[0].process_context == {"aging_temperature_c": 650}
 
 
-def test_research_objective_evidence_unit_prompt_compacts_long_text_source(
+def test_research_objective_evidence_prompt_compacts_long_text_source(
     tmp_path,
 ):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
@@ -2226,7 +2354,7 @@ def test_research_objective_evidence_unit_prompt_compacts_long_text_source(
             "confidence": 0.9,
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -2237,7 +2365,7 @@ def test_research_objective_evidence_unit_prompt_compacts_long_text_source(
             "excluded_tables": ["table-2"],
         }
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -2261,16 +2389,16 @@ def test_research_objective_evidence_unit_prompt_compacts_long_text_source(
         def __init__(self) -> None:
             self.unit_payloads: list[dict[str, Any]] = []
 
-        def extract_objective_evidence_units(
+        def extract_objective_evidence(
             self,
             payload: dict[str, Any],
-        ) -> StructuredObjectiveEvidenceUnits:
+        ) -> StructuredEvidenceExtractions:
             self.unit_payloads.append(payload)
-            return StructuredObjectiveEvidenceUnits()
+            return StructuredEvidenceExtractions()
 
     extractor = PayloadCaptureExtractor()
 
-    service._build_objective_evidence_units(
+    service._build_objective_evidence(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -2289,11 +2417,11 @@ def test_research_objective_evidence_unit_prompt_compacts_long_text_source(
     assert "excluded_tables" not in payload["paper_frame"]
 
 
-def test_research_objective_tree_state_supports_cross_block_logic_chain(tmp_path):
+def test_research_objective_tree_state_supports_cross_block_evidence_context(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
@@ -2303,7 +2431,7 @@ def test_research_objective_tree_state_supports_cross_block_logic_chain(tmp_path
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-heat",
             "question": objective.question,
@@ -2313,7 +2441,7 @@ def test_research_objective_tree_state_supports_cross_block_logic_chain(tmp_path
             "confidence": 0.9,
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -2322,7 +2450,7 @@ def test_research_objective_tree_state_supports_cross_block_logic_chain(tmp_path
         }
     )
     routes = (
-        ObjectiveEvidenceRoute.from_mapping(
+        EvidenceCandidate.from_mapping(
             {
                 "objective_id": "obj-heat",
                 "document_id": "paper-1",
@@ -2333,7 +2461,7 @@ def test_research_objective_tree_state_supports_cross_block_logic_chain(tmp_path
                 "confidence": 0.84,
             }
         ),
-        ObjectiveEvidenceRoute.from_mapping(
+        EvidenceCandidate.from_mapping(
             {
                 "objective_id": "obj-heat",
                 "document_id": "paper-1",
@@ -2349,7 +2477,7 @@ def test_research_objective_tree_state_supports_cross_block_logic_chain(tmp_path
                 "confidence": 0.88,
             }
         ),
-        ObjectiveEvidenceRoute.from_mapping(
+        EvidenceCandidate.from_mapping(
             {
                 "objective_id": "obj-heat",
                 "document_id": "paper-1",
@@ -2474,17 +2602,17 @@ def test_research_objective_tree_state_supports_cross_block_logic_chain(tmp_path
         def __init__(self) -> None:
             self.unit_payloads: list[dict[str, Any]] = []
 
-        def extract_objective_evidence_units(
+        def extract_objective_evidence(
             self,
             payload: dict[str, Any],
-        ) -> StructuredObjectiveEvidenceUnits:
+        ) -> StructuredEvidenceExtractions:
             self.unit_payloads.append(payload)
             source_ref = payload["evidence_route"]["source_ref"]
             if source_ref == "methods":
-                return StructuredObjectiveEvidenceUnits(
-                    evidence_units=[
-                        StructuredObjectiveEvidenceUnit(
-                            unit_kind="process_context",
+                return StructuredEvidenceExtractions(
+                    extractions=[
+                        StructuredEvidenceExtraction(
+                            evidence_kind="process_context",
                             sample_context={"sample": "S1"},
                             process_context={"heat_treatment": "650 C for 4 h"},
                             join_keys={"sample_key": "S1"},
@@ -2497,10 +2625,10 @@ def test_research_objective_tree_state_supports_cross_block_logic_chain(tmp_path
                 assert payload["document_state"]["process_contexts"][0]["value"] == {
                     "heat_treatment": "650 C for 4 h",
                 }
-                return StructuredObjectiveEvidenceUnits(
-                    evidence_units=[
-                        StructuredObjectiveEvidenceUnit(
-                            unit_kind="interpretation",
+                return StructuredEvidenceExtractions(
+                    extractions=[
+                        StructuredEvidenceExtraction(
+                            evidence_kind="interpretation",
                             sample_context={"sample": "S1"},
                             process_context={
                                 "heat_treatment": "650 C for 4 h",
@@ -2515,11 +2643,11 @@ def test_research_objective_tree_state_supports_cross_block_logic_chain(tmp_path
                         )
                     ]
                 )
-            return StructuredObjectiveEvidenceUnits()
+            return StructuredEvidenceExtractions()
 
     extractor = ChainExtractor()
 
-    units = service._build_objective_evidence_units(
+    units = service._build_objective_evidence(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -2530,27 +2658,15 @@ def test_research_objective_tree_state_supports_cross_block_logic_chain(tmp_path
         tables_by_document_id={"paper-1": [table]},
         document_trees_by_document_id={"paper-1": document_tree},
     )
-    chains = service._build_objective_logic_chains(
-        collection_id="col-test",
-        objectives=(objective,),
-        objective_contexts=(objective_context,),
-        objective_evidence_units=units,
-    )
-
     assert [payload["evidence_route"]["source_ref"] for payload in extractor.unit_payloads] == [
         "methods",
         "discussion",
     ]
-    measurement = next(unit for unit in units if unit.unit_kind == "measurement")
+    measurement = next(unit for unit in units if unit.evidence_kind == "measurement")
     assert measurement.process_context["heat_treatment"] == "650 C for 4 h"
     assert measurement.value_payload["value"] == 900.0
-    chain_payload = chains[0].chain_payload
-    paper_chain = chain_payload["paper_chains"][0]
-    assert paper_chain["sample_and_process_contexts"]
-    assert paper_chain["measurement_results"]
-    assert paper_chain["author_interpretations"]
-    assert chain_payload["cross_paper"]["resolved_measurement_count"] == 1
-    assert chain_payload["evidence_unit_ids_by_role"]["interpretations"]
+    interpretation = next(unit for unit in units if unit.evidence_kind == "interpretation")
+    assert interpretation.process_context["heat_treatment"] == "650 C for 4 h"
 
 
 def test_research_objective_fragmented_table_cells_repair_table_matrix_before_extraction(
@@ -2559,7 +2675,7 @@ def test_research_objective_fragmented_table_cells_repair_table_matrix_before_ex
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-density",
             "question": "How do process settings affect relative density?",
@@ -2570,13 +2686,13 @@ def test_research_objective_fragmented_table_cells_repair_table_matrix_before_ex
             "confidence": 0.88,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "target_property_axes": ["relative density"],
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -2585,7 +2701,7 @@ def test_research_objective_fragmented_table_cells_repair_table_matrix_before_ex
             "relevant_tables": ["table-1"],
         }
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -2714,16 +2830,16 @@ def test_research_objective_fragmented_table_cells_repair_table_matrix_before_ex
                 confidence=0.88,
             )
 
-        def extract_objective_evidence_units(
+        def extract_objective_evidence(
             self,
             payload: dict[str, Any],
-        ) -> StructuredObjectiveEvidenceUnits:
+        ) -> StructuredEvidenceExtractions:
             self.unit_payloads.append(payload)
-            return StructuredObjectiveEvidenceUnits()
+            return StructuredEvidenceExtractions()
 
     extractor = TableMatrixRepairExtractor()
 
-    units = service._build_objective_evidence_units(
+    units = service._build_objective_evidence(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -2753,7 +2869,7 @@ def test_research_objective_fragmented_table_cells_repair_table_matrix_before_ex
         for cell in repair_payload["source"]["table_cells"]
     )
     assert extractor.unit_payloads == []
-    measurements = [unit for unit in units if unit.unit_kind == "measurement"]
+    measurements = [unit for unit in units if unit.evidence_kind == "measurement"]
     assert len(measurements) == 3
     assert {unit.value_payload.get("value") for unit in measurements} == {
         97.83,
@@ -2790,7 +2906,7 @@ def test_research_objective_fragmented_table_matrix_triggers_structural_repair(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -2817,30 +2933,30 @@ def test_research_objective_service_inherits_single_objective_material(tmp_path)
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "material_scope": ["316L stainless steel"],
         }
     )
     units = (
-        ObjectiveEvidenceUnit.from_mapping(
+        ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": "oeu-missing-material",
+                "evidence_id": "oeu-missing-material",
                 "objective_id": "obj-mechanical",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "yield strength",
                 "value_payload": {"value": 236.65},
                 "resolution_status": "resolved",
             }
         ),
-        ObjectiveEvidenceUnit.from_mapping(
+        ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": "oeu-explicit-material",
+                "evidence_id": "oeu-explicit-material",
                 "objective_id": "obj-mechanical",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "material_system": {"family": "AISI 316L stainless steel"},
                 "property_normalized": "yield strength",
                 "value_payload": {"value": 159.97},
@@ -2864,18 +2980,18 @@ def test_research_objective_service_does_not_inherit_ambiguous_material(tmp_path
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-multi-material",
             "material_scope": ["316L stainless steel", "Ti-6Al-4V"],
         }
     )
-    unit = ObjectiveEvidenceUnit.from_mapping(
+    unit = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-missing-material",
+            "evidence_id": "oeu-missing-material",
             "objective_id": "obj-multi-material",
             "document_id": "paper-1",
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "yield strength",
             "value_payload": {"value": 236.65},
             "resolution_status": "resolved",
@@ -2896,7 +3012,7 @@ def test_research_objective_service_normalizes_result_table_values_to_measuremen
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
@@ -2914,19 +3030,19 @@ def test_research_objective_service_normalizes_result_table_values_to_measuremen
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": ["yield strength"],
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={"page": 4},
         objective_context=objective_context,
         extracted_record={
-            "unit_kind": "sample_context",
+            "evidence_kind": "sample_context",
             "sample_context": {"Sample number": "1"},
             "process_context": {"Condition number": "1"},
             "value_payload": {
@@ -2940,7 +3056,7 @@ def test_research_objective_service_normalizes_result_table_values_to_measuremen
 
     assert len(records) == 1
     record = records[0]
-    assert record["unit_kind"] == "measurement"
+    assert record["evidence_kind"] == "measurement"
     assert record["property_normalized"] == "yield strength"
     assert record["unit"] == "MPa"
     assert record["value_payload"] == {
@@ -2954,7 +3070,7 @@ def test_research_objective_service_normalizes_result_table_values_to_measuremen
     assert record["confidence"] == 0.84
     assert record["source_refs"] == (
         {
-            "route_id": route.route_id,
+            "source_ref": route.source_ref,
             "source_kind": "table",
             "source_ref": "table-2",
             "role": "current_experimental_evidence",
@@ -2969,7 +3085,7 @@ def test_research_objective_service_keeps_process_label_numbers_out_of_text_meas
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
@@ -2980,19 +3096,19 @@ def test_research_objective_service_keeps_process_label_numbers_out_of_text_meas
             "confidence": 0.72,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": ["elongation"],
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={"page": 8, "text": "Ductility increased for the low-porosity sample."},
         objective_context=objective_context,
         extracted_record={
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "elongation",
             "material_system": {"name": "316L stainless steel"},
             "sample_context": {"sample": "135 W-750 mm·s -1"},
@@ -3008,7 +3124,7 @@ def test_research_objective_service_keeps_process_label_numbers_out_of_text_meas
     )
 
     assert len(records) == 1
-    assert records[0]["unit_kind"] == "interpretation"
+    assert records[0]["evidence_kind"] == "interpretation"
     assert records[0]["property_normalized"] == "elongation"
     assert "value" not in records[0]["value_payload"]
 
@@ -3019,7 +3135,7 @@ def test_research_objective_service_carries_route_evidence_role_to_source_refs(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-corrosion",
             "document_id": "paper-1",
@@ -3032,20 +3148,20 @@ def test_research_objective_service_carries_route_evidence_role_to_source_refs(
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={
             "page": 6,
             "text": "LoF defects located at melt pool boundaries were observed.",
         },
-        objective_context=ObjectiveContext.from_mapping(
+        objective_context=ObjectiveAnalysisLens.from_mapping(
             {
                 "objective_id": "obj-corrosion",
                 "target_property_axes": ["pitting corrosion behavior"],
             }
         ),
         extracted_record={
-            "unit_kind": "characterization",
+            "evidence_kind": "characterization",
             "property_normalized": "lack of fusion defects",
             "value_payload": {
                 "summary": "LoF defects located at melt pool boundaries were observed.",
@@ -3057,40 +3173,23 @@ def test_research_objective_service_carries_route_evidence_role_to_source_refs(
     assert records[0]["source_refs"][0]["evidence_role"] == "mediator_context"
 
 
-def test_research_objective_service_enriches_legacy_unit_source_refs_from_routes(
-    tmp_path,
-):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
-    route = ObjectiveEvidenceRoute.from_mapping(
+def test_research_objective_service_reads_evidence_role_from_unit_source():
+    unit = ExtractedEvidenceDraft.from_mapping(
         {
+            "evidence_id": "oeu-lof",
             "objective_id": "obj-corrosion",
             "document_id": "paper-1",
-            "source_kind": "text_window",
-            "source_ref": "blk-lof-defects",
-            "role": "characterization",
-            "extractable": False,
-            "join_plan": {"evidence_role": "mediator_context"},
-            "confidence": 0.62,
-        }
-    )
-    unit = ObjectiveEvidenceUnit.from_mapping(
-        {
-            "evidence_unit_id": "oeu-lof",
-            "objective_id": "obj-corrosion",
-            "document_id": "paper-1",
-            "unit_kind": "characterization",
+            "evidence_kind": "characterization",
             "property_normalized": "lack of fusion defects",
             "value_payload": {
                 "summary": "LoF defects located at melt pool boundaries were observed.",
             },
             "source_refs": [
                 {
-                    "route_id": route.route_id,
                     "source_kind": "text_window",
                     "source_ref": "blk-lof-defects",
                     "role": "characterization",
+                    "evidence_role": "mediator_context",
                 }
             ],
             "resolution_status": "resolved",
@@ -3098,12 +3197,7 @@ def test_research_objective_service_enriches_legacy_unit_source_refs_from_routes
         }
     )
 
-    records = service._evidence_units_with_route_evidence_roles(
-        (unit,),
-        routes=(route,),
-    )
-
-    assert records[0]["source_refs"][0]["evidence_role"] == "mediator_context"
+    assert unit.evidence_role == "mediator_context"
 
 
 def test_research_objective_service_uses_main_number_after_leading_uncertainty(
@@ -3112,7 +3206,7 @@ def test_research_objective_service_uses_main_number_after_leading_uncertainty(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
@@ -3128,14 +3222,14 @@ def test_research_objective_service_uses_main_number_after_leading_uncertainty(
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": ["hardness", "yield strength"],
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         source={
             "page": 5,
@@ -3172,7 +3266,7 @@ def test_research_objective_service_keeps_non_ascii_process_headers_out_of_resul
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-texture",
             "document_id": "paper-1",
@@ -3188,7 +3282,7 @@ def test_research_objective_service_keeps_non_ascii_process_headers_out_of_resul
             },
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-texture",
             "variable_process_axes": [
@@ -3202,7 +3296,7 @@ def test_research_objective_service_keeps_non_ascii_process_headers_out_of_resul
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         source={
             "page": 8,
@@ -3242,7 +3336,7 @@ def test_research_objective_service_keeps_unrole_result_table_case_as_sample_key
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-texture",
             "document_id": "paper-1",
@@ -3257,7 +3351,7 @@ def test_research_objective_service_keeps_unrole_result_table_case_as_sample_key
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-texture",
             "variable_process_axes": [
@@ -3268,7 +3362,7 @@ def test_research_objective_service_keeps_unrole_result_table_case_as_sample_key
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         source={
             "page": 9,
@@ -3304,7 +3398,7 @@ def test_research_objective_service_expands_fatigue_and_defect_result_columns(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-fatigue",
             "document_id": "paper-1",
@@ -3321,7 +3415,7 @@ def test_research_objective_service_expands_fatigue_and_defect_result_columns(
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-fatigue",
             "variable_process_axes": [
@@ -3335,7 +3429,7 @@ def test_research_objective_service_expands_fatigue_and_defect_result_columns(
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         source={
             "page": 10,
@@ -3380,7 +3474,7 @@ def test_research_objective_service_uses_role_aliases_for_result_process_context
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-texture",
             "document_id": "paper-1",
@@ -3396,7 +3490,7 @@ def test_research_objective_service_uses_role_aliases_for_result_process_context
             },
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-texture",
             "variable_process_axes": [
@@ -3407,7 +3501,7 @@ def test_research_objective_service_uses_role_aliases_for_result_process_context
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         source={
             "page": 8,
@@ -3446,7 +3540,7 @@ def test_research_objective_service_uses_specific_role_label_for_abbreviated_res
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
@@ -3461,14 +3555,14 @@ def test_research_objective_service_uses_specific_role_label_for_abbreviated_res
             "confidence": 0.82,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": ["elongation"],
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         objective_context=objective_context,
         source={
@@ -3492,7 +3586,7 @@ def test_research_objective_service_uses_matching_result_headers_when_role_is_br
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -3508,14 +3602,14 @@ def test_research_objective_service_uses_matching_result_headers_when_role_is_br
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "target_property_axes": ["densification"],
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         source={
             "page": 2,
@@ -3548,7 +3642,7 @@ def test_research_objective_service_keeps_routed_model_metric_columns(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-texture",
             "document_id": "paper-1",
@@ -3566,7 +3660,7 @@ def test_research_objective_service_keeps_routed_model_metric_columns(
             "confidence": 0.82,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-texture",
             "target_property_axes": [
@@ -3578,7 +3672,7 @@ def test_research_objective_service_keeps_routed_model_metric_columns(
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         source={
             "page": 7,
@@ -3623,7 +3717,7 @@ def test_research_objective_service_treats_relative_density_as_structural_target
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -3643,7 +3737,7 @@ def test_research_objective_service_treats_relative_density_as_structural_target
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "variable_process_axes": [
@@ -3655,7 +3749,7 @@ def test_research_objective_service_treats_relative_density_as_structural_target
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         source={
             "page": 2,
@@ -3711,7 +3805,7 @@ def test_research_objective_service_skips_matrix_test_condition_table_fallback(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -3737,7 +3831,7 @@ def test_research_objective_service_skips_untyped_table_test_condition_fallback(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -3757,7 +3851,7 @@ def test_research_objective_service_skips_off_target_result_table_fallback(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
@@ -3774,7 +3868,7 @@ def test_research_objective_service_skips_off_target_result_table_fallback(
             },
         }
     )
-    corrosion_route = ObjectiveEvidenceRoute.from_mapping(
+    corrosion_route = EvidenceCandidate.from_mapping(
         {
             **route.to_record(),
             "objective_id": "obj-corrosion",
@@ -3791,7 +3885,7 @@ def test_research_objective_service_skips_off_target_result_table_fallback(
     assert service._objective_table_route_should_skip_llm_fallback(route)
     assert service._objective_table_route_should_skip_llm_fallback(corrosion_route)
 
-    eis_route = ObjectiveEvidenceRoute.from_mapping(
+    eis_route = EvidenceCandidate.from_mapping(
         {
             **route.to_record(),
             "source_ref": "table-eis",
@@ -3813,13 +3907,13 @@ def test_research_objective_service_builds_method_conditions_and_binds_measureme
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": ["yield strength", "microhardness"],
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
@@ -3868,23 +3962,23 @@ def test_research_objective_service_builds_method_conditions_and_binds_measureme
     assert hardness_condition["load"] == "10 N"
 
     measurements = (
-        ObjectiveEvidenceUnit.from_mapping(
+        ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": "yield-measurement",
+                "evidence_id": "yield-measurement",
                 "objective_id": "obj-mechanical",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "yield strength",
                 "value_payload": {"source_value_text": "236.65", "value": 236.65},
                 "resolution_status": "resolved",
             }
         ),
-        ObjectiveEvidenceUnit.from_mapping(
+        ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": "hardness-measurement",
+                "evidence_id": "hardness-measurement",
                 "objective_id": "obj-mechanical",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "microhardness",
                 "value_payload": {"source_value_text": "224.7", "value": 224.7},
                 "resolution_status": "resolved",
@@ -3896,18 +3990,18 @@ def test_research_objective_service_builds_method_conditions_and_binds_measureme
         (*method_units, *measurements)
     )
     resolved_measurements = [
-        unit for unit in resolved if unit.unit_kind == "measurement"
+        unit for unit in resolved if unit.evidence_kind == "measurement"
     ]
 
     assert resolved_measurements[0].test_condition["method"] == "tensile testing"
     assert (
         resolved_measurements[0].resolved_condition["test_condition_unit_id"]
-        == method_units[0].evidence_unit_id
+        == method_units[0].evidence_id
     )
     assert resolved_measurements[1].test_condition["method"] == "Vickers microhardness"
     assert (
         resolved_measurements[1].resolved_condition["test_condition_unit_id"]
-        == method_units[1].evidence_unit_id
+        == method_units[1].evidence_id
     )
 
 
@@ -3917,7 +4011,7 @@ def test_research_objective_service_derives_table_characterization_units(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "target_property_axes": ["densification", "microstructure"],
@@ -3925,18 +4019,18 @@ def test_research_objective_service_derives_table_characterization_units(
     )
 
     def density_unit(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         sample_number: str,
         strategy: str,
         value: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-density",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "relative density",
                 "sample_context": {"Sample number": sample_number},
                 "process_context": {"Scan strategy": strategy},
@@ -3988,7 +4082,7 @@ def test_research_objective_service_does_not_keep_text_trends_as_measurements(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
@@ -4000,12 +4094,12 @@ def test_research_objective_service_does_not_keep_text_trends_as_measurements(
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={"page": 5},
         objective_context=None,
         extracted_record={
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "microstructure",
             "value_payload": {"result": "refined microstructure"},
             "resolution_status": "partial",
@@ -4014,11 +4108,11 @@ def test_research_objective_service_does_not_keep_text_trends_as_measurements(
 
     assert len(records) == 1
     record = records[0]
-    assert record["unit_kind"] == "characterization"
+    assert record["evidence_kind"] == "characterization"
     assert record["interpretation"] == "refined microstructure"
     assert record["source_refs"] == (
         {
-            "route_id": route.route_id,
+            "source_ref": route.source_ref,
             "source_kind": "text_window",
             "source_ref": "block-1",
             "role": "characterization",
@@ -4033,7 +4127,7 @@ def test_research_objective_service_keeps_non_numeric_text_characterization(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -4045,12 +4139,12 @@ def test_research_objective_service_keeps_non_numeric_text_characterization(
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={"page": 3},
         objective_context=None,
         extracted_record={
-            "unit_kind": "characterization",
+            "evidence_kind": "characterization",
             "property_normalized": "microstructure",
             "value_payload": {"observation": "irregular pores were observed"},
             "resolution_status": "partial",
@@ -4058,7 +4152,7 @@ def test_research_objective_service_keeps_non_numeric_text_characterization(
     )
 
     assert len(records) == 1
-    assert records[0]["unit_kind"] == "characterization"
+    assert records[0]["evidence_kind"] == "characterization"
     assert records[0]["property_normalized"] == "microstructure"
 
 
@@ -4068,7 +4162,7 @@ def test_research_objective_service_keeps_numeric_density_text_as_measurement(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -4080,12 +4174,12 @@ def test_research_objective_service_keeps_numeric_density_text_as_measurement(
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={"page": 3},
         objective_context=None,
         extracted_record={
-            "unit_kind": "characterization",
+            "evidence_kind": "characterization",
             "sample_context": {"sample_id": "375 W-2100 mm·s -1"},
             "process_context": {
                 "laser_power": "375 W",
@@ -4099,7 +4193,7 @@ def test_research_objective_service_keeps_numeric_density_text_as_measurement(
 
     assert len(records) == 1
     record = records[0]
-    assert record["unit_kind"] == "measurement"
+    assert record["evidence_kind"] == "measurement"
     assert record["property_normalized"] == "relative density"
     assert record["value_payload"] == {
         "source_value_text": "97.83",
@@ -4114,7 +4208,7 @@ def test_research_objective_service_expands_respective_density_text_measurements
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -4126,12 +4220,12 @@ def test_research_objective_service_expands_respective_density_text_measurements
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={"page": 3},
         objective_context=None,
         extracted_record={
-            "unit_kind": "characterization",
+            "evidence_kind": "characterization",
             "sample_context": {
                 "sample_ids": [
                     "375 W-2100 mm·s -1",
@@ -4152,7 +4246,7 @@ def test_research_objective_service_expands_respective_density_text_measurements
 
     assert [
         (
-            record["unit_kind"],
+            record["evidence_kind"],
             record["property_normalized"],
             record["sample_context"],
             record["value_payload"],
@@ -4190,7 +4284,7 @@ def test_research_objective_service_expands_mapped_density_text_measurements(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -4202,12 +4296,12 @@ def test_research_objective_service_expands_mapped_density_text_measurements(
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={"page": 3},
         objective_context=None,
         extracted_record={
-            "unit_kind": "characterization",
+            "evidence_kind": "characterization",
             "property_normalized": "relative density",
             "sample_context": {
                 "samples": [
@@ -4240,7 +4334,7 @@ def test_research_objective_service_expands_mapped_density_text_measurements(
 
     assert [
         (
-            record["unit_kind"],
+            record["evidence_kind"],
             record["property_normalized"],
             record["sample_context"],
             record["process_context"],
@@ -4282,7 +4376,7 @@ def test_research_objective_service_expands_mapped_density_interpretation(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -4293,7 +4387,7 @@ def test_research_objective_service_expands_mapped_density_interpretation(
             "confidence": 0.72,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "question": "How do laser power and scan speed affect density?",
@@ -4301,12 +4395,12 @@ def test_research_objective_service_expands_mapped_density_interpretation(
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={"page": 3},
         objective_context=objective_context,
         extracted_record={
-            "unit_kind": "interpretation",
+            "evidence_kind": "interpretation",
             "property_normalized": "density",
             "value_payload": {
                 "375W-2100mm/s": "97.83%",
@@ -4317,7 +4411,7 @@ def test_research_objective_service_expands_mapped_density_interpretation(
         },
     )
 
-    assert [record["unit_kind"] for record in records] == [
+    assert [record["evidence_kind"] for record in records] == [
         "measurement",
         "measurement",
         "measurement",
@@ -4340,7 +4434,7 @@ def test_research_objective_service_expands_mapped_numeric_text_measurements(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-preheat",
             "document_id": "paper-1",
@@ -4352,12 +4446,12 @@ def test_research_objective_service_expands_mapped_numeric_text_measurements(
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={"page": 5},
         objective_context=None,
         extracted_record={
-            "unit_kind": "characterization",
+            "evidence_kind": "characterization",
             "property_normalized": "cooling rate",
             "process_context": {"process": "laser beam powder bed fusion"},
             "value_payload": {
@@ -4370,7 +4464,7 @@ def test_research_objective_service_expands_mapped_numeric_text_measurements(
 
     assert [
         (
-            record["unit_kind"],
+            record["evidence_kind"],
             record["property_normalized"],
             record["sample_context"],
             record["process_context"],
@@ -4404,7 +4498,7 @@ def test_research_objective_service_expands_mapped_residual_stress_text_measurem
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-heat-treatment",
             "document_id": "paper-1",
@@ -4416,12 +4510,12 @@ def test_research_objective_service_expands_mapped_residual_stress_text_measurem
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={"page": 4},
         objective_context=None,
         extracted_record={
-            "unit_kind": "characterization",
+            "evidence_kind": "characterization",
             "property_normalized": "residual stress",
             "process_context": {"laser_power": "120 W", "scan_speed": "100 mm/s"},
             "value_payload": {
@@ -4435,7 +4529,7 @@ def test_research_objective_service_expands_mapped_residual_stress_text_measurem
 
     assert [
         (
-            record["unit_kind"],
+            record["evidence_kind"],
             record["property_normalized"],
             record["sample_context"],
             record["value_payload"],
@@ -4473,7 +4567,7 @@ def test_research_objective_service_expands_source_text_density_measurements_whe
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -4485,7 +4579,7 @@ def test_research_objective_service_expands_source_text_density_measurements_whe
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={
             "page": 3,
@@ -4497,7 +4591,7 @@ def test_research_objective_service_expands_source_text_density_measurements_whe
         },
         objective_context=None,
         extracted_record={
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "property_normalized": "microstructure",
             "sample_context": {
                 "density": "97.83%",
@@ -4515,7 +4609,7 @@ def test_research_objective_service_expands_source_text_density_measurements_whe
 
     assert [
         (
-            record["unit_kind"],
+            record["evidence_kind"],
             record["property_normalized"],
             record["sample_context"],
             record["process_context"],
@@ -4557,13 +4651,13 @@ def test_research_objective_service_dedupes_shared_density_measurements(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    corrosion_context = ObjectiveContext.from_mapping(
+    corrosion_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-corrosion",
             "target_property_axes": ["corrosion potential", "pitting potential"],
         }
     )
-    mechanical_context = ObjectiveContext.from_mapping(
+    mechanical_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": [
@@ -4573,22 +4667,22 @@ def test_research_objective_service_dedupes_shared_density_measurements(
             ],
         }
     )
-    corrosion_density = ObjectiveEvidenceUnit.from_mapping(
+    corrosion_density = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "density-corrosion",
+            "evidence_id": "density-corrosion",
             "objective_id": "obj-corrosion",
             "document_id": "paper-1",
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "relative density",
             "sample_context": {"sample_number": "1", "sample_id": "sample-a"},
             "value_payload": {"source_value_text": "97.83", "value": 97.83},
             "unit": "%",
         }
     )
-    mechanical_density = ObjectiveEvidenceUnit.from_mapping(
+    mechanical_density = ExtractedEvidenceDraft.from_mapping(
         {
             **corrosion_density.to_record(),
-            "evidence_unit_id": "density-mechanical",
+            "evidence_id": "density-mechanical",
             "objective_id": "obj-mechanical",
         }
     )
@@ -4601,7 +4695,7 @@ def test_research_objective_service_dedupes_shared_density_measurements(
         },
     )
 
-    assert [unit.evidence_unit_id for unit in deduped] == ["density-mechanical"]
+    assert [unit.evidence_id for unit in deduped] == ["density-mechanical"]
 
 
 def test_research_objective_service_reclassifies_mechanical_text_trends(
@@ -4610,7 +4704,7 @@ def test_research_objective_service_reclassifies_mechanical_text_trends(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
@@ -4622,12 +4716,12 @@ def test_research_objective_service_reclassifies_mechanical_text_trends(
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={"page": 6},
         objective_context=None,
         extracted_record={
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "yield strength",
             "value_payload": {"result": "higher for strategy A"},
             "resolution_status": "partial",
@@ -4635,7 +4729,7 @@ def test_research_objective_service_reclassifies_mechanical_text_trends(
     )
 
     assert len(records) == 1
-    assert records[0]["unit_kind"] == "interpretation"
+    assert records[0]["evidence_kind"] == "interpretation"
     assert records[0]["interpretation"] == "higher for strategy A"
 
 
@@ -4645,7 +4739,7 @@ def test_research_objective_service_reclassifies_off_target_text_measurements(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-microstructure",
             "document_id": "paper-1",
@@ -4656,20 +4750,20 @@ def test_research_objective_service_reclassifies_off_target_text_measurements(
             "confidence": 0.72,
         }
     )
-    microstructure_context = ObjectiveContext.from_mapping(
+    microstructure_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-microstructure",
             "target_property_axes": ["microstructure"],
         }
     )
-    mechanical_context = ObjectiveContext.from_mapping(
+    mechanical_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": ["yield strength", "elongation"],
         }
     )
     extracted_record = {
-        "unit_kind": "measurement",
+        "evidence_kind": "measurement",
         "property_normalized": "elongation",
         "sample_context": {"sample_number": "3"},
         "value_payload": {"trend": "increase", "value": "10%"},
@@ -4677,14 +4771,14 @@ def test_research_objective_service_reclassifies_off_target_text_measurements(
         "resolution_status": "resolved",
     }
 
-    off_target_records = service._objective_evidence_unit_records_from_extracted(
+    off_target_records = service._objective_evidence_records_from_extracted(
         route=route,
         source={"page": 8},
         objective_context=microstructure_context,
         extracted_record=extracted_record,
     )
-    on_target_records = service._objective_evidence_unit_records_from_extracted(
-        route=ObjectiveEvidenceRoute.from_mapping(
+    on_target_records = service._objective_evidence_records_from_extracted(
+        route=EvidenceCandidate.from_mapping(
             {**route.to_record(), "objective_id": "obj-mechanical"}
         ),
         source={"page": 8},
@@ -4692,9 +4786,9 @@ def test_research_objective_service_reclassifies_off_target_text_measurements(
         extracted_record=extracted_record,
     )
 
-    assert off_target_records[0]["unit_kind"] == "interpretation"
+    assert off_target_records[0]["evidence_kind"] == "interpretation"
     assert off_target_records[0]["property_normalized"] == "elongation"
-    assert on_target_records[0]["unit_kind"] == "measurement"
+    assert on_target_records[0]["evidence_kind"] == "measurement"
 
 
 def test_research_objective_service_preserves_numeric_text_mechanisms(
@@ -4703,7 +4797,7 @@ def test_research_objective_service_preserves_numeric_text_mechanisms(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-preheat",
             "document_id": "paper-1",
@@ -4714,7 +4808,7 @@ def test_research_objective_service_preserves_numeric_text_mechanisms(
             "confidence": 0.72,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-preheat",
             "target_property_axes": [
@@ -4728,7 +4822,7 @@ def test_research_objective_service_preserves_numeric_text_mechanisms(
 
     extracted_records = [
         {
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "cooling rate",
             "sample_context": {"condition": "P150"},
             "value_payload": {
@@ -4739,14 +4833,14 @@ def test_research_objective_service_preserves_numeric_text_mechanisms(
             "resolution_status": "resolved",
         },
         {
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "melt pool width/depth ratio",
             "sample_context": {"condition": "P150"},
             "value_payload": {"source_value_text": "1.7", "value": 1.7},
             "resolution_status": "resolved",
         },
         {
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "residual stress",
             "sample_context": {"condition": "as-SLM"},
             "value_payload": {"source_value_text": "99.5 MPa", "value": 99.5},
@@ -4756,7 +4850,7 @@ def test_research_objective_service_preserves_numeric_text_mechanisms(
     ]
 
     records = tuple(
-        service._objective_evidence_unit_records_from_extracted(
+        service._objective_evidence_records_from_extracted(
             route=route,
             source={"page": 5},
             objective_context=objective_context,
@@ -4765,7 +4859,7 @@ def test_research_objective_service_preserves_numeric_text_mechanisms(
         for record in extracted_records
     )
 
-    assert [record["unit_kind"] for record in records] == [
+    assert [record["evidence_kind"] for record in records] == [
         "characterization",
         "characterization",
         "characterization",
@@ -4788,7 +4882,7 @@ def test_research_objective_service_reclassifies_text_comparison_without_pair_co
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -4800,12 +4894,12 @@ def test_research_objective_service_reclassifies_text_comparison_without_pair_co
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={"page": 12},
         objective_context=None,
         extracted_record={
-            "unit_kind": "comparison",
+            "evidence_kind": "comparison",
             "interpretation": (
                 "Scanning strategy A exhibited highest densification compared "
                 "to strategies B and C."
@@ -4815,7 +4909,7 @@ def test_research_objective_service_reclassifies_text_comparison_without_pair_co
     )
 
     assert len(records) == 1
-    assert records[0]["unit_kind"] == "characterization"
+    assert records[0]["evidence_kind"] == "characterization"
     assert records[0]["interpretation"].startswith("Scanning strategy A")
 
 
@@ -4825,7 +4919,7 @@ def test_research_objective_service_does_not_expand_text_trends_into_measurement
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
@@ -4837,12 +4931,12 @@ def test_research_objective_service_does_not_expand_text_trends_into_measurement
         }
     )
 
-    records = service._objective_evidence_unit_records_from_extracted(
+    records = service._objective_evidence_records_from_extracted(
         route=route,
         source={"page": 6},
         objective_context=None,
         extracted_record={
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "yield strength",
             "value_payload": {"yield strength": "better mechanical properties"},
             "interpretation": "Strategy A performed better than B and C.",
@@ -4852,7 +4946,7 @@ def test_research_objective_service_does_not_expand_text_trends_into_measurement
 
     assert len(records) == 1
     record = records[0]
-    assert record["unit_kind"] == "interpretation"
+    assert record["evidence_kind"] == "interpretation"
     assert record["interpretation"] == "Strategy A performed better than B and C."
     assert record["value_payload"] == {"yield strength": "better mechanical properties"}
 
@@ -4863,7 +4957,7 @@ def test_research_objective_service_expands_result_table_matrix_measurements(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
@@ -4883,7 +4977,7 @@ def test_research_objective_service_expands_result_table_matrix_measurements(
             "confidence": 0.8,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "target_property_axes": [
@@ -4895,7 +4989,7 @@ def test_research_objective_service_expands_result_table_matrix_measurements(
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         objective_context=objective_context,
         source={
@@ -4932,7 +5026,7 @@ def test_research_objective_service_expands_result_table_matrix_measurements(
         "elongation",
         "microhardness",
     }
-    assert all(record["unit_kind"] == "measurement" for record in records)
+    assert all(record["evidence_kind"] == "measurement" for record in records)
     assert all(record["resolution_status"] == "resolved" for record in records)
     assert not any(
         record["property_normalized"] == "Standard deviation"
@@ -4965,7 +5059,7 @@ def test_research_objective_service_normalizes_compact_tensile_headers(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-preheat",
             "document_id": "paper-1",
@@ -4982,7 +5076,7 @@ def test_research_objective_service_normalizes_compact_tensile_headers(
             "confidence": 0.82,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-preheat",
             "target_property_axes": [
@@ -4993,7 +5087,7 @@ def test_research_objective_service_normalizes_compact_tensile_headers(
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         objective_context=objective_context,
         source={
@@ -5047,7 +5141,7 @@ def test_research_objective_service_skips_reference_rows_and_keeps_condition_axi
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-preheat",
             "document_id": "paper-1",
@@ -5064,7 +5158,7 @@ def test_research_objective_service_skips_reference_rows_and_keeps_condition_axi
             "confidence": 0.82,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-preheat",
             "variable_process_axes": ["build platform preheating"],
@@ -5076,7 +5170,7 @@ def test_research_objective_service_skips_reference_rows_and_keeps_condition_axi
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         objective_context=objective_context,
         source={
@@ -5121,7 +5215,7 @@ def test_research_objective_service_skips_reference_rows_and_keeps_condition_axi
     }
 
     comparison_units = service._build_objective_pairwise_comparison_units(
-        tuple(ObjectiveEvidenceUnit.from_mapping(record) for record in records),
+        tuple(ExtractedEvidenceDraft.from_mapping(record) for record in records),
         objective_contexts=(objective_context,),
     )
 
@@ -5146,7 +5240,7 @@ def test_research_objective_service_skips_non_target_result_property_columns(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-preheat",
             "document_id": "paper-1",
@@ -5163,7 +5257,7 @@ def test_research_objective_service_skips_non_target_result_property_columns(
             "confidence": 0.76,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-preheat",
             "target_property_axes": [
@@ -5174,7 +5268,7 @@ def test_research_objective_service_skips_non_target_result_property_columns(
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         objective_context=objective_context,
         source={
@@ -5196,7 +5290,7 @@ def test_research_objective_service_skips_table_matrix_continuation_header_rows(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-corrosion",
             "document_id": "paper-1",
@@ -5212,7 +5306,7 @@ def test_research_objective_service_skips_table_matrix_continuation_header_rows(
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         objective_context=None,
         source={
@@ -5247,7 +5341,7 @@ def test_research_objective_service_adds_sample_numbers_to_labeled_table_rows(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
             "document_id": "paper-1",
@@ -5262,14 +5356,14 @@ def test_research_objective_service_adds_sample_numbers_to_labeled_table_rows(
             "confidence": 0.8,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "target_property_axes": ["density"],
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         objective_context=objective_context,
         source={
@@ -5289,11 +5383,11 @@ def test_research_objective_service_adds_sample_numbers_to_labeled_table_rows(
     ]
 
 
-def test_research_objective_service_builds_objective_evidence_lens(tmp_path):
+def test_research_objective_service_builds_objective_analysis_lens(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-corrosion",
             "question": (
@@ -5306,21 +5400,39 @@ def test_research_objective_service_builds_objective_evidence_lens(tmp_path):
         }
     )
 
-    lens = service._build_objective_evidence_lens(
-        objective=objective,
-        variable_process_axes=["laser power"],
-        process_context_axes=["SLM"],
-        target_property_axes=["pitting potential"],
-        excluded_property_axes=["yield strength"],
-    )
+    lens = service._build_objective_analysis_lenses(
+        paper_skims=(
+            PaperSkim.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "changed_variables": ["laser power"],
+                }
+            ),
+        ),
+        objectives=(objective,),
+        tables=(),
+    )[0]
 
-    assert lens["target_outcome_axes"] == ["pitting potential"]
-    assert lens["mediator_axes"] == ["porosity", "pore", "pore size"]
-    assert lens["variable_process_axes"] == ["laser power"]
-    assert lens["context_axes"] == ["316L stainless steel", "SLM"]
-    assert lens["excluded_axes"] == ["yield strength"]
-    assert any("target_outcome_axis" in rule for rule in lens["direct_support_rules"])
-    assert any("Mediator axes" in rule for rule in lens["direct_support_rules"])
+    assert lens.target_property_axes == ("pitting potential",)
+    assert lens.mediator_axes == ("porosity", "pore", "pore size")
+    assert lens.variable_process_axes == ("laser power",)
+    assert lens.process_context_axes == ("SLM",)
+    assert any("target_outcome_axis" in rule for rule in lens.direct_support_rules)
+    assert any("Mediator axes" in rule for rule in lens.direct_support_rules)
+
+
+@pytest.mark.parametrize(
+    "obsolete_field",
+    ["objective_evidence_lens", "extraction_guidance"],
+)
+def test_objective_analysis_lens_rejects_obsolete_nested_fields(obsolete_field):
+    with pytest.raises(ValueError, match="obsolete Objective analysis lens fields"):
+        ObjectiveAnalysisLens.from_mapping(
+            {
+                "objective_id": "obj-corrosion",
+                obsolete_field: {},
+            }
+        )
 
 
 def test_research_objective_service_routes_matching_tables_beyond_seed_documents(
@@ -5329,7 +5441,7 @@ def test_research_objective_service_routes_matching_tables_beyond_seed_documents
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-density",
             "question": "How does volumetric energy density affect density?",
@@ -5363,7 +5475,7 @@ def test_research_objective_service_routes_matching_tables_beyond_seed_documents
     )
 
     assert {
-        (hint["document_id"], hint["table_id"], hint["role"])
+        (hint.document_id, hint.table_id, hint.role)
         for hint in hints
     } == {
         ("paper-seed", "tbl-seed-density", "result_table"),
@@ -5381,7 +5493,7 @@ def test_research_objective_service_does_not_route_single_letter_acronym_tables(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-density",
             "question": "How does scan speed affect density?",
@@ -5413,7 +5525,7 @@ def test_research_objective_service_does_not_route_single_letter_acronym_tables(
         variable_process_axes=["scan speed"],
     )
 
-    assert hints == []
+    assert hints == ()
 
 
 def test_research_objective_service_treats_energy_density_only_table_as_condition(
@@ -5422,7 +5534,7 @@ def test_research_objective_service_treats_energy_density_only_table_as_conditio
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-density",
             "question": "How do laser power and scan speed affect density?",
@@ -5452,8 +5564,8 @@ def test_research_objective_service_treats_energy_density_only_table_as_conditio
     )
 
     assert len(hints) == 1
-    assert hints[0]["role"] == "condition_context"
-    assert hints[0]["matched_property_axes"] == []
+    assert hints[0].role == "condition_context"
+    assert hints[0].matched_property_axes == ()
 
 
 def test_research_objective_service_normalizes_archimedes_density_column(
@@ -5462,7 +5574,7 @@ def test_research_objective_service_normalizes_archimedes_density_column(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "question": "How does volumetric energy density affect density?",
@@ -5484,7 +5596,7 @@ def test_research_objective_service_ignores_analysis_purpose_as_table_result(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-microstructure",
             "question": "How does heat treatment affect microstructure?",
@@ -5512,7 +5624,7 @@ def test_research_objective_service_ignores_analysis_purpose_as_table_result(
         variable_process_axes=["heat treatment"],
     )
 
-    assert hints == []
+    assert hints == ()
 
 
 def test_research_objective_service_recovers_non_seed_condition_and_result_routes(
@@ -5521,7 +5633,7 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-mechanical",
             "question": "How do LPBF parameters affect tensile properties?",
@@ -5583,7 +5695,7 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
         target_property_axes=list(objective.property_axes),
         variable_process_axes=list(objective.process_axes),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": objective.objective_id,
             "question": objective.question,
@@ -5594,7 +5706,7 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
             "confidence": 0.9,
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": objective.objective_id,
             "document_id": "paper-independent",
@@ -5638,7 +5750,7 @@ def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_re
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-corrosion",
             "question": (
@@ -5689,7 +5801,7 @@ def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_re
     )
 
     assert {
-        (hint["table_id"], hint["role"], tuple(hint["matched_property_axes"]))
+        (hint.table_id, hint.role, hint.matched_property_axes)
         for hint in hints
     } == {
         ("tbl-electrochemical", "result_table", ("pitting corrosion behavior",)),
@@ -5703,7 +5815,7 @@ def test_research_objective_service_keeps_density_out_of_defect_structure_result
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-fatigue",
             "question": (
@@ -5735,39 +5847,32 @@ def test_research_objective_service_keeps_density_out_of_defect_structure_result
         variable_process_axes=["volumetric energy density"],
     )
 
-    assert all(hint["role"] != "result_table" for hint in hints)
+    assert all(hint.role != "result_table" for hint in hints)
 
 
-def test_research_objective_service_route_payload_includes_objective_evidence_lens(
+def test_research_objective_service_route_payload_uses_flat_analysis_lens(
     tmp_path,
 ):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    context = ObjectiveContext.from_mapping(
+    context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-corrosion",
             "question": "How does porosity affect pitting corrosion?",
             "target_property_axes": ["pitting potential"],
-            "objective_evidence_lens": {
-                "target_outcome_axes": ["pitting potential"],
-                "mediator_axes": ["porosity"],
-                "variable_process_axes": [],
-                "context_axes": ["316L stainless steel"],
-                "excluded_axes": [],
-                "direct_support_rules": [
-                    "Direct support must explicitly report a target outcome."
-                ],
-            },
+            "mediator_axes": ["porosity"],
+            "direct_support_rules": [
+                "Direct support must explicitly report a target outcome."
+            ],
         }
     )
 
     payload = service._route_prompt_objective_context_record(context)
 
-    assert payload["objective_evidence_lens"]["target_outcome_axes"] == [
-        "pitting potential"
-    ]
-    assert payload["objective_evidence_lens"]["mediator_axes"] == ["porosity"]
+    assert payload["target_property_axes"] == ["pitting potential"]
+    assert payload["mediator_axes"] == ["porosity"]
+    assert "objective_evidence_lens" not in payload
 
 
 def test_research_objective_service_adds_sample_numbers_to_process_table_rows(
@@ -5776,7 +5881,7 @@ def test_research_objective_service_adds_sample_numbers_to_process_table_rows(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-process",
             "document_id": "paper-1",
@@ -5793,7 +5898,7 @@ def test_research_objective_service_adds_sample_numbers_to_process_table_rows(
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         objective_context=None,
         source={
@@ -5829,7 +5934,7 @@ def test_research_objective_service_keeps_unlabeled_process_table_columns_as_con
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    route = ObjectiveEvidenceRoute.from_mapping(
+    route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-process",
             "document_id": "paper-1",
@@ -5843,7 +5948,7 @@ def test_research_objective_service_keeps_unlabeled_process_table_columns_as_con
             "confidence": 0.8,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-process",
             "variable_process_axes": [
@@ -5853,7 +5958,7 @@ def test_research_objective_service_keeps_unlabeled_process_table_columns_as_con
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=route,
         objective_context=objective_context,
         source={
@@ -5888,12 +5993,12 @@ def test_research_objective_service_resolves_measurements_from_process_units(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    measurement = ObjectiveEvidenceUnit.from_mapping(
+    measurement = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-measurement",
+            "evidence_id": "oeu-measurement",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "Yield Strength",
             "sample_context": {
                 "Condition number": "1",
@@ -5915,12 +6020,12 @@ def test_research_objective_service_resolves_measurements_from_process_units(
             "confidence": 0.8,
         }
     )
-    process_context = ObjectiveEvidenceUnit.from_mapping(
+    process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-process-context",
+            "evidence_id": "oeu-process-context",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {
                 "Condition number": "1",
                 "Sample number": "2",
@@ -5944,12 +6049,12 @@ def test_research_objective_service_resolves_measurements_from_process_units(
             "confidence": 0.8,
         }
     )
-    duplicate_test_condition = ObjectiveEvidenceUnit.from_mapping(
+    duplicate_test_condition = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-test-condition",
+            "evidence_id": "oeu-test-condition",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "test_condition",
+            "evidence_kind": "test_condition",
             "sample_context": {
                 "Condition number": "1",
                 "Sample number": "2",
@@ -5961,12 +6066,12 @@ def test_research_objective_service_resolves_measurements_from_process_units(
             "confidence": 0.72,
         }
     )
-    other_process_context = ObjectiveEvidenceUnit.from_mapping(
+    other_process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-other-process-context",
+            "evidence_id": "oeu-other-process-context",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {
                 "Condition number": "2",
                 "Sample number": "1",
@@ -5980,7 +6085,7 @@ def test_research_objective_service_resolves_measurements_from_process_units(
         }
     )
 
-    resolved_units = service._resolve_objective_evidence_unit_contexts(
+    resolved_units = service._resolve_objective_evidence_contexts(
         (
             measurement,
             duplicate_test_condition,
@@ -5990,7 +6095,7 @@ def test_research_objective_service_resolves_measurements_from_process_units(
     )
 
     resolved_measurement = resolved_units[0]
-    assert resolved_measurement.evidence_unit_id == "oeu-measurement"
+    assert resolved_measurement.evidence_id == "oeu-measurement"
     assert resolved_measurement.process_context == {
         "Scan strategy": "Chessboard",
         "Scanning speed (mm/s)": "0.25",
@@ -6025,12 +6130,12 @@ def test_research_objective_service_resolves_case_measurements_from_sample_numbe
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    measurement = ObjectiveEvidenceUnit.from_mapping(
+    measurement = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-yield-case-4",
+            "evidence_id": "oeu-yield-case-4",
             "objective_id": "obj-texture",
             "document_id": "paper-1",
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "yield strength",
             "sample_context": {"Case": "4"},
             "value_payload": {
@@ -6042,12 +6147,12 @@ def test_research_objective_service_resolves_case_measurements_from_sample_numbe
             "confidence": 0.84,
         }
     )
-    process_context = ObjectiveEvidenceUnit.from_mapping(
+    process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-angle-sample-4",
+            "evidence_id": "oeu-angle-sample-4",
             "objective_id": "obj-texture",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {"Sample #": "4"},
             "process_context": {
                 "α ( ◦ )": "0",
@@ -6059,7 +6164,7 @@ def test_research_objective_service_resolves_case_measurements_from_sample_numbe
         }
     )
 
-    resolved_units = service._resolve_objective_evidence_unit_contexts(
+    resolved_units = service._resolve_objective_evidence_contexts(
         (measurement, process_context),
     )
 
@@ -6082,12 +6187,12 @@ def test_research_objective_service_resolves_measurements_from_process_label(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    measurement = ObjectiveEvidenceUnit.from_mapping(
+    measurement = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-measurement",
+            "evidence_id": "oeu-measurement",
             "objective_id": "obj-corrosion",
             "document_id": "paper-1",
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "pitting potential",
             "sample_context": {
                 "Sample": "135 W-750 mm·s -1",
@@ -6101,12 +6206,12 @@ def test_research_objective_service_resolves_measurements_from_process_label(
             "confidence": 0.8,
         }
     )
-    matching_process_context = ObjectiveEvidenceUnit.from_mapping(
+    matching_process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-process-135-750",
+            "evidence_id": "oeu-process-135-750",
             "objective_id": "obj-corrosion",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {
                 "sample_number": "3",
             },
@@ -6119,12 +6224,12 @@ def test_research_objective_service_resolves_measurements_from_process_label(
             "confidence": 0.8,
         }
     )
-    other_process_context = ObjectiveEvidenceUnit.from_mapping(
+    other_process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-process-255-1400",
+            "evidence_id": "oeu-process-255-1400",
             "objective_id": "obj-corrosion",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "process_context": {
                 "Laser power (W)": "255",
                 "Scan speed (mm·s -1)": "1400",
@@ -6134,12 +6239,12 @@ def test_research_objective_service_resolves_measurements_from_process_label(
             "confidence": 0.8,
         }
     )
-    matching_text_context = ObjectiveEvidenceUnit.from_mapping(
+    matching_text_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-text-135-750",
+            "evidence_id": "oeu-text-135-750",
             "objective_id": "obj-corrosion",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {
                 "porosity": "low",
                 "process": "Selective Laser Melting",
@@ -6153,7 +6258,7 @@ def test_research_objective_service_resolves_measurements_from_process_label(
         }
     )
 
-    resolved_units = service._resolve_objective_evidence_unit_contexts(
+    resolved_units = service._resolve_objective_evidence_contexts(
         (
             measurement,
             matching_process_context,
@@ -6185,12 +6290,12 @@ def test_research_objective_service_prefers_sample_label_over_row_number_context
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    measurement = ObjectiveEvidenceUnit.from_mapping(
+    measurement = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-yield-as-slm",
+            "evidence_id": "oeu-yield-as-slm",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "yield strength",
             "sample_context": {
                 "Specimens": "as-SLM(120/100)",
@@ -6205,12 +6310,12 @@ def test_research_objective_service_prefers_sample_label_over_row_number_context
             "confidence": 0.8,
         }
     )
-    matching_process_context = ObjectiveEvidenceUnit.from_mapping(
+    matching_process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-process-as-slm",
+            "evidence_id": "oeu-process-as-slm",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {
                 "Specimens": "as-SLM (120/100)",
                 "sample_number": "10",
@@ -6225,12 +6330,12 @@ def test_research_objective_service_prefers_sample_label_over_row_number_context
             "confidence": 0.8,
         }
     )
-    duplicate_matching_process_context = ObjectiveEvidenceUnit.from_mapping(
+    duplicate_matching_process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-process-as-slm-row-only",
+            "evidence_id": "oeu-process-as-slm-row-only",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {
                 "sample_number": "10",
             },
@@ -6244,12 +6349,12 @@ def test_research_objective_service_prefers_sample_label_over_row_number_context
             "confidence": 0.8,
         }
     )
-    row_number_process_context = ObjectiveEvidenceUnit.from_mapping(
+    row_number_process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-process-row-11",
+            "evidence_id": "oeu-process-row-11",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {
                 "Specimens": "HT-SLM (120/100)",
                 "sample_number": "11",
@@ -6265,7 +6370,7 @@ def test_research_objective_service_prefers_sample_label_over_row_number_context
         }
     )
 
-    resolved_units = service._resolve_objective_evidence_unit_contexts(
+    resolved_units = service._resolve_objective_evidence_contexts(
         (
             measurement,
             row_number_process_context,
@@ -6290,12 +6395,12 @@ def test_research_objective_service_matches_all_unique_specimen_numbers(tmp_path
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    measurement = ObjectiveEvidenceUnit.from_mapping(
+    measurement = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-elongation-hip-140-100",
+            "evidence_id": "oeu-elongation-hip-140-100",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "elongation",
             "sample_context": {"Specimens": "HIP-SLM (140/100)"},
             "value_payload": {
@@ -6307,12 +6412,12 @@ def test_research_objective_service_matches_all_unique_specimen_numbers(tmp_path
             "confidence": 0.8,
         }
     )
-    wrong_process_context = ObjectiveEvidenceUnit.from_mapping(
+    wrong_process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-process-hip-100-100",
+            "evidence_id": "oeu-process-hip-100-100",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {"Specimens": "100) HIP-SLM (100/"},
             "process_context": {
                 "Laser energy density (J/mm3)": "278",
@@ -6324,12 +6429,12 @@ def test_research_objective_service_matches_all_unique_specimen_numbers(tmp_path
             "confidence": 0.8,
         }
     )
-    matching_process_context = ObjectiveEvidenceUnit.from_mapping(
+    matching_process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-process-hip-140-100",
+            "evidence_id": "oeu-process-hip-140-100",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {"Specimens": "100) HIP-SLM"},
             "process_context": {
                 "Laser energy density (J/mm3)": "389",
@@ -6342,7 +6447,7 @@ def test_research_objective_service_matches_all_unique_specimen_numbers(tmp_path
         }
     )
 
-    resolved_units = service._resolve_objective_evidence_unit_contexts(
+    resolved_units = service._resolve_objective_evidence_contexts(
         (measurement, wrong_process_context, matching_process_context),
     )
 
@@ -6361,12 +6466,12 @@ def test_research_objective_service_prefers_descriptive_label_over_row_number_co
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    measurement = ObjectiveEvidenceUnit.from_mapping(
+    measurement = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-yield-as-slm-140-200",
+            "evidence_id": "oeu-yield-as-slm-140-200",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "yield strength",
             "sample_context": {
                 "Specimens": "as-SLM(140/ 200)",
@@ -6381,12 +6486,12 @@ def test_research_objective_service_prefers_descriptive_label_over_row_number_co
             "confidence": 0.8,
         }
     )
-    matching_process_context = ObjectiveEvidenceUnit.from_mapping(
+    matching_process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-process-as-slm-140-200",
+            "evidence_id": "oeu-process-as-slm-140-200",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {
                 "Specimens": "(140/ 100) as-SLM",
                 "sample_number": "22",
@@ -6401,12 +6506,12 @@ def test_research_objective_service_prefers_descriptive_label_over_row_number_co
             "confidence": 0.8,
         }
     )
-    row_number_process_context = ObjectiveEvidenceUnit.from_mapping(
+    row_number_process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-process-ht-slm-140-200",
+            "evidence_id": "oeu-process-ht-slm-140-200",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {
                 "Specimens": "(140/ 200) HT-SLM",
                 "sample_number": "23",
@@ -6422,7 +6527,7 @@ def test_research_objective_service_prefers_descriptive_label_over_row_number_co
         }
     )
 
-    resolved_units = service._resolve_objective_evidence_unit_contexts(
+    resolved_units = service._resolve_objective_evidence_contexts(
         (
             measurement,
             row_number_process_context,
@@ -6447,12 +6552,12 @@ def test_research_objective_service_uses_process_context_label_tokens(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    measurement = ObjectiveEvidenceUnit.from_mapping(
+    measurement = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-yield-as-slm-140-200",
+            "evidence_id": "oeu-yield-as-slm-140-200",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "yield strength",
             "sample_context": {
                 "Specimens": "as-SLM(140/ 200)",
@@ -6467,12 +6572,12 @@ def test_research_objective_service_uses_process_context_label_tokens(
             "confidence": 0.8,
         }
     )
-    matching_process_context = ObjectiveEvidenceUnit.from_mapping(
+    matching_process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-process-as-slm-140-200",
+            "evidence_id": "oeu-process-as-slm-140-200",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {
                 "sample_number": "22",
             },
@@ -6487,12 +6592,12 @@ def test_research_objective_service_uses_process_context_label_tokens(
             "confidence": 0.8,
         }
     )
-    row_number_process_context = ObjectiveEvidenceUnit.from_mapping(
+    row_number_process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-process-hip-slm-140-200",
+            "evidence_id": "oeu-process-hip-slm-140-200",
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {
                 "sample_number": "24",
             },
@@ -6508,7 +6613,7 @@ def test_research_objective_service_uses_process_context_label_tokens(
         }
     )
 
-    resolved_units = service._resolve_objective_evidence_unit_contexts(
+    resolved_units = service._resolve_objective_evidence_contexts(
         (
             measurement,
             row_number_process_context,
@@ -6532,12 +6637,12 @@ def test_research_objective_service_resolves_measurements_from_process_context(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    measurement = ObjectiveEvidenceUnit.from_mapping(
+    measurement = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-density-255-1400",
+            "evidence_id": "oeu-density-255-1400",
             "objective_id": "obj-density",
             "document_id": "paper-1",
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "relative density",
             "sample_context": {
                 "material": "316L stainless steel",
@@ -6556,12 +6661,12 @@ def test_research_objective_service_resolves_measurements_from_process_context(
             "confidence": 0.8,
         }
     )
-    matching_process_context = ObjectiveEvidenceUnit.from_mapping(
+    matching_process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-process-255-1400",
+            "evidence_id": "oeu-process-255-1400",
             "objective_id": "obj-density",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {
                 "sample_number": "2",
             },
@@ -6574,12 +6679,12 @@ def test_research_objective_service_resolves_measurements_from_process_context(
             "confidence": 0.8,
         }
     )
-    other_process_context = ObjectiveEvidenceUnit.from_mapping(
+    other_process_context = ExtractedEvidenceDraft.from_mapping(
         {
-            "evidence_unit_id": "oeu-process-135-750",
+            "evidence_id": "oeu-process-135-750",
             "objective_id": "obj-density",
             "document_id": "paper-1",
-            "unit_kind": "process_context",
+            "evidence_kind": "process_context",
             "sample_context": {
                 "sample_number": "3",
             },
@@ -6593,7 +6698,7 @@ def test_research_objective_service_resolves_measurements_from_process_context(
         }
     )
 
-    resolved_units = service._resolve_objective_evidence_unit_contexts(
+    resolved_units = service._resolve_objective_evidence_contexts(
         (
             measurement,
             matching_process_context,
@@ -6627,7 +6732,7 @@ def test_research_objective_service_generates_pairwise_comparison_units(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "question": "How do process axes affect yield strength?",
@@ -6641,7 +6746,7 @@ def test_research_objective_service_generates_pairwise_comparison_units(
     )
 
     def measurement(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         condition_number: str,
         sample_number: str,
@@ -6649,13 +6754,13 @@ def test_research_objective_service_generates_pairwise_comparison_units(
         speed: str,
         value: float,
         confidence: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-mechanical",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "yield strength",
                 "sample_context": {
                     "Condition number": condition_number,
@@ -6724,7 +6829,7 @@ def test_research_objective_service_generates_pairwise_comparison_units(
         for unit in comparison_units
     }
     strategy_comparison = comparisons_by_axis["scanning strategy"]
-    assert strategy_comparison.unit_kind == "comparison"
+    assert strategy_comparison.evidence_kind == "comparison"
     assert strategy_comparison.sample_context["Sample number"] == "1"
     assert strategy_comparison.baseline_context["sample_context"][
         "Sample number"
@@ -6742,7 +6847,7 @@ def test_research_objective_service_generates_pairwise_comparison_units(
     speed_comparison = comparisons_by_axis["scanning speed"]
     assert speed_comparison.sample_context["Sample number"] == "1"
     assert speed_comparison.baseline_context["sample_context"]["Sample number"] == "8"
-    assert speed_comparison.value_payload["baseline_evidence_unit_id"] == (
+    assert speed_comparison.value_payload["baseline_evidence_id"] == (
         "oeu-s8-yield"
     )
 
@@ -6753,7 +6858,7 @@ def test_pairwise_selection_keeps_valid_pairs_when_non_objective_axes_define_gro
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "question": "How does scan speed affect density?",
@@ -6763,19 +6868,19 @@ def test_pairwise_selection_keeps_valid_pairs_when_non_objective_axes_define_gro
     )
 
     def density_unit(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         sample_number: str,
         hatch_spacing: str,
         scan_speed: str,
         density: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-density",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "density",
                 "sample_context": {"Sample number": sample_number},
                 "process_context": {
@@ -6864,7 +6969,7 @@ def test_research_objective_service_matches_contextual_property_variants_for_pai
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-yield",
             "variable_process_axes": ["scan strategy rotation angle"],
@@ -6873,18 +6978,18 @@ def test_research_objective_service_matches_contextual_property_variants_for_pai
     )
 
     def measurement(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         sample_number: str,
         rotation_angle: str,
         value: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-yield",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "yield strength experiment",
                 "sample_context": {"sample_number": sample_number},
                 "process_context": {"θ ( ◦ )": rotation_angle},
@@ -6925,7 +7030,7 @@ def test_research_objective_service_generates_pairwise_from_symbol_angle_axes(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-texture",
             "variable_process_axes": [
@@ -6937,18 +7042,18 @@ def test_research_objective_service_generates_pairwise_from_symbol_angle_axes(
     )
 
     def measurement(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         sample_number: str,
         theta: str,
         value: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-texture",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "yield strength",
                 "sample_context": {"sample_number": sample_number},
                 "process_context": {
@@ -6990,7 +7095,7 @@ def test_research_objective_service_selects_large_grid_pairs_from_raw_angle_axes
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-yield",
             "variable_process_axes": ["scan strategy rotation angle"],
@@ -6999,18 +7104,18 @@ def test_research_objective_service_selects_large_grid_pairs_from_raw_angle_axes
     )
 
     def measurement(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         sample_number: str,
         theta: str,
         value: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-yield",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "yield strength experiment",
                 "sample_context": {"sample_number": sample_number},
                 "process_context": {"θ ( ◦ )": theta},
@@ -7053,7 +7158,7 @@ def test_research_objective_service_orders_numeric_axis_comparison_before_value_
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-ved",
             "variable_process_axes": ["volumetric energy density"],
@@ -7062,18 +7167,18 @@ def test_research_objective_service_orders_numeric_axis_comparison_before_value_
     )
 
     def measurement(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         sample_label: str,
         ved: str,
         value: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-ved",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "ultimate tensile strength",
                 "sample_context": {"sample_id": sample_label},
                 "process_context": {"VED [J/mm 3]": ved},
@@ -7107,7 +7212,7 @@ def test_research_objective_service_does_not_use_ascii_raw_process_fallback(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-yield",
             "variable_process_axes": ["scan strategy rotation angle"],
@@ -7116,18 +7221,18 @@ def test_research_objective_service_does_not_use_ascii_raw_process_fallback(
     )
 
     def measurement(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         sample_number: str,
         operator_note: str,
         value: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-yield",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "yield strength",
                 "sample_context": {"sample_number": sample_number},
                 "process_context": {"Operator note": operator_note},
@@ -7165,7 +7270,7 @@ def test_research_objective_service_generates_small_set_multi_axis_comparisons(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "question": "How do laser power and scan speed affect density?",
@@ -7179,19 +7284,19 @@ def test_research_objective_service_generates_small_set_multi_axis_comparisons(
     )
 
     def density_unit(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         sample_number: str,
         laser_power: str,
         scan_speed: str,
         density: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-density",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "density",
                 "sample_context": {"sample_number": sample_number},
                 "process_context": {
@@ -7256,7 +7361,7 @@ def test_research_objective_service_skips_pair_when_unmodeled_hatch_spacing_chan
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "variable_process_axes": [
@@ -7269,19 +7374,19 @@ def test_research_objective_service_skips_pair_when_unmodeled_hatch_spacing_chan
     )
 
     def elongation_unit(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         sample_number: str,
         scan_speed: str,
         hatch_spacing: str,
         value: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-mechanical",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "elongation",
                 "sample_context": {"Sample number": sample_number},
                 "process_context": {
@@ -7329,7 +7434,7 @@ def test_research_objective_service_skips_pair_when_treatment_and_energy_input_c
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "variable_process_axes": ["energy density", "scanning speed"],
@@ -7338,20 +7443,20 @@ def test_research_objective_service_skips_pair_when_treatment_and_energy_input_c
     )
 
     def yield_unit(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         specimen: str,
         energy_density: str,
         laser_power: str,
         treatment: str,
         value: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-mechanical",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "yield strength",
                 "sample_context": {"Specimens": specimen},
                 "process_context": {
@@ -7401,7 +7506,7 @@ def test_research_objective_service_does_not_promote_ved_when_sample_controls_ch
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-elongation",
             "variable_process_axes": ["energy density"],
@@ -7410,19 +7515,19 @@ def test_research_objective_service_does_not_promote_ved_when_sample_controls_ch
     )
 
     def elongation_unit(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         specimen: str,
         energy_density: str,
         treatment: str,
         value: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-elongation",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "elongation",
                 "sample_context": {
                     "Specimens": specimen,
@@ -7468,7 +7573,7 @@ def test_research_objective_service_attributes_derived_ved_change_to_scan_speed(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-density",
             "variable_process_axes": [
@@ -7481,19 +7586,19 @@ def test_research_objective_service_attributes_derived_ved_change_to_scan_speed(
     )
 
     def density_unit(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         sample_number: str,
         scan_speed: str,
         energy_density: str,
         density: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-density",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "density",
                 "sample_context": {"sample_number": sample_number},
                 "process_context": {
@@ -7542,7 +7647,7 @@ def test_research_objective_service_generates_pairwise_from_sample_condition_axi
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-preheat",
             "question": "How does build platform preheating affect tensile properties?",
@@ -7556,20 +7661,20 @@ def test_research_objective_service_generates_pairwise_from_sample_condition_axi
     )
 
     def measurement(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         sample_number: str,
         platform_condition: str,
         property_name: str,
         value: float,
         unit: str,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-preheat",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": property_name,
                 "sample_context": {
                     "Build platform conditions": platform_condition,
@@ -7670,7 +7775,7 @@ def test_research_objective_service_generates_pairwise_from_process_condition_ax
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-preheat",
             "question": "How does build platform preheating affect tensile properties?",
@@ -7684,20 +7789,20 @@ def test_research_objective_service_generates_pairwise_from_process_condition_ax
     )
 
     def measurement(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         sample_number: str,
         platform_condition: str,
         property_name: str,
         value: float,
         unit: str,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-preheat",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": property_name,
                 "sample_context": {"sample_number": sample_number},
                 "process_context": {"Build platform conditions": platform_condition},
@@ -7795,7 +7900,7 @@ def test_research_objective_service_limits_pairwise_to_target_properties(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-corrosion",
             "question": "How do process axes affect corrosion potential?",
@@ -7805,19 +7910,19 @@ def test_research_objective_service_limits_pairwise_to_target_properties(
     )
 
     def measurement(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         sample_number: str,
         laser_power: str,
         property_name: str,
         value: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-corrosion",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": property_name,
                 "sample_context": {"sample_number": sample_number},
                 "process_context": {"Laser power (W)": laser_power},
@@ -7876,7 +7981,7 @@ def test_research_objective_service_limits_large_grid_to_adjacent_axis_pairs(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-grid",
             "question": "How do laser power and scan speed affect yield strength?",
@@ -7891,13 +7996,13 @@ def test_research_objective_service_limits_large_grid_to_adjacent_axis_pairs(
         laser_power: str,
         scan_speed: str,
         value: float,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": f"oeu-grid-{sample_number}",
+                "evidence_id": f"oeu-grid-{sample_number}",
                 "objective_id": "obj-grid",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "yield strength",
                 "sample_context": {"sample_number": sample_number},
                 "process_context": {
@@ -7950,7 +8055,7 @@ def test_research_objective_service_caps_large_multiaxis_table_comparisons(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-large-table",
             "question": (
@@ -7972,7 +8077,7 @@ def test_research_objective_service_caps_large_multiaxis_table_comparisons(
     )
 
     def measurement(
-        evidence_unit_id: str,
+        evidence_id: str,
         *,
         sample_number: str,
         laser_power: str,
@@ -7981,13 +8086,13 @@ def test_research_objective_service_caps_large_multiaxis_table_comparisons(
         property_name: str,
         value: float,
         unit: str,
-    ) -> ObjectiveEvidenceUnit:
-        return ObjectiveEvidenceUnit.from_mapping(
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": evidence_unit_id,
+                "evidence_id": evidence_id,
                 "objective_id": "obj-large-table",
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": property_name,
                 "sample_context": {"sample_number": sample_number},
                 "process_context": {
@@ -8005,7 +8110,7 @@ def test_research_objective_service_caps_large_multiaxis_table_comparisons(
             }
         )
 
-    units: list[ObjectiveEvidenceUnit] = []
+    units: list[ExtractedEvidenceDraft] = []
     properties = (
         ("yield strength", "MPa", 300.0),
         ("ultimate tensile strength", "MPa", 500.0),
@@ -8069,7 +8174,7 @@ def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlle
     )
     density_objective_id = "obj-density"
     mechanical_objective_id = "obj-mechanical"
-    density_context = ObjectiveContext.from_mapping(
+    density_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": density_objective_id,
             "question": "How do process axes affect densification?",
@@ -8081,7 +8186,7 @@ def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlle
             "target_property_axes": ["densification", "microstructure"],
         }
     )
-    mechanical_context = ObjectiveContext.from_mapping(
+    mechanical_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": mechanical_objective_id,
             "question": "How do process axes affect mechanical properties?",
@@ -8159,18 +8264,18 @@ def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlle
         property_name: str,
         value: float,
         unit: str,
-    ) -> ObjectiveEvidenceUnit:
+    ) -> ExtractedEvidenceDraft:
         condition_number, strategy, energy_density, scan_speed = process_rows[
             sample_number
         ]
-        return ObjectiveEvidenceUnit.from_mapping(
+        return ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": (
+                "evidence_id": (
                     f"oeu-{objective_id}-{sample_number}-{property_name}"
                 ),
                 "objective_id": objective_id,
                 "document_id": "paper-1",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": property_name,
                 "sample_context": {
                     "Condition number": condition_number,
@@ -8191,7 +8296,7 @@ def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlle
             }
         )
 
-    units: list[ObjectiveEvidenceUnit] = [
+    units: list[ExtractedEvidenceDraft] = [
         measurement(
             density_objective_id,
             sample_number,
@@ -8265,7 +8370,7 @@ def test_research_objective_service_resolves_ved_fatigue_table_from_printed_labe
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-fatigue",
             "question": (
@@ -8284,12 +8389,12 @@ def test_research_objective_service_resolves_ved_fatigue_table_from_printed_labe
     )
 
     process_units = [
-        ObjectiveEvidenceUnit.from_mapping(
+        ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": f"oeu-process-{sample_label}",
+                "evidence_id": f"oeu-process-{sample_label}",
                 "objective_id": "obj-fatigue",
                 "document_id": "paper-ved",
-                "unit_kind": "process_context",
+                "evidence_kind": "process_context",
                 "sample_context": {"ID": sample_label},
                 "process_context": {
                     "VED [J/mm 3 ]": ved,
@@ -8316,12 +8421,12 @@ def test_research_objective_service_resolves_ved_fatigue_table_from_printed_labe
         )
     ]
     measurement_units = [
-        ObjectiveEvidenceUnit.from_mapping(
+        ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": f"oeu-fatigue-{sample_label}",
+                "evidence_id": f"oeu-fatigue-{sample_label}",
                 "objective_id": "obj-fatigue",
                 "document_id": "paper-ved",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "fatigue strength",
                 "sample_context": {"Printed 316L": sample_label},
                 "value_payload": {
@@ -8347,12 +8452,12 @@ def test_research_objective_service_resolves_ved_fatigue_table_from_printed_labe
         )
     ]
     defect_units = [
-        ObjectiveEvidenceUnit.from_mapping(
+        ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_unit_id": f"oeu-defect-{sample_label}",
+                "evidence_id": f"oeu-defect-{sample_label}",
                 "objective_id": "obj-fatigue",
                 "document_id": "paper-ved",
-                "unit_kind": "measurement",
+                "evidence_kind": "measurement",
                 "property_normalized": "max defect length",
                 "sample_context": {"Printed 316L": sample_label},
                 "value_payload": {
@@ -8378,7 +8483,7 @@ def test_research_objective_service_resolves_ved_fatigue_table_from_printed_labe
         )
     ]
 
-    resolved_units = service._resolve_objective_evidence_unit_contexts(
+    resolved_units = service._resolve_objective_evidence_contexts(
         (*process_units, *measurement_units, *defect_units)
     )
     comparison_units = service._build_objective_pairwise_comparison_units(
@@ -8389,7 +8494,7 @@ def test_research_objective_service_resolves_ved_fatigue_table_from_printed_labe
     fatigue_units = [
         unit
         for unit in resolved_units
-        if unit.unit_kind == "measurement"
+        if unit.evidence_kind == "measurement"
         and unit.property_normalized == "fatigue strength"
         and unit.sample_context.get("Printed 316L") in {"L-VED", "M-VED", "H-VED"}
     ]
@@ -8415,7 +8520,7 @@ def test_research_objective_service_inferrs_sample_and_defect_columns_without_mo
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-fatigue",
             "question": (
@@ -8432,9 +8537,9 @@ def test_research_objective_service_inferrs_sample_and_defect_columns_without_mo
             "target_property_axes": ["defect structure", "fatigue strength"],
         }
     )
-    process_route = ObjectiveEvidenceRoute.from_mapping(
+    process_route = EvidenceCandidate.from_mapping(
         {
-            "route_id": "route-process",
+            "source_ref": "route-process",
             "objective_id": "obj-fatigue",
             "document_id": "paper-ved",
             "source_kind": "table",
@@ -8451,9 +8556,9 @@ def test_research_objective_service_inferrs_sample_and_defect_columns_without_mo
             "confidence": 0.84,
         }
     )
-    result_route = ObjectiveEvidenceRoute.from_mapping(
+    result_route = EvidenceCandidate.from_mapping(
         {
-            "route_id": "route-fatigue",
+            "source_ref": "route-fatigue",
             "objective_id": "obj-fatigue",
             "document_id": "paper-ved",
             "source_kind": "table",
@@ -8467,7 +8572,7 @@ def test_research_objective_service_inferrs_sample_and_defect_columns_without_mo
         }
     )
 
-    process_records = service._objective_table_matrix_evidence_unit_records(
+    process_records = service._objective_table_matrix_evidence_records(
         route=process_route,
         source={
             "page": 4,
@@ -8495,7 +8600,7 @@ def test_research_objective_service_inferrs_sample_and_defect_columns_without_mo
         },
         objective_context=objective_context,
     )
-    result_records = service._objective_table_matrix_evidence_unit_records(
+    result_records = service._objective_table_matrix_evidence_records(
         route=result_route,
         source={
             "page": 10,
@@ -8525,10 +8630,10 @@ def test_research_objective_service_inferrs_sample_and_defect_columns_without_mo
         objective_context=objective_context,
     )
     units = tuple(
-        ObjectiveEvidenceUnit.from_mapping(record)
+        ExtractedEvidenceDraft.from_mapping(record)
         for record in (*process_records, *result_records)
     )
-    resolved_units = service._resolve_objective_evidence_unit_contexts(units)
+    resolved_units = service._resolve_objective_evidence_contexts(units)
     comparison_units = service._build_objective_pairwise_comparison_units(
         resolved_units,
         objective_contexts=(objective_context,),
@@ -8547,7 +8652,7 @@ def test_research_objective_service_inferrs_sample_and_defect_columns_without_mo
     assert {
         unit.sample_context.get("Printed 316L"): unit.process_context.get("VED [J/mm 3]")
         for unit in resolved_units
-        if unit.unit_kind == "measurement"
+        if unit.evidence_kind == "measurement"
         and unit.property_normalized == "fatigue strength"
         and unit.sample_context.get("Printed 316L") in {"L-VED", "M-VED", "H-VED"}
     } == {"L-VED": "50.8", "M-VED": "79.4", "H-VED": "84.3"}
@@ -8568,7 +8673,7 @@ def test_process_route_does_not_treat_result_columns_as_process_context(tmp_path
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-fatigue",
             "variable_process_axes": [
@@ -8581,9 +8686,9 @@ def test_process_route_does_not_treat_result_columns_as_process_context(tmp_path
             "target_property_axes": ["defect structure", "fatigue strength"],
         }
     )
-    misrouted_result_table = ObjectiveEvidenceRoute.from_mapping(
+    misrouted_result_table = EvidenceCandidate.from_mapping(
         {
-            "route_id": "route-misclassified-results",
+            "source_ref": "route-misclassified-results",
             "objective_id": "obj-fatigue",
             "document_id": "paper-ved",
             "source_kind": "table",
@@ -8597,7 +8702,7 @@ def test_process_route_does_not_treat_result_columns_as_process_context(tmp_path
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=misrouted_result_table,
         source={
             "page": 5,
@@ -8627,16 +8732,16 @@ def test_process_route_recovers_target_columns_from_mixed_table(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-fatigue",
             "variable_process_axes": ["volumetric energy density"],
             "target_property_axes": ["fatigue strength"],
         }
     )
-    mixed_route = ObjectiveEvidenceRoute.from_mapping(
+    mixed_route = EvidenceCandidate.from_mapping(
         {
-            "route_id": "route-mixed-fatigue",
+            "source_ref": "route-mixed-fatigue",
             "objective_id": "obj-fatigue",
             "document_id": "paper-ved",
             "source_kind": "table",
@@ -8653,7 +8758,7 @@ def test_process_route_recovers_target_columns_from_mixed_table(tmp_path):
         }
     )
 
-    records = service._objective_table_matrix_evidence_unit_records(
+    records = service._objective_table_matrix_evidence_records(
         route=mixed_route,
         source={
             "page": 10,
@@ -8671,8 +8776,8 @@ def test_process_route_recovers_target_columns_from_mixed_table(tmp_path):
         objective_context=objective_context,
     )
 
-    process_record = next(record for record in records if record["unit_kind"] == "process_context")
-    result_record = next(record for record in records if record["unit_kind"] == "measurement")
+    process_record = next(record for record in records if record["evidence_kind"] == "process_context")
+    result_record = next(record for record in records if record["evidence_kind"] == "measurement")
     assert process_record["process_context"] == {"VED [J/mm3]": "50.8"}
     assert "Fatigue strength [MPa]" not in process_record["process_context"]
     assert "Standard deviation [MPa]" not in process_record["process_context"]
@@ -8689,7 +8794,7 @@ def test_research_objective_service_adds_context_hint_route_for_condition_table(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "document_id": "paper-1",
@@ -8699,7 +8804,7 @@ def test_research_objective_service_adds_context_hint_route_for_condition_table(
             "excluded_tables": ["table-1"],
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-mechanical",
             "question": "How do processing parameters affect yield strength?",
@@ -8720,7 +8825,7 @@ def test_research_objective_service_adds_context_hint_route_for_condition_table(
             "confidence": 0.9,
         }
     )
-    routes: list[ObjectiveEvidenceRoute] = []
+    routes: list[EvidenceCandidate] = []
 
     service._append_objective_context_hint_routes(
         routes=routes,
@@ -8766,7 +8871,7 @@ def test_research_objective_service_ranks_result_text_candidates(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-structure",
             "document_id": "paper-1",
@@ -8778,7 +8883,7 @@ def test_research_objective_service_ranks_result_text_candidates(
             "relevant_sections": ["Paper title"],
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-structure",
             "material_scope": ["316L stainless steel"],
@@ -8826,7 +8931,7 @@ def test_research_objective_service_ranks_result_text_candidates(
     assert set(candidate_refs[:2]) == {"microstructure-results", "conclusion"}
     assert "intro" not in candidate_refs
 
-    routes: list[ObjectiveEvidenceRoute] = []
+    routes: list[EvidenceCandidate] = []
     service._append_ranked_text_hint_routes(
         routes=routes,
         seen=set(),
@@ -8851,7 +8956,7 @@ def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_suppo
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-corrosion",
             "document_id": "paper-1",
@@ -8862,23 +8967,17 @@ def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_suppo
             "measured_property_scope": ["pitting corrosion"],
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-corrosion",
             "material_scope": ["316L stainless steel"],
             "variable_process_axes": ["laser power"],
             "process_context_axes": ["SLM"],
             "target_property_axes": ["pitting potential"],
-            "objective_evidence_lens": {
-                "target_outcome_axes": ["pitting potential"],
-                "mediator_axes": ["porosity", "pore size", "lack of fusion"],
-                "variable_process_axes": ["laser power"],
-                "context_axes": ["316L stainless steel", "SLM"],
-                "excluded_axes": [],
-                "direct_support_rules": [
-                    "Direct support must explicitly report a target outcome."
-                ],
-            },
+            "mediator_axes": ["porosity", "pore size", "lack of fusion"],
+            "direct_support_rules": [
+                "Direct support must explicitly report a target outcome."
+            ],
         }
     )
     candidates = [
@@ -8903,7 +9002,7 @@ def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_suppo
             ),
         },
     ]
-    routes: list[ObjectiveEvidenceRoute] = []
+    routes: list[EvidenceCandidate] = []
 
     service._append_ranked_text_hint_routes(
         routes=routes,
@@ -8925,7 +9024,7 @@ def test_research_objective_routing_uses_document_tree_order(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
@@ -8935,7 +9034,7 @@ def test_research_objective_routing_uses_document_tree_order(tmp_path):
             "confidence": 0.9,
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -9046,7 +9145,7 @@ def test_research_objective_routing_binds_current_source_to_model_decision(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
@@ -9056,7 +9155,7 @@ def test_research_objective_routing_binds_current_source_to_model_decision(
             "confidence": 0.9,
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -9101,7 +9200,7 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
@@ -9112,7 +9211,7 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
+    objective_context = ObjectiveAnalysisLens.from_mapping(
         {
             "objective_id": "obj-heat",
             "question": objective.question,
@@ -9127,11 +9226,10 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
                     "reason": "Large hint text should not enter routing prompt.",
                 }
             ],
-            "extraction_guidance": {"large": "x" * 1000},
             "confidence": 0.8,
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -9188,7 +9286,7 @@ def test_research_objective_routing_uses_text_hint_not_source_text(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
@@ -9198,7 +9296,7 @@ def test_research_objective_routing_uses_text_hint_not_source_text(tmp_path):
             "confidence": 0.9,
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -9260,7 +9358,7 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree(tm
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
@@ -9270,7 +9368,7 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree(tm
             "confidence": 0.9,
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -9389,7 +9487,7 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections(tmp_p
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
@@ -9399,7 +9497,7 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections(tmp_p
             "confidence": 0.9,
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -9494,7 +9592,7 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
@@ -9504,7 +9602,7 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text(
             "confidence": 0.9,
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -9573,7 +9671,7 @@ def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
@@ -9583,7 +9681,7 @@ def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
             "confidence": 0.9,
         }
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
@@ -9658,7 +9756,7 @@ def test_research_objective_service_keeps_numeric_mechanism_text_candidates(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    frame = ObjectivePaperFrame.from_mapping(
+    frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-preheating",
             "document_id": "paper-1",
@@ -9725,32 +9823,32 @@ def test_research_objective_service_keeps_numeric_mechanism_text_candidates(
     }
 
 
-def test_research_objective_service_drops_known_empty_evidence_units(tmp_path):
+def test_research_objective_service_drops_known_empty_evidence_items(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    empty_unit = ObjectiveEvidenceUnit.from_mapping(
+    empty_unit = ExtractedEvidenceDraft.from_mapping(
         {
             "objective_id": "obj-1",
             "document_id": "paper-1",
-            "unit_kind": "characterization",
+            "evidence_kind": "characterization",
             "source_refs": [{"source_kind": "text_window", "source_ref": "b1"}],
         }
     )
-    useful_unit = ObjectiveEvidenceUnit.from_mapping(
+    useful_unit = ExtractedEvidenceDraft.from_mapping(
         {
             "objective_id": "obj-1",
             "document_id": "paper-1",
-            "unit_kind": "characterization",
+            "evidence_kind": "characterization",
             "source_refs": [{"source_kind": "text_window", "source_ref": "b1"}],
             "value_payload": {"microstructure": "refined dendrites"},
         }
     )
-    empty_measurement = ObjectiveEvidenceUnit.from_mapping(
+    empty_measurement = ExtractedEvidenceDraft.from_mapping(
         {
             "objective_id": "obj-1",
             "document_id": "paper-1",
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "property_normalized": "yield strength",
             "sample_context": {"scanning_strategy": "A"},
             "process_context": {"process": "Selective Laser Melting"},
@@ -9758,15 +9856,15 @@ def test_research_objective_service_drops_known_empty_evidence_units(tmp_path):
         }
     )
 
-    assert not service._objective_evidence_unit_has_payload(empty_unit)
-    assert not service._objective_evidence_unit_has_payload(empty_measurement)
-    assert service._objective_evidence_unit_has_payload(useful_unit)
+    assert not service._objective_evidence_has_payload(empty_unit)
+    assert not service._objective_evidence_has_payload(empty_measurement)
+    assert service._objective_evidence_has_payload(useful_unit)
 
 
-def test_structured_objective_evidence_unit_wraps_scalar_value_payload():
-    unit = StructuredObjectiveEvidenceUnit.model_validate(
+def test_structured_objective_evidence_wraps_scalar_value_payload():
+    unit = StructuredEvidenceExtraction.model_validate(
         {
-            "unit_kind": "measurement",
+            "evidence_kind": "measurement",
             "sample_context": "not a mapping",
             "value_payload": 95.4,
         }
@@ -9791,7 +9889,7 @@ def test_research_objective_service_builds_and_persists_objective_records(
         collection_service=collection_service,
         structured_extractor=extractor,
     )
-    service.research_understanding_service.structured_extractor = extractor
+    service.finding_synthesis_service.structured_extractor = extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         "build_test",
@@ -9892,7 +9990,7 @@ def test_research_objective_service_builds_and_persists_objective_records(
     _seed_document_profiles(service, collection_id)
 
     with caplog.at_level("INFO"):
-        objectives = service.build_research_objectives(
+        objectives = service.build_objective_candidates(
             collection_id,
             build_id="build_test",
         )
@@ -9901,143 +9999,22 @@ def test_research_objective_service_builds_and_persists_objective_records(
     assert objectives[0].question.startswith("How does heat treatment")
     facts = service.objective_repository.read(collection_id)
     assert facts.research_objectives_ready is True
-    assert (
-        service.research_understanding_repository.list_objective_understandings(
-            collection_id
-        )
-        == ()
-    )
     assert len(facts.paper_skims) == 2
     assert facts.paper_skims[0].source_filename == "paper-1.pdf"
     assert facts.research_objectives[0].excluded_document_ids == ("paper-2",)
-    assert len(facts.objective_contexts) == 1
-    objective_context = facts.objective_contexts[0]
-    assert objective_context.objective_id == facts.research_objectives[0].objective_id
-    assert objective_context.target_property_axes == ("corrosion",)
-    assert objective_context.process_context_axes == ("LPBF", "heat treatment")
-    assert objective_context.routing_hints[0]["table_id"] == "table-1"
-    assert objective_context.routing_hints[0]["role"] == "result_table"
-    assert len(facts.objective_paper_frames) == 2
-    active_frame = next(
-        frame
-        for frame in facts.objective_paper_frames
-        if frame.document_id == "paper-1"
-    )
-    excluded_frame = next(
-        frame
-        for frame in facts.objective_paper_frames
-        if frame.document_id == "paper-2"
-    )
-    assert active_frame.objective_id == facts.research_objectives[0].objective_id
-    assert active_frame.relevance == "high"
-    assert active_frame.paper_role == "primary_experiment"
-    assert active_frame.relevant_tables == ("table-1",)
-    assert excluded_frame.relevance == "irrelevant"
-    assert excluded_frame.paper_role == "review"
-    table_route = next(
-        route
-        for route in facts.objective_evidence_routes
-        if route.source_kind == "table" and route.source_ref == "table-1"
-    )
-    excluded_table_route = next(
-        route
-        for route in facts.objective_evidence_routes
-        if route.source_kind == "table" and route.source_ref == "table-2"
-    )
-    text_route = next(
-        route
-        for route in facts.objective_evidence_routes
-        if route.source_kind == "text_window" and route.source_ref == "b2"
-    )
-    assert table_route.role == "current_experimental_evidence"
-    assert table_route.extractable is True
-    assert table_route.table_schema["column_headers"] == [
-        "sample",
-        "corrosion current",
-    ]
-    assert table_route.column_roles == {
-        "sample": "sample_id",
-        "corrosion current": "target_property",
-    }
-    assert excluded_table_route.role == "low_value_or_irrelevant"
-    assert excluded_table_route.extractable is False
-    assert text_route.role == "process_or_treatment"
-    assert len(facts.objective_evidence_units) == 3
-    measurement_units = [
-        unit
-        for unit in facts.objective_evidence_units
-        if unit.unit_kind == "measurement"
-    ]
-    assert len(measurement_units) == 2
-    assert {unit.sample_context["sample"] for unit in measurement_units} == {
-        "as-built",
-        "heat-treated",
-    }
-    assert all(
-        unit.source_refs[0]["route_id"] == table_route.route_id
-        for unit in measurement_units
-    )
-    process_unit = next(
-        unit
-        for unit in facts.objective_evidence_units
-        if unit.unit_kind == "process_context"
-    )
-    assert process_unit.source_refs[0]["route_id"] == text_route.route_id
-    assert len(facts.objective_logic_chains) == 1
-    chain_payload = facts.objective_logic_chains[0].chain_payload
-    assert chain_payload["schema_version"] == "objective_logic_chain.v1"
-    assert chain_payload["unit_counts_by_kind"]["measurement"] == 2
-    assert chain_payload["cross_paper"]["resolved_measurement_count"] == 2
-    assert chain_payload["cross_paper"]["measurement_range_ready"] is True
-    value_ranges = chain_payload["cross_paper"]["measurement_value_ranges"]
-    assert len(value_ranges) == 1
-    corrosion_range = value_ranges[0]
-    assert corrosion_range["property_normalized"] == "corrosion current"
-    assert corrosion_range["measurement_count"] == 2
-    assert corrosion_range["min"]["value"] == 0.4
-    assert corrosion_range["min"]["source_value_text"] == "0.4 uA/cm2"
-    assert corrosion_range["min"]["sample_context"] == {"sample": "heat-treated"}
-    assert corrosion_range["max"]["value"] == 1.2
-    assert corrosion_range["max"]["source_value_text"] == "1.2 uA/cm2"
-    assert corrosion_range["max"]["sample_context"] == {"sample": "as-built"}
-    assert "corrosion current range 0.4 uA/cm2-1.2 uA/cm2" in str(
-        facts.objective_logic_chains[0].summary
-    )
-    assert len(extractor.route_payloads) == 2
-    assert len(extractor.unit_payloads) == 1
-    assert extractor.unit_payloads[0]["evidence_route"]["source_kind"] == "text_window"
-    assert extractor.unit_payloads[0]["evidence_route"]["source_ref"] == "b2"
-    assert all("source_candidates" not in payload for payload in extractor.route_payloads)
-    assert [payload["current_source"]["source_ref"] for payload in extractor.route_payloads] == [
-        "b2",
-        "table-1",
-    ]
-    assert extractor.route_payloads[0]["paper_frame"]["frame_id"] == active_frame.frame_id
-    assert extractor.route_payloads[0]["tree_position"]["section_path"] == ["Abstract"]
-    assert extractor.unit_payloads[0]["tree_position"]["section_path"] == ["Abstract"]
-    assert extractor.unit_payloads[0]["document_state"]["schema_version"] == (
-        "objective_document_state.v1"
-    )
-    assert extractor.unit_payloads[0]["document_state"]["evidence_counts_by_kind"] == {}
+    assert facts.research_objectives == objectives
+    assert service.objective_repository.list_objectives(collection_id) == objectives
+    assert objectives[0].confirmation_status == "candidate"
+    assert objectives[0].active_analysis_version is None
+    assert objectives[0].published_analysis_version is None
+    assert extractor.frame_payloads == []
+    assert extractor.route_payloads == []
+    assert extractor.unit_payloads == []
     assert extractor.skim_payloads[0]["headings"] == ["Abstract", "References"]
     assert "Additional abstract context" in extractor.skim_payloads[0]["text_preview"]
     assert "Reference text should not" not in extractor.skim_payloads[0]["text_preview"]
     assert extractor.skim_payloads[0]["table_captions"][0]["table_id"] == "table-1"
     assert extractor.discovery_payloads[0]["paper_skims"][0]["document_id"] == "paper-1"
-    assert extractor.frame_payloads[0]["objective_context"]["objective_id"] == (
-        facts.research_objectives[0].objective_id
-    )
-    assert extractor.frame_payloads[0]["section_snippets"] == [
-        {
-            "section_label": "Abstract",
-            "block_type": "section",
-            "text": (
-                "LPBF 316L was compared before and after heat treatment.\n\n"
-                "Additional abstract context stayed in the same section."
-            ),
-        }
-    ]
-    assert extractor.frame_payloads[0]["table_summaries"][0]["table_id"] == "table-1"
     assert any(
         "Research objective paper skim document started" in record.message
         and "document_position=1" in record.message
@@ -10048,30 +10025,8 @@ def test_research_objective_service_builds_and_persists_objective_records(
         and "accepted_objective_count=1" in record.message
         for record in caplog.records
     )
-    assert any(
-        "Research objective paper framing document finished" in record.message
-        and "relevant_tables=1" in record.message
-        for record in caplog.records
-    )
-    assert any(
-        "Research objective evidence routing frame finished" in record.message
-        and "extractable_route_count=2" in record.message
-        for record in caplog.records
-    )
-    assert any(
-        "Research objective evidence-unit extraction finished" in record.message
-        and "objective_evidence_units=3" in record.message
-        for record in caplog.records
-    )
-    assert any(
-        "Research objective logic-chain assembly finished" in record.message
-        and "logic_chain_count=1" in record.message
-        for record in caplog.records
-    )
-
     skim_call_count = len(extractor.skim_payloads)
     assert service.read_research_objectives(collection_id) == objectives
-    assert service.read_objective_contexts(collection_id) == facts.objective_contexts
     assert len(extractor.skim_payloads) == skim_call_count
     output_dir = collection_service.get_paths(collection_id).output_dir
     assert not list(output_dir.glob("*objective*"))
@@ -10116,7 +10071,7 @@ def test_research_objective_service_strengthens_broad_objective_axes(tmp_path):
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_research_objectives(
+    objectives = service.build_objective_candidates(
         collection_id,
         build_id="build_test",
     )
@@ -10174,7 +10129,7 @@ def test_research_objective_service_merges_overlapping_mechanical_objectives(
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_research_objectives(
+    objectives = service.build_objective_candidates(
         collection_id,
         build_id="build_test",
     )
@@ -10203,7 +10158,7 @@ def test_research_objective_service_merges_overlapping_mechanical_objectives(
     assert mechanical_objective.question.startswith("How do")
 
 
-def test_research_objective_service_builds_targeted_objective_contexts(
+def test_research_objective_service_persists_definitions_without_analysis_artifacts(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
@@ -10296,52 +10251,33 @@ def test_research_objective_service_builds_targeted_objective_contexts(
     )
     _seed_document_profiles(service, collection_id)
 
-    service.build_research_objectives(collection_id, build_id="build_test")
+    objectives = service.build_objective_candidates(
+        collection_id,
+        build_id="build_test",
+    )
     facts = service.objective_repository.read(collection_id)
-    contexts = facts.objective_contexts
-
-    assert len(contexts) == 2
-    structure_context = next(
-        context for context in contexts if "densification" in context.target_property_axes
+    structure_objective = next(
+        objective for objective in objectives if "densification" in objective.property_axes
     )
-    mechanical_context = next(
-        context for context in contexts if "yield strength" in context.target_property_axes
+    mechanical_objective = next(
+        objective for objective in objectives if "yield strength" in objective.property_axes
     )
-    assert structure_context.variable_process_axes == (
+    assert structure_objective.process_axes == (
+        "Selective Laser Melting",
         "energy density",
         "scanning strategy",
         "scanning speed",
     )
-    assert structure_context.process_context_axes == ("Selective Laser Melting",)
-    assert [
-        hint["table_id"] for hint in structure_context.routing_hints
-    ] == ["table-1"]
-    assert structure_context.routing_hints[0]["role"] == "result_table"
-    assert [
-        (hint["table_id"], hint["role"]) for hint in mechanical_context.routing_hints
-    ] == [("table-1", "condition_context"), ("table-2", "result_table")]
-    assert "microhardness" in mechanical_context.routing_hints[1][
-        "matched_property_axes"
-    ]
-    frames_by_objective_id = {
-        frame.objective_id: frame
-        for frame in facts.objective_paper_frames
-    }
-    assert frames_by_objective_id[structure_context.objective_id].relevant_tables == (
-        "table-1",
+    assert mechanical_objective.property_axes == (
+        "yield strength",
+        "ultimate tensile strength",
+        "elongation",
+        "microhardness",
     )
-    assert frames_by_objective_id[mechanical_context.objective_id].relevant_tables == (
-        "table-1",
-        "table-2",
-    )
-    mechanical_routes = {
-        route.source_ref: route
-        for route in facts.objective_evidence_routes
-        if route.objective_id == mechanical_context.objective_id
-        and route.source_kind == "table"
-    }
-    assert mechanical_routes["table-1"].role == "process_or_treatment"
-    assert mechanical_routes["table-2"].role == "current_experimental_evidence"
+    assert facts.research_objectives == objectives
+    assert service._structured_extractor.frame_payloads == []
+    assert service._structured_extractor.route_payloads == []
+    assert service._structured_extractor.unit_payloads == []
 
 
 def test_research_objective_service_canonicalizes_axis_aliases_with_llm(
@@ -10470,7 +10406,7 @@ def test_research_objective_service_does_not_global_fill_unmatched_seed_axes(
     assert objective.property_axes == ("mechanical properties",)
 
 
-def test_research_objective_service_list_prunes_overbroad_display_axes(
+def test_research_objective_service_keeps_candidate_definition_as_source_of_truth(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
@@ -10509,13 +10445,15 @@ def test_research_objective_service_list_prunes_overbroad_display_axes(
     )
     _seed_document_profiles(service, collection_id)
 
-    service.build_research_objectives(collection_id, build_id="build_test")
-    workspace = service.list_objective_workspaces(collection_id)
+    objectives = service.build_objective_candidates(
+        collection_id,
+        build_id="build_test",
+    )
 
-    objective = workspace["objectives"][0]
-    assert objective["process_axes"] == ["energy density", "scanning speed"]
-    assert "porosity" not in objective["question"]
-    assert "heat treatment" not in objective["question"]
+    assert service.objective_repository.list_objectives(collection_id) == objectives
+    assert objectives[0].confirmation_status == "candidate"
+    assert objectives[0].active_analysis_version is None
+    assert objectives[0].published_analysis_version is None
 
 
 def test_research_objective_service_splits_merge_plan_with_disjoint_properties(
@@ -10620,7 +10558,7 @@ def test_research_objective_service_dedupes_repeated_objective_ids_before_persis
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_research_objectives(
+    objectives = service.build_objective_candidates(
         collection_id,
         build_id="build_test",
     )
@@ -10641,7 +10579,7 @@ def test_objective_analysis_uses_deterministic_frame_when_frame_model_fails(
         collection_service=collection_service,
         structured_extractor=extractor,
     )
-    service.research_understanding_service.structured_extractor = extractor
+    service.finding_synthesis_service.structured_extractor = extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         "build_test",
@@ -10671,8 +10609,9 @@ def test_objective_analysis_uses_deterministic_frame_when_frame_model_fails(
         ),
     )
     _seed_document_profiles(service, collection_id)
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
+            "collection_id": collection_id,
             "objective_id": "obj_texture_yield",
             "question": "How does scan strategy affect texture and yield strength?",
             "material_scope": ["316L stainless steel"],
@@ -10698,15 +10637,6 @@ def test_objective_analysis_uses_deterministic_frame_when_frame_model_fails(
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "material_scope": ["316L stainless steel"],
-            "process_context_axes": ["LPBF"],
-            "variable_process_axes": ["scan strategy rotation angle"],
-            "target_property_axes": ["crystallographic texture", "yield strength"],
-        }
-    )
     service.objective_repository.replace(
         collection_id,
         "build_test",
@@ -10714,21 +10644,19 @@ def test_objective_analysis_uses_deterministic_frame_when_frame_model_fails(
             research_objectives_ready=True,
             paper_skims=(paper_skim,),
             research_objectives=(objective,),
-            objective_contexts=(objective_context,),
         ),
     )
-    service.objective_repository.confirm_objective(
-        collection_id,
-        objective.objective_id,
-    )
+    analysis = _queue_running_analysis(service, collection_id, objective.objective_id)
 
-    understanding = service.analyze_objective(collection_id, objective.objective_id)
+    artifacts = service.analyze_objective(collection_id, analysis)
 
-    facts = service.objective_repository.read(collection_id)
     assert extractor.frame_payloads
-    assert facts.objective_paper_frames == ()
-    assert facts.objective_evidence_units == ()
-    assert understanding.scope.scope_type == "objective"
+    assert artifacts.contributions[0].document_id == "paper-1"
+    assert artifacts.contributions[0].analysis_version == analysis.analysis_version
+    assert all(
+        evidence.analysis_version == analysis.analysis_version
+        for evidence in artifacts.evidence_records
+    )
 
 
 def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
@@ -10741,7 +10669,7 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
         collection_service=collection_service,
         structured_extractor=_ObjectiveExtractor(),
     )
-    service.research_understanding_service.structured_extractor = service._structured_extractor
+    service.finding_synthesis_service.structured_extractor = service._structured_extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         "build_test",
@@ -10778,8 +10706,9 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
         ),
     )
     _seed_document_profiles(service, collection_id)
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
+            "collection_id": collection_id,
             "objective_id": "obj_corrosion",
             "question": "How does heat treatment affect corrosion current?",
             "material_scope": ["316L stainless steel"],
@@ -10805,15 +10734,6 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "material_scope": ["316L stainless steel"],
-            "process_context_axes": ["LPBF"],
-            "variable_process_axes": ["heat treatment"],
-            "target_property_axes": ["corrosion current"],
-        }
-    )
     service.objective_repository.replace(
         collection_id,
         "build_test",
@@ -10821,26 +10741,21 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
             research_objectives_ready=True,
             paper_skims=(paper_skim,),
             research_objectives=(objective,),
-            objective_contexts=(objective_context,),
         ),
     )
-    service.objective_repository.confirm_objective(
-        collection_id,
-        objective.objective_id,
-    )
+    analysis = _queue_running_analysis(service, collection_id, objective.objective_id)
 
     failing_extractor = _FailingRouteExtractor()
     service._structured_extractor = failing_extractor
-    service.research_understanding_service.structured_extractor = failing_extractor
-    understanding = service.analyze_objective(collection_id, objective.objective_id)
+    service.finding_synthesis_service.structured_extractor = failing_extractor
+    artifacts = service.analyze_objective(collection_id, analysis)
 
-    assert understanding.scope.scope_type == "objective"
     assert failing_extractor.route_payloads
-    facts = service.objective_repository.read(collection_id)
-    assert facts.objective_paper_frames == ()
-    assert facts.objective_evidence_routes == ()
-    assert facts.objective_evidence_units == ()
-    assert facts.objective_logic_chains == ()
+    assert artifacts.contributions[0].document_id == "paper-1"
+    assert all(
+        evidence.analysis_version == analysis.analysis_version
+        for evidence in artifacts.evidence_records
+    )
 
 
 def test_objective_analysis_does_not_mutate_active_objective_facts(
@@ -10854,7 +10769,7 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
         collection_service=collection_service,
         structured_extractor=extractor,
     )
-    service.research_understanding_service.structured_extractor = extractor
+    service.finding_synthesis_service.structured_extractor = extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         "build_test",
@@ -10892,8 +10807,9 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
         ),
     )
     _seed_document_profiles(service, collection_id)
-    objective = ResearchObjective.from_mapping(
+    objective = _research_objective(
         {
+            "collection_id": collection_id,
             "objective_id": "obj_corrosion",
             "question": "How does heat treatment affect corrosion current?",
             "material_scope": ["316L stainless steel"],
@@ -10919,60 +10835,6 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveContext.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "material_scope": ["316L stainless steel"],
-            "process_context_axes": ["LPBF"],
-            "variable_process_axes": ["heat treatment"],
-            "target_property_axes": ["corrosion current"],
-        }
-    )
-    stale_frame = ObjectivePaperFrame.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "relevance": "low",
-            "paper_role": "uncertain",
-            "relevant_sections": [],
-            "relevant_tables": [],
-        }
-    )
-    stale_route = ObjectiveEvidenceRoute.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "source_kind": "text_window",
-            "source_ref": "stale-block",
-            "role": "low_value_or_irrelevant",
-            "extractable": False,
-        }
-    )
-    stale_unit = ObjectiveEvidenceUnit.from_mapping(
-        {
-            "evidence_unit_id": "oeu_stale",
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "unit_kind": "measurement",
-            "property_normalized": "stale property",
-            "value_payload": {"source_value_text": "stale"},
-            "source_refs": [
-                {
-                    "source_kind": "text_window",
-                    "source_ref": "stale-block",
-                }
-            ],
-            "resolution_status": "resolved",
-        }
-    )
-    stale_chain = ObjectiveLogicChain.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "chain_scope": "objective",
-            "evidence_unit_ids": ["oeu_stale"],
-            "summary": "stale chain",
-        }
-    )
     service.objective_repository.replace(
         collection_id,
         "build_test",
@@ -10980,26 +10842,18 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
             research_objectives_ready=True,
             paper_skims=(paper_skim,),
             research_objectives=(objective,),
-            objective_contexts=(objective_context,),
-            objective_paper_frames=(stale_frame,),
-            objective_evidence_routes=(stale_route,),
-            objective_evidence_units=(stale_unit,),
-            objective_logic_chains=(stale_chain,),
         ),
     )
     active_facts = service.objective_repository.read(collection_id)
-    service.objective_repository.confirm_objective(
-        collection_id,
-        objective.objective_id,
-    )
+    analysis = _queue_running_analysis(service, collection_id, objective.objective_id)
 
-    understanding = service.analyze_objective(collection_id, objective.objective_id)
+    artifacts = service.analyze_objective(collection_id, analysis)
 
     facts = service.objective_repository.read(collection_id)
     assert extractor.frame_payloads
     assert extractor.route_payloads
     assert facts == active_facts
-    assert understanding.scope.scope_type == "objective"
+    assert artifacts.contributions
 
 
 def _build_duplicate_paper_objectives(
@@ -11043,7 +10897,7 @@ def _build_duplicate_paper_objectives(
         ),
     )
     _seed_document_profiles(service, collection_id)
-    return service.build_research_objectives(
+    return service.build_objective_candidates(
         collection_id,
         build_id="build_test",
     )

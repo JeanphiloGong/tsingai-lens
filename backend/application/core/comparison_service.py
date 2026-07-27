@@ -6,14 +6,13 @@ from typing import Any
 from urllib.parse import urlencode
 
 from domain.core.comparison_assembly import (
+    ComparableResultAssembler,
+    ComparisonInputRecords,
     ComparisonSemanticRecords,
 )
 from domain.core.comparison_projection import (
     ComparisonProjectionRecords,
     ComparisonRowProjector,
-)
-from domain.core.objective_comparison_projection import (
-    project_objective_comparison_semantics,
 )
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
@@ -26,7 +25,7 @@ from domain.core.comparison import (
     ComparisonFactSet,
     ComparisonRowRecord,
 )
-from domain.ports import ComparisonRepository, ObjectiveRepository, PaperFactRepository
+from domain.ports import ComparisonRepository, PaperFactRepository
 
 logger = logging.getLogger(__name__)
 
@@ -110,16 +109,15 @@ class ComparisonService:
         self,
         collection_service: CollectionService,
         paper_fact_repository: PaperFactRepository,
-        objective_repository: ObjectiveRepository,
         comparison_repository: ComparisonRepository,
         document_profile_service: DocumentProfileService,
     ) -> None:
         self.collection_service = collection_service
         self.paper_fact_repository = paper_fact_repository
-        self.objective_repository = objective_repository
         self.comparison_repository = comparison_repository
         self.document_profile_service = document_profile_service
         self.comparison_row_projector = ComparisonRowProjector()
+        self.comparable_result_assembler = ComparableResultAssembler()
 
     def list_comparison_rows(
         self,
@@ -555,49 +553,40 @@ class ComparisonService:
         build_id: str,
     ) -> tuple[ComparisonRowRecord, ...]:
         self.collection_service.get_collection(collection_id)
-        objective_semantic_records = self._build_objective_comparison_semantics(
-            collection_id,
-            build_id,
+        paper_facts = self.paper_fact_repository.read(
+            collection_id, build_id=build_id
         )
-        if objective_semantic_records is not None:
-            row_records = self.comparison_row_projector.project_rows_from_semantic_artifacts(
-                collection_id=collection_id,
-                comparable_results=objective_semantic_records.comparable_results,
-                scoped_results=objective_semantic_records.collection_comparable_results,
-            )
-            if not row_records:
-                raise ComparisonRowsNotReadyError(collection_id)
-            self._store_comparison_artifacts(
-                collection_id=collection_id,
-                build_id=build_id,
-                semantic_records=objective_semantic_records,
-            )
-            logger.info(
-                "Objective comparison projection finished collection_id=%s comparable_results=%s collection_comparable_results=%s comparison_rows=%s",
-                collection_id,
-                len(objective_semantic_records.comparable_results),
-                len(objective_semantic_records.collection_comparable_results),
-                len(row_records),
-            )
-            return row_records
-
-        raise ComparisonRowsNotReadyError(collection_id)
-
-    def _build_objective_comparison_semantics(
-        self,
-        collection_id: str,
-        build_id: str,
-    ) -> ComparisonSemanticRecords | None:
-        facts = self.objective_repository.read(collection_id, build_id=build_id)
-        if not facts.objective_evidence_units:
-            return None
-        semantic_records = project_objective_comparison_semantics(
+        semantic_records = self.comparable_result_assembler.assemble_semantic_records(
             collection_id=collection_id,
-            evidence_units=facts.objective_evidence_units,
+            records=ComparisonInputRecords(
+                sample_variants=paper_facts.sample_variants,
+                measurement_results=paper_facts.measurement_results,
+                test_conditions=paper_facts.test_conditions,
+                baseline_references=paper_facts.baseline_references,
+            ),
         )
         if not semantic_records.comparable_results:
             raise ComparisonRowsNotReadyError(collection_id)
-        return semantic_records
+        row_records = self.comparison_row_projector.project_rows_from_semantic_artifacts(
+            collection_id=collection_id,
+            comparable_results=semantic_records.comparable_results,
+            scoped_results=semantic_records.collection_comparable_results,
+        )
+        if not row_records:
+            raise ComparisonRowsNotReadyError(collection_id)
+        self._store_comparison_artifacts(
+            collection_id=collection_id,
+            build_id=build_id,
+            semantic_records=semantic_records,
+        )
+        logger.info(
+            "Paper-fact comparison projection finished collection_id=%s comparable_results=%s collection_comparable_results=%s comparison_rows=%s",
+            collection_id,
+            len(semantic_records.comparable_results),
+            len(semantic_records.collection_comparable_results),
+            len(row_records),
+        )
+        return row_records
 
     def _semantic_records_from_facts(
         self,

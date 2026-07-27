@@ -796,7 +796,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
 	});
 
-	it('keeps research-understanding evidence links in parsed paper mode', async () => {
+	it('keeps source evidence links in parsed paper mode', async () => {
 		setPage({
 			params: { id: 'col_123', document_id: 'doc_1' },
 			url: new URL(

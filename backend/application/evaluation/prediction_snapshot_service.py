@@ -6,7 +6,6 @@ from typing import Any
 from application.source.collection_service import CollectionService
 from domain.core import ComparisonFactSet
 from domain.core.paper_fact import PaperFactSet
-from domain.core.research_objective import ObjectiveFactSet
 from domain.evaluation import (
     EvaluationPredictionItem,
     EvaluationPredictionSnapshot,
@@ -57,19 +56,23 @@ class EvaluationPredictionSnapshotService:
     ) -> EvaluationPredictionSnapshot:
         self.collection_service.get_collection(collection_id)
         paper_facts = self.paper_fact_repository.read(collection_id)
-        objective_facts = self.objective_repository.read(collection_id)
         comparison_facts = self.comparison_repository.read(collection_id)
-        items = self._prediction_items(
-            paper_facts,
-            objective_facts,
-            comparison_facts,
-            fact_source=fact_source,
-        )
+        objective_counts = {
+            "published_objective_analyses": 0,
+            "objective_findings": 0,
+            "objective_evidence": 0,
+        }
+        if fact_source == "objective_first":
+            items, objective_counts = self._objective_first_items(collection_id)
+        elif fact_source == "paper_facts":
+            items = self._paper_fact_items(paper_facts, comparison_facts)
+        else:
+            raise ValueError(f"unsupported fact_source: {fact_source}")
         if not items and not self._facts_ready_for_source(
             paper_facts,
-            objective_facts,
             comparison_facts,
             fact_source=fact_source,
+            objective_counts=objective_counts,
         ):
             raise CoreArtifactsNotReadyForEvaluationError(collection_id, fact_source)
         snapshot = EvaluationPredictionSnapshot(
@@ -81,89 +84,114 @@ class EvaluationPredictionSnapshotService:
             system_context=system_context or {},
             artifact_counts=self._artifact_counts(
                 paper_facts,
-                objective_facts,
                 comparison_facts,
+                objective_counts=objective_counts,
             ),
             items=tuple(items),
         )
         self.evaluation_repository.upsert_prediction_snapshot(snapshot)
         return snapshot
 
-    def _prediction_items(
-        self,
-        paper_facts: PaperFactSet,
-        objective_facts: ObjectiveFactSet,
-        comparison_facts: ComparisonFactSet,
-        *,
-        fact_source: str,
-    ) -> list[EvaluationPredictionItem]:
-        if fact_source == "objective_first":
-            return self._objective_first_items(objective_facts)
-        if fact_source == "paper_facts":
-            return self._paper_fact_items(paper_facts, comparison_facts)
-        raise ValueError(f"unsupported fact_source: {fact_source}")
-
     def _objective_first_items(
         self,
-        facts: ObjectiveFactSet,
-    ) -> list[EvaluationPredictionItem]:
+        collection_id: str,
+    ) -> tuple[list[EvaluationPredictionItem], dict[str, int]]:
         items: list[EvaluationPredictionItem] = []
-        for unit in facts.objective_evidence_units:
-            if unit.unit_kind == "measurement":
-                items.append(
-                    EvaluationPredictionItem(
-                        item_id=unit.evidence_unit_id,
-                        document_id=unit.document_id,
-                        family="measurement_results",
-                        item_key=self._measurement_item_key(
-                            document_id=unit.document_id,
-                            sample=self._sample_label(unit.sample_context),
-                            metric=unit.property_normalized,
-                        ),
-                        payload={
-                            "sample": self._sample_label(unit.sample_context),
-                            "metric": unit.property_normalized,
-                            "value": self._numeric_value(unit.value_payload),
-                            "unit": unit.unit,
-                            "value_payload": dict(unit.value_payload),
-                        },
-                        source_refs=tuple(unit.source_refs),
-                        confidence=unit.confidence,
-                    )
+        published_analysis_count = 0
+        exported_evidence_keys: set[tuple[str, int, str]] = set()
+        for objective in self.objective_repository.list_objectives(collection_id):
+            analysis_version = objective.published_analysis_version
+            if analysis_version is None:
+                continue
+            published_analysis_count += 1
+            finding_offset = 0
+            while True:
+                findings, finding_total = self.objective_repository.list_findings(
+                    collection_id,
+                    objective.objective_id,
+                    analysis_version,
+                    offset=finding_offset,
+                    limit=200,
                 )
-            if unit.unit_kind == "comparison":
-                items.append(
-                    EvaluationPredictionItem(
-                        item_id=unit.evidence_unit_id,
-                        document_id=unit.document_id,
-                        family="comparisons",
-                        item_key=self._comparison_item_key(
-                            document_id=unit.document_id,
-                            current_sample=self._sample_label(unit.sample_context),
-                            baseline_sample=self._sample_label(unit.baseline_context),
-                            metric=unit.property_normalized,
-                        ),
-                        payload={
-                            "current_sample": self._sample_label(unit.sample_context),
-                            "baseline_sample": self._sample_label(
-                                unit.baseline_context
-                            ),
-                            "metric": unit.property_normalized,
-                            "current_value": self._numeric_value(unit.value_payload),
-                            "baseline_value": self._baseline_numeric_value(
-                                unit.value_payload
-                            ),
-                            "direction": self._text(
-                                unit.value_payload.get("direction")
-                            ),
-                            "value_payload": dict(unit.value_payload),
-                            "unit": unit.unit,
-                        },
-                        source_refs=tuple(unit.source_refs),
-                        confidence=unit.confidence,
+                if not findings:
+                    break
+                for finding in findings:
+                    evidence_records: list[Any] = []
+                    evidence_offset = 0
+                    while True:
+                        evidence_page, evidence_total = (
+                            self.objective_repository.list_evidence(
+                                collection_id,
+                                objective.objective_id,
+                                analysis_version,
+                                finding_id=finding.finding_id,
+                                offset=evidence_offset,
+                                limit=500,
+                            )
+                        )
+                        if not evidence_page:
+                            break
+                        evidence_records.extend(evidence_page)
+                        evidence_offset += len(evidence_page)
+                        if evidence_offset >= evidence_total:
+                            break
+                    for evidence in evidence_records:
+                        exported_evidence_keys.add(
+                            (
+                                objective.objective_id,
+                                analysis_version,
+                                evidence.evidence_id,
+                            )
+                        )
+                    contributing_documents = (
+                        finding.derivation.contributing_document_ids
                     )
-                )
-        return items
+                    item_key = (
+                        f"{objective.objective_id}:v{analysis_version}:"
+                        f"{finding.finding_id}"
+                    )
+                    payload = finding.to_record()
+                    payload["evidence"] = [
+                        evidence.to_record() for evidence in evidence_records
+                    ]
+                    source_refs = tuple(
+                        {
+                            "evidence_id": evidence.evidence_id,
+                            "document_id": evidence.document_id,
+                            "source_kind": evidence.source_kind,
+                            "source_ref": evidence.source_ref,
+                            "source_excerpt": evidence.source_excerpt,
+                            "page_numbers": list(evidence.page_numbers),
+                            "related_source_refs": [
+                                dict(locator)
+                                for locator in evidence.related_source_refs
+                            ],
+                        }
+                        for evidence in evidence_records
+                    )
+                    items.append(
+                        EvaluationPredictionItem(
+                            item_id=item_key,
+                            document_id=(
+                                contributing_documents[0]
+                                if len(contributing_documents) == 1
+                                else ""
+                            ),
+                            family="objective_findings",
+                            item_key=item_key,
+                            payload=payload,
+                            source_refs=source_refs,
+                            confidence=finding.confidence,
+                        )
+                    )
+                finding_offset += len(findings)
+                if finding_offset >= finding_total:
+                    break
+        return items, {
+            "published_objective_analyses": published_analysis_count,
+            "objective_findings": len(items),
+            "objective_evidence": len(exported_evidence_keys),
+        }
 
     def _paper_fact_items(
         self,
@@ -230,13 +258,13 @@ class EvaluationPredictionSnapshotService:
     def _facts_ready_for_source(
         self,
         paper_facts: PaperFactSet,
-        objective_facts: ObjectiveFactSet,
         comparison_facts: ComparisonFactSet,
         *,
         fact_source: str,
+        objective_counts: dict[str, int],
     ) -> bool:
         if fact_source == "objective_first":
-            return bool(objective_facts.research_objectives_ready)
+            return objective_counts["objective_findings"] > 0
         if fact_source == "paper_facts":
             return bool(
                 paper_facts.paper_facts_ready
@@ -247,8 +275,9 @@ class EvaluationPredictionSnapshotService:
     def _artifact_counts(
         self,
         paper_facts: PaperFactSet,
-        objective_facts: ObjectiveFactSet,
         comparison_facts: ComparisonFactSet,
+        *,
+        objective_counts: dict[str, int],
     ) -> dict[str, int]:
         return {
             "document_profiles": len(paper_facts.document_profiles),
@@ -256,8 +285,7 @@ class EvaluationPredictionSnapshotService:
             "pairwise_comparison_relations": len(
                 comparison_facts.pairwise_comparison_relations
             ),
-            "objective_evidence_units": len(objective_facts.objective_evidence_units),
-            "objective_logic_chains": len(objective_facts.objective_logic_chains),
+            **objective_counts,
         }
 
     def _measurement_item_key(

@@ -290,23 +290,20 @@ export function getCollectionWorkspaceState(
 		return 'processing';
 	}
 
-	if (
+	const latestTaskFailed =
 		workspace.latest_task?.status === 'failed' ||
-		workspace.latest_task?.status === 'partial_success'
-	) {
-		return 'failed';
-	}
-
+		workspace.latest_task?.status === 'partial_success';
 	const actionablePrimaryViews = countActionablePrimaryViews(workspace);
 	const failedPrimaryViews = PRIMARY_WORKFLOW_KEYS.filter(
 		(key) => workspace.workflow[key] === 'failed'
 	).length;
 
 	if (actionablePrimaryViews === 0) {
-		return failedPrimaryViews > 0 ? 'failed' : 'ready_to_process';
+		return latestTaskFailed || failedPrimaryViews > 0 ? 'failed' : 'ready_to_process';
 	}
 
 	const hasLimits =
+		latestTaskFailed ||
 		Object.values(workspace.workflow).some((status) =>
 			['limited', 'not_applicable', 'failed'].includes(status)
 		) || workspace.warnings.length > 0;

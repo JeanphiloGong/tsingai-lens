@@ -10,10 +10,13 @@ from domain.core.comparison import (
 from domain.core.document_profile import DocumentProfile
 from domain.core.paper_fact import PaperFactSet
 from domain.core.research_objective import (
+    ObjectiveAnalysis,
+    ObjectiveEvidence,
     ObjectiveFactSet,
+    PaperContribution,
     ResearchObjective,
 )
-from domain.core.research_understanding import ResearchUnderstanding
+from domain.core.finding import Finding
 from domain.source import (
     ArtifactVersionRecord,
     BuildStageRecord,
@@ -42,8 +45,8 @@ from domain.evaluation import (
     EvaluationGoldSet,
     EvaluationPredictionSnapshot,
     EvaluationRun,
-    ResearchUnderstandingCuration,
-    ResearchUnderstandingFeedback,
+    FindingCuration,
+    FindingFeedback,
 )
 from domain.goal import ExperimentPlanRecord
 
@@ -331,12 +334,12 @@ class ObjectiveRepository(Protocol):
         build_id: str | None = None,
     ) -> ObjectiveFactSet: ...
 
-    def list_objective_workspaces(
+    def list_objectives(
         self,
         collection_id: str,
     ) -> tuple[ResearchObjective, ...]: ...
 
-    def read_objective_workspace(
+    def read_objective(
         self,
         collection_id: str,
         objective_id: str,
@@ -348,37 +351,98 @@ class ObjectiveRepository(Protocol):
         objective_id: str,
     ) -> ResearchObjective: ...
 
-    def queue_objective_analysis(
+    def queue_analysis(
         self,
         collection_id: str,
         objective_id: str,
-    ) -> ResearchObjective: ...
+        *,
+        pipeline_version: str,
+        model_name: str | None,
+        prompt_versions: dict[str, str],
+    ) -> tuple[ResearchObjective, ObjectiveAnalysis]: ...
 
-    def claim_objective_analysis(
+    def claim_analysis(
         self,
         collection_id: str,
         objective_id: str,
-    ) -> ResearchObjective | None: ...
+        analysis_version: int,
+    ) -> ObjectiveAnalysis | None: ...
 
-    def update_objective_analysis_progress(
+    def update_analysis_progress(
         self,
         collection_id: str,
         objective_id: str,
-        analysis_progress: dict[str, Any],
-    ) -> ResearchObjective: ...
+        analysis_version: int,
+        *,
+        phase: str,
+        processed_document_count: int,
+        total_document_count: int,
+        current_document_id: str | None,
+        progress_message: str | None,
+    ) -> ObjectiveAnalysis: ...
 
-    def mark_objective_analysis_ready(
+    def fail_analysis(
         self,
         collection_id: str,
         objective_id: str,
-    ) -> ResearchObjective: ...
+        analysis_version: int,
+        *,
+        error_code: str,
+        error_message: str,
+    ) -> ObjectiveAnalysis: ...
 
-    def mark_objective_analysis_failed(
+    def publish_analysis(
         self,
         collection_id: str,
         objective_id: str,
-        analysis_error: str,
-    ) -> ResearchObjective: ...
+        analysis_version: int,
+        *,
+        contributions: tuple[PaperContribution, ...],
+        evidence_records: tuple[ObjectiveEvidence, ...],
+        findings: tuple[Finding, ...],
+    ) -> tuple[ResearchObjective, ObjectiveAnalysis]: ...
+
+    def read_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int | None = None,
+    ) -> ObjectiveAnalysis | None: ...
+
+    def read_published_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ObjectiveAnalysis | None: ...
+
+    def list_findings(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        *,
+        offset: int = 0,
+        limit: int = 50,
+    ) -> tuple[tuple[Finding, ...], int]: ...
+
+    def read_finding(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        finding_id: str,
+    ) -> Finding | None: ...
+
+    def list_evidence(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        *,
+        finding_id: str | None = None,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> tuple[tuple[ObjectiveEvidence, ...], int]: ...
 
 
 class ComparisonRepository(Protocol):
@@ -399,56 +463,34 @@ class ComparisonRepository(Protocol):
     ) -> ComparisonFactSet: ...
 
 
-class ResearchUnderstandingRepository(Protocol):
-    backend_name: str
-
-    def upsert_objective_understanding(
-        self,
-        collection_id: str,
-        objective_id: str,
-        understanding: ResearchUnderstanding,
-    ) -> None: ...
-
-    def read_objective_understanding(
-        self,
-        collection_id: str,
-        objective_id: str,
-    ) -> ResearchUnderstanding | None: ...
-
-    def list_objective_understandings(
-        self,
-        collection_id: str,
-    ) -> tuple[ResearchUnderstanding, ...]: ...
-
-
-class ResearchUnderstandingReviewRepository(Protocol):
+class FindingReviewRepository(Protocol):
     backend_name: str
 
     def upsert_feedback(
         self,
-        feedback: ResearchUnderstandingFeedback,
-    ) -> ResearchUnderstandingFeedback: ...
+        feedback: FindingFeedback,
+    ) -> FindingFeedback: ...
 
     def list_feedback(
         self,
         collection_id: str,
         objective_id: str | None = None,
+        analysis_version: int | None = None,
         finding_id: str | None = None,
-        claim_id: str | None = None,
-    ) -> tuple[ResearchUnderstandingFeedback, ...]: ...
+    ) -> tuple[FindingFeedback, ...]: ...
 
     def upsert_curation(
         self,
-        curation: ResearchUnderstandingCuration,
-    ) -> ResearchUnderstandingCuration: ...
+        curation: FindingCuration,
+    ) -> FindingCuration: ...
 
     def list_curations(
         self,
         collection_id: str,
         objective_id: str | None = None,
+        analysis_version: int | None = None,
         finding_id: str | None = None,
-        claim_id: str | None = None,
-    ) -> tuple[ResearchUnderstandingCuration, ...]: ...
+    ) -> tuple[FindingCuration, ...]: ...
 
 
 class EvaluationRepository(Protocol):

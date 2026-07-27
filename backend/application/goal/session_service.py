@@ -24,13 +24,8 @@ from application.core.semantic_build.paper_facts_service import (
     PaperFactsNotReadyError,
     PaperFactsService,
 )
-from application.core.semantic_build.research_objective_service import (
-    ResearchObjectiveNotFoundError,
-    ResearchObjectiveService,
-    ResearchObjectivesNotReadyError,
-)
-from application.evaluation.research_understanding_feedback_service import (
-    ResearchUnderstandingFeedbackService,
+from application.evaluation.finding_feedback_service import (
+    FindingFeedbackService,
 )
 from application.goal.protocol_contract import (
     has_affirmative_ved_only_effect_claim,
@@ -47,7 +42,7 @@ from domain.goal import (
     GoalSourceLink,
     GoalSourceMode,
 )
-from domain.ports import GoalSessionRepository
+from domain.ports import GoalSessionRepository, ObjectiveRepository
 
 AnswerMode = GoalAnswerMode
 SourceMode = GoalSourceMode
@@ -114,10 +109,10 @@ class GoalSessionService:
         collection_service: CollectionService,
         research_view_service: ResearchViewAggregationService,
         workspace_service: WorkspaceService,
-        research_objective_service: ResearchObjectiveService,
+        objective_repository: ObjectiveRepository,
         comparison_service: ComparisonService,
         paper_facts_service: PaperFactsService,
-        research_understanding_feedback_service: ResearchUnderstandingFeedbackService,
+        finding_feedback_service: FindingFeedbackService,
         goal_session_repository: GoalSessionRepository,
         llm_client: Any | None = None,
         model: str | None = None,
@@ -127,10 +122,8 @@ class GoalSessionService:
         self.workspace_service = workspace_service
         self.comparison_service = comparison_service
         self.paper_facts_service = paper_facts_service
-        self.research_objective_service = research_objective_service
-        self.research_understanding_feedback_service = (
-            research_understanding_feedback_service
-        )
+        self.objective_repository = objective_repository
+        self.finding_feedback_service = finding_feedback_service
         self.goal_session_repository = goal_session_repository
         self.model = (
             model
@@ -614,8 +607,8 @@ class GoalSessionService:
             evidence_ids
             or self._has_non_empty_path(material_profile, ("sample_matrix", "rows"))
             or self._has_non_empty_path(objectives, ("objectives",))
-            or self._has_non_empty_path(objective_research_view, ("evidence_units",))
-            or self._has_non_empty_path(objective_research_view, ("logic_chain",))
+            or self._has_non_empty_path(objective_research_view, ("findings",))
+            or self._has_non_empty_path(objective_research_view, ("evidence",))
             or bool(curated_research_findings)
             or self._has_non_empty_path(collection_research_view, ("materials",))
             or self._has_non_empty_path(
@@ -657,13 +650,14 @@ class GoalSessionService:
         collection_id: str,
         warnings: list[str],
     ) -> dict[str, Any] | None:
-        try:
-            return self.research_objective_service.list_objective_workspaces(
-                collection_id
-            )
-        except ResearchObjectivesNotReadyError:
+        objectives = self.objective_repository.list_objectives(collection_id)
+        if not objectives:
             warnings.append("research_objectives_not_ready")
             return None
+        return {
+            "collection_id": collection_id,
+            "objectives": [objective.to_record() for objective in objectives],
+        }
 
     def _safe_objective_research_view(
         self,
@@ -671,17 +665,41 @@ class GoalSessionService:
         objective_id: str,
         warnings: list[str],
     ) -> dict[str, Any] | None:
-        try:
-            return self.research_objective_service.get_objective_research_view(
-                collection_id,
-                objective_id,
-            )
-        except ResearchObjectiveNotFoundError:
+        objective = self.objective_repository.read_objective(
+            collection_id,
+            objective_id,
+        )
+        if objective is None:
             warnings.append("focused_objective_not_found")
             return None
-        except ResearchObjectivesNotReadyError:
-            warnings.append("research_objectives_not_ready")
-            return None
+        analysis = self.objective_repository.read_published_analysis(
+            collection_id,
+            objective_id,
+        )
+        findings = ()
+        evidence = ()
+        if analysis is not None:
+            findings, _ = self.objective_repository.list_findings(
+                collection_id,
+                objective_id,
+                analysis.analysis_version,
+                offset=0,
+                limit=50,
+            )
+            evidence, _ = self.objective_repository.list_evidence(
+                collection_id,
+                objective_id,
+                analysis.analysis_version,
+                offset=0,
+                limit=100,
+            )
+        return {
+            "collection_id": collection_id,
+            "objective": objective.to_record(),
+            "analysis": analysis.to_record() if analysis is not None else None,
+            "findings": [finding.to_record() for finding in findings],
+            "evidence": [item.to_record() for item in evidence],
+        }
 
     def _safe_collection_research_view(
         self,
@@ -746,7 +764,7 @@ class GoalSessionService:
         if not focused_objective_id:
             return []
         try:
-            dataset = self.research_understanding_feedback_service.export_dataset(
+            dataset = self.finding_feedback_service.export_dataset(
                 collection_id=collection_id,
                 objective_id=focused_objective_id,
                 dataset_use_status="training_ready",

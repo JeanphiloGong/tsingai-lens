@@ -4,14 +4,14 @@ from openai import APIConnectionError
 
 from application.core.comparison_service import ComparisonRowsNotReadyError
 from application.core.semantic_build.paper_facts_service import PaperFactsNotReadyError
-from application.evaluation import ResearchUnderstandingFeedbackService
+from application.evaluation import FindingFeedbackService
 from application.goal.experiment_plan_service import ExperimentPlanService
 from application.goal.session_service import GoalSessionService, _StructuredProtocolDraft
+from domain.core import Finding, ObjectiveAnalysis, ObjectiveEvidence, ResearchObjective
 from tests.support.collection_service import build_test_collection_service
 from tests.support.objective_workspace_repository import (
     InMemoryObjectiveWorkspaceRepository,
 )
-from domain.core.research_understanding import ResearchUnderstanding
 
 
 class _FakeMessage:
@@ -181,52 +181,22 @@ class _MaterialResearchViewService:
 
 
 class _EmptyResearchObjectiveService:
-    def list_objective_workspaces(self, collection_id: str) -> dict:
-        return {
-            "collection_id": collection_id,
-            "state": "empty",
-            "readiness": {
-                "objectives_ready": False,
-                "frames_ready": False,
-                "routes_ready": False,
-                "evidence_units_ready": False,
-                "logic_chain_ready": False,
-            },
-            "objectives": [],
-            "warnings": [],
-        }
+    def list_objectives(self, collection_id: str):
+        return ()
 
-    def get_objective_research_view(self, collection_id: str, objective_id: str) -> dict:
-        return {
-            "collection_id": collection_id,
-            "state": "empty",
-            "objective": {
-                "objective_id": objective_id,
-                "question": objective_id,
-                "material_scope": [],
-                "process_axes": [],
-                "property_axes": [],
-                "comparison_intent": None,
-                "confidence": 0.0,
-            },
-            "objective_context": None,
-            "readiness": {
-                "objectives_ready": False,
-                "frames_ready": False,
-                "routes_ready": False,
-                "evidence_units_ready": False,
-                "logic_chain_ready": False,
-            },
-            "paper_frames": [],
-            "evidence_routes": [],
-            "evidence_units": [],
-            "logic_chain": None,
-            "existing_comparison_rows": [],
-            "warnings": [],
-        }
+    def read_objective(self, collection_id: str, objective_id: str):
+        return None
 
+    def read_published_analysis(self, collection_id: str, objective_id: str):
+        return None
 
-class _TrainingReadyResearchUnderstandingFeedbackService:
+    def list_findings(self, *args, **kwargs):
+        return (), 0
+
+    def list_evidence(self, *args, **kwargs):
+        return (), 0
+
+class _TrainingReadyFindingFeedbackService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
@@ -240,7 +210,6 @@ class _TrainingReadyResearchUnderstandingFeedbackService:
             "items": [
                 {
                     "finding_id": "finding_preheat_ductility",
-                    "claim_id": "claim_preheat_ductility",
                     "finding_fingerprint": "finding.v1:preheat-ductility",
                     "protocol_source_fingerprint": "protocol-source.v1:preheat-ductility",
                     "label_status": "gold",
@@ -307,7 +276,7 @@ class _TrainingReadyResearchUnderstandingFeedbackService:
         }
 
 
-class _EmptyTrainingReadyResearchUnderstandingFeedbackService:
+class _EmptyTrainingReadyFindingFeedbackService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
@@ -323,7 +292,7 @@ class _EmptyTrainingReadyResearchUnderstandingFeedbackService:
         }
 
 
-class _ProtocolIneligibleTrainingReadyResearchUnderstandingFeedbackService:
+class _ProtocolIneligibleTrainingReadyFindingFeedbackService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
@@ -440,210 +409,139 @@ class _ProtocolIneligibleTrainingReadyResearchUnderstandingFeedbackService:
         }
 
 
-class _SingleUnderstandingRepository:
-    backend_name = "fake"
-
-    def __init__(self, understanding: ResearchUnderstanding) -> None:
-        self.understanding = understanding
-
-    def read_objective_understanding(
-        self,
-        collection_id: str,  # noqa: ARG002
-        objective_id: str,  # noqa: ARG002
-    ):
-        return self.understanding
-
-    def list_objective_understandings(
-        self,
-        collection_id: str,  # noqa: ARG002
-    ):
-        return (self.understanding,)
-
-
-class _ReviewRepository:
-    def __init__(self) -> None:
-        self.curations = []
-
-    def upsert_feedback(self, feedback):
-        return feedback
-
-    def list_feedback(self, *args, **kwargs):  # noqa: ANN002, ANN003
-        return ()
-
-    def upsert_curation(self, curation):
-        self.curations = [
-            curation,
-            *[
-                item
-                for item in self.curations
-                if item.curation_id != curation.curation_id
-            ],
-        ]
-        return curation
-
-    def list_curations(
-        self,
-        collection_id,
-        objective_id=None,
-        finding_id=None,
-        claim_id=None,
-    ):
-        return tuple(
-            curation
-            for curation in self.curations
-            if curation.collection_id == collection_id
-            and (objective_id is None or curation.objective_id == objective_id)
-            and (finding_id is None or curation.finding_id == finding_id)
-            and (claim_id is None or curation.claim_id == claim_id)
-        )
-
-
-class _PassthroughResearchUnderstandingProjectionService:
-    def with_presentation(self, understanding, *, recover_source_findings=True):
-        assert recover_source_findings is False
-        return understanding.to_record()
-
-
 class _ObjectiveResearchService(_EmptyResearchObjectiveService):
-    def list_objective_workspaces(self, collection_id: str) -> dict:
-        return {
-            "collection_id": collection_id,
-            "state": "ready",
-            "readiness": {
-                "objectives_ready": True,
-                "frames_ready": True,
-                "routes_ready": True,
-                "evidence_units_ready": True,
-                "logic_chain_ready": True,
-            },
-            "objectives": [
-                {
-                    "objective_id": "obj_lpbf_strength",
-                    "question": "How does LPBF energy density affect 316L strength?",
-                    "material_scope": ["316L stainless steel"],
-                    "process_axes": ["energy density", "scan strategy"],
-                    "property_axes": ["yield strength", "elongation"],
-                    "comparison_intent": "Compare LPBF process windows against mechanical response.",
-                    "confidence": 0.87,
-                    "state": "ready",
-                    "paper_frame_count": 1,
-                    "evidence_route_count": 1,
-                    "evidence_unit_count": 1,
-                    "logic_chain_count": 1,
-                }
-            ],
-            "warnings": [],
-        }
-
-    def get_objective_research_view(self, collection_id: str, objective_id: str) -> dict:
-        return {
-            "collection_id": collection_id,
-            "state": "ready",
-            "objective": {
+    @staticmethod
+    def _objective(collection_id: str, objective_id: str) -> ResearchObjective:
+        return ResearchObjective.from_mapping(
+            {
+                "collection_id": collection_id,
                 "objective_id": objective_id,
                 "question": "How does LPBF energy density affect 316L strength?",
                 "material_scope": ["316L stainless steel"],
                 "process_axes": ["energy density", "scan strategy"],
                 "property_axes": ["yield strength", "elongation"],
-                "comparison_intent": "Compare LPBF process windows against mechanical response.",
+                "comparison_intent": (
+                    "Compare LPBF process windows against mechanical response."
+                ),
+                "seed_document_ids": ["paper-a"],
                 "confidence": 0.87,
-            },
-            "objective_context": {
+                "confirmation_status": "confirmed",
+                "active_analysis_version": 1,
+                "published_analysis_version": 1,
+            }
+        )
+
+    @staticmethod
+    def _analysis(collection_id: str, objective_id: str) -> ObjectiveAnalysis:
+        return ObjectiveAnalysis(
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=1,
+            source_build_id="build-1",
+            pipeline_version="test",
+            model_name="fake-model",
+            prompt_versions={},
+            status="succeeded",
+            phase="completed",
+            processed_document_count=1,
+            total_document_count=1,
+        )
+
+    @staticmethod
+    def _evidence(collection_id: str, objective_id: str) -> ObjectiveEvidence:
+        return ObjectiveEvidence.from_mapping(
+            {
+                "collection_id": collection_id,
                 "objective_id": objective_id,
-                "question": "How does LPBF energy density affect 316L strength?",
-                "material_scope": ["316L stainless steel"],
-                "variable_process_axes": ["energy density"],
-                "process_context_axes": ["scan strategy"],
-                "target_property_axes": ["yield strength", "elongation"],
-                "excluded_property_axes": [],
-                "routing_hints": [],
-                "extraction_guidance": {"focus": "mechanical evidence"},
-                "confidence": 0.84,
-            },
-            "readiness": {
-                "objectives_ready": True,
-                "frames_ready": True,
-                "routes_ready": True,
-                "evidence_units_ready": True,
-                "logic_chain_ready": True,
-            },
-            "paper_frames": [
-                {
-                    "frame_id": "frame_1",
-                    "objective_id": objective_id,
-                    "document_id": "paper-a",
-                    "title": "LPBF 316L process window",
-                    "source_filename": "p001.pdf",
-                    "relevance": "high",
-                    "paper_role": "primary_experiment",
-                    "background": "16 LPBF samples compare energy density and scan strategy.",
-                    "material_match": ["316L stainless steel"],
-                    "changed_variables": ["energy density", "scan strategy"],
-                    "measured_property_scope": ["yield strength", "elongation"],
-                    "test_environment_scope": [],
-                    "relevant_sections": ["Results"],
-                    "relevant_tables": ["Table 3"],
-                    "excluded_tables": [],
-                }
-            ],
-            "evidence_routes": [],
-            "evidence_units": [
-                {
-                    "evidence_unit_id": "oeu_strength",
-                    "objective_id": objective_id,
-                    "document_id": "paper-a",
-                    "unit_kind": "measurement",
-                    "property_normalized": "yield strength",
-                    "material_system": {"name": "316L stainless steel"},
-                    "sample_context": {"sample_id": "S014"},
-                    "process_context": {"energy_density": "100 J/mm3"},
-                    "resolved_condition": {},
-                    "test_condition": {},
-                    "value_payload": {"value": 448, "unit": "MPa"},
-                    "unit": "MPa",
-                    "baseline_context": {},
-                    "interpretation": None,
-                    "source_refs": [
-                        {
-                            "document_id": "paper-a",
-                            "evidence_id": "ev_strength",
-                            "page": 8,
-                            "source_kind": "table",
-                            "source_ref": "Table 3",
-                        }
-                    ],
-                    "evidence_anchor_ids": ["anc_strength"],
-                    "join_keys": {},
-                    "resolution_status": "resolved",
-                    "confidence": 0.91,
-                }
-            ],
-            "logic_chain": {
-                "logic_chain_id": "chain_strength",
+                "analysis_version": 1,
+                "evidence_id": "ev_strength",
+                "document_id": "paper-a",
+                "source_kind": "table",
+                "source_ref": "Table 3",
+                "source_excerpt": "At 100 J/mm3, the reported yield strength was 448 MPa.",
+                "page_numbers": [8],
+                "evidence_role": "direct_result",
+                "selection_status": "extracted",
+                "evidence_kind": "measurement",
+                "property_normalized": "yield strength",
+                "material_system": {"name": "316L stainless steel"},
+                "sample_context": {"sample_id": "S014"},
+                "process_context": {"energy_density": "100 J/mm3"},
+                "value_payload": {"value": 448, "unit": "MPa"},
+                "unit": "MPa",
+                "join_keys": {"changed_variables": ["energy density", "scan strategy"]},
+                "resolution_status": "resolved",
+                "confidence": 0.91,
+            }
+        )
+
+    @classmethod
+    def _finding(cls, collection_id: str, objective_id: str) -> Finding:
+        return Finding.from_mapping(
+            {
+                "collection_id": collection_id,
                 "objective_id": objective_id,
-                "chain_scope": "objective",
-                "document_id": None,
-                "question": "How does LPBF energy density affect 316L strength?",
-                "evidence_unit_ids": ["oeu_strength"],
-                "chain_payload": {
-                    "steps": [
-                        {"step_role": "process", "label": "LPBF energy density"},
-                        {"step_role": "performance", "label": "yield strength"},
-                    ]
-                },
-                "summary": "LPBF energy density and scan strategy shape strength and ductility.",
+                "analysis_version": 1,
+                "finding_id": "finding_strength",
+                "finding_level": "paper",
+                "statement": (
+                    "LPBF energy density and scan strategy shape strength and ductility."
+                ),
+                "variables": ["energy density", "scan strategy"],
+                "outcomes": ["yield strength"],
+                "direction": "changes",
+                "scope_summary": "LPBF 316L in the reported paper conditions",
+                "evidence_strength": "moderate",
+                "generalization_status": "paper_level_only",
+                "paper_count": 1,
                 "confidence": 0.88,
-            },
-            "existing_comparison_rows": [],
-            "warnings": [],
-        }
+                "display_rank": 0,
+                "relations": [
+                    {
+                        "source_term": "energy density and scan strategy",
+                        "relation_type": "associated_with",
+                        "target_term": "yield strength",
+                        "direction": "changes",
+                        "assertion_strength": "associative",
+                        "supporting_evidence_ids": ["ev_strength"],
+                    }
+                ],
+                "context": {
+                    "material_system": {"name": "316L stainless steel"},
+                    "process_conditions": [{"energy_density": "100 J/mm3"}],
+                    "supporting_evidence_ids": ["ev_strength"],
+                },
+                "derivation": {
+                    "synthesis_mode": "paper",
+                    "comparison_status": "insufficient_confirmation",
+                    "contributing_document_ids": ["paper-a"],
+                    "supporting_evidence_ids": ["ev_strength"],
+                    "rationale": "One paper reports the coupled process result.",
+                },
+            }
+        )
+
+    def list_objectives(self, collection_id: str):
+        return (self._objective(collection_id, "obj_lpbf_strength"),)
+
+    def read_objective(self, collection_id: str, objective_id: str):
+        return self._objective(collection_id, objective_id)
+
+    def read_published_analysis(self, collection_id: str, objective_id: str):
+        return self._analysis(collection_id, objective_id)
+
+    def list_findings(self, collection_id: str, objective_id: str, *args, **kwargs):
+        return (self._finding(collection_id, objective_id),), 1
+
+    def list_evidence(self, collection_id: str, objective_id: str, *args, **kwargs):
+        return (self._evidence(collection_id, objective_id),), 1
 
 
 def _service(
     tmp_path,
     content: str = "draft answer",
     research_objective_service=None,
-    research_understanding_feedback_service=None,
+    finding_feedback_service=None,
     comparison_service=None,
     paper_facts_service=None,
 ) -> tuple[GoalSessionService, CollectionService]:
@@ -654,11 +552,11 @@ def _service(
         workspace_service=_FakeWorkspaceService(),
         comparison_service=comparison_service or _EmptyComparisonService(),
         paper_facts_service=paper_facts_service or _EmptyPaperFactsService(),
-        research_objective_service=research_objective_service
+        objective_repository=research_objective_service
         or _EmptyResearchObjectiveService(),
-        research_understanding_feedback_service=(
-            research_understanding_feedback_service
-            or _EmptyTrainingReadyResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            finding_feedback_service
+            or _EmptyTrainingReadyFindingFeedbackService()
         ),
         goal_session_repository=InMemoryObjectiveWorkspaceRepository(),
         llm_client=_FakeLLMClient(content),
@@ -671,7 +569,7 @@ def _service_with_llm_client(
     tmp_path,
     llm_client,
     research_objective_service=None,
-    research_understanding_feedback_service=None,
+    finding_feedback_service=None,
     comparison_service=None,
     paper_facts_service=None,
 ) -> tuple[GoalSessionService, CollectionService]:
@@ -682,11 +580,11 @@ def _service_with_llm_client(
         workspace_service=_FakeWorkspaceService(),
         comparison_service=comparison_service or _EmptyComparisonService(),
         paper_facts_service=paper_facts_service or _EmptyPaperFactsService(),
-        research_objective_service=research_objective_service
+        objective_repository=research_objective_service
         or _EmptyResearchObjectiveService(),
-        research_understanding_feedback_service=(
-            research_understanding_feedback_service
-            or _EmptyTrainingReadyResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            finding_feedback_service
+            or _EmptyTrainingReadyFindingFeedbackService()
         ),
         goal_session_repository=InMemoryObjectiveWorkspaceRepository(),
         llm_client=llm_client,
@@ -893,14 +791,14 @@ def test_goal_chat_downgrades_uncited_grounded_answer(tmp_path):
 
 
 def test_goal_chat_uses_protocol_ready_findings_for_protocol_context(tmp_path):
-    feedback_service = _TrainingReadyResearchUnderstandingFeedbackService()
+    feedback_service = _TrainingReadyFindingFeedbackService()
     service, collection_service = _service(
         tmp_path,
         content=(
             "<think>Use hidden reasoning and unreviewed facts.</think>\n"
             "Use the accepted preheating finding for the next protocol [Source 1]."
         ),
-        research_understanding_feedback_service=feedback_service,
+        finding_feedback_service=feedback_service,
         paper_facts_service=_EvidencePaperFactsService(),
     )
     collection = collection_service.create_collection("Goal Finding Collection")
@@ -1029,8 +927,9 @@ Risks or limits
     service, collection_service = _service_with_llm_client(
         tmp_path,
         llm_client,
-        research_understanding_feedback_service=(
-            _TrainingReadyResearchUnderstandingFeedbackService()
+        research_objective_service=_ObjectiveResearchService(),
+        finding_feedback_service=(
+            _TrainingReadyFindingFeedbackService()
         ),
         paper_facts_service=_EvidencePaperFactsService(),
     )
@@ -1275,8 +1174,8 @@ Risks or limits
     service, collection_service = _service_with_llm_client(
         tmp_path,
         llm_client,
-        research_understanding_feedback_service=(
-            _TrainingReadyResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _TrainingReadyFindingFeedbackService()
         ),
         paper_facts_service=_EvidencePaperFactsService(),
     )
@@ -1331,8 +1230,8 @@ Risks or limits
     service, collection_service = _service_with_llm_client(
         tmp_path,
         llm_client,
-        research_understanding_feedback_service=(
-            _TrainingReadyResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _TrainingReadyFindingFeedbackService()
         ),
         paper_facts_service=_EvidencePaperFactsService(),
     )
@@ -1357,228 +1256,6 @@ Risks or limits
     assert "could not verify the protocol draft contract" in response["answer"]
 
 
-def test_reviewed_finding_drives_traceable_experiment_plan(tmp_path):
-    understanding = ResearchUnderstanding.from_mapping(
-        {
-            "state": "ready",
-            "scope": {
-                "scope_type": "objective",
-                "collection_id": "col-reviewed",
-                "objective_id": "obj_reviewed",
-                "title": "How does preheating affect ductility?",
-            },
-            "claims": [
-                {
-                    "claim_id": "claim_preheat",
-                    "claim_type": "finding",
-                    "statement": "Preheating improves ductility.",
-                    "status": "supported",
-                    "evidence_ref_ids": ["ev_preheat"],
-                    "context_ids": ["ctx_lpbf"],
-                }
-            ],
-            "evidence_refs": [
-                {
-                    "evidence_ref_id": "ev_preheat",
-                    "source_kind": "text",
-                    "document_id": "paper-preheat",
-                    "label": "P001 Results",
-                    "locator": {"source_ref": "blk-preheat"},
-                    "traceability_status": "direct",
-                    "evidence_role": "direct_result",
-                    "quote": "Preheating increased ductility by 14% in LPBF 316L.",
-                }
-            ],
-            "contexts": [
-                {
-                    "context_id": "ctx_lpbf",
-                    "label": "LPBF 316L",
-                    "material_scope": ["316L stainless steel"],
-                    "process_context": {"process": "LPBF"},
-                    "test_condition": {"temperature": "room"},
-                    "property_scope": ["ductility"],
-                    "limitations": [],
-                }
-            ],
-            "presentation": {
-                "findings": [
-                    {
-                        "finding_id": "finding_preheat",
-                        "claim_id": "claim_preheat",
-                        "title": "preheating -> ductility",
-                        "statement": "Preheating improves ductility.",
-                        "variables": ["preheating"],
-                        "mediators": ["microstructure"],
-                        "outcomes": ["ductility"],
-                        "direction": "increase",
-                        "scope_summary": "LPBF 316L",
-                        "support_grade": "partial",
-                        "review_status": "needs_review",
-                        "generalization_status": "paper_level_only",
-                        "generalization_note": (
-                            "Evidence comes from one paper; use this as a traceable "
-                            "paper-level finding, not a cross-paper conclusion."
-                        ),
-                        "paper_count": 1,
-                        "evidence_count": 1,
-                        "evidence_bundle": {"direct_result": ["ev_preheat"]},
-                        "evidence_ref_ids": ["ev_preheat"],
-                        "context_ids": ["ctx_lpbf"],
-                    }
-                ],
-                "evidence_items": [
-                    {
-                        "evidence_ref_id": "ev_preheat",
-                        "document_id": "paper-preheat",
-                        "title": "P001 Results",
-                        "source_label": "P001 p.7",
-                        "source_kind": "text",
-                        "source_ref": "blk-preheat",
-                        "page": "7",
-                        "quote": "Preheating increased ductility by 14%.",
-                        "source_text": (
-                            "The sample preheated at 150 C shows a 14% "
-                            "improvement in ductility."
-                        ),
-                        "traceability_status": "direct",
-                        "evidence_role": "direct_result",
-                    }
-                ],
-                "context_summaries": [
-                    {
-                        "context_id": "ctx_lpbf",
-                        "label": "LPBF 316L",
-                        "material_scope": ["316L stainless steel"],
-                        "property_scope": ["ductility"],
-                        "process_summary": "LPBF",
-                        "test_summary": "room temperature",
-                    }
-                ],
-            },
-            "model_traces": [],
-        }
-    )
-    feedback_service = ResearchUnderstandingFeedbackService(
-        review_repository=_ReviewRepository(),
-        research_understanding_repository=_SingleUnderstandingRepository(understanding),
-        research_understanding_service=(
-            _PassthroughResearchUnderstandingProjectionService()
-        ),
-    )
-    protocol_candidate = (
-            "Hypothesis: 150 C preheating improves LPBF 316L ductility "
-            "through microstructure changes [Source 1].\n"
-            "Variable matrix: compare 25 C and 150 C build-platform "
-            "preheating.\n"
-            "Measurements: elongation and microstructure.\n"
-            "Controls: keep LPBF alloy, powder, and scan parameters fixed.\n"
-            "Risks or limits: current evidence is one LPBF 316L finding."
-        )
-    structured_protocol = {
-        "proposed_variable_manipulations": [
-            "Compare ambient and preheated conditions selected by the expert."
-        ],
-        "proposed_measurements": [
-            "The expert selects a validated microstructure method."
-        ],
-        "proposed_controls": [
-            "Keep alloy, powder, and scan parameters fixed."
-        ],
-        "design_risks": ["Uncontrolled scan parameters can confound preheating effects."],
-    }
-    service, collection_service = _service_with_llm_client(
-        tmp_path,
-        _StructuredRepairLLMClient(protocol_candidate, structured_protocol),
-        research_understanding_feedback_service=feedback_service,
-        paper_facts_service=_EvidencePaperFactsService(),
-    )
-    collection = collection_service.create_collection("Reviewed Goal Collection")
-    collection_id = collection["collection_id"]
-    feedback_service.record_curation(
-        collection_id=collection_id,
-        objective_id="obj_reviewed",
-        finding_id="finding_preheat",
-        claim_id="claim_preheat",
-        curated_claim_type="finding",
-        curated_status="supported",
-        curated_statement=(
-            "150 C preheating improves LPBF 316L ductility through "
-            "microstructure changes."
-        ),
-        curated_support_grade="partial",
-        curated_review_status="accepted",
-        curated_variables=["preheating"],
-        curated_mediators=["microstructure"],
-        curated_outcomes=["ductility"],
-        curated_direction="increase",
-        curated_scope_summary="LPBF 316L",
-        curated_evidence_ref_ids=["ev_preheat"],
-        curated_context_ids=["ctx_lpbf"],
-        reviewer="materials-expert",
-    )
-
-    dataset = feedback_service.export_dataset(
-        collection_id=collection_id,
-        objective_id="obj_reviewed",
-        dataset_use_status="training_ready",
-    )
-    session = service.create_session(
-        collection_id=collection_id,
-        focused_objective_id="obj_reviewed",
-        answer_mode="hybrid",
-        user_id="expert-a",
-    )
-    response = service.post_message(
-        session["session_id"],
-        message="Draft a protocol from reviewed findings.",
-        page_context={"objective_id": "obj_reviewed"},
-    )
-    plan_service = ExperimentPlanService(
-        repository=InMemoryObjectiveWorkspaceRepository(),
-        goal_session_repository=service.goal_session_repository,
-        research_understanding_feedback_service=feedback_service,
-    )
-    plan = plan_service.create_plan(
-        collection_id=collection_id,
-        objective_id="obj_reviewed",
-        title="Preheating validation protocol",
-        content=response["answer"],
-        source_message_id=response["message_id"],
-        source_links=response["source_links"],
-        metadata={"source": "goal_copilot"},
-        created_by="expert-a",
-    )
-
-    assert dataset["item_count"] == 1
-    assert dataset["items"][0]["label_status"] == "gold"
-    assert dataset["items"][0]["dataset_use_status"] == "training_ready"
-    assert dataset["items"][0]["protocol_readiness"]["status"] == "protocol_ready"
-    assert dataset["quality_summary"]["protocol_ready_sample_count"] == 1
-    assert len(dataset["items"][0]["training_messages"]) == 2
-    assert response["source_mode"] == "collection_grounded"
-    assert response["review_gate"] == "protocol_ready_findings"
-    assert "- Proposed design choice: Compare ambient and preheated conditions" in (
-        response["answer"]
-    )
-    assert response["used_evidence_ids"] == ["ev_preheat"]
-    assert response["source_links"] == [
-        {
-            "kind": "evidence",
-            "label": "Source 1",
-            "href": (
-                f"/collections/{collection_id}/documents/"
-                "paper-preheat?evidence_id=ev_preheat"
-            ),
-        }
-    ]
-    prompt = service.llm_client.chat.completions.calls[0]["messages"][1]["content"]
-    assert "curated_research_findings" in prompt
-    assert "microstructure changes" in prompt
-    assert "ev_preheat" not in prompt
-    assert plan.metadata["review_gate"] == "protocol_ready_findings"
-    assert plan.metadata["used_evidence_ids"] == ["ev_preheat"]
-    assert plan.source_links[0]["href"].endswith("evidence_id=ev_preheat")
-
 
 def test_goal_chat_suppresses_backbone_readiness_warnings_when_curated_findings_exist(
     tmp_path,
@@ -1586,8 +1263,8 @@ def test_goal_chat_suppresses_backbone_readiness_warnings_when_curated_findings_
     service, collection_service = _service(
         tmp_path,
         content="Use the accepted preheating finding for the next protocol [Source 1].",
-        research_understanding_feedback_service=(
-            _TrainingReadyResearchUnderstandingFeedbackService()
+        finding_feedback_service=(
+            _TrainingReadyFindingFeedbackService()
         ),
         comparison_service=_NotReadyComparisonService(),
         paper_facts_service=_NotReadyPaperFactsService(),
@@ -1613,12 +1290,12 @@ def test_goal_chat_suppresses_backbone_readiness_warnings_when_curated_findings_
 
 
 def test_goal_chat_warns_when_focused_scope_has_no_protocol_ready_findings(tmp_path):
-    feedback_service = _EmptyTrainingReadyResearchUnderstandingFeedbackService()
+    feedback_service = _EmptyTrainingReadyFindingFeedbackService()
     service, collection_service = _service(
         tmp_path,
         content="Use the collection evidence cautiously [Source 1].",
         research_objective_service=_ObjectiveResearchService(),
-        research_understanding_feedback_service=feedback_service,
+        finding_feedback_service=feedback_service,
     )
     collection = collection_service.create_collection("Unreviewed Goal Collection")
     session = service.create_session(
@@ -1648,11 +1325,11 @@ def test_goal_chat_warns_when_focused_scope_has_no_protocol_ready_findings(tmp_p
 
 
 def test_goal_chat_excludes_training_ready_findings_that_are_not_protocol_ready(tmp_path):
-    feedback_service = _ProtocolIneligibleTrainingReadyResearchUnderstandingFeedbackService()
+    feedback_service = _ProtocolIneligibleTrainingReadyFindingFeedbackService()
     service, collection_service = _service(
         tmp_path,
         content="No reviewed actionable findings are available.",
-        research_understanding_feedback_service=feedback_service,
+        finding_feedback_service=feedback_service,
         paper_facts_service=_EvidencePaperFactsService(),
     )
     collection = collection_service.create_collection("Non Actionable Findings")

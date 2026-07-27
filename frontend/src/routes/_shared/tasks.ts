@@ -13,14 +13,6 @@ export type TaskStage =
   | 'objective_candidates_completed'
   | 'objective_paper_skim_started'
   | 'objective_discovery_started'
-  | 'objective_paper_framing_started'
-  | 'objective_evidence_routing_started'
-  | 'objective_evidence_units_started'
-  | 'objective_logic_chains_started'
-  | 'paper_facts_started'
-  | 'comparison_rows_started'
-  | 'research_understandings_started'
-  | 'research_understandings_completed'
   | 'artifacts_ready'
   | 'failed';
 

@@ -185,7 +185,7 @@ def parse_args() -> argparse.Namespace:
 def build_services(
     collections_root: Path,
     session_factory: Any,
-) -> tuple[Any, Any, Any, Any, Any, Any, Any]:
+) -> tuple[Any, Any, Any, Any, Any, Any]:
     from application.core.semantic_build.document_profile_service import DocumentProfileService
     from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
     from application.core.semantic_build.paper_facts_service import PaperFactsService
@@ -194,9 +194,6 @@ def build_services(
     from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
     from infra.persistence.postgres.paper_fact_repository import (
         PostgresPaperFactRepository,
-    )
-    from infra.persistence.postgres.research_understanding_repository import (
-        PostgresResearchUnderstandingRepository,
     )
     from infra.persistence.postgres.source_artifact_repository import (
         PostgresSourceArtifactRepository,
@@ -207,9 +204,6 @@ def build_services(
     )
     source_artifact_repository = PostgresSourceArtifactRepository(session_factory)
     paper_fact_repository = PostgresPaperFactRepository(session_factory)
-    research_understanding_repository = PostgresResearchUnderstandingRepository(
-        session_factory
-    )
     document_profile_service = DocumentProfileService(
         collection_service=collection_service,
         source_artifact_repository=source_artifact_repository,
@@ -219,7 +213,6 @@ def build_services(
         collection_service,
         source_artifact_repository,
         paper_fact_repository,
-        research_understanding_repository,
         document_profile_service,
         PaperFactsService,
         CoreLLMStructuredExtractor,
@@ -502,7 +495,6 @@ def main() -> int:
         collection_service,
         source_artifact_repository,
         paper_fact_repository,
-        research_understanding_repository,
         document_profile_service,
         paper_facts_service_class,
         extractor_class,
@@ -532,7 +524,6 @@ def main() -> int:
         collection_service=collection_service,
         source_artifact_repository=source_artifact_repository,
         paper_fact_repository=paper_fact_repository,
-        research_understanding_repository=research_understanding_repository,
         document_profile_service=document_profile_service,
         structured_extractor=inner_extractor,
     )
@@ -555,7 +546,6 @@ def main() -> int:
         collection_service=collection_service,
         source_artifact_repository=source_artifact_repository,
         paper_fact_repository=paper_fact_repository,
-        research_understanding_repository=research_understanding_repository,
         document_profile_service=document_profile_service,
         structured_extractor=timing_extractor,
     )

@@ -1,180 +1,93 @@
 # Persistence Adapters
 
-This node owns storage-specific repository construction and implementation.
-The stable data ownership and identity contract lives in
+This node owns storage-specific repository implementations. The authoritative
+identity and ownership model is documented in
 [`../../docs/architecture/persistence-model.md`](../../docs/architecture/persistence-model.md).
-
-## Scope
-
-- `database.py`
-- `file/`
-- `memory/`
-- `postgres/`
-- `sqlite/`
-
-## Responsibilities
-
-- construct the concrete repository used by direct application callers
-- keep file layout, database access, SQL, and row encoding inside infra
-- map explicitly between persistence rows and domain records
-- keep runtime composition visible and small
-
-## Current Runtime
-
-- `file/`
-  Owns collection workspace directories, scratch/output paths, and immutable
-  uploaded input bytes through `FileObjectStore`. It owns no structured task,
-  build, artifact, collection, membership, or import state.
-- `memory/`
-  Direct isolated-test implementations for the collection and build
-  aggregates. Neither implementation is selectable at runtime.
-- `postgres/`
-  Owns users, browser sessions, collection metadata, stored-object metadata,
-  canonical documents and versions, collection-document membership, collection
-  file provenance, import provenance, Goal-intake handoffs, tasks, collection
-  builds, stage state, artifact versions, active-build selection, and
-  build-versioned Source structure, figures, references, document profiles,
-  reusable paper facts, research objectives, contexts, paper frames, evidence
-  routes, evidence units, logic chains, comparable results, collection
-  comparison assessments, pairwise relations, Research Objective lifecycle
-  state, Objective Understandings and expert review, Objective-focused
-  sessions/messages, Objective experiment plans, evaluation gold sets,
-  prediction snapshots, runs, scores, and failures through SQLAlchemy mappings
-  and direct aggregate repositories.
-  The application creates one engine and session factory and composes these
-  repositories and services in the FastAPI lifespan.
-- `sqlite/`
-  Retains one Source repository as a lightweight fixture for isolated unit,
-  router, export, and migration-baseline tests. It is not composed into
-  maintained runtime readers or writers and is not a selectable backend.
-
-Auth, collection, build, Source, paper-fact, objective, comparison,
-Understanding, review, session/message, and experiment-plan aggregates are
-composed directly in `main.py`. Evaluation callers receive the direct
-PostgreSQL repository explicitly. No aggregate has a repository factory or
-runtime fallback. Source pipeline JSON and Parquet outputs live under
-`infra/source/` runtime storage and are rebuildable intermediates, not a second
-persistence authority.
-
-No vector persistence exists. The accepted retrieval gate stopped before
-`pgvector`, embedding tables, or a runtime retrieval service were added;
-canonical PostgreSQL Source records remain authoritative.
-
-`database.py` owns the validated synchronous SQLAlchemy engine and session
-factory. The FastAPI lifespan shares this contract between auth, collection,
-and build repositories and disposes its owned engine at shutdown; injected test
-services remain caller-owned.
-
-`postgres/base.py` owns declarative metadata. `postgres/models/auth.py`,
-`postgres/models/collection.py`, `postgres/models/document.py`,
-`postgres/models/build.py`, `postgres/models/source.py`,
-`postgres/models/paper_fact.py`, `postgres/models/objective.py`,
-`postgres/models/comparison.py`, `postgres/models/understanding.py`,
-`postgres/models/evaluation.py`, and `postgres/models/objective_workspace.py`
-own their storage mappings; the matching direct
-aggregate repositories own explicit row/domain mapping and short transactions.
-`../../migrations/` owns the version history and is the only PostgreSQL schema
-change path; repositories never create tables.
-
-`PostgresCollectionRepository` is the single structured owner for collection
-metadata, canonical documents and versions, exact-version collection
-membership, object/file replicas, imports, imported-document links, and
-handoffs. Import registration creates or reuses document identity and commits
-membership, provenance, and membership-based collection count/status in one
-transaction. Identical content may have separate collection-scoped object
-replicas but only one immutable version. Collection deletion removes final
-unreferenced document identity and commits relational removal before the
-workspace directory is deleted. Maintained callers do not read or write
-collection file or import manifest JSON and do not scan input directories as a
-fallback authority.
-
-There is no separate document repository or service. Canonical registration is
-part of collection import, and keeping one repository preserves the single
-transaction that also owns file provenance and collection count.
-
-`PostgresBuildRepository` is the single structured owner for tasks, collection
-builds, ordered stages, immutable artifact versions, and active-build
-selection. It allocates collection-local build numbers and activates only newer
-successful builds in short transactions. `MemoryBuildRepository` mirrors this
-aggregate only for isolated tests. No maintained caller reads or writes task
-JSON or `artifacts.json`.
-
-`PostgresSourceArtifactRepository` is the single structured owner for Source
-documents, text units, blocks, tables, rows, cells, figures, references, and
-their associations. A write names one pending build; a normal read resolves
-only the active successful build. Exact stored-filename matching links every
-Source document to canonical collection membership and its immutable document
-version. Figure rows store object keys and verification metadata; figure bytes
-remain in the existing object store. References are extracted and persisted
-before activation, so the public reference POST is an idempotent active-build
-read rather than a post-build mutation.
-
-`PostgresPaperFactRepository` is the single structured owner for document
-profiles, evidence anchors, methods, sample variants, test conditions,
-baselines, measurements, characterization observations, and structure
-features. Writes name one pending build and validate each Source document and
-document version in the same transaction. Default reads resolve only the
-active successful build. Callers that also need objectives or comparisons
-receive the direct Objective and Comparison repositories explicitly; no
-composite repository or SQLite paper-fact fallback exists.
-
-`PostgresObjectiveRepository` is the single structured owner for research
-objectives, contexts, paper frames, evidence routes, evidence units, logic
-chains, and their ordered document, Source, paper-fact anchor, and evidence-unit
-links. Writes replace one explicitly named pending build; default reads resolve
-only the active successful build. The same repository owns
-`research_objective_lifecycles`, keyed by `(collection_id, objective_id)`, and
-pins each confirmed Objective to its exact immutable source build. Objective
-analysis derives its stages in memory and persists only the final
-objective-scoped Understanding through
-`PostgresResearchUnderstandingRepository`. It does not mutate
-the collection Objective build. No second Goal identity, lifecycle repository,
-SQLite objective path, fallback, or dual path remains.
-
-`PostgresResearchUnderstandingRepository` owns final Objective Understandings
-keyed by `(collection_id, objective_id)`. It validates the parent Objective
-lifecycle and replaces each normalized Understanding graph transactionally.
-
-`PostgresResearchUnderstandingReviewRepository` owns feedback and curation for
-Objective Findings. Writes validate the parent Understanding, Finding, and
-optional claim before commit, so cross-Objective review references fail at the
-persistence boundary.
-
-`PostgresObjectiveWorkspaceRepository` owns Objective-focused Goal sessions,
-ordered messages, and experiment plans. Goal session naming describes user
-intent, while `focused_objective_id` is the only persisted research identity.
-Copilot plans may reference only assistant messages from a session focused on
-the same collection and Objective.
-
-`PostgresEvaluationRepository` owns evaluation gold sets and items, prediction
-snapshots and items, and evaluation runs with their scores and failures. Each
-upsert preserves the parent collection identity and replaces child records in
-one transaction. Runs may reference only existing gold and prediction parents
-from the same collection. Application services require this repository as an
-explicit dependency; no SQLite evaluation path remains.
-
-`PostgresComparisonRepository` is the single structured owner for comparable
-results, collection-scoped assessments, pairwise relations, and their ordered
-source/evidence links. Writes replace one explicitly named pending build;
-default reads resolve only the active successful build. `ComparisonService`
-regenerates `ComparisonRowRecord` values from those semantic records for every
-row-facing read. No comparison-row table, SQLite comparison read, fallback, or
-dual write exists.
-
-The former broad Core persistence path, ConfirmedGoal runtime path, persistence
-factory, and SQLite Goal-session, experiment-plan, Understanding, review, and
-evaluation repositories have been deleted. There is no aggregate facade,
-fallback alias, compatibility path, or runtime storage selector.
 
 ## Runtime Boundary
 
-- PostgreSQL repositories own structured mutable state.
-- A single approved local object-store implementation owns immutable binary
-  bytes by storage key.
-- Alembic owns schema changes; repository reads never create or alter schema.
-- Application services receive only the concrete aggregate repositories they
-  use.
+- PostgreSQL owns structured mutable state.
+- The object store owns immutable uploaded and generated bytes.
+- Local output and cache paths are rebuildable scratch.
+- Alembic is the only runtime schema-change path.
+
+SQLite and memory repositories exist only for isolated tests. Maintained
+runtime composition uses one SQLAlchemy engine and explicit PostgreSQL
+repositories from `main.py`; there is no repository factory, runtime storage
+selector, or fallback read.
+
+## Objective Aggregate
+
+`PostgresObjectiveRepository` owns the complete durable Objective aggregate:
+
+```text
+research_objectives
+  -> objective_analyses
+     -> objective_paper_contributions
+     -> objective_evidence
+     -> objective_findings
+        -> objective_finding_relations
+        -> objective_finding_contexts
+        -> objective_finding_derivations
+```
+
+The identities are:
+
+- Objective: `(collection_id, objective_id)`
+- analysis version: `(collection_id, objective_id, analysis_version)`
+- paper contribution: analysis identity plus `document_id`
+- Evidence: analysis identity plus `evidence_id`
+- Finding: analysis identity plus `finding_id`
+- Relation: Finding identity plus `relation_order`
+- Context and Derivation: one-to-one with the Finding identity
+
+The Objective row stores confirmation state and active/published analysis
+version pointers. Execution status, progress, error, Source lineage, model, and
+prompt versions live on `objective_analyses`. A retry allocates a new version.
+Publishing validates all child references, marks that version succeeded, and
+advances the Objective's published pointer in one transaction. A failed run
+cannot replace the previous published version.
+
+Collection build stores candidate Objective definitions only. Deep analysis
+does not mutate build-versioned semantic records and does not persist a second
+Objective result graph or intermediate traversal identities.
+
+`PostgresFindingReviewRepository` owns `finding_feedback_records` and
+`finding_curation_records`. Every row references the exact published Finding
+identity. Cross-version or unknown references fail at the persistence/service
+boundary.
+
+`PostgresObjectiveWorkspaceRepository` owns Objective-focused assistant
+sessions, messages, and experiment plans in `objective_sessions`,
+`objective_messages`, and `objective_experiment_plans`. The class name reflects
+the user interaction surface; it is not an Objective analysis aggregate or a
+second research identity.
+
+## Other Aggregates
+
+- `PostgresCollectionRepository`
+  Owns collections, canonical documents and versions, exact collection
+  membership, stored-object metadata, import provenance, and intake handoffs.
+- `PostgresBuildRepository`
+  Owns tasks, collection builds, ordered stages, artifact versions, and active
+  build selection.
+- `PostgresSourceArtifactRepository`
+  Owns build-versioned Source documents, text units, blocks, tables, figures,
+  references, and their associations.
+- `PostgresPaperFactRepository`
+  Owns document profiles and reusable evidence-backed paper facts.
+- `PostgresComparisonRepository`
+  Owns comparable results, collection assessments, pairwise relations, and
+  source/evidence links. Comparison rows are deterministic read projections.
+- `PostgresEvaluationRepository`
+  Owns gold sets, prediction snapshots, evaluation runs, scores, and failures.
+
+## Implementation Rule
+
+SQLAlchemy models own storage shape, domain records own scientific meaning and
+invariants, and Pydantic models own HTTP payloads. Repositories map between
+those layers explicitly and use short transactions.
 
 Do not add a generic repository, persistence facade, compatibility wrapper,
-service locator, or runtime fallback. Update the real repository and its direct
-callers in the same cutover slice.
+dual write, runtime schema detection, or JSON fallback store. Change the owning
+repository and all direct callers together.

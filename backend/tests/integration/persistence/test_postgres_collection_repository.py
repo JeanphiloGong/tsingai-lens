@@ -25,7 +25,10 @@ from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
 )
+from tests.integration.persistence.database_cleanup import reset_postgres_schema
 from infra.persistence.postgres.models.collection import StoredObject
+from infra.persistence.postgres.models.build import CollectionBuild, Task
+from infra.persistence.postgres.models.source import SourceDocument
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -179,6 +182,79 @@ def test_collection_repository_updates_and_deletes_existing_record(
     assert collection_repository.read_collection("col_update") is None
     assert collection_repository.update_collection(updated) is False
     assert collection_repository.delete_collection("col_update") is False
+
+
+def test_collection_delete_removes_build_source_documents_before_memberships(
+    collection_repository,
+) -> None:
+    collection_id = "col_delete_built_source"
+    collection_repository.add_collection(_collection(collection_id))
+    import_record = _collection_import(
+        collection_id,
+        "built-source",
+        ingested_at="2026-07-19T08:01:00+00:00",
+    )
+    collection_repository.add_collection_import(
+        import_record,
+        updated_at="2026-07-19T08:01:00+00:00",
+    )
+    membership = collection_repository.list_collection_documents(collection_id)[0]
+    created_at = datetime(2026, 7, 19, 8, 2, tzinfo=timezone.utc)
+    with collection_repository.session_factory.begin() as session:
+        session.add(
+            Task(
+                task_id="task_delete_built_source",
+                collection_id=collection_id,
+                task_type="build",
+                status="completed",
+                current_stage="artifacts_ready",
+                progress_percent=100,
+                progress_detail=None,
+                output_path=None,
+                errors=[],
+                warnings=[],
+                details={},
+                created_at=created_at,
+                updated_at=created_at,
+                started_at=created_at,
+                finished_at=created_at,
+            )
+        )
+        session.flush()
+        session.add(
+            CollectionBuild(
+                build_id="build_delete_built_source",
+                task_id="task_delete_built_source",
+                collection_id=collection_id,
+                build_number=1,
+                status="succeeded",
+                created_at=created_at,
+                started_at=created_at,
+                finished_at=created_at,
+            )
+        )
+        session.add(
+            SourceDocument(
+                build_id="build_delete_built_source",
+                source_document_id="source_delete_built_source",
+                collection_id=collection_id,
+                collection_document_id=membership.collection_document_id,
+                document_version_id=membership.document_version_id,
+                human_readable_id=0,
+                title="Built source",
+                text="source text",
+                creation_date=None,
+                metadata_json={},
+            )
+        )
+
+    assert collection_repository.delete_collection(collection_id) is True
+    with collection_repository.session_factory() as session:
+        assert session.get(CollectionBuild, "build_delete_built_source") is None
+        assert session.get(
+            SourceDocument,
+            ("build_delete_built_source", "source_delete_built_source"),
+        ) is None
 
 
 @pytest.mark.parametrize(
@@ -354,9 +430,9 @@ def test_postgresql_enforces_collection_contract() -> None:
 
     engine = create_engine(url)
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    reset_postgres_schema(engine)
     with engine.begin() as connection:
         config.attributes["connection"] = connection
-        command.downgrade(config, "base")
         command.upgrade(config, "head")
 
     sessions = build_session_factory(engine)
@@ -421,7 +497,5 @@ def test_postgresql_enforces_collection_contract() -> None:
                 updated_at=now.isoformat(),
             )
     finally:
-        with engine.begin() as connection:
-            config.attributes["connection"] = connection
-            command.downgrade(config, "base")
+        reset_postgres_schema(engine)
         engine.dispose()

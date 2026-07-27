@@ -2,7 +2,6 @@
 	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
-	import ResearchUnderstandingWorkbench from '../../_components/ResearchUnderstandingWorkbench.svelte';
 	import { errorMessage } from '../../../../_shared/api';
 	import { t } from '../../../../_shared/i18n';
 	import {
@@ -176,7 +175,6 @@
 	$: materialId = $page.params.material_id ?? '';
 	$: loadKey = `${collectionId}:${materialId}`;
 	$: sampleRows = materialProfile?.sample_matrix.rows ?? [];
-	$: understanding = materialProfile?.understanding ?? null;
 	$: sampleColumns = sampleMatrixColumns(materialProfile, sampleRows);
 	$: propertySummaries = materialProfile?.measured_properties ?? [];
 	$: propertyColumns = materialPropertyColumns(materialProfile, sampleRows, sampleColumns, $t);
@@ -1317,15 +1315,6 @@
 			<p>{$t('research.materialProfile.emptyBody')}</p>
 		</section>
 	{:else}
-		<ResearchUnderstandingWorkbench
-			{understanding}
-			{collectionId}
-			returnTo={materialHref()}
-			bodyKey="research.understanding.materialBody"
-			titleId="material-understanding-title"
-		/>
-
-
 		<div class="dossier-layout">
 			<main class="dossier-main" aria-label={$t('research.materialDossier.mainLabel')}>
 				<section id="material-problems" class="dossier-card material-problems-card">

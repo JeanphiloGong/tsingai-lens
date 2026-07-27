@@ -301,6 +301,7 @@
     ],
     "research_objectives": [
       {
+        "collection_id": "col_baseline",
         "objective_id": "objective_strength",
         "question": "How does heat treatment affect yield strength of Synthetic Alloy A?",
         "material_scope": ["Synthetic Alloy A"],
@@ -310,67 +311,125 @@
         "seed_document_ids": ["doc_strength"],
         "excluded_document_ids": [],
         "confidence": 1.0,
-        "reason": "Synthetic baseline objective."
+        "reason": "Synthetic baseline objective.",
+        "confirmation_status": "confirmed",
+        "active_analysis_version": 1,
+        "published_analysis_version": 1
       }
     ],
-    "research_understandings": [
+    "objective_analyses": [
       {
-        "schema_version": "research_understanding.v1",
-        "state": "ready",
-        "scope": {
-          "scope_type": "objective",
-          "collection_id": "col_baseline",
-          "material_id": null,
-          "objective_id": "objective_strength",
-          "document_id": null,
-          "title": "Synthetic strength goal"
-        },
-        "claims": [
-          {
-            "claim_id": "claim_strength",
-            "claim_type": "finding",
-            "statement": "Heat-treated Synthetic Alloy A reached 620 MPa yield strength.",
-            "status": "supported",
-            "confidence": 1.0,
-            "strength": "direct",
-            "evidence_ref_ids": ["evidence_strength"],
-            "context_ids": ["context_strength"],
-            "source_object_ids": ["result_strength"],
-            "warnings": []
-          }
-        ],
-        "relations": [],
-        "evidence_refs": [
-          {
-            "evidence_ref_id": "evidence_strength",
-            "source_kind": "text",
-            "document_id": "doc_strength",
-            "label": "Synthetic result paragraph",
-            "locator": {"source_ref": "block_result"},
-            "fact_ids": ["result_strength"],
-            "anchor_ids": ["anchor_strength"],
-            "confidence": 1.0,
-            "traceability_status": "resolved",
-            "evidence_role": "supporting",
-            "quote": "Result: yield strength reached 620 MPa.",
-            "href": "/collections/col_baseline/documents/doc_strength?block_id=block_result"
-          }
-        ],
-        "contexts": [
-          {
-            "context_id": "context_strength",
-            "label": "Room-temperature tensile test",
-            "material_scope": ["Synthetic Alloy A"],
-            "process_context": {"heat_treatment_c": 700},
-            "test_condition": {"temperature_c": 25},
-            "property_scope": ["yield_strength"],
-            "limitations": []
-          }
-        ],
+        "collection_id": "col_baseline",
+        "objective_id": "objective_strength",
+        "analysis_version": 1,
+        "source_build_id": "build_baseline",
+        "pipeline_version": "objective-analysis.v2",
+        "model_name": "synthetic-model",
+        "prompt_versions": {"finding_synthesis": "finding_synthesis.v1"},
+        "status": "succeeded",
+        "phase": "completed",
+        "processed_document_count": 1,
+        "total_document_count": 1,
+        "created_at": "2026-01-01T00:02:00+00:00",
+        "started_at": "2026-01-01T00:02:10+00:00",
+        "completed_at": "2026-01-01T00:02:50+00:00"
+      }
+    ],
+    "objective_paper_contributions": [
+      {
+        "collection_id": "col_baseline",
+        "objective_id": "objective_strength",
+        "analysis_version": 1,
+        "document_id": "doc_strength",
+        "analysis_status": "analyzed",
+        "relevance": "high",
+        "paper_role": "primary_experiment",
+        "contribution_summary": "Reports a direct heat-treatment strength result.",
+        "material_match": ["Synthetic Alloy A"],
+        "changed_variables": ["heat treatment"],
+        "measured_property_scope": ["yield strength"],
+        "test_environment_scope": ["room-temperature tensile test"],
         "warnings": [],
-        "model_traces": [],
-        "summary": {"claim_count": 1, "relation_count": 0, "evidence_ref_count": 1, "context_count": 1},
-        "presentation": {}
+        "confidence": 1.0
+      }
+    ],
+    "objective_evidence": [
+      {
+        "collection_id": "col_baseline",
+        "objective_id": "objective_strength",
+        "analysis_version": 1,
+        "evidence_id": "evidence_strength",
+        "document_id": "doc_strength",
+        "source_kind": "text_window",
+        "source_ref": "block_result",
+        "source_excerpt": "Result: yield strength reached 620 MPa.",
+        "page_numbers": [2],
+        "related_source_refs": [],
+        "evidence_role": "direct_result",
+        "selection_status": "extracted",
+        "selection_reason": "Direct objective result.",
+        "evidence_kind": "measurement",
+        "property_normalized": "yield strength",
+        "material_system": {"name": "Synthetic Alloy A"},
+        "sample_context": {"state": "heat-treated"},
+        "process_context": {"heat_treatment_c": 700},
+        "test_condition": {"temperature_c": 25},
+        "resolved_condition": {},
+        "value_payload": {"value": 620},
+        "unit": "MPa",
+        "baseline_context": {"label": "as-built"},
+        "interpretation": "The heat-treated sample reached 620 MPa yield strength.",
+        "join_keys": {"variable_process_axes": ["heat treatment"]},
+        "anchor_ids": ["anchor_strength"],
+        "resolution_status": "resolved",
+        "confidence": 1.0
+      }
+    ],
+    "objective_findings": [
+      {
+        "collection_id": "col_baseline",
+        "objective_id": "objective_strength",
+        "analysis_version": 1,
+        "finding_id": "finding_strength",
+        "finding_level": "paper",
+        "statement": "Heat-treated Synthetic Alloy A reached 620 MPa yield strength.",
+        "variables": ["heat treatment"],
+        "mediators": [],
+        "outcomes": ["yield strength"],
+        "direction": "reports",
+        "scope_summary": "Synthetic Alloy A under a room-temperature tensile test.",
+        "evidence_strength": "moderate",
+        "generalization_status": "paper_level_only",
+        "paper_count": 1,
+        "confidence": 1.0,
+        "display_rank": 0,
+        "relations": [
+          {
+            "source_term": "heat treatment",
+            "relation_type": "associated_with",
+            "target_term": "yield strength",
+            "direction": "reports",
+            "assertion_strength": "associative",
+            "supporting_evidence_ids": ["evidence_strength"]
+          }
+        ],
+        "context": {
+          "material_system": {"name": "Synthetic Alloy A"},
+          "process_conditions": [{"heat_treatment_c": 700}],
+          "sample_state": {"state": "heat-treated"},
+          "test_conditions": [{"temperature_c": 25}],
+          "comparison_baseline": {"label": "as-built"},
+          "limitations": ["single paper"],
+          "supporting_evidence_ids": ["evidence_strength"]
+        },
+        "derivation": {
+          "synthesis_mode": "paper",
+          "comparison_status": "insufficient_confirmation",
+          "contributing_document_ids": ["doc_strength"],
+          "supporting_evidence_ids": ["evidence_strength"],
+          "contradicting_evidence_ids": [],
+          "rationale": "One direct result supports this paper-level Finding."
+        }
       }
     ],
     "goal_sessions": [
@@ -450,9 +509,8 @@
         "feedback_id": "feedback_strength",
         "collection_id": "col_baseline",
         "objective_id": "objective_strength",
+        "analysis_version": 1,
         "finding_id": "finding_strength",
-        "claim_id": "claim_strength",
-        "finding_fingerprint": "finding.v1:synthetic-strength",
         "review_status": "correct",
         "issue_type": "none",
         "note": "Synthetic claim is directly supported.",
@@ -465,10 +523,8 @@
         "curation_id": "curation_strength",
         "collection_id": "col_baseline",
         "objective_id": "objective_strength",
+        "analysis_version": 1,
         "finding_id": "finding_strength",
-        "claim_id": "claim_strength",
-        "finding_fingerprint": "finding.v1:synthetic-strength",
-        "curated_claim_type": "finding",
         "curated_status": "supported",
         "curated_statement": "Heat-treated Synthetic Alloy A reached 620 MPa yield strength.",
         "curated_support_grade": "direct",
@@ -478,8 +534,7 @@
         "curated_outcomes": ["yield strength"],
         "curated_direction": "reports",
         "curated_scope_summary": "Synthetic Alloy A",
-        "curated_evidence_ref_ids": ["evidence_strength"],
-        "curated_context_ids": ["context_strength"],
+        "curated_evidence_ids": ["evidence_strength"],
         "note": "Synthetic curation record.",
         "reviewer": "fixture-reviewer",
         "updated_at": "2026-01-01T00:04:30+00:00"

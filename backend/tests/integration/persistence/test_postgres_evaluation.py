@@ -29,6 +29,7 @@ from infra.persistence.postgres.collection_repository import (
 from infra.persistence.postgres.evaluation_repository import (
     PostgresEvaluationRepository,
 )
+from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -221,9 +222,9 @@ def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascade() ->
     engine = create_engine(url)
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
     try:
+        reset_postgres_schema(engine)
         with engine.begin() as connection:
             config.attributes["connection"] = connection
-            command.downgrade(config, "base")
             command.upgrade(config, "head")
 
         sessions = build_session_factory(engine)
@@ -315,7 +316,5 @@ def test_postgresql_enforces_evaluation_foreign_keys_and_collection_cascade() ->
         assert repository.read_prediction_snapshot("snapshot-cascade") is None
         assert repository.read_evaluation_run("evaluation-cascade") is None
     finally:
-        with engine.begin() as connection:
-            config.attributes["connection"] = connection
-            command.downgrade(config, "base")
+        reset_postgres_schema(engine)
         engine.dispose()

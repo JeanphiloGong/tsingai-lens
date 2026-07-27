@@ -24,8 +24,8 @@ const routes = [
 	[`/collections/${collectionId}/documents/${documentId}?page=2`, 'Source view is ready'],
 	[`/collections/${collectionId}/materials`, 'Canonical materials detected'],
 	[`/collections/${collectionId}/materials/${materialId}`, '316L stainless steel'],
-	[`/collections/${collectionId}/objectives`, 'Research objectives'],
-	[`/collections/${collectionId}/objectives/${objectiveId}`, 'Research understanding'],
+	[`/collections/${collectionId}/objectives`, '研究目标'],
+	[`/collections/${collectionId}/objectives/${objectiveId}`, 'Findings'],
 	[`/collections/${collectionId}/results`, 'Extracted Results'],
 	[`/collections/${collectionId}/results/${resultId}`, 'Evidence chain'],
 	[`/collections/${collectionId}/evidence`, 'Evidence Review'],
@@ -115,7 +115,9 @@ test.describe('page interaction audit', () => {
 		await page.goto(`/collections/${collectionId}/objectives?audit_state=uploaded`);
 
 		await expect(page.getByRole('heading', { name: 'Processing required' })).toBeVisible();
-		await expect(page.getByText('Process this collection before opening research objectives')).toBeVisible();
+		await expect(
+			page.getByText('Process this collection before opening research objectives')
+		).toBeVisible();
 		await expect(page.getByRole('link', { name: 'Back to workspace' })).toHaveAttribute(
 			'href',
 			`/collections/${collectionId}`
@@ -434,40 +436,37 @@ async function mockApis(page: Page) {
 		if (path === `/api/v1/collections/${collectionId}/materials/${materialId}/research-view`) {
 			return route.fulfill(json(materialProfile()));
 		}
-		if (path === `/api/v1/collections/${collectionId}/research-understanding/curations`) {
-			return route.fulfill(json({ collection_id: collectionId, items: [] }));
-		}
-		if (path === `/api/v1/collections/${collectionId}/research-understanding/feedback`) {
-			return route.fulfill(json({ collection_id: collectionId, items: [] }));
-		}
-		if (path === `/api/v1/collections/${collectionId}/research-understanding/dataset`) {
-			return route.fulfill(
-				json({
-					schema_version: 'research_understanding_dataset.v1',
-					dataset_id: 'rud_obj_1',
-					collection_id: collectionId,
-					objective_id: objectiveId,
-					task_type: 'research_understanding_finding',
-					metric_profile: 'materials_expert',
-					label_status_filter: null,
-					dataset_use_status_filter: null,
-					item_count: 0,
-					label_counts: { candidate: 0, silver: 0, gold: 0, rejected: 0 },
-					quality_summary: {},
-					items: [],
-					warnings: []
-				})
-			);
-		}
 		if (path === `/api/v1/collections/${collectionId}/objectives`) {
 			return route.fulfill(json(objectives()));
 		}
-		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/research-view`) {
+		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}`) {
 			return route.fulfill(json(objectiveView()));
 		}
-		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/experiment-plans`) {
+		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings`) {
 			return route.fulfill(
-				json({ collection_id: collectionId, objective_id: objectiveId, items: [] })
+				json({
+					collection_id: collectionId,
+					objective_id: objectiveId,
+					analysis_version: 1,
+					items: [objectiveFinding()],
+					offset: 0,
+					limit: 50,
+					total: 1
+				})
+			);
+		}
+		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence`) {
+			return route.fulfill(
+				json({
+					collection_id: collectionId,
+					objective_id: objectiveId,
+					analysis_version: 1,
+					finding_id: 'finding-1',
+					items: [objectiveEvidence()],
+					offset: 0,
+					limit: 100,
+					total: 1
+				})
 			);
 		}
 		if (path === `/api/v1/collections/${collectionId}/results`)
@@ -658,101 +657,6 @@ function evidenceRef() {
 	};
 }
 
-function understanding(scopeType: 'objective' | 'material') {
-	const title =
-		scopeType === 'objective'
-			? 'How does heat treatment affect LPBF 316L tensile strength?'
-			: '316L stainless steel';
-	const scope =
-		scopeType === 'objective'
-			? {
-					scope_type: 'objective',
-					collection_id: collectionId,
-					material_id: null,
-					objective_id: objectiveId,
-					document_id: null,
-					title
-				}
-			: {
-					scope_type: 'material',
-					collection_id: collectionId,
-					material_id: materialId,
-					objective_id: null,
-					document_id: null,
-					title
-				};
-	return {
-		schema_version: 'research_understanding.v1',
-		state: 'ready',
-		scope,
-		claims: [
-			{
-				claim_id: `${scopeType}_claim_1`,
-				claim_type: 'measurement',
-				statement:
-					scopeType === 'objective'
-						? 'Yield strength reached 560 MPa.'
-						: 'Hardness is reported as 215 HV.',
-				status: 'supported',
-				confidence: 0.92,
-				strength: null,
-				evidence_ref_ids: [`${scopeType}_ref_1`],
-				context_ids: [`${scopeType}_ctx_1`],
-				source_object_ids: ['unit_measure'],
-				warnings: []
-			}
-		],
-		relations: [
-			{
-				relation_id: `${scopeType}_relation_1`,
-				relation_type: 'compares',
-				subject: scopeType === 'objective' ? 'HT-SLM' : 'scan strategy',
-				predicate: 'compares',
-				object: scopeType === 'objective' ? 'as-built baseline' : 'hardness',
-				status: 'supported',
-				confidence: 0.8,
-				evidence_ref_ids: [`${scopeType}_ref_1`],
-				context_ids: [`${scopeType}_ctx_1`],
-				source_object_ids: ['unit_measure'],
-				warnings: []
-			}
-		],
-		evidence_refs: [
-			{
-				evidence_ref_id: `${scopeType}_ref_1`,
-				source_kind: 'table',
-				document_id: documentId,
-				label: 'Table 2',
-				locator: { source_ref: 'Table 2', page: 3 },
-				fact_ids: ['unit_measure'],
-				anchor_ids: ['anc_1'],
-				confidence: 0.92,
-				traceability_status: 'resolved',
-				quote: scopeType === 'objective' ? 'Yield strength reached 560 MPa.' : '215 HV',
-				href: null
-			}
-		],
-		contexts: [
-			{
-				context_id: `${scopeType}_ctx_1`,
-				label: scopeType === 'objective' ? 'Objective scope' : 'Material scope',
-				material_scope: ['316L stainless steel'],
-				process_context: { process_families: ['LPBF'] },
-				test_condition: {},
-				property_scope: scopeType === 'objective' ? ['yield strength'] : ['hardness'],
-				limitations: []
-			}
-		],
-		warnings: [],
-		summary: {
-			claim_count: 1,
-			relation_count: 1,
-			evidence_ref_count: 1,
-			context_count: 1
-		}
-	};
-}
-
 function value(displayValue: string) {
 	return {
 		display_value: displayValue,
@@ -907,7 +811,6 @@ function materialProfile() {
 			]
 		},
 		comparable_groups: [],
-		understanding: understanding('material'),
 		evidence_links: {},
 		warnings: []
 	};
@@ -1238,33 +1141,24 @@ function evidence() {
 function objectives() {
 	return {
 		collection_id: collectionId,
-		state: 'ready',
-		readiness: {
-			objectives_ready: true,
-			frames_ready: true,
-			routes_ready: true,
-			evidence_units_ready: true,
-			logic_chain_ready: true
-		},
 		objectives: [
 			{
+				collection_id: collectionId,
 				objective_id: objectiveId,
 				question: 'How does heat treatment affect LPBF 316L tensile strength?',
 				material_scope: ['316L stainless steel'],
 				process_axes: ['heat treatment'],
 				property_axes: ['yield strength'],
 				comparison_intent: 'Compare as-built and heat-treated LPBF 316L.',
+				seed_document_ids: [documentId],
+				excluded_document_ids: [],
 				confidence: 0.91,
-				status: 'ready',
-				analysis_error: null,
-				analysis_progress: null,
+				reason: null,
+				confirmation_status: 'confirmed',
+				active_analysis_version: 1,
+				published_analysis_version: 1,
 				created_at: now(),
-				updated_at: now(),
-				state: 'ready',
-				paper_frame_count: 1,
-				evidence_route_count: 1,
-				evidence_unit_count: 2,
-				logic_chain_count: 1
+				updated_at: now()
 			}
 		]
 	};
@@ -1273,71 +1167,117 @@ function objectives() {
 function objectiveView() {
 	const objective = objectives().objectives[0];
 	return {
-		...objectives(),
+		collection_id: collectionId,
 		objective,
-		objective_context: {
-			objective_id: objectiveId,
-			question: objective.question,
-			material_scope: ['316L stainless steel'],
-			variable_process_axes: ['heat treatment'],
-			process_context_axes: [],
-			target_property_axes: ['yield strength'],
-			excluded_property_axes: [],
-			routing_hints: [],
-			extraction_guidance: {},
-			confidence: 0.88
-		},
-		paper_frames: [
+		active_analysis: objectiveAnalysis(),
+		published_analysis: objectiveAnalysis(),
+		warnings: []
+	};
+}
+
+function objectiveAnalysis() {
+	return {
+		collection_id: collectionId,
+		objective_id: objectiveId,
+		analysis_version: 1,
+		source_build_id: 'build-1',
+		pipeline_version: 'objective-analysis.v2',
+		model_name: 'model-1',
+		prompt_versions: {},
+		status: 'succeeded',
+		phase: 'succeeded',
+		processed_document_count: 1,
+		total_document_count: 1,
+		current_document_id: null,
+		progress_message: null,
+		error_code: null,
+		error_message: null,
+		created_at: now(),
+		started_at: now(),
+		completed_at: now()
+	};
+}
+
+function objectiveFinding() {
+	return {
+		collection_id: collectionId,
+		objective_id: objectiveId,
+		analysis_version: 1,
+		finding_id: 'finding-1',
+		finding_level: 'paper',
+		statement: 'Annealing was associated with higher tensile strength.',
+		variables: ['heat treatment'],
+		mediators: [],
+		outcomes: ['tensile strength'],
+		direction: 'increase',
+		scope_summary: 'LPBF 316L under the reported tensile-test condition.',
+		evidence_strength: 'moderate',
+		generalization_status: 'paper_level_only',
+		paper_count: 1,
+		confidence: 0.88,
+		display_rank: 0,
+		relations: [
 			{
-				frame_id: 'opf_1',
-				objective_id: objectiveId,
-				document_id: documentId,
-				title: 'LPBF 316L heat treatment study',
-				source_filename: 'paper-a.txt',
-				relevance: 'high',
-				paper_role: 'primary_experiment',
-				background: 'Reports tensile testing of as-built and heat-treated LPBF 316L.',
-				material_match: ['316L stainless steel'],
-				changed_variables: ['heat treatment'],
-				measured_property_scope: ['yield strength'],
-				test_environment_scope: [],
-				relevant_sections: ['Results'],
-				relevant_tables: ['table-2'],
-				excluded_tables: []
+				relation_order: 0,
+				source_term: 'annealing',
+				relation_type: 'associated_with',
+				target_term: 'tensile strength',
+				direction: 'increase',
+				assertion_strength: 'associative',
+				supporting_evidence_ids: ['evidence-1']
 			}
 		],
-		evidence_routes: [],
-		evidence_units: [
-			{
-				evidence_unit_id: 'unit_measure',
-				objective_id: objectiveId,
-				document_id: documentId,
-				unit_kind: 'measurement',
-				property_normalized: 'yield strength',
-				material_system: {},
-				sample_context: { sample: 'HT-SLM' },
-				process_context: { heat_treatment: 'annealed' },
-				resolved_condition: {},
-				test_condition: { method: 'tensile test' },
-				value_payload: { statement: 'Yield strength reached 560 MPa.' },
-				unit: 'MPa',
-				source_refs: [],
-				evidence_anchor_ids: [],
-				resolution_status: 'resolved',
-				confidence: 0.92
-			}
-		],
-		logic_chain: {
-			logic_chain_id: 'chain_1',
-			objective_id: objectiveId,
-			chain_scope: 'objective',
-			question: objective.question,
-			evidence_unit_ids: ['unit_measure'],
-			summary: 'Heat-treated LPBF 316L is supported by tensile evidence.',
-			chain_payload: {},
-			confidence: 0.83
+		context: {
+			material_system: { name: '316L' },
+			process_conditions: [{ state: 'annealed' }],
+			sample_state: {},
+			test_conditions: [{ method: 'tensile test' }],
+			comparison_baseline: { state: 'as-built' },
+			limitations: ['Single paper only.'],
+			supporting_evidence_ids: ['evidence-1']
 		},
-		understanding: understanding('objective')
+		derivation: {
+			synthesis_mode: 'paper',
+			comparison_status: 'insufficient_confirmation',
+			contributing_document_ids: [documentId],
+			supporting_evidence_ids: ['evidence-1'],
+			contradicting_evidence_ids: [],
+			rationale: 'One direct result supports this paper-level Finding.'
+		}
+	};
+}
+
+function objectiveEvidence() {
+	return {
+		collection_id: collectionId,
+		objective_id: objectiveId,
+		analysis_version: 1,
+		evidence_id: 'evidence-1',
+		document_id: documentId,
+		source_kind: 'text_window',
+		source_ref: 'results',
+		source_excerpt: 'After annealing, tensile strength increased to 620 MPa.',
+		page_numbers: [3],
+		related_source_refs: [],
+		evidence_role: 'direct_result',
+		selection_status: 'extracted',
+		selection_reason: 'Direct result.',
+		evidence_kind: 'measurement',
+		property_normalized: 'tensile strength',
+		material_system: { name: '316L' },
+		sample_context: {},
+		process_context: {},
+		test_condition: {},
+		resolved_condition: {},
+		value_payload: { value: 620 },
+		unit: 'MPa',
+		baseline_context: {},
+		interpretation: null,
+		join_keys: {},
+		anchor_ids: [],
+		resolution_status: 'resolved',
+		failure_reason: null,
+		confidence: 0.92
 	};
 }
 

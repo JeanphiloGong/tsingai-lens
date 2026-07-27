@@ -29,7 +29,6 @@ from infra.persistence.postgres.models.comparison import (
     comparable_result_observation_links,
     pairwise_comparison_anchor_links,
 )
-from infra.persistence.postgres.models.objective import ObjectiveEvidenceUnitRecord
 from infra.persistence.postgres.models.paper_fact import (
     PaperFactBaselineReference,
     PaperFactCharacterizationObservation,
@@ -275,16 +274,9 @@ class PostgresComparisonRepository:
             PaperFactMeasurementResult,
             (build_id, item.source_result_id),
         )
-        objective_source = session.get(
-            ObjectiveEvidenceUnitRecord,
-            (build_id, item.source_result_id),
-        )
-        matches = [source for source in (paper_source, objective_source) if source]
-        if len(matches) != 1:
-            raise ValueError(
-                "comparable source result must resolve to exactly one source"
-            )
-        source = matches[0]
+        if paper_source is None:
+            raise ValueError("comparable source result must resolve to paper measurement")
+        source = paper_source
         if (
             source.collection_id != collection_id
             or source.source_document_id != item.source_document_id
@@ -292,11 +284,7 @@ class PostgresComparisonRepository:
             raise ValueError(
                 "comparable source result has cross-build document lineage"
             )
-        return (
-            "paper_measurement"
-            if paper_source is not None
-            else "objective_evidence_unit"
-        )
+        return "paper_measurement"
 
     def _validate_comparable_links(
         self,
@@ -522,11 +510,6 @@ class PostgresComparisonRepository:
             paper_result_id=(
                 item.source_result_id if source_kind == "paper_measurement" else None
             ),
-            objective_evidence_unit_id=(
-                item.source_result_id
-                if source_kind == "objective_evidence_unit"
-                else None
-            ),
             source_document_id=item.source_document_id,
             variant_id=item.binding.variant_id,
             baseline_id=item.binding.baseline_id,
@@ -622,8 +605,7 @@ class PostgresComparisonRepository:
         return ComparableResult.from_mapping(
             {
                 "comparable_result_id": result_id,
-                "source_result_id": row.paper_result_id
-                or row.objective_evidence_unit_id,
+                "source_result_id": row.paper_result_id,
                 "source_document_id": row.source_document_id,
                 "binding": {
                     "variant_id": row.variant_id,

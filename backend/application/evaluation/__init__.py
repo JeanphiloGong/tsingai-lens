@@ -5,17 +5,17 @@ from application.evaluation.gold_service import EvaluationGoldService
 from application.evaluation.prediction_snapshot_service import (
     EvaluationPredictionSnapshotService,
 )
-from application.evaluation.research_understanding_feedback_service import (
-    ResearchUnderstandingFeedbackService,
+from application.evaluation.finding_feedback_service import (
+    FindingFeedbackService,
 )
-from application.evaluation.research_understanding_review_import_service import (
-    ResearchUnderstandingReviewImportService,
+from application.evaluation.finding_review_import_service import (
+    FindingReviewImportService,
 )
 
 __all__ = [
     "CoreEvaluationService",
     "EvaluationGoldService",
     "EvaluationPredictionSnapshotService",
-    "ResearchUnderstandingFeedbackService",
-    "ResearchUnderstandingReviewImportService",
+    "FindingFeedbackService",
+    "FindingReviewImportService",
 ]

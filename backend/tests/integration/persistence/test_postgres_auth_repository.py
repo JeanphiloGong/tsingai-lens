@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 
 from infra.persistence.database import build_session_factory
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
+from tests.integration.persistence.database_cleanup import reset_postgres_schema
 from infra.persistence.postgres.models.auth import AuthSession
 
 
@@ -104,9 +105,9 @@ def test_postgresql_enforces_auth_contract(monkeypatch) -> None:
 
     engine = create_engine(url)
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    reset_postgres_schema(engine)
     with engine.begin() as connection:
         config.attributes["connection"] = connection
-        command.downgrade(config, "base")
         command.upgrade(config, "head")
     repository = PostgresAuthRepository(build_session_factory(engine))
     try:
@@ -174,7 +175,7 @@ def test_postgresql_enforces_auth_contract(monkeypatch) -> None:
         from main import create_app
 
         monkeypatch.setattr(
-            "main.ResearchUnderstandingService",
+            "main.FindingSynthesisService",
             lambda **_kwargs: object(),
         )
         monkeypatch.setattr("main.GoalSessionService", lambda **_kwargs: object())
@@ -205,7 +206,5 @@ def test_postgresql_enforces_auth_contract(monkeypatch) -> None:
             assert logout.status_code == 200
             assert client.get("/api/v1/auth/me").status_code == 401
     finally:
-        with engine.begin() as connection:
-            config.attributes["connection"] = connection
-            command.downgrade(config, "base")
+        reset_postgres_schema(engine)
         engine.dispose()

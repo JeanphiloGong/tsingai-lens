@@ -56,10 +56,6 @@ except Exception:  # noqa: BLE001
 _OBJECTIVE_PROGRESS_STAGE_PERCENT = {
     "objective_paper_skim_started": 72,
     "objective_discovery_started": 73,
-    "objective_paper_framing_started": 74,
-    "objective_evidence_routing_started": 75,
-    "objective_evidence_units_started": 76,
-    "objective_logic_chains_started": 78,
 }
 _OBJECTIVE_PROGRESS_UPDATE_INTERVAL = 5
 

@@ -16,7 +16,7 @@ model. In particular:
 
 - collections remain the Lens v1 working scope
 - reusable facts remain separate from collection projections
-- every claim remains traceable to Source evidence
+- every Finding remains traceable to exact Source Evidence
 - rows, cards, graphs, reports, and exports remain downstream views
 
 ## The Storage Rule
@@ -55,15 +55,14 @@ accidentally restore legacy ownership.
 | Collection builds and stage state | PostgreSQL `collection_builds` and `build_stages` | No | PostgreSQL |
 | Artifact readiness and active-build selection | PostgreSQL `artifact_versions` and `collection_active_builds` | No | PostgreSQL metadata; binary exports in object storage |
 | Users and auth sessions | PostgreSQL `auth_users` and `auth_sessions` | No | PostgreSQL |
-| Goal sessions, messages, and Objective experiment plans | PostgreSQL `objective_goal_sessions`, `objective_goal_messages`, and `objective_experiment_plans` | No | PostgreSQL |
+| Objective sessions, messages, and experiment plans | PostgreSQL `objective_sessions`, `objective_messages`, and `objective_experiment_plans` | No | PostgreSQL |
 | Source documents, text units, blocks, tables, rows, cells, figures, references, and associations | PostgreSQL build-versioned Source tables | No | PostgreSQL metadata |
 | Document profiles and reusable paper facts | PostgreSQL build-versioned paper-fact tables | No | PostgreSQL |
-| Research objectives, contexts, paper frames, evidence routes, evidence units, and logic chains | PostgreSQL build-versioned objective tables | No | PostgreSQL |
-| Research Objective confirmation and analysis lifecycle | PostgreSQL `research_objective_lifecycles` | No | PostgreSQL |
+| Research Objective candidates and paper skims | PostgreSQL `research_objectives`, `objective_builds`, and `objective_paper_skims` | No | PostgreSQL |
+| Versioned Objective analysis, paper contributions, Evidence, Findings, Relations, Contexts, and Derivations | PostgreSQL `objective_analyses` and `objective_*` child tables | No | PostgreSQL |
 | Comparable results, collection assessments, and pairwise comparison relations | PostgreSQL build-versioned comparison tables | No | PostgreSQL |
 | Comparison rows | In-memory deterministic projection | Yes | No durable store |
-| Research understandings | PostgreSQL normalized Objective Understanding tables | No | PostgreSQL |
-| Finding feedback and curation | PostgreSQL `objective_finding_feedback` and `objective_finding_curations` | No | PostgreSQL |
+| Finding feedback and curation | PostgreSQL `finding_feedback_records` and `finding_curation_records` | No | PostgreSQL |
 | Evaluation gold sets, items, prediction snapshots, items, runs, scores, and failures | PostgreSQL `evaluation_*` tables | No | PostgreSQL |
 | Extracted figure image bytes | Collection/build-scoped object keys | Re-extractable when source bytes and parser version exist | Object storage with PostgreSQL Source figure metadata |
 | Source pipeline JSON, Parquet, state, and statistics | collection and top-level `output/` paths | Yes; files may duplicate PostgreSQL Source rows | Local scratch only |
@@ -129,7 +128,7 @@ from builds that never generated comparison semantics.
 
 Runtime projections use focused aggregate reads. Workspace, graph,
 research-view, and prediction-snapshot operations request only the PaperFact,
-Objective, Comparison, or Understanding families they consume. Within one
+Objective, or Comparison families they consume. Within one
 operation, each consumed semantic aggregate is read at most once and the
 already-loaded value is passed into projection builders. Research-view does
 not resolve comparison projection for material-list or document-only paths.
@@ -137,16 +136,17 @@ not resolve comparison projection for material-list or document-only paths.
 representative response counts, including generated-but-empty comparison
 semantics.
 
-Objective analysis reads the exact immutable Objective build pinned by
-`research_objective_lifecycles`, derives frames, routes, evidence units, and a
-logic chain in memory, and persists only the final objective-scoped
-`ResearchUnderstanding` through `PostgresResearchUnderstandingRepository`.
-Lifecycle state stays on the existing `PostgresObjectiveRepository`; there is
-no separate Goal identity or lifecycle repository. Analysis never rewrites an
-active collection objective build. Review state uses
-`PostgresResearchUnderstandingReviewRepository`, while sessions, messages, and
-plans use `PostgresObjectiveWorkspaceRepository`; all are composed once in the
-FastAPI lifespan with no runtime SQLite fallback.
+Collection build persists candidate Objective definitions and paper skims.
+Confirmation changes only the `ResearchObjective.confirmation_status`. Deep
+analysis allocates a new `objective_analyses.analysis_version`, pins the exact
+Source build, and writes `PaperContribution`, `ObjectiveEvidence`, `Finding`,
+`FindingRelation`, `FindingContext`, and `FindingDerivation` records under the
+same composite owner. A successful version and the root's published pointer
+commit atomically. A failed retry preserves the prior published version.
+Review state uses `PostgresFindingReviewRepository`, while sessions, messages,
+and plans use `PostgresObjectiveWorkspaceRepository`; all are composed once in
+the FastAPI lifespan with no runtime SQLite fallback. The workspace repository
+name describes the interaction surface and does not own analysis output.
 
 Evaluation gold sets, prediction snapshots, runs, scores, and failures use the
 direct `PostgresEvaluationRepository`. Each service receives that repository
@@ -180,8 +180,11 @@ history and are not a supported data or API contract.
 - A storage key locates bytes. PostgreSQL metadata records its SHA-256, media
   type, byte size, object kind, and creation time.
 - Source and Core records identify the immutable build that produced them.
-- One Objective lifecycle row points to the exact immutable Objective build
-  version selected at confirmation.
+- One Research Objective owns candidate/confirmed state and active/published
+  analysis-version pointers.
+- Every analysis child includes `collection_id`, `objective_id`, and
+  `analysis_version`; a Finding adds `finding_id` and Evidence adds
+  `evidence_id`.
 - DOI and other external identifiers are deduplication signals with uniqueness
   rules appropriate to their issuer; they do not replace internal identity.
 
@@ -218,14 +221,16 @@ erDiagram
     CORE_FACT ||--o{ FACT_EVIDENCE : supported_by
     EVIDENCE_ANCHOR ||--o{ FACT_EVIDENCE : anchors
 
-    COLLECTION ||--o{ RESEARCH_OBJECTIVE : frames
-    RESEARCH_OBJECTIVE ||--o{ OBJECTIVE_FACT : selects
-    CORE_FACT ||--o{ OBJECTIVE_FACT : reused_by
-    RESEARCH_OBJECTIVE ||--o| OBJECTIVE_LIFECYCLE : pins
-    OBJECTIVE_LIFECYCLE ||--o| RESEARCH_UNDERSTANDING : produces
-    RESEARCH_UNDERSTANDING ||--o{ CLAIM : contains
-    CLAIM ||--o{ CLAIM_EVIDENCE : cites
-    EVIDENCE_ANCHOR ||--o{ CLAIM_EVIDENCE : supports
+    COLLECTION ||--o{ RESEARCH_OBJECTIVE : contains
+    RESEARCH_OBJECTIVE ||--o{ OBJECTIVE_ANALYSIS : versions
+    OBJECTIVE_ANALYSIS ||--o{ PAPER_CONTRIBUTION : includes
+    OBJECTIVE_ANALYSIS ||--o{ OBJECTIVE_EVIDENCE : extracts
+    OBJECTIVE_ANALYSIS ||--o{ FINDING : publishes
+    PAPER_CONTRIBUTION ||--o{ OBJECTIVE_EVIDENCE : owns
+    FINDING ||--o{ FINDING_RELATION : asserts
+    FINDING ||--|| FINDING_CONTEXT : scopes
+    FINDING ||--|| FINDING_DERIVATION : explains
+    FINDING }o--o{ OBJECTIVE_EVIDENCE : cites
 ```
 
 ### Required Keys And Foreign Keys
@@ -244,11 +249,14 @@ Concrete migration names may differ, but these identity rules may not.
 | Source records | Existing domain IDs per record family | Every structure, figure, and reference row references one collection build and valid Source document ownership; reference links use declared foreign keys. Figure metadata records object key, SHA-256, MIME type, dimensions, and byte size, never image bytes. |
 | Evidence anchor | `anchor_id` | References document version and build stage plus exactly one supported Source locator, such as a text unit, block, table cell, or figure. |
 | Reusable Core facts | Existing domain IDs per fact family | Every fact references document version and Core build stage; many-to-many evidence uses link tables. |
-| Objective and collection assessment | `objective_id` and family-specific IDs | Objective semantics are immutable within one collection build; reusable fact selection and assessment use foreign-keyed links rather than copied payloads. |
-| Objective lifecycle | `(collection_id, objective_id)` | References the exact `(collection_id, source_build_id, objective_id)` semantic row; stores only typed status, progress, error, and timestamps. |
-| Objective analysis | `objective_id`, `understanding_id` | New Understanding writes use `scope_type=objective` and the same `objective_id`; ready requires persisted reviewable Findings. |
-| Understanding graph | `claim_id`, `relation_id`, `context_id`, `evidence_ref_id` | Child records reference understanding; claim, relation, context, and evidence associations use link tables. |
-| Feedback, curation, evaluation | Existing evaluation IDs | Review records reference immutable understanding/claim or prediction identities and their version. |
+| Research Objective | `(collection_id, objective_id)` | Stores immutable confirmed scope plus candidate/confirmed state and active/published version pointers. |
+| Objective analysis | `(collection_id, objective_id, analysis_version)` | References one Objective and one immutable Source build; status is `queued`, `running`, `succeeded`, or `failed`. |
+| Paper contribution | Analysis identity plus `document_id` | References one included Source document and cannot cross the analysis version. |
+| Objective Evidence | Analysis identity plus `evidence_id` | References one paper contribution and one exact Source locator/excerpt; lifecycle and scientific role are typed. |
+| Finding | Analysis identity plus `finding_id` | References one succeeded analysis; supporting and contradicting Evidence links are version-local. |
+| Finding Relation, Context, and Derivation | Finding identity plus relation order where applicable | Cannot outlive or cross the owning Finding; cross-paper derivation requires direct results from at least two papers. |
+| Feedback and curation | Existing review ID plus the complete Finding identity | Review records reference one immutable published Finding version. |
+| Evaluation | Existing evaluation IDs | Snapshots and runs preserve collection and version lineage. |
 
 No reviewable identity may exist only as an element inside an opaque JSON
 payload.
@@ -267,11 +275,12 @@ Build output is immutable. Activation is the only mutable selection step.
 5. A failed or cancelled build remains diagnostic history and cannot change the
    pointer.
 
-Objective analysis does not create another research-goal identity. Confirmation
-inserts one lifecycle row that pins an immutable Objective build. Analysis moves
-that row through `confirmed -> queued -> running -> ready|failed`; PostgreSQL
-claims `queued -> running` atomically. The service writes and verifies the
-objective-scoped Understanding before marking the lifecycle `ready`.
+Objective analysis does not create another research identity. Confirmation
+moves the root from `candidate` to `confirmed`. Queueing allocates a monotonically
+increasing analysis version; PostgreSQL claims `queued -> running` atomically.
+The repository validates and writes all version children, marks the analysis
+`succeeded`, and advances `published_analysis_version` in one transaction.
+Failure marks only that version `failed`; retry allocates a new version.
 
 ## JSONB Policy
 

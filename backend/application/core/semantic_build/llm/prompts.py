@@ -617,39 +617,11 @@ def _build_objective_context_guidance(payload: dict[str, Any]) -> str:
 
 def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     user_prompt = (
-        "Skim this one paper for collection-level research-objective discovery.\n\n"
+        "Extract a compact research map from this one paper.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only schema-valid structured data with these fields: doc_role, "
-        "candidate_materials, candidate_processes, candidate_properties, "
-        "changed_variables, possible_objectives, evidence_density, confidence, "
-        "and warnings.\n"
-        "Do not extract final measurement facts or comparison rows.\n"
-        "Do not output a material as a research objective unless it is phrased as "
-        "a question or comparison intent.\n"
-        "Make the skim useful for later comparison planning:\n"
-        "- `candidate_processes` should include both the process family and the "
-        "main variable axes when visible. For PBF/SLM/LPBF papers, include axes "
-        "such as energy density, scan strategy, scanning speed, laser power, "
-        "hatch spacing, layer thickness, build orientation, heat treatment, or "
-        "porosity when they are part of the study.\n"
-        "- `candidate_properties` should prefer concrete observable endpoints "
-        "from title, headings, captions, and table headers. Do not stop at "
-        "`mechanical properties` when specific endpoints such as yield strength, "
-        "ultimate tensile strength, elongation, hardness, or microhardness are "
-        "visible. Do not stop at `corrosion properties` when corrosion potential, "
-        "pitting potential, current density, EIS, or passivation metrics are "
-        "visible.\n"
-        "- `possible_objectives` should combine material + process variable axes "
-        "+ concrete property axes. Avoid overly broad questions that only say "
-        "`processing affects properties`.\n"
-        "- Emit at most 3 high-signal `possible_objectives` for one paper. Group "
-        "related endpoints into one objective instead of creating one question "
-        "per metric. For example, yield strength, ultimate tensile strength, "
-        "elongation, and microhardness usually belong in one mechanical-properties "
-        "objective with specific endpoints listed in `candidate_properties`.\n"
-        "- Preserve paper-level outcomes visible in the title or abstract, such "
-        "as densification/relative density and microstructure, even when tables "
-        "also expose many mechanical endpoints.\n"
+        "Return only the schema object. Use at most a few high-signal values. "
+        "Do not extract final measurements. Include process family plus changed "
+        "axes, concrete measured properties, and question-shaped objectives."
     )
     return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
 
@@ -658,44 +630,17 @@ def build_research_objective_discovery_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
     user_prompt = (
-        "Discover research objectives supported by this collection of paper skims.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only schema-valid structured data with an `objectives` array.\n"
-        "Each objective must have a question, material_scope, process_axes, "
-        "property_axes, comparison_intent, seed_document_ids, "
-        "excluded_document_ids, confidence, and reason.\n"
-        "For seed_document_ids and excluded_document_ids, copy only the exact "
-        "canonical document_id values from the paper skims. Never use a title, "
-        "source_filename, source_path, or a filename-derived identifier.\n"
-        "Do not return a list of materials. Return question-shaped objectives "
-        "that define what should be compared.\n"
-        "`comparison_intent` is required and must be a non-empty operational "
-        "sentence that says which process/material groups or variable axes should "
-        "be compared against which property endpoints. Do not return null.\n"
-        "`process_axes` should include the studied variable axes, not only the "
-        "manufacturing method. For example, prefer `Selective Laser Melting`, "
-        "`energy density`, `scan strategy`, and `scanning speed` together when "
-        "the paper studies those axes.\n"
-        "`property_axes` should preserve specific endpoints when they are visible "
-        "in the skims. For example, expand broad `mechanical properties` into "
-        "yield strength, ultimate tensile strength, elongation, hardness, or "
-        "microhardness when those endpoints are present.\n"
-        "Prefer a small set of high-signal objectives. Do not split one coherent "
-        "mechanical-properties comparison into many tiny objectives unless the "
-        "paper clearly treats them as separate research questions.\n"
-        "Do not create one objective per mechanical endpoint. Group related "
-        "mechanical endpoints into one objective and list the specific endpoints "
-        "inside `property_axes`.\n"
-        "Do not collapse distinct `possible_objectives` from a paper skim when "
-        "they cover different property axes. Keep an objective about "
-        "densification/microstructure separate from one about mechanical "
-        "properties unless the skim only provides one explicitly integrated "
-        "research question.\n"
-        "For PBF/SLM parameter papers, a good objective set often separates: "
-        "densification/relative density, microstructure, and grouped mechanical "
-        "properties, instead of four separate tensile/hardness questions.\n"
+        "Create a small set of comparison questions from these compact paper skims.\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
+        "Return only the schema object. Keep objectives few and question-shaped. "
+        "Use exact document_id values for seed/excluded ids. Group related "
+        "properties, but keep distinct process-property comparisons separate."
     )
-    return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
+    system_prompt = (
+        "Build concise research-objective questions for literature comparison. "
+        "Use only the supplied skims. Return one JSON object, no commentary."
+    )
+    return system_prompt, user_prompt
 
 
 def build_research_axis_canonicalization_prompt(

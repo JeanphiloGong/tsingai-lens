@@ -1980,16 +1980,11 @@ export function buildDocumentWorkbenchModel({
 		title:
 			toOptionalText(content?.title) ||
 			toOptionalText(content?.source_filename) ||
-			'Graph Prompting for Low-Resource Knowledge Graph Completion',
+			documentId,
 		source_filename:
-			toOptionalText(content?.source_filename) || (content ? null : 'fixture-paper.txt'),
+			toOptionalText(content?.source_filename) || null,
 		sourceFileUrl: buildDocumentSourceFileUrl(collectionId, content?.document_id || documentId),
-		metadata: [
-			'Wang et al.',
-			'Tsinghua University',
-			'2023',
-			'International Journal of Machine Tools and Manufacture'
-		],
+		metadata: [],
 		pages,
 		source_spans: sourceSpans,
 		source_targets_by_span_id: sourceTargetsBySpanId,

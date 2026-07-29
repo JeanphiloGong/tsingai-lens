@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from hashlib import sha1
 from typing import Any, Mapping
@@ -18,6 +19,7 @@ from domain.core import (
 _MAX_DIRECT_EVIDENCE = 48
 _MAX_CONTEXT_EVIDENCE = 24
 _MAX_EXCERPT_CHARS = 900
+logger = logging.getLogger(__name__)
 
 
 class FindingSynthesisService:
@@ -123,21 +125,35 @@ class FindingSynthesisService:
                 for item in _mapping_list(result_set.get("direct_evidence"))
                 if (document_id := _text(item.get("document_id")))
             }
-            parsed = self.structured_extractor.synthesize_findings(
-                {
-                    "objective": objective_payload,
-                    "paper_contributions": contribution_payloads,
-                    "result_sets": [result_set],
-                    "context_evidence": [
-                        self._evidence_payload(evidence)
-                        for evidence in context_evidence
-                        if evidence.document_id in contributing_document_ids
-                    ],
+            try:
+                parsed = self.structured_extractor.synthesize_findings(
+                    {
+                        "objective": objective_payload,
+                        "paper_contributions": contribution_payloads,
+                        "result_sets": [result_set],
+                        "context_evidence": [
+                            self._evidence_payload(evidence)
+                            for evidence in context_evidence
+                            if evidence.document_id in contributing_document_ids
+                        ],
+                    }
+                )
+            except Exception:  # noqa: BLE001
+                # A provider formatting failure must not erase already validated
+                # source evidence. The fallback states only the observed relation.
+                logger.exception(
+                    "Finding synthesis failed result_set_id=%s; using source-backed fallback",
+                    result_set["result_set_id"],
+                )
+                parsed_record = {
+                    "findings": [self._fallback_candidate(result_set)]
                 }
-            )
-            parsed_record = (
-                parsed.model_dump() if hasattr(parsed, "model_dump") else dict(parsed)
-            )
+            else:
+                parsed_record = (
+                    parsed.model_dump()
+                    if hasattr(parsed, "model_dump")
+                    else dict(parsed)
+                )
             expected_result_set_id = str(result_set["result_set_id"])
             for candidate in _mapping_list(parsed_record.get("findings")):
                 if _text(candidate.get("result_set_id")) != expected_result_set_id:
@@ -155,6 +171,38 @@ class FindingSynthesisService:
                     findings.append(finding)
                     break
         return tuple(findings)
+
+    @staticmethod
+    def _fallback_candidate(result_set: Mapping[str, Any]) -> dict[str, Any]:
+        """Build a deliberately non-causal Finding when the provider is malformed."""
+        variables = _strings(result_set.get("source_axes"))
+        outcomes = _strings(result_set.get("outcome_properties"))
+        return {
+            "result_set_id": result_set["result_set_id"],
+            "source_concept": ", ".join(variables),
+            "outcomes": [
+                {
+                    "concept": outcome,
+                    "direction": "unknown",
+                    "statement": f"The reported comparison includes {outcome}.",
+                }
+                for outcome in outcomes
+            ],
+            "mediator_concepts": [],
+            "statement": (
+                f"The reported comparison of {', '.join(variables)} includes "
+                f"the measured outcome {', '.join(outcomes)}."
+            ),
+            "synthesis_status": "insufficient_confirmation",
+            "context_evidence_ids": [],
+            "mechanism_evidence_ids": [],
+            "common_conditions": [],
+            "incomparable_conditions": [
+                "Provider synthesis failed; direction and causality were not inferred."
+            ],
+            "confidence": 0.0,
+            "warnings": ["finding_synthesis_provider_failure"],
+        }
 
     @staticmethod
     def _validate_scope(

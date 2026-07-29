@@ -42,12 +42,9 @@
 	$: storeReadinessState = readinessFromCollectionStatus(storeCollection?.status);
 	$: currentPath = $page.url.pathname;
 	$: isOverviewRoute = currentPath === `/collections/${collectionId}`;
-	$: readinessState =
-		isOverviewRoute && (storeReadinessState === 'processing' || storeReadinessState === 'ready')
-			? storeReadinessState
-			: stateWorkspace
-				? getOverviewReadinessState(stateWorkspace)
-				: storeReadinessState;
+	$: readinessState = stateWorkspace
+		? getOverviewReadinessState(stateWorkspace)
+		: storeReadinessState;
 	$: statusLabel = readinessState
 		? $t(`overview.readinessLabels.${readinessState}`)
 		: formatStatus(collection?.status);

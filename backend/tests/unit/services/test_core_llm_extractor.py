@@ -131,6 +131,26 @@ def test_core_llm_extractor_validates_json_text_response():
     }
 
 
+def test_core_llm_extractor_uses_last_complete_json_after_model_reasoning():
+    client = _FakeOpenAIClient(
+        'The draft was {"doc_type": experimental,}\n'
+        'Final answer:\n{"doc_type":"experimental","confidence":0.9,"parsing_warnings":[]}'
+    )
+    extractor = _json_text_extractor(client)
+
+    result = extractor.extract_document_profile(
+        {
+            "title": "LPBF paper",
+            "source_filename": "paper.pdf",
+            "abstract_or_lead_text": "This is an experimental study.",
+            "headings": ["Methods", "Results"],
+        }
+    )
+
+    assert result.doc_type == "experimental"
+    assert result.confidence == 0.9
+
+
 def test_core_llm_extractor_ignores_top_level_extra_json_text_fields():
     client = _FakeOpenAIClient(
         """
@@ -396,6 +416,7 @@ def test_core_llm_extractor_validates_research_objective_response():
 
     assert isinstance(objectives, StructuredResearchObjectives)
     assert objectives.objectives[0].question.startswith("How does heat treatment")
+    assert client.chat.completions.calls[0]["max_completion_tokens"] == 1400
 
 
 def test_core_llm_extractor_validates_axis_canonicalization_response():

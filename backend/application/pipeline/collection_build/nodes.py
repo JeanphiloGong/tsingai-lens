@@ -4,15 +4,26 @@ from dataclasses import replace
 from typing import Any
 
 from application.pipeline.collection_build.context import CollectionBuildContext
+from application.pipeline.collection_build.definitions import SOURCE_ARTIFACTS
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 
 
-async def run(context: CollectionBuildContext) -> dict[str, Any]:
-    build_source_artifacts = context.services["build_source_artifacts"]
-    outputs = await build_source_artifacts(
+def register_files(context: CollectionBuildContext) -> dict:
+    files = context.collection_service.list_files(context.collection_id)
+    if not files:
+        raise RuntimeError("集合内没有可构建文件")
+    context.state["file_count"] = len(files)
+    return {}
+
+
+async def build_source_artifacts(
+    context: CollectionBuildContext,
+) -> dict[str, Any]:
+    build = context.services["build_source_artifacts"]
+    outputs = await build(
         config=context.config,
         method=context.method,
         additional_context=context.additional_context,
@@ -80,3 +91,52 @@ async def run(context: CollectionBuildContext) -> dict[str, Any]:
         "table_count": len(artifacts.tables),
         "figure_count": len(artifacts.figures),
     }
+
+
+def register_artifacts(context: CollectionBuildContext) -> dict:
+    artifacts = context.artifact_registry_service.register(
+        context.task_id,
+        context.collection_id,
+        context.output_dir,
+        build_id=context.build_id,
+    )
+    context.state["artifacts"] = artifacts
+    return {"output_path": artifacts["output_path"]}
+
+
+def build_document_profiles(context: CollectionBuildContext) -> dict:
+    profiles = context.services["document_profile_service"].build_document_profiles(
+        context.collection_id,
+        build_id=context.build_id,
+    )
+    return {"profile_count": len(profiles)}
+
+
+def build_objective_candidates(context: CollectionBuildContext) -> dict:
+    progress_callback = context.services.get("objective_progress_callback")
+    objectives = context.services[
+        "research_objective_service"
+    ].build_objective_candidates(
+        context.collection_id,
+        progress_callback=progress_callback,
+        build_id=context.build_id,
+    )
+    return {"objective_candidate_count": len(objectives)}
+
+
+def finalize(context: CollectionBuildContext) -> dict:
+    task = context.task_service.get_task(context.task_id)
+    node_states = task.get("pipeline_nodes", {})
+    source_status = node_states.get(SOURCE_ARTIFACTS, {}).get("status")
+    if source_status != "succeeded":
+        status = "failed"
+    elif any(state.get("status") == "failed" for state in node_states.values()):
+        status = "partial_success"
+    else:
+        status = "completed"
+    output_path = None
+    artifacts = context.state.get("artifacts")
+    if isinstance(artifacts, dict):
+        output_path = artifacts.get("output_path")
+    context.state["final_status"] = status
+    return {"status": status, "output_path": output_path}

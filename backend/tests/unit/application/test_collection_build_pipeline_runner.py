@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from application.pipeline.collection_build.context import CollectionBuildContext
-from application.pipeline.collection_build.nodes import source_artifacts
+from application.pipeline.collection_build import nodes
 from application.pipeline.collection_build.definitions import (
     COLLECTION_BUILD_NODE_DEFINITIONS,
     CollectionBuildNodeDefinition,
@@ -171,7 +171,7 @@ def test_source_node_persists_figure_metadata_and_references_before_activation()
         services={"build_source_artifacts": build_source_artifacts},
     )
 
-    result = asyncio.run(source_artifacts.run(context))
+    result = asyncio.run(nodes.build_source_artifacts(context))
 
     assert [call[0] for call in calls] == ["artifacts", "references"]
     assert calls[0][3].figures[0].image_path.endswith(f"{digest}.png")

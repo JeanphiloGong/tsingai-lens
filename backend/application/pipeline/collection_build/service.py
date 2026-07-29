@@ -29,14 +29,7 @@ from application.pipeline.collection_build.definitions import (
     OBJECTIVE_CANDIDATES,
     SOURCE_ARTIFACTS,
 )
-from application.pipeline.collection_build.nodes import (
-    artifact_registry,
-    document_profiles,
-    files_registered,
-    finalize,
-    objective_candidates,
-    source_artifacts,
-)
+from application.pipeline.collection_build import nodes
 from application.pipeline.collection_build.runner import CollectionBuildPipelineRunner
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
@@ -235,12 +228,12 @@ class CollectionBuildPipelineService:
     def _build_runner(self) -> CollectionBuildPipelineRunner:
         return CollectionBuildPipelineRunner(
             {
-                FILES_REGISTERED: files_registered.run,
-                SOURCE_ARTIFACTS: source_artifacts.run,
-                ARTIFACT_REGISTRY: artifact_registry.run,
-                DOCUMENT_PROFILES: document_profiles.run,
-                OBJECTIVE_CANDIDATES: objective_candidates.run,
-                FINALIZE: finalize.run,
+                FILES_REGISTERED: nodes.register_files,
+                SOURCE_ARTIFACTS: nodes.build_source_artifacts,
+                ARTIFACT_REGISTRY: nodes.register_artifacts,
+                DOCUMENT_PROFILES: nodes.build_document_profiles,
+                OBJECTIVE_CANDIDATES: nodes.build_objective_candidates,
+                FINALIZE: nodes.finalize,
             }
         )
 

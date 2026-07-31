@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+from application.pipeline.collection_build.config import CollectionBuildPipelineConfig
 from application.pipeline.collection_build.context import CollectionBuildContext
 from application.pipeline.collection_build.definitions import SOURCE_ARTIFACTS
 from application.source.reference_extraction_service import (
@@ -11,7 +12,10 @@ from application.source.reference_extraction_service import (
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 
 
-def register_files(context: CollectionBuildContext) -> dict:
+def register_files(
+    context: CollectionBuildContext,
+    _config: CollectionBuildPipelineConfig,
+) -> dict:
     files = context.collection_service.list_files(context.collection_id)
     if not files:
         raise RuntimeError("集合内没有可构建文件")
@@ -21,13 +25,13 @@ def register_files(context: CollectionBuildContext) -> dict:
 
 async def build_source_artifacts(
     context: CollectionBuildContext,
+    config: CollectionBuildPipelineConfig,
 ) -> dict[str, Any]:
-    build = context.services["build_source_artifacts"]
-    outputs = await build(
-        config=context.config,
-        method=context.method,
-        additional_context=context.additional_context,
-        verbose=context.verbose,
+    outputs = await context.build_source_artifacts(
+        config=config.source,
+        method=config.method,
+        additional_context=config.source_additional_context,
+        verbose=config.verbose,
     )
     errors = [str(err) for output in outputs for err in (output.errors or [])]
     if errors:
@@ -93,38 +97,47 @@ async def build_source_artifacts(
     }
 
 
-def register_artifacts(context: CollectionBuildContext) -> dict:
+def register_artifacts(
+    context: CollectionBuildContext,
+    config: CollectionBuildPipelineConfig,
+) -> dict:
     artifacts = context.artifact_registry_service.register(
         context.task_id,
         context.collection_id,
-        context.output_dir,
+        config.source.output.base_dir,
         build_id=context.build_id,
     )
     context.state["artifacts"] = artifacts
     return {"output_path": artifacts["output_path"]}
 
 
-def build_document_profiles(context: CollectionBuildContext) -> dict:
-    profiles = context.services["document_profile_service"].build_document_profiles(
+def build_document_profiles(
+    context: CollectionBuildContext,
+    _config: CollectionBuildPipelineConfig,
+) -> dict:
+    profiles = context.document_profile_service.build_document_profiles(
         context.collection_id,
         build_id=context.build_id,
     )
     return {"profile_count": len(profiles)}
 
 
-def build_objective_candidates(context: CollectionBuildContext) -> dict:
-    progress_callback = context.services.get("objective_progress_callback")
-    objectives = context.services[
-        "research_objective_service"
-    ].build_objective_candidates(
+def build_objective_candidates(
+    context: CollectionBuildContext,
+    _config: CollectionBuildPipelineConfig,
+) -> dict:
+    objectives = context.research_objective_service.build_objective_candidates(
         context.collection_id,
-        progress_callback=progress_callback,
+        progress_callback=context.objective_progress_callback,
         build_id=context.build_id,
     )
     return {"objective_candidate_count": len(objectives)}
 
 
-def finalize(context: CollectionBuildContext) -> dict:
+def finalize(
+    context: CollectionBuildContext,
+    _config: CollectionBuildPipelineConfig,
+) -> dict:
     task = context.task_service.get_task(context.task_id)
     node_states = task.get("pipeline_nodes", {})
     source_status = node_states.get(SOURCE_ARTIFACTS, {}).get("status")

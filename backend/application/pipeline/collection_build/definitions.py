@@ -3,10 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Final
 
+from application.pipeline.collection_build.config import CollectionBuildPipelineConfig
 from application.pipeline.collection_build.context import CollectionBuildContext
 
 
-NodeFunction = Callable[[CollectionBuildContext], object]
+NodeFunction = Callable[
+    [CollectionBuildContext, CollectionBuildPipelineConfig],
+    object,
+]
 
 
 @dataclass(frozen=True)

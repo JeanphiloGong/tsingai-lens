@@ -27,6 +27,7 @@ from domain.source import (
     build_source_document_tree,
 )
 from infra.persistence.memory import MemoryBuildRepository
+from infra.source.config.pipeline_mode import IndexingMethod
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 from infra.source.runtime.source_evidence import (
     build_blocks,
@@ -247,16 +248,16 @@ def test_build_pipeline_service_builds_runtime_config_without_config_file(
 
     collection = collection_service.create_collection("Direct Config Collection")
     paths = collection_service.get_paths(collection["collection_id"])
-    config, output_dir = runner._build_collection_config(collection["collection_id"])
+    config = runner._build_pipeline_config(collection["collection_id"])
 
     assert not (tmp_path / "configs" / "default.yaml").exists()
-    assert config.root_dir == str(paths.collection_dir.resolve())
-    assert config.input.storage.base_dir == str(paths.input_dir.resolve())
-    assert config.output.base_dir == str(paths.output_dir.resolve())
-    assert config.input.encoding == "utf-8"
-    assert config.input.file_pattern == r".*\.(txt|pdf)$"
-    assert config.cache.base_dir == "../cache"
-    assert output_dir == paths.output_dir
+    assert config.source.root_dir == str(paths.collection_dir.resolve())
+    assert config.source.input.storage.base_dir == str(paths.input_dir.resolve())
+    assert config.source.output.base_dir == str(paths.output_dir.resolve())
+    assert config.source.input.encoding == "utf-8"
+    assert config.source.input.file_pattern == r".*\.(txt|pdf)$"
+    assert config.source.cache.base_dir == "../cache"
+    assert config.method == IndexingMethod.Standard
 
 
 def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_path):

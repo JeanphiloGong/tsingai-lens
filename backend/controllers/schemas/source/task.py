@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field
 TaskStatus = Literal["queued", "running", "completed", "partial_success", "failed"]
 TaskStage = Literal[
     "queued",
-    "files_registered",
     "source_artifacts_started",
     "source_artifacts_completed",
     "document_profiles_started",

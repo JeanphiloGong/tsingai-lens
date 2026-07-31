@@ -40,10 +40,10 @@ def test_task_service_persists_pipeline_nodes_as_ordered_stages() -> None:
     updated = task_service.update_task(
         task["task_id"],
         status="running",
-        current_stage="source_artifacts_started",
-        progress_percent=25,
+        current_stage="document_profiles_started",
+        progress_percent=70,
         pipeline_nodes={
-            "files_registered": {
+            "source_artifacts": {
                 "status": "succeeded",
                 "started_at": "2026-07-19T10:00:00+00:00",
                 "finished_at": "2026-07-19T10:00:01+00:00",
@@ -51,7 +51,7 @@ def test_task_service_persists_pipeline_nodes_as_ordered_stages() -> None:
                 "warnings": [],
                 "skip_reason": None,
             },
-            "source_artifacts": {
+            "document_profiles": {
                 "status": "running",
                 "started_at": "2026-07-19T10:00:01+00:00",
                 "finished_at": None,
@@ -67,11 +67,11 @@ def test_task_service_persists_pipeline_nodes_as_ordered_stages() -> None:
     assert build is not None
     assert build.status == "building"
     assert [stage.stage_kind for stage in stages] == [
-        "files_registered",
         "source_artifacts",
+        "document_profiles",
     ]
     assert stages[1].warnings == ("slow parser",)
-    assert updated["pipeline_nodes"]["source_artifacts"]["status"] == "running"
+    assert updated["pipeline_nodes"]["document_profiles"]["status"] == "running"
     assert (
         task_service.get_task(task["task_id"])["pipeline_nodes"]
         == updated["pipeline_nodes"]

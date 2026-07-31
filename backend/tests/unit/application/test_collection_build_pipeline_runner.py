@@ -176,6 +176,7 @@ def test_source_node_persists_figure_metadata_and_references_before_activation()
         collection_id="col-1",
         task_service=SimpleNamespace(),
         collection_service=SimpleNamespace(
+            list_files=lambda collection_id: [{"collection_id": collection_id}],
             write_figure_asset=lambda *args: (
                 f"col-1/objects/source/build-1/figures/{digest}.png"
             )
@@ -197,6 +198,7 @@ def test_source_node_persists_figure_metadata_and_references_before_activation()
     assert calls[0][3].figures[0].image_size_bytes == len(content)
     assert len(calls[1][3].entries) == 1
     assert len(calls[1][3].mentions) == 1
+    assert context.state["file_count"] == 1
     assert result["figure_count"] == 1
 
 
@@ -396,6 +398,7 @@ def test_default_collection_build_pipeline_stops_after_objective_candidates():
     )
 
     assert OBJECTIVE_CANDIDATES in node_ids
+    assert "files_registered" not in node_ids
     assert "research_objectives" not in node_ids
     assert "paper_facts" not in node_ids
     assert "comparison_rows" not in node_ids

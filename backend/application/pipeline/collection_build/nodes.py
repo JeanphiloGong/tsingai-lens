@@ -12,21 +12,15 @@ from application.source.reference_extraction_service import (
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 
 
-def register_files(
-    context: CollectionBuildContext,
-    _config: CollectionBuildPipelineConfig,
-) -> dict:
-    files = context.collection_service.list_files(context.collection_id)
-    if not files:
-        raise RuntimeError("集合内没有可构建文件")
-    context.state["file_count"] = len(files)
-    return {}
-
-
 async def build_source_artifacts(
     context: CollectionBuildContext,
     config: CollectionBuildPipelineConfig,
 ) -> dict[str, Any]:
+    files = context.collection_service.list_files(context.collection_id)
+    if not files:
+        raise RuntimeError("集合内没有可构建文件")
+    context.state["file_count"] = len(files)
+
     outputs = await context.build_source_artifacts(
         config=config.source,
         method=config.method,

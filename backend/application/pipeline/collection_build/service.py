@@ -28,7 +28,6 @@ from application.pipeline.collection_build.context import (
 from application.pipeline.collection_build.definitions import (
     ARTIFACT_REGISTRY,
     DOCUMENT_PROFILES,
-    FILES_REGISTERED,
     FINALIZE,
     OBJECTIVE_CANDIDATES,
     SOURCE_ARTIFACTS,
@@ -239,7 +238,6 @@ class CollectionBuildPipelineService:
     def _build_runner(self) -> CollectionBuildPipelineRunner:
         return CollectionBuildPipelineRunner(
             {
-                FILES_REGISTERED: nodes.register_files,
                 SOURCE_ARTIFACTS: nodes.build_source_artifacts,
                 ARTIFACT_REGISTRY: nodes.register_artifacts,
                 DOCUMENT_PROFILES: nodes.build_document_profiles,
@@ -254,8 +252,6 @@ class CollectionBuildPipelineService:
         if context.state.get("final_status"):
             return str(context.state["final_status"])
         node_states = result.get("pipeline_nodes", {})
-        if node_states.get(FILES_REGISTERED, {}).get("status") != "succeeded":
-            return "failed"
         if node_states.get(SOURCE_ARTIFACTS, {}).get("status") != "succeeded":
             return "failed"
         if result.get("errors"):

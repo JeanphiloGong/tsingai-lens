@@ -10,7 +10,9 @@ def _load_module():
         Path(__file__).resolve().parents[3]
         / "scripts/evaluation/expert_gold/check_objective_findings_projection.py"
     )
-    spec = importlib.util.spec_from_file_location("check_objective_findings_projection", script)
+    spec = importlib.util.spec_from_file_location(
+        "check_objective_findings_projection", script
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -18,21 +20,33 @@ def _load_module():
     return module
 
 
-def _bundle(*, level: str = "paper", paper_count: int = 1):
+def _bundle(*, synthesis_status: str = "insufficient_confirmation"):
     finding = {
         "collection_id": "col-1",
         "objective_id": "objective-1",
         "analysis_version": 2,
         "finding_id": "finding-1",
-        "finding_level": level,
         "statement": "Higher VED was associated with higher relative density.",
-        "variables": ["volumetric energy density"],
-        "outcomes": ["relative density"],
-        "paper_count": paper_count,
-        "derivation": {
-            "supporting_evidence_ids": ["evidence-1"],
-            "contributing_document_ids": ["paper-1"],
-        },
+        "factors": ["volumetric energy density"],
+        "outcome": "relative density",
+        "direction": "increase",
+        "assertion_strength": "associative",
+        "attribution_scope": "isolated_effect",
+        "synthesis_status": synthesis_status,
+        "certainty": 0.8,
+        "mechanisms": [],
+        "scientific_context": {"material": [], "sample": [], "process": [], "test": []},
+        "limitations": ["One directly contributing paper."],
+        "paper_contributions": [
+            {
+                "document_id": "paper-1",
+                "analysis_status": "analyzed",
+                "supporting_evidence_ids": ["evidence-1"],
+                "contradicting_evidence_ids": [],
+                "context_evidence_ids": [],
+                "condition_boundary_evidence_ids": [],
+            }
+        ],
     }
     evidence = {
         "collection_id": "col-1",
@@ -78,6 +92,9 @@ def test_canonical_finding_and_source_excerpt_pass() -> None:
 def test_returned_context_evidence_does_not_fail_direct_support_check() -> None:
     checker = _load_module()
     bundle = _bundle()
+    bundle["findings"][0]["paper_contributions"][0]["context_evidence_ids"].append(
+        "context-1"
+    )
     bundle["evidence_by_finding"]["finding-1"].append(
         {
             "collection_id": "col-1",
@@ -111,10 +128,10 @@ def test_returned_context_evidence_does_not_fail_direct_support_check() -> None:
     assert result["evidence_count"] == 2
 
 
-def test_cross_paper_finding_requires_two_direct_documents() -> None:
+def test_synthesized_finding_requires_two_direct_documents() -> None:
     checker = _load_module()
     result = checker.evaluate_objective_bundle(
-        _bundle(level="cross_paper", paper_count=2),
+        _bundle(synthesis_status="agreement"),
         source_index={
             ("paper-1", "text_window", "block-1"): {
                 "text": "Relative density increased to 99.6% at higher VED.",
@@ -124,7 +141,7 @@ def test_cross_paper_finding_requires_two_direct_documents() -> None:
     )
 
     failed = {check["check"] for check in result["checks"] if check["status"] == "fail"}
-    assert "Finding finding-1 paper count matches direct evidence" in failed
+    assert "Finding finding-1 synthesis matches direct paper support" in failed
 
 
 def test_source_excerpt_mismatch_blocks_the_audit() -> None:

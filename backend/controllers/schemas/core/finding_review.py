@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from controllers.schemas.core.research_objectives import (
+    FindingResponse,
+    ObjectiveEvidenceResponse,
+)
 
 
 FindingReviewStatus = Literal["correct", "incorrect", "partial", "unclear"]
@@ -11,11 +16,13 @@ FindingIssueType = Literal[
     "evidence_not_grounded",
     "missing_evidence",
     "insufficient_evidence",
-    "wrong_variable",
+    "wrong_factor",
     "wrong_outcome",
     "wrong_direction",
     "wrong_context",
-    "wrong_relation",
+    "wrong_mechanism",
+    "wrong_attribution",
+    "wrong_synthesis",
     "overclaim",
     "unclear_statement",
     "other",
@@ -33,6 +40,14 @@ class FindingFeedbackCreateRequest(BaseModel):
     issue_type: FindingIssueType = Field(default="none")
     note: str | None = Field(default=None, max_length=2000)
     reviewer: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> "FindingFeedbackCreateRequest":
+        if self.review_status == "correct" and self.issue_type != "none":
+            raise ValueError("correct feedback cannot report an issue")
+        if self.review_status in {"incorrect", "partial"} and self.issue_type == "none":
+            raise ValueError(f"{self.review_status} feedback requires an issue")
+        return self
 
 
 class FindingFeedbackResponse(BaseModel):
@@ -61,15 +76,7 @@ class FindingCurationCreateRequest(BaseModel):
 
     analysis_version: int = Field(..., ge=1)
     curated_status: FindingStatus = Field(default="limited")
-    curated_statement: str = Field(..., min_length=1, max_length=4000)
-    curated_support_grade: str | None = Field(default=None, max_length=40)
-    curated_review_status: str | None = Field(default=None, max_length=40)
-    curated_variables: list[str] = Field(default_factory=list, max_length=40)
-    curated_mediators: list[str] = Field(default_factory=list, max_length=40)
-    curated_outcomes: list[str] = Field(default_factory=list, max_length=40)
-    curated_direction: str | None = Field(default=None, max_length=80)
-    curated_scope_summary: str | None = Field(default=None, max_length=1000)
-    curated_evidence_ids: list[str] = Field(default_factory=list, max_length=80)
+    curated_finding: FindingResponse
     note: str | None = Field(default=None, max_length=2000)
     reviewer: str | None = Field(default=None, max_length=120)
 
@@ -81,15 +88,7 @@ class FindingCurationResponse(BaseModel):
     analysis_version: int
     finding_id: str
     curated_status: FindingStatus
-    curated_statement: str
-    curated_support_grade: str | None = None
-    curated_review_status: str | None = None
-    curated_variables: list[str] = Field(default_factory=list)
-    curated_mediators: list[str] = Field(default_factory=list)
-    curated_outcomes: list[str] = Field(default_factory=list)
-    curated_direction: str | None = None
-    curated_scope_summary: str | None = None
-    curated_evidence_ids: list[str] = Field(default_factory=list)
+    curated_finding: FindingResponse
     note: str | None = None
     reviewer: str | None = None
     updated_at: str
@@ -109,13 +108,15 @@ class FindingDatasetSampleResponse(BaseModel):
     analysis_version: int
     finding_id: str
     research_objective: str
-    finding_level: str
     document_ids: list[str] = Field(default_factory=list)
     label_status: FindingDatasetLabelStatus
     dataset_use_status: FindingDatasetUseStatus
-    system_prediction: dict[str, Any] = Field(default_factory=dict)
-    expert_target: dict[str, Any] | None = None
-    evidence: list[dict[str, Any]] = Field(default_factory=list)
+    finding_fingerprint: str
+    evidence_fingerprint: str
+    system_prediction: FindingResponse
+    expert_target: FindingResponse | None = None
+    training_target: FindingResponse
+    evidence: list[ObjectiveEvidenceResponse] = Field(default_factory=list)
     training_schema_version: str
     training_prompt_version: str
     training_messages: list[dict[str, Any]] = Field(default_factory=list)

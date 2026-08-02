@@ -5,6 +5,8 @@ from hashlib import sha256
 import json
 from pathlib import Path
 
+import pytest
+
 from domain.core import (
     BaselineReference,
     DocumentProfile,
@@ -61,6 +63,24 @@ from tests.support.objective_workspace_repository import (
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = BACKEND_ROOT / "tests" / "fixtures" / "persistence_revision"
+
+
+def test_baseline_rejects_missing_canonical_curated_finding() -> None:
+    scenario = json.loads((FIXTURE_DIR / "scenario.json").read_text(encoding="utf-8"))
+    scenario["records"]["curations"][0].pop("curated_finding")
+
+    with pytest.raises(ValueError, match="invalid canonical curation"):
+        capture_baseline(scenario)
+
+
+def test_baseline_rejects_mismatched_curated_finding_identity() -> None:
+    scenario = json.loads((FIXTURE_DIR / "scenario.json").read_text(encoding="utf-8"))
+    scenario["records"]["curations"][0]["curated_finding"]["finding_id"] = (
+        "finding-other"
+    )
+
+    with pytest.raises(ValueError, match="invalid canonical curation"):
+        capture_baseline(scenario)
 
 
 def test_current_repositories_round_trip_the_reviewed_persistence_baseline(

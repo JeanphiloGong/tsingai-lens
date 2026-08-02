@@ -13,10 +13,7 @@
 		type GoalSourceLink
 	} from '../../../_shared/goalSessions';
 	import { t } from '../../../_shared/i18n';
-	import {
-		fetchObjectiveFindingDataset,
-		type FindingDataset
-	} from '../../../_shared/researchView';
+	import { fetchObjectiveFindingDataset, type FindingDataset } from '../../../_shared/researchView';
 
 	type StoredGoalSession = {
 		session_id: string;
@@ -100,13 +97,13 @@
 		? 'ready'
 		: objectiveTrainingReadyCount > 0
 			? 'messages_pending'
-		: objectiveReviewCandidateCount > 0
-			? 'needs_review'
-			: objectiveDatasetSummary
-				? 'empty'
-				: readinessError
-					? 'error'
-					: 'pending';
+			: objectiveReviewCandidateCount > 0
+				? 'needs_review'
+				: objectiveDatasetSummary
+					? 'empty'
+					: readinessError
+						? 'error'
+						: 'pending';
 	$: {
 		if (!queryObjectiveId) {
 			readinessText = $t('goalCopilot.experimentReadiness.noObjective');
@@ -266,10 +263,7 @@
 		}
 	}
 
-	async function loadObjectiveReadiness(
-		activeCollectionId: string,
-		activeObjectiveId: string
-	) {
+	async function loadObjectiveReadiness(activeCollectionId: string, activeObjectiveId: string) {
 		objectiveDatasetSummary = null;
 		readinessError = '';
 		if (!activeCollectionId || !activeObjectiveId) {
@@ -278,10 +272,7 @@
 		}
 		objectiveDatasetLoading = true;
 		try {
-			const dataset = await fetchObjectiveFindingDataset(
-				activeCollectionId,
-				activeObjectiveId
-			);
+			const dataset = await fetchObjectiveFindingDataset(activeCollectionId, activeObjectiveId);
 			objectiveDatasetSummary = dataset;
 		} catch (err) {
 			readinessError = errorMessage(err);
@@ -466,12 +457,16 @@
 			.slice(0, 12);
 	}
 
-	function needsCuratedFindings(message: GoalSessionMessage) {
-		return (message.warnings ?? []).includes('curated_research_findings_empty');
+	function needsReviewedFindings(message: GoalSessionMessage) {
+		return (message.warnings ?? []).includes('reviewed_findings_empty');
 	}
 
-	function hasProtocolReadyReviewGate(message: GoalSessionMessage) {
-		return message.review_gate === 'protocol_ready_findings';
+	function hasReviewedFindingGate(message: GoalSessionMessage) {
+		return message.review_gate === 'reviewed_findings';
+	}
+
+	function hasStaleSources(message: GoalSessionMessage) {
+		return message.source_validity === 'stale';
 	}
 
 	function missingSourceCitation(message: GoalSessionMessage) {
@@ -553,17 +548,18 @@
 	function canSaveExperimentPlan(message: GoalSessionMessage) {
 		return Boolean(
 			queryObjectiveId &&
-				message.role === 'assistant' &&
-				message.source_mode === 'collection_grounded' &&
-				hasProtocolReadyReviewGate(message) &&
-				messageText(message).trim() &&
-				visibleSourceLinks(message).length > 0 &&
-				hasEvidenceCitations(message) &&
-				citesVisibleSourceLabel(message) &&
-				sourceLinksMatchEvidenceCitations(message) &&
-				allEvidenceCitationsHaveSourceLinks(message) &&
-				hasProtocolDraftStructure(message) &&
-				!needsCuratedFindings(message)
+			message.role === 'assistant' &&
+			message.source_mode === 'collection_grounded' &&
+			hasReviewedFindingGate(message) &&
+			message.source_validity === 'current' &&
+			messageText(message).trim() &&
+			visibleSourceLinks(message).length > 0 &&
+			hasEvidenceCitations(message) &&
+			citesVisibleSourceLabel(message) &&
+			sourceLinksMatchEvidenceCitations(message) &&
+			allEvidenceCitationsHaveSourceLinks(message) &&
+			hasProtocolDraftStructure(message) &&
+			!needsReviewedFindings(message)
 		);
 	}
 
@@ -590,9 +586,13 @@
 	}
 
 	function isProtocolSectionHeading(line: string) {
-		return ['hypothesis', 'variable matrix', 'measurements', 'controls', 'risks or limits'].includes(
-			line.toLowerCase()
-		);
+		return [
+			'hypothesis',
+			'variable matrix',
+			'measurements',
+			'controls',
+			'risks or limits'
+		].includes(line.toLowerCase());
 	}
 
 	function experimentPlanHref(planId: string) {
@@ -617,6 +617,7 @@
 					source: 'goal_copilot',
 					source_mode: message.source_mode,
 					review_gate: message.review_gate ?? null,
+					source_validity: message.source_validity ?? null,
 					used_evidence_ids: message.used_evidence_ids ?? [],
 					source_link_count: visibleSourceLinks(message).length
 				}
@@ -801,13 +802,15 @@
 											{/each}
 										</nav>
 									{/if}
-									{#if message.role === 'assistant' &&
-										message.source_mode === 'collection_grounded' &&
-										!hasProtocolReadyReviewGate(message)}
+									{#if hasStaleSources(message)}
+										<p class="review-required-note">
+											{$t('goalCopilot.experimentPlan.sourceStale')}
+										</p>
+									{:else if message.role === 'assistant' && message.source_mode === 'collection_grounded' && !hasReviewedFindingGate(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.reviewRequired')}
 										</p>
-									{:else if needsCuratedFindings(message)}
+									{:else if needsReviewedFindings(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.reviewRequired')}
 										</p>
@@ -819,49 +822,23 @@
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.sourceTraceRequired')}
 										</p>
-									{:else if message.role === 'assistant' &&
-										message.source_mode === 'collection_grounded' &&
-										visibleSourceLinks(message).length &&
-										!hasEvidenceCitations(message)}
+									{:else if message.role === 'assistant' && message.source_mode === 'collection_grounded' && visibleSourceLinks(message).length && !hasEvidenceCitations(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.evidenceRequired')}
 										</p>
-									{:else if message.role === 'assistant' &&
-										message.source_mode === 'collection_grounded' &&
-										visibleSourceLinks(message).length &&
-										hasEvidenceCitations(message) &&
-										!citesVisibleSourceLabel(message)}
+									{:else if message.role === 'assistant' && message.source_mode === 'collection_grounded' && visibleSourceLinks(message).length && hasEvidenceCitations(message) && !citesVisibleSourceLabel(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.sourceCitationRequired')}
 										</p>
-									{:else if message.role === 'assistant' &&
-										message.source_mode === 'collection_grounded' &&
-										visibleSourceLinks(message).length &&
-										hasEvidenceCitations(message) &&
-										citesVisibleSourceLabel(message) &&
-										!sourceLinksMatchEvidenceCitations(message)}
+									{:else if message.role === 'assistant' && message.source_mode === 'collection_grounded' && visibleSourceLinks(message).length && hasEvidenceCitations(message) && citesVisibleSourceLabel(message) && !sourceLinksMatchEvidenceCitations(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.evidenceLinkMismatch')}
 										</p>
-									{:else if message.role === 'assistant' &&
-										message.source_mode === 'collection_grounded' &&
-										visibleSourceLinks(message).length &&
-										hasEvidenceCitations(message) &&
-										citesVisibleSourceLabel(message) &&
-										sourceLinksMatchEvidenceCitations(message) &&
-										!allEvidenceCitationsHaveSourceLinks(message)}
+									{:else if message.role === 'assistant' && message.source_mode === 'collection_grounded' && visibleSourceLinks(message).length && hasEvidenceCitations(message) && citesVisibleSourceLabel(message) && sourceLinksMatchEvidenceCitations(message) && !allEvidenceCitationsHaveSourceLinks(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.sourceLinkRequired')}
 										</p>
-									{:else if message.role === 'assistant' &&
-										message.source_mode === 'collection_grounded' &&
-										hasProtocolReadyReviewGate(message) &&
-										visibleSourceLinks(message).length &&
-										hasEvidenceCitations(message) &&
-										citesVisibleSourceLabel(message) &&
-										sourceLinksMatchEvidenceCitations(message) &&
-										allEvidenceCitationsHaveSourceLinks(message) &&
-										!hasProtocolDraftStructure(message)}
+									{:else if message.role === 'assistant' && message.source_mode === 'collection_grounded' && hasReviewedFindingGate(message) && visibleSourceLinks(message).length && hasEvidenceCitations(message) && citesVisibleSourceLabel(message) && sourceLinksMatchEvidenceCitations(message) && allEvidenceCitationsHaveSourceLinks(message) && !hasProtocolDraftStructure(message)}
 										<p class="review-required-note">
 											{$t('goalCopilot.experimentPlan.protocolStructureRequired')}
 										</p>

@@ -34,12 +34,45 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
     )
 
 
+def _finding(**overrides):
+    finding = {
+        "collection_id": "col-1",
+        "objective_id": "objective-1",
+        "analysis_version": 2,
+        "finding_id": "finding-1",
+        "statement": "Preheating increased ductility by 14%.",
+        "factors": ["preheating"],
+        "outcome": "ductility",
+        "direction": "increase",
+        "assertion_strength": "associative",
+        "attribution_scope": "isolated_effect",
+        "synthesis_status": "insufficient_confirmation",
+        "certainty": 0.5,
+        "display_rank": 0,
+        "mechanisms": [],
+        "scientific_context": {"material": [], "sample": [], "process": [], "test": []},
+        "limitations": ["One directly contributing paper."],
+        "paper_contributions": [
+            {
+                "document_id": "paper-1",
+                "analysis_status": "analyzed",
+                "supporting_evidence_ids": ["ev-1"],
+                "contradicting_evidence_ids": [],
+                "context_evidence_ids": [],
+                "condition_boundary_evidence_ids": [],
+            }
+        ],
+    }
+    finding.update(overrides)
+    return finding
+
+
 def _row(**overrides):
     row = {
         "collection_id": "col-1",
         "objective_id": "objective-1",
+        "analysis_version": 2,
         "finding_id": "finding-1",
-        "claim_id": "claim-1",
         "action": "skip",
         "statement": "Preheating increased ductility by 14%.",
         "acceptance_gate": {
@@ -78,10 +111,7 @@ def test_check_agent_review_draft_accepts_safe_silver_draft(tmp_path):
                     "reviewer": "agent-materials-review",
                     "recommendation": "correct",
                     "note": "Outcome should be ductility.",
-                    "suggested_target": {
-                        "statement": "Preheating increased ductility by 14%.",
-                        "evidence_ref_ids": ["ev-1"],
-                    },
+                    "curated_finding": _finding(finding_id="finding-2"),
                 },
             ),
         ],
@@ -162,7 +192,7 @@ def test_check_agent_review_draft_blocks_accept_when_gate_blocks(tmp_path):
                     "status": "correction_required",
                     "accept_allowed": False,
                     "requires_correction": True,
-                    "blocking_missing": ["variables"],
+                    "blocking_missing": ["factors"],
                     "review_checks": [],
                 }
             )
@@ -174,7 +204,7 @@ def test_check_agent_review_draft_blocks_accept_when_gate_blocks(tmp_path):
     assert summary["status"] == "fail"
     assert [error["message"] for error in summary["errors"]] == [
         "agent accept recommendation is blocked by acceptance_gate",
-        "agent accept recommendation has blocking gaps: variables",
+        "agent accept recommendation has blocking gaps: factors",
     ]
 
 

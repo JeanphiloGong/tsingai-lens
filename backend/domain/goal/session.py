@@ -6,6 +6,7 @@ from typing import Any, Literal, Mapping
 
 GoalAnswerMode = Literal["grounded", "hybrid", "general"]
 GoalMessageRole = Literal["user", "assistant"]
+GoalSourceValidity = Literal["current", "stale"]
 GoalSourceLinkKind = Literal["document", "evidence"]
 GoalSourceMode = Literal[
     "collection_grounded",
@@ -17,6 +18,7 @@ GoalSourceMode = Literal[
 ANSWER_MODES = {"grounded", "hybrid", "general"}
 MESSAGE_ROLES = {"user", "assistant"}
 SOURCE_LINK_KINDS = {"document", "evidence"}
+SOURCE_VALIDITIES = {"current", "stale"}
 SOURCE_MODES = {
     "collection_grounded",
     "collection_limited",
@@ -60,6 +62,8 @@ class GoalMessageRecord:
     source_links: tuple[GoalSourceLink, ...] = ()
     review_gate: str | None = None
     source_finding_refs: tuple[Mapping[str, Any], ...] = ()
+    source_validity: GoalSourceValidity | None = None
+    source_validity_reasons: tuple[str, ...] = ()
 
     @classmethod
     def user(
@@ -93,6 +97,8 @@ class GoalMessageRecord:
         source_links: Any = None,
         review_gate: Any = None,
         source_finding_refs: Any = None,
+        source_validity: Any = None,
+        source_validity_reasons: Any = None,
     ) -> "GoalMessageRecord":
         normalized_source_mode = normalize_source_mode(source_mode)
         evidence_ids = _stable_strings(used_evidence_ids)
@@ -101,11 +107,15 @@ class GoalMessageRecord:
         normalized_source_finding_refs = _normalize_source_finding_refs(
             source_finding_refs
         )
+        normalized_source_validity = normalize_source_validity(source_validity)
+        normalized_source_validity_reasons = _stable_strings(source_validity_reasons)
         if normalized_source_mode != "collection_grounded":
             evidence_ids = ()
             public_source_links = ()
             normalized_review_gate = None
             normalized_source_finding_refs = ()
+            normalized_source_validity = None
+            normalized_source_validity_reasons = ()
         return cls(
             message_id=_normalize_required_text(message_id, "message_id"),
             session_id=_normalize_required_text(session_id, "session_id"),
@@ -118,6 +128,8 @@ class GoalMessageRecord:
             source_links=public_source_links,
             review_gate=normalized_review_gate,
             source_finding_refs=normalized_source_finding_refs,
+            source_validity=normalized_source_validity,
+            source_validity_reasons=normalized_source_validity_reasons,
             created_at=str(created_at),
         )
 
@@ -136,6 +148,8 @@ class GoalMessageRecord:
                 source_links=payload.get("source_links"),
                 review_gate=payload.get("review_gate"),
                 source_finding_refs=payload.get("source_finding_refs"),
+                source_validity=payload.get("source_validity"),
+                source_validity_reasons=payload.get("source_validity_reasons"),
                 created_at=payload.get("created_at") or "",
             )
         return cls.user(
@@ -169,6 +183,8 @@ class GoalMessageRecord:
                         dict(source_finding_ref)
                         for source_finding_ref in self.source_finding_refs
                     ],
+                    "source_validity": self.source_validity,
+                    "source_validity_reasons": list(self.source_validity_reasons),
                 }
             )
         return record
@@ -420,6 +436,15 @@ def normalize_source_mode(value: Any) -> GoalSourceMode:
     return source_mode  # type: ignore[return-value]
 
 
+def normalize_source_validity(value: Any) -> GoalSourceValidity | None:
+    if value is None or not str(value).strip():
+        return None
+    source_validity = str(value).strip().lower()
+    if source_validity not in SOURCE_VALIDITIES:
+        raise ValueError("source_validity must be one of: current, stale")
+    return source_validity  # type: ignore[return-value]
+
+
 def _normalize_required_text(value: Any, field_name: str) -> str:
     text = _normalize_optional_text(value)
     if not text:
@@ -466,31 +491,46 @@ def _normalize_source_finding_refs(value: Any) -> tuple[Mapping[str, Any], ...]:
     if not isinstance(value, list | tuple):
         return ()
     refs: list[Mapping[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, int, str, str]] = set()
     for item in value:
         if not isinstance(item, Mapping):
             continue
+        objective_id = _normalize_optional_text(item.get("objective_id"))
         finding_id = _normalize_optional_text(item.get("finding_id"))
-        finding_fingerprint = _normalize_optional_text(
-            item.get("finding_fingerprint")
+        finding_fingerprint = _normalize_optional_text(item.get("finding_fingerprint"))
+        evidence_fingerprint = _normalize_optional_text(
+            item.get("evidence_fingerprint")
         )
-        protocol_source_fingerprint = _normalize_optional_text(
-            item.get("protocol_source_fingerprint")
-        )
-        if not finding_id or not finding_fingerprint or not protocol_source_fingerprint:
+        try:
+            analysis_version = int(item.get("analysis_version") or 0)
+        except (TypeError, ValueError):
+            analysis_version = 0
+        if (
+            not objective_id
+            or not finding_id
+            or analysis_version < 1
+            or not finding_fingerprint
+            or not evidence_fingerprint
+        ):
             continue
-        key = (finding_id, protocol_source_fingerprint)
+        key = (
+            objective_id,
+            finding_id,
+            analysis_version,
+            finding_fingerprint,
+            evidence_fingerprint,
+        )
         if key in seen:
             continue
         seen.add(key)
         refs.append(
             {
+                "objective_id": objective_id,
                 "finding_id": finding_id,
+                "analysis_version": analysis_version,
                 "finding_fingerprint": finding_fingerprint,
-                "protocol_source_fingerprint": protocol_source_fingerprint,
-                "evidence_ref_ids": list(
-                    _stable_strings(item.get("evidence_ref_ids"))
-                ),
+                "evidence_fingerprint": evidence_fingerprint,
+                "evidence_ids": list(_stable_strings(item.get("evidence_ids"))),
             }
         )
     return tuple(refs)
@@ -516,11 +556,14 @@ __all__ = [
     "GoalSourceLink",
     "GoalSourceLinkKind",
     "GoalSourceMode",
+    "GoalSourceValidity",
     "MESSAGE_ROLES",
     "SOURCE_LINK_KINDS",
     "SOURCE_MODES",
+    "SOURCE_VALIDITIES",
     "normalize_answer_mode",
     "normalize_message_role",
     "normalize_source_link_kind",
     "normalize_source_mode",
+    "normalize_source_validity",
 ]

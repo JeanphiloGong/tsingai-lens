@@ -261,15 +261,7 @@ class FindingCurationRecord(Base):
     analysis_version: Mapped[int] = mapped_column(Integer, nullable=False)
     finding_id: Mapped[str] = mapped_column(String(128), nullable=False)
     curated_status: Mapped[str] = mapped_column(String(64), nullable=False)
-    curated_statement: Mapped[str] = mapped_column(Text, nullable=False)
-    curated_support_grade: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    curated_review_status: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    curated_variables: Mapped[list[Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    curated_mediators: Mapped[list[Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    curated_outcomes: Mapped[list[Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    curated_direction: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    curated_scope_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    curated_evidence_ids: Mapped[list[str]] = mapped_column(
+    curated_finding: Mapped[dict[str, Any]] = mapped_column(
         _JSON_DOCUMENT, nullable=False
     )
     note: Mapped[str | None] = mapped_column(Text, nullable=True)

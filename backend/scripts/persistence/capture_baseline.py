@@ -5,8 +5,17 @@ import argparse
 import json
 import math
 from pathlib import Path
+import sys
 from time import perf_counter
 from typing import Any
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+from domain.core import ObjectiveEvidence, PaperContribution  # noqa: E402
+from domain.evaluation import FindingCuration  # noqa: E402
 
 
 REQUIRED_FAMILIES = (
@@ -134,20 +143,40 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
                 )
             )
 
-    for family in ("feedback", "curations"):
-        for item in records[family]:
-            key = (
-                item.get("collection_id"),
-                item.get("objective_id"),
-                item.get("analysis_version"),
-                item.get("finding_id"),
+    for item in records["feedback"]:
+        key = _finding_identity(item)
+        if key not in findings_by_key:
+            raise ValueError(f"unresolved feedback finding: {key[-1]}")
+
+    for item in records["curations"]:
+        key = _finding_identity(item)
+        if key not in findings_by_key:
+            raise ValueError(f"unresolved curation finding: {key[-1]}")
+        try:
+            curation = FindingCuration.from_mapping(item)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid canonical curation: {key[-1]}") from exc
+        if curation.to_record() != item:
+            raise ValueError(f"non-canonical curation record: {key[-1]}")
+        evidence = tuple(
+            ObjectiveEvidence.from_mapping(record)
+            for evidence_key, record in evidence_by_key.items()
+            if evidence_key[:3] == key[:3]
+        )
+        contributions = tuple(
+            PaperContribution.from_mapping(record)
+            for record in records["objective_paper_contributions"]
+            if (
+                record.get("collection_id"),
+                record.get("objective_id"),
+                record.get("analysis_version"),
             )
-            if key not in findings_by_key:
-                raise ValueError(f"unresolved {family[:-1]} finding: {key[-1]}")
-            for evidence_id in item.get("curated_evidence_ids", []):
-                evidence_key = (*key[:3], evidence_id)
-                if evidence_key not in evidence_by_key:
-                    raise ValueError(f"unresolved curation evidence: {evidence_id}")
+            == key[:3]
+        )
+        try:
+            curation.curated_finding.validate_sources(evidence, contributions)
+        except ValueError as exc:
+            raise ValueError(f"invalid curation sources: {key[-1]}") from exc
 
     if not traces:
         raise ValueError("scenario has no complete Finding evidence trace")
@@ -315,6 +344,15 @@ def _source_trace(
         "file_id": source_file["file_id"],
         "quote": evidence["source_excerpt"],
     }
+
+
+def _finding_identity(item: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
+    return (
+        item.get("collection_id"),
+        item.get("objective_id"),
+        item.get("analysis_version"),
+        item.get("finding_id"),
+    )
 
 
 def measure_capture(scenario: dict[str, Any], *, iterations: int) -> dict[str, Any]:

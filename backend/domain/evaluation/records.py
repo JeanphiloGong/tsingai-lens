@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Final, Mapping
 
+from domain.core.finding import Finding
+
 
 EVALUATION_TARGET_LAYERS: Final[frozenset[str]] = frozenset({"core", "goal"})
 EVALUATION_LAYERS: Final[frozenset[str]] = frozenset(
@@ -31,11 +33,13 @@ FINDING_ISSUE_TYPES: Final[frozenset[str]] = frozenset(
         "evidence_not_grounded",
         "missing_evidence",
         "insufficient_evidence",
-        "wrong_variable",
+        "wrong_factor",
         "wrong_outcome",
         "wrong_direction",
         "wrong_context",
-        "wrong_relation",
+        "wrong_mechanism",
+        "wrong_attribution",
+        "wrong_synthesis",
         "overclaim",
         "unclear_statement",
         "other",
@@ -374,6 +378,16 @@ class FindingFeedback:
             raise ValueError("finding feedback requires objective and finding identity")
         if self.analysis_version < 1:
             raise ValueError("finding feedback requires a positive analysis_version")
+        if self.review_status not in FINDING_REVIEW_STATUSES:
+            raise ValueError(f"unsupported finding review status: {self.review_status}")
+        if self.issue_type not in FINDING_ISSUE_TYPES:
+            raise ValueError(f"unsupported finding issue type: {self.issue_type}")
+        if self.review_status == "correct" and self.issue_type != "none":
+            raise ValueError("correct finding feedback cannot report an issue")
+        if self.review_status in {"incorrect", "partial"} and self.issue_type == "none":
+            raise ValueError(
+                f"{self.review_status} finding feedback requires an issue"
+            )
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "FindingFeedback":
@@ -383,16 +397,8 @@ class FindingFeedback:
             objective_id=_normalize_text(payload.get("objective_id")) or "",
             analysis_version=int(payload.get("analysis_version") or 0),
             finding_id=_normalize_text(payload.get("finding_id")) or "",
-            review_status=_normalize_choice(
-                payload.get("review_status"),
-                allowed=FINDING_REVIEW_STATUSES,
-                default="unclear",
-            ),
-            issue_type=_normalize_choice(
-                payload.get("issue_type"),
-                allowed=FINDING_ISSUE_TYPES,
-                default="other",
-            ),
+            review_status=(_normalize_text(payload.get("review_status")) or "").lower(),
+            issue_type=(_normalize_text(payload.get("issue_type")) or "").lower(),
             note=_normalize_text(payload.get("note")),
             reviewer=_normalize_text(payload.get("reviewer")),
             created_at=_normalize_text(payload.get("created_at")) or "",
@@ -421,15 +427,7 @@ class FindingCuration:
     analysis_version: int
     finding_id: str
     curated_status: str
-    curated_statement: str
-    curated_support_grade: str | None
-    curated_review_status: str | None
-    curated_variables: tuple[str, ...]
-    curated_mediators: tuple[str, ...]
-    curated_outcomes: tuple[str, ...]
-    curated_direction: str | None
-    curated_scope_summary: str | None
-    curated_evidence_ids: tuple[str, ...]
+    curated_finding: Finding
     note: str | None
     reviewer: str | None
     updated_at: str
@@ -439,6 +437,17 @@ class FindingCuration:
             raise ValueError("finding curation requires objective and finding identity")
         if self.analysis_version < 1:
             raise ValueError("finding curation requires a positive analysis_version")
+        if self.curated_status not in FINDING_CURATION_STATUSES:
+            raise ValueError(
+                f"unsupported finding curation status: {self.curated_status}"
+            )
+        if self.curated_finding.key != (
+            self.collection_id,
+            self.objective_id,
+            self.analysis_version,
+            self.finding_id,
+        ):
+            raise ValueError("curated Finding identity differs from curation identity")
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "FindingCuration":
@@ -448,21 +457,11 @@ class FindingCuration:
             objective_id=_normalize_text(payload.get("objective_id")) or "",
             analysis_version=int(payload.get("analysis_version") or 0),
             finding_id=_normalize_text(payload.get("finding_id")) or "",
-            curated_status=_normalize_choice(
-                payload.get("curated_status"),
-                allowed=FINDING_CURATION_STATUSES,
-                default="limited",
-            ),
-            curated_statement=_normalize_text(payload.get("curated_statement")) or "",
-            curated_support_grade=_normalize_text(payload.get("curated_support_grade")),
-            curated_review_status=_normalize_text(payload.get("curated_review_status")),
-            curated_variables=_normalize_text_tuple(payload.get("curated_variables")),
-            curated_mediators=_normalize_text_tuple(payload.get("curated_mediators")),
-            curated_outcomes=_normalize_text_tuple(payload.get("curated_outcomes")),
-            curated_direction=_normalize_text(payload.get("curated_direction")),
-            curated_scope_summary=_normalize_text(payload.get("curated_scope_summary")),
-            curated_evidence_ids=_normalize_text_tuple(
-                payload.get("curated_evidence_ids")
+            curated_status=(
+                _normalize_text(payload.get("curated_status")) or ""
+            ).lower(),
+            curated_finding=Finding.from_mapping(
+                _normalize_mapping(payload.get("curated_finding"))
             ),
             note=_normalize_text(payload.get("note")),
             reviewer=_normalize_text(payload.get("reviewer")),
@@ -477,15 +476,7 @@ class FindingCuration:
             "analysis_version": self.analysis_version,
             "finding_id": self.finding_id,
             "curated_status": self.curated_status,
-            "curated_statement": self.curated_statement,
-            "curated_support_grade": self.curated_support_grade,
-            "curated_review_status": self.curated_review_status,
-            "curated_variables": list(self.curated_variables),
-            "curated_mediators": list(self.curated_mediators),
-            "curated_outcomes": list(self.curated_outcomes),
-            "curated_direction": self.curated_direction,
-            "curated_scope_summary": self.curated_scope_summary,
-            "curated_evidence_ids": list(self.curated_evidence_ids),
+            "curated_finding": self.curated_finding.to_record(),
             "note": self.note,
             "reviewer": self.reviewer,
             "updated_at": self.updated_at,
@@ -524,7 +515,9 @@ def _normalize_mapping_sequence(value: Any) -> tuple[dict[str, Any], ...]:
     if isinstance(value, (str, bytes)):
         return ()
     try:
-        return tuple(_normalize_mapping(item) for item in value if isinstance(item, Mapping))
+        return tuple(
+            _normalize_mapping(item) for item in value if isinstance(item, Mapping)
+        )
     except TypeError:
         return ()
 

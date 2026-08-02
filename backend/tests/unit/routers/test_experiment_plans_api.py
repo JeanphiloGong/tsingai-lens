@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+from application.evaluation.finding_feedback_service import _source_snapshot_validity
 from application.goal.experiment_plan_service import ExperimentPlanService
 from controllers.goal import experiment_plans as experiment_plans_controller
 from controllers.schemas.goal.experiment_plan import (
@@ -42,14 +43,18 @@ class _FindingFeedbackService:
             "items": [
                 {
                     "finding_id": "finding-1",
-                    "finding_fingerprint": "finding.v1:abc",
-                    "protocol_source_fingerprint": "protocol-source.v1:def",
+                    "analysis_version": 1,
+                    "finding_fingerprint": "finding.v2:abc",
+                    "evidence_fingerprint": "evidence.v2:def",
                     "dataset_use_status": "training_ready",
-                    "protocol_readiness": {"status": "protocol_ready"},
-                    "training_evidence_refs": [{"evidence_ref_id": "ev_1"}],
+                    "evidence": [{"evidence_id": "ev_1"}],
                 }
             ],
         }
+
+    def source_snapshot_validity(self, **kwargs):  # noqa: ANN003, ANN201
+        dataset = self.export_dataset(**kwargs)
+        return _source_snapshot_validity(kwargs["source_findings"], dataset["items"])
 
 
 def _write_goal_message(repository: InMemoryObjectiveWorkspaceRepository) -> None:
@@ -86,7 +91,7 @@ def _write_goal_message(repository: InMemoryObjectiveWorkspaceRepository) -> Non
                 "used_evidence_ids": ["ev_1"],
                 "warnings": [],
                 "links": {},
-                "review_gate": "protocol_ready_findings",
+                "review_gate": "reviewed_findings",
                 "source_links": [
                     {
                         "kind": "evidence",
@@ -96,10 +101,12 @@ def _write_goal_message(repository: InMemoryObjectiveWorkspaceRepository) -> Non
                 ],
                 "source_finding_refs": [
                     {
+                        "objective_id": "objective_1",
                         "finding_id": "finding-1",
-                        "finding_fingerprint": "finding.v1:abc",
-                        "protocol_source_fingerprint": "protocol-source.v1:def",
-                        "evidence_ref_ids": ["ev_1"],
+                        "analysis_version": 1,
+                        "finding_fingerprint": "finding.v2:abc",
+                        "evidence_fingerprint": "evidence.v2:def",
+                        "evidence_ids": ["ev_1"],
                     }
                 ],
                 "created_at": "2026-07-13T00:01:00+00:00",
@@ -114,9 +121,7 @@ def test_experiment_plan_routes_create_list_and_update():
     service = ExperimentPlanService(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        finding_feedback_service=(
-            _FindingFeedbackService()
-        ),
+        finding_feedback_service=(_FindingFeedbackService()),
     )
     request = _request(service)
 

@@ -5,6 +5,7 @@ from typing import Any
 from application.evaluation.finding_review_import_service import (
     FindingReviewImportService,
 )
+from domain.core import Finding
 
 
 class _FeedbackService:
@@ -12,6 +13,7 @@ class _FeedbackService:
         self.feedback_calls: list[dict[str, Any]] = []
         self.curation_calls: list[dict[str, Any]] = []
         self.export_calls: list[dict[str, str]] = []
+        self.validation_calls: list[dict[str, Any]] = []
 
     def export_dataset(self, *, collection_id: str, objective_id: str) -> dict:
         self.export_calls.append(
@@ -22,6 +24,7 @@ class _FeedbackService:
                 {
                     "analysis_version": 3,
                     "finding_id": "finding-density",
+                    "system_prediction": _finding(),
                     "evidence": [
                         {"evidence_id": "evidence-result"},
                         {"evidence_id": "evidence-condition"},
@@ -36,6 +39,21 @@ class _FeedbackService:
     def record_curation(self, **payload: Any) -> None:
         self.curation_calls.append(payload)
 
+    def validate_curation(self, **payload: Any) -> Finding:
+        self.validation_calls.append(payload)
+        candidate = Finding.from_mapping(payload["curated_finding"])
+        if candidate.to_record() != payload["curated_finding"]:
+            raise ValueError(
+                "curated_finding must use the complete canonical Finding contract"
+            )
+        if candidate.key != (
+            payload["collection_id"],
+            payload["objective_id"],
+            payload["analysis_version"],
+            payload["finding_id"],
+        ):
+            raise ValueError("curation cannot change the published Finding identity")
+        return candidate
 
 def _identity(**extra: Any) -> dict[str, Any]:
     return {
@@ -44,6 +62,42 @@ def _identity(**extra: Any) -> dict[str, Any]:
         "analysis_version": 3,
         "finding_id": "finding-density",
         **extra,
+    }
+
+
+def _finding() -> dict[str, Any]:
+    return {
+        "collection_id": "col-1",
+        "objective_id": "objective-1",
+        "analysis_version": 3,
+        "finding_id": "finding-density",
+        "statement": "Within this paper, higher VED coincided with higher density.",
+        "factors": ["volumetric energy density"],
+        "outcome": "relative density",
+        "direction": "increase",
+        "assertion_strength": "associative",
+        "attribution_scope": "association_only",
+        "synthesis_status": "insufficient_confirmation",
+        "certainty": 0.5,
+        "display_rank": 0,
+        "mechanisms": [],
+        "scientific_context": {
+            "material": [{"name": "alloy", "value": "316L", "unit": None}],
+            "sample": [],
+            "process": [],
+            "test": [],
+        },
+        "limitations": ["Only one paper directly supports this result."],
+        "paper_contributions": [
+            {
+                "document_id": "paper-1",
+                "analysis_status": "analyzed",
+                "supporting_evidence_ids": ["evidence-result"],
+                "contradicting_evidence_ids": [],
+                "context_evidence_ids": ["evidence-condition"],
+                "condition_boundary_evidence_ids": [],
+            }
+        ],
     }
 
 
@@ -108,13 +162,7 @@ def test_import_applies_curation_with_version_local_evidence() -> None:
         rows=[
             _identity(
                 action="correct",
-                suggested_target={
-                    "statement": "Within this paper, higher VED coincided with higher density.",
-                    "status": "limited",
-                    "variables": ["volumetric energy density"],
-                    "outcomes": ["relative density"],
-                    "evidence_ids": ["evidence-result", "evidence-condition"],
-                },
+                curated_finding=_finding(),
             )
         ],
         reviewer="expert-1",
@@ -129,21 +177,93 @@ def test_import_applies_curation_with_version_local_evidence() -> None:
             "analysis_version": 3,
             "finding_id": "finding-density",
             "curated_status": "limited",
-            "curated_statement": (
-                "Within this paper, higher VED coincided with higher density."
-            ),
-            "curated_evidence_ids": ["evidence-result", "evidence-condition"],
-            "curated_support_grade": None,
-            "curated_review_status": None,
-            "curated_variables": ["volumetric energy density"],
-            "curated_mediators": [],
-            "curated_outcomes": ["relative density"],
-            "curated_direction": None,
-            "curated_scope_summary": None,
+            "curated_finding": _finding(),
             "note": None,
             "reviewer": "expert-1",
         }
     ]
+    assert feedback.validation_calls == [
+        {
+            "collection_id": "col-1",
+            "objective_id": "objective-1",
+            "analysis_version": 3,
+            "finding_id": "finding-density",
+            "curated_finding": _finding(),
+        }
+    ]
+
+
+def test_import_dry_run_rejects_noncanonical_curated_finding() -> None:
+    feedback = _FeedbackService()
+    malformed = _finding()
+    malformed.pop("scientific_context")
+
+    result = FindingReviewImportService(feedback).import_rows(
+        rows=[_identity(action="correct", curated_finding=malformed)],
+        reviewer="expert-1",
+        dry_run=True,
+    )
+
+    assert result["status"] == "fail"
+    assert "complete canonical Finding contract" in result["errors"][0]["message"]
+    assert feedback.curation_calls == []
+
+
+def test_import_dry_run_rejects_cross_identity_curated_finding() -> None:
+    feedback = _FeedbackService()
+    cross_identity = _finding()
+    cross_identity["objective_id"] = "objective-other"
+
+    result = FindingReviewImportService(feedback).import_rows(
+        rows=[_identity(action="correct", curated_finding=cross_identity)],
+        reviewer="expert-1",
+        dry_run=True,
+    )
+
+    assert result["status"] == "fail"
+    assert "cannot change the published Finding identity" in result["errors"][0]["message"]
+    assert feedback.curation_calls == []
+
+
+def test_import_dry_run_rejects_invalid_curated_status() -> None:
+    feedback = _FeedbackService()
+
+    result = FindingReviewImportService(feedback).import_rows(
+        rows=[
+            _identity(
+                action="correct",
+                curated_status="bogus",
+                curated_finding=_finding(),
+            )
+        ],
+        reviewer="expert-1",
+        dry_run=True,
+    )
+
+    assert result["status"] == "fail"
+    assert result["errors"] == [
+        {"line": 1, "message": "correct requires a valid curated_status"}
+    ]
+    assert feedback.curation_calls == []
+
+
+def test_import_rejects_retired_review_jsonl_aliases() -> None:
+    feedback = _FeedbackService()
+
+    result = FindingReviewImportService(feedback).import_rows(
+        rows=[_identity(expert_action="accept", expert_note="legacy")],
+        reviewer="expert-1",
+        dry_run=True,
+    )
+
+    assert result["status"] == "fail"
+    assert result["errors"] == [
+        {
+            "line": 1,
+            "message": "expert_action and expert_note are not review JSONL fields",
+        }
+    ]
+    assert feedback.export_calls == []
 
 
 def test_import_rejects_claim_identity_instead_of_ignoring_it() -> None:

@@ -8,16 +8,25 @@ import sys
 from typing import Any
 
 
+BACKEND_ROOT = Path(__file__).resolve().parents[3]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+from domain.core import Finding  # noqa: E402
+
+
 AGENT_RECOMMENDATIONS = ("accept", "reject", "correct", "unclear", "skip")
 REJECT_ISSUE_OPTIONS = (
     "evidence_not_grounded",
     "missing_evidence",
     "insufficient_evidence",
-    "wrong_variable",
+    "wrong_factor",
     "wrong_outcome",
     "wrong_direction",
     "wrong_context",
-    "wrong_relation",
+    "wrong_mechanism",
+    "wrong_attribution",
+    "wrong_synthesis",
     "overclaim",
     "unclear_statement",
     "other",
@@ -180,6 +189,15 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
     errors: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     finding_id = _text(row.get("finding_id"))
+    identity = _identity(row)
+    if identity is None:
+        errors.append(
+            _issue(
+                line_number,
+                finding_id,
+                "collection_id, objective_id, analysis_version, and finding_id are required",
+            )
+        )
     action = _text(row.get("action")).lower()
     if action != "skip":
         errors.append(
@@ -237,23 +255,30 @@ def _check_row(row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
                 )
             )
     elif recommendation == "correct":
-        target = _mapping(agent_review.get("suggested_target"))
-        if not _text(target.get("statement")):
+        target = _mapping(agent_review.get("curated_finding"))
+        if not target:
             errors.append(
                 _issue(
                     line_number,
                     finding_id,
-                    "agent correct recommendation requires agent_review.suggested_target.statement",
+                    "agent correct recommendation requires agent_review.curated_finding",
                 )
             )
-        if not _strings(target.get("evidence_ref_ids")):
-            errors.append(
-                _issue(
-                    line_number,
-                    finding_id,
-                    "agent correct recommendation requires evidence_ref_ids",
+        else:
+            try:
+                candidate = Finding.from_mapping(target)
+                if candidate.to_record() != target:
+                    raise ValueError("Finding is not canonical")
+                if identity is not None and candidate.key != identity:
+                    raise ValueError("Finding identity differs from the reviewed row")
+            except ValueError as exc:
+                errors.append(
+                    _issue(
+                        line_number,
+                        finding_id,
+                        f"invalid agent_review.curated_finding: {exc}",
+                    )
                 )
-            )
     if recommendation in {"accept", "reject", "correct", "unclear"} and not _text(
         agent_review.get("note")
     ):
@@ -308,6 +333,20 @@ def _goal_handoff(row_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ]:
             goal["first_unresolved_finding_id"] = _text(result.get("finding_id"))
     return [_finalize_goal_handoff(goal) for goal in goals.values()]
+
+
+def _identity(row: dict[str, Any]) -> tuple[str, str, int, str] | None:
+    try:
+        analysis_version = int(row.get("analysis_version") or 0)
+    except (TypeError, ValueError):
+        analysis_version = 0
+    identity = (
+        _text(row.get("collection_id")),
+        _text(row.get("objective_id")),
+        analysis_version,
+        _text(row.get("finding_id")),
+    )
+    return identity if all((identity[0], identity[1], identity[2] > 0, identity[3])) else None
 
 
 def _finalize_goal_handoff(goal: dict[str, Any]) -> dict[str, Any]:

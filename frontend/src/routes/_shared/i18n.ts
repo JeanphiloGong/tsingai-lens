@@ -268,14 +268,15 @@ const translations: Record<Language, Translations> = {
 				saved: 'Saved',
 				open: 'Open plan',
 				defaultTitle: 'Experiment plan draft',
-				reviewRequired:
-					'Save is disabled until this objective has expert-reviewed protocol-ready findings.',
+				reviewRequired: 'Save is disabled until this objective has expert-reviewed Findings.',
+				sourceStale:
+					'The reviewed Finding or Evidence used by this answer has changed. Generate a new answer before saving a plan.',
 				evidenceRequired:
 					'Save is disabled until the answer cites the exact reviewed evidence used for the plan.',
 				sourceTraceRequired:
 					'This answer is limited because Lens could not verify a visible source citation. Review the findings and evidence before using it for a protocol.',
 				protocolContractInvalid:
-					'This draft failed the source/design contract and cannot be saved. Review the protocol-ready findings and regenerate it.',
+					'This draft failed the source/design contract and cannot be saved. Review the Findings and regenerate it.',
 				sourceCitationRequired:
 					'Save is disabled until the answer names the visible source label, such as [Source 1].',
 				sourceLinkRequired:
@@ -2572,6 +2573,7 @@ const translations: Record<Language, Translations> = {
 				open: '打开方案',
 				defaultTitle: '实验方案草稿',
 				reviewRequired: '该研究目标还没有专家复核后的可生成方案 Findings，暂不能保存为实验方案。',
+				sourceStale: '该回答使用的已复核 Finding 或 Evidence 已变化，请重新生成回答后再保存方案。',
 				evidenceRequired: '该回答还没有引用用于方案的已复核证据，暂不能保存为实验方案。',
 				sourceTraceRequired:
 					'该回答因缺少可验证的可见来源引用而受限。请先检查 Findings 和证据，再用于实验方案。',

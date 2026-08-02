@@ -84,7 +84,8 @@ succeeded published analysis with non-empty Findings. It validates:
 
 - complete `(collection_id, objective_id, analysis_version, finding_id)`
   identity;
-- variables, outcomes, Finding level, and paper count;
+- non-empty factors, exactly one outcome, and synthesis status;
+- direct paper bindings computed from PaperContributions;
 - at least one supporting direct-result Evidence record;
 - exact Evidence membership for each Finding;
 - Source locator, excerpt, and page resolution;
@@ -102,8 +103,8 @@ collection_id + objective_id + analysis_version + finding_id
 ```
 
 Review decisions use `accept`, `reject`, `correct`, or `skip`. A correction
-must provide a curated statement and Evidence IDs belonging to the same
-Finding version.
+must provide one complete canonical `curated_finding` whose identity,
+PaperContributions, and Evidence all belong to the same published version.
 
 Import a JSONL decision file:
 
@@ -128,8 +129,38 @@ Minimal accept row:
 Minimal correction row:
 
 ```json
-{"collection_id":"col_xxx","objective_id":"obj_xxx","analysis_version":2,"finding_id":"finding_xxx","action":"correct","suggested_target":{"statement":"Under the reported LPBF conditions, preheating was associated with higher elongation.","evidence_ids":["evidence_xxx"]}}
+{
+  "collection_id": "col_xxx",
+  "objective_id": "obj_xxx",
+  "analysis_version": 2,
+  "finding_id": "finding_xxx",
+  "action": "correct",
+  "curated_status": "limited",
+  "curated_finding": {
+    "collection_id": "col_xxx",
+    "objective_id": "obj_xxx",
+    "analysis_version": 2,
+    "finding_id": "finding_xxx",
+    "statement": "Under the reported LPBF conditions, preheating was associated with higher elongation.",
+    "factors": ["preheating"],
+    "outcome": "elongation",
+    "direction": "increase",
+    "assertion_strength": "associative",
+    "attribution_scope": "isolated_effect",
+    "synthesis_status": "insufficient_confirmation",
+    "certainty": 0.5,
+    "display_rank": 0,
+    "mechanisms": [],
+    "scientific_context": {"material": [], "sample": [], "process": [], "test": []},
+    "limitations": ["One directly contributing paper."],
+    "paper_contributions": [{"document_id": "paper_xxx", "analysis_status": "analyzed", "supporting_evidence_ids": ["evidence_xxx"], "contradicting_evidence_ids": [], "context_evidence_ids": [], "condition_boundary_evidence_ids": []}]
+  }
+}
 ```
+
+For `merge_expert_decision_board.py`, the TSV carries the same complete object
+as JSON text in `curated_finding_json`; scalar correction columns are not
+supported.
 
 ## Independent Agent Drafts
 
@@ -164,7 +195,7 @@ Use `format=training_jsonl` for fine-tuning rows. Each line contains:
     {"role": "assistant", "content": "Structured Finding target"}
   ],
   "metadata": {
-    "schema_version": "objective_finding_training.v1",
+    "schema_version": "objective_finding_training.v2",
     "collection_id": "col_xxx",
     "objective_id": "obj_xxx",
     "analysis_version": 2,
@@ -174,5 +205,6 @@ Use `format=training_jsonl` for fine-tuning rows. Each line contains:
 }
 ```
 
-The model input contains source text. `evidence_ids` preserve audit identity;
-they are never the only Evidence content supplied to training.
+Only `training_ready` samples produce JSONL rows. The model input contains
+exact source text and scientific context. `evidence_ids` preserve audit
+identity; they are never the only Evidence content supplied to training.

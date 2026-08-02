@@ -104,23 +104,23 @@ The Objective detail page has two levels:
 1. a compact Finding list;
 2. one selected Finding detail.
 
-The list shows statement, variable, outcome, scope, evidence strength, paper
-count, and generalization boundary. It does not expose internal IDs.
+The list shows statement, factors, one outcome, synthesis status, certainty,
+and directly contributing paper count. It does not expose internal IDs.
 
 The selected detail shows:
 
-- the Finding statement and evidence summary;
-- ordered Relations with assertion strength;
-- structured material, process, sample, and test Context;
-- limitations and comparison baseline;
-- exact Evidence excerpts grouped under the Finding;
+- the Finding statement, factors, outcome, direction, and attribution scope;
+- subordinate mechanisms with assertion strength;
+- typed material, sample, process, and test scientific context;
+- explicit limitations and every PaperContribution status;
+- exact Evidence excerpts grouped by contribution role;
 - paper/page/source metadata and Open source action;
-- bounded Derivation audit;
 - one Feedback action that expands the review form.
 
-Feedback uses `analysis_version + finding_id`. Changing selection loads only
-that Finding's Evidence. Empty Evidence is an explicit failure/empty state, not
-a fabricated source summary.
+Feedback uses `analysis_version + finding_id`. Changing selection loads that
+Finding detail and Evidence together, and stale rapid-selection responses are
+discarded. Empty Evidence is an explicit failure/empty state, not a fabricated
+source summary.
 
 ## Document Verification
 
@@ -140,11 +140,11 @@ The assistant distinguishes:
 - collection-limited answer;
 - general fallback/background.
 
-Objective-focused grounded answers consume bounded published Findings and
-return visible source links. Only reviewed protocol-ready Findings may ground a
-saved assistant-generated experiment plan. Plans remain editable drafts and
-display stale source status when the underlying Finding/Evidence version
-changes.
+Objective-focused grounded answers consume bounded, training-ready published
+Findings and return visible source links. Saved assistant-generated experiment
+plans retain analysis version, Finding fingerprint, Evidence fingerprint, and
+Evidence IDs. Plans remain editable drafts and display stale source status when
+any underlying snapshot changes.
 
 ## Graph
 

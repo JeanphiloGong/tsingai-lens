@@ -10,18 +10,6 @@ from typing import Any
 
 
 ACTION_VALUES = frozenset({"accept", "reject", "correct", "skip", ""})
-LIST_FIELDS = {
-    "corrected_variables": "variables",
-    "corrected_mediators": "mediators",
-    "corrected_outcomes": "outcomes",
-    "corrected_evidence_ref_ids": "evidence_ref_ids",
-}
-TEXT_FIELDS = {
-    "corrected_statement": "statement",
-    "corrected_direction": "direction",
-    "corrected_scope_summary": "scope_summary",
-    "corrected_support_grade": "support_grade",
-}
 
 
 def parse_args() -> argparse.Namespace:
@@ -62,15 +50,25 @@ def merge_expert_decision_board(
     board_rows: list[dict[str, str]],
 ) -> list[dict[str, Any]]:
     indexed = _index_template_rows(template_rows)
-    merged = [dict(row) for row in template_rows]
+    merged = [
+        {
+            key: value
+            for key, value in row.items()
+            if key not in {"expert_action", "expert_note"}
+        }
+        for row in template_rows
+    ]
     merged_by_key = {_row_key(row): row for row in merged}
     errors: list[str] = []
-    used_keys: set[tuple[str, str, str]] = set()
+    used_keys: set[tuple[str, str, int, str]] = set()
 
     for line_number, board_row in enumerate(board_rows, start=2):
         key = _board_key(board_row)
-        if not key[1] or not key[2]:
-            errors.append(f"line {line_number}: objective_id and finding_id are required")
+        if not key[0] or not key[1] or key[2] < 1 or not key[3]:
+            errors.append(
+                f"line {line_number}: collection_id, objective_id, "
+                "analysis_version, and finding_id are required"
+            )
             continue
         if key not in indexed:
             errors.append(
@@ -123,7 +121,13 @@ def read_tsv(path: Path) -> list[dict[str, str]]:
         reader = csv.DictReader(handle, delimiter="\t")
         missing = [
             field
-            for field in ("collection_id", "objective_id", "finding_id", "expert_action")
+            for field in (
+                "collection_id",
+                "objective_id",
+                "analysis_version",
+                "finding_id",
+                "expert_action",
+            )
             if field not in (reader.fieldnames or [])
         ]
         if missing:
@@ -136,13 +140,14 @@ def read_tsv(path: Path) -> list[dict[str, str]]:
 
 def _index_template_rows(
     rows: list[dict[str, Any]],
-) -> dict[tuple[str, str, str], dict[str, Any]]:
-    indexed: dict[tuple[str, str, str], dict[str, Any]] = {}
+) -> dict[tuple[str, str, int, str], dict[str, Any]]:
+    indexed: dict[tuple[str, str, int, str], dict[str, Any]] = {}
     for line_number, row in enumerate(rows, start=1):
         key = _row_key(row)
-        if not key[1] or not key[2]:
+        if not key[0] or not key[1] or key[2] < 1 or not key[3]:
             raise ValueError(
-                f"template line {line_number}: objective_id and finding_id are required"
+                f"template line {line_number}: collection_id, objective_id, "
+                "analysis_version, and finding_id are required"
             )
         if key in indexed:
             raise ValueError(f"template line {line_number}: duplicate finding row")
@@ -158,23 +163,22 @@ def _validate_action(
 ) -> list[str]:
     errors: list[str] = []
     if action == "accept" and not _accept_allowed(template_row, board_row):
-        errors.append(
-            f"line {line_number}: accept is blocked; use correct or reject"
-        )
+        errors.append(f"line {line_number}: accept is blocked; use correct or reject")
     if action == "reject":
         issue_type = _text(board_row.get("issue_type")).lower()
         if not issue_type:
             errors.append(f"line {line_number}: reject requires issue_type")
     if action == "correct":
-        if not _text(board_row.get("corrected_statement")):
-            errors.append(f"line {line_number}: correct requires corrected_statement")
-        evidence_ref_ids = _split_list(board_row.get("corrected_evidence_ref_ids"))
-        if not evidence_ref_ids:
-            evidence_ref_ids = _split_list(board_row.get("curated_evidence_ref_ids"))
-        if not evidence_ref_ids:
-            errors.append(
-                f"line {line_number}: correct requires corrected_evidence_ref_ids"
-            )
+        try:
+            curated_finding = _curated_finding(board_row)
+        except ValueError as exc:
+            errors.append(f"line {line_number}: {exc}")
+        else:
+            identity = _row_key(template_row)
+            if _finding_key(curated_finding) != identity:
+                errors.append(
+                    f"line {line_number}: curated_finding identity must match the reviewed Finding"
+                )
     return errors
 
 
@@ -186,23 +190,15 @@ def _apply_decision(
     target_row["action"] = action
     note = _text(board_row.get("expert_note"))
     if note:
-        target_row["expert_note"] = note
+        target_row["note"] = note
     if action == "reject":
         target_row["issue_type"] = _text(board_row.get("issue_type")).lower()
         return
     if action == "correct":
-        target = dict(target_row.get("suggested_target") or {})
-        for source_field, target_field in TEXT_FIELDS.items():
-            value = _text(board_row.get(source_field))
-            if value:
-                target[target_field] = value
-        for source_field, target_field in LIST_FIELDS.items():
-            values = _split_list(board_row.get(source_field))
-            if values:
-                target[target_field] = values
-        target_row["suggested_target"] = target
-        if target.get("evidence_ref_ids"):
-            target_row["curated_evidence_ref_ids"] = list(target["evidence_ref_ids"])
+        target_row["curated_finding"] = _curated_finding(board_row)
+        curated_status = _text(board_row.get("curated_status"))
+        if curated_status:
+            target_row["curated_status"] = curated_status
 
 
 def _accept_allowed(
@@ -225,28 +221,46 @@ def _accept_allowed(
     return not (isinstance(blocking, list) and blocking)
 
 
-def _board_key(row: dict[str, str]) -> tuple[str, str, str]:
+def _board_key(row: dict[str, str]) -> tuple[str, str, int, str]:
     return (
         _text(row.get("collection_id")),
         _text(row.get("objective_id")),
+        _int(row.get("analysis_version")),
         _text(row.get("finding_id")),
     )
 
 
-def _row_key(row: dict[str, Any]) -> tuple[str, str, str]:
+def _row_key(row: dict[str, Any]) -> tuple[str, str, int, str]:
     return (
         _text(row.get("collection_id")),
         _text(row.get("objective_id")),
+        _int(row.get("analysis_version")),
         _text(row.get("finding_id")),
     )
 
 
-def _split_list(value: Any) -> list[str]:
-    text = _text(value)
-    if not text:
-        return []
-    delimiter = ";" if ";" in text else ","
-    return [_text(item) for item in text.split(delimiter) if _text(item)]
+def _finding_key(row: dict[str, Any]) -> tuple[str, str, int, str]:
+    return _row_key(row)
+
+
+def _curated_finding(row: dict[str, str]) -> dict[str, Any]:
+    raw = _text(row.get("curated_finding_json"))
+    if not raw:
+        raise ValueError("correct requires one complete curated_finding_json")
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("curated_finding_json must be valid JSON") from exc
+    if not isinstance(value, dict):
+        raise ValueError("curated_finding_json must be a JSON object")
+    return value
+
+
+def _int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _jsonl(rows: list[dict[str, Any]]) -> str:

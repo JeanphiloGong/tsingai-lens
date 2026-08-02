@@ -27,24 +27,28 @@ Every Objective review record uses:
 ```
 
 The service rejects missing, stale, unpublished, and cross-version Findings.
-Curation Evidence IDs must belong to the same Finding and analysis version.
-No alternate conclusion ID is accepted.
+Curation stores one complete canonical `curated_finding`. Its identity and all
+Evidence/PaperContribution bindings must belong to the same published Finding
+version. No partial correction or alternate conclusion ID is accepted.
 
 ## Dataset Contract
 
-`objective_finding_dataset.v1` contains one sample per published Finding. Each
+`objective_finding_dataset.v2` contains one sample per published Finding. Each
 sample includes:
 
 - the research question and exact versioned Finding identity;
-- system prediction and optional expert target;
+- canonical `system_prediction`, optional `expert_target`, and resolved
+  `training_target`;
 - all selected Evidence with `document_id`, typed locator, page numbers, and
   exact `source_excerpt`;
+- deterministic Finding and Evidence fingerprints;
 - training messages generated from that same Evidence;
 - label and dataset-use status.
 
 `training_jsonl` emits only `{messages, metadata}` rows with non-empty training
-messages. IDs alone are never used as model input. Gold and training readiness
-come from current human review or curation of the exact Finding version.
+messages. IDs alone are never used as model input. The newest feedback or
+curation event controls label and training readiness for the exact Finding
+version; an older acceptance cannot override a newer rejection or correction.
 
 Persistence details belong to `infra/persistence/`; HTTP request and response
 schemas belong to `controllers/schemas/`.

@@ -23,7 +23,9 @@ class PostgresFindingReviewRepository:
     def upsert_feedback(self, feedback: FindingFeedback) -> FindingFeedback:
         with self.session_factory.begin() as session:
             existing = session.get(FindingFeedbackRecord, feedback.feedback_id)
-            if existing is not None and _feedback_key(existing) != _feedback_key(feedback):
+            if existing is not None and _feedback_key(existing) != _feedback_key(
+                feedback
+            ):
                 raise ValueError("feedback identity cannot be reassigned")
             row = existing or FindingFeedbackRecord(feedback_id=feedback.feedback_id)
             row.collection_id = feedback.collection_id
@@ -74,7 +76,9 @@ class PostgresFindingReviewRepository:
     def upsert_curation(self, curation: FindingCuration) -> FindingCuration:
         with self.session_factory.begin() as session:
             existing = session.get(FindingCurationRecord, curation.curation_id)
-            if existing is not None and _curation_key(existing) != _curation_key(curation):
+            if existing is not None and _curation_key(existing) != _curation_key(
+                curation
+            ):
                 raise ValueError("curation identity cannot be reassigned")
             row = existing or FindingCurationRecord(curation_id=curation.curation_id)
             row.collection_id = curation.collection_id
@@ -82,15 +86,7 @@ class PostgresFindingReviewRepository:
             row.analysis_version = curation.analysis_version
             row.finding_id = curation.finding_id
             row.curated_status = curation.curated_status
-            row.curated_statement = curation.curated_statement
-            row.curated_support_grade = curation.curated_support_grade
-            row.curated_review_status = curation.curated_review_status
-            row.curated_variables = list(curation.curated_variables)
-            row.curated_mediators = list(curation.curated_mediators)
-            row.curated_outcomes = list(curation.curated_outcomes)
-            row.curated_direction = curation.curated_direction
-            row.curated_scope_summary = curation.curated_scope_summary
-            row.curated_evidence_ids = list(curation.curated_evidence_ids)
+            row.curated_finding = curation.curated_finding.to_record()
             row.note = curation.note
             row.reviewer = curation.reviewer
             row.updated_at = _datetime(curation.updated_at)
@@ -175,15 +171,7 @@ def _curation(row: FindingCurationRecord) -> FindingCuration:
             "analysis_version": row.analysis_version,
             "finding_id": row.finding_id,
             "curated_status": row.curated_status,
-            "curated_statement": row.curated_statement,
-            "curated_support_grade": row.curated_support_grade,
-            "curated_review_status": row.curated_review_status,
-            "curated_variables": list(row.curated_variables),
-            "curated_mediators": list(row.curated_mediators),
-            "curated_outcomes": list(row.curated_outcomes),
-            "curated_direction": row.curated_direction,
-            "curated_scope_summary": row.curated_scope_summary,
-            "curated_evidence_ids": list(row.curated_evidence_ids),
+            "curated_finding": dict(row.curated_finding),
             "note": row.note,
             "reviewer": row.reviewer,
             "updated_at": _isoformat(row.updated_at),

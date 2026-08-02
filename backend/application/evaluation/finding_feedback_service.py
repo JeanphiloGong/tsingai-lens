@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from hashlib import sha1
-from typing import Any
+from hashlib import sha1, sha256
+from typing import Any, Mapping
 
 from domain.core import Finding, ObjectiveEvidence
 from domain.evaluation import FindingCuration, FindingFeedback
 from domain.ports import FindingReviewRepository, ObjectiveRepository
 
 
-DATASET_SCHEMA_VERSION = "objective_finding_dataset.v1"
-TRAINING_SCHEMA_VERSION = "objective_finding_training.v1"
-TRAINING_PROMPT_VERSION = "objective_finding_training_prompt.v1"
+DATASET_SCHEMA_VERSION = "objective_finding_dataset.v2"
+TRAINING_SCHEMA_VERSION = "objective_finding_training.v2"
+TRAINING_PROMPT_VERSION = "objective_finding_training_prompt.v2"
+_FINDING_PAGE_SIZE = 200
+_EVIDENCE_PAGE_SIZE = 500
 
 
 class FindingFeedbackService:
@@ -77,10 +79,16 @@ class FindingFeedbackService:
         self,
         *,
         collection_id: str,
-        objective_id: str | None = None,
-        analysis_version: int | None = None,
-        finding_id: str | None = None,
+        objective_id: str,
+        analysis_version: int,
+        finding_id: str,
     ) -> tuple[FindingFeedback, ...]:
+        self._require_published_finding(
+            collection_id,
+            objective_id,
+            analysis_version,
+            finding_id,
+        )
         return self.review_repository.list_feedback(
             collection_id,
             objective_id,
@@ -96,35 +104,17 @@ class FindingFeedbackService:
         analysis_version: int,
         finding_id: str,
         curated_status: str,
-        curated_statement: str,
-        curated_evidence_ids: list[str],
-        curated_support_grade: str | None = None,
-        curated_review_status: str | None = None,
-        curated_variables: list[str] | None = None,
-        curated_mediators: list[str] | None = None,
-        curated_outcomes: list[str] | None = None,
-        curated_direction: str | None = None,
-        curated_scope_summary: str | None = None,
+        curated_finding: Mapping[str, Any],
         note: str | None = None,
         reviewer: str | None = None,
     ) -> FindingCuration:
-        finding = self._require_published_finding(
-            collection_id,
-            objective_id,
-            analysis_version,
-            finding_id,
-        )
-        available_evidence, _ = self.objective_repository.list_evidence(
-            collection_id,
-            objective_id,
-            analysis_version,
+        candidate = self.validate_curation(
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
             finding_id=finding_id,
-            offset=0,
-            limit=500,
+            curated_finding=curated_finding,
         )
-        available_ids = {item.evidence_id for item in available_evidence}
-        if set(curated_evidence_ids) - available_ids:
-            raise ValueError("curation references evidence outside the Finding")
         updated_at = _now_iso()
         curation = FindingCuration.from_mapping(
             {
@@ -140,17 +130,7 @@ class FindingFeedbackService:
                 "analysis_version": analysis_version,
                 "finding_id": finding_id,
                 "curated_status": curated_status,
-                "curated_statement": curated_statement,
-                "curated_support_grade": curated_support_grade,
-                "curated_review_status": curated_review_status,
-                "curated_variables": curated_variables or list(finding.variables),
-                "curated_mediators": curated_mediators or list(finding.mediators),
-                "curated_outcomes": curated_outcomes or list(finding.outcomes),
-                "curated_direction": curated_direction or finding.direction,
-                "curated_scope_summary": (
-                    curated_scope_summary or finding.scope_summary
-                ),
-                "curated_evidence_ids": curated_evidence_ids,
+                "curated_finding": candidate.to_record(),
                 "note": note,
                 "reviewer": reviewer,
                 "updated_at": updated_at,
@@ -158,14 +138,62 @@ class FindingFeedbackService:
         )
         return self.review_repository.upsert_curation(curation)
 
+    def validate_curation(
+        self,
+        *,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        finding_id: str,
+        curated_finding: Mapping[str, Any],
+    ) -> Finding:
+        published = self._require_published_finding(
+            collection_id,
+            objective_id,
+            analysis_version,
+            finding_id,
+        )
+        candidate = Finding.from_mapping(curated_finding)
+        if candidate.to_record() != dict(curated_finding):
+            raise ValueError(
+                "curated_finding must use the complete canonical Finding contract"
+            )
+        if candidate.key != published.key:
+            raise ValueError("curation cannot change the published Finding identity")
+        if tuple(
+            (item.document_id, item.analysis_status)
+            for item in candidate.paper_contributions
+        ) != tuple(
+            (item.document_id, item.analysis_status)
+            for item in published.paper_contributions
+        ):
+            raise ValueError("curation cannot change Objective paper coverage")
+
+        evidence = self._finding_evidence(published)
+        candidate.validate_sources(
+            evidence,
+            self.objective_repository.list_contributions(
+                collection_id,
+                objective_id,
+                analysis_version,
+            ),
+        )
+        return candidate
+
     def list_curations(
         self,
         *,
         collection_id: str,
-        objective_id: str | None = None,
-        analysis_version: int | None = None,
-        finding_id: str | None = None,
+        objective_id: str,
+        analysis_version: int,
+        finding_id: str,
     ) -> tuple[FindingCuration, ...]:
+        self._require_published_finding(
+            collection_id,
+            objective_id,
+            analysis_version,
+            finding_id,
+        )
         return self.review_repository.list_curations(
             collection_id,
             objective_id,
@@ -191,18 +219,17 @@ class FindingFeedbackService:
         version = objective.published_analysis_version
         if version is None:
             raise ValueError("objective has no published analysis")
-        items = self._dataset_items(
-            collection_id,
-            objective_id,
-            version,
-            label_status=label_status,
-            dataset_use_status=dataset_use_status,
-        )
         return {
             "schema_version": DATASET_SCHEMA_VERSION,
             "collection_id": collection_id,
             "objective_id": objective_id,
-            "items": items,
+            "items": self._dataset_items(
+                collection_id,
+                objective_id,
+                version,
+                label_status=label_status,
+                dataset_use_status=dataset_use_status,
+            ),
             "warnings": [],
         }
 
@@ -245,9 +272,28 @@ class FindingFeedbackService:
             "collection_id": collection_id,
             "version": DATASET_SCHEMA_VERSION,
             "target_layer": "core",
-            "metric_profile": "objective_findings_v1",
+            "metric_profile": "objective_findings_v2",
             "items": dataset["items"],
         }
+
+    def source_snapshot_validity(
+        self,
+        *,
+        collection_id: str,
+        objective_id: str,
+        source_findings: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]],
+    ) -> tuple[str, list[str]]:
+        try:
+            dataset = self.export_dataset(
+                collection_id=collection_id,
+                objective_id=objective_id,
+            )
+        except (FileNotFoundError, ValueError):
+            return "stale", ["source_dataset_unavailable"]
+        items = dataset.get("items") if isinstance(dataset, Mapping) else None
+        if not isinstance(items, list):
+            return "stale", ["source_dataset_unavailable"]
+        return _source_snapshot_validity(source_findings, items)
 
     def _dataset_items(
         self,
@@ -262,43 +308,51 @@ class FindingFeedbackService:
             collection_id, objective_id
         )
         assert objective is not None
-        findings, _ = self.objective_repository.list_findings(
-            collection_id,
-            objective_id,
-            analysis_version,
-            offset=0,
-            limit=200,
-        )
+        findings = self._all_findings(collection_id, objective_id, analysis_version)
         result: list[dict[str, Any]] = []
         for finding in findings:
-            evidence, _ = self.objective_repository.list_evidence(
+            evidence = self._finding_evidence(finding)
+            feedback = self.review_repository.list_feedback(
                 collection_id,
                 objective_id,
                 analysis_version,
-                finding_id=finding.finding_id,
-                offset=0,
-                limit=500,
+                finding.finding_id,
             )
-            feedback = self.list_feedback(
-                collection_id=collection_id,
-                objective_id=objective_id,
-                analysis_version=analysis_version,
-                finding_id=finding.finding_id,
+            curations = self.review_repository.list_curations(
+                collection_id,
+                objective_id,
+                analysis_version,
+                finding.finding_id,
             )
-            curations = self.list_curations(
-                collection_id=collection_id,
-                objective_id=objective_id,
-                analysis_version=analysis_version,
-                finding_id=finding.finding_id,
+            sample_label, use_status, current_curation = _dataset_status(
+                feedback,
+                curations,
             )
-            sample_label, use_status = _dataset_status(feedback)
             if label_status is not None and sample_label != label_status:
                 continue
             if dataset_use_status is not None and use_status != dataset_use_status:
                 continue
-            curation = curations[-1] if curations else None
-            output = _curated_finding_record(finding, curation)
+
+            system_prediction = finding.to_record()
+            expert_target = (
+                current_curation.curated_finding.to_record()
+                if current_curation is not None
+                else None
+            )
+            training_target = expert_target or system_prediction
+            target_finding = Finding.from_mapping(training_target)
             evidence_records = [item.to_record() for item in evidence]
+            finding_fingerprint = _fingerprint("finding.v2", training_target)
+            evidence_fingerprint = _fingerprint("evidence.v2", evidence_records)
+            training_messages = (
+                _training_messages(
+                    objective.question,
+                    evidence,
+                    training_target,
+                )
+                if use_status == "training_ready"
+                else []
+            )
             result.append(
                 {
                     "sample_id": _stable_id(
@@ -312,23 +366,18 @@ class FindingFeedbackService:
                     "analysis_version": analysis_version,
                     "finding_id": finding.finding_id,
                     "research_objective": objective.question,
-                    "finding_level": finding.finding_level,
-                    "document_ids": list(
-                        finding.derivation.contributing_document_ids
-                    ),
+                    "document_ids": list(target_finding.contributing_document_ids),
                     "label_status": sample_label,
                     "dataset_use_status": use_status,
-                    "system_prediction": finding.to_record(),
-                    "expert_target": output if curation is not None else None,
+                    "finding_fingerprint": finding_fingerprint,
+                    "evidence_fingerprint": evidence_fingerprint,
+                    "system_prediction": system_prediction,
+                    "expert_target": expert_target,
+                    "training_target": training_target,
                     "evidence": evidence_records,
                     "training_schema_version": TRAINING_SCHEMA_VERSION,
                     "training_prompt_version": TRAINING_PROMPT_VERSION,
-                    "training_messages": _training_messages(
-                        objective.question,
-                        finding,
-                        evidence,
-                        output,
-                    ),
+                    "training_messages": training_messages,
                     "metadata": {
                         "schema_version": TRAINING_SCHEMA_VERSION,
                         "collection_id": collection_id,
@@ -337,11 +386,56 @@ class FindingFeedbackService:
                         "finding_id": finding.finding_id,
                         "label_status": sample_label,
                         "dataset_use_status": use_status,
+                        "finding_fingerprint": finding_fingerprint,
+                        "evidence_fingerprint": evidence_fingerprint,
+                        "document_ids": list(target_finding.contributing_document_ids),
                         "evidence_ids": [item.evidence_id for item in evidence],
                     },
                 }
             )
         return result
+
+    def _all_findings(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> tuple[Finding, ...]:
+        result: list[Finding] = []
+        offset = 0
+        while True:
+            page, total = self.objective_repository.list_findings(
+                collection_id,
+                objective_id,
+                analysis_version,
+                offset=offset,
+                limit=_FINDING_PAGE_SIZE,
+            )
+            result.extend(page)
+            offset += len(page)
+            if offset >= total:
+                return tuple(result)
+            if not page:
+                raise RuntimeError("Finding pagination ended before the reported total")
+
+    def _finding_evidence(self, finding: Finding) -> tuple[ObjectiveEvidence, ...]:
+        result: list[ObjectiveEvidence] = []
+        offset = 0
+        while True:
+            page, total = self.objective_repository.list_evidence(
+                finding.collection_id,
+                finding.objective_id,
+                finding.analysis_version,
+                finding_id=finding.finding_id,
+                offset=offset,
+                limit=_EVIDENCE_PAGE_SIZE,
+            )
+            result.extend(page)
+            offset += len(page)
+            if offset >= total:
+                return tuple(result)
+            if not page:
+                raise RuntimeError("Evidence pagination ended before the reported total")
 
     def _require_published_finding(
         self,
@@ -358,7 +452,7 @@ class FindingFeedbackService:
                 f"research objective not found: {collection_id}/{objective_id}"
             )
         if objective.published_analysis_version != analysis_version:
-            raise ValueError("feedback must reference the published analysis version")
+            raise ValueError("review must reference the published analysis version")
         finding = self.objective_repository.read_finding(
             collection_id,
             objective_id,
@@ -372,60 +466,118 @@ class FindingFeedbackService:
 
 def _dataset_status(
     feedback: tuple[FindingFeedback, ...],
-) -> tuple[str, str]:
-    if not feedback:
-        return "candidate", "review_candidate"
-    latest = feedback[-1]
+    curations: tuple[FindingCuration, ...],
+) -> tuple[str, str, FindingCuration | None]:
+    events: list[tuple[datetime, int, FindingFeedback | FindingCuration]] = [
+        (_datetime(item.created_at), 0, item) for item in feedback
+    ]
+    events.extend((_datetime(item.updated_at), 1, item) for item in curations)
+    if not events:
+        return "candidate", "review_candidate", None
+    latest = max(events, key=lambda item: (item[0], item[1]))[2]
+    if isinstance(latest, FindingCuration):
+        if latest.curated_status == "unsupported":
+            return "rejected", "rejected", latest
+        return "gold", "training_ready", latest
     if latest.review_status == "correct":
-        return "gold", "training_ready"
+        return "gold", "training_ready", None
     if latest.review_status == "incorrect":
-        return "rejected", "rejected"
-    return "silver", "review_candidate"
+        return "rejected", "rejected", None
+    return "silver", "review_candidate", None
 
 
-def _curated_finding_record(
-    finding: Finding,
-    curation: FindingCuration | None,
-) -> dict[str, Any]:
-    if curation is None:
-        return finding.to_record()
-    record = finding.to_record()
-    record.update(
-        {
-            "statement": curation.curated_statement,
-            "variables": list(curation.curated_variables),
-            "mediators": list(curation.curated_mediators),
-            "outcomes": list(curation.curated_outcomes),
-            "direction": curation.curated_direction,
-            "scope_summary": curation.curated_scope_summary,
-            "evidence_strength": (
-                curation.curated_support_grade or finding.evidence_strength
-            ),
-        }
+def _source_snapshot_validity(
+    source_findings: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]],
+    dataset_items: list[Any],
+) -> tuple[str, list[str]]:
+    if not source_findings:
+        return "stale", ["source_finding_snapshot_missing"]
+    current_by_finding_id = {
+        finding_id: item
+        for item in dataset_items
+        if isinstance(item, Mapping)
+        and (finding_id := _text(item.get("finding_id")))
+    }
+    reasons: list[str] = []
+    for source_finding in source_findings:
+        finding_id = _text(source_finding.get("finding_id"))
+        current = current_by_finding_id.get(finding_id)
+        if current is None:
+            reasons.append("source_finding_missing")
+            continue
+        if current.get("dataset_use_status") != "training_ready":
+            reasons.append("source_finding_no_longer_reviewed")
+            continue
+        if _positive_int(current.get("analysis_version")) != _positive_int(
+            source_finding.get("analysis_version")
+        ):
+            reasons.append("source_analysis_version_changed")
+        if _text(current.get("finding_fingerprint")) != _text(
+            source_finding.get("finding_fingerprint")
+        ):
+            reasons.append("source_finding_changed")
+        if _text(current.get("evidence_fingerprint")) != _text(
+            source_finding.get("evidence_fingerprint")
+        ):
+            reasons.append("source_evidence_changed")
+        if _dataset_evidence_ids(current) != _strings(
+            source_finding.get("evidence_ids")
+        ):
+            reasons.append("source_evidence_ids_changed")
+    if reasons:
+        return "stale", list(dict.fromkeys(reasons))
+    return "current", []
+
+
+def _dataset_evidence_ids(item: Mapping[str, Any]) -> tuple[str, ...]:
+    return _strings(
+        evidence.get("evidence_id")
+        for evidence in item.get("evidence", [])
+        if isinstance(evidence, Mapping)
     )
-    return record
+
+
+def _strings(values: Any) -> tuple[str, ...]:
+    if isinstance(values, (str, bytes)) or values is None:
+        values = ()
+    elif not isinstance(values, (list, tuple)):
+        values = tuple(values)
+    result: list[str] = []
+    for value in values:
+        text = _text(value)
+        if text and text not in result:
+            result.append(text)
+    return tuple(result)
+
+
+def _positive_int(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return parsed if parsed > 0 else 0
+
+
+def _text(value: Any) -> str:
+    return str(value or "").strip()
 
 
 def _training_messages(
     question: str,
-    finding: Finding,
     evidence: tuple[ObjectiveEvidence, ...],
-    output: dict[str, Any],
+    output: Mapping[str, Any],
 ) -> list[dict[str, str]]:
-    evidence_text = "\n".join(
-        (
-            f"[{item.evidence_id} | {item.document_id} | "
-            f"{item.source_kind}:{item.source_ref} | pages "
-            f"{','.join(str(page) for page in item.page_numbers) or 'unknown'} | "
-            f"{item.evidence_role}] {item.source_excerpt}"
-        )
-        for item in evidence
+    evidence_text = "\n\n".join(
+        _training_evidence_text(index, item)
+        for index, item in enumerate(evidence, start=1)
     )
     user_content = (
         f"Research objective: {question}\n"
-        f"Finding level: {finding.finding_level}\n"
-        f"Evidence:\n{evidence_text}\n"
-        "Return one structured Finding using only the evidence above."
+        "Task: Return one atomic Finding with one complete factor set and one "
+        "outcome. Preserve attribution scope, synthesis status, mechanisms, "
+        "scientific context, limitations, paper contributions, and Evidence "
+        "roles. Use only the Evidence below.\n\n"
+        f"Evidence:\n{evidence_text}"
     )
     return [
         {"role": "user", "content": user_content},
@@ -436,9 +588,46 @@ def _training_messages(
     ]
 
 
+def _training_evidence_text(index: int, evidence: ObjectiveEvidence) -> str:
+    record = evidence.to_record()
+    locator = (
+        f"{evidence.source_kind}:{evidence.source_ref}; pages="
+        f"{','.join(str(page) for page in evidence.page_numbers) or 'unknown'}"
+    )
+    scientific_payload = {
+        "changed_variables": record["changed_variables"],
+        "comparison": record["comparison"],
+        "reported_result": record["reported_result"],
+        "attribution_scope": record["attribution_scope"],
+        "scientific_context": record["scientific_context"],
+    }
+    return (
+        f"[E{index} | evidence_id={evidence.evidence_id} | "
+        f"document_id={evidence.document_id} | role={evidence.evidence_role} | "
+        f"{locator}]\n"
+        f"Scientific record: {json.dumps(scientific_payload, ensure_ascii=False, separators=(',', ':'))}\n"
+        f"Source excerpt: {evidence.source_excerpt}"
+    )
+
+
+def _fingerprint(prefix: str, value: Any) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return f"{prefix}:{sha256(payload.encode('utf-8')).hexdigest()}"
+
+
 def _stable_id(prefix: str, *parts: str) -> str:
     digest = sha1("\x1f".join(parts).encode("utf-8")).hexdigest()[:20]
     return f"{prefix}_{digest}"
+
+
+def _datetime(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
 def _now_iso() -> str:

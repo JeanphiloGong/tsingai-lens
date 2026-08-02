@@ -11,19 +11,6 @@ from uuid import uuid4
 from openai import OpenAI, OpenAIError
 from pydantic import BaseModel, Field
 
-from application.core.comparison_service import (
-    ComparisonRowsNotReadyError,
-    ComparisonService,
-)
-from application.core.research_view_aggregation_service import (
-    ResearchViewAggregationService,
-    ResearchViewMaterialNotFoundError,
-    ResearchViewNotReadyError,
-)
-from application.core.semantic_build.paper_facts_service import (
-    PaperFactsNotReadyError,
-    PaperFactsService,
-)
 from application.evaluation.finding_feedback_service import (
     FindingFeedbackService,
 )
@@ -33,7 +20,6 @@ from application.goal.protocol_contract import (
     proposed_design_choices_are_source_independent,
     ved_design_is_scientifically_consistent,
 )
-from application.core.workspace_overview_service import WorkspaceService
 from application.source.collection_service import CollectionService
 from domain.goal import (
     GoalAnswerMode,
@@ -42,15 +28,10 @@ from domain.goal import (
     GoalSourceLink,
     GoalSourceMode,
 )
-from domain.ports import GoalSessionRepository, ObjectiveRepository
+from domain.ports import GoalSessionRepository
 
 AnswerMode = GoalAnswerMode
 SourceMode = GoalSourceMode
-_GENERAL_FALLBACK_PREFIX = (
-    "The current collection does not contain structured evidence for this "
-    "question. The following answer is general background and should not be "
-    "treated as a collection-supported conclusion.\n\n"
-)
 _MAX_CONTEXT_CHARS = 18000
 _MAX_ROLLING_SUMMARY_CHARS = 1600
 _MAX_SOURCE_LINKS = 12
@@ -61,7 +42,7 @@ _THINK_BLOCK_RE = re.compile(
 _THINK_OPEN_RE = re.compile(r"<think\b[^>]*>", re.IGNORECASE)
 _THINK_CLOSE_RE = re.compile(r"</think\s*>", re.IGNORECASE)
 _UNSET = object()
-PROTOCOL_READY_REVIEW_GATE = "protocol_ready_findings"
+REVIEWED_FINDING_GATE = "reviewed_findings"
 
 
 class _StructuredProtocolDraft(BaseModel):
@@ -112,22 +93,12 @@ class GoalSessionService:
         self,
         *,
         collection_service: CollectionService,
-        research_view_service: ResearchViewAggregationService,
-        workspace_service: WorkspaceService,
-        objective_repository: ObjectiveRepository,
-        comparison_service: ComparisonService,
-        paper_facts_service: PaperFactsService,
         finding_feedback_service: FindingFeedbackService,
         goal_session_repository: GoalSessionRepository,
         llm_client: Any | None = None,
         model: str | None = None,
     ) -> None:
         self.collection_service = collection_service
-        self.research_view_service = research_view_service
-        self.workspace_service = workspace_service
-        self.comparison_service = comparison_service
-        self.paper_facts_service = paper_facts_service
-        self.objective_repository = objective_repository
         self.finding_feedback_service = finding_feedback_service
         self.goal_session_repository = goal_session_repository
         self.model = (
@@ -259,7 +230,10 @@ class GoalSessionService:
         session = GoalSessionRecord.from_mapping(self._read_session(session_id))
         return {
             "session_id": session.session_id,
-            "items": self._read_messages(session.session_id),
+            "items": [
+                self._with_message_source_validity(session, message)
+                for message in self._read_messages(session.session_id)
+            ],
         }
 
     def list_messages_for_user(self, session_id: str, user_id: str) -> dict[str, Any]:
@@ -299,7 +273,7 @@ class GoalSessionService:
         session_record = session.to_record()
         self._write_session(session_record)
         self._write_messages(session_record, messages)
-        return response
+        return self._with_message_source_validity(session, response, revalidate=False)
 
     def post_message_for_user(
         self,
@@ -333,12 +307,12 @@ class GoalSessionService:
             list(context.get("source_links") or []) if has_collection_context else []
         )
 
-        if mode == "grounded" and not has_collection_context:
+        if mode != "general" and not has_collection_context:
             source_mode: SourceMode = "collection_limited"
             answer = (
-                "The bound collection does not currently contain structured Core "
-                "evidence that can answer this question. Finish indexing, add more "
-                "source material, or switch to hybrid/general mode for background."
+                "The selected research objective does not currently have expert-reviewed "
+                "Findings with auditable Evidence. Review a Finding before asking Lens "
+                "to use it for research conclusions or experiment planning."
             )
             warnings.append("no_collection_evidence_found")
         elif mode == "general":
@@ -366,7 +340,7 @@ class GoalSessionService:
                 used_evidence_ids = []
                 source_links = []
             elif (
-                context.get("review_gate") == PROTOCOL_READY_REVIEW_GATE
+                context.get("review_gate") == REVIEWED_FINDING_GATE
                 and self._is_protocol_draft(answer)
                 and not self._protocol_contract_is_valid(answer)
             ):
@@ -379,7 +353,9 @@ class GoalSessionService:
                 )
                 used_evidence_ids = []
                 source_links = []
-            elif not source_links or not self._answer_cites_source_link(answer, source_links):
+            elif not source_links or not self._answer_cites_source_link(
+                answer, source_links
+            ):
                 source_mode = "collection_limited"
                 warnings.append("goal_copilot_missing_source_citation")
                 answer = (
@@ -389,20 +365,6 @@ class GoalSessionService:
                 )
                 used_evidence_ids = []
                 source_links = []
-        else:
-            source_mode = "general_fallback"
-            warnings.append("no_collection_evidence_found")
-            generated, failed_warning = self._try_generate_llm_answer(
-                session=session,
-                user_message=message,
-                source_mode=source_mode,
-                context={},
-            )
-            if failed_warning:
-                warnings.append(failed_warning)
-            answer = self._ensure_general_fallback_boundary(generated)
-            used_evidence_ids = []
-
         assistant_message = GoalMessageRecord.assistant(
             message_id=f"msg_{uuid4().hex[:12]}",
             session_id=session.session_id,
@@ -413,12 +375,18 @@ class GoalSessionService:
             links=links,
             source_links=source_links,
             review_gate=(
-                PROTOCOL_READY_REVIEW_GATE
+                REVIEWED_FINDING_GATE
                 if source_mode == "collection_grounded"
-                and context.get("review_gate") == PROTOCOL_READY_REVIEW_GATE
+                and context.get("review_gate") == REVIEWED_FINDING_GATE
                 else None
             ),
             source_finding_refs=context.get("source_finding_refs"),
+            source_validity=(
+                "current"
+                if source_mode == "collection_grounded"
+                and context.get("review_gate") == REVIEWED_FINDING_GATE
+                else None
+            ),
             created_at=_now_iso(),
         )
         session = self._update_session_after_answer(
@@ -534,72 +502,26 @@ class GoalSessionService:
         collection_id = session.collection_id
         warnings: list[str] = []
         collection = self.collection_service.get_collection(collection_id)
-        workspace = self._safe_workspace(collection_id, warnings)
         focused_material_id = session.focused_material_id
         focused_objective_id = session.focused_objective_id
-        objectives = self._safe_objectives(collection_id, warnings)
-        objective_research_view = None
-        if focused_objective_id:
-            objective_research_view = self._safe_objective_research_view(
-                collection_id,
-                focused_objective_id,
-                warnings,
-            )
-        material_profile = None
-        collection_research_view = None
-        if focused_material_id:
-            material_profile = self._safe_material_profile(
-                collection_id,
-                focused_material_id,
-                warnings,
-            )
-        else:
-            collection_research_view = self._safe_collection_research_view(
-                collection_id,
-                warnings,
-            )
-        comparisons = self._safe_comparisons(collection_id, warnings)
-        evidence_cards = self._safe_evidence_cards(collection_id, warnings)
-        curated_research_findings = self._safe_curated_research_findings(
+        reviewed_findings = self._safe_reviewed_findings(
             collection_id,
             focused_objective_id=focused_objective_id,
             warnings=warnings,
         )
-        if focused_objective_id and not curated_research_findings:
-            warnings.append("curated_research_findings_empty")
-        if curated_research_findings:
-            warnings = [
-                warning
-                for warning in warnings
-                if warning
-                not in {"comparison_rows_not_ready", "evidence_cards_not_ready"}
-            ]
+        if not focused_objective_id:
+            warnings.append("focused_objective_required")
+        elif not reviewed_findings:
+            warnings.append("reviewed_findings_empty")
 
-        context_payload = {
+        source_context_payload = {
             "collection": collection,
-            "workspace": workspace,
             "focused_material_id": focused_material_id,
             "focused_paper_id": session.focused_paper_id,
             "focused_objective_id": focused_objective_id,
-            "research_objectives": objectives,
-            "objective_research_view": objective_research_view,
-            "material_profile": material_profile,
-            "collection_research_view": collection_research_view,
-            "comparisons": comparisons,
-            "evidence_cards": evidence_cards,
-            "curated_research_findings": curated_research_findings,
         }
-        if curated_research_findings or focused_objective_id:
-            source_context_payload = {
-                "collection": collection,
-                "focused_material_id": focused_material_id,
-                "focused_paper_id": session.focused_paper_id,
-                "focused_objective_id": focused_objective_id,
-            }
-            if curated_research_findings:
-                source_context_payload["curated_research_findings"] = curated_research_findings
-        else:
-            source_context_payload = context_payload
+        if reviewed_findings:
+            source_context_payload["reviewed_findings"] = reviewed_findings
         evidence_ids = self._collect_evidence_ids(source_context_payload)
         material_ids = self._collect_material_ids(source_context_payload)
         paper_ids = self._collect_paper_ids(source_context_payload)
@@ -608,20 +530,7 @@ class GoalSessionService:
             evidence_sources=self._collect_evidence_sources(source_context_payload),
             paper_ids=paper_ids,
         )
-        has_collection_context = bool(
-            evidence_ids
-            or self._has_non_empty_path(material_profile, ("sample_matrix", "rows"))
-            or self._has_non_empty_path(objectives, ("objectives",))
-            or self._has_non_empty_path(objective_research_view, ("findings",))
-            or self._has_non_empty_path(objective_research_view, ("evidence",))
-            or bool(curated_research_findings)
-            or self._has_non_empty_path(collection_research_view, ("materials",))
-            or self._has_non_empty_path(
-                collection_research_view, ("comparable_groups",)
-            )
-            or self._has_non_empty_path(comparisons, ("items",))
-            or self._has_non_empty_path(evidence_cards, ("items",))
-        )
+        has_collection_context = bool(reviewed_findings and evidence_ids)
         return {
             "has_collection_context": has_collection_context,
             "warnings": warnings,
@@ -631,135 +540,17 @@ class GoalSessionService:
             "links": self._session_links(session),
             "source_links": self._public_source_links(source_refs),
             "source_refs": source_refs,
-            "review_gate": (
-                PROTOCOL_READY_REVIEW_GATE if curated_research_findings else None
-            ),
+            "review_gate": (REVIEWED_FINDING_GATE if reviewed_findings else None),
             "source_finding_refs": self._source_finding_refs(
-                curated_research_findings
+                reviewed_findings,
+                objective_id=focused_objective_id,
             ),
             "payload": self._compact_value(source_context_payload),
             "prompt_source_links": self._prompt_source_links(source_refs),
             "prompt_payload": self._prompt_payload(source_context_payload, source_refs),
         }
 
-    def _safe_workspace(
-        self,
-        collection_id: str,
-        warnings: list[str],
-    ) -> dict[str, Any] | None:
-        _ = warnings
-        return self.workspace_service.get_workspace_overview(collection_id)
-
-    def _safe_objectives(
-        self,
-        collection_id: str,
-        warnings: list[str],
-    ) -> dict[str, Any] | None:
-        objectives = self.objective_repository.list_objectives(collection_id)
-        if not objectives:
-            warnings.append("research_objectives_not_ready")
-            return None
-        return {
-            "collection_id": collection_id,
-            "objectives": [objective.to_record() for objective in objectives],
-        }
-
-    def _safe_objective_research_view(
-        self,
-        collection_id: str,
-        objective_id: str,
-        warnings: list[str],
-    ) -> dict[str, Any] | None:
-        objective = self.objective_repository.read_objective(
-            collection_id,
-            objective_id,
-        )
-        if objective is None:
-            warnings.append("focused_objective_not_found")
-            return None
-        analysis = self.objective_repository.read_published_analysis(
-            collection_id,
-            objective_id,
-        )
-        findings = ()
-        evidence = ()
-        if analysis is not None:
-            findings, _ = self.objective_repository.list_findings(
-                collection_id,
-                objective_id,
-                analysis.analysis_version,
-                offset=0,
-                limit=50,
-            )
-            evidence, _ = self.objective_repository.list_evidence(
-                collection_id,
-                objective_id,
-                analysis.analysis_version,
-                offset=0,
-                limit=100,
-            )
-        return {
-            "collection_id": collection_id,
-            "objective": objective.to_record(),
-            "analysis": analysis.to_record() if analysis is not None else None,
-            "findings": [finding.to_record() for finding in findings],
-            "evidence": [item.to_record() for item in evidence],
-        }
-
-    def _safe_collection_research_view(
-        self,
-        collection_id: str,
-        warnings: list[str],
-    ) -> dict[str, Any] | None:
-        try:
-            return self.research_view_service.get_collection_research_view(
-                collection_id
-            )
-        except ResearchViewNotReadyError:
-            warnings.append("research_view_not_ready")
-            return None
-
-    def _safe_material_profile(
-        self,
-        collection_id: str,
-        material_id: str,
-        warnings: list[str],
-    ) -> dict[str, Any] | None:
-        try:
-            return self.research_view_service.get_collection_material_research_view(
-                collection_id,
-                material_id,
-            )
-        except ResearchViewMaterialNotFoundError:
-            warnings.append("focused_material_not_found")
-            return None
-        except ResearchViewNotReadyError:
-            warnings.append("research_view_not_ready")
-            return None
-
-    def _safe_comparisons(
-        self,
-        collection_id: str,
-        warnings: list[str],
-    ) -> dict[str, Any] | None:
-        try:
-            return self.comparison_service.list_comparison_rows(collection_id, limit=10)
-        except ComparisonRowsNotReadyError:
-            warnings.append("comparison_rows_not_ready")
-            return None
-
-    def _safe_evidence_cards(
-        self,
-        collection_id: str,
-        warnings: list[str],
-    ) -> dict[str, Any] | None:
-        try:
-            return self.paper_facts_service.list_evidence_cards(collection_id, limit=10)
-        except PaperFactsNotReadyError:
-            warnings.append("evidence_cards_not_ready")
-            return None
-
-    def _safe_curated_research_findings(
+    def _safe_reviewed_findings(
         self,
         collection_id: str,
         *,
@@ -775,111 +566,110 @@ class GoalSessionService:
                 dataset_use_status="training_ready",
             )
         except FileNotFoundError:
-            warnings.append("curated_research_findings_not_ready")
+            warnings.append("reviewed_findings_not_ready")
             return []
         except ValueError as exc:
-            warnings.append(f"curated_research_findings_invalid: {exc}")
+            warnings.append(f"reviewed_findings_invalid: {exc}")
             return []
         items = dataset.get("items") if isinstance(dataset, dict) else None
         if not isinstance(items, list):
             return []
-        findings = [
-            self._curated_research_finding_for_prompt(item)
-            for item in items
-            if isinstance(item, dict)
-        ]
-        return [finding for finding in findings if finding][:8]
+        findings: list[dict[str, Any]] = []
+        omitted = False
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            finding = self._reviewed_finding_for_prompt(item)
+            if not finding:
+                continue
+            candidate = [*findings, finding]
+            encoded = json.dumps(
+                {"reviewed_findings": candidate},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            if len(encoded) > _MAX_CONTEXT_CHARS:
+                omitted = True
+                continue
+            findings.append(finding)
+        if omitted:
+            warnings.append("reviewed_findings_context_limited")
+        return findings
 
-    def _curated_research_finding_for_prompt(
+    def _reviewed_finding_for_prompt(
         self,
         item: dict[str, Any],
     ) -> dict[str, Any]:
         if item.get("dataset_use_status") != "training_ready":
             return {}
-        protocol_readiness = item.get("protocol_readiness")
-        if not isinstance(protocol_readiness, dict) or (
-            protocol_readiness.get("status") != "protocol_ready"
+        finding_id = _clean_text(item.get("finding_id"))
+        try:
+            analysis_version = int(item.get("analysis_version") or 0)
+        except (TypeError, ValueError):
+            analysis_version = 0
+        finding_fingerprint = _clean_text(item.get("finding_fingerprint"))
+        evidence_fingerprint = _clean_text(item.get("evidence_fingerprint"))
+        if (
+            not finding_id
+            or analysis_version < 1
+            or not finding_fingerprint
+            or not evidence_fingerprint
         ):
             return {}
-        finding_id = _clean_text(item.get("finding_id"))
-        finding_fingerprint = _clean_text(item.get("finding_fingerprint"))
-        protocol_source_fingerprint = _clean_text(
-            item.get("protocol_source_fingerprint")
-        )
-        if not finding_id or not finding_fingerprint or not protocol_source_fingerprint:
-            return {}
-        target = item.get("expert_target")
+        target = item.get("training_target")
         if not isinstance(target, dict):
-            target = {}
-        prediction = item.get("system_prediction")
-        if not isinstance(prediction, dict):
-            prediction = {}
-        statement = _clean_text(target.get("statement")) or _clean_text(
-            prediction.get("statement")
-        )
+            return {}
+        statement = _clean_text(target.get("statement"))
         if not statement:
             return {}
         evidence_refs = [
-            self._curated_evidence_ref_for_prompt(ref)
-            for ref in item.get("training_evidence_refs", [])
+            self._reviewed_evidence_for_prompt(ref)
+            for ref in item.get("evidence", [])
             if isinstance(ref, dict)
         ]
-        if not self._curated_research_finding_is_actionable(
+        if not self._reviewed_finding_is_actionable(
             target,
-            prediction,
             evidence_refs=evidence_refs,
         ):
             return {}
         return {
             "finding_id": finding_id,
+            "analysis_version": analysis_version,
             "finding_fingerprint": finding_fingerprint,
-            "protocol_source_fingerprint": protocol_source_fingerprint,
-            "finding": statement,
+            "evidence_fingerprint": evidence_fingerprint,
+            "statement": statement,
             "label_status": _clean_text(item.get("label_status")),
             "dataset_use_status": "training_ready",
-            "variables": self._stable_strings(
-                target.get("variables") or prediction.get("variables")
-            ),
-            "mediators": self._stable_strings(
-                target.get("mediators") or prediction.get("mediators")
-            ),
-            "outcomes": self._stable_strings(
-                target.get("outcomes") or prediction.get("outcomes")
-            ),
-            "direction": _clean_text(
-                target.get("direction") or prediction.get("direction")
-            ),
-            "scope_summary": _clean_text(
-                target.get("scope_summary") or prediction.get("scope_summary")
-            ),
-            "support_grade": _clean_text(
-                target.get("support_grade") or prediction.get("support_grade")
-            ),
-            "generalization_status": _clean_text(
-                target.get("generalization_status")
-                or prediction.get("generalization_status")
-            ),
-            "generalization_note": _clean_text(
-                target.get("generalization_note")
-                or prediction.get("generalization_note")
-            ),
-            "evidence": [ref for ref in evidence_refs if ref][:4],
+            "factors": self._stable_strings(target.get("factors")),
+            "outcome": _clean_text(target.get("outcome")),
+            "direction": _clean_text(target.get("direction")),
+            "assertion_strength": _clean_text(target.get("assertion_strength")),
+            "attribution_scope": _clean_text(target.get("attribution_scope")),
+            "synthesis_status": _clean_text(target.get("synthesis_status")),
+            "certainty": target.get("certainty"),
+            "mechanisms": target.get("mechanisms") or [],
+            "scientific_context": target.get("scientific_context") or {},
+            "limitations": self._stable_strings(target.get("limitations")),
+            "paper_contributions": target.get("paper_contributions") or [],
+            "evidence": [ref for ref in evidence_refs if ref],
         }
 
     def _source_finding_refs(
         self,
         findings: list[dict[str, Any]],
+        *,
+        objective_id: str | None,
     ) -> list[dict[str, Any]]:
         return [
             {
+                "objective_id": objective_id,
                 "finding_id": finding["finding_id"],
+                "analysis_version": finding["analysis_version"],
                 "finding_fingerprint": finding["finding_fingerprint"],
-                "protocol_source_fingerprint": finding[
-                    "protocol_source_fingerprint"
-                ],
-                "evidence_ref_ids": self._stable_strings(
+                "evidence_fingerprint": finding["evidence_fingerprint"],
+                "evidence_ids": self._stable_strings(
                     [
-                        ref.get("evidence_ref_id")
+                        ref.get("evidence_id")
                         for ref in finding.get("evidence", [])
                         if isinstance(ref, dict)
                     ]
@@ -888,58 +678,54 @@ class GoalSessionService:
             for finding in findings
         ]
 
-    def _curated_research_finding_is_actionable(
+    def _reviewed_finding_is_actionable(
         self,
         target: dict[str, Any],
-        prediction: dict[str, Any],
         *,
         evidence_refs: list[dict[str, Any]],
     ) -> bool:
-        status = (
-            _clean_text(target.get("status") or prediction.get("status")) or ""
-        ).lower()
-        support_grade = (
-            _clean_text(target.get("support_grade") or prediction.get("support_grade"))
-            or ""
-        ).lower()
-        if status in {"unsupported", "conflicted"}:
-            return False
-        if support_grade in {"insufficient", "conflict", "conflicted", "weak"}:
-            return False
-        variables = self._stable_strings(
-            target.get("variables") or prediction.get("variables")
-        )
-        outcomes = self._stable_strings(
-            target.get("outcomes") or prediction.get("outcomes")
-        )
-        direction = _clean_text(target.get("direction") or prediction.get("direction"))
-        scope = _clean_text(
-            target.get("scope_summary") or prediction.get("scope_summary")
-        )
+        factors = self._stable_strings(target.get("factors"))
+        outcome = _clean_text(target.get("outcome"))
+        supporting_ids = {
+            evidence_id
+            for contribution in target.get("paper_contributions", [])
+            if isinstance(contribution, dict)
+            for evidence_id in self._stable_strings(
+                contribution.get("supporting_evidence_ids")
+            )
+        }
+        available_ids = {
+            ref.get("evidence_id")
+            for ref in evidence_refs
+            if ref.get("evidence_id") and ref.get("source_excerpt")
+        }
         return (
-            bool(variables)
-            and bool(outcomes)
-            and bool(direction or scope)
-            and any(ref.get("evidence_ref_id") and ref.get("quote") for ref in evidence_refs)
+            bool(factors)
+            and bool(outcome)
+            and bool(_clean_text(target.get("direction")))
+            and bool(supporting_ids)
+            and supporting_ids <= available_ids
         )
 
-    def _curated_evidence_ref_for_prompt(self, ref: dict[str, Any]) -> dict[str, Any]:
-        evidence_id = _clean_text(ref.get("evidence_ref_id") or ref.get("evidence_id"))
+    def _reviewed_evidence_for_prompt(self, ref: dict[str, Any]) -> dict[str, Any]:
+        evidence_id = _clean_text(ref.get("evidence_id"))
         if not evidence_id:
             return {}
-        text = _clean_text(
-            ref.get("training_source_text")
-            or ref.get("quote")
-            or ref.get("source_text")
-            or ref.get("text")
-        )
+        text = _clean_text(ref.get("source_excerpt"))
+        if not text:
+            return {}
         return {
-            "evidence_ref_id": evidence_id,
-            "document_id": _clean_text(ref.get("document_id") or ref.get("paper_id")),
-            "page": ref.get("page"),
+            "evidence_id": evidence_id,
+            "document_id": _clean_text(ref.get("document_id")),
+            "page_numbers": ref.get("page_numbers") or [],
             "source_kind": _clean_text(ref.get("source_kind")),
             "source_ref": _clean_text(ref.get("source_ref")),
-            "quote": text[:700] if text else None,
+            "evidence_role": _clean_text(ref.get("evidence_role")),
+            "changed_variables": ref.get("changed_variables") or [],
+            "reported_result": ref.get("reported_result"),
+            "attribution_scope": _clean_text(ref.get("attribution_scope")),
+            "scientific_context": ref.get("scientific_context") or {},
+            "source_excerpt": text,
         }
 
     def _generate_llm_answer(
@@ -959,7 +745,7 @@ class GoalSessionService:
         answer = self._complete_llm_prompt(system_prompt, prompt)
         if (
             source_mode == "collection_grounded"
-            and context.get("review_gate") == PROTOCOL_READY_REVIEW_GATE
+            and context.get("review_gate") == REVIEWED_FINDING_GATE
             and self._is_protocol_draft(answer)
         ):
             answer = self._repair_protocol_answer(
@@ -971,9 +757,9 @@ class GoalSessionService:
                     for link in context.get("prompt_source_links") or []
                     if str(link.get("label") or "").strip()
                 },
-                curated_findings=(
+                reviewed_findings=(
                     context.get("prompt_payload", {}).get(
-                        "curated_research_findings",
+                        "reviewed_findings",
                         [],
                     )
                     if isinstance(context.get("prompt_payload"), dict)
@@ -1004,7 +790,7 @@ class GoalSessionService:
         prompt: str,
         answer: str,
         allowed_source_labels: set[str],
-        curated_findings: list[dict[str, Any]],
+        reviewed_findings: list[dict[str, Any]],
     ) -> str:
         repair_prompt = (
             f"{prompt}\n\n"
@@ -1031,12 +817,14 @@ class GoalSessionService:
                 ],
                 response_format=_StructuredProtocolDraft,
             )
-            parsed = completion.choices[0].message.parsed if completion.choices else None
+            parsed = (
+                completion.choices[0].message.parsed if completion.choices else None
+            )
             draft = _StructuredProtocolDraft.model_validate(parsed)
             return self._render_protocol_draft(
                 draft,
                 allowed_source_labels=allowed_source_labels,
-                curated_findings=curated_findings,
+                reviewed_findings=reviewed_findings,
             )
         except Exception as exc:
             raise _ProtocolContractError(
@@ -1048,10 +836,10 @@ class GoalSessionService:
         draft: _StructuredProtocolDraft,
         *,
         allowed_source_labels: set[str],
-        curated_findings: list[dict[str, Any]],
+        reviewed_findings: list[dict[str, Any]],
     ) -> str:
         grounding = self._protocol_grounding(
-            curated_findings,
+            reviewed_findings,
             allowed_source_labels=allowed_source_labels,
         )
         ved_grounding = any(
@@ -1150,7 +938,7 @@ class GoalSessionService:
 
     def _protocol_grounding(
         self,
-        curated_findings: list[dict[str, Any]],
+        reviewed_findings: list[dict[str, Any]],
         *,
         allowed_source_labels: set[str],
     ) -> dict[str, list[str]]:
@@ -1158,10 +946,10 @@ class GoalSessionService:
         variable_observations: list[str] = []
         reported_outcomes: list[str] = []
         evidence_limits: list[str] = []
-        for finding in curated_findings[:8]:
+        for finding in reviewed_findings:
             if not isinstance(finding, dict):
                 continue
-            statement = _clean_text(finding.get("finding"))
+            statement = _clean_text(finding.get("statement"))
             evidence = finding.get("evidence")
             labels = self._stable_strings(
                 [
@@ -1178,21 +966,24 @@ class GoalSessionService:
                     f"unknown protocol source labels: {sorted(unknown_labels)}"
                 )
             citations = "".join(f"[{label}]" for label in labels)
-            hypotheses.append(
-                f"{self._clean_protocol_text(statement)} {citations}"
-            )
+            hypotheses.append(f"{self._clean_protocol_text(statement)} {citations}")
 
-            variables = self._stable_strings(finding.get("variables"))
-            mediators = self._stable_strings(finding.get("mediators"))
-            outcomes = self._stable_strings(finding.get("outcomes"))
+            factors = self._stable_strings(finding.get("factors"))
+            outcome = _clean_text(finding.get("outcome"))
             direction = _clean_text(finding.get("direction"))
-            scope = _clean_text(finding.get("scope_summary"))
-            relation = (
-                f"Observed relation: {', '.join(variables)} -> "
-                f"{', '.join(outcomes)}"
-            )
-            if mediators:
-                relation += f"; mediator: {', '.join(mediators)}"
+            attribution_scope = _clean_text(finding.get("attribution_scope"))
+            relation = f"Observed relation: {', '.join(factors)} -> {outcome}"
+            mechanisms = [
+                (
+                    f"{item.get('source_term')} {item.get('relation_type')} "
+                    f"{item.get('target_term')}"
+                ).strip()
+                for item in finding.get("mechanisms", [])
+                if isinstance(item, dict)
+            ]
+            mechanisms = [item for item in mechanisms if item]
+            if mechanisms:
+                relation += f"; mechanisms: {', '.join(mechanisms)}"
             if direction and direction.lower() not in {
                 "compares",
                 "comparison",
@@ -1201,29 +992,32 @@ class GoalSessionService:
                 "unspecified",
             }:
                 relation += f"; direction: {direction}"
-            if scope:
-                relation += f"; scope: {scope}"
+            if attribution_scope:
+                relation += f"; attribution: {attribution_scope}"
             variable_observations.append(f"{relation}. {citations}")
 
-            outcome_label = (
-                "Reported outcome" if len(outcomes) == 1 else "Reported outcomes"
-            )
-            reported_outcomes.append(
-                f"{outcome_label}: {', '.join(outcomes)}. {citations}"
-            )
-            generalization_note = _clean_text(finding.get("generalization_note"))
-            generalization_status = _clean_text(
-                finding.get("generalization_status")
-            )
-            limit = generalization_note or generalization_status
-            if limit and limit not in evidence_limits:
-                evidence_limits.append(self._clean_protocol_text(limit))
+            reported_outcomes.append(f"Reported outcome: {outcome}. {citations}")
+            limits = self._stable_strings(finding.get("limitations"))
+            synthesis_status = _clean_text(finding.get("synthesis_status"))
+            if synthesis_status == "insufficient_confirmation" and not any(
+                "one paper" in limit.lower() or "single-paper" in limit.lower()
+                for limit in limits
+            ):
+                limits.append(
+                    "Only one independent paper directly supports this Finding."
+                )
+            elif synthesis_status in {"conflict", "condition_dependent"}:
+                limits.append(f"Cross-paper synthesis status: {synthesis_status}.")
+            for limit in limits:
+                cleaned = self._clean_protocol_text(limit)
+                if cleaned and cleaned not in evidence_limits:
+                    evidence_limits.append(cleaned)
 
         if not hypotheses or not variable_observations or not reported_outcomes:
-            raise ValueError("curated protocol grounding is incomplete")
+            raise ValueError("reviewed Finding grounding is incomplete")
         if not evidence_limits:
             evidence_limits.append(
-                "The curated Findings do not define a cross-paper generalization boundary."
+                "The reviewed Findings do not define a cross-paper generalization boundary."
             )
         return {
             "hypotheses": hypotheses,
@@ -1240,7 +1034,9 @@ class GoalSessionService:
             text,
             flags=re.IGNORECASE,
         ):
-            raise ValueError("proposed protocol item contains an embedded category label")
+            raise ValueError(
+                "proposed protocol item contains an embedded category label"
+            )
         if proposed_design_choice_has_unsupported_detail(text):
             raise ValueError("proposed protocol item contains an unsupported detail")
         return text
@@ -1271,7 +1067,9 @@ class GoalSessionService:
         source_lines = [
             line for line in answer.splitlines() if line.startswith("- Source-backed:")
         ]
-        if not source_lines or any(not source_pattern.search(line) for line in source_lines):
+        if not source_lines or any(
+            not source_pattern.search(line) for line in source_lines
+        ):
             return False
         hypothesis = answer.split("**Variable matrix**", 1)[0]
         if not source_pattern.search(hypothesis):
@@ -1322,7 +1120,7 @@ class GoalSessionService:
         except _ProtocolContractError:
             return (
                 "Lens could not verify the protocol draft contract. Review the "
-                "protocol-ready findings and source evidence directly, then retry.",
+                "reviewed findings and source evidence directly, then retry.",
                 "goal_copilot_protocol_contract_invalid",
             )
         except OpenAIError:
@@ -1347,8 +1145,8 @@ class GoalSessionService:
                 "Answer only from the provided collection context. Cite source link "
                 "labels such as [Source 1] when making collection-supported claims. "
                 "When asked for experiments, protocols, or next-step research plans, "
-                "use curated protocol-ready findings first and say when expert-reviewed "
-                "protocol inputs are insufficient for a decision. Protocol draft requirements: "
+                "use expert-reviewed findings first and say when reviewed evidence is "
+                "insufficient for a decision. Protocol draft requirements: "
                 "write a structured protocol draft with these exact section labels: "
                 "Hypothesis, Variable matrix, Measurements, Controls, and Risks or limits. "
                 "For every independent variable, describe its operational manipulation "
@@ -1416,7 +1214,9 @@ class GoalSessionService:
                 context.get("prompt_payload", context.get("payload", context)),
                 ensure_ascii=False,
                 indent=2,
-            )[:_MAX_CONTEXT_CHARS]
+            )
+            if context.get("review_gate") != REVIEWED_FINDING_GATE:
+                context_text = context_text[:_MAX_CONTEXT_CHARS]
             source_links_text = json.dumps(
                 context.get("prompt_source_links") or [],
                 ensure_ascii=False,
@@ -1458,11 +1258,7 @@ class GoalSessionService:
         )
 
     def _collection_data_version(self, collection: dict[str, Any]) -> str:
-        return str(
-            collection.get("updated_at")
-            or collection.get("created_at")
-            or ""
-        )
+        return str(collection.get("updated_at") or collection.get("created_at") or "")
 
     def _session_links(self, session: GoalSessionRecord) -> dict[str, str]:
         collection_id = session.collection_id
@@ -1543,9 +1339,6 @@ class GoalSessionService:
                     "document_id": document_id or "",
                 }
             )
-            if len(refs) >= _MAX_SOURCE_LINKS:
-                return refs
-
         for paper_id in paper_ids:
             if paper_id in covered_documents:
                 continue
@@ -1562,8 +1355,6 @@ class GoalSessionService:
                     "evidence_id": "",
                 }
             )
-            if len(refs) >= _MAX_SOURCE_LINKS:
-                return refs
         return refs
 
     def _public_source_links(
@@ -1593,6 +1384,49 @@ class GoalSessionService:
 
     def _read_messages(self, session_id: str) -> list[dict[str, Any]]:
         return self.goal_session_repository.read_messages(session_id)
+
+    def _with_message_source_validity(
+        self,
+        session: GoalSessionRecord,
+        message: dict[str, Any],
+        *,
+        revalidate: bool = True,
+    ) -> dict[str, Any]:
+        payload = dict(message)
+        source_findings = tuple(
+            item
+            for item in payload.get("source_finding_refs", [])
+            if isinstance(item, dict)
+        )
+        if payload.get("role") != "assistant" or not source_findings:
+            payload["source_validity"] = None
+            payload["source_validity_reasons"] = []
+            return payload
+        if not revalidate:
+            validity, reasons = "current", []
+        else:
+            objective_ids = self._stable_strings(
+                [item.get("objective_id") for item in source_findings]
+            )
+            if len(objective_ids) != 1:
+                validity, reasons = "stale", ["source_objective_identity_invalid"]
+            else:
+                validity, reasons = (
+                    self.finding_feedback_service.source_snapshot_validity(
+                        collection_id=session.collection_id,
+                        objective_id=objective_ids[0],
+                        source_findings=source_findings,
+                    )
+                )
+        payload["source_validity"] = validity
+        payload["source_validity_reasons"] = reasons
+        if validity == "stale":
+            payload["source_mode"] = "collection_limited"
+            payload["review_gate"] = None
+            payload["warnings"] = self._stable_strings(
+                [*payload.get("warnings", []), "source_finding_snapshot_stale"]
+            )
+        return payload
 
     def _write_messages(
         self,
@@ -1723,7 +1557,11 @@ class GoalSessionService:
         return value
 
     def _prompt_payload(self, value: Any, source_refs: list[dict[str, str]]) -> Any:
-        compact = self._compact_value(value)
+        compact = (
+            value
+            if isinstance(value, dict) and value.get("reviewed_findings")
+            else self._compact_value(value)
+        )
         evidence_labels = {
             ref["evidence_id"]: ref["label"]
             for ref in source_refs
@@ -1761,7 +1599,11 @@ class GoalSessionService:
                     if label:
                         cleaned["evidence_source"] = label
                     continue
-                if key_text in {"used_evidence_ids", "evidence_ids", "anchor_ids"}:
+                if key_text in {
+                    "used_evidence_ids",
+                    "evidence_ids",
+                    "anchor_ids",
+                } or key_text.endswith("_evidence_ids"):
                     if isinstance(item, list):
                         labels = [
                             evidence_labels.get(str(entry or ""))
@@ -1835,13 +1677,3 @@ class GoalSessionService:
             if re.search(pattern, answer, flags=re.IGNORECASE):
                 return True
         return False
-
-    def _ensure_general_fallback_boundary(self, answer: str) -> str:
-        if "not a collection-supported conclusion" in answer.lower():
-            return answer
-        if (
-            "current collection" in answer.lower()
-            and "general background" in answer.lower()
-        ):
-            return answer
-        return f"{_GENERAL_FALLBACK_PREFIX}{answer.strip()}"

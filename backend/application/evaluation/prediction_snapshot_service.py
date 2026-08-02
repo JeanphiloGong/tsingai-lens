@@ -143,9 +143,7 @@ class EvaluationPredictionSnapshotService:
                                 evidence.evidence_id,
                             )
                         )
-                    contributing_documents = (
-                        finding.derivation.contributing_document_ids
-                    )
+                    contributing_documents = finding.contributing_document_ids
                     item_key = (
                         f"{objective.objective_id}:v{analysis_version}:"
                         f"{finding.finding_id}"
@@ -181,7 +179,7 @@ class EvaluationPredictionSnapshotService:
                             item_key=item_key,
                             payload=payload,
                             source_refs=source_refs,
-                            confidence=finding.confidence,
+                            confidence=finding.certainty,
                         )
                     )
                 finding_offset += len(findings)

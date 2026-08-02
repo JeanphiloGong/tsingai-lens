@@ -208,7 +208,14 @@ filtered by `finding_id`.
 
 Feedback and curation require `analysis_version`. Review import and dataset
 rows use the complete versioned Finding identity. Training samples include
-exact Evidence excerpts and provenance, not IDs alone.
+exact Evidence excerpts and provenance, not IDs alone. Curation accepts one
+complete canonical `curated_finding`; it cannot store a partial field patch or
+cite Evidence outside the published Finding version.
+
+`objective_finding_dataset.v2` exposes the canonical `system_prediction`, an
+optional validated `expert_target`, the resolved `training_target`, exact
+Evidence, and deterministic Finding/Evidence fingerprints. The latest feedback
+or curation event controls review and training status.
 
 ## Frontend States
 
@@ -221,8 +228,9 @@ exact Evidence excerpts and provenance, not IDs alone.
 - `succeeded`: show the published Finding list and selected detail.
 
 The first Finding is selected deterministically when no selection exists.
-Selecting another Finding loads only that Finding's Evidence page. Source links
-open the owning document with `source_ref` and page context.
+Selecting another Finding loads that Finding detail and Evidence page together;
+stale rapid-selection responses are discarded. Source links open the owning
+document with Evidence identity, `source_ref`, exact quote, and page context.
 
 ## Invariants
 

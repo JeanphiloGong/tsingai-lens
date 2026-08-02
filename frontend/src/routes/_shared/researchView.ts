@@ -34,11 +34,13 @@ export type FindingFeedbackIssueType =
 	| 'evidence_not_grounded'
 	| 'missing_evidence'
 	| 'insufficient_evidence'
-	| 'wrong_variable'
+	| 'wrong_factor'
 	| 'wrong_outcome'
 	| 'wrong_direction'
 	| 'wrong_context'
-	| 'wrong_relation'
+	| 'wrong_mechanism'
+	| 'wrong_attribution'
+	| 'wrong_synthesis'
 	| 'overclaim'
 	| 'unclear_statement'
 	| 'other';
@@ -59,15 +61,7 @@ export type FindingFeedback = FindingFeedbackCreate & {
 export type FindingCurationCreate = {
 	analysis_version: number;
 	curated_status: string;
-	curated_statement: string;
-	curated_support_grade?: string | null;
-	curated_review_status?: string | null;
-	curated_variables?: string[];
-	curated_mediators?: string[];
-	curated_outcomes?: string[];
-	curated_direction?: string | null;
-	curated_scope_summary?: string | null;
-	curated_evidence_ids: string[];
+	curated_finding: ObjectiveFinding;
 	note?: string | null;
 	reviewer?: string | null;
 };
@@ -86,13 +80,15 @@ export type FindingDatasetSample = {
 	analysis_version: number;
 	finding_id: string;
 	research_objective: string;
-	finding_level: string;
 	document_ids: string[];
 	label_status: FindingDatasetLabelStatus;
 	dataset_use_status: FindingDatasetUseStatus;
-	system_prediction: Record<string, unknown>;
-	expert_target: Record<string, unknown> | null;
-	evidence: Record<string, unknown>[];
+	finding_fingerprint: string;
+	evidence_fingerprint: string;
+	system_prediction: ObjectiveFinding;
+	expert_target: ObjectiveFinding | null;
+	training_target: ObjectiveFinding;
+	evidence: ObjectiveEvidence[];
 	training_schema_version: string;
 	training_prompt_version: string;
 	training_messages: Array<{ role: string; content: string }>;
@@ -314,52 +310,51 @@ export type ObjectiveSummary = {
 	updated_at: string | null;
 };
 
-export type ObjectiveFindingRelation = {
-	relation_order: number;
+export type ObjectiveFindingMechanism = {
 	source_term: string;
 	relation_type: string;
 	target_term: string;
-	direction: string | null;
-	assertion_strength: string;
+	direction: ObjectiveEvidenceResultDirection | null;
+	assertion_strength: 'causal' | 'associative' | 'descriptive';
 	supporting_evidence_ids: string[];
 };
-export type ObjectiveFindingContext = {
-	material_system: Record<string, unknown>;
-	process_conditions: Record<string, unknown>[];
-	sample_state: Record<string, unknown>;
-	test_conditions: Record<string, unknown>[];
-	comparison_baseline: Record<string, unknown>;
-	limitations: string[];
-	supporting_evidence_ids: string[];
+export type ObjectiveScientificAttribute = {
+	name: string;
+	value: string | number | boolean;
+	unit: string | null;
 };
-export type ObjectiveFindingDerivation = {
-	synthesis_mode: string;
-	comparison_status: string;
-	contributing_document_ids: string[];
+export type ObjectiveScientificContext = {
+	material: ObjectiveScientificAttribute[];
+	sample: ObjectiveScientificAttribute[];
+	process: ObjectiveScientificAttribute[];
+	test: ObjectiveScientificAttribute[];
+};
+export type ObjectiveFindingPaperContribution = {
+	document_id: string;
+	analysis_status: 'analyzed' | 'excluded' | 'failed';
 	supporting_evidence_ids: string[];
 	contradicting_evidence_ids: string[];
-	rationale: string;
+	context_evidence_ids: string[];
+	condition_boundary_evidence_ids: string[];
 };
 export type ObjectiveFinding = {
 	collection_id: string;
 	objective_id: string;
 	analysis_version: number;
 	finding_id: string;
-	finding_level: string;
 	statement: string;
-	variables: string[];
-	mediators: string[];
-	outcomes: string[];
-	direction: string | null;
-	scope_summary: string;
-	evidence_strength: string;
-	generalization_status: string;
-	paper_count: number;
-	confidence: number;
+	factors: string[];
+	outcome: string;
+	direction: ObjectiveEvidenceResultDirection;
+	assertion_strength: 'causal' | 'associative' | 'descriptive';
+	attribution_scope: Exclude<ObjectiveEvidenceAttributionScope, 'not_attributable'>;
+	synthesis_status: 'agreement' | 'conflict' | 'condition_dependent' | 'insufficient_confirmation';
+	certainty: number;
 	display_rank: number;
-	relations: ObjectiveFindingRelation[];
-	context: ObjectiveFindingContext;
-	derivation: ObjectiveFindingDerivation;
+	mechanisms: ObjectiveFindingMechanism[];
+	scientific_context: ObjectiveScientificContext;
+	limitations: string[];
+	paper_contributions: ObjectiveFindingPaperContribution[];
 };
 export type ObjectiveEvidence = {
 	collection_id: string;
@@ -396,12 +391,7 @@ export type ObjectiveEvidence = {
 		result_text: string;
 	} | null;
 	attribution_scope: ObjectiveEvidenceAttributionScope;
-	scientific_context: {
-		material: { name: string; value: string | number | boolean; unit: string | null }[];
-		sample: { name: string; value: string | number | boolean; unit: string | null }[];
-		process: { name: string; value: string | number | boolean; unit: string | null }[];
-		test: { name: string; value: string | number | boolean; unit: string | null }[];
-	};
+	scientific_context: ObjectiveScientificContext;
 	anchor_ids: string[];
 	resolution_status: string;
 	failure_reason: string | null;
@@ -427,6 +417,12 @@ export type ObjectiveFindingPage = {
 	offset: number;
 	limit: number;
 	total: number;
+};
+export type ObjectiveFindingDetail = {
+	collection_id: string;
+	objective_id: string;
+	analysis_version: number;
+	finding: ObjectiveFinding;
 };
 export type ObjectiveEvidencePage = {
 	collection_id: string;
@@ -669,12 +665,6 @@ function normalizeUnknownRecord(value: unknown): Record<string, unknown> {
 	return record ? { ...record } : {};
 }
 
-function normalizeUnknownRecordList(value: unknown): Record<string, unknown>[] {
-	return asArray(value)
-		.map((item) => normalizeUnknownRecord(item))
-		.filter((item) => Object.keys(item).length > 0);
-}
-
 function normalizeContextRecord(value: unknown, fallbackKey: string): Record<string, string> {
 	if (typeof value === 'string' || typeof value === 'number') {
 		const text = toText(value);
@@ -758,58 +748,6 @@ function normalizeWarnings(value: unknown): ResearchViewWarning[] {
 	return asArray(value)
 		.map((item, index) => normalizeResearchWarning(item) ?? warningFromText(String(item), index))
 		.filter((item) => item.message);
-}
-
-function normalizeFindingDataset(value: unknown): FindingDataset {
-	const record = asRecord(value);
-	return {
-		schema_version: toText(record?.schema_version),
-		collection_id: toText(record?.collection_id),
-		objective_id: nonEmptyText(record?.objective_id),
-		items: asArray(record?.items)
-			.map((item) => normalizeFindingDatasetSample(item))
-			.filter((item): item is FindingDatasetSample => item !== null),
-		warnings: toStringList(record?.warnings)
-	};
-}
-
-function normalizeFindingDatasetSample(value: unknown): FindingDatasetSample | null {
-	const record = asRecord(value);
-	if (!record) return null;
-	const sampleId = toText(record.sample_id);
-	const objectiveId = toText(record.objective_id);
-	const analysisVersion = toNumber(record.analysis_version);
-	const findingId = toText(record.finding_id);
-	if (!sampleId || !objectiveId || analysisVersion < 1 || !findingId) return null;
-	const labelStatus = toText(record.label_status) as FindingDatasetLabelStatus;
-	const datasetUseStatus = toText(record.dataset_use_status) as FindingDatasetUseStatus;
-	if (!['candidate', 'silver', 'gold', 'rejected'].includes(labelStatus)) return null;
-	if (!['training_ready', 'review_candidate', 'rejected'].includes(datasetUseStatus)) return null;
-	return {
-		sample_id: sampleId,
-		objective_id: objectiveId,
-		analysis_version: analysisVersion,
-		finding_id: findingId,
-		research_objective: toText(record.research_objective),
-		finding_level: toText(record.finding_level),
-		document_ids: toStringList(record.document_ids),
-		label_status: labelStatus,
-		dataset_use_status: datasetUseStatus,
-		system_prediction: normalizeUnknownRecord(record.system_prediction),
-		expert_target: asRecord(record.expert_target),
-		evidence: normalizeUnknownRecordList(record.evidence),
-		training_schema_version: toText(record.training_schema_version),
-		training_prompt_version: toText(record.training_prompt_version),
-		training_messages: asArray(record.training_messages)
-			.map((message) => {
-				const messageRecord = asRecord(message);
-				const role = toText(messageRecord?.role);
-				const content = toText(messageRecord?.content);
-				return role && content ? { role, content } : null;
-			})
-			.filter((message): message is { role: string; content: string } => message !== null),
-		metadata: normalizeUnknownRecord(record.metadata)
-	};
 }
 
 function normalizeEvidenceReference(value: unknown): EvidenceReference | null {
@@ -1623,6 +1561,17 @@ export async function fetchObjectiveFindings(
 	return requestJson(`${path}?${params.toString()}`) as Promise<ObjectiveFindingPage>;
 }
 
+export async function fetchObjectiveFinding(
+	collectionId: string,
+	objectiveId: string,
+	analysisVersion: number,
+	findingId: string
+): Promise<ObjectiveFindingDetail> {
+	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/findings/${encodeURIComponent(findingId)}`;
+	const params = new URLSearchParams({ analysis_version: String(analysisVersion) });
+	return requestJson(`${path}?${params.toString()}`) as Promise<ObjectiveFindingDetail>;
+}
+
 export async function fetchObjectiveEvidence(
 	collectionId: string,
 	objectiveId: string,
@@ -1761,10 +1710,9 @@ export async function fetchObjectiveFindingDataset(
 ): Promise<FindingDataset> {
 	const params = findingDatasetParams(filters);
 	const suffix = params.size ? `?${params.toString()}` : '';
-	const data = await requestJson(
+	return requestJson(
 		`/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/finding-dataset${suffix}`
-	);
-	return normalizeFindingDataset(data);
+	) as Promise<FindingDataset>;
 }
 
 export async function fetchDocumentMaterials(

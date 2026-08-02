@@ -26,8 +26,14 @@ DEFAULT_OBJECTIVE_IDS = (
     "obj_how-do-volumetric-energy-density-laser-power-scanning-speed-hatch-spacin_3df14419",
 )
 OBJECTIVE_EXPECTATIONS: dict[str, tuple[tuple[str, ...], ...]] = {
-    DEFAULT_OBJECTIVE_IDS[0]: (("preheat", "build platform"), ("ductility", "elongation")),
-    DEFAULT_OBJECTIVE_IDS[1]: (("heat treatment", "hip"), ("density", "microstructure")),
+    DEFAULT_OBJECTIVE_IDS[0]: (
+        ("preheat", "build platform"),
+        ("ductility", "elongation"),
+    ),
+    DEFAULT_OBJECTIVE_IDS[1]: (
+        ("heat treatment", "hip"),
+        ("density", "microstructure"),
+    ),
     DEFAULT_OBJECTIVE_IDS[2]: (("porosity", "pore"), ("pitting", "corrosion")),
     DEFAULT_OBJECTIVE_IDS[3]: (("orientation", "rotation angle"), ("yield strength",)),
     DEFAULT_OBJECTIVE_IDS[4]: (("scan", "energy density"), ("strength", "elongation")),
@@ -95,7 +101,9 @@ def check_objective_findings_projection(
         objectives.append(result)
         checks.extend(result["checks"])
     return {
-        "status": "fail" if any(item["status"] == "fail" for item in checks) else "pass",
+        "status": (
+            "fail" if any(item["status"] == "fail" for item in checks) else "pass"
+        ),
         "collection_id": collection_id,
         "objective_count": len(objectives),
         "objectives": objectives,
@@ -118,9 +126,19 @@ def evaluate_objective_bundle(
     objective_id = _text(objective.get("objective_id"))
     analysis_version = _int(analysis.get("analysis_version"))
     checks = [
-        _check(objective_id, "objective is confirmed", objective.get("confirmation_status") == "confirmed"),
-        _check(objective_id, "published analysis succeeded", analysis.get("status") == "succeeded"),
-        _check(objective_id, "published analysis version is explicit", analysis_version > 0),
+        _check(
+            objective_id,
+            "objective is confirmed",
+            objective.get("confirmation_status") == "confirmed",
+        ),
+        _check(
+            objective_id,
+            "published analysis succeeded",
+            analysis.get("status") == "succeeded",
+        ),
+        _check(
+            objective_id, "published analysis version is explicit", analysis_version > 0
+        ),
         _check(objective_id, "published analysis has Findings", bool(findings)),
     ]
 
@@ -129,18 +147,43 @@ def evaluate_objective_bundle(
         finding_id = _text(finding.get("finding_id"))
         evidence = evidence_by_finding.get(finding_id, [])
         all_evidence.extend(evidence)
-        supporting_ids = set(
-            _text_list(_mapping(finding.get("derivation")).get("supporting_evidence_ids"))
-        )
+        contributions = _mapping_list(finding.get("paper_contributions"))
+        referenced_ids = {
+            evidence_id
+            for contribution in contributions
+            for field in (
+                "supporting_evidence_ids",
+                "contradicting_evidence_ids",
+                "context_evidence_ids",
+                "condition_boundary_evidence_ids",
+            )
+            for evidence_id in _text_list(contribution.get(field))
+        }
+        direct_ids = {
+            evidence_id
+            for contribution in contributions
+            for field in ("supporting_evidence_ids", "contradicting_evidence_ids")
+            for evidence_id in _text_list(contribution.get(field))
+        }
         direct_records = [
             item
             for item in evidence
             if item.get("evidence_role") == "direct_result"
-            and _text(item.get("evidence_id")) in supporting_ids
+            and _text(item.get("evidence_id")) in direct_ids
         ]
         direct_documents = {_text(item.get("document_id")) for item in direct_records}
-        paper_count = _int(finding.get("paper_count"))
-        level = _text(finding.get("finding_level"))
+        bound_direct_documents = {
+            _text(contribution.get("document_id"))
+            for contribution in contributions
+            if any(
+                evidence_id in direct_ids
+                for evidence_id in (
+                    _text_list(contribution.get("supporting_evidence_ids"))
+                    + _text_list(contribution.get("contradicting_evidence_ids"))
+                )
+            )
+        }
+        synthesis_status = _text(finding.get("synthesis_status"))
         checks.extend(
             [
                 _check(
@@ -152,9 +195,9 @@ def evaluate_objective_bundle(
                 ),
                 _check(
                     objective_id,
-                    f"Finding {finding_id} has variables and outcomes",
-                    bool(_text_list(finding.get("variables")))
-                    and bool(_text_list(finding.get("outcomes"))),
+                    f"Finding {finding_id} has factors and one outcome",
+                    bool(_text_list(finding.get("factors")))
+                    and bool(_text(finding.get("outcome"))),
                 ),
                 _check(
                     objective_id,
@@ -163,23 +206,23 @@ def evaluate_objective_bundle(
                 ),
                 _check(
                     objective_id,
-                    f"Finding {finding_id} paper count matches direct evidence",
-                    paper_count == len(direct_documents),
-                    f"paper_count={paper_count}; direct_documents={sorted(direct_documents)}",
+                    f"Finding {finding_id} direct paper bindings match Evidence",
+                    bound_direct_documents == direct_documents,
+                    f"bindings={sorted(bound_direct_documents)}; evidence={sorted(direct_documents)}",
                 ),
                 _check(
                     objective_id,
-                    f"Finding {finding_id} level matches paper support",
-                    (level == "paper" and paper_count == 1)
-                    or (level == "cross_paper" and paper_count >= 2),
-                    f"level={level}; paper_count={paper_count}",
+                    f"Finding {finding_id} synthesis matches direct paper support",
+                    synthesis_status == "insufficient_confirmation"
+                    or len(direct_documents) >= 2,
+                    f"synthesis_status={synthesis_status}; direct_documents={sorted(direct_documents)}",
                 ),
                 _check(
                     objective_id,
                     f"Finding {finding_id} references only returned Evidence",
-                    supporting_ids
+                    referenced_ids
                     <= {_text(item.get("evidence_id")) for item in evidence},
-                    f"supporting={sorted(supporting_ids)}; returned={sorted(_text(item.get('evidence_id')) for item in evidence)}",
+                    f"referenced={sorted(referenced_ids)}; returned={sorted(_text(item.get('evidence_id')) for item in evidence)}",
                 ),
             ]
         )
@@ -190,26 +233,31 @@ def evaluate_objective_bundle(
             _check(
                 objective_id,
                 "all Evidence records have exact source locators",
-                bool(all_evidence) and all(item["locator_matches"] for item in source_results),
+                bool(all_evidence)
+                and all(item["locator_matches"] for item in source_results),
                 _failed_source_ids(source_results, "locator_matches"),
             ),
             _check(
                 objective_id,
                 "all Evidence excerpts match Source artifacts",
-                bool(all_evidence) and all(item["excerpt_matches"] for item in source_results),
+                bool(all_evidence)
+                and all(item["excerpt_matches"] for item in source_results),
                 _failed_source_ids(source_results, "excerpt_matches"),
             ),
             _check(
                 objective_id,
                 "all Evidence pages match Source artifacts",
-                bool(all_evidence) and all(item["page_matches"] for item in source_results),
+                bool(all_evidence)
+                and all(item["page_matches"] for item in source_results),
                 _failed_source_ids(source_results, "page_matches"),
             ),
         ]
     )
     expected_terms = OBJECTIVE_EXPECTATIONS.get(objective_id, ())
     if expected_terms:
-        finding_text = _normalized_text(" ".join(_text(item.get("statement")) for item in findings))
+        finding_text = _normalized_text(
+            " ".join(_text(item.get("statement")) for item in findings)
+        )
         missing = [
             list(group)
             for group in expected_terms
@@ -330,7 +378,9 @@ def _api_objective_bundle(
     }
 
 
-def _load_source_index(collection_id: str) -> dict[tuple[str, str, str], dict[str, Any]]:
+def _load_source_index(
+    collection_id: str,
+) -> dict[tuple[str, str, str], dict[str, Any]]:
     with contextlib.redirect_stdout(io.StringIO()):
         from infra.persistence.database import (  # noqa: PLC0415
             DatabaseSettings,
@@ -384,7 +434,9 @@ def _audit_source_record(
     source = source_index.get(key)
     excerpt = _normalized_text(evidence.get("source_excerpt"))
     source_text = _normalized_text(source.get("text")) if source else ""
-    pages = {_int(page) for page in evidence.get("page_numbers") or [] if _int(page) > 0}
+    pages = {
+        _int(page) for page in evidence.get("page_numbers") or [] if _int(page) > 0
+    }
     source_page = _int(source.get("page")) if source else 0
     return {
         "evidence_id": _text(evidence.get("evidence_id")),

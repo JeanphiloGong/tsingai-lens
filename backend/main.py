@@ -278,11 +278,6 @@ def create_app(
             application.state.goal_service = GoalService(active_collection_service)
             application.state.goal_session_service = GoalSessionService(
                 collection_service=active_collection_service,
-                research_view_service=research_view_service,
-                workspace_service=workspace_service,
-                comparison_service=comparison_service,
-                paper_facts_service=paper_facts_service,
-                objective_repository=active_objective_repository,
                 finding_feedback_service=finding_feedback_service,
                 goal_session_repository=active_goal_session_repository,
             )

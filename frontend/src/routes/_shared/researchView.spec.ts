@@ -11,6 +11,7 @@ import {
 	fetchObjective,
 	fetchObjectiveAnalysis,
 	fetchObjectiveEvidence,
+	fetchObjectiveFinding,
 	fetchObjectiveFindings,
 	runObjectiveAnalysis
 } from './researchView';
@@ -58,6 +59,40 @@ const analysis = {
 	created_at: null,
 	started_at: null,
 	completed_at: null
+};
+
+const finding = {
+	collection_id: 'col_123',
+	objective_id: 'obj_1',
+	analysis_version: 1,
+	finding_id: 'finding-1',
+	statement: 'Higher temperature was associated with greater strength.',
+	factors: ['temperature'],
+	outcome: 'strength',
+	direction: 'increase' as const,
+	assertion_strength: 'associative' as const,
+	attribution_scope: 'isolated_effect' as const,
+	synthesis_status: 'insufficient_confirmation' as const,
+	certainty: 0.8,
+	display_rank: 0,
+	mechanisms: [],
+	scientific_context: {
+		material: [{ name: 'alloy', value: 'Alloy A', unit: null }],
+		sample: [],
+		process: [],
+		test: []
+	},
+	limitations: ['Single paper only.'],
+	paper_contributions: [
+		{
+			document_id: 'paper-1',
+			analysis_status: 'analyzed' as const,
+			supporting_evidence_ids: ['evidence-1'],
+			contradicting_evidence_ids: [],
+			context_evidence_ids: [],
+			condition_boundary_evidence_ids: []
+		}
+	]
 };
 
 describe('objective Finding API', () => {
@@ -129,6 +164,12 @@ describe('objective Finding API', () => {
 				collection_id: 'col_123',
 				objective_id: 'obj_1',
 				analysis_version: 1,
+				finding
+			})
+			.mockResolvedValueOnce({
+				collection_id: 'col_123',
+				objective_id: 'obj_1',
+				analysis_version: 1,
 				finding_id: 'finding-1',
 				items: [],
 				offset: 0,
@@ -137,12 +178,16 @@ describe('objective Finding API', () => {
 			});
 
 		await fetchObjectiveFindings('col_123', 'obj_1', 1, 0, 20);
+		await fetchObjectiveFinding('col_123', 'obj_1', 1, 'finding-1');
 		await fetchObjectiveEvidence('col_123', 'obj_1', 1, 'finding-1');
 
 		expect(request.mock.calls[0][0]).toBe(
 			'/collections/col_123/objectives/obj_1/findings?analysis_version=1&offset=0&limit=20'
 		);
 		expect(request.mock.calls[1][0]).toBe(
+			'/collections/col_123/objectives/obj_1/findings/finding-1?analysis_version=1'
+		);
+		expect(request.mock.calls[2][0]).toBe(
 			'/collections/col_123/objectives/obj_1/evidence?analysis_version=1&finding_id=finding-1&offset=0&limit=100'
 		);
 	});
@@ -189,8 +234,7 @@ describe('objective Finding API', () => {
 		await createFindingCuration('col_123', 'obj_1', 'finding-1', {
 			analysis_version: 1,
 			curated_status: 'limited',
-			curated_statement: 'Narrower statement.',
-			curated_evidence_ids: ['evidence-1']
+			curated_finding: finding
 		});
 
 		expect(request).toHaveBeenCalledWith(

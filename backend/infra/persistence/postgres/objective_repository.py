@@ -263,10 +263,14 @@ class PostgresObjectiveRepository:
                 scope = self._scope_by_objective(session, collection_id).get(
                     objective_id, {}
                 )
-                return self._objective_record(row, scope), self._analysis_record(existing)
+                return self._objective_record(row, scope), self._analysis_record(
+                    existing
+                )
             source_build_id = self._resolve_read_build(session, collection_id, None)
             if source_build_id is None:
-                raise FileNotFoundError(f"active collection build not found: {collection_id}")
+                raise FileNotFoundError(
+                    f"active collection build not found: {collection_id}"
+                )
             next_version = (
                 session.scalar(
                     select(func.max(ObjectiveAnalysisRecord.analysis_version)).where(
@@ -308,7 +312,9 @@ class PostgresObjectiveRepository:
             scope = self._scope_by_objective(session, collection_id).get(
                 objective_id, {}
             )
-            return self._objective_record(row, scope), self._analysis_record(analysis_row)
+            return self._objective_record(row, scope), self._analysis_record(
+                analysis_row
+            )
 
     def claim_analysis(
         self,
@@ -389,9 +395,7 @@ class PostgresObjectiveRepository:
         findings: tuple[Finding, ...],
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         with self.session_factory.begin() as session:
-            objective_row = self._locked_objective(
-                session, collection_id, objective_id
-            )
+            objective_row = self._locked_objective(session, collection_id, objective_id)
             analysis_row = self._locked_analysis(
                 session, collection_id, objective_id, analysis_version
             )
@@ -438,9 +442,7 @@ class PostgresObjectiveRepository:
             self._apply_analysis(analysis_row, succeeded)
             objective = self._objective_record(
                 objective_row,
-                self._scope_by_objective(session, collection_id).get(
-                    objective_id, {}
-                ),
+                self._scope_by_objective(session, collection_id).get(objective_id, {}),
             ).publish_analysis(succeeded)
             objective_row.published_analysis_version = analysis_version
             objective_row.updated_at = datetime.now(timezone.utc)
@@ -487,6 +489,25 @@ class PostgresObjectiveRepository:
             )
             return self._analysis_record(row) if row is not None else None
 
+    def list_contributions(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> tuple[PaperContribution, ...]:
+        with self.session_factory() as session:
+            rows = session.scalars(
+                select(ObjectivePaperContributionRecord)
+                .where(
+                    ObjectivePaperContributionRecord.collection_id == collection_id,
+                    ObjectivePaperContributionRecord.objective_id == objective_id,
+                    ObjectivePaperContributionRecord.analysis_version
+                    == analysis_version,
+                )
+                .order_by(ObjectivePaperContributionRecord.source_document_id)
+            )
+            return tuple(self._contribution_record(row) for row in rows)
+
     def list_findings(
         self,
         collection_id: str,
@@ -497,15 +518,18 @@ class PostgresObjectiveRepository:
         limit: int = 50,
     ) -> tuple[tuple[Finding, ...], int]:
         with self.session_factory() as session:
-            total = session.scalar(
-                select(func.count())
-                .select_from(ObjectiveFindingRecord)
-                .where(
-                    ObjectiveFindingRecord.collection_id == collection_id,
-                    ObjectiveFindingRecord.objective_id == objective_id,
-                    ObjectiveFindingRecord.analysis_version == analysis_version,
+            total = (
+                session.scalar(
+                    select(func.count())
+                    .select_from(ObjectiveFindingRecord)
+                    .where(
+                        ObjectiveFindingRecord.collection_id == collection_id,
+                        ObjectiveFindingRecord.objective_id == objective_id,
+                        ObjectiveFindingRecord.analysis_version == analysis_version,
+                    )
                 )
-            ) or 0
+                or 0
+            )
             rows = tuple(
                 session.scalars(
                     select(ObjectiveFindingRecord)
@@ -561,8 +585,7 @@ class PostgresObjectiveRepository:
                             == objective_id,
                             objective_finding_evidence_links.c.analysis_version
                             == analysis_version,
-                            objective_finding_evidence_links.c.finding_id
-                            == finding_id,
+                            objective_finding_evidence_links.c.finding_id == finding_id,
                         )
                         .order_by(
                             objective_finding_evidence_links.c.link_role,
@@ -578,10 +601,18 @@ class PostgresObjectiveRepository:
                 ObjectiveEvidenceRecord.analysis_version == analysis_version,
             )
             if evidence_ids is not None:
-                filters = (*filters, ObjectiveEvidenceRecord.evidence_id.in_(evidence_ids))
-            total = session.scalar(
-                select(func.count()).select_from(ObjectiveEvidenceRecord).where(*filters)
-            ) or 0
+                filters = (
+                    *filters,
+                    ObjectiveEvidenceRecord.evidence_id.in_(evidence_ids),
+                )
+            total = (
+                session.scalar(
+                    select(func.count())
+                    .select_from(ObjectiveEvidenceRecord)
+                    .where(*filters)
+                )
+                or 0
+            )
             rows = session.scalars(
                 select(ObjectiveEvidenceRecord)
                 .where(*filters)
@@ -602,11 +633,19 @@ class PostgresObjectiveRepository:
         findings: Iterable[Finding],
     ) -> None:
         for item in (*tuple(contributions), *tuple(evidence_records), *tuple(findings)):
-            if (item.collection_id, item.objective_id, item.analysis_version) != expected_key:
-                raise ValueError("objective analysis artifact has cross-version identity")
+            if (
+                item.collection_id,
+                item.objective_id,
+                item.analysis_version,
+            ) != expected_key:
+                raise ValueError(
+                    "objective analysis artifact has cross-version identity"
+                )
 
     @staticmethod
-    def _apply_analysis(row: ObjectiveAnalysisRecord, analysis: ObjectiveAnalysis) -> None:
+    def _apply_analysis(
+        row: ObjectiveAnalysisRecord, analysis: ObjectiveAnalysis
+    ) -> None:
         row.status = analysis.status
         row.phase = analysis.phase
         row.processed_document_count = analysis.processed_document_count
@@ -697,6 +736,30 @@ class PostgresObjectiveRepository:
             confidence=item.confidence,
         )
 
+    @staticmethod
+    def _contribution_record(
+        row: ObjectivePaperContributionRecord,
+    ) -> PaperContribution:
+        return PaperContribution.from_mapping(
+            {
+                "collection_id": row.collection_id,
+                "objective_id": row.objective_id,
+                "analysis_version": row.analysis_version,
+                "document_id": row.source_document_id,
+                "analysis_status": row.analysis_status,
+                "relevance": row.relevance,
+                "paper_role": row.paper_role,
+                "contribution_summary": row.contribution_summary,
+                "material_match": row.material_match,
+                "changed_variables": row.changed_variables,
+                "measured_property_scope": row.measured_property_scope,
+                "test_environment_scope": row.test_environment_scope,
+                "exclusion_reason": row.exclusion_reason,
+                "warnings": row.warnings,
+                "confidence": row.confidence,
+            }
+        )
+
     def _write_finding(self, session: Session, finding: Finding) -> None:
         session.add(
             ObjectiveFindingRecord(
@@ -784,9 +847,7 @@ class PostgresObjectiveRepository:
                     "evidence_id": evidence_id,
                     "position": position,
                 }
-                for position, evidence_id in enumerate(
-                    relation.supporting_evidence_ids
-                )
+                for position, evidence_id in enumerate(relation.supporting_evidence_ids)
             ]
             if rows:
                 session.execute(
@@ -864,9 +925,7 @@ class PostgresObjectiveRepository:
                     ObjectiveFindingPaperContributionRecord.finding_id
                     == key_filters[3],
                 )
-                .order_by(
-                    ObjectiveFindingPaperContributionRecord.paper_order
-                )
+                .order_by(ObjectiveFindingPaperContributionRecord.paper_order)
             )
         )
         if context_row is None or not paper_rows:
@@ -979,9 +1038,7 @@ class PostgresObjectiveRepository:
             source_ref=row.source_ref,
             source_excerpt=row.source_excerpt,
             page_numbers=tuple(row.page_numbers),
-            related_source_refs=tuple(
-                dict(value) for value in row.related_source_refs
-            ),
+            related_source_refs=tuple(dict(value) for value in row.related_source_refs),
             evidence_role=row.evidence_role,
             selection_status=row.selection_status,
             selection_reason=row.selection_reason,

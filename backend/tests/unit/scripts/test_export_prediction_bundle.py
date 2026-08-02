@@ -190,8 +190,22 @@ def test_prediction_bundle_exports_published_findings_and_exact_evidence(tmp_pat
             "analysis_version": 2,
             "finding_id": "finding-1",
             "statement": "Preheating was associated with higher ductility.",
-            "generalization_status": "paper_level_only",
-            "context": {"limitations": ["single paper"]},
+            "factors": ["preheating"],
+            "outcome": "ductility",
+            "direction": "increase",
+            "assertion_strength": "associative",
+            "attribution_scope": "isolated_effect",
+            "synthesis_status": "insufficient_confirmation",
+            "certainty": 0.8,
+            "mechanisms": [],
+            "scientific_context": {
+                "material": [],
+                "sample": [],
+                "process": [],
+                "test": [],
+            },
+            "limitations": ["single paper"],
+            "paper_contributions": [],
         }
     ]
 
@@ -212,6 +226,9 @@ def test_prediction_bundle_exports_published_findings_and_exact_evidence(tmp_pat
         "row": 1,
     }
     assert bundle["uncertainties"][0]["limitations"] == ["single paper"]
+    assert bundle["uncertainties"][0]["synthesis_status"] == (
+        "insufficient_confirmation"
+    )
 
 
 def test_export_prediction_bundle_allows_missing_artifacts(tmp_path, monkeypatch):

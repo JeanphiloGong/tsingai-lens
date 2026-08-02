@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import csv
 import json
-from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -13,11 +11,13 @@ _ISSUES = frozenset(
         "evidence_not_grounded",
         "missing_evidence",
         "insufficient_evidence",
-        "wrong_variable",
+        "wrong_factor",
         "wrong_outcome",
         "wrong_direction",
         "wrong_context",
-        "wrong_relation",
+        "wrong_mechanism",
+        "wrong_attribution",
+        "wrong_synthesis",
         "overclaim",
         "unclear_statement",
         "other",
@@ -96,29 +96,18 @@ class FindingReviewImportService:
             dry_run=dry_run,
         )
 
-    def import_decision_board_tsv(
-        self,
-        *,
-        content: str,
-        reviewer: str,
-        dry_run: bool = False,
-    ) -> dict[str, Any]:
-        return self.import_rows(
-            rows=read_decision_board_tsv(content),
-            reviewer=reviewer,
-            dry_run=dry_run,
-        )
-
     def _decision(self, row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
-        action = _text(row.get("action") or row.get("expert_action")).lower()
+        if "expert_action" in row or "expert_note" in row:
+            raise ValueError("expert_action and expert_note are not review JSONL fields")
+        action = _text(row.get("action")).lower()
         if action not in _ACTIONS:
             raise ValueError("action must be accept, reject, correct, or skip")
         identity = _identity(row)
         if action == "skip":
             return {"line": line_number, "action": action, "payload": identity}
 
-        item = self._require_dataset_item(identity)
         if action == "accept":
+            self._require_dataset_item(identity)
             return {
                 "line": line_number,
                 "action": action,
@@ -126,10 +115,11 @@ class FindingReviewImportService:
                     **identity,
                     "review_status": "correct",
                     "issue_type": "none",
-                    "note": _optional_text(row.get("note") or row.get("expert_note")),
+                    "note": _optional_text(row.get("note")),
                 },
             }
         if action == "reject":
+            self._require_dataset_item(identity)
             issue_type = _text(row.get("issue_type")).lower()
             if issue_type not in _ISSUES:
                 raise ValueError("reject requires a valid issue_type")
@@ -140,69 +130,28 @@ class FindingReviewImportService:
                     **identity,
                     "review_status": "incorrect",
                     "issue_type": issue_type,
-                    "note": _optional_text(row.get("note") or row.get("expert_note")),
+                    "note": _optional_text(row.get("note")),
                 },
             }
 
-        target = row.get("suggested_target")
-        target = dict(target) if isinstance(target, dict) else {}
-        statement = _text(
-            target.get("statement")
-            or row.get("curated_statement")
-            or row.get("corrected_statement")
+        curated_finding = row.get("curated_finding")
+        if not isinstance(curated_finding, dict):
+            raise ValueError("correct requires one complete curated_finding")
+        candidate = self.feedback_service.validate_curation(
+            **identity,
+            curated_finding=curated_finding,
         )
-        if not statement:
-            raise ValueError("correct requires a curated statement")
-        evidence_ids = _strings(
-            target.get("evidence_ids")
-            or row.get("curated_evidence_ids")
-            or [
-                evidence.get("evidence_id")
-                for evidence in item.get("evidence", [])
-                if isinstance(evidence, dict)
-            ]
-        )
-        if not evidence_ids:
-            raise ValueError("correct requires at least one evidence_id")
-        available_ids = {
-            evidence.get("evidence_id")
-            for evidence in item.get("evidence", [])
-            if isinstance(evidence, dict)
-        }
-        if set(evidence_ids) - available_ids:
-            raise ValueError("curation references evidence outside the Finding")
+        curated_status = _text(row.get("curated_status")) or "limited"
+        if curated_status not in {"supported", "limited", "conflicted", "unsupported"}:
+            raise ValueError("correct requires a valid curated_status")
         return {
             "line": line_number,
             "action": action,
             "payload": {
                 **identity,
-                "curated_status": _text(target.get("status") or row.get("curated_status"))
-                or "limited",
-                "curated_statement": statement,
-                "curated_evidence_ids": evidence_ids,
-                "curated_support_grade": _optional_text(
-                    target.get("evidence_strength")
-                    or row.get("curated_support_grade")
-                ),
-                "curated_review_status": _optional_text(
-                    target.get("review_status") or row.get("curated_review_status")
-                ),
-                "curated_variables": _strings(
-                    target.get("variables") or row.get("curated_variables")
-                ),
-                "curated_mediators": _strings(
-                    target.get("mediators") or row.get("curated_mediators")
-                ),
-                "curated_outcomes": _strings(
-                    target.get("outcomes") or row.get("curated_outcomes")
-                ),
-                "curated_direction": _optional_text(
-                    target.get("direction") or row.get("curated_direction")
-                ),
-                "curated_scope_summary": _optional_text(
-                    target.get("scope_summary") or row.get("curated_scope_summary")
-                ),
-                "note": _optional_text(row.get("note") or row.get("expert_note")),
+                "curated_status": curated_status,
+                "curated_finding": candidate.to_record(),
+                "note": _optional_text(row.get("note")),
             },
         }
 
@@ -234,10 +183,6 @@ def read_review_jsonl(path: Path) -> list[dict[str, Any]]:
                 raise ValueError(f"line {line_number} must be a JSON object")
             rows.append(payload)
     return rows
-
-
-def read_decision_board_tsv(content: str) -> list[dict[str, Any]]:
-    return [dict(row) for row in csv.DictReader(StringIO(content), delimiter="\t")]
 
 
 def _identity(row: dict[str, Any]) -> dict[str, Any]:
@@ -303,16 +248,4 @@ def _optional_text(value: Any) -> str | None:
     return _text(value) or None
 
 
-def _strings(value: Any) -> list[str]:
-    if value is None:
-        return []
-    values = value if isinstance(value, (list, tuple, set)) else [value]
-    result: list[str] = []
-    for item in values:
-        text = _text(item)
-        if text and text not in result:
-            result.append(text)
-    return result
-
-
-__all__ = ["FindingReviewImportService", "read_decision_board_tsv", "read_review_jsonl"]
+__all__ = ["FindingReviewImportService", "read_review_jsonl"]

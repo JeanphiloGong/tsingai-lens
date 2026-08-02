@@ -31,10 +31,10 @@ The user-facing hierarchy is:
 Research Objective
   -> Findings list
   -> selected Finding
-     -> Relation
-     -> applicability Context
+     -> factors, outcome, direction, and synthesis status
+     -> mechanisms and typed scientific context
+     -> PaperContribution bindings
      -> exact Evidence excerpts and Source links
-     -> Derivation audit
      -> feedback action
 ```
 
@@ -49,7 +49,9 @@ page handles these states explicitly:
   retry;
 - succeeded: show Findings from the published analysis version.
 
-Finding and Evidence requests always include the published `analysis_version`.
+Finding detail and Evidence requests always include the published
+`analysis_version` and are loaded together for the selected Finding. Stale
+rapid-selection responses are discarded.
 The UI keeps internal IDs out of presentation while retaining them for API
 identity and source navigation. Evidence displays the exact returned
 `source_excerpt`, paper/page metadata, and a document link carrying the stable

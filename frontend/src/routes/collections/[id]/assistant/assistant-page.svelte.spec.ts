@@ -81,15 +81,17 @@ function datasetResponse({
 		analysis_version: 1,
 		finding_id: `finding_training_${index + 1}`,
 		research_objective: 'How does VED affect fatigue strength?',
-		finding_level: 'paper',
 		document_ids: ['paper-1'],
 		label_status: 'gold',
 		dataset_use_status: 'training_ready',
+		finding_fingerprint: `finding-fingerprint-${index + 1}`,
+		evidence_fingerprint: `evidence-fingerprint-${index + 1}`,
 		system_prediction: {},
 		expert_target: {},
+		training_target: {},
 		evidence: [],
-		training_schema_version: 'objective_finding_training.v1',
-		training_prompt_version: 'objective_finding_training_prompt.v1',
+		training_schema_version: 'objective_finding_training.v2',
+		training_prompt_version: 'objective_finding_training_prompt.v2',
 		training_messages:
 			index < trainingMessages
 				? [
@@ -105,20 +107,22 @@ function datasetResponse({
 		analysis_version: 1,
 		finding_id: `finding_review_${index + 1}`,
 		research_objective: 'How does VED affect fatigue strength?',
-		finding_level: 'paper',
 		document_ids: ['paper-1'],
 		label_status: 'candidate',
 		dataset_use_status: 'review_candidate',
+		finding_fingerprint: `finding-review-fingerprint-${index + 1}`,
+		evidence_fingerprint: `evidence-review-fingerprint-${index + 1}`,
 		system_prediction: {},
 		expert_target: null,
+		training_target: {},
 		evidence: [],
-		training_schema_version: 'objective_finding_training.v1',
-		training_prompt_version: 'objective_finding_training_prompt.v1',
+		training_schema_version: 'objective_finding_training.v2',
+		training_prompt_version: 'objective_finding_training_prompt.v2',
 		training_messages: [],
 		metadata: {}
 	}));
 	return {
-		schema_version: 'objective_finding_dataset.v1',
+		schema_version: 'objective_finding_dataset.v2',
 		collection_id: 'col_123',
 		objective_id: 'obj_1',
 		items: [...trainingItems, ...reviewItems],
@@ -137,7 +141,10 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method = requestMethod(input, init);
-			if (path === '/api/v1/collections/col_123/objectives/obj_1/finding-dataset' && method === 'GET') {
+			if (
+				path === '/api/v1/collections/col_123/objectives/obj_1/finding-dataset' &&
+				method === 'GET'
+			) {
 				return Promise.resolve(jsonResponse(datasetResponse()));
 			}
 			if (path === '/api/v1/goal-sessions' && method === 'POST') {
@@ -186,7 +193,8 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						used_evidence_ids: ['ev_1'],
 						warnings: [],
 						links: {},
-						review_gate: 'protocol_ready_findings',
+						review_gate: 'reviewed_findings',
+						source_validity: 'current',
 						source_links: [
 							{
 								kind: 'evidence',
@@ -198,7 +206,10 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 					})
 				);
 			}
-			if (path === '/api/v1/collections/col_123/objectives/obj_1/experiment-plans' && method === 'POST') {
+			if (
+				path === '/api/v1/collections/col_123/objectives/obj_1/experiment-plans' &&
+				method === 'POST'
+			) {
 				return Promise.resolve(
 					jsonResponse({
 						plan_id: 'plan_1',
@@ -228,16 +239,16 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 					})
 				);
 			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+			return Promise.resolve(
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 	});
 
 	it('shows protocol readiness for goals with training-ready message samples', async () => {
 		render(Page);
 
-		await expect
-			.element(browserPage.getByText('Experiment readiness'))
-			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Experiment readiness')).toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(
@@ -293,7 +304,10 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method = requestMethod(input, init);
-			if (path === '/api/v1/collections/col_123/objectives/obj_1/finding-dataset' && method === 'GET') {
+			if (
+				path === '/api/v1/collections/col_123/objectives/obj_1/finding-dataset' &&
+				method === 'GET'
+			) {
 				return Promise.resolve(
 					jsonResponse(
 						datasetResponse({
@@ -326,7 +340,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 					})
 				);
 			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+			return Promise.resolve(
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);
@@ -336,19 +352,24 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 				browserPage.getByText(
 					'3 finding(s) still need expert review before protocol drafts can be saved. Next: Review findings first.'
 				)
-				)
+			)
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Review findings first' }))
 			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1?review=queue');
-		await expect.element(browserPage.getByRole('button', { name: 'Draft protocol' })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Draft protocol' }))
+			.not.toBeInTheDocument();
 	});
 
 	it('shows pending training messages before protocol drafts are ready', async () => {
 		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
 			const path = requestPath(input);
 			const method = requestMethod(input, init);
-			if (path === '/api/v1/collections/col_123/objectives/obj_1/finding-dataset' && method === 'GET') {
+			if (
+				path === '/api/v1/collections/col_123/objectives/obj_1/finding-dataset' &&
+				method === 'GET'
+			) {
 				return Promise.resolve(
 					jsonResponse(
 						datasetResponse({
@@ -381,7 +402,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 					})
 				);
 			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+			return Promise.resolve(
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);
@@ -396,7 +419,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Check objective readiness' }))
 			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1?review=training_ready');
-		await expect.element(browserPage.getByRole('button', { name: 'Draft protocol' })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Draft protocol' }))
+			.not.toBeInTheDocument();
 	});
 
 	it('starts a protocol draft from reviewed goal findings', async () => {
@@ -406,7 +431,8 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 
 		const [, messageInit] = fetchMock.mock.calls.find(([input, init]) => {
 			return (
-				requestPath(input as string | URL | Request) === '/api/v1/goal-sessions/session_1/messages' &&
+				requestPath(input as string | URL | Request) ===
+					'/api/v1/goal-sessions/session_1/messages' &&
 				requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
 			);
 		}) as [string | URL | Request, RequestInit];
@@ -423,7 +449,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 	it('saves grounded copilot answers as traceable experiment plans', async () => {
 		render(Page);
 
-		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
+			.toBeInTheDocument();
 		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
 		await browserPage.getByRole('button', { name: 'Send' }).click();
 
@@ -431,9 +459,15 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Source 1' }))
 			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_1');
-		await expect.element(browserPage.getByRole('button', { name: 'Copy answer' })).toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Like answer' })).not.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Dislike answer' })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Copy answer' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Like answer' }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Dislike answer' }))
+			.not.toBeInTheDocument();
 
 		await browserPage.getByRole('button', { name: 'Save plan' }).click();
 
@@ -459,7 +493,8 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		expect(payload.metadata).toEqual({
 			source: 'goal_copilot',
 			source_mode: 'collection_grounded',
-			review_gate: 'protocol_ready_findings',
+			review_gate: 'reviewed_findings',
+			source_validity: 'current',
 			used_evidence_ids: ['ev_1'],
 			source_link_count: 1
 		});
@@ -469,6 +504,89 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 				'href',
 				'/collections/col_123/objectives/obj_1?plan_id=plan_1#experiment-plans-title'
 			);
+	});
+
+	it('shows a stale-source warning and hides Save plan for a historical answer', async () => {
+		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+			const path = requestPath(input);
+			const method = requestMethod(input, init);
+			if (
+				path === '/api/v1/collections/col_123/objectives/obj_1/finding-dataset' &&
+				method === 'GET'
+			) {
+				return Promise.resolve(jsonResponse(datasetResponse()));
+			}
+			if (path === '/api/v1/goal-sessions' && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						session_id: 'session_1',
+						user_id: 'test-user',
+						collection_id: 'col_123',
+						focused_material_id: null,
+						focused_paper_id: null,
+						focused_objective_id: 'obj_1',
+						goal_text: null,
+						goal_brief_json: {},
+						answer_mode: 'hybrid',
+						rolling_summary: '',
+						last_evidence_ids: [],
+						last_material_ids: [],
+						last_paper_ids: [],
+						collection_data_version: null,
+						created_at: '2026-07-13T00:00:00+00:00',
+						updated_at: '2026-07-13T00:00:00+00:00'
+					})
+				);
+			}
+			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
+				return Promise.resolve(
+					jsonResponse({
+						message_id: 'msg_assistant_stale',
+						session_id: 'session_1',
+						role: 'assistant',
+						content:
+							'Hypothesis\nReviewed result [Source 1].\n\n' +
+							'Variable matrix\nCompare conditions.\n\n' +
+							'Measurements\nMeasure strength.\n\n' +
+							'Controls\nHold other variables fixed.\n\n' +
+							'Risks or limits\nEvidence has changed.',
+						source_mode: 'collection_grounded',
+						used_evidence_ids: ['ev_1'],
+						warnings: ['source_finding_snapshot_stale'],
+						links: {},
+						review_gate: null,
+						source_validity: 'stale',
+						source_validity_reasons: ['source_evidence_changed'],
+						source_links: [
+							{
+								kind: 'evidence',
+								label: 'Source 1',
+								href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
+							}
+						],
+						created_at: '2026-07-13T00:01:00+00:00'
+					})
+				);
+			}
+			return Promise.resolve(
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
+		});
+
+		render(Page);
+
+		await browserPage.getByLabelText('Message').fill('Show the historical plan.');
+		await browserPage.getByRole('button', { name: 'Send' }).click();
+		await expect
+			.element(
+				browserPage.getByText(
+					'The reviewed Finding or Evidence used by this answer has changed. Generate a new answer before saving a plan.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Save plan' }))
+			.not.toBeInTheDocument();
 	});
 
 	it('does not save grounded answers without visible source links as experiment plans', async () => {
@@ -509,23 +627,32 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						used_evidence_ids: [],
 						warnings: [],
 						links: {},
-						review_gate: 'protocol_ready_findings',
+						review_gate: 'reviewed_findings',
+						source_validity: 'current',
 						source_links: [],
 						created_at: '2026-07-13T00:01:00+00:00'
 					})
 				);
 			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+			return Promise.resolve(
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);
 
-		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
+			.toBeInTheDocument();
 		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
 		await browserPage.getByRole('button', { name: 'Send' }).click();
 
-		await expect.element(browserPage.getByText('This grounded draft has no source links.')).toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('This grounded draft has no source links.'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Save plan' }))
+			.not.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.some(([input, init]) => {
 				return (
@@ -574,7 +701,8 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						used_evidence_ids: ['ev_1'],
 						warnings: [],
 						links: {},
-						review_gate: 'protocol_ready_findings',
+						review_gate: 'reviewed_findings',
+						source_validity: 'current',
 						source_links: [
 							{
 								kind: 'evidence',
@@ -586,16 +714,22 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 					})
 				);
 			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+			return Promise.resolve(
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);
 
-		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
+			.toBeInTheDocument();
 		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
 		await browserPage.getByRole('button', { name: 'Send' }).click();
 
-		await expect.element(browserPage.getByText('Run 25 C and 150 C LPBF 316L builds')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Run 25 C and 150 C LPBF 316L builds'))
+			.toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(
@@ -603,7 +737,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 				)
 			)
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Save plan' }))
+			.not.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.some(([input, init]) => {
 				return (
@@ -659,16 +795,22 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 					})
 				);
 			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+			return Promise.resolve(
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);
 
-		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
+			.toBeInTheDocument();
 		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
 		await browserPage.getByRole('button', { name: 'Send' }).click();
 
-		await expect.element(browserPage.getByText(/could not verify source citations/)).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText(/could not verify source citations/))
+			.toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(
@@ -676,7 +818,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 				)
 			)
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Save plan' }))
+			.not.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.some(([input, init]) => {
 				return (
@@ -732,24 +876,32 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 					})
 				);
 			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+			return Promise.resolve(
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);
 
-		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
+			.toBeInTheDocument();
 		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
 		await browserPage.getByRole('button', { name: 'Send' }).click();
 
-		await expect.element(browserPage.getByText(/could not verify the protocol draft contract/)).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText(/could not verify the protocol draft contract/))
+			.toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(
-					'This draft failed the source/design contract and cannot be saved. Review the protocol-ready findings and regenerate it.'
+					'This draft failed the source/design contract and cannot be saved. Review the Findings and regenerate it.'
 				)
 			)
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Save plan' }))
+			.not.toBeInTheDocument();
 	});
 
 	it('does not save grounded answers without evidence citations as experiment plans', async () => {
@@ -790,7 +942,8 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						used_evidence_ids: [],
 						warnings: [],
 						links: {},
-						review_gate: 'protocol_ready_findings',
+						review_gate: 'reviewed_findings',
+						source_validity: 'current',
 						source_links: [
 							{
 								kind: 'evidence',
@@ -802,16 +955,22 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 					})
 				);
 			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+			return Promise.resolve(
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);
 
-		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
+			.toBeInTheDocument();
 		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
 		await browserPage.getByRole('button', { name: 'Send' }).click();
 
-		await expect.element(browserPage.getByText(/does not cite reviewed evidence/)).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText(/does not cite reviewed evidence/))
+			.toBeInTheDocument();
 		await expect
 			.element(
 				browserPage.getByText(
@@ -822,7 +981,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Source 1' }))
 			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_uncited');
-		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Save plan' }))
+			.not.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.some(([input, init]) => {
 				return (
@@ -882,20 +1043,28 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 					})
 				);
 			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+			return Promise.resolve(
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);
 
-		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
+			.toBeInTheDocument();
 		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
 		await browserPage.getByRole('button', { name: 'Send' }).click();
 
 		await expect.element(browserPage.getByText(/accepted finding/)).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Save is disabled until this objective has expert-reviewed protocol-ready findings.'))
+			.element(
+				browserPage.getByText('Save is disabled until this objective has expert-reviewed Findings.')
+			)
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Save plan' }))
+			.not.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.some(([input, init]) => {
 				return (
@@ -944,7 +1113,8 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						used_evidence_ids: ['ev_1'],
 						warnings: [],
 						links: {},
-						review_gate: 'protocol_ready_findings',
+						review_gate: 'reviewed_findings',
+						source_validity: 'current',
 						source_links: [
 							{
 								kind: 'evidence',
@@ -956,12 +1126,16 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 					})
 				);
 			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+			return Promise.resolve(
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);
 
-		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
+			.toBeInTheDocument();
 		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
 		await browserPage.getByRole('button', { name: 'Send' }).click();
 
@@ -976,7 +1150,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Source 1' }))
 			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_1');
-		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Save plan' }))
+			.not.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.some(([input, init]) => {
 				return (
@@ -1025,7 +1201,8 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						used_evidence_ids: ['ev_1'],
 						warnings: [],
 						links: {},
-						review_gate: 'protocol_ready_findings',
+						review_gate: 'reviewed_findings',
+						source_validity: 'current',
 						source_links: [
 							{
 								kind: 'evidence',
@@ -1037,12 +1214,16 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 					})
 				);
 			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+			return Promise.resolve(
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);
 
-		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
+			.toBeInTheDocument();
 		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
 		await browserPage.getByRole('button', { name: 'Send' }).click();
 
@@ -1057,7 +1238,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('link', { name: 'Source 1' }))
 			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_other');
-		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Save plan' }))
+			.not.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.some(([input, init]) => {
 				return (
@@ -1106,7 +1289,8 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						used_evidence_ids: ['ev_1', 'ev_2'],
 						warnings: [],
 						links: {},
-						review_gate: 'protocol_ready_findings',
+						review_gate: 'reviewed_findings',
+						source_validity: 'current',
 						source_links: [
 							{
 								kind: 'evidence',
@@ -1118,12 +1302,16 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 					})
 				);
 			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+			return Promise.resolve(
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);
 
-		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
+			.toBeInTheDocument();
 		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
 		await browserPage.getByRole('button', { name: 'Send' }).click();
 
@@ -1135,7 +1323,9 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 				)
 			)
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Save plan' }))
+			.not.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.some(([input, init]) => {
 				return (
@@ -1182,7 +1372,7 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 						answer: 'This draft cites unreviewed collection evidence [Source 1].',
 						source_mode: 'collection_grounded',
 						used_evidence_ids: ['ev_unreviewed'],
-						warnings: ['curated_research_findings_empty'],
+						warnings: ['reviewed_findings_empty'],
 						links: {},
 						source_links: [
 							{
@@ -1195,20 +1385,30 @@ describe('collections/[id]/assistant/+page.svelte', () => {
 					})
 				);
 			}
-			return Promise.resolve(jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected'));
+			return Promise.resolve(
+				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
+			);
 		});
 
 		render(Page);
 
-		await expect.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
+			.toBeInTheDocument();
 		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
 		await browserPage.getByRole('button', { name: 'Send' }).click();
 
-		await expect.element(browserPage.getByText(/unreviewed collection evidence/)).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('Save is disabled until this objective has expert-reviewed protocol-ready findings.'))
+			.element(browserPage.getByText(/unreviewed collection evidence/))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('button', { name: 'Save plan' })).not.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('Save is disabled until this objective has expert-reviewed Findings.')
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Save plan' }))
+			.not.toBeInTheDocument();
 		expect(
 			fetchMock.mock.calls.some(([input, init]) => {
 				return (

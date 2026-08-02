@@ -23,9 +23,7 @@ class MemoryObjectiveRepository:
         self._contributions: dict[
             tuple[str, str, int], tuple[PaperContribution, ...]
         ] = {}
-        self._evidence: dict[
-            tuple[str, str, int], tuple[ObjectiveEvidence, ...]
-        ] = {}
+        self._evidence: dict[tuple[str, str, int], tuple[ObjectiveEvidence, ...]] = {}
         self._findings: dict[tuple[str, str, int], tuple[Finding, ...]] = {}
 
     @classmethod
@@ -109,21 +107,23 @@ class MemoryObjectiveRepository:
             (
                 analysis
                 for analysis_key, analysis in self._analyses.items()
-                if analysis_key[:2] == key
-                and analysis.status in {"queued", "running"}
+                if analysis_key[:2] == key and analysis.status in {"queued", "running"}
             ),
             None,
         )
         if existing is not None:
             return objective, existing
-        version = max(
-            (
-                analysis_key[2]
-                for analysis_key in self._analyses
-                if analysis_key[:2] == key
-            ),
-            default=0,
-        ) + 1
+        version = (
+            max(
+                (
+                    analysis_key[2]
+                    for analysis_key in self._analyses
+                    if analysis_key[:2] == key
+                ),
+                default=0,
+            )
+            + 1
+        )
         analysis = ObjectiveAnalysis(
             collection_id=collection_id,
             objective_id=objective_id,
@@ -217,7 +217,7 @@ class MemoryObjectiveRepository:
         if {item.document_id for item in evidence_records} - contribution_documents:
             raise ValueError("objective evidence lacks owning paper contribution")
         for finding in findings:
-            finding.validate_evidence(evidence_records)
+            finding.validate_sources(evidence_records, contributions)
         analysis = analysis.succeed(completed_at=datetime.now(timezone.utc))
         objective_key = key[:2]
         objective = self._require_objective(*objective_key).publish_analysis(analysis)
@@ -267,8 +267,12 @@ class MemoryObjectiveRepository:
         records = self._findings.get(
             (collection_id, objective_id, analysis_version), ()
         )
-        ordered = tuple(sorted(records, key=lambda item: (item.display_rank, item.finding_id)))
-        return ordered[max(0, offset) : max(0, offset) + max(1, min(limit, 200))], len(ordered)
+        ordered = tuple(
+            sorted(records, key=lambda item: (item.display_rank, item.finding_id))
+        )
+        return ordered[max(0, offset) : max(0, offset) + max(1, min(limit, 200))], len(
+            ordered
+        )
 
     def read_finding(
         self,
@@ -286,6 +290,16 @@ class MemoryObjectiveRepository:
                 if finding.finding_id == finding_id
             ),
             None,
+        )
+
+    def list_contributions(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> tuple[PaperContribution, ...]:
+        return self._contributions.get(
+            (collection_id, objective_id, analysis_version), ()
         )
 
     def list_evidence(
@@ -308,8 +322,9 @@ class MemoryObjectiveRepository:
             if finding is None:
                 return (), 0
             evidence_ids = {
-                *finding.derivation.supporting_evidence_ids,
-                *finding.derivation.contradicting_evidence_ids,
+                *finding.supporting_evidence_ids,
+                *finding.contradicting_evidence_ids,
+                *finding.context_evidence_ids,
             }
             records = tuple(
                 evidence for evidence in records if evidence.evidence_id in evidence_ids
@@ -333,9 +348,7 @@ class MemoryObjectiveRepository:
         objective_id: str,
         analysis_version: int,
     ) -> ObjectiveAnalysis:
-        analysis = self._analyses.get(
-            (collection_id, objective_id, analysis_version)
-        )
+        analysis = self._analyses.get((collection_id, objective_id, analysis_version))
         if analysis is None:
             raise FileNotFoundError(
                 f"objective analysis not found: {objective_id}/v{analysis_version}"

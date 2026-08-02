@@ -750,15 +750,50 @@ class StructuredPaperSkim(_StrictModel):
 
 
 class StructuredResearchObjective(_StrictModel):
-    question: str
-    material_scope: list[str] = Field(default_factory=list)
-    process_axes: list[str] = Field(default_factory=list)
-    property_axes: list[str] = Field(default_factory=list)
-    comparison_intent: str | None = None
-    seed_document_ids: list[str] = Field(default_factory=list)
-    excluded_document_ids: list[str] = Field(default_factory=list)
-    confidence: float = 0.0
-    reason: str | None = None
+    question: str = Field(
+        min_length=8,
+        max_length=240,
+        description="Exact question copied from a selected skim's possible_objectives.",
+    )
+    material_scope: list[str] = Field(
+        min_length=1,
+        max_length=3,
+        description="Material labels copied from the selected seed skims.",
+    )
+    process_axes: list[str] = Field(
+        min_length=1,
+        max_length=8,
+        description="Process or changed-variable labels copied from the seed skims.",
+    )
+    property_axes: list[str] = Field(
+        min_length=1,
+        max_length=8,
+        description="Measured property labels copied from the selected seed skims.",
+    )
+    comparison_intent: str = Field(
+        min_length=1,
+        max_length=240,
+        description="Concise comparison represented by this candidate objective.",
+    )
+    seed_document_ids: list[str] = Field(
+        min_length=1,
+        max_length=12,
+        description="Exact input document ids that directly support this candidate.",
+    )
+    excluded_document_ids: list[str] = Field(
+        max_length=12,
+        description="Exact input document ids clearly outside this candidate's scope.",
+    )
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Confidence in candidate selection and paper binding, from 0 to 1.",
+    )
+    reason: str = Field(
+        min_length=1,
+        max_length=200,
+        description="Short explanation grounded in the selected PaperSkim records.",
+    )
 
     @field_validator(
         "material_scope",
@@ -772,9 +807,21 @@ class StructuredResearchObjective(_StrictModel):
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list_container(value)
 
+    @model_validator(mode="after")
+    def _validate_disjoint_document_ids(self) -> "StructuredResearchObjective":
+        overlap = set(self.seed_document_ids) & set(self.excluded_document_ids)
+        if overlap:
+            raise ValueError(
+                "seed_document_ids and excluded_document_ids must be disjoint"
+            )
+        return self
+
 
 class StructuredResearchObjectives(_StrictModel):
-    objectives: list[StructuredResearchObjective] = Field(default_factory=list)
+    objectives: list[StructuredResearchObjective] = Field(
+        max_length=6,
+        description="Bounded supported candidates; empty when none are reviewable.",
+    )
 
     @field_validator("objectives", mode="before")
     @classmethod

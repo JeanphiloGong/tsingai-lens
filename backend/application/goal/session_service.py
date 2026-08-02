@@ -54,7 +54,12 @@ _GENERAL_FALLBACK_PREFIX = (
 _MAX_CONTEXT_CHARS = 18000
 _MAX_ROLLING_SUMMARY_CHARS = 1600
 _MAX_SOURCE_LINKS = 12
-_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", re.IGNORECASE | re.DOTALL)
+_THINK_BLOCK_RE = re.compile(
+    r"<think\b[^>]*>.*?</think\s*>\s*",
+    re.IGNORECASE | re.DOTALL,
+)
+_THINK_OPEN_RE = re.compile(r"<think\b[^>]*>", re.IGNORECASE)
+_THINK_CLOSE_RE = re.compile(r"</think\s*>", re.IGNORECASE)
 _UNSET = object()
 PROTOCOL_READY_REVIEW_GATE = "protocol_ready_findings"
 
@@ -379,8 +384,8 @@ class GoalSessionService:
                 warnings.append("goal_copilot_missing_source_citation")
                 answer = (
                     "Lens could not verify source citations in the generated answer, "
-                    "so do not treat it as a traceable collection conclusion.\n\n"
-                    f"{answer}"
+                    "so do not treat it as a traceable collection conclusion. Review "
+                    "the published findings and evidence directly, then retry."
                 )
                 used_evidence_ids = []
                 source_links = []
@@ -1808,7 +1813,14 @@ class GoalSessionService:
         return "\n".join(parts).strip()
 
     def _strip_thinking_blocks(self, answer: str) -> str:
-        return _THINK_BLOCK_RE.sub("", answer).strip()
+        cleaned = _THINK_BLOCK_RE.sub("", answer)
+        closing_tags = list(_THINK_CLOSE_RE.finditer(cleaned))
+        if closing_tags:
+            cleaned = cleaned[closing_tags[-1].end() :]
+        opening_tag = _THINK_OPEN_RE.search(cleaned)
+        if opening_tag:
+            cleaned = cleaned[: opening_tag.start()]
+        return cleaned.strip()
 
     def _answer_cites_source_link(
         self,

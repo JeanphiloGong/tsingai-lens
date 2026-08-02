@@ -787,6 +787,7 @@ def test_goal_chat_downgrades_uncited_grounded_answer(tmp_path):
     assert response["source_links"] == []
     assert "goal_copilot_missing_source_citation" in response["warnings"]
     assert "do not treat it as a traceable collection conclusion" in response["answer"]
+    assert "The objective is supported by the collection evidence." not in response["answer"]
     assert loaded["last_evidence_ids"] == []
 
 
@@ -898,6 +899,22 @@ def test_goal_chat_uses_protocol_ready_findings_for_protocol_context(tmp_path):
     assert "paper-unreviewed" not in prompt
     assert "ev_preheat_ductility" not in prompt
     assert "finding_review_candidate" not in prompt
+
+
+def test_goal_chat_strips_incomplete_thinking_markup(tmp_path):
+    service, _ = _service(tmp_path)
+
+    assert service._strip_thinking_blocks("</think>\nVisible answer.") == "Visible answer."
+    assert (
+        service._strip_thinking_blocks(
+            "Hidden reasoning that must not leak.</think>\nVisible answer."
+        )
+        == "Visible answer."
+    )
+    assert (
+        service._strip_thinking_blocks("Visible answer.\n<think>Hidden reasoning")
+        == "Visible answer."
+    )
 
 
 def test_goal_chat_repairs_protocol_contract_before_returning_grounded_answer(tmp_path):

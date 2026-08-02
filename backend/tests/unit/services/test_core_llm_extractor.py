@@ -10,6 +10,7 @@ from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtra
 from application.core.semantic_build.llm.prompts import (
     build_objective_evidence_prompt,
     build_finding_synthesis_prompt,
+    build_paper_skim_prompt,
 )
 from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationPlan,
@@ -383,6 +384,57 @@ def test_core_llm_extractor_validates_paper_skim_response():
     assert isinstance(skim, StructuredPaperSkim)
     assert skim.doc_role == "experimental"
     assert skim.candidate_materials == ["316L stainless steel"]
+    text_call = client.chat.completions.calls[0]
+    assert text_call["response_format"] == {"type": "json_object"}
+    assert text_call["max_completion_tokens"] == 1024
+
+
+def test_paper_skim_prompt_defines_standalone_task_contract():
+    system_prompt, user_prompt = build_paper_skim_prompt(
+        {
+            "title": "LPBF 316L density study",
+            "profile_hint": {
+                "role_hint": "experimental",
+                "source_quality_warnings": [],
+                "role_hint_confidence": 0.9,
+            },
+            "text_preview": "Laser energy density was varied and density was measured.",
+            "headings": ["Methods", "Results"],
+            "table_captions": [],
+            "figure_captions": [],
+        }
+    )
+    prompt = f"{system_prompt}\n{user_prompt}"
+
+    assert "TASK MODEL" in system_prompt
+    assert "INPUT SCHEMA" in system_prompt
+    assert "DECISION PROCESS" in system_prompt
+    assert "HARD RULES" in system_prompt
+    assert "FEW-SHOTS" in system_prompt
+    assert "OUTPUT CONTRACT" in system_prompt
+    assert "profile_hint.role_hint" in system_prompt
+    assert "document_profile" not in prompt
+    assert '"doc_type"' not in prompt
+    assert "common experimental paper" in system_prompt.lower()
+    assert "review paper" in system_prompt.lower()
+    assert "insufficient or conflicting input" in system_prompt.lower()
+
+
+def test_paper_skim_schema_defines_warning_and_confidence_contract():
+    schema = StructuredPaperSkim.model_json_schema()
+
+    assert schema["properties"]["doc_role"]["description"]
+    assert schema["properties"]["evidence_density"]["description"]
+    assert schema["properties"]["confidence"]["minimum"] == 0
+    assert schema["properties"]["confidence"]["maximum"] == 1
+    assert set(schema["properties"]["warnings"]["items"]["enum"]) == {
+        "classification_uncertain",
+        "insufficient_content",
+        "modeling_only",
+        "objective_uncertain",
+        "profile_content_conflict",
+        "review_only",
+    }
 
 
 def test_core_llm_extractor_validates_research_objective_response():
@@ -969,6 +1021,44 @@ def test_core_llm_extractor_logs_invalid_json_output_diagnostics(caplog):
 
     assert "response_model=StructuredPaperSkim attempt=2" in caplog.text
     assert "raw_output_length=69" in caplog.text
+
+
+def test_paper_skim_retry_uses_task_specific_validation_contract():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "doc_type": "experimental",
+          "doc_role": "experimental",
+          "candidate_materials": ["316L stainless steel"],
+          "candidate_processes": ["LPBF"],
+          "candidate_properties": ["density"],
+          "changed_variables": ["laser energy density"],
+          "possible_objectives": ["How does laser energy density affect density?"],
+          "evidence_density": "high",
+          "confidence": 0.9,
+          "warnings": []
+        }
+        """
+    )
+    extractor = _json_text_extractor(client)
+
+    with pytest.raises(ValidationError, match="doc_type"):
+        extractor.extract_paper_skim(
+            {
+                "title": "LPBF 316L density study",
+                "profile_hint": {"role_hint": "experimental"},
+                "text_preview": "Laser energy density was varied and density was measured.",
+                "headings": ["Methods", "Results"],
+                "table_captions": [],
+                "figure_captions": [],
+            }
+        )
+
+    retry_instruction = client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "Previous PaperSkim output failed validation" in retry_instruction
+    assert "doc_type" in retry_instruction
+    assert "exactly these keys" in retry_instruction
+    assert "For finding synthesis" not in retry_instruction
 
 
 def test_core_llm_extractor_can_opt_in_to_provider_thinking(monkeypatch):

@@ -50,6 +50,104 @@ Non-negotiable rules:
 """.strip()
 
 
+_PAPER_SKIM_SYSTEM_PROMPT = """
+TASK MODEL
+You are the paper-screening judge for an evidence-backed literature comparison
+backend. Produce one coarse PaperSkim used only to discover candidate research
+questions for this paper. This is classification and research-map extraction,
+not final fact extraction, paper summarization, evidence synthesis, or a final
+research conclusion. Use only the supplied compact paper content.
+
+INPUT SCHEMA
+- `title`: paper title; useful context but potentially incomplete.
+- `profile_hint.role_hint`: prior coarse classification hint. Treat it as a
+  hint, not as an output field or unquestionable evidence.
+- `profile_hint.source_quality_warnings`: parser/classifier quality warnings.
+- `profile_hint.role_hint_confidence`: confidence in the prior role hint, not
+  the confidence of your PaperSkim.
+- `text_preview`: short source excerpt. It may be truncated or noisy.
+- `headings`: bounded section labels.
+- `table_captions`: bounded caption, section, and column-header context.
+- `figure_captions`: bounded caption and section context.
+
+DECISION PROCESS
+1. Judge whether the supplied content is sufficient and whether the role hint
+   conflicts with the paper content.
+2. Choose `doc_role`: use `experimental` for reported physical experiments,
+   `review` for literature synthesis, `modeling` for simulation-only studies,
+   `mixed` for genuinely mixed roles, and `uncertain` when evidence is weak or
+   conflicting.
+3. Extract only explicitly named material systems and process families.
+4. Extract changed variables only when the paper indicates that they vary or
+   are compared. Do not turn fixed conditions into changed variables.
+5. Extract concrete measured or evaluated properties. Do not return broad
+   background topics as properties.
+6. Return a possible objective only when the supplied content supports a
+   question connecting a process or changed variable to a property in a
+   material scope. Keep it question-shaped and concise. Review-only,
+   modeling-only without comparable outputs, and insufficient inputs may use
+   an empty objective list.
+7. Set evidence density to `high` when several supplied elements directly
+   support the map, `medium` for partial support, `low` for sparse or indirect
+   support, and `unknown` when content is insufficient.
+8. Set confidence for this complete PaperSkim and add only applicable warning
+   codes from the output contract.
+
+HARD RULES
+- Make decisions silently. Return one JSON object and no analysis, markdown,
+  copied input, backend ids, source locators, measurements, or extra fields.
+- Return at most 3 materials, 3 processes, 4 properties, 4 changed variables,
+  2 possible objectives, and 2 warnings.
+- Prefer empty arrays and `uncertain` over unsupported inference.
+- Do not infer a material from a filename or title alone.
+
+FEW-SHOTS
+1. Common experimental paper
+Input:
+{"title":"LPBF 316L density","profile_hint":{"role_hint":"experimental",
+"source_quality_warnings":[],"role_hint_confidence":0.9},"text_preview":
+"Laser energy density was varied for 316L and relative density was measured.",
+"headings":["Methods","Results"],"table_captions":[],"figure_captions":[]}
+Output:
+{"doc_role":"experimental","candidate_materials":["316L stainless steel"],
+"candidate_processes":["LPBF"],"candidate_properties":["relative density"],
+"changed_variables":["laser energy density"],"possible_objectives":
+["How does laser energy density affect relative density of LPBF 316L stainless steel?"],
+"evidence_density":"high","confidence":0.9,"warnings":[]}
+
+2. Review paper
+Input:
+{"title":"Review of corrosion in additively manufactured steels","profile_hint":
+{"role_hint":"review","source_quality_warnings":[],"role_hint_confidence":0.9},
+"text_preview":"This review summarizes prior LPBF 316L corrosion studies.",
+"headings":["Literature review"],"table_captions":[],"figure_captions":[]}
+Output:
+{"doc_role":"review","candidate_materials":["316L stainless steel"],
+"candidate_processes":["LPBF"],"candidate_properties":["corrosion behavior"],
+"changed_variables":[],"possible_objectives":[],"evidence_density":"low",
+"confidence":0.9,"warnings":["review_only"]}
+
+3. Insufficient or conflicting input
+Input:
+{"title":"Material study","profile_hint":{"role_hint":"experimental",
+"source_quality_warnings":["insufficient_content"],"role_hint_confidence":0.4},
+"text_preview":"Results are discussed.","headings":[],"table_captions":[],
+"figure_captions":[]}
+Output:
+{"doc_role":"uncertain","candidate_materials":[],"candidate_processes":[],
+"candidate_properties":[],"changed_variables":[],"possible_objectives":[],
+"evidence_density":"unknown","confidence":0.2,
+"warnings":["insufficient_content","classification_uncertain"]}
+
+OUTPUT CONTRACT
+Return exactly these keys: `doc_role`, `candidate_materials`,
+`candidate_processes`, `candidate_properties`, `changed_variables`,
+`possible_objectives`, `evidence_density`, `confidence`, and `warnings`.
+Use empty arrays when no supported value exists. The response ends immediately
+after the JSON object.
+""".strip()
+
+
 _OBJECTIVE_PAPER_FRAME_SYSTEM_PROMPT = """
 You are framing one paper against one research objective for an evidence-backed literature comparison backend.
 
@@ -617,15 +715,10 @@ def _build_objective_context_guidance(payload: dict[str, Any]) -> str:
 
 def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     user_prompt = (
-        "Extract a compact research map from this one paper.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only the schema object and start with `{` immediately. "
-        "Return at most 3 materials, 3 processes, 4 properties, 4 changed "
-        "variables, 2 possible objectives, and 2 warnings. "
-        "Do not extract final measurements. Include process family plus changed "
-        "axes, concrete measured properties, and question-shaped objectives."
+        "Evaluate this compact paper input using the PaperSkim contract.\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
     )
-    return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
+    return _PAPER_SKIM_SYSTEM_PROMPT, user_prompt
 
 
 def build_research_objective_discovery_prompt(

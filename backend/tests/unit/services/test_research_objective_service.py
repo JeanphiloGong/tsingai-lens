@@ -10013,7 +10013,19 @@ def test_research_objective_service_builds_and_persists_objective_records(
     assert extractor.skim_payloads[0]["headings"] == ["Abstract", "References"]
     assert "Additional abstract context" in extractor.skim_payloads[0]["text_preview"]
     assert "Reference text should not" not in extractor.skim_payloads[0]["text_preview"]
-    assert extractor.skim_payloads[0]["table_captions"][0]["table_id"] == "table-1"
+    assert extractor.skim_payloads[0]["profile_hint"] == {
+        "role_hint": "experimental",
+        "source_quality_warnings": [],
+        "role_hint_confidence": 0.9,
+    }
+    assert "collection_id" not in extractor.skim_payloads[0]
+    assert "document_id" not in extractor.skim_payloads[0]
+    assert "document_profile" not in extractor.skim_payloads[0]
+    assert "table_id" not in extractor.skim_payloads[0]["table_captions"][0]
+    assert all(
+        "figure_id" not in item
+        for item in extractor.skim_payloads[0]["figure_captions"]
+    )
     assert extractor.discovery_payloads[0]["paper_skims"][0]["document_id"] == "paper-1"
     discovery_skim = extractor.discovery_payloads[0]["paper_skims"][0]
     assert set(discovery_skim) == {

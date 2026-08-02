@@ -237,12 +237,36 @@ textarea {
   gap: 0;
 }
 
+.brand-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
 .brand-title {
   color: var(--text-primary);
   font-size: 16px;
   font-weight: 700;
   line-height: 24px;
   letter-spacing: 0;
+}
+
+.brand-version {
+  display: inline-flex;
+  min-width: 48px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
 }
 
 .brand-sub {

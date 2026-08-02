@@ -10015,6 +10015,18 @@ def test_research_objective_service_builds_and_persists_objective_records(
     assert "Reference text should not" not in extractor.skim_payloads[0]["text_preview"]
     assert extractor.skim_payloads[0]["table_captions"][0]["table_id"] == "table-1"
     assert extractor.discovery_payloads[0]["paper_skims"][0]["document_id"] == "paper-1"
+    discovery_skim = extractor.discovery_payloads[0]["paper_skims"][0]
+    assert set(discovery_skim) == {
+        "document_id",
+        "doc_role",
+        "candidate_materials",
+        "candidate_processes",
+        "changed_variables",
+        "candidate_properties",
+        "possible_objectives",
+    }
+    assert "text_preview" not in discovery_skim
+    assert "document_profile" not in discovery_skim
     assert any(
         "Research objective paper skim document started" in record.message
         and "document_position=1" in record.message

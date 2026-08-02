@@ -59,7 +59,7 @@ function taskPayload(status: BuildTask['status'], progressPercent: number): Buil
 		status,
 		current_stage:
 			status === 'queued'
-				? 'files_registered'
+				? 'queued'
 				: status === 'completed'
 					? 'artifacts_ready'
 					: 'paper_facts_started',

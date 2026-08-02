@@ -1925,7 +1925,6 @@ const translations: Record<Language, Translations> = {
 			stageUnknown: 'Unknown',
 			stage: {
 				queued: 'Queued',
-				files_registered: 'Files Registered',
 				source_artifacts_started: 'Source Artifacts Started',
 				source_artifacts_completed: 'Source Artifacts Completed',
 				document_profiles_started: 'Document Profiles Started',
@@ -4152,7 +4151,6 @@ const translations: Record<Language, Translations> = {
 			stageUnknown: '未知',
 			stage: {
 				queued: '排队中',
-				files_registered: '文件已登记',
 				source_artifacts_started: '源产物生成中',
 				source_artifacts_completed: '源产物已完成',
 				document_profiles_started: '文档画像生成中',

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from infra.source.config.pipeline_mode import IndexingMethod
 from infra.source.config.source_runtime_config import (
@@ -20,23 +20,19 @@ from application.core.semantic_build.document_profile_service import (
 from application.core.semantic_build.research_objective_service import (
     ResearchObjectiveService,
 )
-from application.pipeline.collection_build.context import CollectionBuildContext
+from application.pipeline.collection_build.config import CollectionBuildPipelineConfig
+from application.pipeline.collection_build.context import (
+    CollectionBuildContext,
+    SourceArtifactBuilder,
+)
 from application.pipeline.collection_build.definitions import (
     ARTIFACT_REGISTRY,
     DOCUMENT_PROFILES,
-    FILES_REGISTERED,
     FINALIZE,
     OBJECTIVE_CANDIDATES,
     SOURCE_ARTIFACTS,
 )
-from application.pipeline.collection_build.nodes import (
-    artifact_registry,
-    document_profiles,
-    files_registered,
-    finalize,
-    objective_candidates,
-    source_artifacts,
-)
+from application.pipeline.collection_build import nodes
 from application.pipeline.collection_build.runner import CollectionBuildPipelineRunner
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
@@ -79,7 +75,7 @@ class CollectionBuildPipelineService:
         self.document_profile_service = document_profile_service
         self.research_objective_service = research_objective_service
 
-    def _resolve_build_source_artifacts(self):
+    def _resolve_build_source_artifacts(self) -> SourceArtifactBuilder:
         global build_source_artifacts
         if build_source_artifacts is None:
             from infra.source.runtime.build_source_artifacts import (
@@ -87,25 +83,33 @@ class CollectionBuildPipelineService:
             )
 
             build_source_artifacts = resolved_build_source_artifacts
-        return build_source_artifacts
+        return cast(SourceArtifactBuilder, build_source_artifacts)
 
-    def _build_collection_config(
+    def _build_pipeline_config(
         self,
         collection_id: str,
-    ) -> tuple[SourceRuntimeConfig, Path]:
+        *,
+        method: IndexingMethod | str = IndexingMethod.Standard,
+        verbose: bool = False,
+        source_additional_context: dict[str, Any] | None = None,
+    ) -> CollectionBuildPipelineConfig:
         paths = self.collection_service.get_paths(collection_id)
-        config = SourceRuntimeConfig(
-            root_dir=str(paths.collection_dir),
-            input=InputConfig(
-                storage=InputStorageConfig(base_dir=str(paths.input_dir)),
-                file_type="document",
-                encoding="utf-8",
-                file_pattern=r".*\.(txt|pdf)$",
+        return CollectionBuildPipelineConfig(
+            source=SourceRuntimeConfig(
+                root_dir=str(paths.collection_dir),
+                input=InputConfig(
+                    storage=InputStorageConfig(base_dir=str(paths.input_dir)),
+                    file_type="document",
+                    encoding="utf-8",
+                    file_pattern=r".*\.(txt|pdf)$",
+                ),
+                output=StorageConfig(base_dir=str(paths.output_dir)),
+                cache=CacheConfig(base_dir="../cache"),
             ),
-            output=StorageConfig(base_dir=str(paths.output_dir)),
-            cache=CacheConfig(base_dir="../cache"),
+            method=method or IndexingMethod.Standard,
+            verbose=verbose,
+            source_additional_context=source_additional_context,
         )
-        return config, paths.output_dir
 
     def run_task_blocking(
         self,
@@ -138,7 +142,13 @@ class CollectionBuildPipelineService:
     ) -> dict:
         request_token = bind_request_id(request_id) if request_id else None
         try:
-            config, output_dir = self._build_collection_config(collection_id)
+            config = self._build_pipeline_config(
+                collection_id,
+                method=method,
+                verbose=verbose,
+                source_additional_context=additional_context,
+            )
+            output_dir = Path(config.source.output.base_dir)
             self.collection_service.update_collection(collection_id, status="running")
             task = self.task_service.get_task(task_id)
             build = self.task_service.repository.read_build(task_id)
@@ -155,22 +165,15 @@ class CollectionBuildPipelineService:
                 collection_service=self.collection_service,
                 artifact_registry_service=self.artifact_registry_service,
                 source_artifact_repository=self.source_artifact_repository,
-                config=config,
-                output_dir=output_dir,
-                method=method or IndexingMethod.Standard,
-                verbose=verbose,
-                additional_context=additional_context,
-                services={
-                    "build_source_artifacts": self._resolve_build_source_artifacts(),
-                    "document_profile_service": self.document_profile_service,
-                    "research_objective_service": self.research_objective_service,
-                    "objective_progress_callback": self._build_objective_progress_callback(
-                        task_id,
-                        collection_id,
-                    ),
-                },
+                document_profile_service=self.document_profile_service,
+                research_objective_service=self.research_objective_service,
+                build_source_artifacts=self._resolve_build_source_artifacts(),
+                objective_progress_callback=self._build_objective_progress_callback(
+                    task_id,
+                    collection_id,
+                ),
             )
-            result = await self._build_runner().run(context)
+            result = await self._build_runner().run(context, config)
             final_status = self._resolve_final_status(context, result)
             artifacts = context.state.get("artifacts")
             output_path = (
@@ -235,12 +238,11 @@ class CollectionBuildPipelineService:
     def _build_runner(self) -> CollectionBuildPipelineRunner:
         return CollectionBuildPipelineRunner(
             {
-                FILES_REGISTERED: files_registered.run,
-                SOURCE_ARTIFACTS: source_artifacts.run,
-                ARTIFACT_REGISTRY: artifact_registry.run,
-                DOCUMENT_PROFILES: document_profiles.run,
-                OBJECTIVE_CANDIDATES: objective_candidates.run,
-                FINALIZE: finalize.run,
+                SOURCE_ARTIFACTS: nodes.build_source_artifacts,
+                ARTIFACT_REGISTRY: nodes.register_artifacts,
+                DOCUMENT_PROFILES: nodes.build_document_profiles,
+                OBJECTIVE_CANDIDATES: nodes.build_objective_candidates,
+                FINALIZE: nodes.finalize,
             }
         )
 
@@ -250,8 +252,6 @@ class CollectionBuildPipelineService:
         if context.state.get("final_status"):
             return str(context.state["final_status"])
         node_states = result.get("pipeline_nodes", {})
-        if node_states.get(FILES_REGISTERED, {}).get("status") != "succeeded":
-            return "failed"
         if node_states.get(SOURCE_ARTIFACTS, {}).get("status") != "succeeded":
             return "failed"
         if result.get("errors"):

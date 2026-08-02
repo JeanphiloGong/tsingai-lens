@@ -6,8 +6,9 @@ from types import SimpleNamespace
 
 import pandas as pd
 
+from application.pipeline.collection_build.config import CollectionBuildPipelineConfig
 from application.pipeline.collection_build.context import CollectionBuildContext
-from application.pipeline.collection_build.nodes import source_artifacts
+from application.pipeline.collection_build import nodes
 from application.pipeline.collection_build.definitions import (
     COLLECTION_BUILD_NODE_DEFINITIONS,
     CollectionBuildNodeDefinition,
@@ -16,6 +17,7 @@ from application.pipeline.collection_build.definitions import (
     OBJECTIVE_CANDIDATES,
 )
 from application.pipeline.collection_build.runner import CollectionBuildPipelineRunner
+from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 
 
@@ -38,6 +40,9 @@ class MemoryTaskService:
 
 
 def build_context(task_service: MemoryTaskService) -> CollectionBuildContext:
+    async def build_source_artifacts(**kwargs):  # noqa: ANN003, ARG001
+        return []
+
     return CollectionBuildContext(
         task_id="task_1",
         build_id="build_1",
@@ -46,6 +51,16 @@ def build_context(task_service: MemoryTaskService) -> CollectionBuildContext:
         collection_service=SimpleNamespace(),
         artifact_registry_service=SimpleNamespace(),
         source_artifact_repository=SimpleNamespace(),
+        document_profile_service=SimpleNamespace(),
+        research_objective_service=SimpleNamespace(),
+        build_source_artifacts=build_source_artifacts,
+    )
+
+
+def build_config() -> CollectionBuildPipelineConfig:
+    return CollectionBuildPipelineConfig(
+        source=SourceRuntimeConfig(),
+        method="standard",
     )
 
 
@@ -64,11 +79,13 @@ def test_collection_build_pipeline_runner_runs_ready_nodes_in_definition_order()
         ),
     )
 
-    async def first(context):  # noqa: ANN001
+    async def first(context, config):  # noqa: ANN001
+        assert config.method == "standard"
         calls.append("first")
         context.state["first_seen"] = True
 
-    def second(context):  # noqa: ANN001
+    def second(context, config):  # noqa: ANN001
+        assert config.method == "standard"
         assert context.state["first_seen"] is True
         calls.append("second")
 
@@ -76,7 +93,7 @@ def test_collection_build_pipeline_runner_runs_ready_nodes_in_definition_order()
         CollectionBuildPipelineRunner(
             {"first": first, "second": second},
             definitions=definitions,
-        ).run(build_context(task_service))
+        ).run(build_context(task_service), build_config())
     )
 
     assert calls == ["first", "second"]
@@ -159,6 +176,7 @@ def test_source_node_persists_figure_metadata_and_references_before_activation()
         collection_id="col-1",
         task_service=SimpleNamespace(),
         collection_service=SimpleNamespace(
+            list_files=lambda collection_id: [{"collection_id": collection_id}],
             write_figure_asset=lambda *args: (
                 f"col-1/objects/source/build-1/figures/{digest}.png"
             )
@@ -168,16 +186,19 @@ def test_source_node_persists_figure_metadata_and_references_before_activation()
             replace_collection_artifacts=replace_artifacts,
             replace_collection_references=replace_references,
         ),
-        services={"build_source_artifacts": build_source_artifacts},
+        document_profile_service=SimpleNamespace(),
+        research_objective_service=SimpleNamespace(),
+        build_source_artifacts=build_source_artifacts,
     )
 
-    result = asyncio.run(source_artifacts.run(context))
+    result = asyncio.run(nodes.build_source_artifacts(context, build_config()))
 
     assert [call[0] for call in calls] == ["artifacts", "references"]
     assert calls[0][3].figures[0].image_path.endswith(f"{digest}.png")
     assert calls[0][3].figures[0].image_size_bytes == len(content)
     assert len(calls[1][3].entries) == 1
     assert len(calls[1][3].mentions) == 1
+    assert context.state["file_count"] == 1
     assert result["figure_count"] == 1
 
 
@@ -210,13 +231,13 @@ def test_collection_build_pipeline_runner_skips_downstream_nodes_after_failure()
         ),
     )
 
-    def source_artifacts(context):  # noqa: ANN001
+    def source_artifacts(context, config):  # noqa: ANN001
         return {"warnings": ["source warning"]}
 
-    def document_profiles(context):  # noqa: ANN001, ARG001
+    def document_profiles(context, config):  # noqa: ANN001, ARG001
         raise RuntimeError("Error code: 502")
 
-    def paper_facts(context):  # noqa: ANN001, ARG001
+    def paper_facts(context, config):  # noqa: ANN001, ARG001
         raise AssertionError("paper_facts should be skipped")
 
     result = asyncio.run(
@@ -227,7 +248,7 @@ def test_collection_build_pipeline_runner_skips_downstream_nodes_after_failure()
                 "paper_facts": paper_facts,
             },
             definitions=definitions,
-        ).run(build_context(task_service))
+        ).run(build_context(task_service), build_config())
     )
 
     assert result["pipeline_nodes"]["source_artifacts"]["status"] == "succeeded"
@@ -288,20 +309,20 @@ def test_collection_build_pipeline_runner_waits_for_terminal_nodes_without_depen
         ),
     )
 
-    def source_artifacts(context):  # noqa: ANN001, ARG001
+    def source_artifacts(context, config):  # noqa: ANN001, ARG001
         calls.append("source_artifacts")
 
-    def document_profiles(context):  # noqa: ANN001, ARG001
+    def document_profiles(context, config):  # noqa: ANN001, ARG001
         calls.append("document_profiles")
         raise RuntimeError("profile failed")
 
-    def paper_facts(context):  # noqa: ANN001, ARG001
+    def paper_facts(context, config):  # noqa: ANN001, ARG001
         raise AssertionError("paper_facts should be skipped")
 
-    def artifact_registry(context):  # noqa: ANN001, ARG001
+    def artifact_registry(context, config):  # noqa: ANN001, ARG001
         calls.append("artifact_registry")
 
-    def finalize(context):  # noqa: ANN001, ARG001
+    def finalize(context, config):  # noqa: ANN001, ARG001
         calls.append("finalize")
 
     result = asyncio.run(
@@ -314,7 +335,7 @@ def test_collection_build_pipeline_runner_waits_for_terminal_nodes_without_depen
                 "finalize": finalize,
             },
             definitions=definitions,
-        ).run(build_context(task_service))
+        ).run(build_context(task_service), build_config())
     )
 
     assert calls == [
@@ -354,11 +375,11 @@ def test_collection_build_pipeline_runner_rejects_wait_for_before_terminal():
         asyncio.run(
             CollectionBuildPipelineRunner(
                 {
-                    "finalize": lambda context: None,  # noqa: ARG005
-                    "document_profiles": lambda context: None,  # noqa: ARG005
+                    "finalize": lambda context, config: None,  # noqa: ARG005
+                    "document_profiles": lambda context, config: None,  # noqa: ARG005
                 },
                 definitions=definitions,
-            ).run(build_context(task_service))
+            ).run(build_context(task_service), build_config())
         )
     except RuntimeError as exc:
         assert str(exc) == "node finalize wait_for is not terminal: document_profiles"
@@ -377,6 +398,7 @@ def test_default_collection_build_pipeline_stops_after_objective_candidates():
     )
 
     assert OBJECTIVE_CANDIDATES in node_ids
+    assert "files_registered" not in node_ids
     assert "research_objectives" not in node_ids
     assert "paper_facts" not in node_ids
     assert "comparison_rows" not in node_ids

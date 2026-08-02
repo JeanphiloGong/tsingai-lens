@@ -5,6 +5,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
+from application.pipeline.collection_build.config import CollectionBuildPipelineConfig
 from application.pipeline.collection_build.context import CollectionBuildContext
 from application.pipeline.collection_build.definitions import (
     COLLECTION_BUILD_NODE_DEFINITIONS,
@@ -32,7 +33,11 @@ class CollectionBuildPipelineRunner:
         self.definitions = definitions
         self.node_functions = dict(node_functions)
 
-    async def run(self, context: CollectionBuildContext) -> dict[str, Any]:
+    async def run(
+        self,
+        context: CollectionBuildContext,
+        config: CollectionBuildPipelineConfig,
+    ) -> dict[str, Any]:
         node_states = build_initial_node_states(
             tuple(definition.node_id for definition in self.definitions)
         )
@@ -45,7 +50,7 @@ class CollectionBuildPipelineRunner:
                 continue
             self._mark_running(context, definition, node_states)
             try:
-                result = self.node_functions[definition.node_id](context)
+                result = self.node_functions[definition.node_id](context, config)
                 if inspect.isawaitable(result):
                     result = await result
             except Exception as exc:  # noqa: BLE001

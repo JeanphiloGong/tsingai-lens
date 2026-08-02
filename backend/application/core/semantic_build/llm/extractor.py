@@ -48,6 +48,8 @@ _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
 _TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 4096
 _DOCUMENT_PROFILE_MAX_COMPLETION_TOKENS = 1024
+_PAPER_SKIM_MAX_COMPLETION_TOKENS = 256
+_RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS = 1400
 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS = 512
 _OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS = 1024
 _FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS = 2048
@@ -397,6 +399,12 @@ class CoreLLMStructuredExtractor:
             request_kwargs["max_completion_tokens"] = (
                 _DOCUMENT_PROFILE_MAX_COMPLETION_TOKENS
             )
+        elif response_model is StructuredPaperSkim:
+            request_kwargs["max_completion_tokens"] = _PAPER_SKIM_MAX_COMPLETION_TOKENS
+        elif response_model is StructuredResearchObjectives:
+            request_kwargs["max_completion_tokens"] = (
+                _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS
+            )
         elif response_model is StructuredEvidenceSelections:
             request_kwargs["max_completion_tokens"] = (
                 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS
@@ -409,30 +417,60 @@ class CoreLLMStructuredExtractor:
             request_kwargs["max_completion_tokens"] = (
                 _FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS
             )
-        completion = self.client.chat.completions.create(
-            **request_kwargs,
-        )
-        raw_content = self._coerce_message_content(
-            completion.choices[0].message.content if completion.choices else None
-        )
-        if not raw_content:
-            raise RuntimeError("structured extraction returned empty response content")
-        payload = self._load_json_payload(self._extract_json_object(raw_content))
-        try:
-            return response_model.model_validate(payload), raw_content
-        except ValidationError:
-            if isinstance(payload, dict):
-                extra_keys = set(payload) - set(response_model.model_fields)
-                if extra_keys - {"confidence"}:
+        last_error: Exception | None = None
+        for attempt in range(2):
+            attempt_kwargs = dict(request_kwargs)
+            attempt_messages = messages
+            if attempt:
+                attempt_messages = [
+                    *messages,
+                    {
+                        "role": "user",
+                        "content": (
+                            "Previous output was invalid. Return only the smallest valid "
+                            "JSON object matching the schema. Do not explain, repeat the "
+                            "prompt, or include markdown. For finding synthesis, return "
+                            "at most one finding."
+                        ),
+                    },
+                ]
+                attempt_kwargs["messages"] = attempt_messages
+                logger.warning(
+                    "Retrying structured JSON response model=%s response_model=%s",
+                    self.model,
+                    response_model.__name__,
+                )
+            try:
+                completion = self.client.chat.completions.create(**attempt_kwargs)
+                raw_content = self._coerce_message_content(
+                    completion.choices[0].message.content if completion.choices else None
+                )
+                if not raw_content:
+                    raise RuntimeError(
+                        "structured extraction returned empty response content"
+                    )
+                payload = self._load_json_payload(self._extract_json_object(raw_content))
+                try:
+                    return response_model.model_validate(payload), raw_content
+                except ValidationError:
+                    if isinstance(payload, dict):
+                        extra_keys = set(payload) - set(response_model.model_fields)
+                        if extra_keys - {"confidence"}:
+                            raise
+                        filtered_payload = {
+                            key: value
+                            for key, value in payload.items()
+                            if key in response_model.model_fields
+                        }
+                        if filtered_payload != payload:
+                            return response_model.model_validate(filtered_payload), raw_content
                     raise
-                filtered_payload = {
-                    key: value
-                    for key, value in payload.items()
-                    if key in response_model.model_fields
-                }
-                if filtered_payload != payload:
-                    return response_model.model_validate(filtered_payload), raw_content
-            raise
+            except (RuntimeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
+                last_error = exc
+                if attempt == 0:
+                    continue
+                raise
+        raise RuntimeError("structured extraction failed after retry") from last_error
 
     def _parse_provider_structured_response(
         self,
@@ -454,6 +492,12 @@ class CoreLLMStructuredExtractor:
         elif response_model is StructuredDocumentProfile:
             request_kwargs["max_completion_tokens"] = (
                 _DOCUMENT_PROFILE_MAX_COMPLETION_TOKENS
+            )
+        elif response_model is StructuredPaperSkim:
+            request_kwargs["max_completion_tokens"] = _PAPER_SKIM_MAX_COMPLETION_TOKENS
+        elif response_model is StructuredResearchObjectives:
+            request_kwargs["max_completion_tokens"] = (
+                _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS
             )
         elif response_model is StructuredEvidenceSelections:
             request_kwargs["max_completion_tokens"] = (
@@ -577,11 +621,38 @@ class CoreLLMStructuredExtractor:
         if fenced_match is not None:
             return fenced_match.group(1).strip()
 
-        start = text.find("{")
-        end = text.rfind("}")
-        if start < 0 or end < start:
+        candidates: list[str] = []
+        start: int | None = None
+        depth = 0
+        in_string = False
+        escape = False
+        for index, char in enumerate(text):
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+                continue
+            if char == "{" and depth == 0:
+                start = index
+            if char == "{":
+                depth += 1
+            elif char == "}" and depth:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    candidates.append(text[start : index + 1])
+                    start = None
+
+        if not candidates:
             raise RuntimeError("structured extraction returned no JSON object")
-        return text[start : end + 1]
+        # Reasoning models may include malformed JSON-like examples before the
+        # final answer. The last complete object is the model's answer.
+        return candidates[-1].strip()
 
     def _load_json_payload(self, response_text: str) -> Any:
         try:

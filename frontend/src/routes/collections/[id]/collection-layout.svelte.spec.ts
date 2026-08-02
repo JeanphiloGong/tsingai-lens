@@ -227,7 +227,7 @@ describe('collections/[id]/+layout.svelte', () => {
 			.toHaveAttribute('aria-disabled', 'true');
 	});
 
-	it('shows a completed build while the loaded overview workspace is still stale', async () => {
+	it('uses the loaded workspace instead of a stale collection status', async () => {
 		setCollectionStatus('ready');
 		fetchWorkspaceMock.mockResolvedValue({
 			collection: { collection_id: 'col_123', name: 'Battery papers', status: 'uploaded' },
@@ -249,7 +249,7 @@ describe('collections/[id]/+layout.svelte', () => {
 		render(Layout);
 
 		await vi.waitFor(() => {
-			expect(document.querySelector('.collection-meta-row')?.textContent).toContain('Complete');
+			expect(document.querySelector('.collection-meta-row')?.textContent).toContain('Ready to process');
 		});
 	});
 

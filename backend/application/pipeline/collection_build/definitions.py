@@ -3,10 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Final
 
+from application.pipeline.collection_build.config import CollectionBuildPipelineConfig
 from application.pipeline.collection_build.context import CollectionBuildContext
 
 
-NodeFunction = Callable[[CollectionBuildContext], object]
+NodeFunction = Callable[
+    [CollectionBuildContext, CollectionBuildPipelineConfig],
+    object,
+]
 
 
 @dataclass(frozen=True)
@@ -21,7 +25,6 @@ class CollectionBuildNodeDefinition:
     wait_for: tuple[str, ...] = ()
 
 
-FILES_REGISTERED: Final = "files_registered"
 SOURCE_ARTIFACTS: Final = "source_artifacts"
 ARTIFACT_REGISTRY: Final = "artifact_registry"
 DOCUMENT_PROFILES: Final = "document_profiles"
@@ -31,16 +34,8 @@ FINALIZE: Final = "finalize"
 
 COLLECTION_BUILD_NODE_DEFINITIONS: Final[tuple[CollectionBuildNodeDefinition, ...]] = (
     CollectionBuildNodeDefinition(
-        node_id=FILES_REGISTERED,
-        depends_on=(),
-        progress_percent=5,
-        message="Registered collection files for processing.",
-        running_stage="files_registered",
-        completed_stage="files_registered",
-    ),
-    CollectionBuildNodeDefinition(
         node_id=SOURCE_ARTIFACTS,
-        depends_on=(FILES_REGISTERED,),
+        depends_on=(),
         progress_percent=60,
         message="Source artifacts were generated.",
         running_stage="source_artifacts_started",

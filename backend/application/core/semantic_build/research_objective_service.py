@@ -328,8 +328,12 @@ def _transient_mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
     return tuple(dict(item) for item in value if isinstance(item, Mapping))
 
 _SKIM_TEXT_PREVIEW_CHARS = 4000
+_SKIM_MODEL_TEXT_PREVIEW_CHARS = 400
 _SKIM_HEADING_LIMIT = 16
 _SKIM_CAPTION_LIMIT = 12
+_DISCOVERY_AXIS_VALUE_LIMIT = 2
+_DISCOVERY_OBJECTIVE_LIMIT = 1
+_DISCOVERY_TEXT_VALUE_CHARS = 80
 _FRAME_SECTION_SNIPPET_LIMIT = 12
 _FRAME_SECTION_TEXT_CHARS = 420
 _FRAME_SECTION_OVERVIEW_LIMIT = 4
@@ -1102,7 +1106,10 @@ class ResearchObjectiveService:
 
         objective_payload = {
             "collection_id": collection_id,
-            "paper_skims": [skim.to_record() for skim in paper_skims],
+            "paper_skims": [
+                self._build_objective_discovery_skim(skim)
+                for skim in paper_skims
+            ],
         }
         self._notify_progress(
             progress_callback,
@@ -1183,6 +1190,42 @@ class ResearchObjectiveService:
             "paper_skims": tuple(paper_skims),
             "research_objectives": research_objectives,
             "objective_contexts": objective_contexts,
+        }
+
+    @staticmethod
+    def _build_objective_discovery_skim(skim: PaperSkim) -> dict[str, Any]:
+        """Keep collection-level discovery input within the model context budget."""
+
+        def values(items: tuple[str, ...], limit: int) -> list[str]:
+            return [
+                str(item).strip()[:_DISCOVERY_TEXT_VALUE_CHARS]
+                for item in items[:limit]
+                if str(item).strip()
+            ]
+
+        return {
+            "document_id": skim.document_id,
+            "doc_role": skim.doc_role,
+            "candidate_materials": values(
+                skim.candidate_materials,
+                _DISCOVERY_AXIS_VALUE_LIMIT,
+            ),
+            "candidate_processes": values(
+                skim.candidate_processes,
+                _DISCOVERY_AXIS_VALUE_LIMIT,
+            ),
+            "changed_variables": values(
+                skim.changed_variables,
+                _DISCOVERY_AXIS_VALUE_LIMIT,
+            ),
+            "candidate_properties": values(
+                skim.candidate_properties,
+                _DISCOVERY_AXIS_VALUE_LIMIT,
+            ),
+            "possible_objectives": values(
+                skim.possible_objectives,
+                _DISCOVERY_OBJECTIVE_LIMIT,
+            ),
         }
 
     def _canonicalize_objective_document_ids(
@@ -9535,30 +9578,39 @@ class ResearchObjectiveService:
         return {
             "collection_id": collection_id,
             "document_id": document.document_id,
-            "title": document.title,
-            "source_filename": self._resolve_source_filename(document),
-            "document_profile": profile.to_record() if profile else {},
-            "text_preview": text_preview,
-            "headings": headings,
+            "title": str(document.title or "")[:160],
+            "document_profile": (
+                {
+                    "doc_type": profile.doc_type,
+                    "parsing_warnings": list(profile.parsing_warnings)[:2],
+                    "confidence": profile.confidence,
+                }
+                if profile
+                else {}
+            ),
+            "text_preview": text_preview[:_SKIM_MODEL_TEXT_PREVIEW_CHARS],
+            "headings": headings[:4],
             "table_captions": [
                 {
                     "table_id": table.table_id,
-                    "caption_text": table.caption_text,
-                    "heading_path": table.heading_path,
-                    "column_headers": list(table.column_headers),
+                    "caption_text": str(table.caption_text or "")[:160],
+                    "heading_path": str(table.heading_path or "")[:120],
+                    "column_headers": [
+                        str(value)[:80] for value in table.column_headers[:4]
+                    ],
                 }
                 for table in sorted(tables, key=lambda item: item.table_order)[
-                    :_SKIM_CAPTION_LIMIT
+                    :2
                 ]
             ],
             "figure_captions": [
                 {
                     "figure_id": figure.figure_id,
-                    "caption_text": figure.caption_text,
-                    "heading_path": figure.heading_path,
+                    "caption_text": str(figure.caption_text or "")[:160],
+                    "heading_path": str(figure.heading_path or "")[:120],
                 }
                 for figure in sorted(figures, key=lambda item: item.figure_order)[
-                    :_SKIM_CAPTION_LIMIT
+                    :2
                 ]
             ],
         }

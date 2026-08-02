@@ -219,7 +219,7 @@
 					<span>{active.progress_message || active.error_message || active.phase}</span>
 				</div>
 				{#if active.total_document_count > 0}
-					<span>{active.processed_document_count}/{active.total_document_count} 篇</span>
+					<span>{active.processed_document_count}/{active.total_document_count} 篇文献</span>
 				{/if}
 			</section>
 		{/if}

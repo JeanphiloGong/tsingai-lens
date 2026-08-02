@@ -493,6 +493,30 @@ def test_synthesis_returns_empty_without_direct_result() -> None:
     assert extractor.payloads == []
 
 
+def test_synthesis_keeps_source_backed_finding_when_provider_format_fails() -> None:
+    class _FailingExtractor:
+        def synthesize_findings(self, payload: dict) -> SimpleNamespace:
+            raise ValueError("invalid JSON")
+
+    service = FindingSynthesisService(structured_extractor=_FailingExtractor())
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(_evidence("ev-1", "paper-1"),),
+    )
+
+    assert len(findings) == 1
+    assert findings[0].direction == "changes"
+    assert findings[0].finding_level == "paper"
+    assert findings[0].derivation.supporting_evidence_ids == ("ev-1",)
+    assert any(
+        "Provider synthesis failed" in item
+        for item in findings[0].context.limitations
+    )
+
+
 def test_synthesis_rejects_cross_version_children() -> None:
     service = FindingSynthesisService(structured_extractor=_Extractor([]))
 

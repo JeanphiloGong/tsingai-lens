@@ -163,12 +163,8 @@
   }
 
   function handleBackdropKeydown(event: KeyboardEvent) {
+    if (!isCreateOpen) return;
     if (event.key === 'Escape') {
-      closeCreate();
-      return;
-    }
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
       closeCreate();
     }
   }
@@ -376,6 +372,8 @@
     }
   }
 </script>
+
+<svelte:window on:keydown={handleBackdropKeydown} />
 
 <svelte:head>
   <title>{$t('home.title')}</title>
@@ -637,11 +635,8 @@
 {#if isCreateOpen}
   <div
     class="modal-backdrop"
-    role="button"
-    tabindex="0"
-    aria-label={$t('create.cancel')}
+    role="presentation"
     on:click|self={closeCreate}
-    on:keydown={handleBackdropKeydown}
   >
     <div class="modal" role="dialog" aria-modal="true" tabindex="-1">
       <div class="modal-header">

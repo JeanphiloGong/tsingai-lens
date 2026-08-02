@@ -4,7 +4,6 @@ export type TaskStatus = 'queued' | 'running' | 'completed' | 'partial_success' 
 
 export type TaskStage =
   | 'queued'
-  | 'files_registered'
   | 'source_artifacts_started'
   | 'source_artifacts_completed'
   | 'document_profiles_started'

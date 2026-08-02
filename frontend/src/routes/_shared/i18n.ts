@@ -13,7 +13,8 @@ const translations: Record<Language, Translations> = {
 	en: {
 		brand: {
 			title: 'Lens',
-			sub: ''
+			sub: '',
+			version: 'Version'
 		},
 		nav: {
 			home: 'Collections',
@@ -2321,7 +2322,8 @@ const translations: Record<Language, Translations> = {
 	zh: {
 		brand: {
 			title: 'Lens',
-			sub: ''
+			sub: '',
+			version: '版本'
 		},
 		nav: {
 			home: '集合',

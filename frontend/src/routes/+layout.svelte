@@ -1,6 +1,6 @@
 <script lang="ts">
   import './layout.css';
-  import { browser } from '$app/environment';
+  import { browser, version } from '$app/environment';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
@@ -18,6 +18,7 @@
   let themeMenu: HTMLDivElement | null = null;
   let globalSearch = '';
   let authError = '';
+  const appVersion = `v${version}`;
 
   $: isLoginRoute = $page.url.pathname === '/login';
   $: authenticatedUser = $authState.user;
@@ -141,7 +142,14 @@
       <a class="brand" href="/">
         <div class="brand-mark">L</div>
         <div class="brand-text">
-          <div class="brand-title">{$t('brand.title')}</div>
+          <div class="brand-heading">
+            <div class="brand-title">{$t('brand.title')}</div>
+            <span
+              class="brand-version"
+              aria-label={`${$t('brand.version')}: ${appVersion}`}
+              title={`${$t('brand.version')}: ${appVersion}`}
+            >{appVersion}</span>
+          </div>
           {#if $t('brand.sub')}
             <div class="brand-sub">{$t('brand.sub')}</div>
           {/if}

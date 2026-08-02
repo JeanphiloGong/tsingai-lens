@@ -48,7 +48,7 @@ _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
 _TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 4096
 _DOCUMENT_PROFILE_MAX_COMPLETION_TOKENS = 1024
-_PAPER_SKIM_MAX_COMPLETION_TOKENS = 256
+_PAPER_SKIM_MAX_COMPLETION_TOKENS = 1024
 _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS = 1400
 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS = 512
 _OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS = 1024
@@ -440,10 +440,18 @@ class CoreLLMStructuredExtractor:
                     self.model,
                     response_model.__name__,
                 )
+            raw_content = None
+            finish_reason = None
+            usage = None
             try:
                 completion = self.client.chat.completions.create(**attempt_kwargs)
+                choice = completion.choices[0] if completion.choices else None
+                finish_reason = getattr(choice, "finish_reason", None)
+                usage = getattr(completion, "usage", None)
+                if hasattr(usage, "model_dump"):
+                    usage = usage.model_dump()
                 raw_content = self._coerce_message_content(
-                    completion.choices[0].message.content if completion.choices else None
+                    choice.message.content if choice is not None else None
                 )
                 if not raw_content:
                     raise RuntimeError(
@@ -467,6 +475,26 @@ class CoreLLMStructuredExtractor:
                     raise
             except (RuntimeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
                 last_error = exc
+                logger.warning(
+                    "Structured JSON response invalid model=%s response_model=%s "
+                    "attempt=%s finish_reason=%s usage=%s error=%s "
+                    "raw_output_length=%s",
+                    self.model,
+                    response_model.__name__,
+                    attempt + 1,
+                    finish_reason,
+                    usage,
+                    _trace_text(exc, 500),
+                    len(raw_content or ""),
+                )
+                logger.debug(
+                    "Structured JSON invalid raw output model=%s "
+                    "response_model=%s attempt=%s raw_output=%r",
+                    self.model,
+                    response_model.__name__,
+                    attempt + 1,
+                    _trace_text(raw_content, 1000),
+                )
                 if attempt == 0:
                     continue
                 raise

@@ -912,6 +912,65 @@ def test_core_llm_extractor_routes_document_profiles_directly_to_bounded_json_te
     assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
 
 
+def test_core_llm_extractor_uses_provider_parse_with_sufficient_paper_skim_budget(
+    monkeypatch,
+):
+    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
+    client = _FakeOpenAIClient(
+        "unused",
+        parsed=StructuredPaperSkim(
+            doc_role="experimental",
+            candidate_materials=["316L stainless steel"],
+            candidate_processes=["LPBF"],
+            candidate_properties=["density"],
+            changed_variables=["laser energy density"],
+            possible_objectives=[
+                "How does laser energy density affect LPBF 316L density?"
+            ],
+            evidence_density="high",
+            confidence=0.9,
+            warnings=[],
+        ),
+    )
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    skim = extractor.extract_paper_skim(
+        {
+            "document_id": "paper-1",
+            "title": "LPBF 316L density study",
+            "text_preview": "Laser energy density was varied for LPBF 316L.",
+            "table_captions": [],
+        }
+    )
+
+    assert skim.doc_role == "experimental"
+    assert client.chat.completions.calls == []
+    parse_call = client.beta.chat.completions.calls[0]
+    assert parse_call["max_completion_tokens"] == 1024
+    assert parse_call["response_format"] is StructuredPaperSkim
+    assert extractor.consume_last_trace()["extraction_mode"] == "provider_parse"
+
+
+def test_core_llm_extractor_logs_invalid_json_output_diagnostics(caplog):
+    client = _FakeOpenAIClient(
+        "I need to analyze the paper before producing the requested structure."
+    )
+    extractor = _json_text_extractor(client)
+
+    with pytest.raises(RuntimeError, match="no JSON object"):
+        extractor.extract_paper_skim(
+            {
+                "document_id": "paper-1",
+                "title": "LPBF 316L density study",
+                "text_preview": "Laser energy density was varied for LPBF 316L.",
+                "table_captions": [],
+            }
+        )
+
+    assert "response_model=StructuredPaperSkim attempt=2" in caplog.text
+    assert "raw_output_length=69" in caplog.text
+
+
 def test_core_llm_extractor_can_opt_in_to_provider_thinking(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     monkeypatch.setenv("LLM_ENABLE_THINKING", "true")

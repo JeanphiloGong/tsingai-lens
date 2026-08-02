@@ -619,7 +619,9 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     user_prompt = (
         "Extract a compact research map from this one paper.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only the schema object. Use at most a few high-signal values. "
+        "Return only the schema object and start with `{` immediately. "
+        "Return at most 3 materials, 3 processes, 4 properties, 4 changed "
+        "variables, 2 possible objectives, and 2 warnings. "
         "Do not extract final measurements. Include process family plus changed "
         "axes, concrete measured properties, and question-shaped objectives."
     )

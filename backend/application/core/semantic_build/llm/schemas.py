@@ -113,21 +113,15 @@ _OBJECTIVE_EVIDENCE_RESOLUTION_STATUSES = {
     "unknown",
 }
 _FINDING_DIRECTIONS = {
-    "increases",
-    "decreases",
-    "improves",
-    "reduces",
-    "changes",
+    "increase",
+    "decrease",
+    "improve",
+    "worsen",
+    "no_change",
     "mixed",
-    "conditional",
     "unknown",
 }
-_FINDING_SYNTHESIS_STATUSES = {
-    "agreement",
-    "conflict",
-    "condition_dependent",
-    "insufficient_confirmation",
-}
+_FINDING_ASSERTION_STRENGTHS = {"causal", "associative", "descriptive"}
 
 
 def _normalize_literal_choice(value: object, *, allowed: set[str], default: str) -> str:
@@ -1103,20 +1097,66 @@ class StructuredEvidenceExtractions(_StrictModel):
         return _normalize_list_container(value)
 
 
-class StructuredFindingSynthesisOutcome(_StrictModel):
-    concept: str
+class StructuredFindingMechanism(_StrictModel):
+    source_term: str = Field(min_length=1)
+    relation_type: str = Field(min_length=1)
+    target_term: str = Field(min_length=1)
+    direction: str | None = None
+    assertion_strength: Literal["causal", "associative", "descriptive"] = (
+        "descriptive"
+    )
+    supporting_evidence_ids: list[str] = Field(min_length=1, max_length=16)
+
+    @field_validator("source_term", "relation_type", "target_term")
+    @classmethod
+    def _require_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("finding mechanism terms cannot be blank")
+        return text
+
+    @field_validator("supporting_evidence_ids")
+    @classmethod
+    def _require_unique_evidence(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("finding mechanism evidence ids must be unique")
+        return value
+
+    @field_validator("assertion_strength", mode="before")
+    @classmethod
+    def _normalize_assertion_strength(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_FINDING_ASSERTION_STRENGTHS,
+            default="descriptive",
+        )
+
+
+class StructuredFindingSynthesisItem(_StrictModel):
+    result_set_id: str = Field(min_length=1)
+    statement: str = Field(min_length=1)
     direction: Literal[
-        "increases",
-        "decreases",
-        "improves",
-        "reduces",
-        "changes",
+        "increase",
+        "decrease",
+        "improve",
+        "worsen",
+        "no_change",
         "mixed",
-        "conditional",
         "unknown",
     ] = "unknown"
-    statement: str
-    conflicting_evidence_ids: list[str] = Field(default_factory=list, max_length=16)
+    assertion_strength: Literal["causal", "associative", "descriptive"] = (
+        "descriptive"
+    )
+    supporting_evidence_ids: list[str] = Field(min_length=1)
+    contradicting_evidence_ids: list[str] = Field(default_factory=list)
+    condition_boundary_evidence_ids: list[str] = Field(
+        default_factory=list, max_length=24
+    )
+    context_evidence_ids: list[str] = Field(default_factory=list, max_length=24)
+    mechanisms: list[StructuredFindingMechanism] = Field(
+        default_factory=list, max_length=8
+    )
+    limitations: list[str] = Field(default_factory=list, max_length=12)
 
     @field_validator("direction", mode="before")
     @classmethod
@@ -1127,43 +1167,51 @@ class StructuredFindingSynthesisOutcome(_StrictModel):
             default="unknown",
         )
 
-
-class StructuredFindingSynthesisItem(_StrictModel):
-    result_set_id: str = Field(min_length=1)
-    source_concept: str
-    outcomes: list[StructuredFindingSynthesisOutcome] = Field(
-        min_length=1,
-        max_length=8,
-    )
-    mediator_concepts: list[str] = Field(default_factory=list, max_length=5)
-    statement: str
-    synthesis_status: Literal[
-        "agreement",
-        "conflict",
-        "condition_dependent",
-        "insufficient_confirmation",
-    ] = "insufficient_confirmation"
-    context_evidence_ids: list[str] = Field(default_factory=list, max_length=16)
-    mechanism_evidence_ids: list[str] = Field(default_factory=list, max_length=16)
-    common_conditions: list[str] = Field(default_factory=list, max_length=10)
-    incomparable_conditions: list[str] = Field(default_factory=list, max_length=10)
-    confidence: float = 0.0
-    warnings: list[str] = Field(default_factory=list, max_length=8)
-
-    @field_validator("synthesis_status", mode="before")
+    @field_validator("assertion_strength", mode="before")
     @classmethod
-    def _normalize_synthesis_status(cls, value: object) -> str:
+    def _normalize_assertion_strength(cls, value: object) -> str:
         return _normalize_underscored_choice(
             value,
-            allowed=_FINDING_SYNTHESIS_STATUSES,
-            default="insufficient_confirmation",
+            allowed=_FINDING_ASSERTION_STRENGTHS,
+            default="descriptive",
         )
+
+    @field_validator(
+        "supporting_evidence_ids",
+        "contradicting_evidence_ids",
+        "condition_boundary_evidence_ids",
+        "context_evidence_ids",
+    )
+    @classmethod
+    def _require_unique_evidence(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("finding evidence ids must be unique within each role")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_evidence_assignments(self) -> "StructuredFindingSynthesisItem":
+        supporting = set(self.supporting_evidence_ids)
+        contradicting = set(self.contradicting_evidence_ids)
+        context = set(self.context_evidence_ids)
+        if supporting & contradicting:
+            raise ValueError("supporting and contradicting evidence must be disjoint")
+        linked = supporting | contradicting | context
+        if not set(self.condition_boundary_evidence_ids) <= linked:
+            raise ValueError("condition-boundary evidence must already be linked")
+        mechanism_ids = {
+            evidence_id
+            for mechanism in self.mechanisms
+            for evidence_id in mechanism.supporting_evidence_ids
+        }
+        if not mechanism_ids <= context:
+            raise ValueError("mechanism evidence must also be context evidence")
+        return self
 
 
 class StructuredFindingSynthesis(_StrictModel):
     findings: list[StructuredFindingSynthesisItem] = Field(
         default_factory=list,
-        max_length=6,
+        max_length=1,
     )
 
     @field_validator("findings", mode="before")

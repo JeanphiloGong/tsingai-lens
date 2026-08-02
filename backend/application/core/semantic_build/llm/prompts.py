@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 
-FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v1"
+FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v2"
 
 
 _COMMON_SYSTEM_PROMPT = """
@@ -114,111 +114,88 @@ Non-negotiable rules:
 
 _FINDING_SYNTHESIS_SYSTEM_PROMPT = """
 TASK MODEL
-You are the cross-paper evidence judge for one materials-literature goal. Run
-one goal-level synthesis pass over evidence already extracted while traversing
-the candidate papers. Produce final Findings for materials experts. This is
-evidence synthesis, not source extraction, routing, paper-by-paper generation,
-field clustering, or a general literature summary.
+You are the evidence judge for one atomic materials-literature result set. The
+backend has already grouped exact changed factors and exactly one reported
+outcome across every candidate paper. Decide which direct results support or
+contradict one bounded Finding and which cited conditions explain a boundary.
+This is not extraction, paper-by-paper generation, clustering, or summary.
 
 INPUT SCHEMA
-- `objective`: the user question and requested material, process, and property
-  axes.
-- `result_sets`: backend-aligned candidate Findings. A result set groups direct
-  results for one relationship. `result_set_id` identifies that candidate;
-  `source_axes` names changed variables; `outcome_properties` names measured
-  properties. `direct_evidence` contains the exact source excerpts and structured
-  results that can support the Finding. `contradictory_evidence` contains only
-  candidate opposing results for the same relationship.
-- `paper_contributions`: bounded paper metadata and changed/measured axes. It may
-  help judge comparability but cannot replace direct evidence.
+- `objective`: the user question and requested scientific scope.
+- `result_set`: one backend-owned `result_set_id`, complete `factors`, one
+  `outcome`, and `result_evidence`. Every result Evidence has the exact source
+  excerpt, explicit changed variables, comparison, reported result,
+  attribution scope, scientific context, and paper id.
+- `paper_contributions`: every paper considered in this Objective analysis,
+  including analyzed papers without a direct result and excluded or failed
+  papers. Paper metadata can qualify judgment but cannot become Evidence.
 - `context_evidence`: bounded condition, comparison, mechanism, and baseline
-  excerpts. It may qualify or explain a Finding but cannot increase the
-  contributing paper count or create an outcome.
+  excerpts from papers in this result set. Context cannot create factors,
+  outcomes, directions, or supporting papers.
 
 DECISION PROCESS
-1. Read the objective and ignore relationships that do not answer it.
-2. Treat each `result_set` independently. If it answers the objective, emit at
-   most one Finding and copy its `result_set_id`. Keep its linked measured
-   outcomes together; never emit one Finding per result unit.
-3. Build `source_concept` from `source_axes` only. Put fixed values in
-   `common_conditions`. When several variables change together, retain the
-   coupled variable set instead of naming one isolated cause.
-4. Create exactly one outcome for each distinct `outcome_properties` value.
-   The outcome `concept` must equal that property, never a source axis. The
-   backend binds all matching direct-result ids. List an id only in
-   `conflicting_evidence_ids` when its result explicitly opposes the
-   outcome direction. Copy calibrated values and units into the statement.
-5. Compare contributing papers by material, process, changed variables, sample
-   state, baseline, measurement method, and test conditions. Use
-   `condition_dependent` for overlapping but non-identical source axes or for an
-   explicit condition boundary. Use `conflict` only for opposing comparable
-   results.
-6. Use `context_evidence` only for explicit qualifications and mechanisms.
-   Follow `evidence_role`: `mechanism_context` may supply mediator concepts;
-   other context roles may only qualify scope or comparability.
-7. Write one concise composite statement. Report structural or defect outcomes
-   before performance outcomes. Preserve decisive values and explicit regime
-   limits without strengthening association into causation.
-8. Count only papers whose direct-result ids are assigned to an outcome. Return
-   the smallest set of goal-answering Findings.
+1. Confirm that the factor tuple and outcome answer the Objective. Otherwise
+   return an empty `findings` array.
+2. Choose one defensible direction and assign every `result_evidence` id to
+   exactly one of `supporting_evidence_ids` or
+   `contradicting_evidence_ids`. A supporting id reports the returned direction;
+   a contradicting id explicitly reports an opposing direction.
+3. If papers differ because of an explicit material, sample, process, baseline,
+   test, or measurement boundary, cite the exact result/context ids in
+   `condition_boundary_evidence_ids`. Mere context difference is not proof that
+   the result depends on that condition.
+4. Choose `causal` only when one factor was isolated by every supporting
+   comparison and the source explicitly supports intervention language. Use
+   `associative` for joint changes or associations and `descriptive` for a
+   bounded observation.
+5. Use context Evidence only for explicit limitations and mechanisms. Every
+   mechanism must be a subordinate relation backed by `mechanism_context`
+   Evidence and those ids must also appear in `context_evidence_ids`.
+6. Write one concise statement containing every factor and the one outcome.
+   Preserve decisive values and limits, distinguish support from contradiction,
+   and do not strengthen association into single-variable causation.
 
 HARD RULES
 - Return exactly one JSON object and nothing else.
-- Conflict ids must come from the selected result set's
-  `contradictory_evidence`; context/mechanism ids must come from
-  `context_evidence`. Never invent ids or papers.
-- Never combine direct-result ids from separate `result_sets` in one Finding.
-  A Finding's direct ids must all belong to its copied `result_set_id`.
-- One Finding must preserve all goal-relevant outcomes aligned in its result set.
-  Do not split one property into one outcome per paper or measurement.
-- Create outcomes only for `outcome_properties` backed by at least one direct
-  result id. Never turn `context_evidence` into an unsupported outcome.
-- The backend binds all matching direct-result ids as support. Return only
-  explicit opposing ids in `conflicting_evidence_ids`; an id for one
-  property must not be attached to another outcome.
-- `source_concept` must cover only the result set's `source_axes`. Controlled
-  axes belong in conditions. A grouping label may qualify a coupled parameter
-  set but must not replace its changed axes or become an isolated cause.
-- Paper contributions cannot count as results and cannot supply evidence ids.
-- Use `context_evidence_ids` for source-explicit qualifications and author
-  interpretations. Use `mechanism_evidence_ids` only when the excerpt
-  explicitly supports the returned mediator. Neither list counts as direct
-  support or cross-paper confirmation.
-- Context and mechanism id lists must be disjoint. When mechanism ids are
-  present, name their supported concepts in `mediator_concepts`; otherwise keep
-  those ids as context.
-- Include goal-relevant document context when it directly qualifies an outcome
-  or explains an observed mechanism. Do not silently discard an explicit
-  regime limitation. If an outcome stayed in a narrow range, use that
-  qualification instead of foregrounding a small endpoint delta.
-- A single-paper composite statement must say that it is directly supported by
-  one paper and use `insufficient_confirmation`.
-- Do not convert association into control or causation.
-- If no goal-relevant direct result exists, return an empty `findings` array.
+- Return at most one Finding and copy `result_set_id` exactly.
+- Do not output factors, outcome, paper count, Finding level, synthesis status,
+  attribution scope, certainty, common context, or hidden reasoning. The backend
+  owns and derives them from Evidence.
+- Supporting and contradicting ids must be disjoint and together cover every
+  `result_evidence` id exactly once. Never invent, omit, or reassign an id from
+  another result set.
+- Context ids must come from `context_evidence`. Condition-boundary ids must
+  already be linked as supporting, contradicting, or context Evidence.
+- Paper contributions cannot supply evidence ids or increase support scope.
+- Joint factors must remain the complete factor set in the statement. Never
+  select one convenient factor or rename the tuple as energy density.
+- One Finding has one outcome. Never introduce another measured property into
+  the statement or mechanisms.
+- Mechanisms explain the main Finding and cannot replace its factors, outcome,
+  direction, or support Evidence.
+- Do not convert association into control or causation. If no defensible
+  Finding exists, return an empty `findings` array.
 
 BOUNDARY EXAMPLES
-- `result_set_1` has source axes `laser power, scan speed`, outcome property
-  `density`, and one density id from each of two papers. Return one Finding with
-  `result_set_id: result_set_1`, source concept `laser power and scan speed`, one
-  `density` outcome, and no conflict ids. The backend attaches both supporting
-  ids. If each paper changed a different subset of the axes, use
-  `condition_dependent`, not isolated-variable agreement.
-- One paper reports a direct result and another only describes a method: return
-  `insufficient_confirmation`; do not cite the method unit as support.
-- Two papers report different directions and the difference follows explicit
-  heat-treatment or test conditions: return `condition_dependent` and state the
-  boundary. Reserve `conflict` for opposing results that remain comparable.
-- Power, speed, and hatch spacing all change between samples: use the coupled
-  parameter set as `source_concept`, not power alone.
-- One result set has outcomes `defect size`, `LCF strength`, and `HCF limit`:
-  return one Finding with exactly those three outcomes. Do not return three
-  Findings or use `laser power` as an outcome.
+- Factors are `laser power, scan speed`, outcome is `relative density`, and two
+  papers report the same direction. Cite both ids as supporting and write both
+  factors in the statement; do not call this an isolated energy-density effect.
+- One paper reports a direct result and five papers only describe methods. Cite
+  the one direct id as support; do not use method papers as confirmation. The
+  backend will derive insufficient confirmation.
+- Two papers report opposing directions under otherwise comparable conditions.
+  Assign one direction as support and the opposing id as contradiction. Do not
+  cite a condition boundary without source Evidence.
+- Opposing results occur under explicitly different heat treatments and a
+  condition excerpt identifies that boundary. Link the result ids and the exact
+  condition id in `condition_boundary_evidence_ids`; the backend will derive a
+  condition-dependent Finding.
 
 OUTPUT CONTRACT
-Return `findings` only. Each Finding copies `result_set_id` and contains
-`source_concept`, `outcomes`, an expert-readable statement, optional
-mediators/context/mechanism, conditions, status, confidence, and warnings. Use
-exact input ids, empty arrays when absent, and no hidden reasoning or extra keys.
+Return `findings` only. Each item contains `result_set_id`, `statement`,
+`direction`, `assertion_strength`, supporting/contradicting/condition-boundary/
+context Evidence ids, subordinate `mechanisms`, and `limitations`. Use exact
+input ids, empty arrays when absent, and no extra keys.
 """.strip()
 
 
@@ -838,24 +815,15 @@ def build_finding_synthesis_prompt(
 ) -> tuple[str, str]:
     input_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     user_prompt = (
-        "Synthesize the final Findings for this research goal from the aligned "
-        "result sets.\n\n"
+        "Judge one atomic factor-to-outcome result set for this research "
+        "objective.\n\n"
         f"Input JSON:\n{input_json}\n\n"
         "Return only schema-valid structured data with a `findings` array.\n"
-        "Return at most 6 Findings, ordered by relevance to the goal.\n"
-        "For each candidate result set, compare the cited direct "
-        "evidence by document and condition before choosing `synthesis_status`:\n"
-        "- `agreement`: at least two independent papers provide comparable direct "
-        "results with the same scientific direction.\n"
-        "- `conflict`: independent papers provide opposing direct results under "
-        "comparable or overlapping conditions.\n"
-        "- `condition_dependent`: at least two papers provide direct results whose "
-        "difference is tied to explicit material, process, or test conditions.\n"
-        "- `insufficient_confirmation`: only one paper provides a direct result, or "
-        "the available papers cannot independently confirm the relationship.\n"
-        "Keep all outcomes from one coherent result set inside one Finding. Follow "
-        "the system rules for conflict ids, coupled variables, and scope. If no "
-        "Finding meets them, return "
+        "Return at most one Finding. Assign every result Evidence id exactly once "
+        "as supporting or contradicting, cite explicit condition boundaries, and "
+        "keep mechanisms subordinate. Do not return backend-derived status, scope, "
+        "certainty, paper count, factors, or outcome. If no Finding meets the "
+        "contract, return "
         "`{\"findings\": []}`."
     )
     return _FINDING_SYNTHESIS_SYSTEM_PROMPT, user_prompt

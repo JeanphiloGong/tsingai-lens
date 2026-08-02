@@ -107,8 +107,11 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"unresolved finding objective: {objective_id}")
         if (collection_id, objective_id, analysis_version) not in analyses:
             raise ValueError(f"unresolved finding analysis version: {analysis_version}")
-        derivation = finding.get("derivation") or {}
-        supporting_ids = derivation.get("supporting_evidence_ids") or []
+        supporting_ids = [
+            evidence_id
+            for contribution in finding.get("paper_contributions") or []
+            for evidence_id in contribution.get("supporting_evidence_ids") or []
+        ]
         if not supporting_ids:
             raise ValueError(f"finding has no supporting evidence: {finding_id}")
         for evidence_id in supporting_ids:

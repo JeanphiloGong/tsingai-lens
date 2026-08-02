@@ -402,45 +402,33 @@
         "objective_id": "objective_strength",
         "analysis_version": 1,
         "finding_id": "finding_strength",
-        "finding_level": "paper",
         "statement": "Heat-treated Synthetic Alloy A reached 620 MPa yield strength.",
-        "variables": ["heat treatment"],
-        "mediators": [],
-        "outcomes": ["yield strength"],
-        "direction": "reports",
-        "scope_summary": "Synthetic Alloy A under a room-temperature tensile test.",
-        "evidence_strength": "moderate",
-        "generalization_status": "paper_level_only",
-        "paper_count": 1,
-        "confidence": 1.0,
+        "factors": ["heat treatment"],
+        "outcome": "yield strength",
+        "direction": "unknown",
+        "assertion_strength": "descriptive",
+        "attribution_scope": "descriptive_only",
+        "synthesis_status": "insufficient_confirmation",
+        "certainty": 0.5,
         "display_rank": 0,
-        "relations": [
-          {
-            "source_term": "heat treatment",
-            "relation_type": "associated_with",
-            "target_term": "yield strength",
-            "direction": "reports",
-            "assertion_strength": "associative",
-            "supporting_evidence_ids": ["evidence_strength"]
-          }
-        ],
-        "context": {
-          "material_system": {"name": "Synthetic Alloy A"},
-          "process_conditions": [{"heat_treatment_c": 700}],
-          "sample_state": {"state": "heat-treated"},
-          "test_conditions": [{"temperature_c": 25}],
-          "comparison_baseline": {"label": "as-built"},
-          "limitations": ["single paper"],
-          "supporting_evidence_ids": ["evidence_strength"]
+        "mechanisms": [],
+        "scientific_context": {
+          "material": [{"name": "name", "value": "Synthetic Alloy A", "unit": null}],
+          "sample": [{"name": "state", "value": "heat-treated", "unit": null}],
+          "process": [{"name": "heat treatment", "value": 700, "unit": "C"}],
+          "test": [{"name": "temperature", "value": 25, "unit": "C"}]
         },
-        "derivation": {
-          "synthesis_mode": "paper",
-          "comparison_status": "insufficient_confirmation",
-          "contributing_document_ids": ["doc_strength"],
-          "supporting_evidence_ids": ["evidence_strength"],
-          "contradicting_evidence_ids": [],
-          "rationale": "One direct result supports this paper-level Finding."
-        }
+        "limitations": ["single paper"],
+        "paper_contributions": [
+          {
+            "document_id": "doc_strength",
+            "analysis_status": "analyzed",
+            "supporting_evidence_ids": ["evidence_strength"],
+            "contradicting_evidence_ids": [],
+            "context_evidence_ids": [],
+            "condition_boundary_evidence_ids": []
+          }
+        ]
       }
     ],
     "goal_sessions": [

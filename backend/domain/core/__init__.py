@@ -82,14 +82,10 @@ from domain.core.research_objective import (
 )
 from domain.core.finding import (
     FINDING_ASSERTION_STRENGTHS,
-    FINDING_COMPARISON_STATUSES,
-    FINDING_EVIDENCE_STRENGTHS,
-    FINDING_GENERALIZATION_STATUSES,
-    FINDING_LEVELS,
+    FINDING_SYNTHESIS_STATUSES,
     Finding,
-    FindingContext,
-    FindingDerivation,
-    FindingRelation,
+    FindingMechanismRelation,
+    FindingPaperContribution,
 )
 
 __all__ = [
@@ -124,14 +120,10 @@ __all__ = [
     "EvidenceTrace",
     "EvidenceAnchor",
     "FINDING_ASSERTION_STRENGTHS",
-    "FINDING_COMPARISON_STATUSES",
-    "FINDING_EVIDENCE_STRENGTHS",
-    "FINDING_GENERALIZATION_STATUSES",
-    "FINDING_LEVELS",
+    "FINDING_SYNTHESIS_STATUSES",
     "Finding",
-    "FindingContext",
-    "FindingDerivation",
-    "FindingRelation",
+    "FindingMechanismRelation",
+    "FindingPaperContribution",
     "OBJECTIVE_ANALYSIS_STATUSES",
     "OBJECTIVE_ANALYSIS_STATUS_TRANSITIONS",
     "OBJECTIVE_CONFIRMATION_STATUSES",

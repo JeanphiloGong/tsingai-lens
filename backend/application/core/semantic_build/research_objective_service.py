@@ -19,9 +19,6 @@ from application.core.finding_synthesis_service import FindingSynthesisService
 from application.source.collection_service import CollectionService
 from domain.core import (
     Finding,
-    FindingContext,
-    FindingDerivation,
-    FindingRelation,
     ObjectiveAnalysis,
     ObjectiveEvidence,
     ObjectiveEvidenceComparison,

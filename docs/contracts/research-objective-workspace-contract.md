@@ -10,8 +10,9 @@ parallel Objective result and intermediate traversal contracts.
 
 A user creates or confirms one research Objective. Lens analyzes selected
 collection papers and publishes evidence-calibrated Findings. The Objective
-page presents a Finding list; selecting a Finding reveals its relation,
-applicability conditions, derivation, exact source Evidence, and review action.
+page presents a Finding list; selecting a Finding reveals its atomic result,
+mechanism explanation, scientific context, paper contributions, exact source
+Evidence, and review action.
 
 The Objective is a user-visible research identity. Analysis versions are
 runtime lineage, not a second user concept.
@@ -24,9 +25,9 @@ ResearchObjective
      -> PaperContribution
      -> ObjectiveEvidence
      -> Finding
-        -> FindingRelation
-        -> FindingContext
-        -> FindingDerivation
+        -> FindingMechanismRelation
+        -> ObjectiveEvidenceContext
+        -> FindingPaperContribution
 ```
 
 ### ResearchObjective
@@ -121,39 +122,54 @@ Identity: analysis identity plus `finding_id`.
 
 Finding is the only conclusion identity. It owns:
 
-- paper or cross-paper level;
-- statement, variables, mediators, outcomes, and direction;
-- scope summary, evidence strength, generalization status, paper count,
-  confidence, and display rank;
-- ordered Relations, one Context, and one Derivation.
+- one complete changed-factor tuple and exactly one outcome;
+- statement, direction, assertion strength, and attribution scope;
+- evidence-derived synthesis status and certainty;
+- display rank, subordinate mechanisms, common scientific context, and
+  explicit limitations;
+- one FindingPaperContribution binding for every PaperContribution in the
+  Objective analysis.
 
-A paper Finding has direct-result support from exactly one paper and remains
-`paper_level_only`. A cross-paper Finding requires comparable direct-result
-Evidence from at least two distinct papers. `paper_count` equals the distinct
-direct-result papers in Derivation.
+Result sets use exact normalized `(factor tuple, outcome)` identity. Jointly
+changed factors remain one tuple. A causal statement requires exactly one
+factor and supporting isolated-effect Evidence.
 
-### FindingRelation
+The backend derives synthesis status from validated direct Evidence:
+
+- `agreement`: at least two papers support the result without contradiction or
+  an explicit condition boundary;
+- `conflict`: direct Evidence from at least two papers includes a contradiction;
+- `condition_dependent`: cited Evidence establishes an explicit condition
+  boundary;
+- `insufficient_confirmation`: fewer than two papers provide direct Evidence.
+
+Certainty is the minimum confidence of linked direct Evidence and is capped at
+`0.5` for insufficient confirmation. Paper count and paper/cross-paper scope
+are computed from bindings rather than persisted as independent declarations.
+
+### FindingMechanismRelation
 
 Identity: Finding identity plus `relation_order`.
 
-Represents `source_term -> relation_type -> target_term`, direction, assertion
-strength, and supporting Evidence IDs. A causal assertion is valid only when
-direct experimental Evidence identifies the asserted variable as isolated;
-otherwise the relation must be associative, descriptive, or uncertain.
+Represents a subordinate `source_term -> relation_type -> target_term`
+mechanism, optional direction, assertion strength, and mechanism-context
+Evidence IDs. It cannot replace or redefine the Finding's factors, outcome, or
+main direction.
 
-### FindingContext
+### Scientific Context
 
-One-to-one with Finding. Stores structured material system, process conditions,
-sample state, test conditions, comparison baseline, limitations, and supporting
-Evidence IDs. Conflicting conditions remain explicit limitations and are never
-silently merged.
+Finding reuses `ObjectiveEvidenceContext`. It contains the exact intersection
+of material, sample, process, and test attributes present in every supporting
+direct Evidence record. Differences remain in source Evidence and explicit
+limitations; they are never silently merged.
 
-### FindingDerivation
+### FindingPaperContribution
 
-One-to-one with Finding. Stores synthesis mode, comparison status, contributing
-papers, supporting and contradicting Evidence IDs, and a bounded rationale.
-Cross-paper comparison status is one of `agreement`, `conflict`,
-`condition_dependent`, or `insufficient_confirmation`.
+Every PaperContribution in the Objective analysis appears exactly once,
+including excluded, failed, and analyzed papers without a direct result. Each
+binding preserves that paper's supporting, contradicting, context, and
+condition-boundary Evidence IDs. Excluded or failed papers cannot bind Finding
+Evidence.
 
 ## API Contract
 
@@ -211,7 +227,10 @@ open the owning document with `source_ref` and page context.
 ## Invariants
 
 - Every child shares the same collection, Objective, and analysis version.
-- Findings reference only eligible Evidence from their own version.
+- Findings reference only role-eligible Evidence from their own version and
+  bind every PaperContribution in that version.
+- Every eligible direct result in an atomic result set is assigned exactly once
+  as supporting or contradicting.
 - Published Finding graphs are immutable.
 - Internal IDs are retained for requests and audit but are not used as visible
   scientific labels.

@@ -59,7 +59,7 @@ accidentally restore legacy ownership.
 | Source documents, text units, blocks, tables, rows, cells, figures, references, and associations | PostgreSQL build-versioned Source tables | No | PostgreSQL metadata |
 | Document profiles and reusable paper facts | PostgreSQL build-versioned paper-fact tables | No | PostgreSQL |
 | Research Objective candidates and paper skims | PostgreSQL `research_objectives`, `objective_builds`, and `objective_paper_skims` | No | PostgreSQL |
-| Versioned Objective analysis, paper contributions, Evidence, Findings, Relations, Contexts, and Derivations | PostgreSQL `objective_analyses` and `objective_*` child tables | No | PostgreSQL |
+| Versioned Objective analysis, paper contributions, Evidence, atomic Findings, mechanism relations, scientific contexts, and Finding-paper bindings | PostgreSQL `objective_analyses` and `objective_*` child tables | No | PostgreSQL |
 | Comparable results, collection assessments, and pairwise comparison relations | PostgreSQL build-versioned comparison tables | No | PostgreSQL |
 | Comparison rows | In-memory deterministic projection | Yes | No durable store |
 | Finding feedback and curation | PostgreSQL `finding_feedback_records` and `finding_curation_records` | No | PostgreSQL |
@@ -140,8 +140,9 @@ Collection build persists candidate Objective definitions and paper skims.
 Confirmation changes only the `ResearchObjective.confirmation_status`. Deep
 analysis allocates a new `objective_analyses.analysis_version`, pins the exact
 Source build, and writes `PaperContribution`, `ObjectiveEvidence`, `Finding`,
-`FindingRelation`, `FindingContext`, and `FindingDerivation` records under the
-same composite owner. A successful version and the root's published pointer
+`FindingMechanismRelation`, scientific context, and
+`FindingPaperContribution` records under the same composite owner. A
+successful version and the root's published pointer
 commit atomically. A failed retry preserves the prior published version.
 Review state uses `PostgresFindingReviewRepository`, while sessions, messages,
 and plans use `PostgresObjectiveWorkspaceRepository`; all are composed once in
@@ -253,8 +254,9 @@ Concrete migration names may differ, but these identity rules may not.
 | Objective analysis | `(collection_id, objective_id, analysis_version)` | References one Objective and one immutable Source build; status is `queued`, `running`, `succeeded`, or `failed`. |
 | Paper contribution | Analysis identity plus `document_id` | References one included Source document and cannot cross the analysis version. |
 | Objective Evidence | Analysis identity plus `evidence_id` | References one paper contribution and one exact Source locator/excerpt. Stores all changed variables, one explicit comparison, at most one reported result, one attribution scope, and typed material/sample/process/test context. |
-| Finding | Analysis identity plus `finding_id` | References one succeeded analysis; supporting and contradicting Evidence links are version-local. |
-| Finding Relation, Context, and Derivation | Finding identity plus relation order where applicable | Cannot outlive or cross the owning Finding; cross-paper derivation requires direct results from at least two papers. |
+| Finding | Analysis identity plus `finding_id` | Stores one complete factor tuple and one outcome; attribution, status, and certainty agree with version-local supporting and contradicting Evidence. |
+| Finding mechanism and scientific context | Finding identity plus relation order where applicable | Mechanisms cite mechanism Evidence; common context is the exact intersection of supporting direct-Evidence attributes. |
+| Finding-paper contribution | Finding identity plus `source_document_id` | Binds every analysis PaperContribution exactly once and preserves per-paper Evidence roles and order. |
 | Feedback and curation | Existing review ID plus the complete Finding identity | Review records reference one immutable published Finding version. |
 | Evaluation | Existing evaluation IDs | Snapshots and runs preserve collection and version lineage. |
 

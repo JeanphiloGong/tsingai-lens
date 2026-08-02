@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from domain.core import (
     Finding,
+    FindingPaperContribution,
     ObjectiveAnalysis,
     ObjectiveEvidence,
     PaperContribution,
@@ -16,14 +17,19 @@ from domain.core import (
 )
 
 
-_MAX_DIRECT_EVIDENCE = 48
-_MAX_CONTEXT_EVIDENCE = 24
+_MAX_CONTEXT_EVIDENCE_PER_SET = 24
 _MAX_EXCERPT_CHARS = 900
+_CONTEXT_ROLES = {
+    "condition_context",
+    "mechanism_context",
+    "baseline_context",
+    "comparison_context",
+}
 logger = logging.getLogger(__name__)
 
 
 class FindingSynthesisService:
-    """Synthesize canonical, source-backed Findings for one analysis version."""
+    """Synthesize one-outcome, source-backed Findings for an analysis version."""
 
     def __init__(self, structured_extractor: Any | None = None) -> None:
         self.structured_extractor = structured_extractor or CoreLLMStructuredExtractor()
@@ -44,70 +50,16 @@ class FindingSynthesisService:
             contributions=contributions,
             evidence_records=evidence_records,
         )
+        result_sets = self._result_sets(objective, evidence_records)
+        if not result_sets:
+            return ()
         evidence_by_id = {
             evidence.evidence_id: evidence for evidence in evidence_records
         }
-        direct_candidates = tuple(
-            evidence
-            for evidence in evidence_records
-            if evidence.supports_finding
-            and evidence.evidence_role == "direct_result"
-            and evidence.reported_result is not None
-            and evidence.changed_variables
-            and evidence.attribution_scope != "not_attributable"
-        )
-        comparison_keys = {
-            (
-                evidence.document_id,
-                evidence.reported_result.outcome.casefold(),
-            )
-            for evidence in direct_candidates
-            if evidence.comparison is not None
-            and evidence.attribution_scope
-            in {"isolated_effect", "joint_effect"}
-        }
-        direct_evidence = tuple(
-            sorted(
-                (
-                    evidence
-                    for evidence in direct_candidates
-                    if evidence.comparison is not None
-                    or (
-                        evidence.document_id,
-                        evidence.reported_result.outcome.casefold(),
-                    )
-                    not in comparison_keys
-                ),
-                key=lambda item: (-item.confidence, item.document_id, item.evidence_id),
-            )[:_MAX_DIRECT_EVIDENCE]
-        )
-        if not direct_evidence:
-            return ()
-
-        result_sets = self._result_sets(
-            objective=objective,
-            direct_evidence=direct_evidence,
-            evidence_records=evidence_records,
-        )
-        if not result_sets:
-            return ()
-        context_evidence = tuple(
-            sorted(
-                (
-                    evidence
-                    for evidence in evidence_records
-                    if evidence.supports_finding
-                    and evidence.evidence_role
-                    in {
-                        "condition_context",
-                        "mechanism_context",
-                        "baseline_context",
-                        "comparison_context",
-                    }
-                ),
-                key=lambda item: (-item.confidence, item.document_id, item.evidence_id),
-            )[:_MAX_CONTEXT_EVIDENCE]
-        )
+        contribution_payloads = [
+            self._contribution_payload(contribution)
+            for contribution in contributions
+        ]
         objective_payload = {
             "objective_id": objective.objective_id,
             "question": objective.question,
@@ -118,28 +70,25 @@ class FindingSynthesisService:
             "constraints": list(objective.constraints),
             "requested_comparator": objective.requested_comparator,
         }
-        contribution_payloads = [
-            self._contribution_payload(contribution)
-            for contribution in contributions
-            if contribution.analysis_status == "analyzed"
-        ]
         findings: list[Finding] = []
         for result_set in result_sets:
-            contributing_document_ids = {
-                document_id
-                for item in _mapping_list(result_set.get("direct_evidence"))
-                if (document_id := _text(item.get("document_id")))
+            result_documents = {
+                str(item["document_id"])
+                for item in _mapping_list(result_set.get("result_evidence"))
             }
+            context_evidence = self._context_evidence_for_documents(
+                evidence_records,
+                result_documents,
+            )
             try:
                 parsed = self.structured_extractor.synthesize_findings(
                     {
                         "objective": objective_payload,
                         "paper_contributions": contribution_payloads,
-                        "result_sets": [result_set],
+                        "result_set": result_set,
                         "context_evidence": [
                             self._evidence_payload(evidence)
                             for evidence in context_evidence
-                            if evidence.document_id in contributing_document_ids
                         ],
                     }
                 )
@@ -149,12 +98,9 @@ class FindingSynthesisService:
                     result_set["result_set_id"],
                 )
                 continue
-            else:
-                parsed_record = (
-                    parsed.model_dump()
-                    if hasattr(parsed, "model_dump")
-                    else dict(parsed)
-                )
+            parsed_record = (
+                parsed.model_dump() if hasattr(parsed, "model_dump") else dict(parsed)
+            )
             expected_result_set_id = str(result_set["result_set_id"])
             for candidate in _mapping_list(parsed_record.get("findings")):
                 if _text(candidate.get("result_set_id")) != expected_result_set_id:
@@ -165,6 +111,8 @@ class FindingSynthesisService:
                     analysis=analysis,
                     candidate=candidate,
                     result_set=result_set,
+                    context_evidence=context_evidence,
+                    contributions=contributions,
                     evidence_by_id=evidence_by_id,
                     display_rank=len(findings),
                 )
@@ -183,7 +131,11 @@ class FindingSynthesisService:
         evidence_records: tuple[ObjectiveEvidence, ...],
     ) -> None:
         expected = (collection_id, objective.objective_id, analysis.analysis_version)
-        if (analysis.collection_id, analysis.objective_id, analysis.analysis_version) != expected:
+        if (
+            analysis.collection_id,
+            analysis.objective_id,
+            analysis.analysis_version,
+        ) != expected:
             raise ValueError("analysis does not belong to the requested objective")
         if objective.collection_id != collection_id:
             raise ValueError("objective belongs to another collection")
@@ -195,99 +147,414 @@ class FindingSynthesisService:
             )
             if actual != expected:
                 raise ValueError("analysis child belongs to another objective version")
+        contribution_documents = {item.document_id for item in contributions}
+        evidence_documents = {item.document_id for item in evidence_records}
+        if not evidence_documents <= contribution_documents:
+            raise ValueError("Objective Evidence lacks a PaperContribution")
 
     def _result_sets(
         self,
-        *,
         objective: ResearchObjective,
-        direct_evidence: tuple[ObjectiveEvidence, ...],
         evidence_records: tuple[ObjectiveEvidence, ...],
     ) -> tuple[dict[str, Any], ...]:
-        grouped: dict[tuple[str, ...], list[ObjectiveEvidence]] = defaultdict(list)
-        for evidence in direct_evidence:
-            variables = self._variables_for(evidence)
-            if variables and any(
-                _terms_match(variable, objective_axis)
-                for variable in variables
-                for objective_axis in objective.variables
-            ):
-                grouped[variables].append(evidence)
-
-        contradictory = tuple(
-            evidence
-            for evidence in evidence_records
-            if evidence.supports_finding
-            and evidence.evidence_role == "contradictory_result"
-            and evidence.reported_result is not None
-            and evidence.changed_variables
+        grouped: dict[tuple[tuple[str, ...], str], list[ObjectiveEvidence]] = (
+            defaultdict(list)
         )
-        result_sets: list[dict[str, Any]] = []
-        for position, (variables, evidence_items) in enumerate(
-            sorted(grouped.items(), key=lambda item: item[0]), start=1
-        ):
-            properties = _dedupe(
-                evidence.reported_result.outcome
-                for evidence in evidence_items
-                if evidence.reported_result is not None
-            )
-            if not properties:
+        factor_labels: dict[tuple[str, ...], tuple[str, ...]] = {}
+        outcome_labels: dict[str, str] = {}
+        for evidence in evidence_records:
+            if not self._eligible_result_evidence(evidence):
                 continue
-            related_conflicts = [
-                evidence
-                for evidence in contradictory
-                if evidence.reported_result is not None
-                and evidence.reported_result.outcome in properties
-                and self._variables_overlap(
-                    variables,
-                    self._variables_for(evidence),
+            factors = tuple(
+                sorted(
+                    (item.name for item in evidence.changed_variables),
+                    key=lambda value: _normalize_term(value),
                 )
-            ]
+            )
+            factor_key = tuple(_normalize_term(value) for value in factors)
+            outcome = evidence.reported_result.outcome
+            outcome_key = _normalize_term(outcome)
+            if not self._within_objective_scope(
+                factors=factors,
+                outcome=outcome,
+                objective=objective,
+            ):
+                continue
+            grouped[(factor_key, outcome_key)].append(evidence)
+            factor_labels.setdefault(factor_key, factors)
+            outcome_labels.setdefault(outcome_key, outcome)
+
+        result_sets: list[dict[str, Any]] = []
+        for factor_key, outcome_key in sorted(grouped):
+            evidence_items = tuple(
+                sorted(
+                    grouped[(factor_key, outcome_key)],
+                    key=lambda item: (
+                        -item.confidence,
+                        item.document_id,
+                        item.evidence_id,
+                    ),
+                )
+            )
+            if not evidence_items:
+                continue
+            factors = factor_labels[factor_key]
+            outcome = outcome_labels[outcome_key]
+            result_set_id = self._result_set_id(factors, outcome)
             result_sets.append(
                 {
-                    "result_set_id": f"result_set_{position}",
-                    "source_axes": list(variables),
-                    "outcome_properties": list(properties),
-                    "alignment": "same source-axis relationship",
-                    "direct_evidence": [
-                        self._evidence_payload(evidence) for evidence in evidence_items
+                    "result_set_id": result_set_id,
+                    "factors": list(factors),
+                    "outcome": outcome,
+                    "result_evidence": [
+                        self._evidence_payload(evidence)
+                        for evidence in evidence_items
                     ],
-                    "contradictory_evidence": [
-                        self._evidence_payload(evidence) for evidence in related_conflicts
-                    ],
-                    "document_count": len(
-                        {evidence.document_id for evidence in evidence_items}
-                    ),
                 }
             )
         return tuple(result_sets)
 
     @staticmethod
-    def _variables_for(
-        evidence: ObjectiveEvidence,
-    ) -> tuple[str, ...]:
-        return tuple(
-            sorted(
-                _dedupe(variable.name for variable in evidence.changed_variables),
-                key=str.casefold,
-            )
+    def _eligible_result_evidence(evidence: ObjectiveEvidence) -> bool:
+        return bool(
+            evidence.supports_finding
+            and evidence.evidence_role in {"direct_result", "contradictory_result"}
+            and evidence.reported_result is not None
+            and evidence.changed_variables
+            and evidence.attribution_scope != "not_attributable"
         )
 
     @staticmethod
-    def _variables_overlap(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
-        left_terms = {_normalize_term(value) for value in left}
-        right_terms = {_normalize_term(value) for value in right}
-        return bool(left_terms & right_terms)
+    def _within_objective_scope(
+        *,
+        factors: tuple[str, ...],
+        outcome: str,
+        objective: ResearchObjective,
+    ) -> bool:
+        objective_factors = {_normalize_term(value) for value in objective.variables}
+        objective_outcomes = {_normalize_term(value) for value in objective.outcomes}
+        return bool(
+            factors
+            and all(_normalize_term(value) in objective_factors for value in factors)
+            and _normalize_term(outcome) in objective_outcomes
+        )
+
+    @staticmethod
+    def _context_evidence_for_documents(
+        evidence_records: tuple[ObjectiveEvidence, ...],
+        document_ids: set[str],
+    ) -> tuple[ObjectiveEvidence, ...]:
+        candidates = tuple(
+            sorted(
+                (
+                    evidence
+                    for evidence in evidence_records
+                    if evidence.document_id in document_ids
+                    and evidence.supports_finding
+                    and evidence.evidence_role in _CONTEXT_ROLES
+                ),
+                key=lambda item: (-item.confidence, item.document_id, item.evidence_id),
+            )
+        )
+        selected: list[ObjectiveEvidence] = []
+        seen_documents: set[str] = set()
+        selected_ids: set[str] = set()
+        for evidence in candidates:
+            if evidence.document_id in seen_documents:
+                continue
+            selected.append(evidence)
+            selected_ids.add(evidence.evidence_id)
+            seen_documents.add(evidence.document_id)
+            if len(selected) >= _MAX_CONTEXT_EVIDENCE_PER_SET:
+                return tuple(selected)
+        for evidence in candidates:
+            if evidence.evidence_id in selected_ids:
+                continue
+            selected.append(evidence)
+            if len(selected) >= _MAX_CONTEXT_EVIDENCE_PER_SET:
+                break
+        return tuple(selected)
+
+    def _finding_from_candidate(
+        self,
+        *,
+        collection_id: str,
+        objective: ResearchObjective,
+        analysis: ObjectiveAnalysis,
+        candidate: Mapping[str, Any],
+        result_set: Mapping[str, Any],
+        context_evidence: tuple[ObjectiveEvidence, ...],
+        contributions: tuple[PaperContribution, ...],
+        evidence_by_id: Mapping[str, ObjectiveEvidence],
+        display_rank: int,
+    ) -> Finding | None:
+        result_ids = {
+            evidence_id
+            for item in _mapping_list(result_set.get("result_evidence"))
+            if (evidence_id := _text(item.get("evidence_id")))
+        }
+        supporting_ids = self._candidate_evidence_ids(
+            candidate, "supporting_evidence_ids"
+        )
+        contradicting_ids = self._candidate_evidence_ids(
+            candidate, "contradicting_evidence_ids"
+        )
+        if not supporting_ids or contradicting_ids is None:
+            return None
+        if set(supporting_ids) & set(contradicting_ids):
+            return None
+        if set(supporting_ids) | set(contradicting_ids) != result_ids:
+            return None
+        if any(
+            evidence_by_id[evidence_id].evidence_role
+            not in {"direct_result", "contradictory_result"}
+            for evidence_id in (*supporting_ids, *contradicting_ids)
+        ):
+            return None
+
+        allowed_context_ids = {item.evidence_id for item in context_evidence}
+        context_ids = self._candidate_evidence_ids(candidate, "context_evidence_ids")
+        if context_ids is None:
+            return None
+        if not set(context_ids) <= allowed_context_ids:
+            return None
+        boundary_ids = self._candidate_evidence_ids(
+            candidate, "condition_boundary_evidence_ids"
+        )
+        if boundary_ids is None:
+            return None
+        if not set(boundary_ids) <= (
+            set(supporting_ids) | set(contradicting_ids) | set(context_ids)
+        ):
+            return None
+        mechanisms = _mapping_list(candidate.get("mechanisms"))
+        mechanism_ids: set[str] = set()
+        for mechanism in mechanisms:
+            ids = self._candidate_evidence_ids(
+                mechanism, "supporting_evidence_ids"
+            )
+            if not ids:
+                return None
+            mechanism_ids.update(ids)
+        if not mechanism_ids <= set(context_ids):
+            return None
+        if any(
+            evidence_by_id[evidence_id].evidence_role != "mechanism_context"
+            for evidence_id in mechanism_ids
+        ):
+            return None
+
+        factors = _strings(result_set.get("factors"))
+        outcome = _text(result_set.get("outcome"))
+        statement = _text(candidate.get("statement"))
+        if not factors or not outcome or not statement:
+            return None
+        if not self._statement_covers_atomic_result(statement, factors, outcome):
+            return None
+        direction = _text(candidate.get("direction")) or "unknown"
+        supporting_evidence = tuple(
+            evidence_by_id[evidence_id] for evidence_id in supporting_ids
+        )
+        contradicting_evidence = tuple(
+            evidence_by_id[evidence_id] for evidence_id in contradicting_ids
+        )
+        expected_direction = self._direction_for(supporting_evidence)
+        if expected_direction is None or direction != expected_direction:
+            return None
+
+        paper_bindings = self._paper_bindings(
+            contributions=contributions,
+            supporting_ids=supporting_ids,
+            contradicting_ids=contradicting_ids,
+            context_ids=context_ids,
+            boundary_ids=boundary_ids,
+            evidence_by_id=evidence_by_id,
+        )
+        synthesis_status = Finding.synthesis_status_for(paper_bindings)
+        attribution_scope = Finding.attribution_scope_for(
+            factors, supporting_evidence
+        )
+        assertion_strength = _text(candidate.get("assertion_strength")) or (
+            "descriptive"
+        )
+        if assertion_strength == "causal" and attribution_scope != "isolated_effect":
+            return None
+        if attribution_scope == "descriptive_only" and assertion_strength != (
+            "descriptive"
+        ):
+            return None
+        direct_evidence = supporting_evidence + contradicting_evidence
+        certainty = Finding.certainty_for(synthesis_status, direct_evidence)
+        limitations = self._limitations(
+            candidate=candidate,
+            factors=factors,
+            synthesis_status=synthesis_status,
+            attribution_scope=attribution_scope,
+        )
+        finding_id = self._finding_id(
+            objective_id=objective.objective_id,
+            analysis_version=analysis.analysis_version,
+            factors=factors,
+            outcome=outcome,
+            supporting_ids=supporting_ids,
+            contradicting_ids=contradicting_ids,
+        )
+        try:
+            finding = Finding.from_mapping(
+                {
+                    "collection_id": collection_id,
+                    "objective_id": objective.objective_id,
+                    "analysis_version": analysis.analysis_version,
+                    "finding_id": finding_id,
+                    "statement": statement,
+                    "factors": factors,
+                    "outcome": outcome,
+                    "direction": direction,
+                    "assertion_strength": assertion_strength,
+                    "attribution_scope": attribution_scope,
+                    "synthesis_status": synthesis_status,
+                    "certainty": certainty,
+                    "display_rank": display_rank,
+                    "mechanisms": mechanisms,
+                    "scientific_context": Finding.common_scientific_context_for(
+                        supporting_evidence
+                    ).to_record(),
+                    "limitations": limitations,
+                    "paper_contributions": [
+                        item.to_record() for item in paper_bindings
+                    ],
+                }
+            )
+            finding.validate_sources(tuple(evidence_by_id.values()), contributions)
+        except ValueError:
+            logger.warning(
+                "Rejected invalid Finding candidate result_set_id=%s",
+                result_set["result_set_id"],
+                exc_info=True,
+            )
+            return None
+        return finding
+
+    @staticmethod
+    def _candidate_evidence_ids(
+        candidate: Mapping[str, Any], field: str
+    ) -> tuple[str, ...] | None:
+        raw_ids = candidate.get(field, ())
+        if not isinstance(raw_ids, (list, tuple)):
+            return None
+        values: list[str] = []
+        for raw_id in raw_ids:
+            if not isinstance(raw_id, str) or not raw_id.strip():
+                return None
+            evidence_id = raw_id.strip()
+            if evidence_id in values:
+                return None
+            values.append(evidence_id)
+        return tuple(values)
+
+    @staticmethod
+    def _statement_covers_atomic_result(
+        statement: str,
+        factors: tuple[str, ...],
+        outcome: str,
+    ) -> bool:
+        statement_term = _normalize_term(statement)
+        return bool(
+            _normalize_term(outcome) in statement_term
+            and all(_normalize_term(factor) in statement_term for factor in factors)
+        )
+
+    @staticmethod
+    def _direction_for(
+        supporting_evidence: tuple[ObjectiveEvidence, ...],
+    ) -> str | None:
+        directions = {
+            evidence.reported_result.direction
+            for evidence in supporting_evidence
+            if evidence.reported_result is not None
+        }
+        return next(iter(directions)) if len(directions) == 1 else None
+
+    @staticmethod
+    def _paper_bindings(
+        *,
+        contributions: tuple[PaperContribution, ...],
+        supporting_ids: tuple[str, ...],
+        contradicting_ids: tuple[str, ...],
+        context_ids: tuple[str, ...],
+        boundary_ids: tuple[str, ...],
+        evidence_by_id: Mapping[str, ObjectiveEvidence],
+    ) -> tuple[FindingPaperContribution, ...]:
+        def ids_for(document_id: str, values: tuple[str, ...]) -> tuple[str, ...]:
+            return tuple(
+                value
+                for value in values
+                if evidence_by_id[value].document_id == document_id
+            )
+
+        return tuple(
+            FindingPaperContribution(
+                document_id=contribution.document_id,
+                analysis_status=contribution.analysis_status,
+                supporting_evidence_ids=ids_for(
+                    contribution.document_id, supporting_ids
+                ),
+                contradicting_evidence_ids=ids_for(
+                    contribution.document_id, contradicting_ids
+                ),
+                context_evidence_ids=ids_for(contribution.document_id, context_ids),
+                condition_boundary_evidence_ids=ids_for(
+                    contribution.document_id, boundary_ids
+                ),
+            )
+            for contribution in contributions
+        )
+
+    @staticmethod
+    def _limitations(
+        *,
+        candidate: Mapping[str, Any],
+        factors: tuple[str, ...],
+        synthesis_status: str,
+        attribution_scope: str,
+    ) -> tuple[str, ...]:
+        deterministic: list[str] = []
+        if len(factors) > 1:
+            deterministic.append(
+                "The reported comparison changes the complete factor set; "
+                "individual-factor effects are not identifiable."
+            )
+        if synthesis_status == "insufficient_confirmation":
+            deterministic.append(
+                "Cross-paper confirmation is absent for this atomic result."
+            )
+        if synthesis_status == "conflict":
+            deterministic.append(
+                "Comparable direct results report opposing directions."
+            )
+        if synthesis_status == "condition_dependent":
+            deterministic.append(
+                "The reported relationship changes across an explicit condition boundary."
+            )
+        if attribution_scope == "association_only":
+            deterministic.append(
+                "The available evidence supports association, not isolated causation."
+            )
+        return _strings([*_strings(candidate.get("limitations")), *deterministic])
 
     @staticmethod
     def _contribution_payload(contribution: PaperContribution) -> dict[str, Any]:
         return {
             "document_id": contribution.document_id,
+            "analysis_status": contribution.analysis_status,
             "relevance": contribution.relevance,
             "paper_role": contribution.paper_role,
             "changed_variables": list(contribution.changed_variables),
             "measured_property_scope": list(contribution.measured_property_scope),
             "test_environment_scope": list(contribution.test_environment_scope),
             "summary": contribution.contribution_summary,
+            "exclusion_reason": contribution.exclusion_reason,
+            "warnings": list(contribution.warnings),
         }
 
     @staticmethod
@@ -313,311 +580,34 @@ class FindingSynthesisService:
             "confidence": evidence.confidence,
         }
 
-    def _finding_from_candidate(
-        self,
-        *,
-        collection_id: str,
-        objective: ResearchObjective,
-        analysis: ObjectiveAnalysis,
-        candidate: Mapping[str, Any],
-        result_set: Mapping[str, Any],
-        evidence_by_id: Mapping[str, ObjectiveEvidence],
-        display_rank: int,
-    ) -> Finding | None:
-        result_evidence = _mapping_list(result_set.get("direct_evidence"))
-        allowed_support_ids = {
-            evidence_id
-            for item in result_evidence
-            if (evidence_id := _text(item.get("evidence_id")))
-        }
-        outcomes = _mapping_list(candidate.get("outcomes"))
-        outcome_names = _dedupe(_text(item.get("concept")) for item in outcomes)
-        allowed_outcomes = _strings(result_set.get("outcome_properties"))
-        outcome_names = tuple(
-            outcome
-            for outcome in outcome_names
-            if any(_terms_match(outcome, allowed) for allowed in allowed_outcomes)
-        )
-        if not outcome_names:
-            return None
-        supporting_ids = tuple(
-            evidence_id
-            for evidence_id in allowed_support_ids
-            if evidence_id in evidence_by_id
-            and evidence_by_id[evidence_id].reported_result is not None
-            and any(
-                _terms_match(
-                    evidence_by_id[evidence_id].reported_result.outcome,
-                    outcome,
-                )
-                for outcome in outcome_names
-            )
-        )
-        if not supporting_ids:
-            return None
-        supporting_ids = tuple(sorted(supporting_ids))
-        contributing_documents = tuple(
-            sorted({evidence_by_id[value].document_id for value in supporting_ids})
-        )
-        finding_level = "cross_paper" if len(contributing_documents) >= 2 else "paper"
-        synthesis_status = _text(candidate.get("synthesis_status")) or "insufficient_confirmation"
-        if finding_level == "paper":
-            synthesis_status = "insufficient_confirmation"
-        elif synthesis_status not in {
-            "agreement",
-            "conflict",
-            "condition_dependent",
-            "insufficient_confirmation",
-        }:
-            synthesis_status = "insufficient_confirmation"
-
-        conflict_ids = self._conflict_ids(
-            candidate=candidate,
-            result_set=result_set,
-            evidence_by_id=evidence_by_id,
-            supporting_ids=supporting_ids,
-        )
-        context_ids = self._context_ids(
-            candidate=candidate,
-            evidence_by_id=evidence_by_id,
-            supporting_document_ids=set(contributing_documents),
-        )
-        variables = tuple(_strings(result_set.get("source_axes")))
-        statement = _text(candidate.get("statement"))
-        if not variables or not statement:
-            return None
-        coupled_variables = len(variables) > 1 or any(
-            "," in variable or " and " in variable.casefold()
-            for variable in variables
-        )
-        directions = _dedupe(_text(item.get("direction")) for item in outcomes)
-        direction = directions[0] if len(directions) == 1 else "mixed"
-        if coupled_variables:
-            direction = "changes"
-            statement = (
-                "In the reported comparison, the coupled condition defined by "
-                f"{', '.join(variables)} was associated with changes in "
-                f"{', '.join(outcome_names)}."
-            )
-        conditions = _dedupe(_text(value) for value in _strings(candidate.get("common_conditions")))
-        limitations = _dedupe(
-            [
-                *_strings(candidate.get("incomparable_conditions")),
-                *_strings(candidate.get("warnings")),
-                *(
-                    (
-                        "The reported comparison changes coupled variables; "
-                        "individual-variable effects are not identifiable.",
-                    )
-                    if coupled_variables
-                    else ()
-                ),
-                *(
-                    ("Supported by one paper only; cross-paper confirmation is absent.",)
-                    if finding_level == "paper"
-                    else ()
-                ),
-            ]
-        )
-        supporting_evidence = [evidence_by_id[value] for value in supporting_ids]
-        material_system = _first_mapping(
-            {
-                attribute.name: attribute.value
-                for attribute in evidence.scientific_context.material
-            }
-            for evidence in supporting_evidence
-        ) or {"scope": list(objective.material_scope)}
-        context_evidence = [
-            evidence_by_id[value]
-            for value in context_ids
-            if value in evidence_by_id
-        ]
-        context_support_ids = tuple(
-            _dedupe([*supporting_ids, *context_ids])
-        )
-        finding_id = self._finding_id(
-            objective_id=objective.objective_id,
-            analysis_version=analysis.analysis_version,
-            variables=variables,
-            outcomes=outcome_names,
-            supporting_ids=supporting_ids,
-        )
-        finding = Finding.from_mapping(
-            {
-                "collection_id": collection_id,
-                "objective_id": objective.objective_id,
-                "analysis_version": analysis.analysis_version,
-                "finding_id": finding_id,
-                "finding_level": finding_level,
-                "statement": statement,
-                "variables": variables,
-                "mediators": _strings(candidate.get("mediator_concepts")),
-                "outcomes": outcome_names,
-                "direction": direction,
-                "scope_summary": "; ".join(conditions)
-                or ", ".join(objective.material_scope)
-                or objective.question,
-                "evidence_strength": {
-                    "agreement": "strong",
-                    "condition_dependent": "moderate",
-                    "conflict": "moderate",
-                    "insufficient_confirmation": "weak",
-                }[synthesis_status],
-                "generalization_status": (
-                    "paper_level_only"
-                    if finding_level == "paper"
-                    else {
-                        "agreement": "cross_paper_agreement",
-                        "condition_dependent": "condition_dependent",
-                        "conflict": "conflict",
-                        "insufficient_confirmation": "insufficient_confirmation",
-                    }[synthesis_status]
-                ),
-                "paper_count": len(contributing_documents),
-                "confidence": candidate.get("confidence"),
-                "display_rank": display_rank,
-                "relations": [
-                    {
-                        "source_term": " and ".join(variables),
-                        "relation_type": "associated_with",
-                        "target_term": outcome,
-                        "direction": (
-                            direction
-                            if coupled_variables
-                            else next(
-                                (
-                                    _text(item.get("direction"))
-                                    for item in outcomes
-                                    if _terms_match(_text(item.get("concept")), outcome)
-                                ),
-                                direction,
-                            )
-                        ),
-                        "assertion_strength": "associative",
-                        "supporting_evidence_ids": [
-                            evidence_id
-                            for evidence_id in supporting_ids
-                            if _terms_match(
-                                evidence_by_id[evidence_id].reported_result.outcome,
-                                outcome,
-                            )
-                        ],
-                    }
-                    for outcome in outcome_names
-                ],
-                "context": {
-                    "material_system": material_system,
-                    "process_conditions": _distinct_mappings(
-                        {
-                            attribute.name: attribute.value
-                            for attribute in evidence.scientific_context.process
-                        }
-                        for evidence in [*supporting_evidence, *context_evidence]
-                    ),
-                    "sample_state": _first_mapping(
-                        {
-                            attribute.name: attribute.value
-                            for attribute in evidence.scientific_context.sample
-                        }
-                        for evidence in supporting_evidence
-                    ),
-                    "test_conditions": _distinct_mappings(
-                        {
-                            attribute.name: attribute.value
-                            for attribute in evidence.scientific_context.test
-                        }
-                        for evidence in [*supporting_evidence, *context_evidence]
-                    ),
-                    "comparison_baseline": _first_mapping(
-                        {
-                            "baseline_label": evidence.comparison.baseline_label,
-                            "target_label": evidence.comparison.target_label,
-                            "axis_names": list(evidence.comparison.axis_names),
-                        }
-                        for evidence in supporting_evidence
-                        if evidence.comparison is not None
-                    ),
-                    "limitations": limitations,
-                    "supporting_evidence_ids": context_support_ids,
-                },
-                "derivation": {
-                    "synthesis_mode": finding_level,
-                    "comparison_status": synthesis_status,
-                    "contributing_document_ids": contributing_documents,
-                    "supporting_evidence_ids": supporting_ids,
-                    "contradicting_evidence_ids": conflict_ids,
-                    "rationale": statement,
-                },
-            }
-        )
-        finding.validate_evidence(tuple(evidence_by_id.values()))
-        return finding
-
     @staticmethod
-    def _conflict_ids(
-        *,
-        candidate: Mapping[str, Any],
-        result_set: Mapping[str, Any],
-        evidence_by_id: Mapping[str, ObjectiveEvidence],
-        supporting_ids: tuple[str, ...],
-    ) -> tuple[str, ...]:
-        allowed = {
-            evidence_id
-            for item in _mapping_list(result_set.get("contradictory_evidence"))
-            if (evidence_id := _text(item.get("evidence_id")))
-        }
-        requested = {
-            evidence_id
-            for outcome in _mapping_list(candidate.get("outcomes"))
-            for evidence_id in _strings(outcome.get("conflicting_evidence_ids"))
-        }
-        return tuple(
-            sorted(
-                evidence_id
-                for evidence_id in allowed & requested
-                if evidence_id in evidence_by_id and evidence_id not in supporting_ids
-            )
+    def _result_set_id(factors: tuple[str, ...], outcome: str) -> str:
+        identity = json.dumps(
+            [factors, outcome],
+            ensure_ascii=True,
+            separators=(",", ":"),
         )
-
-    @staticmethod
-    def _context_ids(
-        *,
-        candidate: Mapping[str, Any],
-        evidence_by_id: Mapping[str, ObjectiveEvidence],
-        supporting_document_ids: set[str],
-    ) -> tuple[str, ...]:
-        requested = _dedupe(
-            [
-                *_strings(candidate.get("context_evidence_ids")),
-                *_strings(candidate.get("mechanism_evidence_ids")),
-            ]
-        )
-        return tuple(
-            evidence_id
-            for evidence_id in requested
-            if evidence_id in evidence_by_id
-            and evidence_by_id[evidence_id].supports_finding
-            and evidence_by_id[evidence_id].document_id in supporting_document_ids
-            and evidence_by_id[evidence_id].evidence_role
-            in {
-                "condition_context",
-                "mechanism_context",
-                "baseline_context",
-                "comparison_context",
-            }
-        )
+        return f"result_set_{sha1(identity.encode('utf-8')).hexdigest()[:16]}"
 
     @staticmethod
     def _finding_id(
         *,
         objective_id: str,
         analysis_version: int,
-        variables: tuple[str, ...],
-        outcomes: tuple[str, ...],
+        factors: tuple[str, ...],
+        outcome: str,
         supporting_ids: tuple[str, ...],
+        contradicting_ids: tuple[str, ...],
     ) -> str:
         identity = json.dumps(
-            [objective_id, analysis_version, variables, outcomes, supporting_ids],
+            [
+                objective_id,
+                analysis_version,
+                factors,
+                outcome,
+                supporting_ids,
+                contradicting_ids,
+            ],
             ensure_ascii=True,
             separators=(",", ":"),
         )
@@ -633,14 +623,10 @@ def _strings(value: Any) -> tuple[str, ...]:
     if value is None:
         return ()
     values = value if isinstance(value, (list, tuple, set)) else (value,)
-    return tuple(_dedupe(_text(item) for item in values))
-
-
-def _dedupe(values: Any) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
-    for value in values:
-        text = _text(value)
+    for item in values:
+        text = _text(item)
         if not text:
             continue
         key = text.casefold()
@@ -648,7 +634,7 @@ def _dedupe(values: Any) -> list[str]:
             continue
         seen.add(key)
         result.append(text)
-    return result
+    return tuple(result)
 
 
 def _mapping_list(value: Any) -> list[dict[str, Any]]:
@@ -659,35 +645,9 @@ def _mapping_list(value: Any) -> list[dict[str, Any]]:
 
 def _normalize_term(value: Any) -> str:
     return " ".join(
-        part for part in "".join(
+        part
+        for part in "".join(
             character.lower() if character.isalnum() else " "
             for character in (_text(value) or "")
         ).split()
     )
-
-
-def _terms_match(left: Any, right: Any) -> bool:
-    left_term = _normalize_term(left)
-    right_term = _normalize_term(right)
-    if not left_term or not right_term:
-        return False
-    return left_term == right_term or left_term in right_term or right_term in left_term
-
-
-def _first_mapping(values: Any) -> dict[str, Any]:
-    return next((dict(value) for value in values if value), {})
-
-
-def _distinct_mappings(values: Any) -> tuple[dict[str, Any], ...]:
-    result: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for value in values:
-        if not value:
-            continue
-        item = dict(value)
-        key = json.dumps(item, ensure_ascii=True, sort_keys=True, default=str)
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(item)
-    return tuple(result)

@@ -11,9 +11,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from domain.core import (
     Finding,
-    FindingContext,
-    FindingDerivation,
-    FindingRelation,
+    FindingMechanismRelation,
+    FindingPaperContribution,
     ObjectiveAnalysis,
     ObjectiveEvidence,
     ObjectiveEvidenceComparison,
@@ -34,7 +33,7 @@ from infra.persistence.postgres.models.objective import (
     ObjectiveBuild,
     ObjectiveEvidenceRecord,
     ObjectiveFindingContextRecord,
-    ObjectiveFindingDerivationRecord,
+    ObjectiveFindingPaperContributionRecord,
     ObjectiveFindingRecord,
     ObjectiveFindingRelationRecord,
     ObjectivePaperContributionRecord,
@@ -416,7 +415,7 @@ class PostgresObjectiveRepository:
                     evidence,
                 )
             for finding in findings:
-                finding.validate_evidence(evidence_records)
+                finding.validate_sources(evidence_records, contributions)
 
             self._delete_analysis_artifacts(
                 session, collection_id, objective_id, analysis_version
@@ -705,17 +704,14 @@ class PostgresObjectiveRepository:
                 objective_id=finding.objective_id,
                 analysis_version=finding.analysis_version,
                 finding_id=finding.finding_id,
-                finding_level=finding.finding_level,
                 statement=finding.statement,
-                variables=list(finding.variables),
-                mediators=list(finding.mediators),
-                outcomes=list(finding.outcomes),
+                factors=list(finding.factors),
+                outcome=finding.outcome,
                 direction=finding.direction,
-                scope_summary=finding.scope_summary,
-                evidence_strength=finding.evidence_strength,
-                generalization_status=finding.generalization_status,
-                paper_count=finding.paper_count,
-                confidence=finding.confidence,
+                assertion_strength=finding.assertion_strength,
+                attribution_scope=finding.attribution_scope,
+                synthesis_status=finding.synthesis_status,
+                certainty=finding.certainty,
                 display_rank=finding.display_rank,
             )
         )
@@ -733,7 +729,7 @@ class PostgresObjectiveRepository:
                 direction=relation.direction,
                 assertion_strength=relation.assertion_strength,
             )
-            for position, relation in enumerate(finding.relations)
+            for position, relation in enumerate(finding.mechanisms)
         )
         session.add(
             ObjectiveFindingContextRecord(
@@ -741,37 +737,27 @@ class PostgresObjectiveRepository:
                 objective_id=finding.objective_id,
                 analysis_version=finding.analysis_version,
                 finding_id=finding.finding_id,
-                material_system=dict(finding.context.material_system),
-                process_conditions=[
-                    dict(value) for value in finding.context.process_conditions
-                ],
-                sample_state=dict(finding.context.sample_state),
-                test_conditions=[
-                    dict(value) for value in finding.context.test_conditions
-                ],
-                comparison_baseline=dict(finding.context.comparison_baseline),
-                limitations=list(finding.context.limitations),
+                scientific_context=finding.scientific_context.to_record(),
+                limitations=list(finding.limitations),
             )
         )
-        session.add(
-            ObjectiveFindingDerivationRecord(
+        session.add_all(
+            ObjectiveFindingPaperContributionRecord(
                 collection_id=finding.collection_id,
                 objective_id=finding.objective_id,
                 analysis_version=finding.analysis_version,
                 finding_id=finding.finding_id,
-                synthesis_mode=finding.derivation.synthesis_mode,
-                comparison_status=finding.derivation.comparison_status,
-                contributing_document_ids=list(
-                    finding.derivation.contributing_document_ids
-                ),
-                rationale=finding.derivation.rationale,
+                source_document_id=contribution.document_id,
+                paper_order=position,
             )
+            for position, contribution in enumerate(finding.paper_contributions)
         )
         session.flush()
         for link_role, evidence_ids in (
-            ("supporting", finding.derivation.supporting_evidence_ids),
-            ("contradicting", finding.derivation.contradicting_evidence_ids),
-            ("context", finding.context.supporting_evidence_ids),
+            ("supporting", finding.supporting_evidence_ids),
+            ("contradicting", finding.contradicting_evidence_ids),
+            ("context", finding.context_evidence_ids),
+            ("boundary", finding.condition_boundary_evidence_ids),
         ):
             rows = [
                 {
@@ -787,7 +773,7 @@ class PostgresObjectiveRepository:
             ]
             if rows:
                 session.execute(objective_finding_evidence_links.insert(), rows)
-        for relation_order, relation in enumerate(finding.relations):
+        for relation_order, relation in enumerate(finding.mechanisms):
             rows = [
                 {
                     "collection_id": finding.collection_id,
@@ -865,28 +851,66 @@ class PostgresObjectiveRepository:
         ).mappings():
             evidence_links[str(link["link_role"])].append(str(link["evidence_id"]))
         context_row = session.get(ObjectiveFindingContextRecord, key_filters)
-        derivation_row = session.get(ObjectiveFindingDerivationRecord, key_filters)
-        if context_row is None or derivation_row is None:
+        paper_rows = tuple(
+            session.scalars(
+                select(ObjectiveFindingPaperContributionRecord)
+                .where(
+                    ObjectiveFindingPaperContributionRecord.collection_id
+                    == key_filters[0],
+                    ObjectiveFindingPaperContributionRecord.objective_id
+                    == key_filters[1],
+                    ObjectiveFindingPaperContributionRecord.analysis_version
+                    == key_filters[2],
+                    ObjectiveFindingPaperContributionRecord.finding_id
+                    == key_filters[3],
+                )
+                .order_by(
+                    ObjectiveFindingPaperContributionRecord.paper_order
+                )
+            )
+        )
+        if context_row is None or not paper_rows:
             raise RuntimeError(f"incomplete persisted finding: {row.finding_id}")
+        linked_evidence_ids = {
+            evidence_id
+            for evidence_ids in evidence_links.values()
+            for evidence_id in evidence_ids
+        }
+        evidence_documents: dict[str, str] = {}
+        for evidence_id in linked_evidence_ids:
+            evidence_row = session.get(
+                ObjectiveEvidenceRecord,
+                (*key_filters[:3], evidence_id),
+            )
+            if evidence_row is None:
+                raise RuntimeError(
+                    f"persisted Finding references missing Evidence: {evidence_id}"
+                )
+            evidence_documents[evidence_id] = evidence_row.source_document_id
+
+        def evidence_for_document(link_role: str, document_id: str) -> tuple[str, ...]:
+            return tuple(
+                evidence_id
+                for evidence_id in evidence_links.get(link_role, ())
+                if evidence_documents[evidence_id] == document_id
+            )
+
         return Finding(
             collection_id=row.collection_id,
             objective_id=row.objective_id,
             analysis_version=row.analysis_version,
             finding_id=row.finding_id,
-            finding_level=row.finding_level,
             statement=row.statement,
-            variables=tuple(row.variables),
-            mediators=tuple(row.mediators),
-            outcomes=tuple(row.outcomes),
+            factors=tuple(row.factors),
+            outcome=row.outcome,
             direction=row.direction,
-            scope_summary=row.scope_summary,
-            evidence_strength=row.evidence_strength,
-            generalization_status=row.generalization_status,
-            paper_count=row.paper_count,
-            confidence=row.confidence,
+            assertion_strength=row.assertion_strength,
+            attribution_scope=row.attribution_scope,
+            synthesis_status=row.synthesis_status,
+            certainty=row.certainty,
             display_rank=row.display_rank,
-            relations=tuple(
-                FindingRelation(
+            mechanisms=tuple(
+                FindingMechanismRelation(
                     source_term=relation.source_term,
                     relation_type=relation.relation_type,
                     target_term=relation.target_term,
@@ -898,34 +922,50 @@ class PostgresObjectiveRepository:
                 )
                 for relation in relation_rows
             ),
-            context=FindingContext(
-                material_system=dict(context_row.material_system),
-                process_conditions=tuple(
-                    dict(value) for value in context_row.process_conditions
-                ),
-                sample_state=dict(context_row.sample_state),
-                test_conditions=tuple(
-                    dict(value) for value in context_row.test_conditions
-                ),
-                comparison_baseline=dict(context_row.comparison_baseline),
-                limitations=tuple(context_row.limitations),
-                supporting_evidence_ids=tuple(evidence_links.get("context", ())),
+            scientific_context=ObjectiveEvidenceContext.from_mapping(
+                context_row.scientific_context
             ),
-            derivation=FindingDerivation(
-                synthesis_mode=derivation_row.synthesis_mode,
-                comparison_status=derivation_row.comparison_status,
-                contributing_document_ids=tuple(
-                    derivation_row.contributing_document_ids
-                ),
-                supporting_evidence_ids=tuple(
-                    evidence_links.get("supporting", ())
-                ),
-                contradicting_evidence_ids=tuple(
-                    evidence_links.get("contradicting", ())
-                ),
-                rationale=derivation_row.rationale,
+            limitations=tuple(context_row.limitations),
+            paper_contributions=tuple(
+                FindingPaperContribution(
+                    document_id=paper_row.source_document_id,
+                    analysis_status=self._paper_contribution_status(
+                        session,
+                        key_filters[:3],
+                        paper_row.source_document_id,
+                    ),
+                    supporting_evidence_ids=evidence_for_document(
+                        "supporting", paper_row.source_document_id
+                    ),
+                    contradicting_evidence_ids=evidence_for_document(
+                        "contradicting", paper_row.source_document_id
+                    ),
+                    context_evidence_ids=evidence_for_document(
+                        "context", paper_row.source_document_id
+                    ),
+                    condition_boundary_evidence_ids=evidence_for_document(
+                        "boundary", paper_row.source_document_id
+                    ),
+                )
+                for paper_row in paper_rows
             ),
         )
+
+    @staticmethod
+    def _paper_contribution_status(
+        session: Session,
+        analysis_key: tuple[str, str, int],
+        document_id: str,
+    ) -> str:
+        row = session.get(
+            ObjectivePaperContributionRecord,
+            (*analysis_key, document_id),
+        )
+        if row is None:
+            raise RuntimeError(
+                f"persisted Finding references missing PaperContribution: {document_id}"
+            )
+        return row.analysis_status
 
     @staticmethod
     def _evidence_record(row: ObjectiveEvidenceRecord) -> ObjectiveEvidence:

@@ -15,7 +15,6 @@ from application.core.semantic_build.llm.schemas import (
     StructuredEvidenceExtractions,
     StructuredFindingSynthesis,
     StructuredFindingSynthesisItem,
-    StructuredFindingSynthesisOutcome,
     StructuredObjectiveMergeGroup,
     StructuredObjectiveMergePlan,
     StructuredPaperContributionDraft,
@@ -1132,42 +1131,47 @@ class _ObjectiveExtractor:
         payload: dict[str, Any],
     ) -> StructuredFindingSynthesis:
         self.finding_payloads.append(payload)
-        findings: list[StructuredFindingSynthesisItem] = []
-        for result_set in payload.get("result_sets", [])[:6]:
-            source_axes = [
-                str(value).strip()
-                for value in result_set.get("source_axes", [])
-                if str(value).strip()
-            ]
-            outcomes = [
-                str(value).strip()
-                for value in result_set.get("outcome_properties", [])
-                if str(value).strip()
-            ]
-            if not source_axes or not outcomes:
-                continue
-            source_concept = " + ".join(source_axes)
-            findings.append(
+        result_set = payload.get("result_set", {})
+        factors = [
+            str(value).strip()
+            for value in result_set.get("factors", [])
+            if str(value).strip()
+        ]
+        outcome = str(result_set.get("outcome") or "").strip()
+        result_evidence = result_set.get("result_evidence", [])
+        supporting_ids = [
+            str(item["evidence_id"])
+            for item in result_evidence
+            if item.get("evidence_role") == "direct_result"
+        ]
+        contradicting_ids = [
+            str(item["evidence_id"])
+            for item in result_evidence
+            if item.get("evidence_role") == "contradictory_result"
+        ]
+        if not factors or not outcome or not supporting_ids:
+            return StructuredFindingSynthesis()
+        direction = next(
+            (
+                str(item.get("reported_result", {}).get("direction") or "unknown")
+                for item in result_evidence
+                if item.get("evidence_id") == supporting_ids[0]
+            ),
+            "unknown",
+        )
+        factor_text = " + ".join(factors)
+        return StructuredFindingSynthesis(
+            findings=[
                 StructuredFindingSynthesisItem(
                     result_set_id=str(result_set["result_set_id"]),
-                    source_concept=source_concept,
-                    outcomes=[
-                        StructuredFindingSynthesisOutcome(
-                            concept=outcome,
-                            direction="changes",
-                            statement=f"{source_concept} changes {outcome}.",
-                        )
-                        for outcome in outcomes
-                    ],
-                    statement=(
-                        f"{source_concept} changes {', '.join(outcomes)} in the "
-                        "reported paper conditions."
-                    ),
-                    synthesis_status="insufficient_confirmation",
-                    confidence=0.82,
+                    statement=f"{factor_text} changes {outcome}.",
+                    direction=direction,
+                    assertion_strength="associative",
+                    supporting_evidence_ids=supporting_ids,
+                    contradicting_evidence_ids=contradicting_ids,
                 )
-            )
-        return StructuredFindingSynthesis(findings=findings)
+            ]
+        )
 
 
 class _FailingRouteExtractor(_ObjectiveExtractor):

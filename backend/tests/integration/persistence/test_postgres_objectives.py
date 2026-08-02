@@ -63,11 +63,55 @@ def _candidate_facts(objective: ResearchObjective | None = None) -> ObjectiveFac
     )
 
 
+def _analysis_artifacts():
+    artifacts = _artifacts()
+    source_document_ids = (
+        "srcdoc_runtime",
+        "srcdoc_supporting",
+        "srcdoc_contradicting",
+        "srcdoc_excluded",
+    )
+    blocks = tuple(
+        replace(
+            artifacts.blocks[0],
+            block_id=block_id,
+            document_id=document_id,
+            text=text,
+            text_unit_ids=(),
+        )
+        for block_id, document_id, text in (
+            ("block-support-1", source_document_ids[0], "Strength increased."),
+            ("block-support-2", source_document_ids[1], "Strength increased."),
+            ("block-contradict", source_document_ids[2], "Strength decreased."),
+            ("block-context", source_document_ids[0], "Tests used ambient air."),
+            ("block-mechanism", source_document_ids[0], "Grain refinement occurred."),
+        )
+    )
+    return replace(
+        artifacts,
+        documents=tuple(
+            replace(
+                artifacts.documents[0],
+                document_id=document_id,
+                human_readable_id=position,
+                title=f"Paper {position + 1}",
+                text_unit_ids=(),
+            )
+            for position, document_id in enumerate(source_document_ids)
+        ),
+        text_units=(),
+        blocks=blocks,
+        tables=(),
+        table_rows=(),
+        table_cells=(),
+    )
+
+
 def _prepare_candidate(source_repository, builds, build_id: str = "build_objectives"):
     task = _task(f"task_{build_id}")
     builds.add_task(task, build_id=build_id)
     source_repository.replace_collection_artifacts(
-        "col_source", build_id, _artifacts()
+        "col_source", build_id, _analysis_artifacts()
     )
     repository = PostgresObjectiveRepository(source_repository.session_factory)
     repository.replace("col_source", build_id, _candidate_facts())
@@ -75,39 +119,59 @@ def _prepare_candidate(source_repository, builds, build_id: str = "build_objecti
     return repository
 
 
-def _contribution(version: int) -> PaperContribution:
+def _contribution(
+    version: int,
+    document_id: str = "srcdoc_runtime",
+    *,
+    analysis_status: str = "analyzed",
+) -> PaperContribution:
     return PaperContribution.from_mapping(
         {
             "collection_id": "col_source",
             "objective_id": "objective-1",
             "analysis_version": version,
-            "document_id": "srcdoc_runtime",
-            "analysis_status": "analyzed",
-            "relevance": "high",
+            "document_id": document_id,
+            "analysis_status": analysis_status,
+            "relevance": "high" if analysis_status == "analyzed" else "none",
             "paper_role": "primary_experiment",
             "contribution_summary": "Direct experimental evidence.",
             "material_match": ["Alloy A"],
             "changed_variables": ["temperature"],
             "measured_property_scope": ["strength"],
             "test_environment_scope": ["ambient"],
+            "exclusion_reason": (
+                "Outside the confirmed Objective scope."
+                if analysis_status == "excluded"
+                else None
+            ),
             "confidence": 0.9,
         }
     )
 
 
-def _evidence(version: int) -> ObjectiveEvidence:
+def _evidence(
+    version: int,
+    evidence_id: str = "evidence-support-1",
+    document_id: str = "srcdoc_runtime",
+    source_ref: str = "block-support-1",
+    *,
+    evidence_role: str = "direct_result",
+    direction: str = "increase",
+    confidence: float = 0.9,
+) -> ObjectiveEvidence:
+    is_result = evidence_role in {"direct_result", "contradictory_result"}
     return ObjectiveEvidence.from_mapping(
         {
             "collection_id": "col_source",
             "objective_id": "objective-1",
             "analysis_version": version,
-            "evidence_id": "evidence-1",
-            "document_id": "srcdoc_runtime",
+            "evidence_id": evidence_id,
+            "document_id": document_id,
             "source_kind": "text_window",
-            "source_ref": "block-1",
+            "source_ref": source_ref,
             "source_excerpt": "Strength increased from 90 to 100 MPa at 600 C.",
             "page_numbers": [1],
-            "evidence_role": "direct_result",
+            "evidence_role": evidence_role,
             "selection_status": "extracted",
             "selection_reason": "Reports measured strength.",
             "changed_variables": [
@@ -117,22 +181,24 @@ def _evidence(version: int) -> ObjectiveEvidence:
                     "target_value": 600,
                     "unit": "C",
                 }
-            ],
+            ] if is_result else [],
             "comparison": {
                 "baseline_label": "500 C",
                 "target_label": "600 C",
                 "axis_names": ["temperature"],
                 "comparable": True,
                 "incomparability_reasons": [],
-            },
+            } if is_result else None,
             "reported_result": {
                 "outcome": "strength",
                 "value": 100,
                 "unit": "MPa",
-                "direction": "increase",
+                "direction": direction,
                 "result_text": "Strength increased from 90 to 100 MPa.",
-            },
-            "attribution_scope": "isolated_effect",
+            } if is_result else None,
+            "attribution_scope": (
+                "isolated_effect" if is_result else "descriptive_only"
+            ),
             "scientific_context": {
                 "material": [{"name": "name", "value": "Alloy A"}],
                 "sample": [],
@@ -140,7 +206,7 @@ def _evidence(version: int) -> ObjectiveEvidence:
                 "test": [{"name": "environment", "value": "ambient"}],
             },
             "resolution_status": "resolved",
-            "confidence": 0.9,
+            "confidence": confidence,
         }
     )
 
@@ -152,38 +218,104 @@ def _finding(version: int) -> Finding:
             "objective_id": "objective-1",
             "analysis_version": version,
             "finding_id": "finding-1",
-            "finding_level": "paper",
-            "statement": "Temperature was associated with strength in this paper.",
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-            "direction": "changes",
-            "scope_summary": "Alloy A under the reported tensile condition.",
-            "evidence_strength": "weak",
-            "generalization_status": "paper_level_only",
-            "paper_count": 1,
-            "confidence": 0.8,
+            "statement": "Temperature was associated with strength under reported conditions.",
+            "factors": ["temperature"],
+            "outcome": "strength",
+            "direction": "increase",
+            "assertion_strength": "associative",
+            "attribution_scope": "isolated_effect",
+            "synthesis_status": "condition_dependent",
+            "certainty": 0.7,
             "display_rank": 0,
-            "relations": [
+            "mechanisms": [
                 {
                     "source_term": "temperature",
-                    "relation_type": "associated_with",
-                    "target_term": "strength",
-                    "assertion_strength": "associative",
-                    "supporting_evidence_ids": ["evidence-1"],
+                    "relation_type": "changes",
+                    "target_term": "grain refinement",
+                    "direction": "increase",
+                    "assertion_strength": "descriptive",
+                    "supporting_evidence_ids": ["evidence-mechanism"],
                 }
             ],
-            "context": {
-                "material_system": {"name": "Alloy A"},
-                "supporting_evidence_ids": ["evidence-1"],
+            "scientific_context": {
+                "material": [{"name": "name", "value": "Alloy A"}],
+                "sample": [],
+                "process": [{"name": "temperature", "value": 600, "unit": "C"}],
+                "test": [{"name": "environment", "value": "ambient"}],
             },
-            "derivation": {
-                "synthesis_mode": "paper",
-                "comparison_status": "insufficient_confirmation",
-                "contributing_document_ids": ["srcdoc_runtime"],
-                "supporting_evidence_ids": ["evidence-1"],
-                "rationale": "One paper directly reports the result.",
-            },
+            "limitations": ["The papers report an explicit condition boundary."],
+            "paper_contributions": [
+                {
+                    "document_id": "srcdoc_runtime",
+                    "analysis_status": "analyzed",
+                    "supporting_evidence_ids": ["evidence-support-1"],
+                    "context_evidence_ids": [
+                        "evidence-context",
+                        "evidence-mechanism",
+                    ],
+                    "condition_boundary_evidence_ids": ["evidence-context"],
+                },
+                {
+                    "document_id": "srcdoc_supporting",
+                    "analysis_status": "analyzed",
+                    "supporting_evidence_ids": ["evidence-support-2"],
+                },
+                {
+                    "document_id": "srcdoc_contradicting",
+                    "analysis_status": "analyzed",
+                    "contradicting_evidence_ids": ["evidence-contradict"],
+                },
+                {
+                    "document_id": "srcdoc_excluded",
+                    "analysis_status": "excluded",
+                },
+            ],
         }
+    )
+
+
+def _analysis_contributions(version: int) -> tuple[PaperContribution, ...]:
+    return (
+        _contribution(version),
+        _contribution(version, "srcdoc_supporting"),
+        _contribution(version, "srcdoc_contradicting"),
+        _contribution(version, "srcdoc_excluded", analysis_status="excluded"),
+    )
+
+
+def _analysis_evidence(version: int) -> tuple[ObjectiveEvidence, ...]:
+    return (
+        _evidence(version),
+        _evidence(
+            version,
+            "evidence-support-2",
+            "srcdoc_supporting",
+            "block-support-2",
+            confidence=0.8,
+        ),
+        _evidence(
+            version,
+            "evidence-contradict",
+            "srcdoc_contradicting",
+            "block-contradict",
+            evidence_role="contradictory_result",
+            direction="decrease",
+            confidence=0.7,
+        ),
+        _evidence(
+            version,
+            "evidence-context",
+            "srcdoc_runtime",
+            "block-context",
+            evidence_role="condition_context",
+        ),
+        _evidence(
+            version,
+            "evidence-mechanism",
+            "srcdoc_runtime",
+            "block-mechanism",
+            evidence_role="mechanism_context",
+        ),
     )
 
 
@@ -278,8 +410,8 @@ def test_publish_is_atomic_and_reads_findings_and_exact_evidence(source_reposito
         "col_source",
         "objective-1",
         version,
-        contributions=(_contribution(version),),
-        evidence_records=(_evidence(version),),
+        contributions=_analysis_contributions(version),
+        evidence_records=_analysis_evidence(version),
         findings=(_finding(version),),
     )
 
@@ -297,8 +429,8 @@ def test_publish_is_atomic_and_reads_findings_and_exact_evidence(source_reposito
     )
     assert finding_total == 1
     assert findings == (_finding(version),)
-    assert evidence_total == 1
-    assert evidence == (_evidence(version),)
+    assert evidence_total == 5
+    assert evidence == _analysis_evidence(version)
 
 
 def test_failed_retry_preserves_previous_published_version(source_repositories) -> None:
@@ -309,8 +441,8 @@ def test_failed_retry_preserves_previous_published_version(source_repositories) 
         "col_source",
         "objective-1",
         1,
-        contributions=(_contribution(1),),
-        evidence_records=(_evidence(1),),
+        contributions=_analysis_contributions(1),
+        evidence_records=_analysis_evidence(1),
         findings=(_finding(1),),
     )
     objective, retry = repository.queue_analysis(
@@ -348,7 +480,7 @@ def test_publish_rejects_cross_version_artifacts_without_partial_writes(
             "col_source",
             "objective-1",
             claimed.analysis_version,
-            contributions=(_contribution(1),),
+            contributions=_analysis_contributions(1),
             evidence_records=(replace(_evidence(1), analysis_version=2),),
             findings=(_finding(1),),
         )

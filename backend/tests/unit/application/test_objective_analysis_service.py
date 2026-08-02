@@ -108,32 +108,28 @@ def _finding(version: int) -> Finding:
             "objective_id": "objective-1",
             "analysis_version": version,
             "finding_id": "finding-1",
-            "finding_level": "paper",
             "statement": "Temperature was associated with strength.",
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-            "scope_summary": "Alloy A",
-            "evidence_strength": "weak",
-            "generalization_status": "paper_level_only",
-            "paper_count": 1,
-            "confidence": 0.8,
-            "relations": [
+            "factors": ["temperature"],
+            "outcome": "strength",
+            "direction": "increase",
+            "assertion_strength": "associative",
+            "attribution_scope": "isolated_effect",
+            "synthesis_status": "insufficient_confirmation",
+            "certainty": 0.5,
+            "mechanisms": [],
+            "scientific_context": {
+                "material": [{"name": "alloy", "value": "Alloy A"}],
+                "sample": [],
+                "process": [],
+                "test": [],
+            },
+            "paper_contributions": [
                 {
-                    "source_term": "temperature",
-                    "relation_type": "associated_with",
-                    "target_term": "strength",
-                    "assertion_strength": "associative",
+                    "document_id": "paper-1",
+                    "analysis_status": "analyzed",
                     "supporting_evidence_ids": ["evidence-1"],
                 }
             ],
-            "context": {"supporting_evidence_ids": ["evidence-1"]},
-            "derivation": {
-                "synthesis_mode": "paper",
-                "comparison_status": "insufficient_confirmation",
-                "contributing_document_ids": ["paper-1"],
-                "supporting_evidence_ids": ["evidence-1"],
-                "rationale": "One direct result.",
-            },
         }
     )
 

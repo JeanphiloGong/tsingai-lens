@@ -60,8 +60,15 @@ related Source locators. Pairwise table results include both source rows, retain
 material differences, reject sparse comparison axes as non-attributable, and
 are bounded per Objective/document.
 
-Finding synthesis uses eligible direct-result Evidence plus bounded condition
-and mechanism context. A paper Finding remains `paper_level_only`; a
-cross-paper Finding requires comparable direct results from at least two
-distinct papers. Coupled variables may be represented as associations or
-limitations, not isolated causal effects.
+Finding synthesis groups Evidence only by an exact normalized changed-factor
+tuple and one exact outcome. Each group can produce at most one Finding. The
+provider assigns every direct result as supporting or contradicting and may
+identify condition boundaries and subordinate mechanisms. The backend derives
+the attribution scope, synthesis status, certainty, common scientific context,
+and one Finding-local binding for every PaperContribution in the analysis.
+
+`agreement`, `conflict`, `condition_dependent`, and
+`insufficient_confirmation` therefore describe validated Evidence coverage,
+not provider confidence or a stored paper-count declaration. Coupled variables
+remain one complete factor tuple and cannot be presented as an isolated causal
+effect.

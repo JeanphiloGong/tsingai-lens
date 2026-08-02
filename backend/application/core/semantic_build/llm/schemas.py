@@ -79,15 +79,29 @@ _OBJECTIVE_EVIDENCE_ROUTE_ROLES = {
     "modeling_or_prediction",
     "low_value_or_irrelevant",
 }
-_OBJECTIVE_EVIDENCE_KINDS = {
-    "measurement",
-    "test_condition",
-    "sample_context",
-    "process_context",
-    "characterization",
-    "baseline_reference",
-    "comparison",
-    "interpretation",
+_OBJECTIVE_EVIDENCE_ROLES = {
+    "direct_result",
+    "condition_context",
+    "mechanism_context",
+    "baseline_context",
+    "comparison_context",
+    "background_context",
+    "contradictory_result",
+    "irrelevant",
+}
+_OBJECTIVE_EVIDENCE_ATTRIBUTION_SCOPES = {
+    "isolated_effect",
+    "joint_effect",
+    "association_only",
+    "descriptive_only",
+    "not_attributable",
+}
+_OBJECTIVE_EVIDENCE_RESULT_DIRECTIONS = {
+    "increase",
+    "decrease",
+    "improve",
+    "worsen",
+    "no_change",
     "mixed",
     "unknown",
 }
@@ -891,30 +905,108 @@ class StructuredEvidenceSelections(_StrictModel):
         return _normalize_list_container(value)
 
 
-class StructuredEvidenceExtraction(_StrictModel):
-    evidence_kind: Literal[
-        "measurement",
-        "test_condition",
-        "sample_context",
-        "process_context",
-        "characterization",
-        "baseline_reference",
-        "comparison",
-        "interpretation",
+ScientificScalar = str | int | float | bool
+
+
+class StructuredEvidenceAttribute(_StrictModel):
+    name: str
+    value: ScientificScalar
+    unit: str | None = None
+
+
+class StructuredEvidenceVariable(_StrictModel):
+    name: str
+    baseline_value: ScientificScalar | None = None
+    target_value: ScientificScalar | None = None
+    unit: str | None = None
+
+    @model_validator(mode="after")
+    def _require_reported_value(self) -> "StructuredEvidenceVariable":
+        if self.baseline_value is None and self.target_value is None:
+            raise ValueError("changed variable requires a baseline or target value")
+        return self
+
+
+class StructuredEvidenceComparison(_StrictModel):
+    baseline_label: str
+    target_label: str
+    axis_names: list[str] = Field(min_length=1)
+    comparable: bool
+    incomparability_reasons: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_comparability(self) -> "StructuredEvidenceComparison":
+        if not self.comparable and not self.incomparability_reasons:
+            raise ValueError("incomparable evidence requires reasons")
+        if self.comparable and self.incomparability_reasons:
+            raise ValueError("comparable evidence cannot have incomparability reasons")
+        return self
+
+
+class StructuredEvidenceResult(_StrictModel):
+    outcome: str
+    value: ScientificScalar | None = None
+    unit: str | None = None
+    direction: Literal[
+        "increase",
+        "decrease",
+        "improve",
+        "worsen",
+        "no_change",
         "mixed",
         "unknown",
     ] = "unknown"
-    property_normalized: str | None = None
-    material_system: dict[str, Any] = Field(default_factory=dict)
-    sample_context: dict[str, Any] = Field(default_factory=dict)
-    process_context: dict[str, Any] = Field(default_factory=dict)
-    resolved_condition: dict[str, Any] = Field(default_factory=dict)
-    test_condition: dict[str, Any] = Field(default_factory=dict)
-    value_payload: dict[str, Any] = Field(default_factory=dict)
-    unit: str | None = None
-    baseline_context: dict[str, Any] = Field(default_factory=dict)
-    interpretation: str | None = None
-    join_keys: dict[str, Any] = Field(default_factory=dict)
+    result_text: str
+
+    @field_validator("direction", mode="before")
+    @classmethod
+    def _normalize_direction(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_OBJECTIVE_EVIDENCE_RESULT_DIRECTIONS,
+            default="unknown",
+        )
+
+
+class StructuredEvidenceContext(_StrictModel):
+    material: list[StructuredEvidenceAttribute] = Field(default_factory=list)
+    sample: list[StructuredEvidenceAttribute] = Field(default_factory=list)
+    process: list[StructuredEvidenceAttribute] = Field(default_factory=list)
+    test: list[StructuredEvidenceAttribute] = Field(default_factory=list)
+
+    @field_validator("material", "sample", "process", "test", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredEvidenceExtraction(_StrictModel):
+    evidence_role: Literal[
+        "direct_result",
+        "condition_context",
+        "mechanism_context",
+        "baseline_context",
+        "comparison_context",
+        "background_context",
+        "contradictory_result",
+        "irrelevant",
+    ] = "irrelevant"
+    changed_variables: list[StructuredEvidenceVariable] = Field(
+        default_factory=list,
+        max_length=12,
+    )
+    comparison: StructuredEvidenceComparison | None = None
+    reported_result: StructuredEvidenceResult | None = None
+    attribution_scope: Literal[
+        "isolated_effect",
+        "joint_effect",
+        "association_only",
+        "descriptive_only",
+        "not_attributable",
+    ] = "not_attributable"
+    scientific_context: StructuredEvidenceContext = Field(
+        default_factory=StructuredEvidenceContext
+    )
     resolution_status: Literal[
         "resolved",
         "partial",
@@ -924,13 +1016,22 @@ class StructuredEvidenceExtraction(_StrictModel):
     ] = "partial"
     confidence: float = 0.0
 
-    @field_validator("evidence_kind", mode="before")
+    @field_validator("evidence_role", mode="before")
     @classmethod
-    def _normalize_evidence_kind(cls, value: object) -> str:
+    def _normalize_evidence_role(cls, value: object) -> str:
         return _normalize_underscored_choice(
             value,
-            allowed=_OBJECTIVE_EVIDENCE_KINDS,
-            default="unknown",
+            allowed=_OBJECTIVE_EVIDENCE_ROLES,
+            default="irrelevant",
+        )
+
+    @field_validator("attribution_scope", mode="before")
+    @classmethod
+    def _normalize_attribution_scope(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_OBJECTIVE_EVIDENCE_ATTRIBUTION_SCOPES,
+            default="not_attributable",
         )
 
     @field_validator("resolution_status", mode="before")
@@ -942,29 +1043,52 @@ class StructuredEvidenceExtraction(_StrictModel):
             default="partial",
         )
 
-    @field_validator(
-        "material_system",
-        "sample_context",
-        "process_context",
-        "resolved_condition",
-        "test_condition",
-        "value_payload",
-        "baseline_context",
-        "join_keys",
-        mode="before",
-    )
+    @field_validator("changed_variables", mode="before")
     @classmethod
-    def _normalize_objects(cls, value: object, info: ValidationInfo) -> object:
-        if value is None:
-            return {}
-        if isinstance(value, dict):
-            return value
-        if info.field_name == "value_payload":
-            return {
-                "value": value,
-                "source_value_text": str(value),
-            }
-        return {}
+    def _normalize_changed_variables(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+    @model_validator(mode="after")
+    def _validate_scientific_contract(self) -> "StructuredEvidenceExtraction":
+        result_role = self.evidence_role in {"direct_result", "contradictory_result"}
+        if result_role and self.reported_result is None:
+            raise ValueError("result evidence requires one reported result")
+        if not result_role and self.reported_result is not None:
+            raise ValueError("context evidence cannot report an experimental result")
+        if not result_role and self.attribution_scope in {
+            "isolated_effect",
+            "joint_effect",
+        }:
+            raise ValueError("context evidence cannot claim experimental attribution")
+        if self.comparison is not None and not self.comparison.comparable:
+            if self.attribution_scope != "not_attributable":
+                raise ValueError("incomparable evidence cannot be attributed")
+        if self.attribution_scope in {"isolated_effect", "joint_effect"}:
+            if self.comparison is None or not self.comparison.comparable:
+                raise ValueError("experimental attribution requires comparison")
+            variables = {item.name.casefold() for item in self.changed_variables}
+            axes = {item.casefold() for item in self.comparison.axis_names}
+            if variables != axes:
+                raise ValueError("comparison axes must match changed variables")
+            if any(
+                item.baseline_value is None or item.target_value is None
+                for item in self.changed_variables
+            ):
+                raise ValueError(
+                    "experimental attribution requires baseline and target values"
+                )
+            if any(
+                item.baseline_value == item.target_value
+                for item in self.changed_variables
+            ):
+                raise ValueError(
+                    "experimental attribution requires changed variable values"
+                )
+            if self.attribution_scope == "isolated_effect" and len(variables) != 1:
+                raise ValueError("isolated effect requires one changed variable")
+            if self.attribution_scope == "joint_effect" and len(variables) < 2:
+                raise ValueError("joint effect requires multiple changed variables")
+        return self
 
 
 class StructuredEvidenceExtractions(_StrictModel):

@@ -24,6 +24,10 @@ from domain.core import (
     FindingRelation,
     ObjectiveAnalysis,
     ObjectiveEvidence,
+    ObjectiveEvidenceComparison,
+    ObjectiveEvidenceContext,
+    ObjectiveEvidenceResult,
+    ObjectiveEvidenceVariable,
     ObjectiveFactSet,
     PaperContribution,
     PaperSkim,
@@ -174,7 +178,6 @@ class EvidenceCandidate:
     reason: str | None
     table_schema: dict[str, Any]
     column_roles: dict[str, Any]
-    join_keys: dict[str, Any]
     join_plan: dict[str, Any]
     confidence: float
 
@@ -192,7 +195,6 @@ class EvidenceCandidate:
             reason=_transient_optional_text(payload.get("reason")),
             table_schema=_transient_mapping(payload.get("table_schema")),
             column_roles=_transient_mapping(payload.get("column_roles")),
-            join_keys=_transient_mapping(payload.get("join_keys")),
             join_plan=_transient_mapping(payload.get("join_plan")),
             confidence=normalize_objective_confidence(payload.get("confidence")),
         )
@@ -208,7 +210,6 @@ class EvidenceCandidate:
             "reason": self.reason,
             "table_schema": dict(self.table_schema),
             "column_roles": dict(self.column_roles),
-            "join_keys": dict(self.join_keys),
             "join_plan": dict(self.join_plan),
             "confidence": self.confidence,
         }
@@ -226,20 +227,13 @@ class ExtractedEvidenceDraft:
     evidence_role: str | None
     selection_reason: str | None
     selection_status: str
-    evidence_kind: str
-    property_normalized: str | None
-    material_system: dict[str, Any]
-    sample_context: dict[str, Any]
-    process_context: dict[str, Any]
-    resolved_condition: dict[str, Any]
-    test_condition: dict[str, Any]
-    value_payload: dict[str, Any]
-    unit: str | None
-    baseline_context: dict[str, Any]
-    interpretation: str | None
+    changed_variables: tuple[ObjectiveEvidenceVariable, ...]
+    comparison: ObjectiveEvidenceComparison | None
+    reported_result: ObjectiveEvidenceResult | None
+    attribution_scope: str
+    scientific_context: ObjectiveEvidenceContext
     source_refs: tuple[dict[str, Any], ...]
     evidence_anchor_ids: tuple[str, ...]
-    join_keys: dict[str, Any]
     resolution_status: str
     confidence: float
 
@@ -257,9 +251,14 @@ class ExtractedEvidenceDraft:
         source_ref = _transient_optional_text(
             payload.get("source_ref") or first_source_ref.get("source_ref")
         )
-        evidence_kind = _transient_text(payload.get("evidence_kind")) or "unknown"
-        property_normalized = _transient_optional_text(
-            payload.get("property_normalized")
+        evidence_role = _transient_optional_text(
+            payload.get("evidence_role") or first_source_ref.get("evidence_role")
+        )
+        reported_result_payload = payload.get("reported_result")
+        reported_result = (
+            ObjectiveEvidenceResult.from_mapping(reported_result_payload)
+            if isinstance(reported_result_payload, Mapping)
+            else None
         )
         evidence_id = _transient_optional_text(payload.get("evidence_id"))
         if evidence_id is None:
@@ -267,10 +266,11 @@ class ExtractedEvidenceDraft:
                 [
                     objective_id,
                     document_id,
-                    evidence_kind,
-                    property_normalized,
+                    evidence_role,
                     source_refs,
-                    payload.get("value_payload"),
+                    payload.get("changed_variables"),
+                    payload.get("comparison"),
+                    payload.get("reported_result"),
                 ],
                 ensure_ascii=True,
                 sort_keys=True,
@@ -283,31 +283,35 @@ class ExtractedEvidenceDraft:
             document_id=document_id,
             source_kind=source_kind,
             source_ref=source_ref,
-            evidence_role=_transient_optional_text(
-                payload.get("evidence_role") or first_source_ref.get("evidence_role")
-            ),
+            evidence_role=evidence_role,
             selection_reason=_transient_optional_text(
                 payload.get("selection_reason")
                 or first_source_ref.get("selection_reason")
             ),
             selection_status=_transient_text(payload.get("selection_status"))
             or "extracted",
-            evidence_kind=evidence_kind,
-            property_normalized=property_normalized,
-            material_system=_transient_mapping(payload.get("material_system")),
-            sample_context=_transient_mapping(payload.get("sample_context")),
-            process_context=_transient_mapping(payload.get("process_context")),
-            resolved_condition=_transient_mapping(payload.get("resolved_condition")),
-            test_condition=_transient_mapping(payload.get("test_condition")),
-            value_payload=_transient_mapping(payload.get("value_payload")),
-            unit=_transient_optional_text(payload.get("unit")),
-            baseline_context=_transient_mapping(payload.get("baseline_context")),
-            interpretation=_transient_optional_text(payload.get("interpretation")),
+            changed_variables=tuple(
+                ObjectiveEvidenceVariable.from_mapping(item)
+                for item in payload.get("changed_variables", ())
+                if isinstance(item, Mapping)
+            ),
+            comparison=(
+                ObjectiveEvidenceComparison.from_mapping(payload["comparison"])
+                if isinstance(payload.get("comparison"), Mapping)
+                else None
+            ),
+            reported_result=reported_result,
+            attribution_scope=_transient_text(payload.get("attribution_scope"))
+            or "not_attributable",
+            scientific_context=(
+                ObjectiveEvidenceContext.from_mapping(payload["scientific_context"])
+                if isinstance(payload.get("scientific_context"), Mapping)
+                else ObjectiveEvidenceContext()
+            ),
             source_refs=source_refs,
             evidence_anchor_ids=normalize_objective_terms(
                 payload.get("evidence_anchor_ids") or payload.get("anchor_ids")
             ),
-            join_keys=_transient_mapping(payload.get("join_keys")),
             resolution_status=_transient_text(payload.get("resolution_status"))
             or "unknown",
             confidence=normalize_objective_confidence(payload.get("confidence")),
@@ -323,20 +327,17 @@ class ExtractedEvidenceDraft:
             "evidence_role": self.evidence_role,
             "selection_reason": self.selection_reason,
             "selection_status": self.selection_status,
-            "evidence_kind": self.evidence_kind,
-            "property_normalized": self.property_normalized,
-            "material_system": dict(self.material_system),
-            "sample_context": dict(self.sample_context),
-            "process_context": dict(self.process_context),
-            "resolved_condition": dict(self.resolved_condition),
-            "test_condition": dict(self.test_condition),
-            "value_payload": dict(self.value_payload),
-            "unit": self.unit,
-            "baseline_context": dict(self.baseline_context),
-            "interpretation": self.interpretation,
+            "changed_variables": [
+                item.to_record() for item in self.changed_variables
+            ],
+            "comparison": self.comparison.to_record() if self.comparison else None,
+            "reported_result": (
+                self.reported_result.to_record() if self.reported_result else None
+            ),
+            "attribution_scope": self.attribution_scope,
+            "scientific_context": self.scientific_context.to_record(),
             "source_refs": [dict(item) for item in self.source_refs],
             "evidence_anchor_ids": list(self.evidence_anchor_ids),
-            "join_keys": dict(self.join_keys),
             "resolution_status": self.resolution_status,
             "confidence": self.confidence,
         }
@@ -386,19 +387,7 @@ _OBJECTIVE_EVIDENCE_TEXT_CHARS = 6000
 _OBJECTIVE_EVIDENCE_PROMPT_TEXT_CHARS = 1800
 _OBJECTIVE_EVIDENCE_PROMPT_TABLE_ROWS = 8
 _OBJECTIVE_EVIDENCE_PROMPT_TABLE_CELLS = 80
-_OBJECTIVE_RESULT_VALUE_METADATA_KEYS = {
-    "value",
-    "min",
-    "max",
-    "retention_percent",
-    "direction",
-    "statement",
-    "value_origin",
-    "source_value_text",
-    "source_unit_text",
-    "derivation_formula",
-    "derivation_inputs",
-}
+_OBJECTIVE_PAIRWISE_SCOPE_LIMIT = 48
 _OBJECTIVE_NON_RESULT_VALUE_COLUMN_TERMS = (
     "standard deviation",
     "std",
@@ -846,7 +835,6 @@ class ResearchObjectiveService:
                 continue
             seen.add(draft.evidence_id)
             evidence_role = self._canonical_evidence_role(draft)
-            evidence_kind = self._canonical_evidence_kind(draft.evidence_kind)
             records.append(
                 ObjectiveEvidence(
                     collection_id=collection_id,
@@ -862,18 +850,11 @@ class ResearchObjectiveService:
                     evidence_role=evidence_role,
                     selection_status="extracted",
                     selection_reason=draft.selection_reason,
-                    evidence_kind=evidence_kind,
-                    property_normalized=draft.property_normalized,
-                    material_system=dict(draft.material_system),
-                    sample_context=dict(draft.sample_context),
-                    process_context=dict(draft.process_context),
-                    test_condition=dict(draft.test_condition),
-                    resolved_condition=dict(draft.resolved_condition),
-                    value_payload=dict(draft.value_payload),
-                    unit=draft.unit,
-                    baseline_context=dict(draft.baseline_context),
-                    interpretation=draft.interpretation,
-                    join_keys=dict(draft.join_keys),
+                    changed_variables=draft.changed_variables,
+                    comparison=draft.comparison,
+                    reported_result=draft.reported_result,
+                    attribution_scope=draft.attribution_scope,
+                    scientific_context=draft.scientific_context,
                     anchor_ids=draft.evidence_anchor_ids,
                     resolution_status=(
                         draft.resolution_status
@@ -895,13 +876,16 @@ class ResearchObjectiveService:
         figures_by_document_id: Mapping[str, list[Any]],
     ) -> dict[str, Any] | None:
         candidates = [
+            *[dict(value) for value in draft.source_refs],
             {
                 "source_kind": draft.source_kind,
                 "source_ref": draft.source_ref,
             },
-            *[dict(value) for value in draft.source_refs],
         ]
         related: list[dict[str, Any]] = []
+        seen_locators: set[tuple[Any, ...]] = set()
+        excerpts: list[str] = []
+        primary: dict[str, Any] | None = None
         for candidate in candidates:
             source_kind = _transient_text(candidate.get("source_kind"))
             source_ref = _transient_text(candidate.get("source_ref"))
@@ -917,23 +901,55 @@ class ResearchObjectiveService:
                 figures_by_document_id=figures_by_document_id,
             )
             locator = {
-                "source_kind": normalized_kind or "text_window",
-                "source_ref": source_ref,
+                key: value
+                for key, value in candidate.items()
+                if key != "source_excerpt" and value not in (None, "", [], {})
             }
-            page = candidate.get("page")
+            locator["source_kind"] = normalized_kind or "text_window"
+            locator["source_ref"] = source_ref
+            page = candidate.get("page") or (located or {}).get("page")
             if page not in (None, ""):
                 locator["page"] = page
-            related.append(locator)
+            locator_key = (
+                locator["source_kind"],
+                locator["source_ref"],
+                locator.get("row_index"),
+                locator.get("col_index"),
+            )
+            is_bare_duplicate = (
+                locator.get("row_index") is None
+                and locator.get("col_index") is None
+                and any(
+                    item.get("source_kind") == locator["source_kind"]
+                    and item.get("source_ref") == locator["source_ref"]
+                    for item in related
+                )
+            )
+            if locator_key not in seen_locators and not is_bare_duplicate:
+                seen_locators.add(locator_key)
+                related.append(locator)
             if located is None:
                 continue
-            return {
-                "source_kind": located["source_kind"],
-                "source_ref": source_ref,
-                "source_excerpt": located["source_excerpt"],
-                "page_numbers": ((located["page"],) if located["page"] else ()),
-                "related_source_refs": tuple(related),
-            }
-        return None
+            if primary is None:
+                primary = {
+                    "source_kind": located["source_kind"],
+                    "source_ref": source_ref,
+                    "page": located["page"],
+                }
+            excerpt = _transient_text(candidate.get("source_excerpt"))
+            if not excerpt and not excerpts:
+                excerpt = located["source_excerpt"]
+            if excerpt and excerpt not in excerpts:
+                excerpts.append(excerpt)
+        if primary is None or not excerpts:
+            return None
+        return {
+            "source_kind": primary["source_kind"],
+            "source_ref": primary["source_ref"],
+            "source_excerpt": "\n".join(excerpts)[:12_000],
+            "page_numbers": ((primary["page"],) if primary["page"] else ()),
+            "related_source_refs": tuple(related),
+        }
 
     @staticmethod
     def _source_excerpt_for_locator(
@@ -997,34 +1013,7 @@ class ResearchObjectiveService:
             "irrelevant",
         }:
             return role
-        if role == "mediator_context" or draft.evidence_kind == "characterization":
-            return "mechanism_context"
-        if role == "background_context":
-            return "background_context"
-        if draft.evidence_kind in {"test_condition", "sample_context", "process_context"}:
-            return "condition_context"
-        if draft.evidence_kind == "baseline_reference":
-            return "baseline_context"
-        if draft.evidence_kind in {"measurement", "comparison", "interpretation"}:
-            return "direct_result"
-        return "background_context"
-
-    @staticmethod
-    def _canonical_evidence_kind(evidence_kind: str) -> str:
-        if evidence_kind in {
-            "measurement",
-            "test_condition",
-            "sample_context",
-            "process_context",
-            "characterization",
-            "baseline_reference",
-            "comparison",
-            "interpretation",
-            "mixed",
-            "unknown",
-        }:
-            return evidence_kind
-        return "unknown"
+        return "irrelevant"
 
     def _build_objective_candidate_inputs(
         self,
@@ -1362,37 +1351,12 @@ class ResearchObjectiveService:
             return target_units
 
         target_document_ids = {unit.document_id for unit in target_units}
-        target_source_refs = {
-            (
-                str(source_ref.get("source_kind") or ""),
-                str(source_ref.get("source_ref") or ""),
-            )
-            for unit in target_units
-            for source_ref in unit.source_refs
-            if source_ref.get("source_ref")
-        }
         selected_ids = {unit.evidence_id for unit in target_units}
         selected = list(target_units)
         for unit in evidence_items:
-            if unit.evidence_id in selected_ids or unit.property_normalized:
+            if unit.evidence_id in selected_ids or unit.reported_result is not None:
                 continue
-            if unit.evidence_kind not in {
-                "process_context",
-                "sample_context",
-                "test_condition",
-            }:
-                continue
-            source_refs = {
-                (
-                    str(source_ref.get("source_kind") or ""),
-                    str(source_ref.get("source_ref") or ""),
-                )
-                for source_ref in unit.source_refs
-                if source_ref.get("source_ref")
-            }
-            if unit.document_id in target_document_ids and (
-                not source_refs or bool(source_refs & target_source_refs)
-            ):
+            if unit.document_id in target_document_ids:
                 selected.append(unit)
                 selected_ids.add(unit.evidence_id)
         return tuple(selected)
@@ -1403,68 +1367,11 @@ class ResearchObjectiveService:
         *,
         target_axes: tuple[str, ...],
     ) -> bool:
-        if self._objective_evidence_is_relative_change_interpretation(unit):
+        if unit.reported_result is None:
             return False
-        if (
-            unit.evidence_kind == "measurement"
-            and self._objective_measurement_numeric_value(unit) is None
-        ):
-            return False
-        if self._objective_property_matches_target_axes(
-            unit.property_normalized,
+        return self._objective_property_matches_target_axes(
+            unit.reported_result.outcome,
             target_axes=target_axes,
-        ):
-            return True
-        if unit.evidence_kind in {"test_condition", "sample_context", "process_context"}:
-            return False
-        text = " ".join(
-            value
-            for value in (
-                self._value_payload_text(unit.value_payload),
-                unit.interpretation,
-            )
-            if value
-        )
-        return any(
-            self._axis_label_is_mentioned(text, axis)
-            for axis in target_axes
-        )
-
-    def _objective_evidence_is_relative_change_interpretation(
-        self,
-        unit: ExtractedEvidenceDraft,
-    ) -> bool:
-        if unit.evidence_kind != "interpretation" or unit.baseline_context:
-            return False
-        text = " ".join(
-            value
-            for value in (
-                self._value_payload_text(unit.value_payload),
-                unit.interpretation,
-            )
-            if value
-        )
-        if not text:
-            return False
-        property_name = self._normalize_property_label(unit.property_normalized)
-        if property_name != "elongation" and not re.search(
-            r"\b(?:ductility|elongation)\b",
-            text,
-            flags=re.IGNORECASE,
-        ):
-            return False
-        return bool(
-            re.search(
-                r"\b(?:increase[sd]?|decrease[sd]?|improve[sd]?|reduce[sd]?)\b",
-                text,
-                flags=re.IGNORECASE,
-            )
-            and re.search(
-                r"\bby\s+(?:about\s+|approximately\s+|approx\.?\s+|~\s*)?"
-                r"\d+(?:\.\d+)?\s*%",
-                text,
-                flags=re.IGNORECASE,
-            )
         )
 
     def _objective_property_matches_target_axes(
@@ -1489,21 +1396,6 @@ class ResearchObjectiveService:
             )
             for expanded_axis in expanded_axes
         )
-
-    def _has_observed_evidence_value(self, value: Any) -> bool:
-        if value in (None, "", [], {}):
-            return False
-        if isinstance(value, str) and value.strip().lower() in {
-            "unknown",
-            "unspecified",
-            "not specified",
-            "n/a",
-            "na",
-            "none",
-            "null",
-        }:
-            return False
-        return True
 
     def _progress_document_metadata(
         self,
@@ -1809,7 +1701,6 @@ class ResearchObjectiveService:
                                         candidate=candidate,
                                     ),
                                     "column_roles": {},
-                                    "join_keys": {},
                                     "join_plan": {},
                                     "confidence": 0.7,
                                 }
@@ -1988,11 +1879,10 @@ class ResearchObjectiveService:
                         if objective_context is not None
                         else {}
                     ),
-                    "join_keys": {},
                 }
             )
         else:
-            finalized.update({"column_roles": {}, "join_keys": {}})
+            finalized.update({"column_roles": {}})
         return finalized
 
     def _append_objective_context_hint_routes(
@@ -2048,7 +1938,6 @@ class ResearchObjectiveService:
                             hint_role=hint.role,
                             table_schema=table_schema,
                         ),
-                        "join_keys": {},
                         "join_plan": {},
                         "confidence": objective_context.confidence,
                     }
@@ -2248,7 +2137,6 @@ class ResearchObjectiveService:
                         "join_plan": {"evidence_role": evidence_role},
                         "table_schema": {},
                         "column_roles": {},
-                        "join_keys": {},
                         "confidence": 0.62,
                     }
                 )
@@ -2450,7 +2338,6 @@ class ResearchObjectiveService:
             objective.objective_id: objective
             for objective in objectives
         }
-        context_by_objective_id = objective_by_id
         frame_by_key = {
             (frame.objective_id, frame.document_id): frame
             for frame in objective_paper_frames
@@ -2524,7 +2411,7 @@ class ResearchObjectiveService:
                     len(extractable_routes),
                 )
                 continue
-            objective_context = context_by_objective_id.get(route.objective_id)
+            objective_context = objective_by_id.get(route.objective_id)
             tree_position = self._route_tree_position(
                 self._source_candidate_from_route(
                     route=route,
@@ -2657,26 +2544,8 @@ class ResearchObjectiveService:
             collection_id,
             len(units),
         )
-        resolved_units = self._resolve_objective_evidence_contexts(tuple(units))
-        resolved_units = self._inherit_objective_material_systems(
-            resolved_units,
-            objectives=objectives,
-        )
-        resolved_units = self._dedupe_shared_density_measurements(
-            resolved_units,
-            context_by_objective_id=context_by_objective_id,
-        )
-        resolved_units = self._attach_objective_method_test_conditions_to_measurements(
-            resolved_units
-        )
-        table_characterization_units = self._build_objective_table_characterization_units(
-            units=resolved_units,
-            objectives=objectives,
-        )
-        if table_characterization_units:
-            resolved_units = (*resolved_units, *table_characterization_units)
         comparison_units = self._build_objective_pairwise_comparison_units(
-            resolved_units,
+            tuple(units),
             objectives=objectives,
         )
         if comparison_units:
@@ -2685,7 +2554,7 @@ class ResearchObjectiveService:
                 collection_id,
                 len(comparison_units),
             )
-        return (*resolved_units, *comparison_units)
+        return (*units, *comparison_units)
 
     def _objective_table_route_should_skip_llm_fallback(
         self,
@@ -3020,100 +2889,7 @@ class ResearchObjectiveService:
         deterministic_records: tuple[dict[str, Any], ...],
         llm_records: tuple[dict[str, Any], ...],
     ) -> tuple[dict[str, Any], ...]:
-        if not deterministic_records:
-            return llm_records
-        if not llm_records:
-            return deterministic_records
-        preserved_records = tuple(
-            record
-            for record in deterministic_records
-            if not (
-                self._objective_evidence_record_has_fragmented_context(record)
-                and any(
-                    self._objective_evidence_records_have_same_result(record, llm_record)
-                    for llm_record in llm_records
-                )
-            )
-        )
-        return (*preserved_records, *llm_records)
-
-    def _objective_evidence_records_have_same_result(
-        self,
-        left: dict[str, Any],
-        right: dict[str, Any],
-    ) -> bool:
-        left_key = self._objective_evidence_record_result_key(left)
-        right_key = self._objective_evidence_record_result_key(right)
-        if left_key is None or right_key is None:
-            return False
-        left_kind, left_property, left_unit, left_value = left_key
-        right_kind, right_property, right_unit, right_value = right_key
-        return (
-            left_kind == right_kind
-            and left_unit == right_unit
-            and left_value == right_value
-            and self._objective_result_properties_match(left_property, right_property)
-        )
-
-    def _objective_result_properties_match(self, left: str, right: str) -> bool:
-        if not left or not right:
-            return left == right
-        return (
-            left == right
-            or self._axis_values_match(left, right)
-            or left in right
-            or right in left
-        )
-
-    def _objective_evidence_record_result_key(
-        self,
-        record: dict[str, Any],
-    ) -> tuple[str, str, str, str] | None:
-        value_payload = (
-            record.get("value_payload")
-            if isinstance(record.get("value_payload"), dict)
-            else {}
-        )
-        raw_value = next(
-            (
-                candidate
-                for candidate in (
-                    value_payload.get("value"),
-                    value_payload.get("source_value_text"),
-                    value_payload.get("value_text"),
-                )
-                if candidate not in (None, "", [], {})
-            ),
-            None,
-        )
-        if raw_value in (None, "", [], {}):
-            return None
-        return (
-            str(record.get("evidence_kind") or "").strip().casefold(),
-            str(record.get("property_normalized") or "").strip().casefold(),
-            str(record.get("unit") or "").strip().casefold(),
-            str(raw_value).strip().casefold(),
-        )
-
-    def _objective_evidence_record_has_fragmented_context(
-        self,
-        record: dict[str, Any],
-    ) -> bool:
-        return any(
-            self._objective_payload_has_fragmented_text(record.get(field))
-            for field in ("sample_context", "process_context", "test_condition", "join_keys")
-        )
-
-    def _objective_payload_has_fragmented_text(self, value: Any) -> bool:
-        if isinstance(value, str):
-            return self._objective_cell_text_looks_structurally_fragmented(value)
-        if isinstance(value, Mapping):
-            values = value.values()
-        elif isinstance(value, (list, tuple)):
-            values = value
-        else:
-            return False
-        return any(self._objective_payload_has_fragmented_text(item) for item in values)
+        return deterministic_records or llm_records
 
     def _build_objective_method_family_test_condition_units(
         self,
@@ -3164,15 +2940,23 @@ class ResearchObjectiveService:
                         ),
                         "objective_id": frame.objective_id,
                         "document_id": frame.document_id,
-                        "evidence_kind": "test_condition",
-                        "property_normalized": family,
-                        "test_condition": {
-                            "method_family": family,
-                            **payload,
-                        },
-                        "value_payload": {
-                            "method_family": family,
-                            "evidence_quote": quote,
+                        "evidence_role": "condition_context",
+                        "selection_reason": quote,
+                        "changed_variables": [],
+                        "comparison": None,
+                        "reported_result": None,
+                        "attribution_scope": "not_attributable",
+                        "scientific_context": {
+                            "material": [],
+                            "sample": [],
+                            "process": [],
+                            "test": [
+                                {"name": "method_family", "value": family},
+                                *(
+                                    {"name": key, "value": value}
+                                    for key, value in payload.items()
+                                ),
+                            ],
                         },
                         "source_refs": (
                             {
@@ -3219,12 +3003,6 @@ class ResearchObjectiveService:
         if normalized in _OBJECTIVE_CHARACTERIZATION_METHOD_PROPERTIES:
             return "density_porosity_microstructure"
         return None
-
-    def _objective_property_is_characterization(self, property_name: Any) -> bool:
-        return (
-            self._objective_method_family_for_property(property_name)
-            == "density_porosity_microstructure"
-        )
 
     def _objective_method_family_candidate(
         self,
@@ -3490,348 +3268,6 @@ class ResearchObjectiveService:
         seed = "|".join(("method_family", objective_id, document_id, family))
         return f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
 
-    def _inherit_objective_material_systems(
-        self,
-        units: tuple[ExtractedEvidenceDraft, ...],
-        *,
-        objectives: tuple[ResearchObjective, ...],
-    ) -> tuple[ExtractedEvidenceDraft, ...]:
-        context_materials = {
-            objective.objective_id: self._single_material_system_from_scope(
-                objective.material_scope
-            )
-            for objective in objectives
-        }
-        if not any(context_materials.values()):
-            return units
-
-        resolved_units: list[ExtractedEvidenceDraft] = []
-        for unit in units:
-            if self._has_observed_evidence_value(unit.material_system):
-                resolved_units.append(unit)
-                continue
-            material_system = context_materials.get(unit.objective_id)
-            if material_system is None:
-                resolved_units.append(unit)
-                continue
-            record = unit.to_record()
-            record["material_system"] = material_system
-            resolved_units.append(ExtractedEvidenceDraft.from_mapping(record))
-        return tuple(resolved_units)
-
-    def _single_material_system_from_scope(
-        self,
-        material_scope: tuple[str, ...],
-    ) -> dict[str, str] | None:
-        materials_by_key: dict[str, str] = {}
-        for material in material_scope:
-            text = str(material or "").strip()
-            if not text or not self._has_observed_evidence_value(text):
-                continue
-            key = self._axis_key(text)
-            if not key:
-                continue
-            materials_by_key.setdefault(key, text)
-        if len(materials_by_key) != 1:
-            return None
-        return {"family": next(iter(materials_by_key.values()))}
-
-    def _attach_objective_method_test_conditions_to_measurements(
-        self,
-        units: tuple[ExtractedEvidenceDraft, ...],
-    ) -> tuple[ExtractedEvidenceDraft, ...]:
-        method_conditions = {
-            (
-                unit.objective_id,
-                unit.document_id,
-                str(unit.property_normalized or ""),
-            ): unit
-            for unit in units
-            if unit.evidence_kind == "test_condition"
-            and unit.property_normalized in _OBJECTIVE_METHOD_FAMILY_PROPERTY_TYPES
-        }
-        if not method_conditions:
-            return units
-
-        resolved_units: list[ExtractedEvidenceDraft] = []
-        for unit in units:
-            if unit.evidence_kind != "measurement" or unit.test_condition:
-                resolved_units.append(unit)
-                continue
-            family = self._objective_method_family_for_property(
-                unit.property_normalized
-            )
-            if family is None:
-                resolved_units.append(unit)
-                continue
-            condition = method_conditions.get(
-                (unit.objective_id, unit.document_id, family)
-            )
-            if condition is None:
-                resolved_units.append(unit)
-                continue
-            record = unit.to_record()
-            record.update(
-                {
-                    "test_condition": dict(condition.test_condition),
-                    "resolved_condition": {
-                        **unit.resolved_condition,
-                        "test_condition_unit_id": condition.evidence_id,
-                        "test_condition_family": family,
-                    },
-                    "resolution_status": "resolved",
-                }
-            )
-            resolved_units.append(ExtractedEvidenceDraft.from_mapping(record))
-        return tuple(resolved_units)
-
-    def _build_objective_table_characterization_units(
-        self,
-        *,
-        units: tuple[ExtractedEvidenceDraft, ...],
-        objectives: tuple[ResearchObjective, ...],
-    ) -> tuple[ExtractedEvidenceDraft, ...]:
-        objective_ids_with_characterization_target = {
-            context.objective_id
-            for context in objectives
-            if any(
-                self._objective_property_is_characterization(axis)
-                for axis in context.outcomes
-            )
-        }
-        density_units_by_scope: dict[tuple[str, str], list[ExtractedEvidenceDraft]] = {}
-        for unit in units:
-            if unit.evidence_kind != "measurement":
-                continue
-            if unit.objective_id not in objective_ids_with_characterization_target:
-                continue
-            if self._normalize_property_label(unit.property_normalized) not in {
-                "density",
-                "relative density",
-            }:
-                continue
-            if self._objective_measurement_numeric_value(unit) is None:
-                continue
-            density_units_by_scope.setdefault(
-                (unit.objective_id, unit.document_id),
-                [],
-            ).append(unit)
-
-        records: list[dict[str, Any]] = []
-        for (objective_id, document_id), density_units in density_units_by_scope.items():
-            if not density_units:
-                continue
-            records.extend(
-                self._objective_density_characterization_records(
-                    objective_id=objective_id,
-                    document_id=document_id,
-                    density_units=density_units,
-                )
-            )
-            records.extend(
-                self._objective_strategy_characterization_records(
-                    objective_id=objective_id,
-                    document_id=document_id,
-                    density_units=density_units,
-                )
-            )
-        return tuple(ExtractedEvidenceDraft.from_mapping(record) for record in records)
-
-    def _objective_density_characterization_records(
-        self,
-        *,
-        objective_id: str,
-        document_id: str,
-        density_units: list[ExtractedEvidenceDraft],
-    ) -> list[dict[str, Any]]:
-        values = [
-            (unit, self._objective_measurement_numeric_value(unit))
-            for unit in density_units
-        ]
-        numeric_values = [
-            (unit, value)
-            for unit, value in values
-            if value is not None
-        ]
-        if not numeric_values:
-            return []
-        min_value = min(value for _, value in numeric_values)
-        max_unit, max_value = max(numeric_values, key=lambda item: item[1])
-        sample_label = self._objective_sample_label(max_unit.sample_context)
-        source_refs = self._dedupe_objective_source_refs(
-            unit.source_refs
-            for unit, _ in numeric_values
-        )
-        return [
-            self._objective_characterization_record(
-                objective_id=objective_id,
-                document_id=document_id,
-                characterization_type="density_porosity_sem_imagej",
-                property_normalized="relative density",
-                sample_context={"sample_count": len(numeric_values)},
-                value_payload={
-                    "relative_density_min": min_value,
-                    "relative_density_max": max_value,
-                    "sample_count": len(numeric_values),
-                },
-                unit="%",
-                interpretation=(
-                    "Table-derived SEM/ImageJ relative density evidence covers "
-                    f"{len(numeric_values)} samples with relative density from "
-                    f"{min_value:g}% to {max_value:g}%."
-                ),
-                source_refs=source_refs,
-            ),
-            self._objective_characterization_record(
-                objective_id=objective_id,
-                document_id=document_id,
-                characterization_type="highest_density_sample",
-                property_normalized="relative density",
-                sample_context=dict(max_unit.sample_context),
-                process_context=dict(max_unit.process_context),
-                value_payload={
-                    "relative_density": max_value,
-                    "sample_label": sample_label,
-                },
-                unit="%",
-                interpretation=(
-                    f"Sample {sample_label} has the highest table-derived "
-                    f"relative density at {max_value:g}%."
-                ),
-                source_refs=tuple(dict(ref) for ref in max_unit.source_refs),
-            ),
-        ]
-
-    def _objective_strategy_characterization_records(
-        self,
-        *,
-        objective_id: str,
-        document_id: str,
-        density_units: list[ExtractedEvidenceDraft],
-    ) -> list[dict[str, Any]]:
-        units_by_strategy: dict[str, list[ExtractedEvidenceDraft]] = {}
-        for unit in density_units:
-            strategy = self._objective_process_value(
-                unit.process_context,
-                "scan_strategy",
-            )
-            if strategy:
-                units_by_strategy.setdefault(strategy.upper(), []).append(unit)
-
-        records: list[dict[str, Any]] = []
-        for strategy in sorted(units_by_strategy):
-            strategy_units = units_by_strategy[strategy]
-            values = [
-                self._objective_measurement_numeric_value(unit)
-                for unit in strategy_units
-            ]
-            numeric_values = [value for value in values if value is not None]
-            if not numeric_values:
-                continue
-            sample_labels = self._dedupe_preserving_order(
-                [
-                    self._objective_sample_label(unit.sample_context)
-                    for unit in strategy_units
-                ]
-            )
-            records.append(
-                self._objective_characterization_record(
-                    objective_id=objective_id,
-                    document_id=document_id,
-                    characterization_type=f"scan_strategy_{strategy.lower()}",
-                    property_normalized="relative density",
-                    sample_context={
-                        "scan_strategy": strategy,
-                        "sample_labels": sample_labels,
-                    },
-                    value_payload={
-                        "scan_strategy": strategy,
-                        "relative_density_min": min(numeric_values),
-                        "relative_density_max": max(numeric_values),
-                    },
-                    unit="%",
-                    interpretation=(
-                        f"Scan strategy {strategy} appears in samples "
-                        f"{', '.join(sample_labels)} with table-derived relative "
-                        f"density from {min(numeric_values):g}% to "
-                        f"{max(numeric_values):g}%."
-                    ),
-                    source_refs=self._dedupe_objective_source_refs(
-                        unit.source_refs for unit in strategy_units
-                    ),
-                )
-            )
-        return records
-
-    def _objective_characterization_record(
-        self,
-        *,
-        objective_id: str,
-        document_id: str,
-        characterization_type: str,
-        property_normalized: str,
-        sample_context: dict[str, Any],
-        value_payload: dict[str, Any],
-        unit: str,
-        interpretation: str,
-        source_refs: tuple[dict[str, Any], ...],
-        process_context: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        seed = "|".join(
-            (
-                "characterization",
-                objective_id,
-                document_id,
-                characterization_type,
-            )
-        )
-        return {
-            "evidence_id": f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}",
-            "objective_id": objective_id,
-            "document_id": document_id,
-            "evidence_kind": "characterization",
-            "property_normalized": property_normalized,
-            "sample_context": sample_context,
-            "process_context": process_context or {},
-            "test_condition": {
-                "method": "SEM / ImageJ",
-                "methods": ["SEM", "ImageJ"],
-                "method_family": "density_porosity_microstructure",
-            },
-            "value_payload": {
-                "characterization_type": characterization_type,
-                **value_payload,
-            },
-            "unit": unit,
-            "interpretation": interpretation,
-            "source_refs": source_refs,
-            "resolution_status": "resolved",
-            "confidence": 0.86,
-        }
-
-    def _objective_process_value(
-        self,
-        process_context: dict[str, Any],
-        target_key: str,
-    ) -> str | None:
-        for key, value in process_context.items():
-            if self._objective_column_key(str(key)) == target_key:
-                text = str(value or "").strip()
-                return text or None
-        return None
-
-    def _objective_sample_label(self, sample_context: dict[str, Any]) -> str:
-        for key in ("Sample number", "sample_number", "sample", "label"):
-            value = sample_context.get(key)
-            if value not in (None, ""):
-                return str(value).strip()
-        for key, value in sample_context.items():
-            if "sample" in self._objective_column_key(str(key)) and value not in (
-                None,
-                "",
-            ):
-                return str(value).strip()
-        return "sample"
 
     def _dedupe_objective_source_refs(
         self,
@@ -3848,516 +3284,6 @@ class ResearchObjectiveService:
                 deduped.append(dict(ref))
         return tuple(deduped)
 
-    def _resolve_objective_evidence_contexts(
-        self,
-        units: tuple[ExtractedEvidenceDraft, ...],
-    ) -> tuple[ExtractedEvidenceDraft, ...]:
-        context_units_by_key: dict[
-            tuple[str, str, tuple[tuple[str, str], ...]],
-            list[ExtractedEvidenceDraft],
-        ] = {}
-        context_units_by_scope: dict[
-            tuple[str, str],
-            list[ExtractedEvidenceDraft],
-        ] = {}
-        for unit in units:
-            if unit.evidence_kind == "measurement":
-                continue
-            if not unit.process_context and not unit.test_condition:
-                continue
-            context_units_by_scope.setdefault(
-                (unit.objective_id, unit.document_id),
-                [],
-            ).append(unit)
-            for key in self._objective_sample_context_match_keys(unit.sample_context):
-                context_units_by_key.setdefault(
-                    (unit.objective_id, unit.document_id, key),
-                    [],
-                ).append(unit)
-
-        resolved_units: list[ExtractedEvidenceDraft] = []
-        for unit in units:
-            if unit.evidence_kind != "measurement":
-                resolved_units.append(unit)
-                continue
-            context_units = self._matching_objective_context_units(
-                unit=unit,
-                context_units_by_key=context_units_by_key,
-                context_units_by_scope=context_units_by_scope,
-            )
-            if not context_units:
-                resolved_units.append(unit)
-                continue
-            merged_process_context = dict(unit.process_context)
-            merged_test_condition = dict(unit.test_condition)
-            context_source_refs: list[dict[str, Any]] = []
-            for context_unit in context_units:
-                merged_process_context = {
-                    **context_unit.process_context,
-                    **merged_process_context,
-                }
-                merged_test_condition = {
-                    **context_unit.test_condition,
-                    **merged_test_condition,
-                }
-                context_source_refs.extend(
-                    {
-                        **dict(source_ref),
-                        "evidence_role": "condition_context",
-                    }
-                    for source_ref in context_unit.source_refs
-                )
-            merged_source_refs = self._dedupe_objective_source_refs(
-                (unit.source_refs, context_source_refs)
-            )
-            merged_sample_context = self._objective_resolved_sample_context(
-                sample_context=unit.sample_context,
-                context_sample_context=self._merged_objective_context_sample_context(
-                    context_units
-                ),
-            )
-            if (
-                merged_process_context == unit.process_context
-                and merged_test_condition == unit.test_condition
-                and merged_sample_context == unit.sample_context
-                and merged_source_refs == unit.source_refs
-            ):
-                resolved_units.append(unit)
-                continue
-            resolved_condition = dict(unit.resolved_condition)
-            if len(context_units) == 1:
-                resolved_condition["context_unit_id"] = context_units[0].evidence_id
-                resolved_condition["matched_sample_context"] = dict(
-                    context_units[0].sample_context
-                )
-            else:
-                resolved_condition["context_unit_ids"] = [
-                    context_unit.evidence_id for context_unit in context_units
-                ]
-                resolved_condition["matched_sample_contexts"] = [
-                    dict(context_unit.sample_context) for context_unit in context_units
-                ]
-            record = unit.to_record()
-            record.update(
-                {
-                    "process_context": merged_process_context,
-                    "sample_context": merged_sample_context,
-                    "test_condition": merged_test_condition,
-                    "source_refs": merged_source_refs,
-                    "resolved_condition": resolved_condition,
-                    "resolution_status": "resolved",
-                }
-            )
-            resolved_units.append(ExtractedEvidenceDraft.from_mapping(record))
-        return tuple(resolved_units)
-
-    def _dedupe_shared_density_measurements(
-        self,
-        units: tuple[ExtractedEvidenceDraft, ...],
-        *,
-        context_by_objective_id: dict[str, ResearchObjective],
-    ) -> tuple[ExtractedEvidenceDraft, ...]:
-        best_by_key: dict[tuple[str, str, str, float, str], tuple[int, int]] = {}
-        duplicate_keys: set[tuple[str, str, str, float, str]] = set()
-        for index, unit in enumerate(units):
-            key = self._shared_density_measurement_key(unit)
-            if key is None:
-                continue
-            score = self._shared_density_measurement_objective_score(
-                unit,
-                objective_context=context_by_objective_id.get(unit.objective_id),
-            )
-            current = best_by_key.get(key)
-            if current is None or score > current[0]:
-                if current is not None:
-                    duplicate_keys.add(key)
-                best_by_key[key] = (score, index)
-            else:
-                duplicate_keys.add(key)
-        if not duplicate_keys:
-            return units
-
-        keep_indexes = {
-            index
-            for key, (_score, index) in best_by_key.items()
-            if key in duplicate_keys
-        }
-        deduped: list[ExtractedEvidenceDraft] = []
-        for index, unit in enumerate(units):
-            key = self._shared_density_measurement_key(unit)
-            if (
-                key is not None
-                and key in duplicate_keys
-                and index not in keep_indexes
-            ):
-                continue
-            deduped.append(unit)
-        return tuple(deduped)
-
-    def _shared_density_measurement_key(
-        self,
-        unit: ExtractedEvidenceDraft,
-    ) -> tuple[str, str, str, float, str] | None:
-        if unit.evidence_kind != "measurement":
-            return None
-        property_key = self._normalize_property_label(unit.property_normalized)
-        if property_key not in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
-            return None
-        value = self._value_payload_numeric_value(unit.value_payload)
-        if value is None:
-            return None
-        sample_key = self._objective_sample_identity_key(unit.sample_context)
-        if not sample_key:
-            return None
-        return (
-            unit.document_id,
-            property_key,
-            sample_key,
-            value,
-            str(unit.unit or "").casefold(),
-        )
-
-    def _shared_density_measurement_objective_score(
-        self,
-        unit: ExtractedEvidenceDraft,
-        *,
-        objective_context: ResearchObjective | None,
-    ) -> int:
-        if objective_context is None:
-            return 0
-        property_key = self._normalize_property_label(unit.property_normalized)
-        if not property_key:
-            return 0
-        target_axes = self._objective_outcomes(objective_context)
-        if self._property_axis_matches_any(property_key, target_axes):
-            return 30
-        if property_key in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
-            if any(
-                self._property_axis_matches_any(axis, _STRUCTURAL_PROPERTY_AXES)
-                for axis in target_axes
-            ):
-                return 25
-            if any(
-                self._property_axis_matches_any(axis, _MECHANICAL_PROPERTY_AXES)
-                for axis in target_axes
-            ):
-                return 20
-        return 0
-
-    def _objective_sample_identity_key(
-        self,
-        sample_context: dict[str, Any],
-    ) -> str:
-        for key in (
-            "sample_number",
-            "sample_id",
-            "Sample number",
-            "Sample",
-            "case",
-            "Case",
-        ):
-            value = str(sample_context.get(key) or "").strip()
-            if value:
-                return value.casefold()
-        for key, value in sorted(sample_context.items()):
-            value_text = str(value or "").strip()
-            if value_text:
-                return f"{key}:{value_text}".casefold()
-        return ""
-
-    def _matching_objective_context_units(
-        self,
-        *,
-        unit: ExtractedEvidenceDraft,
-        context_units_by_key: dict[
-            tuple[str, str, tuple[tuple[str, str], ...]],
-            list[ExtractedEvidenceDraft],
-        ],
-        context_units_by_scope: dict[
-            tuple[str, str],
-            list[ExtractedEvidenceDraft],
-        ],
-    ) -> tuple[ExtractedEvidenceDraft, ...]:
-        matched: list[ExtractedEvidenceDraft] = []
-        scope_candidates = context_units_by_scope.get(
-            (unit.objective_id, unit.document_id),
-            [],
-        )
-        if self._objective_sample_context_has_process_label(unit.sample_context):
-            label_context_unit = self._matching_objective_process_label_context_unit(
-                unit=unit,
-                candidates=scope_candidates,
-            )
-            if label_context_unit is not None:
-                if self._objective_sample_context_has_stable_label(
-                    unit.sample_context
-                ):
-                    return (label_context_unit,)
-                matched.append(label_context_unit)
-        for key in self._objective_sample_context_match_keys(unit.sample_context):
-            candidates = context_units_by_key.get(
-                (unit.objective_id, unit.document_id, key),
-                [],
-            )
-            if len(candidates) == 1:
-                matched.extend(candidates)
-                continue
-            process_context_candidates = [
-                candidate
-                for candidate in candidates
-                if candidate.evidence_kind == "process_context"
-            ]
-            if len(process_context_candidates) == 1:
-                matched.extend(process_context_candidates)
-                continue
-            matched.extend(process_context_candidates)
-        fallback = self._matching_objective_process_label_context_unit(
-            unit=unit,
-            candidates=scope_candidates,
-        )
-        if fallback is not None:
-            matched.append(fallback)
-        return self._dedupe_objective_context_units(matched)
-
-    def _dedupe_objective_context_units(
-        self,
-        units: list[ExtractedEvidenceDraft],
-    ) -> tuple[ExtractedEvidenceDraft, ...]:
-        deduped: list[ExtractedEvidenceDraft] = []
-        seen: set[str] = set()
-        for unit in units:
-            if not unit.process_context and not unit.test_condition:
-                continue
-            key = unit.evidence_id
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(unit)
-        return tuple(deduped)
-
-    def _merged_objective_context_sample_context(
-        self,
-        units: tuple[ExtractedEvidenceDraft, ...],
-    ) -> dict[str, Any]:
-        merged: dict[str, Any] = {}
-        for unit in units:
-            merged.update(unit.sample_context)
-        return merged
-
-    def _objective_sample_context_has_process_label(
-        self,
-        sample_context: dict[str, Any],
-    ) -> bool:
-        if self._objective_sample_context_has_stable_label(sample_context):
-            return True
-        sample_number_keys = {
-            "condition",
-            "condition_no",
-            "condition_number",
-            "sample_no",
-            "sample_number",
-        }
-        for key, value in sample_context.items():
-            if self._objective_column_key(str(key)) in sample_number_keys:
-                continue
-            if re.search(r"[A-Za-z]", str(value or "")):
-                return True
-        return False
-
-    def _objective_resolved_sample_context(
-        self,
-        *,
-        sample_context: dict[str, Any],
-        context_sample_context: dict[str, Any],
-    ) -> dict[str, Any]:
-        merged = dict(sample_context)
-        if self._objective_sample_context_has_explicit_number(merged):
-            return merged
-        for key, value in context_sample_context.items():
-            if self._objective_column_key(str(key)) not in {
-                "sample_no",
-                "sample_number",
-            }:
-                continue
-            if str(value).strip():
-                merged[key] = value
-                break
-        return merged
-
-    def _matching_objective_process_label_context_unit(
-        self,
-        *,
-        unit: ExtractedEvidenceDraft,
-        candidates: list[ExtractedEvidenceDraft],
-    ) -> ExtractedEvidenceDraft | None:
-        match_fragments = [
-            str(value).strip()
-            for value in (
-                tuple(unit.sample_context.values())
-                + tuple(unit.process_context.values())
-            )
-            if str(value).strip()
-        ]
-        if not match_fragments:
-            return None
-        match_numbers: set[str] = set()
-        for fragment in match_fragments:
-            match_numbers.update(self._objective_numeric_match_tokens(fragment))
-        match_text = self._objective_match_text(" ".join(match_fragments))
-        scored: list[tuple[int, ExtractedEvidenceDraft]] = []
-        for candidate in candidates:
-            if not candidate.process_context:
-                continue
-            score = self._objective_process_label_match_score(
-                sample_context=candidate.sample_context,
-                process_context=candidate.process_context,
-                sample_numbers=match_numbers,
-                sample_text=match_text,
-            )
-            if score >= 2:
-                scored.append((score, candidate))
-        if not scored:
-            return None
-        best_score = max(score for score, _candidate in scored)
-        winners = [
-            candidate
-            for score, candidate in scored
-            if score == best_score
-        ]
-        if len(winners) == 1:
-            return winners[0]
-        sample_number_keys = {
-            "condition",
-            "condition_no",
-            "condition_number",
-            "sample_no",
-            "sample_number",
-        }
-        labeled_winners: list[tuple[ExtractedEvidenceDraft, set[str]]] = []
-        for candidate in winners:
-            candidate_label_tokens = self._objective_context_label_tokens(
-                candidate.sample_context,
-                skip_keys=sample_number_keys,
-            ) | self._objective_context_label_tokens(candidate.process_context)
-            if candidate_label_tokens:
-                labeled_winners.append((candidate, candidate_label_tokens))
-        if len(labeled_winners) == 1:
-            return labeled_winners[0][0]
-        match_label_tokens = {
-            token
-            for token in match_text.split()
-            if len(token) > 1 and not token.isdigit()
-        }
-        if match_label_tokens:
-            scored_labeled_winners = [
-                (len(candidate_label_tokens & match_label_tokens), candidate)
-                for candidate, candidate_label_tokens in labeled_winners
-            ]
-            best_label_score = max(
-                (score for score, _candidate in scored_labeled_winners),
-                default=0,
-            )
-            best_labeled_winners = [
-                candidate
-                for score, candidate in scored_labeled_winners
-                if score == best_label_score and score > 0
-            ]
-            if len(best_labeled_winners) == 1:
-                return best_labeled_winners[0]
-            sample_labeled_winners = [
-                candidate
-                for candidate in best_labeled_winners
-                if self._objective_context_label_tokens(
-                    candidate.sample_context,
-                    skip_keys=sample_number_keys,
-                )
-            ]
-            if len(sample_labeled_winners) == 1:
-                return sample_labeled_winners[0]
-        numbered_winners = [
-            candidate
-            for candidate in winners
-            if self._objective_sample_context_has_explicit_number(
-                candidate.sample_context
-            )
-        ]
-        if len(numbered_winners) == 1:
-            return numbered_winners[0]
-        return None
-
-    def _objective_context_label_tokens(
-        self,
-        context: dict[str, Any],
-        *,
-        skip_keys: set[str] | None = None,
-    ) -> set[str]:
-        tokens: set[str] = set()
-        for key, value in context.items():
-            column_key = self._objective_column_key(str(key))
-            if skip_keys is not None and column_key in skip_keys:
-                continue
-            if not self._objective_context_key_carries_label(column_key):
-                continue
-            if not re.search(r"[A-Za-z]", str(value or "")):
-                continue
-            tokens.update(self._objective_text_label_tokens(value))
-        return tokens
-
-    def _objective_context_key_carries_label(self, column_key: str) -> bool:
-        return (
-            column_key
-            in {
-                "id",
-                "label",
-                "sample",
-                "sample_id",
-                "sample_label",
-                "specimen",
-                "specimens",
-            }
-            or "sample" in column_key
-            or "specimen" in column_key
-            or "treatment" in column_key
-        )
-
-    def _objective_text_label_tokens(self, value: Any) -> set[str]:
-        return {
-            token
-            for token in self._objective_match_text(value).split()
-            if len(token) > 1 and not token.isdigit()
-        }
-
-    def _objective_process_label_match_score(
-        self,
-        *,
-        sample_context: dict[str, Any],
-        process_context: dict[str, Any],
-        sample_numbers: set[str],
-        sample_text: str,
-    ) -> int:
-        candidate_numbers = {
-            token
-            for value in (*sample_context.values(), *process_context.values())
-            for token in self._objective_numeric_match_tokens(value)
-            if token not in {"1", "-1"}
-        }
-        score = len(candidate_numbers & sample_numbers)
-        sample_tokens = self._objective_text_label_tokens(sample_text)
-        for key, value in (*sample_context.items(), *process_context.items()):
-            value_text = str(value).strip()
-            if not value_text:
-                continue
-            normalized_value = self._objective_match_text(value_text)
-            if len(normalized_value) >= 3 and normalized_value in sample_text:
-                score += 1
-            column_key = self._objective_column_key(str(key))
-            if sample_tokens and self._objective_context_key_carries_label(
-                column_key
-            ):
-                score += 3 * len(
-                    self._objective_text_label_tokens(value_text) & sample_tokens
-                )
-        return score
 
     def _objective_numeric_match_tokens(self, value: Any) -> tuple[str, ...]:
         tokens: list[str] = []
@@ -4383,1370 +3309,284 @@ class ResearchObjectiveService:
         *,
         objectives: tuple[ResearchObjective, ...],
     ) -> tuple[ExtractedEvidenceDraft, ...]:
-        context_by_objective_id = {
-            context.objective_id: context
-            for context in objectives
-        }
-        existing_keys = {
-            self._objective_comparison_pair_key(unit)
-            for unit in units
-            if unit.evidence_kind == "comparison"
-        }
-        measurements_by_key: dict[
-            tuple[str, str, str, str | None],
+        del objectives
+        results_by_scope: dict[
+            tuple[str, str, str, str | None, str, str],
             list[ExtractedEvidenceDraft],
         ] = {}
-        allowed_pair_specs_by_scope = self._objective_pairwise_allowed_specs(
-            units,
-            context_by_objective_id=context_by_objective_id,
-        )
         for unit in units:
-            objective_context = context_by_objective_id.get(unit.objective_id)
-            if unit.evidence_kind != "measurement":
+            result = unit.reported_result
+            if result is None or unit.attribution_scope != "descriptive_only":
                 continue
-            if (
-                not unit.property_normalized
-                or not unit.sample_context
-                or not self._objective_unit_has_pairwise_context(unit)
-                or self._objective_measurement_numeric_value(unit) is None
-                or not self._objective_unit_matches_target_property(
-                    unit,
-                    objective_context=objective_context,
-                )
-            ):
+            if self._coerce_number(result.value) is None or not unit.source_refs:
                 continue
-            measurements_by_key.setdefault(
+            primary_source = unit.source_refs[0]
+            results_by_scope.setdefault(
                 (
                     unit.objective_id,
                     unit.document_id,
-                    unit.property_normalized,
-                    unit.unit,
+                    result.outcome,
+                    result.unit,
+                    str(primary_source.get("source_kind") or ""),
+                    str(primary_source.get("source_ref") or ""),
                 ),
                 [],
             ).append(unit)
 
         generated: list[ExtractedEvidenceDraft] = []
-        generated_keys: set[tuple[str, str, str, str, str, str]] = set()
-        for (
-            objective_id,
-            _document_id,
-            _property_normalized,
-            _unit,
-        ), measurements in measurements_by_key.items():
-            objective_context = context_by_objective_id.get(objective_id)
-            allow_multi_axis = False
-            if len(measurements) <= 3:
-                allow_multi_axis = not any(
-                    self._objective_single_changed_axis(
-                        current=current,
-                        baseline=candidate,
-                        objective_context=objective_context,
-                    )
-                    is not None
-                    for current_index, current in enumerate(measurements)
-                    for candidate in measurements[current_index + 1:]
-                )
-            for current_index, current in enumerate(measurements):
-                for candidate in measurements[current_index + 1:]:
-                    comparison_axis = self._objective_single_changed_axis(
-                        current=current,
-                        baseline=candidate,
-                        objective_context=objective_context,
-                        allow_multi_axis=allow_multi_axis,
-                    )
-                    if comparison_axis is None:
-                        continue
-                    allowed_pair_specs = allowed_pair_specs_by_scope.get(
-                        (objective_id, current.document_id)
-                    )
-                    if allowed_pair_specs is not None and (
-                        self._objective_pairwise_relation_spec_key(current, candidate)
-                        not in allowed_pair_specs
-                    ):
-                        continue
-                    comparison_unit = self._objective_pairwise_comparison_unit(
-                        first=current,
-                        second=candidate,
-                        comparison_axis=comparison_axis,
-                        objective_context=objective_context,
-                    )
-                    pair_key = self._objective_comparison_pair_key(comparison_unit)
-                    if pair_key in existing_keys or pair_key in generated_keys:
-                        continue
-                    generated_keys.add(pair_key)
-                    generated.append(comparison_unit)
-        return self._select_objective_comparison_units(tuple(generated))
-
-    def _select_objective_comparison_units(
-        self,
-        units: tuple[ExtractedEvidenceDraft, ...],
-    ) -> tuple[ExtractedEvidenceDraft, ...]:
-        if not units:
-            return ()
-        scope_counts: dict[tuple[str, str], int] = {}
-        for unit in units:
-            scope_key = (unit.objective_id, unit.document_id)
-            scope_counts[scope_key] = scope_counts.get(scope_key, 0) + 1
-        if all(
-            count <= _OBJECTIVE_PAIRWISE_LARGE_SCOPE_LIMIT
-            for count in scope_counts.values()
-        ):
-            return units
-
-        grouped_units: dict[tuple[str, str, str, str], list[ExtractedEvidenceDraft]] = {}
-        for unit in units:
-            scope_key = (unit.objective_id, unit.document_id)
-            if scope_counts.get(scope_key, 0) <= _OBJECTIVE_PAIRWISE_LARGE_SCOPE_LIMIT:
-                continue
-            comparison_axis = str(unit.value_payload.get("comparison_axis") or "")
-            axis_key = self._normalize_property_label(comparison_axis) or comparison_axis
-            grouped_units.setdefault(
-                (
-                    unit.objective_id,
-                    unit.document_id,
-                    str(unit.property_normalized or ""),
-                    axis_key,
-                ),
-                [],
-            ).append(unit)
-
-        selected_ids: set[str] = set()
-        for group in grouped_units.values():
-            selected_ids.update(
-                unit.evidence_id
-                for unit in sorted(
-                    group,
-                    key=self._objective_comparison_unit_selection_key,
-                )[:_OBJECTIVE_PAIRWISE_GROUP_LIMIT]
-            )
-
-        return tuple(
-            unit
-            for unit in units
-            if scope_counts.get((unit.objective_id, unit.document_id), 0)
-            <= _OBJECTIVE_PAIRWISE_LARGE_SCOPE_LIMIT
-            or unit.evidence_id in selected_ids
-        )
-
-    def _objective_comparison_unit_selection_key(
-        self,
-        unit: ExtractedEvidenceDraft,
-    ) -> tuple[int, float, str, str, str]:
-        controlled_axes = unit.value_payload.get("controlled_axes")
-        controlled_axis_count = (
-            len(controlled_axes) if isinstance(controlled_axes, list) else 0
-        )
-        current_value = self._coerce_number(
-            unit.value_payload.get("current_value")
-            or unit.value_payload.get("value")
-        )
-        baseline_value = self._coerce_number(unit.baseline_context.get("value"))
-        delta = (
-            abs(current_value - baseline_value)
-            if current_value is not None and baseline_value is not None
-            else 0.0
-        )
-        baseline_sample_context = unit.baseline_context.get("sample_context")
-        if not isinstance(baseline_sample_context, dict):
-            baseline_sample_context = {}
-        return (
-            -controlled_axis_count,
-            -delta,
-            self._objective_sample_identity_key(unit.sample_context),
-            self._objective_sample_identity_key(baseline_sample_context),
-            unit.evidence_id,
-        )
-
-    def _objective_pairwise_allowed_specs(
-        self,
-        units: tuple[ExtractedEvidenceDraft, ...],
-        *,
-        context_by_objective_id: dict[str, ResearchObjective],
-    ) -> dict[tuple[str, str], set[tuple[str, str, str]]]:
-        numeric_measurements = tuple(
-            unit
-            for unit in units
-            if unit.evidence_kind == "measurement"
-            and unit.property_normalized
-            and unit.sample_context
-            and self._objective_unit_has_pairwise_context(unit)
-            and self._objective_measurement_numeric_value(unit) is not None
-            and self._objective_unit_matches_target_property(
-                unit,
-                objective_context=context_by_objective_id.get(unit.objective_id),
-            )
-        )
-        document_density_values = self._objective_document_density_values(
-            numeric_measurements
-        )
-        samples_by_scope: dict[tuple[str, str], dict[str, ExtractedEvidenceDraft]] = {}
-        results_by_scope: dict[
-            tuple[str, str],
-            dict[tuple[str, str], ExtractedEvidenceDraft],
-        ] = {}
-        for unit in numeric_measurements:
-            sample_key = self._objective_sample_identity_key(unit.sample_context)
-            property_key = self._objective_pairwise_property_key(
-                unit.property_normalized
-            )
-            if not sample_key or not property_key:
-                continue
-            scope_key = (unit.objective_id, unit.document_id)
-            samples_by_scope.setdefault(scope_key, {}).setdefault(sample_key, unit)
-            results_by_scope.setdefault(scope_key, {})[(sample_key, property_key)] = unit
-
-        allowed_specs_by_scope: dict[tuple[str, str], set[tuple[str, str, str]]] = {}
-        for scope_key, samples_by_key in samples_by_scope.items():
-            allowed_specs_by_scope[scope_key] = (
-                self._select_objective_pairwise_relation_specs(
-                    document_id=scope_key[1],
-                    samples=list(samples_by_key.values()),
-                    result_lookup=results_by_scope.get(scope_key, {}),
-                    document_density_values=document_density_values,
-                    objective_context=context_by_objective_id.get(scope_key[0]),
-                )
-            )
-        return allowed_specs_by_scope
-
-    def _select_objective_pairwise_relation_specs(
-        self,
-        *,
-        document_id: str,
-        samples: list[ExtractedEvidenceDraft],
-        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
-        document_density_values: dict[tuple[str, str], float],
-        objective_context: ResearchObjective | None,
-    ) -> set[tuple[str, str, str]]:
-        all_specs = self._objective_all_pairwise_relation_specs(
-            samples=samples,
-            result_lookup=result_lookup,
-        )
-        if len(samples) <= 3:
-            return all_specs
-
-        pbf_samples: list[dict[str, Any]] = []
-        density_values: dict[str, float] = {}
-        for sample in samples:
-            sample_key = self._objective_sample_identity_key(sample.sample_context)
-            pbf_context = self._objective_pbf_process_context(sample.process_context)
-            density_value = document_density_values.get((document_id, sample_key))
-            if not sample_key or pbf_context is None or density_value is None:
-                return self._select_objective_adjacent_axis_relation_specs(
-                    samples=samples,
-                    result_lookup=result_lookup,
-                    objective_context=objective_context,
-                )
-            density_values[sample_key] = density_value
-            pbf_samples.append(
-                {
-                    "sample": sample,
-                    "sample_key": sample_key,
-                    "scan_strategy": pbf_context["scan_strategy"],
-                    "scan_speed_mm_s": pbf_context["scan_speed_mm_s"],
-                    "energy_density_j_mm3": pbf_context["energy_density_j_mm3"],
-                }
-            )
-
-        primary = max(
-            pbf_samples,
-            key=lambda item: density_values.get(str(item["sample_key"]), -math.inf),
-        )
-        primary_strategy = str(primary.get("scan_strategy") or "").strip()
-        if not primary_strategy:
-            return all_specs
-
-        selected_specs: set[tuple[str, str, str]] = set()
-        speed_groups: dict[tuple[float, str], list[dict[str, Any]]] = {}
-        strategy_groups: dict[tuple[float, float], list[dict[str, Any]]] = {}
-        for item in pbf_samples:
-            speed_groups.setdefault(
-                (item["energy_density_j_mm3"], item["scan_strategy"]),
-                [],
-            ).append(item)
-            strategy_groups.setdefault(
-                (item["energy_density_j_mm3"], item["scan_speed_mm_s"]),
-                [],
-            ).append(item)
-
-        for (_, strategy), group in speed_groups.items():
-            if strategy != primary_strategy or len(group) < 2:
-                continue
-            for left_index, left in enumerate(group):
-                for right in group[left_index + 1:]:
-                    for property_name in _OBJECTIVE_PAIRWISE_TENSILE_PROPERTIES:
-                        self._add_objective_pairwise_spec_if_numeric_delta(
-                            selected_specs,
-                            left=left["sample"],
-                            right=right["sample"],
-                            property_name=property_name,
-                            result_lookup=result_lookup,
+        generated_by_scope: dict[tuple[str, str], int] = {}
+        for measurements in results_by_scope.values():
+            for baseline_index, baseline in enumerate(measurements):
+                for target in measurements[baseline_index + 1 :]:
+                    scope_key = (target.objective_id, target.document_id)
+                    if generated_by_scope.get(scope_key, 0) >= _OBJECTIVE_PAIRWISE_SCOPE_LIMIT:
+                        break
+                    baseline_process = {
+                        item.name.casefold(): item
+                        for item in baseline.scientific_context.process
+                    }
+                    target_process = {
+                        item.name.casefold(): item
+                        for item in target.scientific_context.process
+                    }
+                    changed_variables: list[dict[str, Any]] = []
+                    changed_axis_names: list[str] = []
+                    incomparability_reasons: list[str] = []
+                    for key in sorted(set(baseline_process) | set(target_process)):
+                        baseline_attribute = baseline_process.get(key)
+                        target_attribute = target_process.get(key)
+                        baseline_value = (
+                            baseline_attribute.value if baseline_attribute else None
                         )
-                    self._add_objective_pairwise_spec_if_numeric_delta(
-                        selected_specs,
-                        left=left["sample"],
-                        right=right["sample"],
-                        property_name=_OBJECTIVE_PAIRWISE_DUCTILITY_PROPERTY,
-                        result_lookup=result_lookup,
-                        min_abs_delta=_OBJECTIVE_PAIRWISE_ELONGATION_MIN_DELTA,
-                    )
-                    density_property = self._objective_density_property_for_pair(
-                        left["sample"],
-                        right["sample"],
-                        result_lookup=result_lookup,
-                    )
-                    if density_property:
-                        self._add_objective_pairwise_spec_if_numeric_delta(
-                            selected_specs,
-                            left=left["sample"],
-                            right=right["sample"],
-                            property_name=density_property,
-                            result_lookup=result_lookup,
-                            min_abs_delta=_OBJECTIVE_PAIRWISE_DENSITY_MIN_DELTA,
+                        target_value = target_attribute.value if target_attribute else None
+                        if baseline_value == target_value:
+                            continue
+                        name = (
+                            target_attribute.name
+                            if target_attribute is not None
+                            else baseline_attribute.name
+                        )
+                        changed_axis_names.append(name)
+                        if baseline_attribute is None or target_attribute is None:
+                            incomparability_reasons.append(
+                                "process comparison is missing one group value for "
+                                f"{name}: {baseline_value!s} vs {target_value!s}"
+                            )
+                        changed_variables.append(
+                            {
+                                "name": name,
+                                "baseline_value": baseline_value,
+                                "target_value": target_value,
+                                "unit": (
+                                    target_attribute.unit
+                                    if target_attribute is not None
+                                    else baseline_attribute.unit
+                                ),
+                            }
+                        )
+                    condition_axis_names: list[str] = []
+                    for context_name in ("material", "test"):
+                        baseline_attributes = {
+                            item.name.casefold(): item
+                            for item in getattr(
+                                baseline.scientific_context, context_name
+                            )
+                        }
+                        target_attributes = {
+                            item.name.casefold(): item
+                            for item in getattr(target.scientific_context, context_name)
+                        }
+                        for key in sorted(
+                            set(baseline_attributes) | set(target_attributes)
+                        ):
+                            baseline_attribute = baseline_attributes.get(key)
+                            target_attribute = target_attributes.get(key)
+                            baseline_value = (
+                                baseline_attribute.value if baseline_attribute else None
+                            )
+                            target_value = (
+                                target_attribute.value if target_attribute else None
+                            )
+                            if baseline_value == target_value:
+                                continue
+                            name = (
+                                target_attribute.name
+                                if target_attribute is not None
+                                else baseline_attribute.name
+                            )
+                            condition_axis_names.append(name)
+                            incomparability_reasons.append(
+                                f"{context_name} condition differs for {name}: "
+                                f"{baseline_value!s} vs {target_value!s}"
+                            )
+
+                    baseline_sample = {
+                        item.name.casefold(): item
+                        for item in baseline.scientific_context.sample
+                    }
+                    target_sample = {
+                        item.name.casefold(): item
+                        for item in target.scientific_context.sample
+                    }
+                    for key in sorted(set(baseline_sample) | set(target_sample)):
+                        if self._objective_table_column_is_sample_key(
+                            self._objective_column_key(key)
+                        ):
+                            continue
+                        baseline_attribute = baseline_sample.get(key)
+                        target_attribute = target_sample.get(key)
+                        baseline_value = (
+                            baseline_attribute.value if baseline_attribute else None
+                        )
+                        target_value = target_attribute.value if target_attribute else None
+                        if baseline_value == target_value:
+                            continue
+                        name = (
+                            target_attribute.name
+                            if target_attribute is not None
+                            else baseline_attribute.name
+                        )
+                        condition_axis_names.append(name)
+                        incomparability_reasons.append(
+                            f"sample condition differs for {name}: "
+                            f"{baseline_value!s} vs {target_value!s}"
                         )
 
-        eligible_strategy_groups = [
-            (key, group)
-            for key, group in strategy_groups.items()
-            if len(group) >= 2
-            and any(item["scan_strategy"] == primary_strategy for item in group)
-        ]
-        if eligible_strategy_groups:
-            first_group_key, first_group = sorted(
-                eligible_strategy_groups,
-                key=lambda item: (item[0][0], -item[0][1]),
-            )[0]
-            primary_group_key = next(
-                (
-                    key
-                    for key, group in strategy_groups.items()
-                    if any(
-                        item["sample_key"] == primary["sample_key"]
-                        for item in group
+                    axis_names = tuple(
+                        dict.fromkeys((*changed_axis_names, *condition_axis_names))
                     )
-                ),
-                None,
-            )
-            primary_group = (
-                strategy_groups.get(primary_group_key, [])
-                if primary_group_key is not None
-                else []
-            )
-
-            self._add_objective_first_strategy_group_specs(
-                selected_specs,
-                group=first_group,
-                primary_strategy=primary_strategy,
-                density_values=density_values,
-                result_lookup=result_lookup,
-            )
-            if primary_group and primary_group_key != first_group_key:
-                self._add_objective_primary_strategy_group_specs(
-                    selected_specs,
-                    group=primary_group,
-                    primary_sample_key=str(primary["sample_key"]),
-                    result_lookup=result_lookup,
-                )
-
-        return selected_specs or all_specs
-
-    def _select_objective_adjacent_axis_relation_specs(
-        self,
-        *,
-        samples: list[ExtractedEvidenceDraft],
-        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
-        objective_context: ResearchObjective | None,
-    ) -> set[tuple[str, str, str]]:
-        if objective_context is None:
-            return set()
-        axes = tuple(
-            self._normalize_property_label(axis)
-            for axis in objective_context.variables
-            if self._normalize_property_label(axis)
-        )
-        if not axes:
-            return set()
-        sample_rows: list[tuple[ExtractedEvidenceDraft, str, dict[str, str]]] = []
-        observed_raw_axes: set[str] = set()
-        for sample in samples:
-            sample_key = self._objective_sample_identity_key(sample.sample_context)
-            axis_values = self._objective_pairwise_process_axis_values(
-                sample,
-                objective_context=objective_context,
-            )
-            observed_raw_axes.update(axis_values)
-            if sample_key and axis_values:
-                sample_rows.append((sample, sample_key, axis_values))
-        axes = (*axes, *tuple(sorted(observed_raw_axes - set(axes))))
-        property_names = {
-            property_name
-            for sample_key, property_name in result_lookup.keys()
-            if sample_key
-        }
-        selected_specs: set[tuple[str, str, str]] = set()
-        for axis in axes:
-            grouped: dict[tuple[tuple[str, str], ...], list[tuple[ExtractedEvidenceDraft, str, str]]] = {}
-            for sample, sample_key, axis_values in sample_rows:
-                if axis not in axis_values:
-                    continue
-                group_key = tuple(
-                    sorted(
-                        (other_axis, value)
-                        for other_axis, value in axis_values.items()
-                        if other_axis != axis
-                    )
-                )
-                grouped.setdefault(group_key, []).append(
-                    (sample, sample_key, axis_values[axis])
-                )
-            for group in grouped.values():
-                ordered = sorted(
-                    group,
-                    key=lambda item: self._objective_axis_sort_key(item[2]),
-                )
-                for left, right in zip(ordered, ordered[1:]):
-                    if left[2] == right[2]:
+                    if not axis_names:
                         continue
-                    for property_name in property_names:
-                        self._add_objective_pairwise_spec_if_numeric_delta(
-                            selected_specs,
-                            left=left[0],
-                            right=right[0],
-                            property_name=property_name,
-                            result_lookup=result_lookup,
-                        )
-        if not selected_specs:
-            selected_specs.update(
-                self._select_objective_primary_axis_relation_specs(
-                    sample_rows=sample_rows,
-                    axes=axes,
-                    property_names=property_names,
-                    result_lookup=result_lookup,
-                )
-            )
-        return selected_specs
-
-    def _select_objective_primary_axis_relation_specs(
-        self,
-        *,
-        sample_rows: list[tuple[ExtractedEvidenceDraft, str, dict[str, str]]],
-        axes: tuple[str | None, ...],
-        property_names: set[str],
-        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
-    ) -> set[tuple[str, str, str]]:
-        primary_axis = next(
-            (
-                axis
-                for axis in ("volumetric energy density", "energy density")
-                if axis in axes
-            ),
-            None,
-        )
-        if primary_axis is None:
-            return set()
-        ordered = sorted(
-            [
-                (sample, sample_key, axis_values[primary_axis])
-                for sample, sample_key, axis_values in sample_rows
-                if primary_axis in axis_values
-            ],
-            key=lambda item: self._objective_axis_sort_key(item[2]),
-        )
-        selected_specs: set[tuple[str, str, str]] = set()
-        for left, right in zip(ordered, ordered[1:]):
-            if left[2] == right[2]:
-                continue
-            for property_name in property_names:
-                self._add_objective_pairwise_spec_if_numeric_delta(
-                    selected_specs,
-                    left=left[0],
-                    right=right[0],
-                    property_name=property_name,
-                    result_lookup=result_lookup,
-                )
-        return selected_specs
-
-    def _objective_axis_sort_key(self, value: Any) -> tuple[int, float | str]:
-        numeric_value = self._coerce_number(value)
-        if numeric_value is not None:
-            return (0, numeric_value)
-        return (1, str(value).strip().casefold())
-
-    def _objective_all_pairwise_relation_specs(
-        self,
-        *,
-        samples: list[ExtractedEvidenceDraft],
-        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
-    ) -> set[tuple[str, str, str]]:
-        specs: set[tuple[str, str, str]] = set()
-        property_names = {
-            property_name
-            for sample_key, property_name in result_lookup.keys()
-            if sample_key
-        }
-        for left_index, left in enumerate(samples):
-            for right in samples[left_index + 1:]:
-                for property_name in property_names:
-                    left_value, right_value = self._objective_pairwise_result_values(
-                        left=left,
-                        right=right,
-                        property_name=property_name,
-                        result_lookup=result_lookup,
+                    baseline_sample_values = {
+                        item.name: item.value
+                        for item in baseline.scientific_context.sample
+                    }
+                    target_sample_values = {
+                        item.name: item.value
+                        for item in target.scientific_context.sample
+                    }
+                    baseline_label = (
+                        self._objective_sample_identity_key(baseline_sample_values)
+                        or baseline.evidence_id
                     )
-                    if left_value is None or right_value is None:
-                        continue
-                    specs.add(
-                        self._objective_pairwise_relation_spec_key(
-                            left,
-                            right,
-                            property_name=property_name,
+                    target_label = (
+                        self._objective_sample_identity_key(target_sample_values)
+                        or target.evidence_id
+                    )
+                    comparable = not incomparability_reasons and bool(
+                        changed_variables
+                    )
+                    attribution_scope = (
+                        "not_attributable"
+                        if not comparable
+                        else (
+                            "isolated_effect"
+                            if len(changed_variables) == 1
+                            else "joint_effect"
                         )
                     )
-        return specs
-
-    def _add_objective_first_strategy_group_specs(
-        self,
-        selected_specs: set[tuple[str, str, str]],
-        *,
-        group: list[dict[str, Any]],
-        primary_strategy: str,
-        density_values: dict[str, float],
-        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
-    ) -> None:
-        density_ordered = sorted(
-            group,
-            key=lambda item: density_values.get(str(item["sample_key"]), -math.inf),
-        )
-        for lower, higher in zip(density_ordered, density_ordered[1:]):
-            density_property = self._objective_density_property_for_pair(
-                lower["sample"],
-                higher["sample"],
-                result_lookup=result_lookup,
-            )
-            if density_property:
-                self._add_objective_pairwise_spec_if_numeric_delta(
-                    selected_specs,
-                    left=lower["sample"],
-                    right=higher["sample"],
-                    property_name=density_property,
-                    result_lookup=result_lookup,
-                )
-
-        primary_sample = next(
-            (
-                item
-                for item in group
-                if str(item.get("scan_strategy") or "") == primary_strategy
-            ),
-            None,
-        )
-        secondary_sample = next(
-            (
-                item
-                for item in sorted(
-                    group,
-                    key=lambda item: str(item.get("scan_strategy") or ""),
-                )
-                if str(item.get("scan_strategy") or "") != primary_strategy
-            ),
-            None,
-        )
-        if primary_sample is None or secondary_sample is None:
-            return
-        for property_name in (
-            *_OBJECTIVE_PAIRWISE_TENSILE_PROPERTIES,
-            _OBJECTIVE_PAIRWISE_DUCTILITY_PROPERTY,
-        ):
-            self._add_objective_pairwise_spec_if_current_higher(
-                selected_specs,
-                current=primary_sample["sample"],
-                reference=secondary_sample["sample"],
-                property_name=property_name,
-                result_lookup=result_lookup,
-            )
-
-    def _add_objective_primary_strategy_group_specs(
-        self,
-        selected_specs: set[tuple[str, str, str]],
-        *,
-        group: list[dict[str, Any]],
-        primary_sample_key: str,
-        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
-    ) -> None:
-        primary_sample = next(
-            (item for item in group if item["sample_key"] == primary_sample_key),
-            None,
-        )
-        if primary_sample is None:
-            return
-        for reference_sample in group:
-            if reference_sample["sample_key"] == primary_sample_key:
-                continue
-            for property_name in (
-                "yield strength",
-                _OBJECTIVE_PAIRWISE_DUCTILITY_PROPERTY,
-            ):
-                self._add_objective_pairwise_spec_if_current_higher(
-                    selected_specs,
-                    current=primary_sample["sample"],
-                    reference=reference_sample["sample"],
-                    property_name=property_name,
-                    result_lookup=result_lookup,
-                )
-
-    def _add_objective_pairwise_spec_if_current_higher(
-        self,
-        selected_specs: set[tuple[str, str, str]],
-        *,
-        current: ExtractedEvidenceDraft,
-        reference: ExtractedEvidenceDraft,
-        property_name: str,
-        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
-    ) -> None:
-        current_value, reference_value = self._objective_pairwise_result_values(
-            left=current,
-            right=reference,
-            property_name=property_name,
-            result_lookup=result_lookup,
-        )
-        if current_value is None or reference_value is None:
-            return
-        if current_value <= reference_value:
-            return
-        selected_specs.add(
-            self._objective_pairwise_relation_spec_key(
-                current,
-                reference,
-                property_name=property_name,
-            )
-        )
-
-    def _add_objective_pairwise_spec_if_numeric_delta(
-        self,
-        selected_specs: set[tuple[str, str, str]],
-        *,
-        left: ExtractedEvidenceDraft,
-        right: ExtractedEvidenceDraft,
-        property_name: str,
-        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
-        min_abs_delta: float = 0.0,
-    ) -> None:
-        left_value, right_value = self._objective_pairwise_result_values(
-            left=left,
-            right=right,
-            property_name=property_name,
-            result_lookup=result_lookup,
-        )
-        if left_value is None or right_value is None:
-            return
-        if math.isclose(left_value, right_value):
-            return
-        if abs(left_value - right_value) < min_abs_delta:
-            return
-        selected_specs.add(
-            self._objective_pairwise_relation_spec_key(
-                left,
-                right,
-                property_name=property_name,
-            )
-        )
-
-    def _objective_pairwise_result_values(
-        self,
-        *,
-        left: ExtractedEvidenceDraft,
-        right: ExtractedEvidenceDraft,
-        property_name: str,
-        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
-    ) -> tuple[float | None, float | None]:
-        return (
-            self._objective_pairwise_result_value(
-                sample_key=self._objective_sample_identity_key(left.sample_context),
-                property_name=property_name,
-                result_lookup=result_lookup,
-            ),
-            self._objective_pairwise_result_value(
-                sample_key=self._objective_sample_identity_key(right.sample_context),
-                property_name=property_name,
-                result_lookup=result_lookup,
-            ),
-        )
-
-    def _objective_pairwise_result_value(
-        self,
-        *,
-        sample_key: str,
-        property_name: str,
-        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
-    ) -> float | None:
-        unit = result_lookup.get((sample_key, property_name))
-        if unit is None:
-            return None
-        return self._objective_measurement_numeric_value(unit)
-
-    def _objective_density_property_for_pair(
-        self,
-        left: ExtractedEvidenceDraft,
-        right: ExtractedEvidenceDraft,
-        *,
-        result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
-    ) -> str | None:
-        left_key = self._objective_sample_identity_key(left.sample_context)
-        right_key = self._objective_sample_identity_key(right.sample_context)
-        for property_name in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
-            if (
-                result_lookup.get((left_key, property_name)) is not None
-                and result_lookup.get((right_key, property_name)) is not None
-            ):
-                return property_name
-        return None
-
-    def _objective_document_density_values(
-        self,
-        measurements: tuple[ExtractedEvidenceDraft, ...],
-    ) -> dict[tuple[str, str], float]:
-        values: dict[tuple[str, str], float] = {}
-        for unit in measurements:
-            property_key = self._objective_pairwise_property_key(
-                unit.property_normalized
-            )
-            if property_key not in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
-                continue
-            sample_key = self._objective_sample_identity_key(unit.sample_context)
-            numeric_value = self._objective_measurement_numeric_value(unit)
-            if not sample_key or numeric_value is None:
-                continue
-            values[(unit.document_id, sample_key)] = numeric_value
-        return values
-
-    def _objective_pbf_process_context(
-        self,
-        process_context: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        scan_strategy: str | None = None
-        scan_speed: float | None = None
-        energy_density: float | None = None
-        for key, value in process_context.items():
-            key_text = self._objective_column_key(str(key))
-            if "scan" in key_text and "strategy" in key_text:
-                scan_strategy = str(value).strip()
-            elif "scan" in key_text and "speed" in key_text:
-                scan_speed = self._coerce_number(value)
-            elif "energy" in key_text and "density" in key_text:
-                energy_density = self._coerce_number(value)
-        if not scan_strategy or scan_speed is None or energy_density is None:
-            return None
-        return {
-            "scan_strategy": scan_strategy,
-            "scan_speed_mm_s": scan_speed,
-            "energy_density_j_mm3": energy_density,
-        }
-
-    def _objective_pairwise_property_key(self, value: Any) -> str | None:
-        return self._normalize_property_label(value)
-
-    def _objective_unit_matches_target_property(
-        self,
-        unit: ExtractedEvidenceDraft,
-        *,
-        objective_context: ResearchObjective | None,
-    ) -> bool:
-        if objective_context is None or not objective_context.outcomes:
-            return True
-        property_key = self._objective_pairwise_property_key(unit.property_normalized)
-        if not property_key:
-            return False
-        target_axes = self._objective_outcomes(objective_context)
-        if self._objective_property_label_matches_target(
-            property_key,
-            target_axes=target_axes,
-        ):
-            return True
-        return self._objective_density_property_matches_structural_target(
-            property_key,
-            target_axes=target_axes,
-        )
-
-    def _objective_pairwise_relation_spec_key(
-        self,
-        left: ExtractedEvidenceDraft,
-        right: ExtractedEvidenceDraft,
-        *,
-        property_name: str | None = None,
-    ) -> tuple[str, str, str]:
-        left_sample = self._objective_sample_identity_key(left.sample_context)
-        right_sample = self._objective_sample_identity_key(right.sample_context)
-        first, second = sorted((left_sample, right_sample))
-        property_key = property_name or self._objective_pairwise_property_key(
-            left.property_normalized
-        )
-        return first, second, str(property_key or "")
-
-    def _objective_single_changed_axis(
-        self,
-        *,
-        current: ExtractedEvidenceDraft,
-        baseline: ExtractedEvidenceDraft,
-        objective_context: ResearchObjective | None,
-        allow_multi_axis: bool = False,
-    ) -> str | None:
-        current_variables = self._objective_pairwise_process_axis_values(
-            current,
-            objective_context=objective_context,
-        )
-        baseline_variables = self._objective_pairwise_process_axis_values(
-            baseline,
-            objective_context=objective_context,
-        )
-        changed_variables = self._objective_changed_axis_values(
-            current_axes=current_variables,
-            baseline_axes=baseline_variables,
-        )
-        if changed_variables:
-            return self._objective_comparison_axis_from_changed_variables(
-                changed_variables,
-                objective_context=objective_context,
-                allow_multi_axis=allow_multi_axis,
-            )
-
-        current_sample_axes = self._objective_sample_axis_values(current)
-        baseline_sample_axes = self._objective_sample_axis_values(baseline)
-        if objective_context is not None and objective_context.variables:
-            changed_sample_axes = self._objective_changed_axis_values(
-                current_axes=current_sample_axes,
-                baseline_axes=baseline_sample_axes,
-            )
-            for axis in changed_sample_axes:
-                if not any(
-                    self._axis_values_match(axis, objective_axis)
-                    or self._axis_label_is_mentioned(axis, objective_axis)
-                    or self._objective_preheating_condition_column_matches_axis(
-                        axis,
-                        current_sample_axes[axis],
-                        axis_key=self._normalize_property_label(objective_axis) or "",
-                    )
-                    for objective_axis in objective_context.variables
-                ):
-                    return None
-        return self._objective_single_changed_axis_from_values(
-            current_axes=current_sample_axes,
-            baseline_axes=baseline_sample_axes,
-            allow_multi_axis=allow_multi_axis,
-        )
-
-    def _objective_pairwise_process_axis_values(
-        self,
-        unit: ExtractedEvidenceDraft,
-        *,
-        objective_context: ResearchObjective | None,
-    ) -> dict[str, str]:
-        objective_axes = (
-            tuple(objective_context.variables)
-            if objective_context is not None
-            else ()
-        )
-        axis_values: dict[str, str] = {}
-        for raw_axis, value in unit.process_context.items():
-            value_text = str(value).strip()
-            if not value_text:
-                continue
-            axis_label = self._label_without_unit_suffix(
-                str(raw_axis).rsplit(">", 1)[-1]
-            )
-            if not axis_label or self._objective_pairwise_axis_is_response(
-                axis_label,
-                unit=unit,
-                objective_context=objective_context,
-            ):
-                continue
-            canonical_axis = next(
-                (
-                    axis
-                    for axis in objective_axes
-                    if self._axis_values_match(axis_label, axis)
-                    or self._axis_label_is_mentioned(axis_label, axis)
-                    or self._objective_preheating_condition_column_matches_axis(
-                        raw_axis,
-                        value_text,
-                        axis_key=self._normalize_property_label(axis) or "",
-                    )
-                ),
-                axis_label,
-            )
-            axis_key = self._normalize_property_label(canonical_axis)
-            if axis_key:
-                axis_values[axis_key] = value_text.casefold()
-        return axis_values
-
-    def _objective_pairwise_axis_is_response(
-        self,
-        axis: str,
-        *,
-        unit: ExtractedEvidenceDraft,
-        objective_context: ResearchObjective | None,
-    ) -> bool:
-        response_axes = {
-            *_OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES,
-            *_STRUCTURAL_PROPERTY_AXES,
-            *_MECHANICAL_PROPERTY_AXES,
-            *(
-                expanded
-                for expansions in _BROAD_PROPERTY_AXIS_EXPANSIONS.values()
-                for expanded in expansions
-            ),
-        }
-        unit_property = self._normalize_property_label(unit.property_normalized)
-        if unit_property:
-            response_axes.add(unit_property)
-        if objective_context is not None:
-            response_axes.update(self._objective_outcomes(objective_context))
-        return any(self._axis_values_match(axis, response) for response in response_axes)
-
-    def _objective_changed_axis_values(
-        self,
-        *,
-        current_axes: dict[str, str],
-        baseline_axes: dict[str, str],
-    ) -> list[str]:
-        return [
-            axis
-            for axis, current_value in current_axes.items()
-            if axis in baseline_axes and current_value != baseline_axes[axis]
-        ]
-
-    def _objective_comparison_axis_from_changed_variables(
-        self,
-        changed_axes: list[str],
-        *,
-        objective_context: ResearchObjective | None,
-        allow_multi_axis: bool,
-    ) -> str | None:
-        energy_axes = [
-            axis
-            for axis in changed_axes
-            if "energy density" in axis or axis == "ved"
-        ]
-        independent_axes = [axis for axis in changed_axes if axis not in energy_axes]
-        candidate_axes = independent_axes or energy_axes
-        if len(candidate_axes) == 1:
-            return self._objective_axis_label(
-                candidate_axes[0],
-                objective_context=objective_context,
-            )
-        if not allow_multi_axis:
-            return None
-        objective_labels = [
-            self._objective_axis_label(
-                axis,
-                objective_context=objective_context,
-            )
-            for axis in candidate_axes
-        ]
-        if any(label is None for label in objective_labels):
-            return None
-        return ", ".join(str(label) for label in objective_labels)
-
-    def _objective_axis_label(
-        self,
-        axis: str,
-        *,
-        objective_context: ResearchObjective | None,
-    ) -> str | None:
-        if objective_context is None or not objective_context.variables:
-            return axis
-        objective_label = next(
-            (
-                self._normalize_property_label(objective_axis) or objective_axis
-                for objective_axis in objective_context.variables
-                if self._axis_values_match(axis, objective_axis)
-                or self._axis_label_is_mentioned(axis, objective_axis)
-            ),
-            None,
-        )
-        if objective_label is not None:
-            return objective_label
-        objective_keys = {
-            objective_key
-            for objective_axis in objective_context.variables
-            if (objective_key := self._normalize_property_label(objective_axis))
-        }
-        if self._objective_process_column_axis_keys(axis) & objective_keys:
-            return axis
-        return None
-
-    def _objective_single_changed_axis_from_values(
-        self,
-        *,
-        current_axes: dict[str, str],
-        baseline_axes: dict[str, str],
-        allow_multi_axis: bool,
-    ) -> str | None:
-        if not current_axes or not baseline_axes:
-            return None
-        changed_axes = [
-            axis
-            for axis in current_axes
-            if axis in baseline_axes and current_axes[axis] != baseline_axes[axis]
-        ]
-        if len(changed_axes) != 1:
-            if allow_multi_axis and len(changed_axes) > 1:
-                return ", ".join(changed_axes)
-            return None
-        return changed_axes[0]
-
-    def _objective_unit_has_pairwise_context(
-        self,
-        unit: ExtractedEvidenceDraft,
-    ) -> bool:
-        return bool(unit.process_context or self._objective_sample_axis_values(unit))
-
-    def _objective_sample_axis_values(
-        self,
-        unit: ExtractedEvidenceDraft,
-    ) -> dict[str, str]:
-        axis_values: dict[str, str] = {}
-        for key, value in unit.sample_context.items():
-            value_text = str(value).strip()
-            if not value_text:
-                continue
-            column_key = self._objective_column_key(str(key))
-            if column_key in {
-                "condition",
-                "condition_no",
-                "condition_number",
-                "id",
-                "label",
-                "printed_316l",
-                "sample",
-                "sample_id",
-                "sample_label",
-                "sample_no",
-                "sample_number",
-                "specimen",
-                "specimens",
-            }:
-                continue
-            axis_values[str(key).strip()] = value_text.casefold()
-        return axis_values
-
-    def _objective_process_axis_values(
-        self,
-        unit: ExtractedEvidenceDraft,
-        *,
-        objective_context: ResearchObjective | None,
-    ) -> dict[str, str]:
-        if objective_context is None or not objective_context.variables:
-            return {
-                self._objective_column_key(key): str(value).strip().casefold()
-                for key, value in unit.process_context.items()
-                if str(value).strip()
-            }
-        axis_values: dict[str, str] = {}
-        for axis in objective_context.variables:
-            axis_key = self._normalize_property_label(axis)
-            if axis_key is None:
-                continue
-            for key, value in unit.process_context.items():
-                value_text = str(value).strip()
-                if not value_text:
-                    continue
-                if (
-                    self._axis_values_match(key, axis)
-                    or self._axis_label_is_mentioned(key, axis)
-                ):
-                    axis_values[axis_key] = value_text.casefold()
-                    break
-                if self._objective_preheating_condition_column_matches_axis(
-                    key,
-                    value_text,
-                    axis_key=axis_key,
-                ):
-                    axis_values[axis_key] = value_text.casefold()
-                    break
-        return axis_values
-
-    def _objective_preheating_condition_column_matches_axis(
-        self,
-        key: Any,
-        value: str,
-        *,
-        axis_key: str,
-    ) -> bool:
-        if axis_key not in {
-            "build platform preheating",
-            "build platform preheating temperature",
-        }:
-            return False
-        key_text = self._objective_column_key(str(key))
-        if "build" not in key_text or "platform" not in key_text:
-            return False
-        if "condition" not in key_text and "preheat" not in key_text:
-            return False
-        value_key = self._objective_column_key(value)
-        return "preheated" in value_key or "preheat" in value_key
-
-    def _objective_process_column_axis_keys(self, value: Any) -> set[str]:
-        column = self._label_without_unit_suffix(value)
-        column = " ".join(column.split()).casefold()
-        if not column:
-            return set()
-        return {
-            axis_key
-            for alias in _OBJECTIVE_SYMBOL_AXIS_ALIASES.get(column, ())
-            if (axis_key := self._normalize_property_label(alias))
-        }
-
-    def _objective_pairwise_comparison_unit(
-        self,
-        *,
-        first: ExtractedEvidenceDraft,
-        second: ExtractedEvidenceDraft,
-        comparison_axis: str,
-        objective_context: ResearchObjective | None,
-    ) -> ExtractedEvidenceDraft:
-        first_value = self._objective_measurement_numeric_value(first)
-        second_value = self._objective_measurement_numeric_value(second)
-        if first_value is None or second_value is None:
-            raise ValueError("pairwise comparison requires numeric measurements")
-        current, baseline = self._ordered_objective_comparison_pair(
-            first=first,
-            second=second,
-            comparison_axis=comparison_axis,
-            objective_context=objective_context,
-        )
-        current_value = self._objective_measurement_numeric_value(current)
-        baseline_value = self._objective_measurement_numeric_value(baseline)
-        if current_value is None or baseline_value is None:
-            raise ValueError("pairwise comparison requires numeric measurements")
-        controlled_axes = self._objective_comparison_controlled_axes(
-            current=current,
-            baseline=baseline,
-            comparison_axis=comparison_axis,
-            objective_context=objective_context,
-        )
-        seed = "|".join(
-            (
-                current.objective_id,
-                current.document_id,
-                str(current.property_normalized or ""),
-                comparison_axis,
-                current.evidence_id,
-                baseline.evidence_id,
-            )
-        )
-        return ExtractedEvidenceDraft.from_mapping(
-            {
-                "evidence_id": (
-                    f"oeu_cmp_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
-                ),
-                "objective_id": current.objective_id,
-                "document_id": current.document_id,
-                "evidence_kind": "comparison",
-                "property_normalized": current.property_normalized,
-                "material_system": current.material_system or baseline.material_system,
-                "sample_context": dict(current.sample_context),
-                "process_context": dict(current.process_context),
-                "test_condition": dict(current.test_condition),
-                "value_payload": {
-                    "value": current_value,
-                    "current_value": current_value,
-                    "source_value_text": current.value_payload.get(
-                        "source_value_text"
-                    ),
-                    "direction": (
+                    baseline_result = baseline.reported_result
+                    target_result = target.reported_result
+                    if baseline_result is None or target_result is None:
+                        continue
+                    baseline_value = self._coerce_number(baseline_result.value)
+                    target_value = self._coerce_number(target_result.value)
+                    if baseline_value is None or target_value is None:
+                        continue
+                    direction = (
                         "increase"
-                        if current_value > baseline_value
+                        if target_value > baseline_value
                         else "decrease"
-                        if current_value < baseline_value
+                        if target_value < baseline_value
                         else "no_change"
-                    ),
-                    "comparison_axis": comparison_axis,
-                    "controlled_axes": controlled_axes,
-                    "current_evidence_id": current.evidence_id,
-                    "baseline_evidence_id": baseline.evidence_id,
-                },
-                "unit": current.unit or baseline.unit,
-                "baseline_context": {
-                    "sample_context": dict(baseline.sample_context),
-                    "process_context": dict(baseline.process_context),
-                    "test_condition": dict(baseline.test_condition),
-                    "value": baseline_value,
-                    "source_value_text": baseline.value_payload.get(
-                        "source_value_text"
-                    ),
-                    "evidence_id": baseline.evidence_id,
-                },
-                "source_refs": self._dedupe_chain_items(
-                    [
-                        *(dict(source_ref) for source_ref in current.source_refs),
-                        *(dict(source_ref) for source_ref in baseline.source_refs),
-                    ]
-                ),
-                "evidence_anchor_ids": self._dedupe_preserving_order(
-                    [
-                        *current.evidence_anchor_ids,
-                        *baseline.evidence_anchor_ids,
-                    ]
-                ),
-                "join_keys": {
-                    "comparison_axis": comparison_axis,
-                    "controlled_axes": controlled_axes,
-                    "current_measurement_id": current.evidence_id,
-                    "baseline_measurement_id": baseline.evidence_id,
-                },
-                "resolution_status": "resolved",
-                "confidence": min(current.confidence, baseline.confidence),
-            }
-        )
+                    )
+                    source_refs = self._dedupe_objective_source_refs(
+                        (baseline.source_refs, target.source_refs)
+                    )
+                    identity = json.dumps(
+                        [
+                            baseline.evidence_id,
+                            target.evidence_id,
+                            axis_names,
+                            target_result.outcome,
+                        ],
+                        ensure_ascii=True,
+                        sort_keys=True,
+                    )
+                    generated.append(
+                        ExtractedEvidenceDraft.from_mapping(
+                            {
+                                "evidence_id": (
+                                    "oeu_cmp_"
+                                    + sha1(identity.encode("utf-8")).hexdigest()[:16]
+                                ),
+                                "objective_id": target.objective_id,
+                                "document_id": target.document_id,
+                                "source_kind": target.source_kind,
+                                "source_ref": target.source_ref,
+                                "evidence_role": "direct_result",
+                                "selection_reason": (
+                                    "Deterministic comparison of rows from the same "
+                                    "result table."
+                                ),
+                                "selection_status": "extracted",
+                                "changed_variables": changed_variables,
+                                "comparison": {
+                                    "baseline_label": baseline_label,
+                                    "target_label": target_label,
+                                    "axis_names": list(axis_names),
+                                    "comparable": comparable,
+                                    "incomparability_reasons": (
+                                        incomparability_reasons
+                                    ),
+                                },
+                                "reported_result": {
+                                    "outcome": target_result.outcome,
+                                    "value": target_result.value,
+                                    "unit": target_result.unit,
+                                    "direction": direction,
+                                    "result_text": (
+                                        f"{target_result.outcome} changed from "
+                                        f"{baseline_result.value!s} to "
+                                        f"{target_result.value!s}"
+                                        + (
+                                            f" {target_result.unit}"
+                                            if target_result.unit
+                                            else ""
+                                        )
+                                        + f" between {baseline_label} and "
+                                        f"{target_label}."
+                                    ),
+                                },
+                                "attribution_scope": attribution_scope,
+                                "scientific_context": (
+                                    target.scientific_context.to_record()
+                                ),
+                                "source_refs": source_refs,
+                                "evidence_anchor_ids": list(
+                                    dict.fromkeys(
+                                        (
+                                            *baseline.evidence_anchor_ids,
+                                            *target.evidence_anchor_ids,
+                                        )
+                                    )
+                                ),
+                                "resolution_status": "resolved",
+                                "confidence": min(
+                                    baseline.confidence, target.confidence
+                                ),
+                            }
+                        )
+                    )
+                    generated_by_scope[scope_key] = (
+                        generated_by_scope.get(scope_key, 0) + 1
+                    )
+        return tuple(generated)
 
-    def _objective_comparison_controlled_axes(
-        self,
-        *,
-        current: ExtractedEvidenceDraft,
-        baseline: ExtractedEvidenceDraft,
-        comparison_axis: str,
-        objective_context: ResearchObjective | None,
-    ) -> list[dict[str, str]]:
-        current_axes = self._objective_comparison_axis_value_map(
-            current,
-            objective_context=objective_context,
-        )
-        baseline_axes = self._objective_comparison_axis_value_map(
-            baseline,
-            objective_context=objective_context,
-        )
-        comparison_axis_key = (
-            self._normalize_property_label(comparison_axis)
-            or self._axis_key(comparison_axis)
-        )
-        controlled_axes: list[dict[str, str]] = []
-        for axis_key, current_axis in sorted(current_axes.items()):
-            if axis_key == comparison_axis_key:
-                continue
-            baseline_axis = baseline_axes.get(axis_key)
-            if baseline_axis is None:
-                continue
-            if current_axis["value"] != baseline_axis["value"]:
-                continue
-            controlled_axes.append(
-                {
-                    "axis": current_axis["axis"],
-                    "value": current_axis["value"],
-                }
-            )
-        return controlled_axes
-
-    def _objective_comparison_axis_value_map(
-        self,
-        unit: ExtractedEvidenceDraft,
-        *,
-        objective_context: ResearchObjective | None,
-    ) -> dict[str, dict[str, str]]:
-        axis_values: dict[str, dict[str, str]] = {}
-        for source in (
-            self._objective_pairwise_process_axis_values(
-                unit,
-                objective_context=objective_context,
-            ),
-            self._objective_sample_axis_values(unit),
-        ):
-            for axis, value in source.items():
-                axis_key = self._normalize_property_label(axis) or self._axis_key(axis)
-                if not axis_key:
-                    continue
-                axis_values[axis_key] = {
-                    "axis": axis,
-                    "value": str(value).strip().casefold(),
-                }
-        return axis_values
-
-    def _ordered_objective_comparison_pair(
-        self,
-        *,
-        first: ExtractedEvidenceDraft,
-        second: ExtractedEvidenceDraft,
-        comparison_axis: str,
-        objective_context: ResearchObjective | None,
-    ) -> tuple[ExtractedEvidenceDraft, ExtractedEvidenceDraft]:
-        first_axis_value = self._objective_comparison_axis_value(
-            first,
-            comparison_axis=comparison_axis,
-            objective_context=objective_context,
-        )
-        second_axis_value = self._objective_comparison_axis_value(
-            second,
-            comparison_axis=comparison_axis,
-            objective_context=objective_context,
-        )
-        first_axis_number = self._coerce_number(first_axis_value)
-        second_axis_number = self._coerce_number(second_axis_value)
-        if (
-            first_axis_number is not None
-            and second_axis_number is not None
-            and not math.isclose(first_axis_number, second_axis_number)
-        ):
-            return (
-                (first, second)
-                if first_axis_number > second_axis_number
-                else (second, first)
-            )
-
-        first_value = self._objective_measurement_numeric_value(first)
-        second_value = self._objective_measurement_numeric_value(second)
-        if first_value is None or second_value is None:
-            return first, second
-        return (first, second) if first_value >= second_value else (second, first)
-
-    def _objective_comparison_axis_value(
-        self,
-        unit: ExtractedEvidenceDraft,
-        *,
-        comparison_axis: str,
-        objective_context: ResearchObjective | None,
-    ) -> str | None:
-        process_axis_values = self._objective_process_axis_values(
-            unit,
-            objective_context=objective_context,
-        )
-        comparison_axis_key = self._normalize_property_label(comparison_axis)
-        if comparison_axis_key and comparison_axis_key in process_axis_values:
-            return process_axis_values[comparison_axis_key]
-        for key, value in unit.process_context.items():
-            if self._axis_values_match(key, comparison_axis):
-                return str(value).strip()
-
-        sample_axis_values = self._objective_sample_axis_values(unit)
-        if comparison_axis_key and comparison_axis_key in sample_axis_values:
-            return sample_axis_values[comparison_axis_key]
-        for key, value in unit.sample_context.items():
-            if self._axis_values_match(key, comparison_axis):
-                return str(value).strip()
-        return None
-
-    def _objective_comparison_pair_key(
-        self,
-        unit: ExtractedEvidenceDraft,
-    ) -> tuple[str, str, str, str, str, str]:
-        baseline_context = unit.baseline_context
-        baseline_sample_context = baseline_context.get("sample_context")
-        if not isinstance(baseline_sample_context, dict):
-            baseline_sample_context = {}
-        comparison_axis = str(
-            unit.value_payload.get("comparison_axis")
-            or unit.value_payload.get("changed_process_axis")
-            or ""
-        )
-        return (
-            unit.objective_id,
-            unit.document_id,
-            str(unit.property_normalized or ""),
-            self._objective_sample_identity_key(unit.sample_context),
-            self._objective_sample_identity_key(baseline_sample_context),
-            self._normalize_property_label(comparison_axis) or comparison_axis,
-        )
 
     def _objective_sample_identity_key(
         self,
-        sample_context: dict[str, Any],
+        sample_attributes: dict[str, Any],
     ) -> str:
         preferred_keys = (
             "sample_number",
@@ -5766,7 +3606,7 @@ class ResearchObjectiveService:
         )
         normalized_items = {
             self._objective_column_key(key): str(value).strip()
-            for key, value in sample_context.items()
+            for key, value in sample_attributes.items()
             if str(value).strip()
         }
         for column_key in preferred_keys:
@@ -5775,64 +3615,10 @@ class ResearchObjectiveService:
                 return value_text.casefold()
         return "|".join(
             f"{self._objective_column_key(key)}={str(value).strip().casefold()}"
-            for key, value in sorted(sample_context.items())
+            for key, value in sorted(sample_attributes.items())
             if str(value).strip()
         )
 
-    def _objective_sample_context_match_keys(
-        self,
-        sample_context: dict[str, Any],
-    ) -> tuple[tuple[tuple[str, str], ...], ...]:
-        items = tuple(
-            sorted(
-                (
-                    self._objective_sample_context_match_key_column(column_key),
-                    str(value).strip().casefold(),
-                )
-                for column, value in sample_context.items()
-                if (column_key := self._objective_column_key(str(column)))
-                in {
-                    "case",
-                    "condition",
-                    "condition_no",
-                    "condition_number",
-                    "id",
-                    "no",
-                    "printed_316l",
-                    "sample",
-                    "sample_id",
-                    "sample_no",
-                    "sample_number",
-                    "specimen",
-                    "specimen_id",
-                    "specimens",
-                }
-                and str(value).strip()
-            )
-        )
-        if not items:
-            return ()
-        keys: list[tuple[tuple[str, str], ...]] = [items]
-        if len(items) > 1:
-            keys.extend((item,) for item in items)
-        return tuple(keys)
-
-    def _objective_sample_context_match_key_column(self, column_key: str) -> str:
-        if column_key in {
-            "case",
-            "id",
-            "no",
-            "printed_316l",
-            "sample",
-            "sample_id",
-            "sample_no",
-            "sample_number",
-            "specimen",
-            "specimen_id",
-            "specimens",
-        }:
-            return "sample_number"
-        return column_key
 
     def _build_objective_route_source_payload(
         self,
@@ -6129,7 +3915,7 @@ class ResearchObjectiveService:
         records: list[dict[str, Any]] = []
         for row_index, row in data_rows:
             row_values = self._objective_table_row_values(headers=headers, row=row)
-            row_context = self._objective_table_row_context(
+            row_attributes = self._objective_table_row_attributes(
                 route=route,
                 row_values=row_values,
                 result_columns=result_columns,
@@ -6141,8 +3927,8 @@ class ResearchObjectiveService:
                 result_columns=result_columns,
             ):
                 continue
-            row_context = self._objective_table_row_context_with_sample_number(
-                row_context=row_context,
+            row_attributes = self._objective_table_row_attributes_with_sample_number(
+                row_attributes=row_attributes,
                 row_index=row_index,
             )
             for result_column in result_columns:
@@ -6155,17 +3941,14 @@ class ResearchObjectiveService:
                     objective_context=objective_context,
                 )
                 _column_property, unit = self._split_property_unit(result_column)
-                property_normalized = (
+                outcome = (
                     self._normalize_objective_unit_property(
                         property_source,
                         objective_context=objective_context,
                     )
                     or property_source
                 )
-                value_payload = {"source_value_text": str(raw_value)}
                 numeric_value = self._coerce_result_cell_number(raw_value)
-                if numeric_value is not None:
-                    value_payload["value"] = numeric_value
                 records.append(
                     {
                         "evidence_id": self._objective_matrix_unit_id(
@@ -6175,20 +3958,49 @@ class ResearchObjectiveService:
                         ),
                         "objective_id": route.objective_id,
                         "document_id": route.document_id,
-                        "evidence_kind": "measurement",
-                        "property_normalized": property_normalized,
-                        "sample_context": row_context["sample_context"],
-                        "process_context": row_context["process_context"],
-                        "test_condition": row_context["test_condition"],
-                        "value_payload": value_payload,
-                        "unit": unit,
+                        "evidence_role": "direct_result",
+                        "changed_variables": [],
+                        "comparison": None,
+                        "reported_result": {
+                            "outcome": outcome,
+                            "value": numeric_value,
+                            "unit": unit,
+                            "direction": "unknown",
+                            "result_text": (
+                                f"{outcome} = {raw_value}"
+                                + (f" {unit}" if unit else "")
+                            ),
+                        },
+                        "attribution_scope": "descriptive_only",
+                        "scientific_context": {
+                            "material": [
+                                {"name": key, "value": value}
+                                for key, value in row_attributes["material"].items()
+                            ],
+                            "sample": [
+                                {"name": key, "value": value}
+                                for key, value in row_attributes["sample"].items()
+                            ],
+                            "process": [
+                                {"name": key, "value": value}
+                                for key, value in row_attributes["process"].items()
+                            ],
+                            "test": [
+                                {"name": key, "value": value}
+                                for key, value in row_attributes["test"].items()
+                            ],
+                        },
                         "source_refs": self._objective_route_source_refs(
                             route=route,
                             source=source,
-                        ),
-                        "join_keys": self._objective_table_join_keys(
-                            route=route,
-                            row_values=row_values,
+                            row_index=row_index,
+                            col_index=headers.index(result_column),
+                            header_path=result_column,
+                            source_excerpt=" | ".join(
+                                f"{header}: {row_values[header]}"
+                                for header in headers
+                                if header in row_values
+                            ),
                         ),
                         "resolution_status": "resolved",
                         "confidence": route.confidence,
@@ -6209,38 +4021,63 @@ class ResearchObjectiveService:
         records: list[dict[str, Any]] = []
         for row_index, row in data_rows:
             row_values = self._objective_table_row_values(headers=headers, row=row)
-            row_context = self._objective_table_row_context(
+            row_attributes = self._objective_table_row_attributes(
                 route=route,
                 row_values=row_values,
                 result_columns=result_columns,
                 objective_context=objective_context,
             )
-            row_context = self._objective_table_row_context_with_sample_number(
-                row_context=row_context,
+            row_attributes = self._objective_table_row_attributes_with_sample_number(
+                row_attributes=row_attributes,
                 row_index=row_index,
             )
-            if not row_context["process_context"] and not row_context["test_condition"]:
+            if (
+                not row_attributes["material"]
+                and not row_attributes["process"]
+                and not row_attributes["test"]
+            ):
                 continue
             records.append(
                 {
                     "evidence_id": self._objective_matrix_unit_id(
                         route=route,
                         row_index=row_index,
-                        column="process_context",
+                        column="scientific_context",
                     ),
                     "objective_id": route.objective_id,
                     "document_id": route.document_id,
-                    "evidence_kind": "process_context",
-                    "sample_context": row_context["sample_context"],
-                    "process_context": row_context["process_context"],
-                    "test_condition": row_context["test_condition"],
+                    "evidence_role": "condition_context",
+                    "changed_variables": [],
+                    "comparison": None,
+                    "reported_result": None,
+                    "attribution_scope": "not_attributable",
+                    "scientific_context": {
+                        "material": [
+                            {"name": key, "value": value}
+                            for key, value in row_attributes["material"].items()
+                        ],
+                        "sample": [
+                            {"name": key, "value": value}
+                            for key, value in row_attributes["sample"].items()
+                        ],
+                        "process": [
+                            {"name": key, "value": value}
+                            for key, value in row_attributes["process"].items()
+                        ],
+                        "test": [
+                            {"name": key, "value": value}
+                            for key, value in row_attributes["test"].items()
+                        ],
+                    },
                     "source_refs": self._objective_route_source_refs(
                         route=route,
                         source=source,
-                    ),
-                    "join_keys": self._objective_table_join_keys(
-                        route=route,
-                        row_values=row_values,
+                        row_index=row_index,
+                        source_excerpt=" | ".join(
+                            f"{header}: {row_values[header]}"
+                            for header in headers
+                            if header in row_values
+                        ),
                     ),
                     "resolution_status": "resolved",
                     "confidence": route.confidence,
@@ -6260,7 +4097,7 @@ class ResearchObjectiveService:
             if index < len(row) and row[index] not in (None, "")
         }
 
-    def _objective_table_row_context(
+    def _objective_table_row_attributes(
         self,
         *,
         route: EvidenceCandidate,
@@ -6268,16 +4105,30 @@ class ResearchObjectiveService:
         result_columns: set[str],
         objective_context: ResearchObjective | None,
     ) -> dict[str, dict[str, str]]:
-        sample_context: dict[str, str] = {}
-        process_context: dict[str, str] = {}
-        test_condition: dict[str, str] = {}
+        material_attributes: dict[str, str] = {}
+        sample_attributes: dict[str, str] = {}
+        process_attributes: dict[str, str] = {}
+        test_attributes: dict[str, str] = {}
         for column, value in row_values.items():
             role = str(route.column_roles.get(column) or "").lower()
             column_key = self._objective_column_key(column)
-            if "sample" in role or self._objective_table_column_is_sample_key(
+            if (
+                any(term in role for term in ("material", "alloy", "composition"))
+                or column_key
+                in {
+                    "material",
+                    "material_system",
+                    "alloy",
+                    "alloy_name",
+                    "alloy_type",
+                    "composition",
+                }
+            ):
+                material_attributes[column] = value
+            elif "sample" in role or self._objective_table_column_is_sample_key(
                 column_key
             ):
-                sample_context[column] = value
+                sample_attributes[column] = value
             elif (
                 column in result_columns
                 or self._objective_value_column_is_non_result(column)
@@ -6289,28 +4140,29 @@ class ResearchObjectiveService:
                 or column_key in {"test", "test_no", "test_number"}
             ):
                 if route.role == "current_experimental_evidence":
-                    sample_context[column] = value
-                test_condition[column] = value
-            elif self._objective_table_column_is_process_context(
+                    sample_attributes[column] = value
+                test_attributes[column] = value
+            elif self._objective_table_column_is_process_attribute(
                 route=route,
                 column=column,
                 role=role,
                 objective_context=objective_context,
             ):
-                process_context[
-                    self._objective_process_context_column_label(
+                process_attributes[
+                    self._objective_process_attribute_label(
                         column=column,
                         role=role,
                         objective_context=objective_context,
                     )
                 ] = value
         return {
-            "sample_context": sample_context,
-            "process_context": process_context,
-            "test_condition": test_condition,
+            "material": material_attributes,
+            "sample": sample_attributes,
+            "process": process_attributes,
+            "test": test_attributes,
         }
 
-    def _objective_process_context_column_label(
+    def _objective_process_attribute_label(
         self,
         *,
         column: str,
@@ -6338,7 +4190,7 @@ class ResearchObjectiveService:
             _OBJECTIVE_GENERIC_PROCESS_ROLE_TOKENS
         )
 
-    def _objective_table_column_is_process_context(
+    def _objective_table_column_is_process_attribute(
         self,
         *,
         route: EvidenceCandidate,
@@ -6357,6 +4209,17 @@ class ResearchObjectiveService:
                 ):
                     return True
         return route.role == "process_or_treatment" and objective_context is None
+
+    def _objective_process_column_axis_keys(self, value: Any) -> set[str]:
+        column = self._label_without_unit_suffix(value)
+        column = " ".join(column.split()).casefold()
+        if not column:
+            return set()
+        return {
+            axis_key
+            for alias in _OBJECTIVE_SYMBOL_AXIS_ALIASES.get(column, ())
+            if (axis_key := self._normalize_property_label(alias))
+        }
 
     def _objective_label_matches_variables(
         self,
@@ -6420,35 +4283,38 @@ class ResearchObjectiveService:
             )
         )
 
-    def _objective_table_row_context_with_sample_number(
+    def _objective_table_row_attributes_with_sample_number(
         self,
         *,
-        row_context: dict[str, dict[str, str]],
+        row_attributes: dict[str, dict[str, str]],
         row_index: int,
     ) -> dict[str, dict[str, str]]:
-        sample_context = dict(row_context["sample_context"])
-        if self._objective_sample_context_has_explicit_number(sample_context):
-            return row_context
-        if sample_context and not self._objective_sample_context_needs_row_number(
-            sample_context
-        ) and self._objective_sample_context_has_stable_label(sample_context):
-            return row_context
-        if not sample_context and not (
-            row_context["process_context"] or row_context["test_condition"]
+        sample_attributes = dict(row_attributes["sample"])
+        if self._objective_sample_attributes_have_explicit_number(sample_attributes):
+            return row_attributes
+        if sample_attributes and not self._objective_sample_attributes_need_row_number(
+            sample_attributes
+        ) and self._objective_sample_attributes_have_stable_label(sample_attributes):
+            return row_attributes
+        if not sample_attributes and not (
+            row_attributes["material"]
+            or row_attributes["process"]
+            or row_attributes["test"]
         ):
-            return row_context
-        sample_context["sample_number"] = str(row_index)
+            return row_attributes
+        sample_attributes["sample_number"] = str(row_index)
         return {
-            "sample_context": sample_context,
-            "process_context": row_context["process_context"],
-            "test_condition": row_context["test_condition"],
+            "material": row_attributes["material"],
+            "sample": sample_attributes,
+            "process": row_attributes["process"],
+            "test": row_attributes["test"],
         }
 
-    def _objective_sample_context_has_explicit_number(
+    def _objective_sample_attributes_have_explicit_number(
         self,
-        sample_context: dict[str, Any],
+        sample_attributes: dict[str, Any],
     ) -> bool:
-        for key, value in sample_context.items():
+        for key, value in sample_attributes.items():
             text = str(value).strip()
             if not text:
                 continue
@@ -6475,11 +4341,11 @@ class ResearchObjectiveService:
                 return True
         return False
 
-    def _objective_sample_context_needs_row_number(
+    def _objective_sample_attributes_need_row_number(
         self,
-        sample_context: dict[str, Any],
+        sample_attributes: dict[str, Any],
     ) -> bool:
-        for value in sample_context.values():
+        for value in sample_attributes.values():
             tokens = [
                 token
                 for token in self._objective_numeric_match_tokens(value)
@@ -6489,11 +4355,11 @@ class ResearchObjectiveService:
                 return True
         return False
 
-    def _objective_sample_context_has_stable_label(
+    def _objective_sample_attributes_have_stable_label(
         self,
-        sample_context: dict[str, Any],
+        sample_attributes: dict[str, Any],
     ) -> bool:
-        for key in sample_context:
+        for key in sample_attributes:
             column_key = self._objective_column_key(str(key))
             if column_key in {
                 "id",
@@ -6509,22 +4375,6 @@ class ResearchObjectiveService:
                 return True
         return False
 
-    def _objective_table_join_keys(
-        self,
-        *,
-        route: EvidenceCandidate,
-        row_values: dict[str, str],
-    ) -> dict[str, Any]:
-        if route.join_keys:
-            return dict(route.join_keys)
-        join_keys = {
-            self._objective_column_key(column): value
-            for column, value in row_values.items()
-            if self._objective_table_column_is_sample_key(
-                self._objective_column_key(column)
-            )
-        }
-        return join_keys
 
     def _objective_table_column_is_sample_key(self, column_key: str) -> bool:
         return column_key in {
@@ -6563,13 +4413,26 @@ class ResearchObjectiveService:
         extracted_record: dict[str, Any],
     ) -> tuple[dict[str, Any], ...]:
         record = dict(extracted_record)
-        extracted_join_keys = record.get("join_keys")
-        if not isinstance(extracted_join_keys, Mapping) or not extracted_join_keys:
-            extracted_join_keys = route.join_keys
-        record["property_normalized"] = self._normalize_objective_unit_property(
-            record.get("property_normalized"),
-            objective_context=objective_context,
-        )
+        reported_result = record.get("reported_result")
+        if isinstance(reported_result, Mapping):
+            outcome = self._normalize_objective_unit_property(
+                reported_result.get("outcome"),
+                objective_context=objective_context,
+            )
+            if not outcome:
+                return ()
+            if (
+                objective_context is not None
+                and objective_context.outcomes
+                and not self._objective_property_matches_target_axes(
+                    outcome,
+                    target_axes=self._objective_outcomes(objective_context),
+                )
+            ):
+                return ()
+            normalized_result = dict(reported_result)
+            normalized_result["outcome"] = outcome
+            record["reported_result"] = normalized_result
         record.update(
             {
                 "objective_id": route.objective_id,
@@ -6578,648 +4441,12 @@ class ResearchObjectiveService:
                     route=route,
                     source=source,
                 ),
-                "join_keys": self._objective_semantic_join_keys(
-                    extracted_join_keys
-                ),
             }
         )
         if not record.get("confidence"):
             record["confidence"] = route.confidence
-        text_measurement_records = (
-            self._numeric_text_characterization_measurement_records(
-                record,
-                source_text=str(source.get("text") or ""),
-            )
-        )
-        if text_measurement_records:
-            return text_measurement_records
-        record = self._normalize_text_evidence_unit_record(
-            route=route,
-            record=record,
-        )
-        if (
-            route.source_kind == "text_window"
-            and record.get("evidence_kind") == "measurement"
-            and not self._objective_text_measurement_matches_context(
-                record.get("property_normalized"),
-                objective_context=objective_context,
-            )
-        ):
-            normalized = dict(record)
-            normalized["evidence_kind"] = (
-                "characterization"
-                if self._objective_text_numeric_mechanism_property(
-                    record.get("property_normalized")
-                )
-                else "interpretation"
-            )
-            return (normalized,)
-        if route.source_kind == "text_window" and record.get("evidence_kind") != "measurement":
-            return (record,)
+        return (record,)
 
-        if route.role != "current_experimental_evidence":
-            return (record,)
-
-        value_payload = (
-            record.get("value_payload")
-            if isinstance(record.get("value_payload"), dict)
-            else {}
-        )
-        result_items = self._objective_result_value_items(
-            route=route,
-            objective_context=objective_context,
-            value_payload=value_payload,
-        )
-        if not result_items:
-            return (record,)
-
-        normalized_records: list[dict[str, Any]] = []
-        for property_name, raw_value in result_items:
-            property_normalized, unit = self._split_property_unit(property_name)
-            property_normalized = (
-                self._normalize_objective_unit_property(
-                    property_normalized,
-                    objective_context=objective_context,
-                )
-                or property_normalized
-            )
-            value_record = {
-                "source_value_text": str(raw_value),
-            }
-            numeric_value = self._coerce_number(raw_value)
-            if numeric_value is not None:
-                value_record["value"] = numeric_value
-            normalized = dict(record)
-            normalized.update(
-                {
-                    "evidence_kind": "measurement",
-                    "property_normalized": (
-                        record.get("property_normalized") or property_normalized
-                    ),
-                    "value_payload": value_record,
-                    "unit": record.get("unit") or unit,
-                    "resolution_status": (
-                        "resolved"
-                        if record.get("sample_context")
-                        else record.get("resolution_status")
-                    ),
-                }
-            )
-            normalized_records.append(normalized)
-        return tuple(normalized_records)
-
-    def _objective_semantic_join_keys(
-        self,
-        value: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        internal_keys = {
-            "collection_id",
-            "document_id",
-            "evidence_id",
-            "document_id",
-            "objective_id",
-            "source_ref",
-            "source_id",
-            "source_kind",
-            "source_ref",
-            "tree_position_node_id",
-        }
-        semantic_keys: dict[str, Any] = {}
-        for key, item in value.items():
-            key_text = str(key).strip()
-            key_token = self._objective_column_key(key_text)
-            if (
-                not key_text
-                or key_token in internal_keys
-                or key_token.startswith("evidence_route_")
-                or key_token.startswith("tree_position_")
-            ):
-                continue
-            semantic_keys[key_text] = item
-        return semantic_keys
-
-    def _normalize_text_evidence_unit_record(
-        self,
-        *,
-        route: EvidenceCandidate,
-        record: dict[str, Any],
-    ) -> dict[str, Any]:
-        if route.source_kind != "text_window":
-            return record
-        if record.get("evidence_kind") == "comparison":
-            value_payload = (
-                record.get("value_payload")
-                if isinstance(record.get("value_payload"), dict)
-                else {}
-            )
-            baseline_context = (
-                record.get("baseline_context")
-                if isinstance(record.get("baseline_context"), dict)
-                else {}
-            )
-            if not value_payload and not baseline_context:
-                normalized = dict(record)
-                if route.role == "characterization":
-                    normalized["evidence_kind"] = "characterization"
-                else:
-                    normalized["evidence_kind"] = "interpretation"
-                return normalized
-        if record.get("evidence_kind") == "characterization":
-            normalized = self._numeric_text_characterization_measurement_record(
-                record,
-            )
-            if normalized is not None:
-                return normalized
-        if record.get("evidence_kind") != "measurement":
-            return record
-        value_payload = (
-            record.get("value_payload")
-            if isinstance(record.get("value_payload"), dict)
-            else {}
-        )
-        if self._text_measurement_has_explicit_numeric_value(value_payload):
-            return record
-        normalized = dict(record)
-        if route.role == "characterization" and self._objective_property_is_characterization(
-            record.get("property_normalized")
-        ):
-            normalized["evidence_kind"] = "characterization"
-        else:
-            normalized["evidence_kind"] = "interpretation"
-        if not normalized.get("interpretation"):
-            normalized["interpretation"] = self._value_payload_text(value_payload)
-        return normalized
-
-    def _text_measurement_has_explicit_numeric_value(
-        self,
-        value_payload: dict[str, Any],
-    ) -> bool:
-        for key in ("value", "numeric_value", "normalized_value", "current_value"):
-            value = value_payload.get(key)
-            if value in (None, "", [], {}):
-                continue
-            if self._coerce_number(value) is not None:
-                return True
-        source_value = value_payload.get("source_value_text")
-        return self._source_value_text_is_atomic_numeric(source_value)
-
-    def _source_value_text_is_atomic_numeric(self, value: Any) -> bool:
-        if value in (None, "", [], {}) or isinstance(value, (dict, list, tuple, set)):
-            return False
-        text = str(value).strip()
-        if not text:
-            return False
-        unit_pattern = r"(?:%|MPa|GPa|HV|mV|V|A/cm2|uA/cm2|µA/cm2|C/s|°C/s|deg\s*C/s)"
-        return bool(
-            re.fullmatch(
-                rf"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?\s*(?:{unit_pattern})?",
-                text,
-                flags=re.IGNORECASE,
-            )
-            or re.fullmatch(
-                rf"[-+]?(?:\d+(?:\.\d*)?|\.\d+)\s*(?:x|×)\s*10\s*\^?\s*[-+]?\d+\s*(?:{unit_pattern})?",
-                text,
-                flags=re.IGNORECASE,
-            )
-        )
-
-    def _objective_text_measurement_matches_context(
-        self,
-        property_name: Any,
-        *,
-        objective_context: ResearchObjective | None,
-    ) -> bool:
-        if objective_context is None or not objective_context.outcomes:
-            return True
-        property_key = self._normalize_property_label(property_name)
-        if not property_key:
-            return True
-        target_axes = self._objective_outcomes(objective_context)
-        if self._objective_property_label_matches_target(
-            property_key,
-            target_axes=target_axes,
-        ):
-            return True
-        if property_key in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
-            return any(
-                self._property_axis_matches_any(axis, _STRUCTURAL_PROPERTY_AXES)
-                or self._property_axis_matches_any(axis, _MECHANICAL_PROPERTY_AXES)
-                for axis in target_axes
-            )
-        return False
-
-    def _objective_text_numeric_mechanism_property(self, property_name: Any) -> bool:
-        property_key = self._normalize_property_label(property_name)
-        if not property_key:
-            return False
-        property_tokens = self._axis_token_set(property_key)
-        if not property_tokens:
-            return False
-        return any(
-            mechanism_tokens.issubset(property_tokens)
-            for mechanism_tokens in (
-                {"cool", "rate"},
-                {"thermal", "gradient"},
-                {"melt", "pool"},
-                {"width", "depth"},
-                self._axis_token_set("residual stress"),
-                {"recrystallization"},
-            )
-        )
-
-    def _numeric_text_characterization_measurement_record(
-        self,
-        record: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        records = self._numeric_text_characterization_measurement_records(record)
-        if len(records) == 1:
-            return records[0]
-        return None
-
-    def _numeric_text_characterization_measurement_records(
-        self,
-        record: dict[str, Any],
-        *,
-        source_text: str = "",
-    ) -> tuple[dict[str, Any], ...]:
-        source_respective_items = (
-            self._source_text_respective_density_measurement_items(source_text)
-        )
-        if source_respective_items:
-            source_record = dict(record)
-            source_record["evidence_id"] = (
-                self._source_text_density_record_base_id(record)
-            )
-            source_record["process_context"] = {}
-            return tuple(
-                self._numeric_text_characterization_measurement_record_from_value(
-                    record=source_record,
-                    property_normalized="relative density",
-                    raw_value=raw_value,
-                    sample_context={"sample_id": sample_label},
-                    unit="%",
-                    item_index=index,
-                )
-                for index, (sample_label, raw_value) in enumerate(
-                    source_respective_items,
-                    start=1,
-                )
-            )
-        evidence_kind = record.get("evidence_kind")
-        if evidence_kind not in {"characterization", "interpretation"}:
-            return ()
-        if evidence_kind == "interpretation" and self._normalize_property_label(
-            record.get("property_normalized")
-        ) not in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
-            return ()
-        respective_items = self._respective_density_measurement_items(record)
-        if respective_items:
-            return tuple(
-                self._numeric_text_characterization_measurement_record_from_value(
-                    record=record,
-                    property_normalized="relative density",
-                    raw_value=raw_value,
-                    sample_context={"sample_id": sample_label},
-                    unit="%",
-                    item_index=index,
-                )
-                for index, (sample_label, raw_value) in enumerate(respective_items, start=1)
-            )
-        value_payload = (
-            record.get("value_payload")
-            if isinstance(record.get("value_payload"), dict)
-            else {}
-        )
-        record_property_normalized = self._normalize_property_label(
-            record.get("property_normalized"),
-        )
-        mapped_numeric_items = self._mapped_text_numeric_measurement_items(
-            value_payload
-        )
-        if record_property_normalized and mapped_numeric_items:
-            return tuple(
-                self._numeric_text_characterization_measurement_record_from_value(
-                    record=record,
-                    property_normalized=record_property_normalized,
-                    raw_value=sample_value,
-                    sample_context={"sample_id": sample_label},
-                    unit=self._unit_from_value_text(sample_value),
-                    item_index=index,
-                )
-                for index, (sample_label, sample_value) in enumerate(
-                    mapped_numeric_items,
-                    start=1,
-                )
-            )
-        value_item = self._numeric_text_characterization_value_item(
-            record=record,
-            value_payload=value_payload,
-        )
-        if value_item is None:
-            return ()
-        property_normalized, raw_value = value_item
-        mapped_density_items = self._mapped_density_measurement_items(raw_value)
-        if (
-            property_normalized in {"relative density", "density"}
-            and mapped_density_items
-        ):
-            return tuple(
-                self._numeric_text_characterization_measurement_record_from_value(
-                    record=record,
-                    property_normalized=property_normalized,
-                    raw_value=sample_value,
-                    sample_context={"sample_id": sample_label},
-                    item_index=index,
-                )
-                for index, (sample_label, sample_value) in enumerate(
-                    mapped_density_items,
-                    start=1,
-                )
-            )
-        numeric_value = self._coerce_number(raw_value)
-        if numeric_value is None:
-            return ()
-        return (
-            self._numeric_text_characterization_measurement_record_from_value(
-                record=record,
-                property_normalized=property_normalized,
-                raw_value=raw_value,
-            ),
-        )
-
-    def _mapped_density_measurement_items(
-        self,
-        raw_value: Any,
-    ) -> tuple[tuple[str, Any], ...]:
-        if not isinstance(raw_value, dict):
-            return ()
-        items: list[tuple[str, Any]] = []
-        for sample_label, sample_value in raw_value.items():
-            label_text = str(sample_label).strip()
-            if not label_text or self._coerce_number(sample_value) is None:
-                continue
-            items.append((label_text, sample_value))
-        if len(items) < 2:
-            return ()
-        return tuple(items)
-
-    def _mapped_text_numeric_measurement_items(
-        self,
-        value_payload: dict[str, Any],
-    ) -> tuple[tuple[str, Any], ...]:
-        items: list[tuple[str, Any]] = []
-        for sample_label, sample_value in value_payload.items():
-            label_text = str(sample_label).strip()
-            if (
-                not label_text
-                or sample_value in (None, "", [], {})
-                or label_text.lower() in _OBJECTIVE_RESULT_VALUE_METADATA_KEYS
-            ):
-                continue
-            if self._coerce_number(sample_value) is None:
-                continue
-            items.append((label_text, sample_value))
-        if len(items) < 2:
-            return ()
-        return tuple(items)
-
-    def _numeric_text_characterization_measurement_record_from_value(
-        self,
-        *,
-        record: dict[str, Any],
-        property_normalized: str,
-        raw_value: Any,
-        sample_context: dict[str, Any] | None = None,
-        unit: str | None = None,
-        item_index: int | None = None,
-    ) -> dict[str, Any]:
-        numeric_value = self._coerce_number(raw_value)
-        resolved_unit = unit or str(record.get("unit") or "").strip() or None
-        if resolved_unit is None and "%" in str(raw_value):
-            resolved_unit = "%"
-        if resolved_unit is None:
-            resolved_unit = self._unit_from_value_text(raw_value)
-        normalized = dict(record)
-        if item_index is not None:
-            seed = "|".join(
-                (
-                    str(record.get("evidence_id") or ""),
-                    str(item_index),
-                    str(sample_context or {}),
-                    str(raw_value),
-                )
-            )
-            normalized["evidence_id"] = (
-                f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
-            )
-        if sample_context is not None:
-            normalized["sample_context"] = dict(sample_context)
-        normalized.update(
-            {
-                "evidence_kind": "measurement",
-                "property_normalized": property_normalized,
-                "value_payload": {
-                    "source_value_text": str(raw_value),
-                    "value": numeric_value,
-                },
-                "unit": resolved_unit,
-            }
-        )
-        return normalized
-
-    def _unit_from_value_text(self, value: Any) -> str | None:
-        text = str(value or "").strip()
-        if not text:
-            return None
-        if "%" in text:
-            return "%"
-        if re.search(r"\bMPa\b", text, flags=re.IGNORECASE):
-            return "MPa"
-        if re.search(r"(?:deg\s*)?C\s*/\s*s", text, flags=re.IGNORECASE):
-            return "C/s"
-        return None
-
-    def _respective_density_measurement_items(
-        self,
-        record: dict[str, Any],
-    ) -> tuple[tuple[str, str], ...]:
-        sample_labels = self._objective_text_sample_labels(record.get("sample_context"))
-        if not sample_labels:
-            return ()
-        value_payload = (
-            record.get("value_payload")
-            if isinstance(record.get("value_payload"), dict)
-            else {}
-        )
-        text = self._value_payload_text(value_payload) or ""
-        if "density" not in text.casefold() or "respectively" not in text.casefold():
-            return ()
-        match = re.search(
-            r"\b(?:was|were|is|are)\s+"
-            r"([0-9][0-9.,\s]*(?:and\s*)?[0-9.]+)\s*%?\s*,?\s*respectively",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if match is None:
-            return ()
-        value_text = match.group(1)
-        values = tuple(
-            value_match.group(0)
-            for value_match in _NUMBER_PATTERN.finditer(value_text)
-        )
-        if len(values) != len(sample_labels):
-            return ()
-        return tuple(zip(sample_labels, values))
-
-    def _source_text_respective_density_measurement_items(
-        self,
-        source_text: str,
-    ) -> tuple[tuple[str, str], ...]:
-        text = " ".join(str(source_text or "").split())
-        if "density" not in text.casefold() or "respectively" not in text.casefold():
-            return ()
-        sample_match = re.search(
-            r"\bdensity\s+of\s+(?:the\s+)?(?:\w+\s+)?samples?\s+of\s+(.+?)\s+"
-            r"(?:was|were)\s+measured\b",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if sample_match is None:
-            return ()
-        value_match = re.search(
-            r"\b(?:which\s+)?(?:was|were|is|are)\s+"
-            r"([0-9][0-9.,\s]*(?:and\s*)?[0-9.]+)\s*%?\s*,?\s*respectively",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if value_match is None:
-            return ()
-        sample_labels = self._split_respective_density_sample_labels(
-            sample_match.group(1)
-        )
-        values = tuple(
-            item.group(0)
-            for item in _NUMBER_PATTERN.finditer(value_match.group(1))
-        )
-        if len(sample_labels) < 2 or len(values) != len(sample_labels):
-            return ()
-        return tuple(zip(sample_labels, values))
-
-    def _split_respective_density_sample_labels(
-        self,
-        sample_text: str,
-    ) -> tuple[str, ...]:
-        normalized = " ".join(str(sample_text or "").split()).strip(" ,")
-        if not normalized:
-            return ()
-        normalized = re.sub(r",?\s+and\s+", ", ", normalized, flags=re.IGNORECASE)
-        return tuple(
-            label.strip(" ,")
-            for label in normalized.split(",")
-            if label.strip(" ,")
-        )
-
-    def _source_text_density_record_base_id(
-        self,
-        record: dict[str, Any],
-    ) -> str:
-        source_refs = record.get("source_refs") or []
-        source_key = json.dumps(source_refs, ensure_ascii=False, sort_keys=True)
-        seed = "|".join(
-            (
-                str(record.get("objective_id") or ""),
-                str(record.get("document_id") or ""),
-                source_key,
-                "source-text-density",
-            )
-        )
-        return f"oeu_{sha1(seed.encode('utf-8')).hexdigest()[:12]}"
-
-    def _objective_text_sample_labels(self, sample_context: Any) -> tuple[str, ...]:
-        if not isinstance(sample_context, dict):
-            return ()
-        for key in ("sample_ids", "samples", "sample_labels"):
-            value = sample_context.get(key)
-            if isinstance(value, (list, tuple)):
-                labels = tuple(str(item).strip() for item in value if str(item).strip())
-                if labels:
-                    return labels
-        return ()
-
-    def _numeric_text_characterization_value_item(
-        self,
-        *,
-        record: dict[str, Any],
-        value_payload: dict[str, Any],
-    ) -> tuple[str, Any] | None:
-        property_normalized = self._normalize_property_label(
-            record.get("property_normalized"),
-        )
-        if property_normalized in {"relative density", "density"}:
-            for key in ("value", "source_value_text", "result"):
-                value = value_payload.get(key)
-                if value not in (None, "", [], {}):
-                    return property_normalized, value
-        for key, value in value_payload.items():
-            if value in (None, "", [], {}):
-                continue
-            key_normalized = self._objective_column_key(str(key))
-            if key_normalized not in {
-                "density",
-                "density_value",
-                "density_percent",
-                "relative_density",
-                "relative_density_value",
-                "relative_density_percent",
-            }:
-                continue
-            if (
-                key_normalized.startswith("relative_")
-                or str(record.get("unit") or "").strip() == "%"
-                or "%" in str(value)
-            ):
-                return "relative density", value
-            return "density", value
-        return None
-
-    def _objective_result_value_items(
-        self,
-        *,
-        route: EvidenceCandidate,
-        objective_context: ResearchObjective | None,
-        value_payload: dict[str, Any],
-    ) -> tuple[tuple[str, Any], ...]:
-        if not value_payload:
-            return ()
-        result_columns = self._objective_route_result_columns(
-            route,
-            objective_context=objective_context,
-        )
-        result_column_by_key = {
-            self._objective_column_key(column): column
-            for column in result_columns
-        }
-        items: list[tuple[str, Any]] = []
-        for key, value in value_payload.items():
-            if value in (None, "", [], {}):
-                continue
-            key_text = str(key or "").strip()
-            if (
-                not key_text
-                or key_text.lower() in _OBJECTIVE_RESULT_VALUE_METADATA_KEYS
-                or self._objective_value_column_is_non_result(key_text)
-            ):
-                continue
-            if result_columns:
-                result_column = result_column_by_key.get(
-                    self._objective_column_key(key_text),
-                )
-                if result_column is None:
-                    continue
-            else:
-                result_column = key_text
-            items.append((result_column, value))
-        return tuple(items)
 
     def _objective_route_result_columns(
         self,
@@ -7544,42 +4771,27 @@ class ResearchObjectiveService:
                 return float(matches[1].group(0))
         return self._coerce_number(text)
 
-    def _value_payload_numeric_value(
-        self,
-        value_payload: dict[str, Any],
-    ) -> float | None:
-        value = value_payload.get("value")
-        if isinstance(value, (int, float)):
-            return float(value)
-        if value not in (None, ""):
-            return self._coerce_number(value)
-        return self._coerce_number(value_payload.get("source_value_text"))
-
-    def _value_payload_text(
-        self,
-        value_payload: dict[str, Any],
-    ) -> str | None:
-        for key in ("statement", "summary", "source_value_text", "result", "value"):
-            value = value_payload.get(key)
-            if value not in (None, "", [], {}):
-                return str(value)
-        if value_payload:
-            return json.dumps(value_payload, ensure_ascii=False, sort_keys=True)
-        return None
 
     def _objective_route_source_refs(
         self,
         *,
         route: EvidenceCandidate,
         source: dict[str, Any],
+        row_index: int | None = None,
+        col_index: int | None = None,
+        header_path: str | None = None,
+        source_excerpt: str | None = None,
     ) -> tuple[dict[str, Any], ...]:
         ref = {
-            "source_ref": route.source_ref,
             "source_kind": route.source_kind,
             "source_ref": route.source_ref,
             "role": route.role,
             "evidence_role": route.join_plan.get("evidence_role"),
             "page": source.get("page"),
+            "row_index": row_index,
+            "col_index": col_index,
+            "header_path": header_path,
+            "source_excerpt": source_excerpt,
         }
         return (
             {
@@ -7593,60 +4805,13 @@ class ResearchObjectiveService:
         self,
         unit: ExtractedEvidenceDraft,
     ) -> bool:
-        if unit.evidence_kind in {
-            "characterization",
-            "comparison",
-            "interpretation",
-            "measurement",
-        }:
-            return bool(
-                unit.value_payload
-                or unit.baseline_context
-                or unit.interpretation
-            )
-        return any(
-            (
-                unit.property_normalized,
-                unit.material_system,
-                unit.sample_context,
-                unit.process_context,
-                unit.resolved_condition,
-                unit.test_condition,
-                unit.value_payload,
-                unit.baseline_context,
-                unit.interpretation,
-            )
+        return bool(
+            unit.changed_variables
+            or unit.comparison is not None
+            or unit.reported_result is not None
+            or unit.scientific_context.has_content
         )
 
-    def _objective_measurement_numeric_value(
-        self,
-        unit: ExtractedEvidenceDraft,
-    ) -> float | None:
-        for key in ("value", "numeric_value", "normalized_value", "current_value"):
-            value = unit.value_payload.get(key)
-            if value in (None, "", [], {}):
-                continue
-            numeric_value = self._coerce_number(value)
-            if numeric_value is not None:
-                return numeric_value
-        source_value = unit.value_payload.get("source_value_text")
-        if self._source_value_text_is_atomic_numeric(source_value):
-            return self._coerce_number(source_value)
-        return None
-
-    def _dedupe_chain_items(
-        self,
-        items: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        deduped: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for item in items:
-            key = repr(sorted(item.items()))
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(item)
-        return deduped
 
     def _dedupe_preserving_order(
         self,
@@ -7960,7 +5125,6 @@ class ResearchObjectiveService:
             "extractable": route.extractable,
             "reason": route.reason,
             "column_roles": dict(route.column_roles),
-            "join_keys": dict(route.join_keys),
             "join_plan": dict(route.join_plan),
             "confidence": route.confidence,
         }
@@ -8051,13 +5215,9 @@ class ResearchObjectiveService:
 
     def _empty_objective_document_state(self) -> dict[str, Any]:
         return {
-            "schema_version": "objective_document_state.v1",
-            "evidence_counts_by_kind": {},
-            "sample_contexts": [],
-            "process_contexts": [],
-            "test_conditions": [],
-            "measurements": [],
-            "open_joins": [],
+            "schema_version": "objective_document_state.v2",
+            "evidence_counts_by_role": {},
+            "prior_evidence": [],
         }
 
     def _objective_document_state_payload(
@@ -8066,145 +5226,29 @@ class ResearchObjectiveService:
     ) -> dict[str, Any]:
         if not units:
             return self._empty_objective_document_state()
-        counts_by_kind: dict[str, int] = {}
+        counts_by_role: dict[str, int] = {}
         for unit in units:
-            counts_by_kind[unit.evidence_kind] = counts_by_kind.get(unit.evidence_kind, 0) + 1
-        return {
-            "schema_version": "objective_document_state.v1",
-            "evidence_counts_by_kind": counts_by_kind,
-            "sample_contexts": self._objective_state_items(
-                units,
-                field_name="sample_context",
-            ),
-            "process_contexts": self._objective_state_items(
-                units,
-                field_name="process_context",
-            ),
-            "test_conditions": self._objective_state_items(
-                units,
-                field_name="test_condition",
-            ),
-            "measurements": self._objective_state_measurements(units),
-            "open_joins": self._objective_state_open_joins(units),
-        }
-
-    def _objective_state_items(
-        self,
-        units: list[ExtractedEvidenceDraft],
-        *,
-        field_name: str,
-    ) -> list[dict[str, Any]]:
-        items: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for unit in reversed(units):
-            value = getattr(unit, field_name)
-            if not value:
-                continue
-            item = {
-                "evidence_id": unit.evidence_id,
-                "evidence_kind": unit.evidence_kind,
-                "value": self._compact_objective_state_mapping(value),
-                "source_refs": [dict(ref) for ref in unit.source_refs[:2]],
-            }
-            key = json.dumps(item["value"], ensure_ascii=False, sort_keys=True)
-            if key in seen:
-                continue
-            seen.add(key)
-            items.append(item)
-            if len(items) >= _OBJECTIVE_STATE_ITEM_LIMIT:
-                break
-        return list(reversed(items))
-
-    def _objective_state_measurements(
-        self,
-        units: list[ExtractedEvidenceDraft],
-    ) -> list[dict[str, Any]]:
-        items: list[dict[str, Any]] = []
-        for unit in reversed(units):
-            if unit.evidence_kind != "measurement":
-                continue
-            items.append(
+            role = unit.evidence_role or "irrelevant"
+            counts_by_role[role] = counts_by_role.get(role, 0) + 1
+        prior_evidence: list[dict[str, Any]] = []
+        for unit in units[-_OBJECTIVE_STATE_ITEM_LIMIT:]:
+            prior_evidence.append(
                 {
-                    "evidence_id": unit.evidence_id,
-                    "property_normalized": unit.property_normalized,
-                    "sample_context": self._compact_objective_state_mapping(
-                        unit.sample_context
+                    "evidence_role": unit.evidence_role,
+                    "outcome": (
+                        unit.reported_result.outcome if unit.reported_result else None
                     ),
-                    "process_context": self._compact_objective_state_mapping(
-                        unit.process_context
-                    ),
-                    "value_payload": self._compact_objective_state_mapping(
-                        unit.value_payload
-                    ),
-                    "unit": unit.unit,
-                    "join_keys": self._compact_objective_state_mapping(unit.join_keys),
+                    "attribution_scope": unit.attribution_scope,
                     "resolution_status": unit.resolution_status,
                     "source_refs": [dict(ref) for ref in unit.source_refs[:2]],
                 }
             )
-            if len(items) >= _OBJECTIVE_STATE_ITEM_LIMIT:
-                break
-        return list(reversed(items))
+        return {
+            "schema_version": "objective_document_state.v2",
+            "evidence_counts_by_role": counts_by_role,
+            "prior_evidence": prior_evidence,
+        }
 
-    def _objective_state_open_joins(
-        self,
-        units: list[ExtractedEvidenceDraft],
-    ) -> list[dict[str, Any]]:
-        joins: list[dict[str, Any]] = []
-        for unit in reversed(units):
-            if unit.resolution_status == "resolved":
-                continue
-            if not unit.join_keys and not unit.sample_context:
-                continue
-            joins.append(
-                {
-                    "evidence_id": unit.evidence_id,
-                    "evidence_kind": unit.evidence_kind,
-                    "sample_context": self._compact_objective_state_mapping(
-                        unit.sample_context
-                    ),
-                    "join_keys": self._compact_objective_state_mapping(unit.join_keys),
-                    "missing": self._objective_state_missing_context(unit),
-                }
-            )
-            if len(joins) >= _OBJECTIVE_STATE_ITEM_LIMIT:
-                break
-        return list(reversed(joins))
-
-    def _objective_state_missing_context(
-        self,
-        unit: ExtractedEvidenceDraft,
-    ) -> list[str]:
-        missing: list[str] = []
-        if not unit.process_context:
-            missing.append("process_context")
-        if unit.evidence_kind == "measurement" and not unit.value_payload:
-            missing.append("value_payload")
-        if unit.evidence_kind == "measurement" and not unit.test_condition:
-            missing.append("test_condition")
-        return missing
-
-    def _compact_objective_state_mapping(
-        self,
-        value: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        compacted: dict[str, Any] = {}
-        for key, item in value.items():
-            if item in (None, "", [], {}):
-                continue
-            if isinstance(item, str):
-                compacted[str(key)] = item[:_OBJECTIVE_STATE_TEXT_CHARS]
-            elif isinstance(item, (int, float, bool)):
-                compacted[str(key)] = item
-            elif isinstance(item, (list, tuple)):
-                compacted[str(key)] = [
-                    str(part)[:_OBJECTIVE_STATE_TEXT_CHARS]
-                    for part in item[:6]
-                    if str(part).strip()
-                ]
-            elif isinstance(item, Mapping):
-                compacted[str(key)] = self._compact_objective_state_mapping(item)
-        return compacted
 
     def _build_ranked_route_text_candidates(
         self,
@@ -10006,15 +7050,6 @@ class ResearchObjectiveService:
             normalized = normalized[:-1]
         return normalized
 
-    def _join_axis_text(self, value: Any) -> str:
-        if not isinstance(value, list):
-            return ""
-        items = [str(item).strip() for item in value if str(item).strip()]
-        if len(items) <= 1:
-            return "".join(items)
-        if len(items) == 2:
-            return f"{items[0]} and {items[1]}"
-        return f"{', '.join(items[:-1])}, and {items[-1]}"
 
     def _group_by_document_id(self, values: tuple[Any, ...]) -> dict[str, list[Any]]:
         grouped: dict[str, list[Any]] = {}

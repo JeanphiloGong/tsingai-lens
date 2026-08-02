@@ -1264,18 +1264,35 @@ function objectiveEvidence() {
 		evidence_role: 'direct_result',
 		selection_status: 'extracted',
 		selection_reason: 'Direct result.',
-		evidence_kind: 'measurement',
-		property_normalized: 'tensile strength',
-		material_system: { name: '316L' },
-		sample_context: {},
-		process_context: {},
-		test_condition: {},
-		resolved_condition: {},
-		value_payload: { value: 620 },
-		unit: 'MPa',
-		baseline_context: {},
-		interpretation: null,
-		join_keys: {},
+		changed_variables: [
+			{
+				name: 'heat treatment',
+				baseline_value: 'as-built',
+				target_value: 'annealed',
+				unit: null
+			}
+		],
+		comparison: {
+			baseline_label: 'as-built',
+			target_label: 'annealed',
+			axis_names: ['heat treatment'],
+			comparable: true,
+			incomparability_reasons: []
+		},
+		reported_result: {
+			outcome: 'tensile strength',
+			value: 620,
+			unit: 'MPa',
+			direction: 'increase',
+			result_text: 'After annealing, tensile strength increased to 620 MPa.'
+		},
+		attribution_scope: 'isolated_effect',
+		scientific_context: {
+			material: [{ name: 'alloy', value: '316L', unit: null }],
+			sample: [{ name: 'state', value: 'annealed', unit: null }],
+			process: [{ name: 'process', value: 'LPBF', unit: null }],
+			test: [{ name: 'method', value: 'tensile test', unit: null }]
+		},
 		anchor_ids: [],
 		resolution_status: 'resolved',
 		failure_reason: null,

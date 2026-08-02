@@ -18,6 +18,7 @@ from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
     StructuredExtractionBundle,
+    StructuredEvidenceExtraction,
     StructuredEvidenceSelections,
     StructuredEvidenceExtractions,
     StructuredObjectiveMergePlan,
@@ -832,18 +833,38 @@ def test_core_llm_extractor_validates_objective_evidence_response():
         {
           "extractions": [
             {
-              "evidence_kind": "measurement",
-              "property_normalized": "corrosion current density",
-              "material_system": {"family": "316L stainless steel"},
-              "sample_context": {"label": "heat-treated"},
-              "process_context": {"process": "LPBF"},
-              "resolved_condition": {},
-              "test_condition": {"environment": "NaCl"},
-              "value_payload": {"value": 0.4},
-              "unit": "uA/cm2",
-              "baseline_context": {},
-              "interpretation": null,
-              "join_keys": {"sample_key": "heat-treated"},
+              "evidence_role": "direct_result",
+              "changed_variables": [
+                {
+                  "name": "heat treatment",
+                  "baseline_value": null,
+                  "target_value": "heat-treated",
+                  "unit": null
+                }
+              ],
+              "comparison": null,
+              "reported_result": {
+                "outcome": "corrosion current density",
+                "value": 0.4,
+                "unit": "uA/cm2",
+                "direction": "unknown",
+                "result_text": "The heat-treated sample reported 0.4 uA/cm2."
+              },
+              "attribution_scope": "association_only",
+              "scientific_context": {
+                "material": [
+                  {"name": "family", "value": "316L stainless steel"}
+                ],
+                "sample": [
+                  {"name": "label", "value": "heat-treated"}
+                ],
+                "process": [
+                  {"name": "process", "value": "LPBF"}
+                ],
+                "test": [
+                  {"name": "environment", "value": "NaCl"}
+                ]
+              },
               "resolution_status": "resolved",
               "confidence": 0.86
             }
@@ -870,12 +891,50 @@ def test_core_llm_extractor_validates_objective_evidence_response():
     )
 
     assert isinstance(extractions, StructuredEvidenceExtractions)
-    assert extractions.extractions[0].evidence_kind == "measurement"
+    extraction = extractions.extractions[0]
+    assert extraction.evidence_role == "direct_result"
+    assert extraction.changed_variables[0].name == "heat treatment"
+    assert extraction.reported_result is not None
+    assert extraction.reported_result.outcome == "corrosion current density"
+    assert extraction.attribution_scope == "association_only"
     assert extractions.extractions[0].resolution_status == "resolved"
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
     assert client.chat.completions.calls[0]["response_format"] == {
         "type": "json_object"
     }
+
+
+def test_structured_objective_evidence_rejects_effect_without_variable_change():
+    with pytest.raises(ValidationError, match="requires changed variable values"):
+        StructuredEvidenceExtraction.model_validate(
+            {
+                "evidence_role": "direct_result",
+                "changed_variables": [
+                    {
+                        "name": "laser power",
+                        "baseline_value": 200,
+                        "target_value": 200,
+                    }
+                ],
+                "comparison": {
+                    "baseline_label": "A",
+                    "target_label": "B",
+                    "axis_names": ["laser power"],
+                    "comparable": True,
+                },
+                "reported_result": {
+                    "outcome": "density",
+                    "value": 98.9,
+                    "unit": "%",
+                    "direction": "no_change",
+                    "result_text": "Density was 98.9% in condition B.",
+                },
+                "attribution_scope": "isolated_effect",
+                "scientific_context": {},
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
 
 
 def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
@@ -900,7 +959,7 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
 
     assert "For text routes, return at most one extraction" in prompt
     assert "Do not enumerate every possible number" in prompt
-    assert "The backend binds `source_refs` from the active route" in prompt
+    assert "The backend binds the exact source excerpt and Source locators" in prompt
     assert "Do not output `source_refs`" in prompt
     assert "one extraction per binding" not in prompt
     assert "Do not merge those bindings into one `interpretation`" not in prompt
@@ -918,9 +977,18 @@ def test_core_llm_extractor_rejects_backend_bound_objective_evidence_fields():
         {
           "extractions": [
             {
-              "evidence_kind": "measurement",
-              "property_normalized": "yield strength",
-              "value_payload": {"value": 450},
+              "evidence_role": "direct_result",
+              "changed_variables": [],
+              "comparison": null,
+              "reported_result": {
+                "outcome": "yield strength",
+                "value": 450,
+                "unit": "MPa",
+                "direction": "unknown",
+                "result_text": "Yield strength reached 450 MPa."
+              },
+              "attribution_scope": "descriptive_only",
+              "scientific_context": {},
               "source_refs": [
                 {"source_kind": "text_window", "source_ref": "block-1"}
               ],

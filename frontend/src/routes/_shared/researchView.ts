@@ -258,6 +258,20 @@ export type ComparableGroup = {
 
 export type ObjectiveConfirmationStatus = 'candidate' | 'confirmed';
 export type ObjectiveAnalysisStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+export type ObjectiveEvidenceAttributionScope =
+	| 'isolated_effect'
+	| 'joint_effect'
+	| 'association_only'
+	| 'descriptive_only'
+	| 'not_attributable';
+export type ObjectiveEvidenceResultDirection =
+	| 'increase'
+	| 'decrease'
+	| 'improve'
+	| 'worsen'
+	| 'no_change'
+	| 'mixed'
+	| 'unknown';
 export type ObjectiveAnalysisState = {
 	collection_id: string;
 	objective_id: string;
@@ -361,19 +375,34 @@ export type ObjectiveEvidence = {
 	evidence_role: string;
 	selection_reason: string | null;
 	selection_status: string;
-	evidence_kind: string;
-	property_normalized: string | null;
-	material_system: Record<string, unknown>;
-	sample_context: Record<string, unknown>;
-	process_context: Record<string, unknown>;
-	resolved_condition: Record<string, unknown>;
-	test_condition: Record<string, unknown>;
-	value_payload: Record<string, unknown>;
-	unit: string | null;
-	baseline_context: Record<string, unknown>;
-	interpretation: string | null;
+	changed_variables: {
+		name: string;
+		baseline_value: string | number | boolean | null;
+		target_value: string | number | boolean | null;
+		unit: string | null;
+	}[];
+	comparison: {
+		baseline_label: string;
+		target_label: string;
+		axis_names: string[];
+		comparable: boolean;
+		incomparability_reasons: string[];
+	} | null;
+	reported_result: {
+		outcome: string;
+		value: string | number | boolean | null;
+		unit: string | null;
+		direction: ObjectiveEvidenceResultDirection;
+		result_text: string;
+	} | null;
+	attribution_scope: ObjectiveEvidenceAttributionScope;
+	scientific_context: {
+		material: { name: string; value: string | number | boolean; unit: string | null }[];
+		sample: { name: string; value: string | number | boolean; unit: string | null }[];
+		process: { name: string; value: string | number | boolean; unit: string | null }[];
+		test: { name: string; value: string | number | boolean; unit: string | null }[];
+	};
 	anchor_ids: string[];
-	join_keys: Record<string, unknown>;
 	resolution_status: string;
 	failure_reason: string | null;
 	confidence: number;

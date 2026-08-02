@@ -31,10 +31,50 @@ def _evidence(
             "source_excerpt": "Preheating was associated with higher ductility.",
             "evidence_role": role,
             "selection_status": "extracted",
-            "evidence_kind": "measurement",
-            "property_normalized": "ductility",
-            "value_payload": {"direction": "increase"},
-            "join_keys": {"isolated_variable": "preheating"} if isolated else {},
+            "changed_variables": (
+                [
+                    {
+                        "name": "preheating",
+                        "baseline_value": "without preheating",
+                        "target_value": "with preheating",
+                    }
+                ]
+                if role in {"direct_result", "contradictory_result"}
+                else []
+            ),
+            "comparison": (
+                {
+                    "baseline_label": "without preheating",
+                    "target_label": "with preheating",
+                    "axis_names": ["preheating"],
+                    "comparable": True,
+                }
+                if role in {"direct_result", "contradictory_result"}
+                else None
+            ),
+            "reported_result": (
+                {
+                    "outcome": "ductility",
+                    "value": None,
+                    "unit": None,
+                    "direction": "increase",
+                    "result_text": "Preheating was associated with higher ductility.",
+                }
+                if role in {"direct_result", "contradictory_result"}
+                else None
+            ),
+            "attribution_scope": (
+                "isolated_effect"
+                if isolated and role in {"direct_result", "contradictory_result"}
+                else "association_only"
+                if role in {"direct_result", "contradictory_result"}
+                else "not_attributable"
+            ),
+            "scientific_context": (
+                {"test": [{"name": "temperature", "value": 25, "unit": "C"}]}
+                if role == "condition_context"
+                else {}
+            ),
             "resolution_status": "resolved",
             "confidence": 0.9,
         }

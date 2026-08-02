@@ -252,7 +252,7 @@ Concrete migration names may differ, but these identity rules may not.
 | Research Objective | `(collection_id, objective_id)` | Stores immutable confirmed scope plus candidate/confirmed state and active/published version pointers. |
 | Objective analysis | `(collection_id, objective_id, analysis_version)` | References one Objective and one immutable Source build; status is `queued`, `running`, `succeeded`, or `failed`. |
 | Paper contribution | Analysis identity plus `document_id` | References one included Source document and cannot cross the analysis version. |
-| Objective Evidence | Analysis identity plus `evidence_id` | References one paper contribution and one exact Source locator/excerpt; lifecycle and scientific role are typed. |
+| Objective Evidence | Analysis identity plus `evidence_id` | References one paper contribution and one exact Source locator/excerpt. Stores all changed variables, one explicit comparison, at most one reported result, one attribution scope, and typed material/sample/process/test context. |
 | Finding | Analysis identity plus `finding_id` | References one succeeded analysis; supporting and contradicting Evidence links are version-local. |
 | Finding Relation, Context, and Derivation | Finding identity plus relation order where applicable | Cannot outlive or cross the owning Finding; cross-paper derivation requires direct results from at least two papers. |
 | Feedback and curation | Existing review ID plus the complete Finding identity | Review records reference one immutable published Finding version. |
@@ -260,6 +260,19 @@ Concrete migration names may differ, but these identity rules may not.
 
 No reviewable identity may exist only as an element inside an opaque JSON
 payload.
+
+Objective Evidence persists its nested scientific values directly. An
+`isolated_effect` has exactly one changed variable and a comparable
+baseline/target pair over that axis. A `joint_effect` has at least two changed
+variables and retains every changed axis. Incomparable groups record reasons
+and are always `not_attributable`; fixed conditions remain in
+`scientific_context` rather than being promoted to changed variables.
+
+Migration `20260802_0021` replaces the prior loose Evidence payload without
+backfill. Because historical rows cannot reliably recover changed variables or
+comparability, it preserves Research Objective definitions, clears their
+active/published analysis pointers, and deletes rebuildable Objective analyses.
+Source artifacts, sessions, and messages are not invalidated.
 
 ## Build Lifecycle
 

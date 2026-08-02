@@ -180,19 +180,36 @@ const evidence = {
 	evidence_role: 'direct_result',
 	selection_reason: 'Direct result.',
 	selection_status: 'extracted',
-	evidence_kind: 'measurement',
-	property_normalized: 'tensile strength',
-	material_system: { name: '316L' },
-	sample_context: {},
-	process_context: {},
-	test_condition: {},
-	resolved_condition: {},
-	value_payload: { value: 620 },
-	unit: 'MPa',
-	baseline_context: {},
-	interpretation: null,
+	changed_variables: [
+		{
+			name: 'heat treatment',
+			baseline_value: 'as-built',
+			target_value: 'annealed',
+			unit: null
+		}
+	],
+	comparison: {
+		baseline_label: 'as-built',
+		target_label: 'annealed',
+		axis_names: ['heat treatment'],
+		comparable: true,
+		incomparability_reasons: []
+	},
+	reported_result: {
+		outcome: 'tensile strength',
+		value: 620,
+		unit: 'MPa',
+		direction: 'increase',
+		result_text: 'After annealing, tensile strength increased to 620 MPa.'
+	},
+	attribution_scope: 'isolated_effect',
+	scientific_context: {
+		material: [{ name: 'alloy', value: '316L', unit: null }],
+		sample: [{ name: 'state', value: 'annealed', unit: null }],
+		process: [{ name: 'process', value: 'LPBF', unit: null }],
+		test: [{ name: 'method', value: 'tensile test', unit: null }]
+	},
 	anchor_ids: [],
-	join_keys: {},
 	resolution_status: 'resolved',
 	failure_reason: null,
 	confidence: 0.92
@@ -314,7 +331,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('本次分析失败')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Evidence extraction failed.')).toBeInTheDocument();
 		await expect.element(browserPage.getByText(finding.statement).first()).toBeInTheDocument();
-		await expect.element(browserPage.getByText(evidence.source_excerpt)).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('blockquote')).toHaveTextContent(
+			evidence.source_excerpt
+		);
 		await expect.element(browserPage.getByRole('button', { name: '重试分析' })).toBeInTheDocument();
 	});
 
@@ -328,7 +347,9 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('associated_with')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Single paper only.')).toBeInTheDocument();
-		await expect.element(browserPage.getByText(evidence.source_excerpt)).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('blockquote')).toHaveTextContent(
+			evidence.source_excerpt
+		);
 		await expect
 			.element(browserPage.getByRole('link', { name: '打开原文' }))
 			.toHaveAttribute(

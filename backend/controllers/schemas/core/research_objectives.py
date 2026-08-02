@@ -7,6 +7,22 @@ from pydantic import BaseModel, Field
 
 ConfirmationStatus = Literal["candidate", "confirmed"]
 AnalysisStatus = Literal["queued", "running", "succeeded", "failed"]
+EvidenceAttributionScope = Literal[
+    "isolated_effect",
+    "joint_effect",
+    "association_only",
+    "descriptive_only",
+    "not_attributable",
+]
+EvidenceResultDirection = Literal[
+    "increase",
+    "decrease",
+    "improve",
+    "worsen",
+    "no_change",
+    "mixed",
+    "unknown",
+]
 
 
 class ObjectiveSummaryResponse(BaseModel):
@@ -102,6 +118,42 @@ class FindingResponse(BaseModel):
     derivation: FindingDerivationResponse
 
 
+class ObjectiveEvidenceAttributeResponse(BaseModel):
+    name: str
+    value: str | int | float | bool
+    unit: str | None = None
+
+
+class ObjectiveEvidenceVariableResponse(BaseModel):
+    name: str
+    baseline_value: str | int | float | bool | None = None
+    target_value: str | int | float | bool | None = None
+    unit: str | None = None
+
+
+class ObjectiveEvidenceComparisonResponse(BaseModel):
+    baseline_label: str
+    target_label: str
+    axis_names: list[str] = Field(default_factory=list)
+    comparable: bool
+    incomparability_reasons: list[str] = Field(default_factory=list)
+
+
+class ObjectiveEvidenceResultResponse(BaseModel):
+    outcome: str
+    value: str | int | float | bool | None = None
+    unit: str | None = None
+    direction: EvidenceResultDirection
+    result_text: str
+
+
+class ObjectiveEvidenceContextResponse(BaseModel):
+    material: list[ObjectiveEvidenceAttributeResponse] = Field(default_factory=list)
+    sample: list[ObjectiveEvidenceAttributeResponse] = Field(default_factory=list)
+    process: list[ObjectiveEvidenceAttributeResponse] = Field(default_factory=list)
+    test: list[ObjectiveEvidenceAttributeResponse] = Field(default_factory=list)
+
+
 class ObjectiveEvidenceResponse(BaseModel):
     collection_id: str
     objective_id: str
@@ -116,18 +168,13 @@ class ObjectiveEvidenceResponse(BaseModel):
     evidence_role: str
     selection_status: str
     selection_reason: str | None = None
-    evidence_kind: str
-    property_normalized: str | None = None
-    material_system: dict[str, Any] = Field(default_factory=dict)
-    sample_context: dict[str, Any] = Field(default_factory=dict)
-    process_context: dict[str, Any] = Field(default_factory=dict)
-    test_condition: dict[str, Any] = Field(default_factory=dict)
-    resolved_condition: dict[str, Any] = Field(default_factory=dict)
-    value_payload: dict[str, Any] = Field(default_factory=dict)
-    unit: str | None = None
-    baseline_context: dict[str, Any] = Field(default_factory=dict)
-    interpretation: str | None = None
-    join_keys: dict[str, Any] = Field(default_factory=dict)
+    changed_variables: list[ObjectiveEvidenceVariableResponse] = Field(
+        default_factory=list
+    )
+    comparison: ObjectiveEvidenceComparisonResponse | None = None
+    reported_result: ObjectiveEvidenceResultResponse | None = None
+    attribution_scope: EvidenceAttributionScope
+    scientific_context: ObjectiveEvidenceContextResponse
     anchor_ids: list[str] = Field(default_factory=list)
     resolution_status: str
     failure_reason: str | None = None

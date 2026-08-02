@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from collections import defaultdict
 from hashlib import sha1
 from typing import Any, Mapping
@@ -20,40 +19,6 @@ from domain.core import (
 _MAX_DIRECT_EVIDENCE = 48
 _MAX_CONTEXT_EVIDENCE = 24
 _MAX_EXCERPT_CHARS = 900
-_NON_RESULT_SOURCE_MARKERS = (
-    "aims to",
-    "aim of this study",
-    "goal of this study",
-    "objective of this study",
-    "assumed to",
-    "is assumed to",
-    "was assumed to",
-    "are assumed to",
-    "were assumed to",
-    "will be investigated",
-    "we are investigating",
-    "is investigated",
-    "was investigated",
-    "are investigated",
-    "were investigated",
-    "has been reported",
-    "have been reported",
-    "in the next step",
-    "future work",
-)
-_RESULT_VALUE_METADATA_KEYS = {
-    "comparison_axis",
-    "controlled_axes",
-    "evidence_quote",
-    "method_family",
-    "notes",
-    "source_value_role",
-    "unit",
-    "value_notes",
-    "value_role",
-    "value_type",
-    "value_unit",
-}
 logger = logging.getLogger(__name__)
 
 
@@ -79,9 +44,6 @@ class FindingSynthesisService:
             contributions=contributions,
             evidence_records=evidence_records,
         )
-        contribution_by_document = {
-            contribution.document_id: contribution for contribution in contributions
-        }
         evidence_by_id = {
             evidence.evidence_id: evidence for evidence in evidence_records
         }
@@ -90,23 +52,29 @@ class FindingSynthesisService:
             for evidence in evidence_records
             if evidence.supports_finding
             and evidence.evidence_role == "direct_result"
-            and evidence.property_normalized
-            and self._is_reviewable_direct_evidence(evidence)
+            and evidence.reported_result is not None
+            and evidence.changed_variables
+            and evidence.attribution_scope != "not_attributable"
         )
         comparison_keys = {
-            (evidence.document_id, evidence.property_normalized.casefold())
+            (
+                evidence.document_id,
+                evidence.reported_result.outcome.casefold(),
+            )
             for evidence in direct_candidates
-            if evidence.evidence_kind == "comparison"
+            if evidence.comparison is not None
+            and evidence.attribution_scope
+            in {"isolated_effect", "joint_effect"}
         }
         direct_evidence = tuple(
             sorted(
                 (
                     evidence
                     for evidence in direct_candidates
-                    if evidence.evidence_kind == "comparison"
+                    if evidence.comparison is not None
                     or (
                         evidence.document_id,
-                        evidence.property_normalized.casefold(),
+                        evidence.reported_result.outcome.casefold(),
                     )
                     not in comparison_keys
                 ),
@@ -118,7 +86,6 @@ class FindingSynthesisService:
 
         result_sets = self._result_sets(
             objective=objective,
-            contribution_by_document=contribution_by_document,
             direct_evidence=direct_evidence,
             evidence_records=evidence_records,
         )
@@ -177,15 +144,11 @@ class FindingSynthesisService:
                     }
                 )
             except Exception:  # noqa: BLE001
-                # A provider formatting failure must not erase already validated
-                # source evidence. The fallback states only the observed relation.
                 logger.exception(
-                    "Finding synthesis failed result_set_id=%s; using source-backed fallback",
+                    "Finding synthesis failed result_set_id=%s",
                     result_set["result_set_id"],
                 )
-                parsed_record = {
-                    "findings": [self._fallback_candidate(result_set)]
-                }
+                continue
             else:
                 parsed_record = (
                     parsed.model_dump()
@@ -209,85 +172,6 @@ class FindingSynthesisService:
                     findings.append(finding)
                     break
         return tuple(findings)
-
-    @staticmethod
-    def _is_reviewable_direct_evidence(evidence: ObjectiveEvidence) -> bool:
-        source_text = " ".join(evidence.source_excerpt.casefold().split())
-        if not source_text or any(
-            marker in source_text for marker in _NON_RESULT_SOURCE_MARKERS
-        ):
-            return False
-        if str(evidence.value_payload.get("value_role") or "").casefold() in {
-            "condition",
-            "control",
-            "control_value",
-            "method",
-            "process_condition",
-        }:
-            return False
-
-        candidates: list[Any] = []
-
-        def collect(value: Any, key: str | None = None) -> None:
-            if key and key.casefold() in _RESULT_VALUE_METADATA_KEYS:
-                return
-            if isinstance(value, Mapping):
-                for nested_key, nested_value in value.items():
-                    collect(nested_value, str(nested_key))
-            elif isinstance(value, (list, tuple)):
-                for nested_value in value:
-                    collect(nested_value)
-            elif value not in (None, "", [], {}):
-                candidates.append(value)
-
-        collect(evidence.value_payload)
-        for candidate in candidates:
-            candidate_text = " ".join(str(candidate).casefold().split())
-            if not candidate_text:
-                continue
-            if len(candidate_text) <= 3 or re.fullmatch(
-                r"[-+]?\d+(?:\.\d+)?", candidate_text
-            ):
-                if re.search(
-                    rf"(?<![\w.]){re.escape(candidate_text)}(?![\w.])",
-                    source_text,
-                ):
-                    return True
-            elif candidate_text in source_text:
-                return True
-        return False
-
-    @staticmethod
-    def _fallback_candidate(result_set: Mapping[str, Any]) -> dict[str, Any]:
-        """Build a deliberately non-causal Finding when the provider is malformed."""
-        variables = _strings(result_set.get("source_axes"))
-        outcomes = _strings(result_set.get("outcome_properties"))
-        return {
-            "result_set_id": result_set["result_set_id"],
-            "source_concept": ", ".join(variables),
-            "outcomes": [
-                {
-                    "concept": outcome,
-                    "direction": "unknown",
-                    "statement": f"The reported comparison includes {outcome}.",
-                }
-                for outcome in outcomes
-            ],
-            "mediator_concepts": [],
-            "statement": (
-                f"The reported comparison of {', '.join(variables)} includes "
-                f"the measured outcome {', '.join(outcomes)}."
-            ),
-            "synthesis_status": "insufficient_confirmation",
-            "context_evidence_ids": [],
-            "mechanism_evidence_ids": [],
-            "common_conditions": [],
-            "incomparable_conditions": [
-                "Provider synthesis failed; direction and causality were not inferred."
-            ],
-            "confidence": 0.0,
-            "warnings": ["finding_synthesis_provider_failure"],
-        }
 
     @staticmethod
     def _validate_scope(
@@ -316,17 +200,12 @@ class FindingSynthesisService:
         self,
         *,
         objective: ResearchObjective,
-        contribution_by_document: Mapping[str, PaperContribution],
         direct_evidence: tuple[ObjectiveEvidence, ...],
         evidence_records: tuple[ObjectiveEvidence, ...],
     ) -> tuple[dict[str, Any], ...]:
         grouped: dict[tuple[str, ...], list[ObjectiveEvidence]] = defaultdict(list)
         for evidence in direct_evidence:
-            variables = self._variables_for(
-                evidence,
-                objective=objective,
-                contribution=contribution_by_document.get(evidence.document_id),
-            )
+            variables = self._variables_for(evidence)
             if variables and any(
                 _terms_match(variable, objective_axis)
                 for variable in variables
@@ -339,28 +218,28 @@ class FindingSynthesisService:
             for evidence in evidence_records
             if evidence.supports_finding
             and evidence.evidence_role == "contradictory_result"
-            and evidence.property_normalized
+            and evidence.reported_result is not None
+            and evidence.changed_variables
         )
         result_sets: list[dict[str, Any]] = []
         for position, (variables, evidence_items) in enumerate(
             sorted(grouped.items(), key=lambda item: item[0]), start=1
         ):
             properties = _dedupe(
-                evidence.property_normalized for evidence in evidence_items
+                evidence.reported_result.outcome
+                for evidence in evidence_items
+                if evidence.reported_result is not None
             )
             if not properties:
                 continue
             related_conflicts = [
                 evidence
                 for evidence in contradictory
-                if evidence.property_normalized in properties
+                if evidence.reported_result is not None
+                and evidence.reported_result.outcome in properties
                 and self._variables_overlap(
                     variables,
-                    self._variables_for(
-                        evidence,
-                        objective=objective,
-                        contribution=contribution_by_document.get(evidence.document_id),
-                    ),
+                    self._variables_for(evidence),
                 )
             ]
             result_sets.append(
@@ -385,35 +264,13 @@ class FindingSynthesisService:
     @staticmethod
     def _variables_for(
         evidence: ObjectiveEvidence,
-        *,
-        objective: ResearchObjective,
-        contribution: PaperContribution | None,
     ) -> tuple[str, ...]:
-        explicit = _dedupe(
-            [
-                *_strings(evidence.join_keys.get("variables")),
-                *_strings(evidence.join_keys.get("changed_variables")),
-                *_strings(evidence.process_context.get("changed_variables")),
-                *_strings(evidence.process_context.get("variable")),
-            ]
+        return tuple(
+            sorted(
+                _dedupe(variable.name for variable in evidence.changed_variables),
+                key=str.casefold,
+            )
         )
-        if explicit:
-            return tuple(sorted(explicit, key=str.casefold))
-        candidates = _strings(evidence.join_keys.get("comparison_axis"))
-        if not candidates:
-            candidates = _strings(evidence.value_payload.get("comparison_axis"))
-        variables = _dedupe(_text(value) for value in candidates)
-        if variables:
-            return tuple(sorted(variables, key=str.casefold))
-        fallback_candidates: list[Any] = []
-        if contribution is not None and len(contribution.changed_variables) == 1:
-            fallback_candidates.extend(contribution.changed_variables)
-        variables = _dedupe(_text(value) for value in fallback_candidates)
-        if variables:
-            return tuple(sorted(variables, key=str.casefold))
-        if len(objective.variables) == 1:
-            return objective.variables
-        return ()
 
     @staticmethod
     def _variables_overlap(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
@@ -439,19 +296,20 @@ class FindingSynthesisService:
             "evidence_id": evidence.evidence_id,
             "document_id": evidence.document_id,
             "evidence_role": evidence.evidence_role,
-            "evidence_kind": evidence.evidence_kind,
-            "property_normalized": evidence.property_normalized,
             "source_excerpt": evidence.source_excerpt[:_MAX_EXCERPT_CHARS],
-            "material_system": dict(evidence.material_system),
-            "sample_context": dict(evidence.sample_context),
-            "process_context": dict(evidence.process_context),
-            "test_condition": dict(evidence.test_condition),
-            "resolved_condition": dict(evidence.resolved_condition),
-            "value_payload": dict(evidence.value_payload),
-            "unit": evidence.unit,
-            "baseline_context": dict(evidence.baseline_context),
-            "interpretation": evidence.interpretation,
-            "join_keys": dict(evidence.join_keys),
+            "changed_variables": [
+                variable.to_record() for variable in evidence.changed_variables
+            ],
+            "comparison": (
+                evidence.comparison.to_record() if evidence.comparison else None
+            ),
+            "reported_result": (
+                evidence.reported_result.to_record()
+                if evidence.reported_result
+                else None
+            ),
+            "attribution_scope": evidence.attribution_scope,
+            "scientific_context": evidence.scientific_context.to_record(),
             "confidence": evidence.confidence,
         }
 
@@ -486,9 +344,12 @@ class FindingSynthesisService:
             evidence_id
             for evidence_id in allowed_support_ids
             if evidence_id in evidence_by_id
-            and evidence_by_id[evidence_id].property_normalized
+            and evidence_by_id[evidence_id].reported_result is not None
             and any(
-                _terms_match(evidence_by_id[evidence_id].property_normalized, outcome)
+                _terms_match(
+                    evidence_by_id[evidence_id].reported_result.outcome,
+                    outcome,
+                )
                 for outcome in outcome_names
             )
         )
@@ -521,12 +382,6 @@ class FindingSynthesisService:
             evidence_by_id=evidence_by_id,
             supporting_document_ids=set(contributing_documents),
         )
-        mechanism_ids = {
-            evidence_id
-            for evidence_id in _strings(candidate.get("mechanism_evidence_ids"))
-            if evidence_id in context_ids
-            and evidence_by_id[evidence_id].evidence_role == "mechanism_context"
-        }
         variables = tuple(_strings(result_set.get("source_axes")))
         statement = _text(candidate.get("statement"))
         if not variables or not statement:
@@ -537,96 +392,12 @@ class FindingSynthesisService:
         )
         directions = _dedupe(_text(item.get("direction")) for item in outcomes)
         direction = directions[0] if len(directions) == 1 else "mixed"
-        outcome_statements: list[str] = []
-        for item in outcomes:
-            outcome = _text(item.get("concept"))
-            if not outcome or not any(
-                _terms_match(outcome, allowed) for allowed in outcome_names
-            ):
-                continue
-            outcome_statement = _text(item.get("statement"))
-            matching_evidence = [
-                evidence_by_id[evidence_id]
-                for evidence_id in supporting_ids
-                if _terms_match(
-                    evidence_by_id[evidence_id].property_normalized,
-                    outcome,
-                )
-            ]
-            source_text = " ".join(
-                evidence.source_excerpt.casefold() for evidence in matching_evidence
-            )
-            if (
-                outcome_statement
-                and "significant" in outcome_statement.casefold()
-                and "significant" not in source_text
-            ):
-                values = _dedupe(
-                    _text(value)
-                    for evidence in matching_evidence
-                    for key in (
-                        "source_value_text",
-                        "value",
-                        "baseline_value",
-                        "current_value",
-                    )
-                    if (value := evidence.value_payload.get(key)) is not None
-                )
-                if values:
-                    value_text = (
-                        values[0]
-                        if len(values) == 1
-                        else f"{', '.join(values[:-1])} and {values[-1]}"
-                    )
-                    unit = next(
-                        (evidence.unit for evidence in matching_evidence if evidence.unit),
-                        None,
-                    )
-                    separator = "" if unit == "%" else " "
-                    outcome_statement = (
-                        f"The reported {', '.join(variables)} comparison measured "
-                        f"{outcome} values of {value_text}"
-                        f"{separator}{unit or ''}."
-                    )
-                else:
-                    outcome_statement = (
-                        f"The reported {', '.join(variables)} comparison included "
-                        f"a change in {outcome}."
-                    )
-            if outcome_statement:
-                outcome_statements.append(outcome_statement)
-        outcome_statements = _dedupe(outcome_statements)
         if coupled_variables:
             direction = "changes"
             statement = (
                 "In the reported comparison, the coupled condition defined by "
                 f"{', '.join(variables)} was associated with changes in "
                 f"{', '.join(outcome_names)}."
-            )
-        elif not mechanism_ids:
-            statement = " ".join(outcome_statements) or (
-                f"{', '.join(variables)} was associated with changes in "
-                f"{', '.join(outcome_names)}."
-            )
-        elif "significant" in statement.casefold() and not any(
-            "significant" in evidence.source_excerpt.casefold()
-            for evidence in [
-                *[evidence_by_id[value] for value in supporting_ids],
-                *[
-                    evidence_by_id[value]
-                    for value in context_ids
-                    if value in evidence_by_id
-                ],
-            ]
-        ):
-            statement = " ".join(outcome_statements) or (
-                f"{', '.join(variables)} was associated with changes in "
-                f"{', '.join(outcome_names)}."
-            )
-        if finding_level == "paper":
-            statement = (
-                f"{statement.rstrip()} This relationship is directly supported "
-                "by one paper."
             )
         conditions = _dedupe(_text(value) for value in _strings(candidate.get("common_conditions")))
         limitations = _dedupe(
@@ -650,7 +421,11 @@ class FindingSynthesisService:
         )
         supporting_evidence = [evidence_by_id[value] for value in supporting_ids]
         material_system = _first_mapping(
-            evidence.material_system for evidence in supporting_evidence
+            {
+                attribute.name: attribute.value
+                for attribute in evidence.scientific_context.material
+            }
+            for evidence in supporting_evidence
         ) or {"scope": list(objective.material_scope)}
         context_evidence = [
             evidence_by_id[value]
@@ -676,11 +451,7 @@ class FindingSynthesisService:
                 "finding_level": finding_level,
                 "statement": statement,
                 "variables": variables,
-                "mediators": (
-                    _strings(candidate.get("mediator_concepts"))
-                    if mechanism_ids
-                    else ()
-                ),
+                "mediators": _strings(candidate.get("mediator_concepts")),
                 "outcomes": outcome_names,
                 "direction": direction,
                 "scope_summary": "; ".join(conditions)
@@ -727,7 +498,7 @@ class FindingSynthesisService:
                             evidence_id
                             for evidence_id in supporting_ids
                             if _terms_match(
-                                evidence_by_id[evidence_id].property_normalized,
+                                evidence_by_id[evidence_id].reported_result.outcome,
                                 outcome,
                             )
                         ],
@@ -737,18 +508,34 @@ class FindingSynthesisService:
                 "context": {
                     "material_system": material_system,
                     "process_conditions": _distinct_mappings(
-                        evidence.process_context
+                        {
+                            attribute.name: attribute.value
+                            for attribute in evidence.scientific_context.process
+                        }
                         for evidence in [*supporting_evidence, *context_evidence]
                     ),
                     "sample_state": _first_mapping(
-                        evidence.sample_context for evidence in supporting_evidence
+                        {
+                            attribute.name: attribute.value
+                            for attribute in evidence.scientific_context.sample
+                        }
+                        for evidence in supporting_evidence
                     ),
                     "test_conditions": _distinct_mappings(
-                        evidence.test_condition
+                        {
+                            attribute.name: attribute.value
+                            for attribute in evidence.scientific_context.test
+                        }
                         for evidence in [*supporting_evidence, *context_evidence]
                     ),
                     "comparison_baseline": _first_mapping(
-                        evidence.baseline_context for evidence in supporting_evidence
+                        {
+                            "baseline_label": evidence.comparison.baseline_label,
+                            "target_label": evidence.comparison.target_label,
+                            "axis_names": list(evidence.comparison.axis_names),
+                        }
+                        for evidence in supporting_evidence
+                        if evidence.comparison is not None
                     ),
                     "limitations": limitations,
                     "supporting_evidence_ids": context_support_ids,

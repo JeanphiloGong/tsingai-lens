@@ -301,9 +301,35 @@ def _published_objective_repository() -> MemoryObjectiveRepository:
             "page_numbers": [7],
             "evidence_role": "direct_result",
             "selection_status": "extracted",
-            "evidence_kind": "measurement",
-            "property_normalized": "strength",
-            "value_payload": {"value": 620, "unit": "MPa"},
+            "changed_variables": [
+                {
+                    "name": "temperature",
+                    "baseline_value": 400,
+                    "target_value": 500,
+                    "unit": "C",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "400 C",
+                "target_label": "500 C",
+                "axis_names": ["temperature"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "strength",
+                "value": 620,
+                "unit": "MPa",
+                "direction": "increase",
+                "result_text": "At 500 C, tensile strength increased to 620 MPa.",
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {
+                "material": [{"name": "alloy", "value": "Alloy A"}],
+                "sample": [],
+                "process": [],
+                "test": [{"name": "test", "value": "tensile"}],
+            },
             "resolution_status": "resolved",
             "confidence": 0.9,
         }

@@ -90,8 +90,51 @@ def _evidence(
     *,
     role: str = "direct_result",
     property_name: str | None = "relative density",
+    variables: list[dict] | None = None,
+    comparison: dict | None | object = ...,
+    attribution_scope: str | None = None,
     **overrides,
 ) -> ObjectiveEvidence:
+    is_result = role in {"direct_result", "contradictory_result"}
+    if variables is None:
+        variables = (
+            [
+                {
+                    "name": "laser power",
+                    "baseline_value": 150,
+                    "target_value": 200,
+                    "unit": "W",
+                },
+                {
+                    "name": "scan speed",
+                    "baseline_value": 800,
+                    "target_value": 700,
+                    "unit": "mm/s",
+                },
+            ]
+            if is_result
+            else []
+        )
+    if comparison is ...:
+        comparison = (
+            {
+                "baseline_label": "condition A",
+                "target_label": "condition B",
+                "axis_names": [item["name"] for item in variables],
+                "comparable": True,
+                "incomparability_reasons": [],
+            }
+            if variables
+            else None
+        )
+    if attribution_scope is None:
+        attribution_scope = (
+            "isolated_effect"
+            if is_result and len(variables) == 1 and comparison is not None
+            else "joint_effect"
+            if is_result and len(variables) > 1 and comparison is not None
+            else "descriptive_only"
+        )
     payload = {
         "collection_id": "col-1",
         "objective_id": "obj-density",
@@ -109,22 +152,28 @@ def _evidence(
         "evidence_role": role,
         "selection_status": "extracted",
         "selection_reason": "Direct objective result.",
-        "evidence_kind": "comparison",
-        "property_normalized": property_name,
-        "material_system": {"alloy": "316L"},
-        "sample_context": {"state": "as-built"},
-        "process_context": {"process": "LPBF"},
-        "test_condition": {},
-        "resolved_condition": {},
-        "value_payload": {
-            "comparison_axis": "laser power and scan speed",
-            "baseline_value": 96.1,
-            "current_value": 99.2,
+        "changed_variables": variables,
+        "comparison": comparison,
+        "reported_result": (
+            {
+                "outcome": property_name,
+                "value": 99.2,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": (
+                    "Relative density increased from 96.1% to 99.2%."
+                ),
+            }
+            if is_result and property_name
+            else None
+        ),
+        "attribution_scope": attribution_scope,
+        "scientific_context": {
+            "material": [{"name": "alloy", "value": "316L", "unit": None}],
+            "sample": [{"name": "state", "value": "as-built", "unit": None}],
+            "process": [{"name": "process", "value": "LPBF", "unit": None}],
+            "test": [],
         },
-        "unit": "%",
-        "baseline_context": {"laser_power_w": 150},
-        "interpretation": "Relative density increased for the coupled parameter set.",
-        "join_keys": {"variables": ["laser power", "scan speed"]},
         "anchor_ids": [f"anchor-{evidence_id}"],
         "resolution_status": "resolved",
         "confidence": 0.9,
@@ -455,17 +504,10 @@ def test_synthesis_prefers_comparison_evidence_over_component_measurements() -> 
             _evidence(
                 "measurement-1",
                 "paper-1",
-                evidence_kind="measurement",
-                join_keys={"sample": "A"},
+                comparison=None,
+                attribution_scope="association_only",
             ),
-            _evidence(
-                "comparison-1",
-                "paper-1",
-                join_keys={
-                    "comparison_axis": ["laser power", "scan speed"],
-                    "controlled_axes": [{"axis": "energy density", "value": "100"}],
-                },
-            ),
+            _evidence("comparison-1", "paper-1"),
         ),
     )
 
@@ -493,7 +535,14 @@ def test_synthesis_excludes_explicit_axes_outside_the_objective() -> None:
             _evidence(
                 "off-objective",
                 "paper-1",
-                join_keys={"comparison_axis": "build platform preheating"},
+                variables=[
+                    {
+                        "name": "build platform preheating",
+                        "baseline_value": 25,
+                        "target_value": 150,
+                        "unit": "degC",
+                    }
+                ],
             ),
         ),
     )
@@ -520,10 +569,9 @@ def test_synthesis_does_not_expand_ambiguous_paper_axes_onto_measurements() -> N
             _evidence(
                 "ambiguous-measurement",
                 "paper-1",
-                evidence_kind="measurement",
-                process_context={"process": "LPBF"},
-                join_keys={"sample": "A"},
-                value_payload={"value": 99.2},
+                variables=[],
+                comparison=None,
+                attribution_scope="descriptive_only",
             ),
         ),
     )
@@ -566,13 +614,27 @@ def test_synthesis_processes_every_result_set_independently() -> None:
             _evidence(
                 "density",
                 "paper-1",
-                join_keys={"variables": ["laser power"]},
+                variables=[
+                    {
+                        "name": "laser power",
+                        "baseline_value": 150,
+                        "target_value": 200,
+                        "unit": "W",
+                    }
+                ],
             ),
             _evidence(
                 "elongation",
                 "paper-1",
                 property_name="elongation",
-                join_keys={"variables": ["scan speed"]},
+                variables=[
+                    {
+                        "name": "scan speed",
+                        "baseline_value": 800,
+                        "target_value": 700,
+                        "unit": "mm/s",
+                    }
+                ],
             ),
         ),
     )
@@ -617,13 +679,27 @@ def test_synthesis_continues_after_one_result_set_is_omitted() -> None:
             _evidence(
                 "density",
                 "paper-1",
-                join_keys={"variables": ["laser power"]},
+                variables=[
+                    {
+                        "name": "laser power",
+                        "baseline_value": 150,
+                        "target_value": 200,
+                        "unit": "W",
+                    }
+                ],
             ),
             _evidence(
                 "elongation",
                 "paper-1",
                 property_name="elongation",
-                join_keys={"variables": ["scan speed"]},
+                variables=[
+                    {
+                        "name": "scan speed",
+                        "baseline_value": 800,
+                        "target_value": 700,
+                        "unit": "mm/s",
+                    }
+                ],
             ),
         ),
     )
@@ -657,21 +733,18 @@ def test_synthesis_binds_context_only_from_contributing_papers() -> None:
                 "paper-1",
                 role="condition_context",
                 property_name=None,
-                evidence_kind="process_context",
             ),
             _evidence(
                 "mechanism-1",
                 "paper-1",
                 role="mechanism_context",
                 property_name=None,
-                evidence_kind="characterization",
             ),
             _evidence(
                 "context-unrelated",
                 "paper-2",
                 role="condition_context",
                 property_name=None,
-                evidence_kind="process_context",
             ),
         ),
     )
@@ -701,7 +774,6 @@ def test_synthesis_returns_empty_without_direct_result() -> None:
                 "paper-1",
                 role="condition_context",
                 property_name=None,
-                evidence_kind="process_context",
             ),
         ),
     )
@@ -710,7 +782,43 @@ def test_synthesis_returns_empty_without_direct_result() -> None:
     assert extractor.payloads == []
 
 
-def test_synthesis_keeps_source_backed_finding_when_provider_format_fails() -> None:
+def test_synthesis_does_not_promote_unattributable_result() -> None:
+    extractor = _Extractor([_candidate()])
+    service = FindingSynthesisService(structured_extractor=extractor)
+    evidence = _evidence(
+        "incomparable-1",
+        "paper-1",
+        variables=[
+            {
+                "name": "energy density",
+                "baseline_value": 194,
+                "target_value": 167,
+                "unit": "J/mm3",
+            }
+        ],
+        comparison={
+            "baseline_label": "as-SLM",
+            "target_label": "HIP-SLM",
+            "axis_names": ["energy density"],
+            "comparable": False,
+            "incomparability_reasons": ["sample state differs: as-SLM vs HIP-SLM"],
+        },
+        attribution_scope="not_attributable",
+    )
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(variables=("energy density",)),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(evidence,),
+    )
+
+    assert findings == ()
+    assert extractor.payloads == []
+
+
+def test_synthesis_returns_empty_when_provider_format_fails() -> None:
     class _FailingExtractor:
         def synthesize_findings(self, payload: dict) -> SimpleNamespace:
             raise ValueError("invalid JSON")
@@ -724,14 +832,7 @@ def test_synthesis_keeps_source_backed_finding_when_provider_format_fails() -> N
         evidence_records=(_evidence("ev-1", "paper-1"),),
     )
 
-    assert len(findings) == 1
-    assert findings[0].direction == "changes"
-    assert findings[0].finding_level == "paper"
-    assert findings[0].derivation.supporting_evidence_ids == ("ev-1",)
-    assert any(
-        "Provider synthesis failed" in item
-        for item in findings[0].context.limitations
-    )
+    assert findings == ()
 
 
 def test_synthesis_rejects_cross_version_children() -> None:

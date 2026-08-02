@@ -91,8 +91,22 @@ Non-negotiable rules:
 - Extract only facts directly supported by `source`; do not use outside knowledge.
 - Use the `objective` and `evidence_route` as the research scope.
 - Do not emit backend persistence ids.
-- The backend binds `source_refs` from the active route/source.
-- Do not output `source_refs`, `evidence_anchor_ids`, backend ids, copied source text, or copied input JSON.
+- The backend binds the exact source excerpt and Source locators from the active route/source.
+- Do not output source refs, evidence anchor ids, backend ids, source excerpts, or copied input JSON.
+- `document_state` is coverage metadata only. It is not scientific source text;
+  never copy prior values or context into the current extraction.
+- Classify the final evidence role from the active source; the route role is only a selection hint.
+- Preserve every factor that changes between compared groups. Never choose one
+  convenient variable when scan speed, hatch spacing, energy density, treatment,
+  sample state, or test regime change together.
+- Keep fixed material, sample, process, and test conditions in scientific_context;
+  fixed conditions are not changed variables.
+- A direct or contradictory result must bind exactly one objective outcome to one
+  reported result from this source.
+- Use isolated_effect only for one changed variable in a comparable experiment.
+  Use joint_effect for two or more jointly varied factors, association_only for
+  non-isolating associations, descriptive_only without an effect comparison, and
+  not_attributable when groups are scientifically incomparable.
 - Prefer fewer, traceable extractions over broad speculative coverage.
 - Return at most one extraction for the current source.
 """.strip()
@@ -763,46 +777,55 @@ def build_objective_evidence_prompt(
         "Return at most one high-confidence extraction. If the source "
         "contains many possible facts, choose the ones most directly tied to "
         "the active objective and route role.\n"
-        "The backend binds `source_refs` from the active route. Do not output "
+        "The backend binds the exact source excerpt and Source locators from the "
+        "active route. Do not output "
         "`source_refs`, `evidence_anchor_ids`, backend ids, copied source text, "
         "or copied input JSON.\n"
-        "`evidence_kind` must be one of: measurement, test_condition, sample_context, "
-        "process_context, characterization, baseline_reference, comparison, "
-        "interpretation, mixed, unknown.\n"
-        "Use `measurement` for target property results, `test_condition` for "
-        "test environments or standards, `sample_context` / `process_context` "
-        "for sample and process-variable bindings, `characterization` for "
-        "microstructure/defect/phase observations, `comparison` for explicit "
-        "within-paper or cross-paper comparison claims, and `interpretation` "
-        "for author explanations tied to this objective.\n"
+        "Treat `document_state` only as a map of prior coverage and Source positions. "
+        "Do not extract or copy scientific values from it; every output field must be "
+        "supported by the active `source`.\n"
+        "Set `evidence_role` from this source's actual content: direct_result, "
+        "contradictory_result, mechanism_context, condition_context, baseline_context, "
+        "comparison_context, background_context, or irrelevant.\n"
+        "For direct_result or contradictory_result, populate exactly one "
+        "`reported_result` whose outcome answers `objective.outcomes`. Preserve its "
+        "reported value, unit, direction, and a bounded result_text.\n"
+        "Populate `changed_variables` with every factor that differs between baseline "
+        "and target, including each factor's reported baseline/target values and unit. "
+        "Do not infer a missing factor from the objective or paper frame.\n"
+        "Populate `comparison` only when the source identifies baseline and target "
+        "groups. Its axis_names must contain every changed-variable name. Mark "
+        "as-SLM/HIP-SLM, different materials, or different test regimes incomparable "
+        "when those differences prevent direct attribution, and state why.\n"
+        "Set attribution_scope to isolated_effect only for one comparable changed "
+        "variable; joint_effect for multiple comparable changed variables; "
+        "association_only for non-isolating associations; descriptive_only when no "
+        "effect comparison is reported; not_attributable for incomparable/context evidence.\n"
+        "Store only fixed material, sample, process, and test conditions in "
+        "scientific_context as name/value/unit entries.\n"
         "For a table route with role `current_experimental_evidence`, return "
         "only the single strongest target result cell if model extraction is "
         "needed; deterministic table parsing handles broad row extraction.\n"
-        "For tables, preserve row-level sample/process/test/value bindings in "
-        "`sample_context`, `process_context`, `test_condition`, `value_payload`, "
-        "and `join_keys`. For text, use exact supported statements from the "
-        "provided source text.\n"
+        "For tables, keep result, baseline, target, changed-variable values, and fixed "
+        "context aligned to the same row/column binding. For text, use only statements "
+        "supported by the provided source text.\n"
         "For text routes, return at most one extraction: the strongest "
-        "objective-relevant measurement, process/test context, characterization, "
-        "comparison, or interpretation. Do not enumerate every possible number "
+        "objective-relevant result, condition, mechanism, comparison, or background "
+        "record. Do not enumerate every possible number "
         "or secondary observation in the paragraph.\n"
         "Good text example: `1.43x10^6 C/s for P150, and 1.65x10^6 C/s for NP` "
         "should produce only the most objective-relevant one of those bindings "
         "for this route, not two separate extractions.\n"
         "Bad text example: returning separate extractions for every numeric "
         "value in one paragraph or copying the whole paragraph into "
-        "`value_payload`.\n"
+        "`result_text`.\n"
         "When `source.table_cells` is present, use each cell's `row_index`, "
         "`col_index`, `header_path`, and `cell_text` as the authoritative table "
         "structure. Use nearby cells and rows to repair parser-split row labels "
         "or dangling fragments, but do not use outside knowledge.\n"
-        "For `measurement`, always put the numeric or qualitative result "
-        "value/trend in `value_payload`; do not emit a measurement with only "
-        "property and context fields.\n"
         "Do not extract composition-only, literature-summary, or unrelated facts "
         "unless the active route role explicitly requires them.\n"
-        "Do not emit an extraction if its property, context, value, and "
-        "interpretation fields would all be empty.\n"
+        "Do not emit an extraction when reported_result and scientific_context are both empty.\n"
         "`resolution_status` should be resolved only when source, sample/process "
         "context, and value or condition are sufficiently bound; otherwise use "
         "partial or unresolved."

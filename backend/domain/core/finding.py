@@ -345,7 +345,7 @@ class Finding:
             ]
             if not any(
                 evidence.evidence_role == "direct_result"
-                and bool(evidence.join_keys.get("isolated_variable"))
+                and evidence.attribution_scope == "isolated_effect"
                 for evidence in relation_evidence
             ):
                 raise ValueError("causal relation lacks isolated-variable evidence")

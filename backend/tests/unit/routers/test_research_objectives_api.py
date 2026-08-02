@@ -90,9 +90,34 @@ def _evidence() -> ObjectiveEvidence:
             "page_numbers": [7],
             "evidence_role": "direct_result",
             "selection_status": "extracted",
-            "evidence_kind": "measurement",
-            "property_normalized": "strength",
-            "value_payload": {"value": 620},
+            "changed_variables": [
+                {
+                    "name": "temperature",
+                    "baseline_value": 400,
+                    "target_value": 500,
+                    "unit": "C",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "400 C",
+                "target_label": "500 C",
+                "axis_names": ["temperature"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "strength",
+                "value": 620,
+                "unit": "MPa",
+                "direction": "increase",
+                "result_text": "Tensile strength increased to 620 MPa.",
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {
+                "material": [],
+                "sample": [],
+                "process": [],
+                "test": [],
+            },
             "resolution_status": "resolved",
             "confidence": 0.9,
         }

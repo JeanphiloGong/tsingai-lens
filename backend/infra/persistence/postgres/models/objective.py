@@ -310,6 +310,11 @@ class ObjectiveEvidenceRecord(Base):
             "source_kind IN ('text_window', 'table', 'figure')",
             name="source_kind_valid",
         ),
+        CheckConstraint(
+            "attribution_scope IN ('isolated_effect', 'joint_effect', "
+            "'association_only', 'descriptive_only', 'not_attributable')",
+            name="attribution_scope_valid",
+        ),
         CheckConstraint("length(source_excerpt) > 0", name="source_excerpt_non_empty"),
         CheckConstraint(
             "selection_status != 'failed' OR failure_reason IS NOT NULL",
@@ -359,22 +364,19 @@ class ObjectiveEvidenceRecord(Base):
     evidence_role: Mapped[str] = mapped_column(String(32), nullable=False)
     selection_status: Mapped[str] = mapped_column(String(16), nullable=False)
     selection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    evidence_kind: Mapped[str] = mapped_column(String(64), nullable=False)
-    property_normalized: Mapped[str | None] = mapped_column(Text, nullable=True)
-    material_system: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    sample_context: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    process_context: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    test_condition: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    resolved_condition: Mapped[dict[str, Any]] = mapped_column(
+    changed_variables: Mapped[list[dict[str, Any]]] = mapped_column(
         _JSON_DOCUMENT, nullable=False
     )
-    value_payload: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    unit: Mapped[str | None] = mapped_column(Text, nullable=True)
-    baseline_context: Mapped[dict[str, Any]] = mapped_column(
+    comparison: Mapped[dict[str, Any] | None] = mapped_column(
+        _JSON_DOCUMENT, nullable=True
+    )
+    reported_result: Mapped[dict[str, Any] | None] = mapped_column(
+        _JSON_DOCUMENT, nullable=True
+    )
+    attribution_scope: Mapped[str] = mapped_column(String(32), nullable=False)
+    scientific_context: Mapped[dict[str, Any]] = mapped_column(
         _JSON_DOCUMENT, nullable=False
     )
-    interpretation: Mapped[str | None] = mapped_column(Text, nullable=True)
-    join_keys: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     anchor_ids: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     resolution_status: Mapped[str] = mapped_column(String(32), nullable=False)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

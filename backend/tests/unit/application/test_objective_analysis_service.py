@@ -66,10 +66,35 @@ def _evidence(version: int) -> ObjectiveEvidence:
             "source_excerpt": "Temperature changed strength.",
             "evidence_role": "direct_result",
             "selection_status": "extracted",
-            "evidence_kind": "measurement",
-            "property_normalized": "strength",
-            "value_payload": {"direction": "changes"},
-            "join_keys": {"isolated_variable": "temperature"},
+            "changed_variables": [
+                {
+                    "name": "temperature",
+                    "baseline_value": 500,
+                    "target_value": 600,
+                    "unit": "C",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "500 C",
+                "target_label": "600 C",
+                "axis_names": ["temperature"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "strength",
+                "value": 620,
+                "unit": "MPa",
+                "direction": "increase",
+                "result_text": "Strength increased at 600 C.",
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {
+                "material": [{"name": "alloy", "value": "Alloy A"}],
+                "sample": [],
+                "process": [],
+                "test": [],
+            },
             "resolution_status": "resolved",
             "confidence": 0.9,
         }

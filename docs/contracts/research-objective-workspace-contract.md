@@ -78,9 +78,15 @@ Each record contains:
 - `document_id` and one primary `source_ref`;
 - `source_kind`: `text_window | table | figure`;
 - exact bounded `source_excerpt`, page numbers, and related typed locators;
-- evidence role, kind, selection/extraction state, and confidence;
-- material, sample, process, test, baseline, value, interpretation, and join
-  fields needed for scientific comparison.
+- evidence role, selection/extraction state, confidence, and
+  `attribution_scope`;
+- `changed_variables`, each with a name and reported baseline/target value;
+- one `comparison` with baseline/target labels, every changed axis,
+  comparability, and explicit incomparability reasons;
+- at most one `reported_result`, containing one outcome, reported value/unit,
+  direction, and bounded result text;
+- `scientific_context`, containing typed material, sample, process, and test
+  name/value/unit attributes that stayed fixed in the comparison.
 
 The Evidence lifecycle is:
 
@@ -92,6 +98,22 @@ Only eligible extracted Evidence may support a Finding. Condition, mechanism,
 baseline, comparison, and background context cannot alone establish a direct
 result. Direct and contradictory results must contain an explicit outcome in
 both the source excerpt and structured content.
+
+`attribution_scope` is `isolated_effect | joint_effect | association_only |
+descriptive_only | not_attributable`. An isolated effect requires exactly one
+changed variable and a comparable baseline/target comparison over the same
+axis. A joint effect requires at least two changed variables and retains every
+changed axis. Incomparable groups require reasons and are always
+`not_attributable`.
+
+Extraction state carries only prior role/outcome coverage and Source positions
+between blocks of the same document; scientific values and context are not
+copied into later extraction prompts. It is reset at every document boundary
+and cannot cross an Objective or analysis version. The service binds provider
+output back to the selected Source locator and never fills missing variables or
+outcomes from the Objective or PaperContribution. Deterministic table Evidence
+also retains row, column, and header coordinates for the reported cell; a
+pairwise result cites both source rows.
 
 ### Finding
 

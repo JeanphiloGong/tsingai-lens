@@ -512,7 +512,6 @@ class FakeCoreLLMStructuredExtractor:
                 ),
                 headers[-1] if headers else "value",
             )
-            extractions: list[StructuredEvidenceExtraction] = []
             for row in matrix[1:]:
                 if not isinstance(row, list) or len(row) < 2:
                     continue
@@ -520,24 +519,50 @@ class FakeCoreLLMStructuredExtractor:
                 value_text = str(row[-1]).strip()
                 if not sample_label or not value_text:
                     continue
-                extractions.append(
-                    StructuredEvidenceExtraction(
-                        evidence_kind="measurement",
-                        property_normalized=property_header,
-                        sample_context={"label": sample_label},
-                        value_payload={"source_value_text": value_text},
-                        join_keys={"sample_key": sample_label},
-                        resolution_status="partial",
-                        confidence=0.78,
-                    )
+                numeric_match = _FLOAT_PATTERN.search(value_text.replace(",", ""))
+                return StructuredEvidenceExtractions(
+                    extractions=[
+                        StructuredEvidenceExtraction(
+                            evidence_role="direct_result",
+                            reported_result={
+                                "outcome": property_header,
+                                "value": (
+                                    float(numeric_match.group(0))
+                                    if numeric_match
+                                    else value_text
+                                ),
+                                "unit": None,
+                                "direction": "unknown",
+                                "result_text": (
+                                    f"{sample_label}: {property_header} = {value_text}"
+                                ),
+                            },
+                            attribution_scope="descriptive_only",
+                            scientific_context={
+                                "sample": [
+                                    {"name": "label", "value": sample_label}
+                                ]
+                            },
+                            resolution_status="partial",
+                            confidence=0.78,
+                        )
+                    ]
                 )
-            return StructuredEvidenceExtractions(extractions=extractions)
+            return StructuredEvidenceExtractions()
         if route.get("source_kind") == "text_window" and source.get("text"):
             return StructuredEvidenceExtractions(
                 extractions=[
                     StructuredEvidenceExtraction(
-                        evidence_kind="process_context",
-                        value_payload={"statement": str(source.get("text"))[:160]},
+                        evidence_role="condition_context",
+                        attribution_scope="not_attributable",
+                        scientific_context={
+                            "process": [
+                                {
+                                    "name": "source_statement",
+                                    "value": str(source.get("text"))[:160],
+                                }
+                            ]
+                        },
                         resolution_status="partial",
                         confidence=0.7,
                     )

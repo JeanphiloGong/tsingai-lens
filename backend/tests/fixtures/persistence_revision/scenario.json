@@ -368,18 +368,29 @@
         "evidence_role": "direct_result",
         "selection_status": "extracted",
         "selection_reason": "Direct objective result.",
-        "evidence_kind": "measurement",
-        "property_normalized": "yield strength",
-        "material_system": {"name": "Synthetic Alloy A"},
-        "sample_context": {"state": "heat-treated"},
-        "process_context": {"heat_treatment_c": 700},
-        "test_condition": {"temperature_c": 25},
-        "resolved_condition": {},
-        "value_payload": {"value": 620},
-        "unit": "MPa",
-        "baseline_context": {"label": "as-built"},
-        "interpretation": "The heat-treated sample reached 620 MPa yield strength.",
-        "join_keys": {"variables": ["heat treatment"]},
+        "changed_variables": [
+          {
+            "name": "heat treatment",
+            "baseline_value": null,
+            "target_value": "heat-treated",
+            "unit": null
+          }
+        ],
+        "comparison": null,
+        "reported_result": {
+          "outcome": "yield strength",
+          "value": 620,
+          "unit": "MPa",
+          "direction": "unknown",
+          "result_text": "The heat-treated sample reached 620 MPa yield strength."
+        },
+        "attribution_scope": "descriptive_only",
+        "scientific_context": {
+          "material": [{"name": "name", "value": "Synthetic Alloy A", "unit": null}],
+          "sample": [{"name": "state", "value": "heat-treated", "unit": null}],
+          "process": [{"name": "heat treatment", "value": 700, "unit": "C"}],
+          "test": [{"name": "temperature", "value": 25, "unit": "C"}]
+        },
         "anchor_ids": ["anchor_strength"],
         "resolution_status": "resolved",
         "confidence": 1.0

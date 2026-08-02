@@ -462,14 +462,39 @@ class _ObjectiveResearchService(_EmptyResearchObjectiveService):
                 "page_numbers": [8],
                 "evidence_role": "direct_result",
                 "selection_status": "extracted",
-                "evidence_kind": "measurement",
-                "property_normalized": "yield strength",
-                "material_system": {"name": "316L stainless steel"},
-                "sample_context": {"sample_id": "S014"},
-                "process_context": {"energy_density": "100 J/mm3"},
-                "value_payload": {"value": 448, "unit": "MPa"},
-                "unit": "MPa",
-                "join_keys": {"changed_variables": ["energy density", "scan strategy"]},
+                "changed_variables": [
+                    {
+                        "name": "energy density",
+                        "baseline_value": None,
+                        "target_value": 100,
+                        "unit": "J/mm3",
+                    }
+                ],
+                "comparison": None,
+                "reported_result": {
+                    "outcome": "yield strength",
+                    "value": 448,
+                    "unit": "MPa",
+                    "direction": "unknown",
+                    "result_text": (
+                        "At 100 J/mm3, the reported yield strength was 448 MPa."
+                    ),
+                },
+                "attribution_scope": "descriptive_only",
+                "scientific_context": {
+                    "material": [
+                        {"name": "name", "value": "316L stainless steel"}
+                    ],
+                    "sample": [{"name": "sample id", "value": "S014"}],
+                    "process": [
+                        {
+                            "name": "energy density",
+                            "value": 100,
+                            "unit": "J/mm3",
+                        }
+                    ],
+                    "test": [],
+                },
                 "resolution_status": "resolved",
                 "confidence": 0.91,
             }

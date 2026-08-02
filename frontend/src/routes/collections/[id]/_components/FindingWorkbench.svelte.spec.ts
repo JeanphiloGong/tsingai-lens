@@ -27,10 +27,13 @@ const evidence = [{
 	collection_id: 'col-1', objective_id: 'obj-1', analysis_version: 1,
 	evidence_id: 'evidence-1', document_id: 'paper-1', source_kind: 'text_window', source_ref: 'block-7',
 	source_excerpt: 'At 500 C, tensile strength increased to 620 MPa.', page_numbers: [7], related_source_refs: [],
-	evidence_role: 'direct_result', selection_reason: null, selection_status: 'extracted', evidence_kind: 'measurement',
-	property_normalized: 'strength', material_system: {}, sample_context: {}, process_context: {}, resolved_condition: {},
-	test_condition: {}, value_payload: { value: 620 }, unit: 'MPa', baseline_context: {}, interpretation: null,
-	anchor_ids: [], join_keys: {}, resolution_status: 'resolved', failure_reason: null, confidence: 0.9
+	evidence_role: 'direct_result', selection_reason: null, selection_status: 'extracted',
+	changed_variables: [{ name: 'temperature', baseline_value: 400, target_value: 500, unit: 'C' }],
+	comparison: { baseline_label: '400 C', target_label: '500 C', axis_names: ['temperature'], comparable: true, incomparability_reasons: [] },
+	reported_result: { outcome: 'strength', value: 620, unit: 'MPa', direction: 'increase' as const, result_text: 'At 500 C, tensile strength increased to 620 MPa.' },
+	attribution_scope: 'isolated_effect' as const,
+	scientific_context: { material: [{ name: 'alloy', value: 'Alloy A', unit: null }], sample: [], process: [], test: [] },
+	anchor_ids: [], resolution_status: 'resolved', failure_reason: null, confidence: 0.9
 }];
 
 describe('single Finding workbench', () => {
@@ -39,8 +42,10 @@ describe('single Finding workbench', () => {
 
 		await expect.element(browserPage.getByText(finding.statement)).toBeInTheDocument();
 		await expect.element(browserPage.getByText('associated_with')).toBeInTheDocument();
-		await expect.element(browserPage.getByText(evidence[0].source_excerpt)).toBeInTheDocument();
-			await expect.element(browserPage.getByRole('link', { name: '打开原文' })).toHaveAttribute(
+		await expect.element(browserPage.getByRole('blockquote')).toHaveTextContent(
+			evidence[0].source_excerpt
+		);
+		await expect.element(browserPage.getByRole('link', { name: '打开原文' })).toHaveAttribute(
 				'href',
 				'/collections/col-1/documents/paper-1?view=parsed-paper&source_ref=block-7&page=7&quote=At+500+C%2C+tensile+strength+increased+to+620+MPa.&return_to=%2Fcollections%2Fcol-1%2Fobjectives%2Fobj-1'
 			);

@@ -16,6 +16,10 @@ from domain.core import (
     FindingRelation,
     ObjectiveAnalysis,
     ObjectiveEvidence,
+    ObjectiveEvidenceComparison,
+    ObjectiveEvidenceContext,
+    ObjectiveEvidenceResult,
+    ObjectiveEvidenceVariable,
     ObjectiveFactSet,
     PaperContribution,
     PaperSkim,
@@ -679,18 +683,15 @@ class PostgresObjectiveRepository:
             evidence_role=item.evidence_role,
             selection_status=item.selection_status,
             selection_reason=item.selection_reason,
-            evidence_kind=item.evidence_kind,
-            property_normalized=item.property_normalized,
-            material_system=dict(item.material_system),
-            sample_context=dict(item.sample_context),
-            process_context=dict(item.process_context),
-            test_condition=dict(item.test_condition),
-            resolved_condition=dict(item.resolved_condition),
-            value_payload=dict(item.value_payload),
-            unit=item.unit,
-            baseline_context=dict(item.baseline_context),
-            interpretation=item.interpretation,
-            join_keys=dict(item.join_keys),
+            changed_variables=[
+                variable.to_record() for variable in item.changed_variables
+            ],
+            comparison=item.comparison.to_record() if item.comparison else None,
+            reported_result=(
+                item.reported_result.to_record() if item.reported_result else None
+            ),
+            attribution_scope=item.attribution_scope,
+            scientific_context=item.scientific_context.to_record(),
             anchor_ids=list(item.anchor_ids),
             resolution_status=item.resolution_status,
             failure_reason=item.failure_reason,
@@ -944,18 +945,24 @@ class PostgresObjectiveRepository:
             evidence_role=row.evidence_role,
             selection_status=row.selection_status,
             selection_reason=row.selection_reason,
-            evidence_kind=row.evidence_kind,
-            property_normalized=row.property_normalized,
-            material_system=dict(row.material_system),
-            sample_context=dict(row.sample_context),
-            process_context=dict(row.process_context),
-            test_condition=dict(row.test_condition),
-            resolved_condition=dict(row.resolved_condition),
-            value_payload=dict(row.value_payload),
-            unit=row.unit,
-            baseline_context=dict(row.baseline_context),
-            interpretation=row.interpretation,
-            join_keys=dict(row.join_keys),
+            changed_variables=tuple(
+                ObjectiveEvidenceVariable.from_mapping(value)
+                for value in row.changed_variables
+            ),
+            comparison=(
+                ObjectiveEvidenceComparison.from_mapping(row.comparison)
+                if row.comparison is not None
+                else None
+            ),
+            reported_result=(
+                ObjectiveEvidenceResult.from_mapping(row.reported_result)
+                if row.reported_result is not None
+                else None
+            ),
+            attribution_scope=row.attribution_scope,
+            scientific_context=ObjectiveEvidenceContext.from_mapping(
+                row.scientific_context
+            ),
             anchor_ids=tuple(row.anchor_ids),
             resolution_status=row.resolution_status,
             failure_reason=row.failure_reason,

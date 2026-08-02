@@ -58,7 +58,7 @@ def _candidate_evidence(**overrides) -> ObjectiveEvidence:
         "source_excerpt": "The heat-treated sample reached 610 MPa.",
         "evidence_role": "direct_result",
         "selection_status": "candidate",
-        "evidence_kind": "measurement",
+        "attribution_scope": "not_attributable",
         "resolution_status": "unknown",
     }
     payload.update(overrides)
@@ -292,18 +292,41 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
         reason="Reports the target strength result.",
     )
     extracted = selected.mark_extracted(
-        property_normalized="yield strength",
-        value_payload={"value": 610},
-        unit="MPa",
-        material_system={"alloy": "316L"},
-        join_keys={"isolated_variable": "heat treatment"},
+        changed_variables=[
+            {
+                "name": "heat treatment",
+                "baseline_value": "as-built",
+                "target_value": "heat-treated",
+            }
+        ],
+        comparison={
+            "baseline_label": "as-built",
+            "target_label": "heat-treated",
+            "axis_names": ["heat treatment"],
+            "comparable": True,
+        },
+        reported_result={
+            "outcome": "yield strength",
+            "value": 610,
+            "unit": "MPa",
+            "direction": "increase",
+            "result_text": "The heat-treated sample reached 610 MPa.",
+        },
+        attribution_scope="isolated_effect",
+        scientific_context={
+            "material": [{"name": "alloy", "value": "316L"}],
+            "test": [{"name": "method", "value": "tensile test"}],
+        },
     )
 
     assert candidate.selection_status == "candidate"
     assert selected.selection_status == "selected"
     assert extracted.selection_status == "extracted"
     assert extracted.source_excerpt == "The heat-treated sample reached 610 MPa."
-    assert extracted.value_payload == {"value": 610}
+    assert extracted.reported_result is not None
+    assert extracted.reported_result.value == 610
+    assert extracted.changed_variables[0].name == "heat treatment"
+    assert extracted.attribution_scope == "isolated_effect"
     assert extracted.supports_finding is True
     assert "route_id" not in extracted.to_record()
     assert "evidence_unit_id" not in extracted.to_record()
@@ -312,9 +335,12 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
 def test_context_only_evidence_cannot_establish_finding_by_itself() -> None:
     evidence = _candidate_evidence(
         evidence_role="condition_context",
-        evidence_kind="test_condition",
     ).select(evidence_role="condition_context")
-    extracted = evidence.mark_extracted(test_condition={"temperature_c": 25})
+    extracted = evidence.mark_extracted(
+        scientific_context={
+            "test": [{"name": "temperature", "value": 25, "unit": "C"}]
+        }
+    )
 
     assert extracted.supports_finding is True
     assert extracted.evidence_role == "condition_context"
@@ -324,9 +350,130 @@ def test_objective_evidence_rejects_invalid_state_and_empty_source() -> None:
     rejected = _candidate_evidence().reject("Not relevant to the target property.")
 
     with pytest.raises(ValueError, match="rejected -> extracted"):
-        rejected.mark_extracted(interpretation="invalid")
+        rejected.mark_extracted(
+            scientific_context={"process": [{"name": "state", "value": "invalid"}]}
+        )
     with pytest.raises(ValueError, match="identity and source"):
         _candidate_evidence(source_excerpt="")
+
+
+def test_objective_evidence_preserves_jointly_varied_factors() -> None:
+    evidence = _candidate_evidence(
+        selection_status="extracted",
+        changed_variables=[
+            {"name": "scan speed", "baseline_value": 750, "target_value": 1000, "unit": "mm/s"},
+            {"name": "hatch spacing", "baseline_value": 80, "target_value": 100, "unit": "um"},
+            {"name": "energy density", "baseline_value": 389, "target_value": 278, "unit": "J/mm3"},
+        ],
+        comparison={
+            "baseline_label": "condition A",
+            "target_label": "condition B",
+            "axis_names": ["scan speed", "hatch spacing", "energy density"],
+            "comparable": True,
+        },
+        reported_result={
+            "outcome": "elongation",
+            "value": 18.2,
+            "unit": "%",
+            "direction": "decrease",
+            "result_text": "Elongation was 18.2% for condition B.",
+        },
+        attribution_scope="joint_effect",
+        resolution_status="resolved",
+    )
+
+    assert [item.name for item in evidence.changed_variables] == [
+        "scan speed",
+        "hatch spacing",
+        "energy density",
+    ]
+    assert evidence.attribution_scope == "joint_effect"
+
+
+def test_objective_evidence_rejects_single_factor_attribution_for_joint_change() -> None:
+    with pytest.raises(ValueError, match="isolated effect requires exactly one"):
+        _candidate_evidence(
+            selection_status="extracted",
+            changed_variables=[
+                {"name": "scan speed", "baseline_value": 750, "target_value": 1000},
+                {"name": "hatch spacing", "baseline_value": 80, "target_value": 100},
+            ],
+            comparison={
+                "baseline_label": "A",
+                "target_label": "B",
+                "axis_names": ["scan speed", "hatch spacing"],
+                "comparable": True,
+            },
+            reported_result={
+                "outcome": "density",
+                "value": 98.9,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": "Density increased to 98.9%.",
+            },
+            attribution_scope="isolated_effect",
+            resolution_status="resolved",
+        )
+
+
+def test_objective_evidence_rejects_effect_without_variable_change() -> None:
+    with pytest.raises(ValueError, match="requires changed variable values"):
+        _candidate_evidence(
+            selection_status="extracted",
+            changed_variables=[
+                {"name": "laser power", "baseline_value": 200, "target_value": 200}
+            ],
+            comparison={
+                "baseline_label": "A",
+                "target_label": "B",
+                "axis_names": ["laser power"],
+                "comparable": True,
+            },
+            reported_result={
+                "outcome": "density",
+                "value": 98.9,
+                "unit": "%",
+                "direction": "no_change",
+                "result_text": "Density was 98.9% in condition B.",
+            },
+            attribution_scope="isolated_effect",
+            resolution_status="resolved",
+        )
+
+
+def test_objective_evidence_marks_incomparable_sample_states_unattributable() -> None:
+    evidence = _candidate_evidence(
+        selection_status="extracted",
+        changed_variables=[
+            {"name": "post treatment", "baseline_value": "as-SLM", "target_value": "HIP-SLM"}
+        ],
+        comparison={
+            "baseline_label": "as-SLM",
+            "target_label": "HIP-SLM",
+            "axis_names": ["post treatment"],
+            "comparable": False,
+            "incomparability_reasons": ["HIP changes porosity and residual stress state"],
+        },
+        reported_result={
+            "outcome": "fatigue life",
+            "value": None,
+            "unit": None,
+            "direction": "increase",
+            "result_text": "HIP-SLM showed longer fatigue life than as-SLM.",
+        },
+        attribution_scope="not_attributable",
+        resolution_status="resolved",
+    )
+
+    assert evidence.comparison is not None
+    assert evidence.comparison.comparable is False
+    with pytest.raises(ValueError, match="incomparable evidence cannot be attributed"):
+        _candidate_evidence(
+            **{
+                **evidence.to_record(),
+                "attribution_scope": "isolated_effect",
+            }
+        )
 
 
 def test_normalizers_remain_stable() -> None:

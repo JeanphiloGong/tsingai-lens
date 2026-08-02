@@ -206,6 +206,7 @@
 					<article class="evidence-item">
 						<div class="evidence-meta">
 							<span>{item.evidence_role}</span>
+							<span>{item.attribution_scope}</span>
 							<span>{item.source_kind}</span>
 							<span
 								>{item.page_numbers.length ? `p.${item.page_numbers.join(', ')}` : '页码未知'}</span
@@ -213,7 +214,7 @@
 							<a href={sourceHref(item)}>打开原文</a>
 						</div>
 						<blockquote>{item.source_excerpt}</blockquote>
-						{#if item.interpretation}<p>{item.interpretation}</p>{/if}
+						{#if item.reported_result}<p>{item.reported_result.result_text}</p>{/if}
 					</article>
 				{/each}
 			</div>

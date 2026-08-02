@@ -558,6 +558,7 @@ objective_finding_evidence_links = Table(
         "link_role IN ('supporting', 'contradicting', 'context', 'boundary')",
         name="link_role_valid",
     ),
+    CheckConstraint("position >= 0", name="position_non_negative"),
     UniqueConstraint(
         "collection_id",
         "objective_id",
@@ -602,6 +603,7 @@ objective_finding_relation_evidence_links = Table(
     Column("relation_order", Integer, primary_key=True),
     Column("evidence_id", String(128), primary_key=True),
     Column("position", Integer, nullable=False),
+    CheckConstraint("position >= 0", name="position_non_negative"),
     UniqueConstraint(
         "collection_id",
         "objective_id",

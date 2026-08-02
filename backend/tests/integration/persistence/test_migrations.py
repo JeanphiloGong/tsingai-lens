@@ -977,6 +977,74 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
             )
             connection.execute(
                 text(
+                    "INSERT INTO documents (document_id, created_at) "
+                    "VALUES ('doc-evidence-pg-2', :created_at)"
+                ),
+                {"created_at": created_at},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO document_versions (
+                        document_version_id, document_id, sha256, media_type,
+                        created_at
+                    ) VALUES (
+                        'version-evidence-pg-2', 'doc-evidence-pg-2', :sha256,
+                        'application/pdf', :created_at
+                    )
+                    """
+                ),
+                {"sha256": "b" * 64, "created_at": created_at},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO collection_documents (
+                        collection_document_id, collection_id, document_id,
+                        document_version_id, created_at
+                    ) VALUES (
+                        'membership-evidence-pg-2', 'col-evidence-pg',
+                        'doc-evidence-pg-2', 'version-evidence-pg-2', :created_at
+                    )
+                    """
+                ),
+                {"created_at": created_at},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO source_documents (
+                        build_id, source_document_id, collection_id,
+                        collection_document_id, document_version_id,
+                        human_readable_id, title, text, creation_date,
+                        metadata_json
+                    ) VALUES (
+                        'build-evidence-pg', 'source-evidence-pg-2',
+                        'col-evidence-pg', 'membership-evidence-pg-2',
+                        'version-evidence-pg-2', 2, 'Evidence paper 2',
+                        'Opposing reported source text.', NULL, '{}'
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO source_blocks (
+                        build_id, block_id, collection_id, source_document_id,
+                        block_type, text, block_order, page, bbox_json,
+                        char_range_json, heading_path, heading_level
+                    ) VALUES (
+                        'build-evidence-pg', 'block-evidence-pg-2',
+                        'col-evidence-pg', 'source-evidence-pg-2', 'paragraph',
+                        'Strength decreased in the second paper.', 0, 1, NULL,
+                        NULL, 'Results', 1
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
                     """
                     INSERT INTO source_blocks (
                         build_id, block_id, collection_id, source_document_id,
@@ -1022,6 +1090,23 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
                 "measured_property_scope": ["strength"],
                 "test_environment_scope": ["ambient"],
                 "confidence": 0.9,
+            }
+        )
+        second_contribution = PaperContribution.from_mapping(
+            {
+                "collection_id": "col-evidence-pg",
+                "objective_id": "obj-evidence-pg",
+                "analysis_version": analysis_version,
+                "document_id": "source-evidence-pg-2",
+                "analysis_status": "analyzed",
+                "relevance": "high",
+                "paper_role": "primary_experiment",
+                "contribution_summary": "Opposing temperature comparison.",
+                "material_match": ["Alloy A"],
+                "changed_variables": ["temperature"],
+                "measured_property_scope": ["strength"],
+                "test_environment_scope": ["ambient"],
+                "confidence": 0.8,
             }
         )
         evidence_base = {
@@ -1077,6 +1162,8 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
             {
                 **result_base,
                 "evidence_id": "contradict-pg-v2",
+                "document_id": "source-evidence-pg-2",
+                "source_ref": "block-evidence-pg-2",
                 "evidence_role": "direct_result",
                 "reported_result": {
                     "outcome": "strength",
@@ -1125,8 +1212,8 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
                 "direction": "increase",
                 "assertion_strength": "associative",
                 "attribution_scope": "isolated_effect",
-                "synthesis_status": "insufficient_confirmation",
-                "certainty": 0.5,
+                "synthesis_status": "condition_dependent",
+                "certainty": 0.8,
                 "display_rank": 0,
                 "mechanisms": [
                     {
@@ -1141,10 +1228,14 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
                 "limitations": ["One paper contains opposing measurements."],
                 "paper_contributions": [
                     {
+                        "document_id": "source-evidence-pg-2",
+                        "analysis_status": "analyzed",
+                        "contradicting_evidence_ids": ["contradict-pg-v2"],
+                    },
+                    {
                         "document_id": "source-evidence-pg",
                         "analysis_status": "analyzed",
                         "supporting_evidence_ids": ["support-pg-v2"],
-                        "contradicting_evidence_ids": ["contradict-pg-v2"],
                         "context_evidence_ids": [
                             "condition-pg-v2",
                             "mechanism-pg-v2",
@@ -1158,7 +1249,7 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
             "col-evidence-pg",
             "obj-evidence-pg",
             analysis_version,
-            contributions=(contribution,),
+            contributions=(second_contribution, contribution),
             evidence_records=evidence_records,
             findings=(finding,),
         )

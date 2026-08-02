@@ -155,6 +155,10 @@ def upgrade() -> None:
             op.f("ck_objective_finding_evidence_links_link_role_valid"),
             "link_role IN ('supporting', 'contradicting', 'context', 'boundary')",
         )
+        batch_op.create_check_constraint(
+            op.f("ck_objective_finding_evidence_links_position_non_negative"),
+            "position >= 0",
+        )
         batch_op.create_unique_constraint(
             op.f(
                 "uq_objective_finding_evidence_links_link_role_position_unique"
@@ -172,6 +176,12 @@ def upgrade() -> None:
     with op.batch_alter_table(
         "objective_finding_relation_evidence_links"
     ) as batch_op:
+        batch_op.create_check_constraint(
+            op.f(
+                "ck_objective_finding_relation_evidence_links_position_non_negative"
+            ),
+            "position >= 0",
+        )
         batch_op.create_unique_constraint(
             op.f("uq_obj_find_rel_evidence_relation_position"),
             [

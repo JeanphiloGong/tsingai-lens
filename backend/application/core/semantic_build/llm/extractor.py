@@ -406,6 +406,7 @@ class CoreLLMStructuredExtractor:
             request_kwargs["max_completion_tokens"] = (
                 _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS
             )
+            request_kwargs["response_format"] = {"type": "json_object"}
         elif response_model is StructuredEvidenceSelections:
             request_kwargs["max_completion_tokens"] = (
                 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS
@@ -433,6 +434,19 @@ class CoreLLMStructuredExtractor:
                         "possible_objectives, evidence_density, confidence, and "
                         "warnings. Remove every other key. Do not output analysis, "
                         "markdown, or copied input."
+                    )
+                elif response_model is StructuredResearchObjectives:
+                    retry_instruction = (
+                        "Previous ResearchObjective discovery output failed "
+                        f"validation: {_trace_text(last_error, 400)}. Return one "
+                        "compact JSON object with exactly one top-level key: "
+                        "objectives. Each item must have exactly these objective "
+                        "keys: question, material_scope, process_axes, "
+                        "property_axes, comparison_intent, seed_document_ids, "
+                        "excluded_document_ids, confidence, and reason. Use "
+                        '{"objectives":[]} when no complete candidate exists. '
+                        "Do not output analysis, markdown, copied input, or extra "
+                        "fields."
                     )
                 else:
                     retry_instruction = (

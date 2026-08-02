@@ -334,6 +334,7 @@ _SKIM_CAPTION_LIMIT = 12
 _DISCOVERY_AXIS_VALUE_LIMIT = 2
 _DISCOVERY_OBJECTIVE_LIMIT = 1
 _DISCOVERY_TEXT_VALUE_CHARS = 80
+_DISCOVERY_OBJECTIVE_TEXT_CHARS = 240
 _FRAME_SECTION_SNIPPET_LIMIT = 12
 _FRAME_SECTION_TEXT_CHARS = 420
 _FRAME_SECTION_OVERVIEW_LIMIT = 4
@@ -1195,9 +1196,13 @@ class ResearchObjectiveService:
     def _build_objective_discovery_skim(skim: PaperSkim) -> dict[str, Any]:
         """Keep collection-level discovery input within the model context budget."""
 
-        def values(items: tuple[str, ...], limit: int) -> list[str]:
+        def values(
+            items: tuple[str, ...],
+            limit: int,
+            text_chars: int = _DISCOVERY_TEXT_VALUE_CHARS,
+        ) -> list[str]:
             return [
-                str(item).strip()[:_DISCOVERY_TEXT_VALUE_CHARS]
+                str(item).strip()[:text_chars]
                 for item in items[:limit]
                 if str(item).strip()
             ]
@@ -1224,6 +1229,7 @@ class ResearchObjectiveService:
             "possible_objectives": values(
                 skim.possible_objectives,
                 _DISCOVERY_OBJECTIVE_LIMIT,
+                _DISCOVERY_OBJECTIVE_TEXT_CHARS,
             ),
         }
 

@@ -57,6 +57,29 @@ def _research_objective(payload: dict[str, Any]) -> ResearchObjective:
     )
 
 
+def test_objective_discovery_skim_preserves_complete_candidate_question():
+    question = (
+        "How do laser energy density and scanning strategy affect relative density "
+        "and microstructure of laser powder bed fused 316L stainless steel?"
+    )
+    skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "doc_role": "experimental",
+            "candidate_materials": ["316L stainless steel"],
+            "candidate_processes": ["laser powder bed fusion"],
+            "candidate_properties": ["relative density", "microstructure"],
+            "changed_variables": ["laser energy density", "scanning strategy"],
+            "possible_objectives": [question],
+        }
+    )
+
+    compact_skim = _ResearchObjectiveService._build_objective_discovery_skim(skim)
+
+    assert len(question) > 80
+    assert compact_skim["possible_objectives"] == [question]
+
+
 def _build_research_objective_service(
     *,
     collection_service,
@@ -255,17 +278,6 @@ class _ObjectiveExtractor:
                     excluded_document_ids=["paper-2"],
                     confidence=0.88,
                     reason="paper skims share a clear material-process-property axis",
-                ),
-                StructuredResearchObjective(
-                    question="316L stainless steel",
-                    material_scope=["316L stainless steel"],
-                    process_axes=[],
-                    property_axes=[],
-                    comparison_intent=None,
-                    seed_document_ids=[],
-                    excluded_document_ids=[],
-                    confidence=0.4,
-                    reason="plain material list should be filtered",
                 ),
             ]
         )
@@ -623,7 +635,9 @@ class _BroadObjectiveExtractor(_ObjectiveExtractor):
                     material_scope=["316L stainless steel"],
                     process_axes=["Selective Laser Melting"],
                     property_axes=["mechanical properties"],
-                    comparison_intent=None,
+                    comparison_intent=(
+                        "Compare mechanical properties across SLM processing parameters."
+                    ),
                     seed_document_ids=["paper-1"],
                     excluded_document_ids=[],
                     confidence=0.88,

@@ -148,6 +148,120 @@ after the JSON object.
 """.strip()
 
 
+_RESEARCH_OBJECTIVE_DISCOVERY_SYSTEM_PROMPT = """
+TASK MODEL
+You are the candidate-selection judge for an evidence-backed literature
+comparison backend. Perform candidate selection and binding: select supported
+research questions already proposed by PaperSkim records and bind each selected
+question to the papers and axes that support it. This is candidate selection,
+not final evidence extraction, not axis canonicalization, not objective merge,
+and not free-form research-question generation.
+
+INPUT SCHEMA
+- `collection_id`: collection context only. Never return it.
+- `paper_skims`: compact candidate records from the papers in this collection.
+- `paper_skims[].document_id`: exact identifier for one input paper. This is the
+  only source for `seed_document_ids` and `excluded_document_ids`.
+- `paper_skims[].doc_role`: coarse paper role. Experimental and genuinely mixed
+  papers may seed an objective; review, modeling-only, or uncertain papers do
+  not seed a directly comparable experimental objective.
+- `paper_skims[].candidate_materials`: material labels explicitly found in that
+  paper.
+- `paper_skims[].candidate_processes`: process-family labels explicitly found in
+  that paper.
+- `paper_skims[].changed_variables`: variables explicitly varied or compared in
+  that paper. These may be selected as process axes.
+- `paper_skims[].candidate_properties`: measured or evaluated property labels
+  explicitly found in that paper.
+- `paper_skims[].possible_objectives`: question-shaped candidates already
+  supported by that paper. This is the only source for output `question`.
+
+DECISION PROCESS
+1. Ignore a skim as a seed when it has no possible objective or lacks a
+   material, a process or changed variable, or a measured property.
+2. Select only a question copied exactly from an input
+   `possible_objectives` value. Never rewrite or expand it.
+3. Bind seed papers that directly support that same material-process-property
+   comparison. Copy their exact `document_id` values.
+4. Copy `material_scope`, `process_axes`, and `property_axes` values exactly
+   from the union of the selected seed skims. Do not normalize synonyms here.
+5. Bind papers to one objective only when their candidate relationship is the
+   same. Keep different process-property relationships as separate candidates;
+   the downstream merge step decides whether separate candidates can merge.
+6. Put a paper in `excluded_document_ids` only when its skim is clearly outside
+   that objective's relationship. An empty exclusion list is valid.
+7. If more than 6 candidates remain, rank them by number of supporting
+   experimental papers, then by completeness of the material, process, and
+   property binding. Keep the first 6.
+8. Write a short comparison intent and a short grounding reason. Set confidence
+   from the clarity and agreement of the selected skims, not from outside
+   knowledge.
+9. Return no objective when the input contains no complete, supported
+   candidate. Use exactly `{"objectives":[]}` for that reject result.
+
+HARD RULES
+- Decide silently. Return one JSON object with no analysis, markdown, copied
+  input, measurements, evidence claims, source locators, or extra fields.
+- Return at most 6 objectives. Each objective has 1-3 materials, 1-8 process
+  axes, 1-8 property axes, 1-12 seed ids, and 0-12 excluded ids.
+- Every question and axis must be copied exactly from the selected seed skims.
+- Every document id must be copied exactly from an input skim. Seed and
+  excluded ids must be disjoint.
+- Prefer the empty reject result over an unsupported or incomplete objective.
+
+FEW-SHOTS
+1. Shared objective across papers
+Input:
+{"collection_id":"c1","paper_skims":[{"document_id":"p1","doc_role":
+"experimental","candidate_materials":["316L stainless steel"],
+"candidate_processes":["LPBF"],"changed_variables":["laser energy density"],
+"candidate_properties":["relative density"],"possible_objectives":
+["How does laser energy density affect relative density of LPBF 316L stainless steel?"]},
+{"document_id":"p2","doc_role":"experimental","candidate_materials":
+["316L stainless steel"],"candidate_processes":["LPBF"],"changed_variables":
+["laser energy density"],"candidate_properties":["relative density"],
+"possible_objectives":["How does laser energy density affect relative density of LPBF 316L stainless steel?"]}]}
+Output:
+{"objectives":[{"question":"How does laser energy density affect relative density of LPBF 316L stainless steel?","material_scope":["316L stainless steel"],
+"process_axes":["LPBF","laser energy density"],"property_axes":["relative density"],
+"comparison_intent":"Compare relative density across reported laser energy densities.",
+"seed_document_ids":["p1","p2"],"excluded_document_ids":[],"confidence":0.95,
+"reason":"Both experimental skims propose the same material-process-property question."}]}
+
+2. Unrelated candidates stay separate
+Input:
+{"collection_id":"c2","paper_skims":[{"document_id":"p1","doc_role":
+"experimental","candidate_materials":["Ti-6Al-4V"],"candidate_processes":
+["heat treatment"],"changed_variables":["aging temperature"],
+"candidate_properties":["yield strength"],"possible_objectives":
+["How does aging temperature affect yield strength of Ti-6Al-4V?"]},
+{"document_id":"p2","doc_role":"experimental","candidate_materials":
+["Ti-6Al-4V"],"candidate_processes":["surface treatment"],"changed_variables":
+["surface roughness"],"candidate_properties":["corrosion resistance"],
+"possible_objectives":["How does surface roughness affect corrosion resistance of Ti-6Al-4V?"]}]}
+Output:
+{"objectives":[{"question":"How does aging temperature affect yield strength of Ti-6Al-4V?","material_scope":["Ti-6Al-4V"],"process_axes":["heat treatment","aging temperature"],"property_axes":["yield strength"],"comparison_intent":"Compare yield strength across aging temperatures.","seed_document_ids":["p1"],"excluded_document_ids":["p2"],"confidence":0.9,"reason":"Only p1 supports the aging-temperature and yield-strength relationship."},{"question":"How does surface roughness affect corrosion resistance of Ti-6Al-4V?","material_scope":["Ti-6Al-4V"],"process_axes":["surface treatment","surface roughness"],"property_axes":["corrosion resistance"],"comparison_intent":"Compare corrosion resistance across surface roughness conditions.","seed_document_ids":["p2"],"excluded_document_ids":["p1"],"confidence":0.9,"reason":"Only p2 supports the surface-roughness and corrosion relationship."}]}
+
+3. Review or insufficient candidates
+Input:
+{"collection_id":"c3","paper_skims":[{"document_id":"p1","doc_role":"review",
+"candidate_materials":["316L stainless steel"],"candidate_processes":["LPBF"],
+"changed_variables":[],"candidate_properties":["corrosion behavior"],
+"possible_objectives":[]},{"document_id":"p2","doc_role":"uncertain",
+"candidate_materials":[],"candidate_processes":[],"changed_variables":[],
+"candidate_properties":[],"possible_objectives":[]}]}
+Output:
+{"objectives":[]}
+
+OUTPUT CONTRACT
+Return exactly one top-level key: `objectives`. Each objective must contain
+exactly these keys: `question`, `material_scope`, `process_axes`,
+`property_axes`, `comparison_intent`, `seed_document_ids`,
+`excluded_document_ids`, `confidence`, and `reason`. Empty `objectives` is the
+only reject form. The response ends immediately after the JSON object.
+""".strip()
+
+
 _OBJECTIVE_PAPER_FRAME_SYSTEM_PROMPT = """
 You are framing one paper against one research objective for an evidence-backed literature comparison backend.
 
@@ -725,17 +839,10 @@ def build_research_objective_discovery_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
     user_prompt = (
-        "Create a small set of comparison questions from these compact paper skims.\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
-        "Return only the schema object. Keep objectives few and question-shaped. "
-        "Use exact document_id values for seed/excluded ids. Group related "
-        "properties, but keep distinct process-property comparisons separate."
+        "Select and bind research-objective candidates using the contract.\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
     )
-    system_prompt = (
-        "Build concise research-objective questions for literature comparison. "
-        "Use only the supplied skims. Return one JSON object, no commentary."
-    )
-    return system_prompt, user_prompt
+    return _RESEARCH_OBJECTIVE_DISCOVERY_SYSTEM_PROMPT, user_prompt
 
 
 def build_research_axis_canonicalization_prompt(

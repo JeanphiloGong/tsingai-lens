@@ -11,6 +11,7 @@ from application.core.semantic_build.llm.prompts import (
     build_objective_evidence_prompt,
     build_finding_synthesis_prompt,
     build_paper_skim_prompt,
+    build_research_objective_discovery_prompt,
 )
 from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationPlan,
@@ -21,6 +22,7 @@ from application.core.semantic_build.llm.schemas import (
     StructuredObjectiveMergePlan,
     StructuredPaperContributionDraft,
     StructuredPaperSkim,
+    StructuredResearchObjective,
     StructuredResearchObjectives,
     StructuredFindingSynthesisOutcome,
     StructuredFindingSynthesis,
@@ -468,7 +470,95 @@ def test_core_llm_extractor_validates_research_objective_response():
 
     assert isinstance(objectives, StructuredResearchObjectives)
     assert objectives.objectives[0].question.startswith("How does heat treatment")
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 1400
+    text_call = client.chat.completions.calls[0]
+    assert text_call["max_completion_tokens"] == 1400
+    assert text_call["response_format"] == {"type": "json_object"}
+
+
+def test_research_objective_discovery_prompt_defines_selection_contract():
+    system_prompt, user_prompt = build_research_objective_discovery_prompt(
+        {
+            "collection_id": "col-1",
+            "paper_skims": [
+                {
+                    "document_id": "paper-1",
+                    "doc_role": "experimental",
+                    "candidate_materials": ["316L stainless steel"],
+                    "candidate_processes": ["LPBF"],
+                    "changed_variables": ["laser energy density"],
+                    "candidate_properties": ["relative density"],
+                    "possible_objectives": [
+                        "How does laser energy density affect relative density of LPBF 316L stainless steel?"
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert "TASK MODEL" in system_prompt
+    assert "INPUT SCHEMA" in system_prompt
+    assert "DECISION PROCESS" in system_prompt
+    assert "HARD RULES" in system_prompt
+    assert "FEW-SHOTS" in system_prompt
+    assert "OUTPUT CONTRACT" in system_prompt
+    assert "candidate selection and binding" in system_prompt
+    assert "not final evidence extraction" in system_prompt
+    assert "not axis canonicalization" in system_prompt
+    assert "not objective merge" in system_prompt
+    assert "`collection_id`" in system_prompt
+    assert "`paper_skims[].document_id`" in system_prompt
+    assert "`paper_skims[].possible_objectives`" in system_prompt
+    assert "copy" in system_prompt.lower()
+    assert "If more than 6 candidates remain" in system_prompt
+    assert "Shared objective across papers" in system_prompt
+    assert "Unrelated candidates stay separate" in system_prompt
+    assert "Review or insufficient candidates" in system_prompt
+    assert '{"objectives":[]}' in system_prompt
+    assert "Input JSON:" in user_prompt
+
+
+def test_research_objective_schema_requires_bounded_complete_records():
+    schema = StructuredResearchObjectives.model_json_schema()
+    objective_schema = schema["$defs"]["StructuredResearchObjective"]
+
+    assert schema["required"] == ["objectives"]
+    assert schema["properties"]["objectives"]["maxItems"] == 6
+    assert set(objective_schema["required"]) == {
+        "question",
+        "material_scope",
+        "process_axes",
+        "property_axes",
+        "comparison_intent",
+        "seed_document_ids",
+        "excluded_document_ids",
+        "confidence",
+        "reason",
+    }
+    assert objective_schema["properties"]["material_scope"]["maxItems"] == 3
+    assert objective_schema["properties"]["process_axes"]["maxItems"] == 8
+    assert objective_schema["properties"]["property_axes"]["maxItems"] == 8
+    assert objective_schema["properties"]["seed_document_ids"]["maxItems"] == 12
+    assert objective_schema["properties"]["excluded_document_ids"]["maxItems"] == 12
+    assert objective_schema["properties"]["confidence"]["minimum"] == 0
+    assert objective_schema["properties"]["confidence"]["maximum"] == 1
+
+    with pytest.raises(ValidationError, match="objectives"):
+        StructuredResearchObjectives.model_validate({})
+
+
+def test_research_objective_schema_rejects_overlapping_document_roles():
+    with pytest.raises(ValidationError, match="must be disjoint"):
+        StructuredResearchObjective(
+            question="How does laser energy density affect relative density?",
+            material_scope=["316L stainless steel"],
+            process_axes=["laser energy density"],
+            property_axes=["relative density"],
+            comparison_intent="Compare relative density across energy densities.",
+            seed_document_ids=["paper-1"],
+            excluded_document_ids=["paper-1"],
+            confidence=0.9,
+            reason="The skim provides a direct process-property candidate.",
+        )
 
 
 def test_core_llm_extractor_validates_axis_canonicalization_response():
@@ -1058,6 +1148,37 @@ def test_paper_skim_retry_uses_task_specific_validation_contract():
     assert "Previous PaperSkim output failed validation" in retry_instruction
     assert "doc_type" in retry_instruction
     assert "exactly these keys" in retry_instruction
+    assert "For finding synthesis" not in retry_instruction
+
+
+def test_research_objective_retry_uses_task_specific_validation_contract():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "objectives": [
+            {
+              "question": "How does laser energy density affect relative density?",
+              "material_scope": ["316L stainless steel"]
+            }
+          ]
+        }
+        """
+    )
+    extractor = _json_text_extractor(client)
+
+    with pytest.raises(ValidationError, match="process_axes"):
+        extractor.discover_research_objectives(
+            {
+                "collection_id": "col-1",
+                "paper_skims": [],
+            }
+        )
+
+    retry_instruction = client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "Previous ResearchObjective discovery output failed validation" in retry_instruction
+    assert "process_axes" in retry_instruction
+    assert "exactly one top-level key: objectives" in retry_instruction
+    assert "exactly these objective keys" in retry_instruction
     assert "For finding synthesis" not in retry_instruction
 
 

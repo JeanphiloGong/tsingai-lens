@@ -104,9 +104,11 @@ class PostgresObjectiveRepository:
                         objective_id=objective.objective_id,
                         question=objective.question,
                         material_scope=list(objective.material_scope),
-                        process_axes=list(objective.process_axes),
-                        property_axes=list(objective.property_axes),
-                        comparison_intent=objective.comparison_intent,
+                        variables=list(objective.variables),
+                        outcomes=list(objective.outcomes),
+                        mechanisms=list(objective.mechanisms),
+                        constraints=list(objective.constraints),
+                        requested_comparator=objective.requested_comparator,
                         confidence=objective.confidence,
                         reason=objective.reason,
                         confirmation_status=objective.confirmation_status,
@@ -121,9 +123,11 @@ class PostgresObjectiveRepository:
                 elif row.confirmation_status == "candidate":
                     row.question = objective.question
                     row.material_scope = list(objective.material_scope)
-                    row.process_axes = list(objective.process_axes)
-                    row.property_axes = list(objective.property_axes)
-                    row.comparison_intent = objective.comparison_intent
+                    row.variables = list(objective.variables)
+                    row.outcomes = list(objective.outcomes)
+                    row.mechanisms = list(objective.mechanisms)
+                    row.constraints = list(objective.constraints)
+                    row.requested_comparator = objective.requested_comparator
                     row.confidence = objective.confidence
                     row.reason = objective.reason
                     row.updated_at = now
@@ -991,9 +995,11 @@ class PostgresObjectiveRepository:
             objective_id=row.objective_id,
             question=row.question,
             material_scope=tuple(row.material_scope),
-            process_axes=tuple(row.process_axes),
-            property_axes=tuple(row.property_axes),
-            comparison_intent=row.comparison_intent,
+            variables=tuple(row.variables),
+            outcomes=tuple(row.outcomes),
+            mechanisms=tuple(row.mechanisms),
+            constraints=tuple(row.constraints),
+            requested_comparator=row.requested_comparator,
             seed_document_ids=tuple(scope.get("seed", ())),
             excluded_document_ids=tuple(scope.get("excluded", ())),
             confidence=row.confidence,

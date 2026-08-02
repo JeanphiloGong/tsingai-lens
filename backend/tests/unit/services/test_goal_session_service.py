@@ -418,9 +418,9 @@ class _ObjectiveResearchService(_EmptyResearchObjectiveService):
                 "objective_id": objective_id,
                 "question": "How does LPBF energy density affect 316L strength?",
                 "material_scope": ["316L stainless steel"],
-                "process_axes": ["energy density", "scan strategy"],
-                "property_axes": ["yield strength", "elongation"],
-                "comparison_intent": (
+                "variables": ["energy density", "scan strategy"],
+                "outcomes": ["yield strength", "elongation"],
+                "requested_comparator": (
                     "Compare LPBF process windows against mechanical response."
                 ),
                 "seed_document_ids": ["paper-a"],

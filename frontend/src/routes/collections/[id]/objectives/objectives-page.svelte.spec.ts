@@ -44,7 +44,8 @@ function jsonResponse(body: unknown) {
 }
 
 function request(input: string | URL | Request, init?: RequestInit) {
-	const raw = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+	const raw =
+		typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 	return {
 		path: new URL(raw, 'http://localhost').pathname,
 		method: input instanceof Request ? input.method : (init?.method ?? 'GET')
@@ -57,9 +58,11 @@ function objective(overrides: Record<string, unknown> = {}) {
 		objective_id: 'obj_heat_strength',
 		question: 'How does heat treatment affect strength?',
 		material_scope: ['316L stainless steel'],
-		process_axes: ['heat treatment'],
-		property_axes: ['yield strength'],
-		comparison_intent: 'Compare treated and untreated samples.',
+		variables: ['heat treatment'],
+		outcomes: ['yield strength'],
+		mechanisms: ['precipitate evolution'],
+		constraints: ['LPBF 316L'],
+		requested_comparator: 'Compare treated and untreated samples.',
 		seed_document_ids: ['paper-1', 'paper-2'],
 		excluded_document_ids: [],
 		confidence: 0.82,
@@ -88,7 +91,9 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 
 		render(Page);
 
-		await expect.element(browserPage.getByRole('heading', { name: '研究目标' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: '研究目标' }))
+			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('当前 collection 尚未生成研究目标。'))
 			.toBeInTheDocument();
@@ -156,10 +161,9 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		render(Page);
 
 		await expect.element(browserPage.getByText('结果 v2')).toBeInTheDocument();
-		await expect.element(browserPage.getByRole('link', { name: '查看 Findings' })).toHaveAttribute(
-			'href',
-			'/collections/col_123/objectives/obj_heat_strength'
-		);
+		await expect
+			.element(browserPage.getByRole('link', { name: '查看 Findings' }))
+			.toHaveAttribute('href', '/collections/col_123/objectives/obj_heat_strength');
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 });

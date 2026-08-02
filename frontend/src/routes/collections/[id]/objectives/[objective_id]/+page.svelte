@@ -182,7 +182,7 @@
 			<div>
 				<a href={`/collections/${collectionId}/objectives`}>研究目标</a>
 				<h1>{analysis.objective.question}</h1>
-				<p>{analysis.objective.comparison_intent || '尚未设置比较意图'}</p>
+				<p>{analysis.objective.requested_comparator || '尚未设置比较意图'}</p>
 			</div>
 			<div class="header-actions">
 				<a class="btn btn--ghost btn--small" href={datasetUrl()}>导出训练数据</a>
@@ -201,8 +201,10 @@
 
 		<div class="scope-strip">
 			<div><span>材料</span><strong>{joined(analysis.objective.material_scope)}</strong></div>
-			<div><span>变量</span><strong>{joined(analysis.objective.process_axes)}</strong></div>
-			<div><span>结果</span><strong>{joined(analysis.objective.property_axes)}</strong></div>
+			<div><span>变量</span><strong>{joined(analysis.objective.variables)}</strong></div>
+			<div><span>结果</span><strong>{joined(analysis.objective.outcomes)}</strong></div>
+			<div><span>机制</span><strong>{joined(analysis.objective.mechanisms)}</strong></div>
+			<div><span>约束</span><strong>{joined(analysis.objective.constraints)}</strong></div>
 			<div><span>文献</span><strong>{analysis.objective.seed_document_ids.length} 篇</strong></div>
 		</div>
 
@@ -304,7 +306,7 @@
 	}
 	.scope-strip {
 		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		border-block: 1px solid var(--border-default);
 	}
 	.scope-strip div {

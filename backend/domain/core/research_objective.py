@@ -173,9 +173,11 @@ class ResearchObjective:
     objective_id: str
     question: str
     material_scope: tuple[str, ...]
-    process_axes: tuple[str, ...]
-    property_axes: tuple[str, ...]
-    comparison_intent: str | None
+    variables: tuple[str, ...]
+    outcomes: tuple[str, ...]
+    mechanisms: tuple[str, ...]
+    constraints: tuple[str, ...]
+    requested_comparator: str | None
     seed_document_ids: tuple[str, ...]
     excluded_document_ids: tuple[str, ...]
     confidence: float
@@ -193,6 +195,29 @@ class ResearchObjective:
             raise ValueError("research objective requires objective_id")
         if not _text(self.question):
             raise ValueError("research objective requires question")
+        if not self.variables:
+            raise ValueError("research objective requires at least one variable")
+        if not self.outcomes:
+            raise ValueError("research objective requires at least one outcome")
+        primary_terms = {
+            value.casefold() for value in (*self.variables, *self.outcomes)
+        }
+        duplicate_mechanisms = primary_terms & {
+            value.casefold() for value in self.mechanisms
+        }
+        if duplicate_mechanisms:
+            raise ValueError(
+                "objective mechanisms duplicate variables or outcomes: "
+                + ", ".join(sorted(duplicate_mechanisms))
+            )
+        duplicate_constraints = primary_terms & {
+            value.casefold() for value in self.constraints
+        }
+        if duplicate_constraints:
+            raise ValueError(
+                "objective constraints duplicate variables or outcomes: "
+                + ", ".join(sorted(duplicate_constraints))
+            )
         if self.confirmation_status not in OBJECTIVE_CONFIRMATION_STATUSES:
             raise ValueError(
                 f"unsupported objective confirmation status: {self.confirmation_status}"
@@ -224,15 +249,31 @@ class ResearchObjective:
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ResearchObjective":
         question = _text(payload.get("question")) or ""
+        material_scope = normalize_objective_terms(payload.get("material_scope"))
+        variables = normalize_objective_terms(payload.get("variables"))
+        outcomes = normalize_objective_terms(payload.get("outcomes"))
+        mechanisms = normalize_objective_terms(payload.get("mechanisms"))
+        constraints = normalize_objective_terms(payload.get("constraints"))
+        requested_comparator = _text(payload.get("requested_comparator"))
         return cls(
             collection_id=_text(payload.get("collection_id")) or "",
             objective_id=_text(payload.get("objective_id"))
-            or build_research_objective_id(question),
+            or build_research_objective_id(
+                question=question,
+                material_scope=material_scope,
+                variables=variables,
+                outcomes=outcomes,
+                mechanisms=mechanisms,
+                constraints=constraints,
+                requested_comparator=requested_comparator,
+            ),
             question=question,
-            material_scope=normalize_objective_terms(payload.get("material_scope")),
-            process_axes=normalize_objective_terms(payload.get("process_axes")),
-            property_axes=normalize_objective_terms(payload.get("property_axes")),
-            comparison_intent=_text(payload.get("comparison_intent")),
+            material_scope=material_scope,
+            variables=variables,
+            outcomes=outcomes,
+            mechanisms=mechanisms,
+            constraints=constraints,
+            requested_comparator=requested_comparator,
             seed_document_ids=normalize_objective_terms(
                 payload.get("seed_document_ids")
             ),
@@ -293,9 +334,11 @@ class ResearchObjective:
             "objective_id": self.objective_id,
             "question": self.question,
             "material_scope": list(self.material_scope),
-            "process_axes": list(self.process_axes),
-            "property_axes": list(self.property_axes),
-            "comparison_intent": self.comparison_intent,
+            "variables": list(self.variables),
+            "outcomes": list(self.outcomes),
+            "mechanisms": list(self.mechanisms),
+            "constraints": list(self.constraints),
+            "requested_comparator": self.requested_comparator,
             "seed_document_ids": list(self.seed_document_ids),
             "excluded_document_ids": list(self.excluded_document_ids),
             "confidence": self.confidence,
@@ -807,12 +850,37 @@ class ObjectiveFactSet:
     research_objectives: tuple[ResearchObjective, ...] = ()
 
 
-def build_research_objective_id(question: str) -> str:
+def build_research_objective_id(
+    *,
+    question: str,
+    material_scope: tuple[str, ...],
+    variables: tuple[str, ...],
+    outcomes: tuple[str, ...],
+    mechanisms: tuple[str, ...],
+    constraints: tuple[str, ...],
+    requested_comparator: str | None,
+) -> str:
     normalized_question = (_text(question) or "unspecified").lower()
     slug = _SLUG_NON_WORD_PATTERN.sub("-", normalized_question).strip("-")
     if not slug:
         slug = "unspecified"
-    digest = sha1(normalized_question.encode("utf-8")).hexdigest()[:8]
+    identity = json.dumps(
+        {
+            "question": normalized_question,
+            "material_scope": sorted(value.casefold() for value in material_scope),
+            "variables": sorted(value.casefold() for value in variables),
+            "outcomes": sorted(value.casefold() for value in outcomes),
+            "mechanisms": sorted(value.casefold() for value in mechanisms),
+            "constraints": sorted(value.casefold() for value in constraints),
+            "requested_comparator": (
+                requested_comparator.casefold() if requested_comparator else None
+            ),
+        },
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    digest = sha1(identity.encode("utf-8")).hexdigest()[:8]
     return f"obj_{slug[:72].strip('-')}_{digest}"
 
 

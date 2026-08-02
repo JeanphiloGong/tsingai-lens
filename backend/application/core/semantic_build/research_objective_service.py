@@ -15,10 +15,6 @@ from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
-from application.core.semantic_build.objective_analysis_lens import (
-    ObjectiveAnalysisLens,
-    SourceSelectionHint,
-)
 from application.core.finding_synthesis_service import FindingSynthesisService
 from application.source.collection_service import CollectionService
 from domain.core import (
@@ -65,6 +61,43 @@ class ObjectiveAnalysisArtifacts:
     contributions: tuple[PaperContribution, ...]
     evidence_records: tuple[ObjectiveEvidence, ...]
     findings: tuple[Finding, ...]
+
+
+@dataclass(frozen=True)
+class SourceSelectionHint:
+    """Transient table-selection hint used only during one analysis run."""
+
+    table_id: str
+    document_id: str
+    caption_text: str | None
+    role: str
+    strength: str | None
+    matched_outcomes: tuple[str, ...]
+    matched_variables: tuple[str, ...]
+    reason: str | None
+
+    def __post_init__(self) -> None:
+        if not self.table_id:
+            raise ValueError("source selection hint requires table_id")
+        if self.role not in {"result_table", "condition_context"}:
+            raise ValueError(f"unsupported source selection hint role: {self.role}")
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "SourceSelectionHint":
+        return cls(
+            table_id=_transient_text(payload.get("table_id")),
+            document_id=_transient_text(payload.get("document_id")),
+            caption_text=_transient_optional_text(payload.get("caption_text")),
+            role=_transient_text(payload.get("role")),
+            strength=_transient_optional_text(payload.get("strength")),
+            matched_outcomes=normalize_objective_terms(
+                payload.get("matched_outcomes")
+            ),
+            matched_variables=normalize_objective_terms(
+                payload.get("matched_variables")
+            ),
+            reason=_transient_optional_text(payload.get("reason")),
+        )
 
 
 @dataclass(frozen=True)
@@ -586,23 +619,6 @@ _OBJECTIVE_CHARACTERIZATION_METHOD_PROPERTIES = frozenset(
         "grain size primary dendrite spacing",
     }
 )
-_OBJECTIVE_MEDIATOR_AXIS_TERMS = (
-    "porosity",
-    "pore",
-    "pore size",
-    "pores",
-    "defect",
-    "defects",
-    "lack of fusion",
-    "lof",
-    "microstructure",
-    "grain",
-    "grains",
-    "melt pool",
-    "passive film",
-)
-
-
 class ResearchObjectivesNotReadyError(RuntimeError):
     """Raised when a collection cannot yet serve research objectives."""
 
@@ -700,17 +716,10 @@ class ResearchObjectiveService:
             collection_id,
             build_id=analysis.source_build_id,
         )
-        objective_contexts = self._build_objective_analysis_lenses(
-            paper_skims=objective_inputs["paper_skims"],
-            objectives=(objective,),
-            tables=objective_inputs["artifacts"].tables,
-        )
-        context = objective_contexts[0] if objective_contexts else None
         paper_frames = self._build_objective_paper_frames(
             collection_id=collection_id,
             extractor=objective_inputs["extractor"],
             objectives=(objective,),
-            objective_contexts=(context,) if context is not None else (),
             paper_skims=objective_inputs["paper_skims"],
             documents=objective_inputs["artifacts"].documents,
             profiles_by_document_id=objective_inputs["profiles_by_document_id"],
@@ -725,7 +734,6 @@ class ResearchObjectiveService:
             collection_id=collection_id,
             extractor=objective_inputs["extractor"],
             objectives=(objective,),
-            objective_contexts=(context,) if context is not None else (),
             objective_paper_frames=paper_frames,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
@@ -738,7 +746,6 @@ class ResearchObjectiveService:
             collection_id=collection_id,
             extractor=objective_inputs["extractor"],
             objectives=(objective,),
-            objective_contexts=(context,) if context is not None else (),
             objective_paper_frames=paper_frames,
             objective_evidence_routes=evidence_candidates,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
@@ -753,7 +760,7 @@ class ResearchObjectiveService:
         )
         evidence_drafts = self._objective_detail_evidence(
             evidence_drafts,
-            objective_context=context,
+            objective_context=objective,
         )
         contributions = self._analysis_contributions(
             collection_id=collection_id,
@@ -1121,24 +1128,15 @@ class ResearchObjectiveService:
         )
         parsed_objectives = extractor.discover_research_objectives(objective_payload)
         discovered_objective_count = len(parsed_objectives.objectives)
-        skim_by_document_id = {
-            skim.document_id: skim
-            for skim in paper_skims
-            if skim.document_id
-        }
         research_objectives = tuple(
             objective
             for objective in (
                 self._canonicalize_objective_document_ids(
-                    self._normalize_research_objective(
-                        ResearchObjective.from_mapping(
-                            {
-                                **item.model_dump(),
-                                "collection_id": collection_id,
-                            }
-                        ),
-                        skim_by_document_id=skim_by_document_id,
-                        paper_skims=tuple(paper_skims),
+                    ResearchObjective.from_mapping(
+                        {
+                            **item.model_dump(),
+                            "collection_id": collection_id,
+                        }
                     ),
                     documents=artifacts.documents,
                 )
@@ -1158,14 +1156,6 @@ class ResearchObjectiveService:
             paper_skims=tuple(paper_skims),
             objectives=research_objectives,
         )
-        research_objectives = self._split_mixed_property_objectives(
-            paper_skims=tuple(paper_skims),
-            objectives=research_objectives,
-        )
-        research_objectives = self._align_research_objective_text_with_axes(
-            paper_skims=tuple(paper_skims),
-            objectives=research_objectives,
-        )
         research_objectives = self._dedupe_research_objectives(research_objectives)
         logger.info(
             "Research objective discovery finished collection_id=%s paper_skim_count=%s discovered_objective_count=%s accepted_objective_count=%s",
@@ -1174,22 +1164,10 @@ class ResearchObjectiveService:
             discovered_objective_count,
             len(research_objectives),
         )
-        objective_contexts = self._build_objective_analysis_lenses(
-            paper_skims=tuple(paper_skims),
-            objectives=research_objectives,
-            tables=artifacts.tables,
-        )
-        logger.info(
-            "Research objective context build finished collection_id=%s objective_count=%s context_count=%s",
-            collection_id,
-            len(research_objectives),
-            len(objective_contexts),
-        )
         return {
             **source_inputs,
             "paper_skims": tuple(paper_skims),
             "research_objectives": research_objectives,
-            "objective_contexts": objective_contexts,
         }
 
     @staticmethod
@@ -1360,15 +1338,15 @@ class ResearchObjectiveService:
         self,
         evidence_items: tuple[ExtractedEvidenceDraft, ...],
         *,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> tuple[ExtractedEvidenceDraft, ...]:
         if (
             objective_context is None
-            or not objective_context.target_property_axes
+            or not objective_context.outcomes
             or not evidence_items
         ):
             return evidence_items
-        target_axes = self._objective_target_property_axes(objective_context)
+        target_axes = self._objective_outcomes(objective_context)
         if not target_axes:
             return evidence_items
 
@@ -1546,7 +1524,6 @@ class ResearchObjectiveService:
         collection_id: str,
         extractor: CoreLLMStructuredExtractor,
         objectives: tuple[ResearchObjective, ...],
-        objective_contexts: tuple[ObjectiveAnalysisLens, ...],
         paper_skims: tuple[PaperSkim, ...],
         documents: tuple[Any, ...],
         profiles_by_document_id: dict[str, Any],
@@ -1555,10 +1532,6 @@ class ResearchObjectiveService:
         document_trees_by_document_id: dict[str, SourceDocumentTree],
         progress_callback: ProgressCallback | None = None,
     ) -> tuple[PaperAnalysisFrame, ...]:
-        context_by_objective_id = {
-            context.objective_id: context
-            for context in objective_contexts
-        }
         skim_by_document_id = {
             skim.document_id: skim
             for skim in paper_skims
@@ -1576,7 +1549,6 @@ class ResearchObjectiveService:
         total_frame_requests = objective_count * document_count
         completed_frame_requests = 0
         for objective_position, objective in enumerate(objectives, start=1):
-            objective_context = context_by_objective_id.get(objective.objective_id)
             for document_position, document in enumerate(documents, start=1):
                 completed_frame_requests += 1
                 document_id = str(getattr(document, "document_id", "") or "")
@@ -1617,7 +1589,6 @@ class ResearchObjectiveService:
                 payload = self._build_objective_paper_frame_payload(
                     collection_id=collection_id,
                     objective=objective,
-                    objective_context=objective_context,
                     paper_skim=skim_by_document_id.get(document_id),
                     document=document,
                     profile=profiles_by_document_id.get(document_id),
@@ -1638,7 +1609,6 @@ class ResearchObjectiveService:
                     )
                     record = self._build_deterministic_objective_paper_frame_record(
                         objective=objective,
-                        objective_context=objective_context,
                         paper_skim=skim_by_document_id.get(document_id),
                         payload=payload,
                     )
@@ -1703,7 +1673,6 @@ class ResearchObjectiveService:
         collection_id: str,
         extractor: CoreLLMStructuredExtractor,
         objectives: tuple[ResearchObjective, ...],
-        objective_contexts: tuple[ObjectiveAnalysisLens, ...],
         objective_paper_frames: tuple[PaperAnalysisFrame, ...],
         blocks_by_document_id: dict[str, list[Any]],
         tables_by_document_id: dict[str, list[Any]],
@@ -1714,9 +1683,17 @@ class ResearchObjectiveService:
             objective.objective_id: objective
             for objective in objectives
         }
-        context_by_objective_id = {
-            context.objective_id: context
-            for context in objective_contexts
+        all_tables = tuple(
+            table
+            for document_tables in tables_by_document_id.values()
+            for table in document_tables
+        )
+        routing_hints_by_objective_id = {
+            objective.objective_id: self._build_objective_table_routing_hints(
+                objective,
+                tables=all_tables,
+            )
+            for objective in objectives
         }
         routes: list[EvidenceCandidate] = []
         seen: set[tuple[str, str, str, str, str]] = set()
@@ -1806,7 +1783,7 @@ class ResearchObjectiveService:
                 (candidate["source_kind"], candidate["source_ref"]): candidate
                 for candidate in source_candidates
             }
-            objective_context = context_by_objective_id.get(frame.objective_id)
+            objective_context = objective_by_id.get(frame.objective_id)
             for candidate in source_candidates:
                 if candidate.get("frame_status") == "excluded":
                     route_key = (
@@ -1842,9 +1819,6 @@ class ResearchObjectiveService:
                 payload = {
                     "collection_id": collection_id,
                     "objective": self._route_prompt_objective_record(objective),
-                    "objective_context": self._route_prompt_objective_context_record(
-                        objective_context,
-                    ),
                     "paper_frame": self._route_prompt_paper_frame_record(frame),
                     "tree_position": self._route_tree_position(candidate),
                     "document_state": self._empty_objective_document_state(),
@@ -1898,6 +1872,10 @@ class ResearchObjectiveService:
                 seen=seen,
                 frame=frame,
                 objective_context=objective_context,
+                routing_hints=routing_hints_by_objective_id.get(
+                    frame.objective_id,
+                    (),
+                ),
                 candidate_by_key=candidate_by_key,
             )
             self._append_ranked_text_hint_routes(
@@ -1932,7 +1910,7 @@ class ResearchObjectiveService:
     def _build_deterministic_objective_route_record(
         self,
         *,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
         candidate: Mapping[str, Any],
     ) -> dict[str, Any]:
         evidence_role = self._route_candidate_evidence_role(
@@ -1963,7 +1941,7 @@ class ResearchObjectiveService:
         *,
         record: dict[str, Any],
         frame: PaperAnalysisFrame,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
         route_candidate: Mapping[str, Any],
     ) -> dict[str, Any]:
         finalized = dict(record)
@@ -2023,12 +2001,13 @@ class ResearchObjectiveService:
         routes: list[EvidenceCandidate],
         seen: set[tuple[str, str, str, str, str]],
         frame: PaperAnalysisFrame,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
+        routing_hints: tuple[SourceSelectionHint, ...],
         candidate_by_key: dict[tuple[str, str], dict[str, Any]],
     ) -> None:
         if objective_context is None:
             return
-        for hint in objective_context.routing_hints:
+        for hint in routing_hints:
             table_id = hint.table_id
             if not table_id:
                 continue
@@ -2084,26 +2063,11 @@ class ResearchObjectiveService:
             "objective_id": objective.objective_id,
             "question": objective.question,
             "material_scope": list(objective.material_scope),
-            "process_axes": list(objective.process_axes),
-            "property_axes": list(objective.property_axes),
-            "comparison_intent": objective.comparison_intent,
-        }
-
-    def _route_prompt_objective_context_record(
-        self,
-        objective_context: ObjectiveAnalysisLens | None,
-    ) -> dict[str, Any]:
-        if objective_context is None:
-            return {}
-        return {
-            "objective_id": objective_context.objective_id,
-            "material_scope": list(objective_context.material_scope),
-            "variable_process_axes": list(objective_context.variable_process_axes),
-            "process_context_axes": list(objective_context.process_context_axes),
-            "target_property_axes": list(objective_context.target_property_axes),
-            "excluded_property_axes": list(objective_context.excluded_property_axes),
-            "mediator_axes": list(objective_context.mediator_axes),
-            "direct_support_rules": list(objective_context.direct_support_rules),
+            "variables": list(objective.variables),
+            "outcomes": list(objective.outcomes),
+            "mechanisms": list(objective.mechanisms),
+            "constraints": list(objective.constraints),
+            "requested_comparator": objective.requested_comparator,
         }
 
     def _route_prompt_paper_frame_record(
@@ -2177,7 +2141,7 @@ class ResearchObjectiveService:
     def _objective_context_hint_column_roles(
         self,
         *,
-        objective_context: ObjectiveAnalysisLens,
+        objective_context: ResearchObjective,
         hint_role: str,
         table_schema: dict[str, Any],
     ) -> dict[str, str]:
@@ -2195,19 +2159,19 @@ class ResearchObjectiveService:
                 roles[header_text] = "statistical_measure"
             elif self._objective_header_matches_any_axis(
                 header_text,
-                objective_context.target_property_axes,
+                objective_context.outcomes,
             ) or (
                 hint_role == "result_table"
                 and header_key == "relative_density"
                 and any(
                     axis in {"densification", "microstructure"}
-                    for axis in objective_context.target_property_axes
+                    for axis in objective_context.outcomes
                 )
             ):
                 roles[header_text] = "target_property"
             elif self._objective_header_matches_any_axis(
                 header_text,
-                objective_context.variable_process_axes,
+                objective_context.variables,
             ) or self._objective_header_looks_process_variable(header_text):
                 roles[header_text] = "process_variable"
         return roles
@@ -2218,7 +2182,7 @@ class ResearchObjectiveService:
         routes: list[EvidenceCandidate],
         seen: set[tuple[str, str, str, str, str]],
         frame: PaperAnalysisFrame,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
         source_candidates: list[dict[str, Any]],
     ) -> None:
         existing_refs = {
@@ -2359,7 +2323,7 @@ class ResearchObjectiveService:
     def _route_candidate_evidence_role(
         self,
         *,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
         candidate: Mapping[str, Any],
     ) -> str:
         if objective_context is None:
@@ -2367,16 +2331,16 @@ class ResearchObjectiveService:
         text = self._route_candidate_text(candidate)
         if not text:
             return "irrelevant"
-        target_axes = objective_context.target_property_axes
-        mediator_axes = objective_context.mediator_axes
+        target_axes = objective_context.outcomes
+        mechanisms = objective_context.mechanisms
         context_axes = (
             *objective_context.material_scope,
-            *objective_context.process_context_axes,
+            *objective_context.constraints,
         )
-        variable_axes = objective_context.variable_process_axes
+        variable_axes = objective_context.variables
         if self._route_text_mentions_any_axis(text, target_axes):
             return "direct_support"
-        if self._route_text_mentions_any_axis(text, mediator_axes):
+        if self._route_text_mentions_any_axis(text, mechanisms):
             return "mediator_context"
         if self._route_text_mentions_any_axis(text, (*variable_axes, *context_axes)):
             return "background_context"
@@ -2474,7 +2438,6 @@ class ResearchObjectiveService:
         collection_id: str,
         extractor: CoreLLMStructuredExtractor,
         objectives: tuple[ResearchObjective, ...],
-        objective_contexts: tuple[ObjectiveAnalysisLens, ...],
         objective_paper_frames: tuple[PaperAnalysisFrame, ...],
         objective_evidence_routes: tuple[EvidenceCandidate, ...],
         blocks_by_document_id: dict[str, list[Any]],
@@ -2487,10 +2450,7 @@ class ResearchObjectiveService:
             objective.objective_id: objective
             for objective in objectives
         }
-        context_by_objective_id = {
-            context.objective_id: context
-            for context in objective_contexts
-        }
+        context_by_objective_id = objective_by_id
         frame_by_key = {
             (frame.objective_id, frame.document_id): frame
             for frame in objective_paper_frames
@@ -2578,9 +2538,6 @@ class ResearchObjectiveService:
             payload = {
                 "collection_id": collection_id,
                 "objective": self._route_prompt_objective_record(objective),
-                "objective_context": self._route_prompt_objective_context_record(
-                    objective_context,
-                ),
                 "paper_frame": self._route_prompt_paper_frame_record(
                     frame_by_key[(route.objective_id, route.document_id)]
                 )
@@ -2685,7 +2642,7 @@ class ResearchObjectiveService:
                 max(len(extractable_routes) - route_position, 0),
             )
         for unit in self._build_objective_method_family_test_condition_units(
-            objective_contexts=objective_contexts,
+            objectives=objectives,
             objective_paper_frames=objective_paper_frames,
             blocks_by_document_id=blocks_by_document_id,
         ):
@@ -2704,7 +2661,6 @@ class ResearchObjectiveService:
         resolved_units = self._inherit_objective_material_systems(
             resolved_units,
             objectives=objectives,
-            objective_contexts=objective_contexts,
         )
         resolved_units = self._dedupe_shared_density_measurements(
             resolved_units,
@@ -2715,13 +2671,13 @@ class ResearchObjectiveService:
         )
         table_characterization_units = self._build_objective_table_characterization_units(
             units=resolved_units,
-            objective_contexts=objective_contexts,
+            objectives=objectives,
         )
         if table_characterization_units:
             resolved_units = (*resolved_units, *table_characterization_units)
         comparison_units = self._build_objective_pairwise_comparison_units(
             resolved_units,
-            objective_contexts=objective_contexts,
+            objectives=objectives,
         )
         if comparison_units:
             logger.info(
@@ -3162,13 +3118,13 @@ class ResearchObjectiveService:
     def _build_objective_method_family_test_condition_units(
         self,
         *,
-        objective_contexts: tuple[ObjectiveAnalysisLens, ...],
+        objectives: tuple[ResearchObjective, ...],
         objective_paper_frames: tuple[PaperAnalysisFrame, ...],
         blocks_by_document_id: dict[str, list[Any]],
     ) -> tuple[ExtractedEvidenceDraft, ...]:
         context_by_objective_id = {
             context.objective_id: context
-            for context in objective_contexts
+            for context in objectives
         }
         records: list[dict[str, Any]] = []
         seen: set[tuple[str, str, str]] = set()
@@ -3233,12 +3189,12 @@ class ResearchObjectiveService:
 
     def _objective_method_families_for_context(
         self,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> tuple[str, ...]:
         if objective_context is None:
             return ()
         families: list[str] = []
-        for axis in objective_context.target_property_axes:
+        for axis in objective_context.outcomes:
             normalized = self._normalize_property_label(axis)
             if not normalized:
                 continue
@@ -3538,8 +3494,7 @@ class ResearchObjectiveService:
         self,
         units: tuple[ExtractedEvidenceDraft, ...],
         *,
-        objectives: tuple[ResearchObjective, ...] = (),
-        objective_contexts: tuple[ObjectiveAnalysisLens, ...],
+        objectives: tuple[ResearchObjective, ...],
     ) -> tuple[ExtractedEvidenceDraft, ...]:
         context_materials = {
             objective.objective_id: self._single_material_system_from_scope(
@@ -3547,15 +3502,6 @@ class ResearchObjectiveService:
             )
             for objective in objectives
         }
-        context_materials.update(
-            {
-                context.objective_id: self._single_material_system_from_scope(
-                    context.material_scope
-                )
-                for context in objective_contexts
-                if context.material_scope
-            }
-        )
         if not any(context_materials.values()):
             return units
 
@@ -3643,14 +3589,14 @@ class ResearchObjectiveService:
         self,
         *,
         units: tuple[ExtractedEvidenceDraft, ...],
-        objective_contexts: tuple[ObjectiveAnalysisLens, ...],
+        objectives: tuple[ResearchObjective, ...],
     ) -> tuple[ExtractedEvidenceDraft, ...]:
         objective_ids_with_characterization_target = {
             context.objective_id
-            for context in objective_contexts
+            for context in objectives
             if any(
                 self._objective_property_is_characterization(axis)
-                for axis in context.target_property_axes
+                for axis in context.outcomes
             )
         }
         density_units_by_scope: dict[tuple[str, str], list[ExtractedEvidenceDraft]] = {}
@@ -4009,7 +3955,7 @@ class ResearchObjectiveService:
         self,
         units: tuple[ExtractedEvidenceDraft, ...],
         *,
-        context_by_objective_id: dict[str, ObjectiveAnalysisLens],
+        context_by_objective_id: dict[str, ResearchObjective],
     ) -> tuple[ExtractedEvidenceDraft, ...]:
         best_by_key: dict[tuple[str, str, str, float, str], tuple[int, int]] = {}
         duplicate_keys: set[tuple[str, str, str, float, str]] = set()
@@ -4075,14 +4021,14 @@ class ResearchObjectiveService:
         self,
         unit: ExtractedEvidenceDraft,
         *,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> int:
         if objective_context is None:
             return 0
         property_key = self._normalize_property_label(unit.property_normalized)
         if not property_key:
             return 0
-        target_axes = self._objective_target_property_axes(objective_context)
+        target_axes = self._objective_outcomes(objective_context)
         if self._property_axis_matches_any(property_key, target_axes):
             return 30
         if property_key in _OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES:
@@ -4435,11 +4381,11 @@ class ResearchObjectiveService:
         self,
         units: tuple[ExtractedEvidenceDraft, ...],
         *,
-        objective_contexts: tuple[ObjectiveAnalysisLens, ...],
+        objectives: tuple[ResearchObjective, ...],
     ) -> tuple[ExtractedEvidenceDraft, ...]:
         context_by_objective_id = {
             context.objective_id: context
-            for context in objective_contexts
+            for context in objectives
         }
         existing_keys = {
             self._objective_comparison_pair_key(unit)
@@ -4615,7 +4561,7 @@ class ResearchObjectiveService:
         self,
         units: tuple[ExtractedEvidenceDraft, ...],
         *,
-        context_by_objective_id: dict[str, ObjectiveAnalysisLens],
+        context_by_objective_id: dict[str, ResearchObjective],
     ) -> dict[tuple[str, str], set[tuple[str, str, str]]]:
         numeric_measurements = tuple(
             unit
@@ -4669,7 +4615,7 @@ class ResearchObjectiveService:
         samples: list[ExtractedEvidenceDraft],
         result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
         document_density_values: dict[tuple[str, str], float],
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> set[tuple[str, str, str]]:
         all_specs = self._objective_all_pairwise_relation_specs(
             samples=samples,
@@ -4808,13 +4754,13 @@ class ResearchObjectiveService:
         *,
         samples: list[ExtractedEvidenceDraft],
         result_lookup: dict[tuple[str, str], ExtractedEvidenceDraft],
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> set[tuple[str, str, str]]:
         if objective_context is None:
             return set()
         axes = tuple(
             self._normalize_property_label(axis)
-            for axis in objective_context.variable_process_axes
+            for axis in objective_context.variables
             if self._normalize_property_label(axis)
         )
         if not axes:
@@ -5202,14 +5148,14 @@ class ResearchObjectiveService:
         self,
         unit: ExtractedEvidenceDraft,
         *,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> bool:
-        if objective_context is None or not objective_context.target_property_axes:
+        if objective_context is None or not objective_context.outcomes:
             return True
         property_key = self._objective_pairwise_property_key(unit.property_normalized)
         if not property_key:
             return False
-        target_axes = self._objective_target_property_axes(objective_context)
+        target_axes = self._objective_outcomes(objective_context)
         if self._objective_property_label_matches_target(
             property_key,
             target_axes=target_axes,
@@ -5240,31 +5186,31 @@ class ResearchObjectiveService:
         *,
         current: ExtractedEvidenceDraft,
         baseline: ExtractedEvidenceDraft,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
         allow_multi_axis: bool = False,
     ) -> str | None:
-        current_process_axes = self._objective_pairwise_process_axis_values(
+        current_variables = self._objective_pairwise_process_axis_values(
             current,
             objective_context=objective_context,
         )
-        baseline_process_axes = self._objective_pairwise_process_axis_values(
+        baseline_variables = self._objective_pairwise_process_axis_values(
             baseline,
             objective_context=objective_context,
         )
-        changed_process_axes = self._objective_changed_axis_values(
-            current_axes=current_process_axes,
-            baseline_axes=baseline_process_axes,
+        changed_variables = self._objective_changed_axis_values(
+            current_axes=current_variables,
+            baseline_axes=baseline_variables,
         )
-        if changed_process_axes:
-            return self._objective_comparison_axis_from_changed_process_axes(
-                changed_process_axes,
+        if changed_variables:
+            return self._objective_comparison_axis_from_changed_variables(
+                changed_variables,
                 objective_context=objective_context,
                 allow_multi_axis=allow_multi_axis,
             )
 
         current_sample_axes = self._objective_sample_axis_values(current)
         baseline_sample_axes = self._objective_sample_axis_values(baseline)
-        if objective_context is not None and objective_context.variable_process_axes:
+        if objective_context is not None and objective_context.variables:
             changed_sample_axes = self._objective_changed_axis_values(
                 current_axes=current_sample_axes,
                 baseline_axes=baseline_sample_axes,
@@ -5278,7 +5224,7 @@ class ResearchObjectiveService:
                         current_sample_axes[axis],
                         axis_key=self._normalize_property_label(objective_axis) or "",
                     )
-                    for objective_axis in objective_context.variable_process_axes
+                    for objective_axis in objective_context.variables
                 ):
                     return None
         return self._objective_single_changed_axis_from_values(
@@ -5291,10 +5237,10 @@ class ResearchObjectiveService:
         self,
         unit: ExtractedEvidenceDraft,
         *,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> dict[str, str]:
         objective_axes = (
-            tuple(objective_context.variable_process_axes)
+            tuple(objective_context.variables)
             if objective_context is not None
             else ()
         )
@@ -5336,7 +5282,7 @@ class ResearchObjectiveService:
         axis: str,
         *,
         unit: ExtractedEvidenceDraft,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> bool:
         response_axes = {
             *_OBJECTIVE_PAIRWISE_DENSITY_PROPERTIES,
@@ -5352,7 +5298,7 @@ class ResearchObjectiveService:
         if unit_property:
             response_axes.add(unit_property)
         if objective_context is not None:
-            response_axes.update(self._objective_target_property_axes(objective_context))
+            response_axes.update(self._objective_outcomes(objective_context))
         return any(self._axis_values_match(axis, response) for response in response_axes)
 
     def _objective_changed_axis_values(
@@ -5367,11 +5313,11 @@ class ResearchObjectiveService:
             if axis in baseline_axes and current_value != baseline_axes[axis]
         ]
 
-    def _objective_comparison_axis_from_changed_process_axes(
+    def _objective_comparison_axis_from_changed_variables(
         self,
         changed_axes: list[str],
         *,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
         allow_multi_axis: bool,
     ) -> str | None:
         energy_axes = [
@@ -5403,14 +5349,14 @@ class ResearchObjectiveService:
         self,
         axis: str,
         *,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> str | None:
-        if objective_context is None or not objective_context.variable_process_axes:
+        if objective_context is None or not objective_context.variables:
             return axis
         objective_label = next(
             (
                 self._normalize_property_label(objective_axis) or objective_axis
-                for objective_axis in objective_context.variable_process_axes
+                for objective_axis in objective_context.variables
                 if self._axis_values_match(axis, objective_axis)
                 or self._axis_label_is_mentioned(axis, objective_axis)
             ),
@@ -5420,7 +5366,7 @@ class ResearchObjectiveService:
             return objective_label
         objective_keys = {
             objective_key
-            for objective_axis in objective_context.variable_process_axes
+            for objective_axis in objective_context.variables
             if (objective_key := self._normalize_property_label(objective_axis))
         }
         if self._objective_process_column_axis_keys(axis) & objective_keys:
@@ -5486,16 +5432,16 @@ class ResearchObjectiveService:
         self,
         unit: ExtractedEvidenceDraft,
         *,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> dict[str, str]:
-        if objective_context is None or not objective_context.variable_process_axes:
+        if objective_context is None or not objective_context.variables:
             return {
                 self._objective_column_key(key): str(value).strip().casefold()
                 for key, value in unit.process_context.items()
                 if str(value).strip()
             }
         axis_values: dict[str, str] = {}
-        for axis in objective_context.variable_process_axes:
+        for axis in objective_context.variables:
             axis_key = self._normalize_property_label(axis)
             if axis_key is None:
                 continue
@@ -5555,7 +5501,7 @@ class ResearchObjectiveService:
         first: ExtractedEvidenceDraft,
         second: ExtractedEvidenceDraft,
         comparison_axis: str,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> ExtractedEvidenceDraft:
         first_value = self._objective_measurement_numeric_value(first)
         second_value = self._objective_measurement_numeric_value(second)
@@ -5658,7 +5604,7 @@ class ResearchObjectiveService:
         current: ExtractedEvidenceDraft,
         baseline: ExtractedEvidenceDraft,
         comparison_axis: str,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> list[dict[str, str]]:
         current_axes = self._objective_comparison_axis_value_map(
             current,
@@ -5693,7 +5639,7 @@ class ResearchObjectiveService:
         self,
         unit: ExtractedEvidenceDraft,
         *,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> dict[str, dict[str, str]]:
         axis_values: dict[str, dict[str, str]] = {}
         for source in (
@@ -5719,7 +5665,7 @@ class ResearchObjectiveService:
         first: ExtractedEvidenceDraft,
         second: ExtractedEvidenceDraft,
         comparison_axis: str,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> tuple[ExtractedEvidenceDraft, ExtractedEvidenceDraft]:
         first_axis_value = self._objective_comparison_axis_value(
             first,
@@ -5755,7 +5701,7 @@ class ResearchObjectiveService:
         unit: ExtractedEvidenceDraft,
         *,
         comparison_axis: str,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> str | None:
         process_axis_values = self._objective_process_axis_values(
             unit,
@@ -6046,7 +5992,7 @@ class ResearchObjectiveService:
         *,
         route: EvidenceCandidate,
         source: dict[str, Any],
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> tuple[dict[str, Any], ...]:
         if route.source_kind != "table":
             return ()
@@ -6076,7 +6022,7 @@ class ResearchObjectiveService:
                 )
                 or (
                     objective_context is not None
-                    and objective_context.target_property_axes
+                    and objective_context.outcomes
                 )
             )
             result_records = (
@@ -6159,7 +6105,7 @@ class ResearchObjectiveService:
         *,
         route: EvidenceCandidate,
         source: dict[str, Any],
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
         headers: tuple[str, ...],
         data_rows: tuple[tuple[int, tuple[str, ...]], ...],
     ) -> tuple[dict[str, Any], ...]:
@@ -6255,7 +6201,7 @@ class ResearchObjectiveService:
         *,
         route: EvidenceCandidate,
         source: dict[str, Any],
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
         headers: tuple[str, ...],
         data_rows: tuple[tuple[int, tuple[str, ...]], ...],
     ) -> tuple[dict[str, Any], ...]:
@@ -6320,7 +6266,7 @@ class ResearchObjectiveService:
         route: EvidenceCandidate,
         row_values: dict[str, str],
         result_columns: set[str],
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> dict[str, dict[str, str]]:
         sample_context: dict[str, str] = {}
         process_context: dict[str, str] = {}
@@ -6369,7 +6315,7 @@ class ResearchObjectiveService:
         *,
         column: str,
         role: str,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> str:
         role_label = self._normalize_property_label(role)
         if (
@@ -6377,7 +6323,7 @@ class ResearchObjectiveService:
             and self._objective_process_role_is_specific(role_label)
             and (
                 objective_context is None
-                or self._objective_label_matches_process_axes(
+                or self._objective_label_matches_variables(
                     role_label,
                     objective_context=objective_context,
                 )
@@ -6398,32 +6344,32 @@ class ResearchObjectiveService:
         route: EvidenceCandidate,
         column: str,
         role: str,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> bool:
         role_text = str(role or "").strip()
         if "process" in role_text or "variable" in role_text:
             return True
         if objective_context is not None:
             for label in (column, role_text):
-                if self._objective_label_matches_process_axes(
+                if self._objective_label_matches_variables(
                     label,
                     objective_context=objective_context,
                 ):
                     return True
         return route.role == "process_or_treatment" and objective_context is None
 
-    def _objective_label_matches_process_axes(
+    def _objective_label_matches_variables(
         self,
         label: Any,
         *,
-        objective_context: ObjectiveAnalysisLens,
+        objective_context: ResearchObjective,
     ) -> bool:
         label_text = str(label or "").strip()
         if not label_text:
             return False
         label_axis_keys = self._objective_process_column_axis_keys(label_text)
         label_tokens = self._axis_token_set(self._axis_key(label_text))
-        for axis in objective_context.variable_process_axes:
+        for axis in objective_context.variables:
             axis_text = str(axis or "").strip()
             if not axis_text:
                 continue
@@ -6613,7 +6559,7 @@ class ResearchObjectiveService:
         *,
         route: EvidenceCandidate,
         source: dict[str, Any],
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
         extracted_record: dict[str, Any],
     ) -> tuple[dict[str, Any], ...]:
         record = dict(extracted_record)
@@ -6841,14 +6787,14 @@ class ResearchObjectiveService:
         self,
         property_name: Any,
         *,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> bool:
-        if objective_context is None or not objective_context.target_property_axes:
+        if objective_context is None or not objective_context.outcomes:
             return True
         property_key = self._normalize_property_label(property_name)
         if not property_key:
             return True
-        target_axes = self._objective_target_property_axes(objective_context)
+        target_axes = self._objective_outcomes(objective_context)
         if self._objective_property_label_matches_target(
             property_key,
             target_axes=target_axes,
@@ -7240,7 +7186,7 @@ class ResearchObjectiveService:
         self,
         *,
         route: EvidenceCandidate,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
         value_payload: dict[str, Any],
     ) -> tuple[tuple[str, Any], ...]:
         if not value_payload:
@@ -7279,7 +7225,7 @@ class ResearchObjectiveService:
         self,
         route: EvidenceCandidate,
         *,
-        objective_context: ObjectiveAnalysisLens | None = None,
+        objective_context: ResearchObjective | None = None,
     ) -> set[str]:
         result_columns: set[str] = set()
         for column, role in route.column_roles.items():
@@ -7311,7 +7257,7 @@ class ResearchObjectiveService:
                 and objective_context is not None
                 and self._objective_header_matches_any_axis(
                     column_text,
-                    objective_context.target_property_axes,
+                    objective_context.outcomes,
                 )
             ):
                 result_columns.add(column_text)
@@ -7322,7 +7268,7 @@ class ResearchObjectiveService:
                 and self._objective_column_key(column_text) == "relative_density"
                 and any(
                     axis in {"densification", "microstructure"}
-                    for axis in objective_context.target_property_axes
+                    for axis in objective_context.outcomes
                 )
             ):
                 result_columns.add(column_text)
@@ -7334,7 +7280,7 @@ class ResearchObjectiveService:
                 and role_label
                 and self._objective_property_label_matches_target(
                     role_label,
-                    target_axes=self._objective_target_property_axes(
+                    target_axes=self._objective_outcomes(
                         objective_context
                     ),
                 )
@@ -7347,7 +7293,7 @@ class ResearchObjectiveService:
         *,
         route: EvidenceCandidate,
         result_column: str,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> str:
         role_label = self._normalize_property_label(
             route.column_roles.get(result_column)
@@ -7358,7 +7304,7 @@ class ResearchObjectiveService:
             and self._objective_result_role_is_specific_property(role_label)
             and self._objective_property_label_matches_target(
                 role_label,
-                target_axes=self._objective_target_property_axes(objective_context),
+                target_axes=self._objective_outcomes(objective_context),
             )
         ):
             return role_label
@@ -7385,13 +7331,13 @@ class ResearchObjectiveService:
         self,
         column_text: str,
         *,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> bool:
-        if objective_context is None or not objective_context.target_property_axes:
+        if objective_context is None or not objective_context.outcomes:
             return True
         property_name, _unit = self._split_property_unit(column_text)
         normalized = self._normalize_property_label(property_name) or property_name
-        target_axes = self._objective_target_property_axes(objective_context)
+        target_axes = self._objective_outcomes(objective_context)
         if self._objective_property_label_matches_target(
             normalized,
             target_axes=target_axes,
@@ -7477,13 +7423,13 @@ class ResearchObjectiveService:
                 return target_key, extra_tokens
         return None
 
-    def _objective_target_property_axes(
+    def _objective_outcomes(
         self,
-        objective_context: ObjectiveAnalysisLens,
+        objective_context: ResearchObjective,
     ) -> tuple[str, ...]:
         axes: list[str] = []
         seen: set[str] = set()
-        for axis in objective_context.target_property_axes:
+        for axis in objective_context.outcomes:
             normalized = self._normalize_property_label(axis)
             if normalized:
                 self._append_unique_axis(axes, seen, normalized)
@@ -7530,17 +7476,17 @@ class ResearchObjectiveService:
         self,
         value: Any,
         *,
-        objective_context: ObjectiveAnalysisLens | None,
+        objective_context: ResearchObjective | None,
     ) -> str | None:
         normalized = self._normalize_property_label(value)
         if not normalized:
             return None
         if objective_context is None:
             return normalized
-        for target_axis in objective_context.target_property_axes:
+        for target_axis in objective_context.outcomes:
             if self._axis_values_match(normalized, target_axis):
                 return self._normalize_property_label(target_axis)
-        target_axes = self._objective_target_property_axes(objective_context)
+        target_axes = self._objective_outcomes(objective_context)
         if normalized in target_axes:
             return normalized
         variant_match = self._objective_contextual_property_variant_match(
@@ -8674,7 +8620,6 @@ class ResearchObjectiveService:
         *,
         collection_id: str,
         objective: ResearchObjective,
-        objective_context: ObjectiveAnalysisLens | None,
         paper_skim: PaperSkim | None,
         document: Any,
         profile: Any,
@@ -8685,28 +8630,6 @@ class ResearchObjectiveService:
         return {
             "collection_id": collection_id,
             "objective": objective.to_record(),
-            "objective_context": (
-                {
-                    "objective_id": objective_context.objective_id,
-                    "question": objective_context.question,
-                    "material_scope": list(objective_context.material_scope),
-                    "variable_process_axes": list(
-                        objective_context.variable_process_axes
-                    ),
-                    "process_context_axes": list(
-                        objective_context.process_context_axes
-                    ),
-                    "target_property_axes": list(
-                        objective_context.target_property_axes
-                    ),
-                    "excluded_property_axes": list(
-                        objective_context.excluded_property_axes
-                    ),
-                    "confidence": objective_context.confidence,
-                }
-                if objective_context is not None
-                else {}
-            ),
             "paper_skim": paper_skim.to_record() if paper_skim is not None else {},
             "document": {
                 "document_id": getattr(document, "document_id", None),
@@ -8717,7 +8640,6 @@ class ResearchObjectiveService:
             "section_snippets": self._build_frame_section_snippets(
                 blocks,
                 objective=objective,
-                objective_context=objective_context,
                 paper_skim=paper_skim,
                 profile=profile,
                 document_tree=document_tree,
@@ -8725,7 +8647,6 @@ class ResearchObjectiveService:
             "table_summaries": self._build_frame_table_summaries(
                 tables,
                 objective=objective,
-                objective_context=objective_context,
                 paper_skim=paper_skim,
                 profile=profile,
             ),
@@ -8736,14 +8657,12 @@ class ResearchObjectiveService:
         blocks: list[Any],
         *,
         objective: ResearchObjective,
-        objective_context: ObjectiveAnalysisLens | None,
         paper_skim: PaperSkim | None,
         profile: Any,
         document_tree: SourceDocumentTree | None = None,
     ) -> list[dict[str, Any]]:
         frame_terms = self._frame_relevance_terms(
             objective=objective,
-            objective_context=objective_context,
             paper_skim=paper_skim,
             profile=profile,
         )
@@ -8853,13 +8772,11 @@ class ResearchObjectiveService:
         tables: list[Any],
         *,
         objective: ResearchObjective,
-        objective_context: ObjectiveAnalysisLens | None,
         paper_skim: PaperSkim | None,
         profile: Any,
     ) -> list[dict[str, Any]]:
         frame_terms = self._frame_relevance_terms(
             objective=objective,
-            objective_context=objective_context,
             paper_skim=paper_skim,
             profile=profile,
         )
@@ -8898,13 +8815,11 @@ class ResearchObjectiveService:
         self,
         *,
         objective: ResearchObjective,
-        objective_context: ObjectiveAnalysisLens | None,
         paper_skim: PaperSkim | None,
         payload: Mapping[str, Any],
     ) -> dict[str, Any]:
         frame_terms = self._frame_relevance_terms(
             objective=objective,
-            objective_context=objective_context,
             paper_skim=paper_skim,
             profile=None,
         )
@@ -8934,7 +8849,6 @@ class ResearchObjectiveService:
         has_relevant_content = bool(sections or tables)
         axis_coverage = self._deterministic_frame_axis_coverage(
             objective=objective,
-            objective_context=objective_context,
             paper_skim=paper_skim,
             items=[*sections, *tables],
             payload=payload,
@@ -8966,12 +8880,10 @@ class ResearchObjectiveService:
             "material_match": list(objective.material_scope),
             "changed_variables": self._deterministic_frame_variables(
                 objective=objective,
-                objective_context=objective_context,
                 paper_skim=paper_skim,
             ),
             "measured_property_scope": self._deterministic_frame_target_properties(
                 objective=objective,
-                objective_context=objective_context,
                 paper_skim=paper_skim,
             ),
             "test_environment_scope": [],
@@ -8984,7 +8896,6 @@ class ResearchObjectiveService:
         self,
         *,
         objective: ResearchObjective,
-        objective_context: ObjectiveAnalysisLens | None,
         paper_skim: PaperSkim | None,
         items: list[str],
         payload: Mapping[str, Any],
@@ -9001,12 +8912,8 @@ class ResearchObjectiveService:
                 ]
             )
         )
-        variable_axes = tuple(
-            objective_context.variable_process_axes if objective_context else ()
-        ) or tuple(objective.process_axes)
-        target_axes = tuple(
-            objective_context.target_property_axes if objective_context else ()
-        ) or tuple(objective.property_axes)
+        variable_axes = tuple(objective.variables)
+        target_axes = tuple(objective.outcomes)
         return {
             "variable": self._frame_mentions_any_axis(text, variable_axes),
             "target_property": self._frame_mentions_any_axis(text, target_axes),
@@ -9082,14 +8989,12 @@ class ResearchObjectiveService:
         self,
         *,
         objective: ResearchObjective,
-        objective_context: ObjectiveAnalysisLens | None,
         paper_skim: PaperSkim | None,
     ) -> list[str]:
         values: list[str] = []
         seen: set[str] = set()
         for candidate in (
-            *(objective_context.variable_process_axes if objective_context else ()),
-            *objective.process_axes,
+            *objective.variables,
             *(getattr(paper_skim, "changed_variables", ()) if paper_skim else ()),
         ):
             self._append_unique_axis(values, seen, candidate)
@@ -9099,14 +9004,12 @@ class ResearchObjectiveService:
         self,
         *,
         objective: ResearchObjective,
-        objective_context: ObjectiveAnalysisLens | None,
         paper_skim: PaperSkim | None,
     ) -> list[str]:
         values: list[str] = []
         seen: set[str] = set()
         for candidate in (
-            *(objective_context.target_property_axes if objective_context else ()),
-            *objective.property_axes,
+            *objective.outcomes,
             *(getattr(paper_skim, "candidate_properties", ()) if paper_skim else ()),
         ):
             self._append_unique_axis(values, seen, candidate)
@@ -9116,7 +9019,6 @@ class ResearchObjectiveService:
         self,
         *,
         objective: ResearchObjective,
-        objective_context: ObjectiveAnalysisLens | None,
         paper_skim: PaperSkim | None,
         profile: Any,
     ) -> tuple[tuple[str, int], ...]:
@@ -9128,14 +9030,11 @@ class ResearchObjectiveService:
                 if text:
                     terms.append((text, weight))
 
-        append_many(objective.process_axes, 6)
-        append_many(objective.property_axes, 6)
+        append_many(objective.variables, 6)
+        append_many(objective.outcomes, 6)
+        append_many(objective.mechanisms, 3)
+        append_many(objective.constraints, 3)
         append_many(objective.material_scope, 1)
-        if objective_context is not None:
-            append_many(objective_context.variable_process_axes, 7)
-            append_many(objective_context.target_property_axes, 7)
-            append_many(objective_context.process_context_axes, 3)
-            append_many(objective_context.material_scope, 1)
         if paper_skim is not None:
             append_many(paper_skim.changed_variables, 3)
             append_many(paper_skim.candidate_properties, 3)
@@ -9265,154 +9164,11 @@ class ResearchObjectiveService:
             filtered.append(text)
         return tuple(filtered)
 
-    def _build_objective_analysis_lenses(
-        self,
-        *,
-        paper_skims: tuple[PaperSkim, ...],
-        objectives: tuple[ResearchObjective, ...],
-        tables: tuple[Any, ...],
-    ) -> tuple[ObjectiveAnalysisLens, ...]:
-        contexts: list[ObjectiveAnalysisLens] = []
-        for objective in objectives:
-            relevant_skims = self._select_relevant_skims(
-                objective,
-                paper_skims=paper_skims,
-            )
-            variable_axes, context_axes = self._split_objective_process_axes(
-                objective,
-                paper_skims=paper_skims,
-            )
-            target_properties = list(objective.property_axes)
-            excluded_properties = self._excluded_objective_properties(
-                relevant_skims=relevant_skims,
-                target_properties=target_properties,
-            )
-            mediator_axes = self._objective_mediator_axes(
-                objective=objective,
-                target_property_axes=target_properties,
-            )
-            routing_hints = self._build_objective_table_routing_hints(
-                objective,
-                tables=tables,
-                target_property_axes=target_properties,
-                variable_process_axes=variable_axes,
-            )
-            contexts.append(
-                ObjectiveAnalysisLens.from_mapping(
-                    {
-                        "objective_id": objective.objective_id,
-                        "question": objective.question,
-                        "material_scope": list(objective.material_scope),
-                        "variable_process_axes": variable_axes,
-                        "process_context_axes": context_axes,
-                        "target_property_axes": target_properties,
-                        "excluded_property_axes": excluded_properties,
-                        "mediator_axes": mediator_axes,
-                        "direct_support_rules": (
-                            self._objective_direct_support_rules(
-                                mediator_axes=mediator_axes,
-                            )
-                        ),
-                        "routing_hints": routing_hints,
-                        "confidence": objective.confidence,
-                    }
-                )
-            )
-        return tuple(contexts)
-
-    def _objective_mediator_axes(
-        self,
-        *,
-        objective: ResearchObjective,
-        target_property_axes: list[str],
-    ) -> list[str]:
-        haystack = " ".join(
-            (
-                objective.question,
-                " ".join(objective.process_axes),
-                " ".join(objective.property_axes),
-                objective.comparison_intent or "",
-            )
-        ).casefold()
-        target_keys = {
-            self._objective_column_key(axis)
-            for axis in target_property_axes
-            if self._objective_column_key(axis)
-        }
-        mediators: list[str] = []
-        seen: set[str] = set()
-        for term in _OBJECTIVE_MEDIATOR_AXIS_TERMS:
-            if term not in haystack:
-                continue
-            term_key = self._objective_column_key(term)
-            if not term_key or term_key in target_keys:
-                continue
-            self._append_unique_axis(mediators, seen, term)
-        return mediators
-
-    def _objective_direct_support_rules(
-        self,
-        *,
-        mediator_axes: list[str],
-    ) -> list[str]:
-        rules = [
-            "Direct support must explicitly report, compare, or explain at least one target_outcome_axis.",
-            "Variable, material, and test context alone can bind evidence but cannot by themselves support a claim.",
-        ]
-        if mediator_axes:
-            rules.append(
-                "Mediator axes are explanatory context unless the source explicitly links them to a target_outcome_axis."
-            )
-        return rules
-
-    def _select_relevant_skims(
-        self,
-        objective: ResearchObjective,
-        *,
-        paper_skims: tuple[PaperSkim, ...],
-    ) -> tuple[PaperSkim, ...]:
-        seeded = tuple(
-            skim
-            for skim in paper_skims
-            if skim.document_id in objective.seed_document_ids
-        )
-        if seeded:
-            return seeded
-        if objective.seed_document_ids:
-            return ()
-        excluded = set(objective.excluded_document_ids)
-        selected = tuple(skim for skim in paper_skims if skim.document_id not in excluded)
-        return selected or paper_skims
-
-    def _excluded_objective_properties(
-        self,
-        *,
-        relevant_skims: tuple[PaperSkim, ...],
-        target_properties: list[str],
-    ) -> list[str]:
-        candidates = self._unique_axis_values(
-            value
-            for skim in relevant_skims
-            for value in skim.candidate_properties
-        )
-        excluded: list[str] = []
-        seen: set[str] = set()
-        for candidate in candidates:
-            if any(
-                self._axis_values_match(candidate, target_property)
-                for target_property in target_properties
-            ):
-                continue
-            self._append_unique_axis(excluded, seen, candidate)
-        return excluded
-
     def _build_objective_table_routing_hints(
         self,
         objective: ResearchObjective,
         *,
         tables: tuple[Any, ...],
-        target_property_axes: list[str],
-        variable_process_axes: list[str],
     ) -> tuple[SourceSelectionHint, ...]:
         hints: list[SourceSelectionHint] = []
         excluded_document_ids = set(objective.excluded_document_ids)
@@ -9435,21 +9191,21 @@ class ResearchObjectiveService:
             property_table_text = " ".join(
                 piece for piece in property_search_pieces if piece.strip()
             )
-            matched_property_axes = [
+            matched_outcomes = [
                 axis
-                for axis in target_property_axes
+                for axis in objective.outcomes
                 if self._source_text_mentions_axis(property_table_text, axis)
             ]
             matched_variable_axes = [
                 axis
-                for axis in variable_process_axes
+                for axis in objective.variables
                 if self._source_text_mentions_axis(table_text, axis)
             ]
-            if matched_property_axes:
+            if matched_outcomes:
                 role = "result_table"
                 strength = (
                     "strong"
-                    if matched_variable_axes or len(matched_property_axes) > 1
+                    if matched_variable_axes or len(matched_outcomes) > 1
                     else "medium"
                 )
             elif matched_variable_axes:
@@ -9465,11 +9221,11 @@ class ResearchObjectiveService:
                         "caption_text": getattr(table, "caption_text", None),
                         "role": role,
                         "strength": strength,
-                        "matched_property_axes": matched_property_axes,
-                        "matched_variable_process_axes": matched_variable_axes,
+                        "matched_outcomes": matched_outcomes,
+                        "matched_variables": matched_variable_axes,
                         "reason": self._build_objective_table_routing_reason(
                             role,
-                            matched_property_axes=matched_property_axes,
+                            matched_outcomes=matched_outcomes,
                             matched_variable_axes=matched_variable_axes,
                         ),
                     }
@@ -9543,7 +9299,7 @@ class ResearchObjectiveService:
         self,
         role: str,
         *,
-        matched_property_axes: list[str],
+        matched_outcomes: list[str],
         matched_variable_axes: list[str],
     ) -> str:
         if role == "result_table":
@@ -9741,126 +9497,6 @@ class ResearchObjectiveService:
                 return value
         return None
 
-    def _normalize_research_objective(
-        self,
-        objective: ResearchObjective,
-        *,
-        skim_by_document_id: dict[str, PaperSkim],
-        paper_skims: tuple[PaperSkim, ...],
-    ) -> ResearchObjective:
-        payload = objective.to_record()
-        payload["process_axes"] = self._merge_process_axes_from_skims(
-            objective,
-            skim_by_document_id=skim_by_document_id,
-            paper_skims=paper_skims,
-        )
-        payload["property_axes"] = self._expand_broad_property_axes(
-            objective.property_axes,
-            objective=objective,
-            skim_by_document_id=skim_by_document_id,
-            paper_skims=paper_skims,
-        )
-        if not str(payload.get("comparison_intent") or "").strip():
-            payload["comparison_intent"] = self._build_comparison_intent(payload)
-        return ResearchObjective.from_mapping(payload)
-
-    def _merge_process_axes_from_skims(
-        self,
-        objective: ResearchObjective,
-        *,
-        skim_by_document_id: dict[str, PaperSkim],
-        paper_skims: tuple[PaperSkim, ...],
-    ) -> list[str]:
-        merged: list[str] = []
-        seen: set[str] = set()
-        for value in objective.process_axes:
-            self._append_unique_axis(merged, seen, value)
-
-        candidate_skims = [
-            skim_by_document_id[document_id]
-            for document_id in objective.seed_document_ids
-            if document_id in skim_by_document_id
-        ]
-        if not candidate_skims:
-            candidate_skims = list(paper_skims) if not objective.seed_document_ids else []
-        for skim in candidate_skims:
-            for value in (*skim.candidate_processes, *skim.changed_variables):
-                self._append_unique_axis(merged, seen, value)
-        return merged
-
-    def _expand_broad_property_axes(
-        self,
-        values: tuple[str, ...],
-        *,
-        objective: ResearchObjective,
-        skim_by_document_id: dict[str, PaperSkim],
-        paper_skims: tuple[PaperSkim, ...],
-    ) -> list[str]:
-        expanded: list[str] = []
-        seen: set[str] = set()
-        available_properties = self._available_property_axes(
-            objective,
-            skim_by_document_id=skim_by_document_id,
-            paper_skims=paper_skims,
-        )
-        for value in values:
-            normalized = str(value or "").strip()
-            if not normalized:
-                continue
-            replacements = _BROAD_PROPERTY_AXIS_EXPANSIONS.get(normalized.lower())
-            if replacements is None:
-                self._append_unique_axis(expanded, seen, normalized)
-                continue
-            matched_replacements = [
-                replacement
-                for replacement in replacements
-                if self._property_axis_is_available(replacement, available_properties)
-            ]
-            if not matched_replacements:
-                self._append_unique_axis(expanded, seen, normalized)
-                continue
-            for replacement in matched_replacements:
-                self._append_unique_axis(expanded, seen, replacement)
-        return expanded
-
-    def _available_property_axes(
-        self,
-        objective: ResearchObjective,
-        *,
-        skim_by_document_id: dict[str, PaperSkim],
-        paper_skims: tuple[PaperSkim, ...],
-    ) -> set[str]:
-        candidate_skims = [
-            skim_by_document_id[document_id]
-            for document_id in objective.seed_document_ids
-            if document_id in skim_by_document_id
-        ]
-        if not candidate_skims:
-            candidate_skims = list(paper_skims) if not objective.seed_document_ids else []
-        return {
-            self._axis_key(value)
-            for skim in candidate_skims
-            for value in skim.candidate_properties
-            if self._axis_key(value)
-        }
-
-    def _property_axis_is_available(
-        self,
-        replacement: str,
-        available_properties: set[str],
-    ) -> bool:
-        key = self._axis_key(replacement)
-        if key in available_properties:
-            return True
-        if key == "microhardness" and "hardness" in available_properties:
-            return True
-        if (
-            key == "corrosion current density"
-            and "current density" in available_properties
-        ):
-            return True
-        return False
-
     def _canonicalize_research_objective_axes_with_llm(
         self,
         *,
@@ -9914,15 +9550,25 @@ class ResearchObjectiveService:
                 for objective in objectives
                 for value in objective.material_scope
             ),
-            "process": self._unique_axis_values(
+            "variable": self._unique_axis_values(
                 value
                 for objective in objectives
-                for value in objective.process_axes
+                for value in objective.variables
             ),
-            "property": self._unique_axis_values(
+            "outcome": self._unique_axis_values(
                 value
                 for objective in objectives
-                for value in objective.property_axes
+                for value in objective.outcomes
+            ),
+            "mechanism": self._unique_axis_values(
+                value
+                for objective in objectives
+                for value in objective.mechanisms
+            ),
+            "constraint": self._unique_axis_values(
+                value
+                for objective in objectives
+                for value in objective.constraints
             ),
         }
 
@@ -9989,14 +9635,24 @@ class ResearchObjectiveService:
             axis_type="material",
             axis_mapping=axis_mapping,
         )
-        payload["process_axes"] = self._canonicalize_axis_values(
-            objective.process_axes,
-            axis_type="process",
+        payload["variables"] = self._canonicalize_axis_values(
+            objective.variables,
+            axis_type="variable",
             axis_mapping=axis_mapping,
         )
-        payload["property_axes"] = self._canonicalize_axis_values(
-            objective.property_axes,
-            axis_type="property",
+        payload["outcomes"] = self._canonicalize_axis_values(
+            objective.outcomes,
+            axis_type="outcome",
+            axis_mapping=axis_mapping,
+        )
+        payload["mechanisms"] = self._canonicalize_axis_values(
+            objective.mechanisms,
+            axis_type="mechanism",
+            axis_mapping=axis_mapping,
+        )
+        payload["constraints"] = self._canonicalize_axis_values(
+            objective.constraints,
+            axis_type="constraint",
             axis_mapping=axis_mapping,
         )
         return ResearchObjective.from_mapping(payload)
@@ -10081,40 +9737,79 @@ class ResearchObjectiveService:
                 objective_by_id[source_id]
                 for source_id in source_ids
             )
-            property_components = self._property_overlap_components(source_objectives)
-            if len(property_components) > 1:
-                for component in property_components:
-                    merged_objectives.append(
-                        self._build_objective_from_property_component(component)
+            if len(source_objectives) > 1:
+                shared_outcome_keys = set.intersection(
+                    *(
+                        self._axis_key_set(*objective.outcomes)
+                        for objective in source_objectives
                     )
-                continue
-
+                )
+                if not shared_outcome_keys:
+                    return None
             material_scope = self._validated_merge_axes(
                 tuple(group.material_scope),
                 source_objectives=source_objectives,
                 source_field="material_scope",
             )
-            process_axes = self._validated_merge_axes(
-                tuple(group.process_axes),
+            variables = self._validated_merge_axes(
+                tuple(group.variables),
                 source_objectives=source_objectives,
-                source_field="process_axes",
+                source_field="variables",
             )
-            property_axes = self._validated_merge_axes(
-                tuple(group.property_axes),
+            outcomes = self._validated_merge_axes(
+                tuple(group.outcomes),
                 source_objectives=source_objectives,
-                source_field="property_axes",
+                source_field="outcomes",
             )
-            if material_scope is None or process_axes is None or property_axes is None:
+            mechanisms = self._validated_merge_axes(
+                tuple(group.mechanisms),
+                source_objectives=source_objectives,
+                source_field="mechanisms",
+            )
+            constraints = self._validated_merge_axes(
+                tuple(group.constraints),
+                source_objectives=source_objectives,
+                source_field="constraints",
+            )
+            if any(
+                values is None
+                for values in (
+                    material_scope,
+                    variables,
+                    outcomes,
+                    mechanisms,
+                    constraints,
+                )
+            ):
                 return None
+
+            if len(source_objectives) == 1:
+                source = source_objectives[0]
+                if str(group.question or "").strip() != source.question:
+                    return None
+                if group.requested_comparator != source.requested_comparator:
+                    return None
+            else:
+                merged_text = " ".join(
+                    value
+                    for value in (group.question, group.requested_comparator)
+                    if value
+                )
+                if any(
+                    not self._axis_label_is_mentioned(merged_text, variable)
+                    for variable in variables
+                ):
+                    return None
 
             payload = {
                 "collection_id": source_objectives[0].collection_id,
-                "objective_id": build_research_objective_id(group.question),
                 "question": group.question,
                 "material_scope": material_scope,
-                "process_axes": process_axes,
-                "property_axes": property_axes,
-                "comparison_intent": group.comparison_intent,
+                "variables": variables,
+                "outcomes": outcomes,
+                "mechanisms": mechanisms,
+                "constraints": constraints,
+                "requested_comparator": group.requested_comparator,
                 "seed_document_ids": self._merge_objective_axes(
                     source_objectives,
                     "seed_document_ids",
@@ -10127,8 +9822,6 @@ class ResearchObjectiveService:
                 "reason": group.reason,
             }
             objective = ResearchObjective.from_mapping(payload)
-            if not objective.comparison_intent:
-                return None
             if not is_question_shaped_objective(objective):
                 return None
             merged_objectives.append(objective)
@@ -10142,367 +9835,19 @@ class ResearchObjectiveService:
         objectives: tuple[ResearchObjective, ...],
     ) -> tuple[ResearchObjective, ...]:
         unique_objectives: list[ResearchObjective] = []
-        seen_objective_ids: set[str] = set()
+        objective_by_id: dict[str, ResearchObjective] = {}
         for objective in objectives:
-            if objective.objective_id in seen_objective_ids:
-                continue
-            seen_objective_ids.add(objective.objective_id)
-            unique_objectives.append(objective)
-
-        deduped: list[ResearchObjective] = []
-        for objective in unique_objectives:
-            if self._objective_is_redundant_property_subset(
-                objective,
-                objectives=tuple(unique_objectives),
-            ):
-                continue
-            deduped.append(objective)
-        return tuple(deduped)
-
-    def _objective_is_redundant_property_subset(
-        self,
-        objective: ResearchObjective,
-        *,
-        objectives: tuple[ResearchObjective, ...],
-    ) -> bool:
-        property_keys = self._axis_key_set(*objective.property_axes)
-        if not property_keys:
-            return False
-        material_keys = self._axis_key_set(*objective.material_scope)
-        process_keys = self._axis_key_set(*objective.process_axes)
-        for other in objectives:
-            if other.objective_id == objective.objective_id:
-                continue
-            other_property_keys = self._axis_key_set(*other.property_axes)
-            if not property_keys < other_property_keys:
-                continue
-            other_material_keys = self._axis_key_set(*other.material_scope)
-            if (
-                material_keys
-                and other_material_keys
-                and not material_keys.intersection(other_material_keys)
-            ):
-                continue
-            other_process_keys = self._axis_key_set(*other.process_axes)
-            if (
-                process_keys
-                and other_process_keys
-                and not process_keys.issubset(other_process_keys)
-            ):
-                continue
-            return True
-        return False
-
-    def _split_mixed_property_objectives(
-        self,
-        *,
-        paper_skims: tuple[PaperSkim, ...],
-        objectives: tuple[ResearchObjective, ...],
-    ) -> tuple[ResearchObjective, ...]:
-        split_objectives: list[ResearchObjective] = []
-        for objective in objectives:
-            split_objectives.extend(
-                self._split_single_mixed_property_objective(
-                    objective,
-                    paper_skims=paper_skims,
-                )
-            )
-        return tuple(split_objectives)
-
-    def _split_single_mixed_property_objective(
-        self,
-        objective: ResearchObjective,
-        *,
-        paper_skims: tuple[PaperSkim, ...],
-    ) -> tuple[ResearchObjective, ...]:
-        structural_axes = [
-            value
-            for value in objective.property_axes
-            if self._property_axis_matches_any(value, _STRUCTURAL_PROPERTY_AXES)
-        ]
-        mechanical_axes = [
-            value
-            for value in objective.property_axes
-            if self._property_axis_matches_any(value, _MECHANICAL_PROPERTY_AXES)
-        ]
-        grouped_keys = self._axis_key_set(*structural_axes, *mechanical_axes)
-        other_axes = [
-            value
-            for value in objective.property_axes
-            if self._axis_key(value) not in grouped_keys
-        ]
-        if not structural_axes or not mechanical_axes or other_axes:
-            return (objective,)
-
-        return (
-            self._build_property_split_objective(
-                objective,
-                property_axes=structural_axes,
-                paper_skims=paper_skims,
-                reason=(
-                    "Split mixed objective to keep structural and densification "
-                    "outcomes separate from mechanical-property outcomes."
-                ),
-            ),
-            self._build_property_split_objective(
-                objective,
-                property_axes=mechanical_axes,
-                paper_skims=paper_skims,
-                reason=(
-                    "Split mixed objective to keep mechanical-property outcomes "
-                    "separate from structural and densification outcomes."
-                ),
-            ),
-        )
-
-    def _build_property_split_objective(
-        self,
-        objective: ResearchObjective,
-        *,
-        property_axes: list[str],
-        paper_skims: tuple[PaperSkim, ...],
-        reason: str,
-    ) -> ResearchObjective:
-        payload = objective.to_record()
-        payload["property_axes"] = property_axes
-        variable_axes, context_axes = self._split_objective_process_axes(
-            objective,
-            paper_skims=paper_skims,
-        )
-        if len(variable_axes) >= 2:
-            payload["question"] = self._build_aligned_research_objective_question(
-                payload,
-                variable_axes=variable_axes,
-                context_axes=context_axes,
-            )
-            payload["comparison_intent"] = self._build_aligned_comparison_intent(
-                payload,
-                variable_axes=variable_axes,
-                context_axes=context_axes,
-            )
-        else:
-            payload["question"] = self._build_research_objective_question(payload)
-            payload["comparison_intent"] = self._build_comparison_intent(payload)
-        payload["objective_id"] = build_research_objective_id(payload["question"])
-        payload["reason"] = reason
-        return ResearchObjective.from_mapping(payload)
-
-    def _align_research_objective_text_with_axes(
-        self,
-        *,
-        paper_skims: tuple[PaperSkim, ...],
-        objectives: tuple[ResearchObjective, ...],
-    ) -> tuple[ResearchObjective, ...]:
-        return tuple(
-            self._align_single_research_objective_text(
-                objective,
-                paper_skims=paper_skims,
-            )
-            for objective in objectives
-        )
-
-    def _align_single_research_objective_text(
-        self,
-        objective: ResearchObjective,
-        *,
-        paper_skims: tuple[PaperSkim, ...],
-    ) -> ResearchObjective:
-        variable_axes, context_axes = self._split_objective_process_axes(
-            objective,
-            paper_skims=paper_skims,
-        )
-        if len(variable_axes) < 2:
-            return objective
-
-        question_missing_axes = [
-            axis
-            for axis in variable_axes
-            if not self._axis_label_is_mentioned(objective.question, axis)
-        ]
-        intent_text = str(objective.comparison_intent or "")
-        intent_missing_axes = [
-            axis
-            for axis in variable_axes
-            if not self._axis_label_is_mentioned(intent_text, axis)
-        ]
-        if not question_missing_axes and not intent_missing_axes:
-            return objective
-
-        payload = objective.to_record()
-        if question_missing_axes:
-            payload["question"] = self._build_aligned_research_objective_question(
-                payload,
-                variable_axes=variable_axes,
-                context_axes=context_axes,
-            )
-            payload["objective_id"] = build_research_objective_id(
-                payload["question"]
-            )
-        if intent_missing_axes:
-            payload["comparison_intent"] = self._build_aligned_comparison_intent(
-                payload,
-                variable_axes=variable_axes,
-                context_axes=context_axes,
-            )
-        return ResearchObjective.from_mapping(payload)
-
-    def _split_objective_process_axes(
-        self,
-        objective: ResearchObjective,
-        *,
-        paper_skims: tuple[PaperSkim, ...],
-    ) -> tuple[list[str], list[str]]:
-        changed_variables = self._relevant_changed_variables(
-            objective,
-            paper_skims=paper_skims,
-        )
-        variable_axes: list[str] = []
-        seen_variable_keys: set[str] = set()
-        for changed_variable in changed_variables:
-            for process_axis in objective.process_axes:
-                if self._axis_values_match(process_axis, changed_variable):
-                    self._append_unique_axis(
-                        variable_axes,
-                        seen_variable_keys,
-                        process_axis,
+            existing = objective_by_id.get(objective.objective_id)
+            if existing is not None:
+                if existing.to_record() != objective.to_record():
+                    raise ValueError(
+                        "conflicting research objectives share objective_id: "
+                        f"{objective.objective_id}"
                     )
-                    break
-        for process_axis in objective.process_axes:
-            if any(
-                self._axis_values_match(process_axis, changed_variable)
-                for changed_variable in changed_variables
-            ):
-                self._append_unique_axis(
-                    variable_axes,
-                    seen_variable_keys,
-                    process_axis,
-                )
-
-        context_axes: list[str] = []
-        seen_context_keys: set[str] = set()
-        for process_axis in objective.process_axes:
-            if any(
-                self._axis_values_match(process_axis, variable_axis)
-                for variable_axis in variable_axes
-            ):
                 continue
-            self._append_unique_axis(context_axes, seen_context_keys, process_axis)
-        return variable_axes, context_axes
-
-    def _relevant_changed_variables(
-        self,
-        objective: ResearchObjective,
-        *,
-        paper_skims: tuple[PaperSkim, ...],
-    ) -> list[str]:
-        seeded_skims = [
-            skim
-            for skim in paper_skims
-            if skim.document_id in objective.seed_document_ids
-        ]
-        if not seeded_skims:
-            seeded_skims = list(paper_skims) if not objective.seed_document_ids else []
-        return self._unique_axis_values(
-            value
-            for skim in seeded_skims
-            for value in skim.changed_variables
-        )
-
-    def _build_aligned_research_objective_question(
-        self,
-        payload: dict[str, Any],
-        *,
-        variable_axes: list[str],
-        context_axes: list[str],
-    ) -> str:
-        variable_text = self._join_axis_text(variable_axes)
-        property_text = (
-            self._join_axis_text(payload.get("property_axes"))
-            or "the reported outcomes"
-        )
-        material_text = (
-            self._join_axis_text(payload.get("material_scope"))
-            or "the material system"
-        )
-        context_text = self._join_axis_text(context_axes)
-        material_phrase = material_text
-        if context_text:
-            material_phrase = f"{material_phrase} processed via {context_text}"
-        return f"How do {variable_text} affect {property_text} of {material_phrase}?"
-
-    def _build_aligned_comparison_intent(
-        self,
-        payload: dict[str, Any],
-        *,
-        variable_axes: list[str],
-        context_axes: list[str],
-    ) -> str:
-        material_text = (
-            self._join_axis_text(payload.get("material_scope"))
-            or "the material system"
-        )
-        variable_text = self._join_axis_text(variable_axes)
-        property_text = (
-            self._join_axis_text(payload.get("property_axes"))
-            or "the reported outcomes"
-        )
-        context_text = self._join_axis_text(context_axes)
-        context_phrase = f" in {context_text}" if context_text else ""
-        return (
-            f"Compare {material_text}{context_phrase} across {variable_text} "
-            f"and evaluate changes in {property_text}."
-        )
-
-    def _property_overlap_components(
-        self,
-        objectives: tuple[ResearchObjective, ...],
-    ) -> tuple[tuple[ResearchObjective, ...], ...]:
-        components: list[tuple[list[ResearchObjective], set[str]]] = []
-        for objective in objectives:
-            current_keys = self._axis_key_set(*objective.property_axes)
-            matched_indexes = [
-                index
-                for index, (_, component_keys) in enumerate(components)
-                if current_keys and component_keys.intersection(current_keys)
-            ]
-            if not matched_indexes:
-                components.append(([objective], set(current_keys)))
-                continue
-            first_index = matched_indexes[0]
-            components[first_index][0].append(objective)
-            components[first_index][1].update(current_keys)
-            for index in reversed(matched_indexes[1:]):
-                objectives_to_move, keys_to_move = components.pop(index)
-                components[first_index][0].extend(objectives_to_move)
-                components[first_index][1].update(keys_to_move)
-        return tuple(tuple(component_objectives) for component_objectives, _ in components)
-
-    def _build_objective_from_property_component(
-        self,
-        objectives: tuple[ResearchObjective, ...],
-    ) -> ResearchObjective:
-        if len(objectives) == 1:
-            return objectives[0]
-        payload = {
-            "collection_id": objectives[0].collection_id,
-            "material_scope": self._merge_objective_axes(objectives, "material_scope"),
-            "process_axes": self._merge_objective_axes(objectives, "process_axes"),
-            "property_axes": self._merge_objective_axes(objectives, "property_axes"),
-            "seed_document_ids": self._merge_objective_axes(
-                objectives,
-                "seed_document_ids",
-            ),
-            "excluded_document_ids": self._merge_objective_axes(
-                objectives,
-                "excluded_document_ids",
-            ),
-            "confidence": max(objective.confidence for objective in objectives),
-            "reason": "Merged objectives with overlapping property axes.",
-        }
-        payload["question"] = self._build_research_objective_question(payload)
-        payload["objective_id"] = build_research_objective_id(payload["question"])
-        payload["comparison_intent"] = self._build_comparison_intent(payload)
-        return ResearchObjective.from_mapping(payload)
+            objective_by_id[objective.objective_id] = objective
+            unique_objectives.append(objective)
+        return tuple(unique_objectives)
 
     def _validated_merge_axes(
         self,
@@ -10534,41 +9879,6 @@ class ResearchObjectiveService:
                 self._append_unique_axis(merged, seen, value)
         return merged
 
-    def _allowed_material_axes(
-        self,
-        objectives: tuple[ResearchObjective, ...],
-        paper_skims: tuple[PaperSkim, ...],
-    ) -> set[str]:
-        return self._axis_key_set(
-            *(
-                value
-                for objective in objectives
-                for value in objective.material_scope
-            ),
-            *(value for skim in paper_skims for value in skim.candidate_materials),
-        )
-
-    def _allowed_process_axes(
-        self,
-        objectives: tuple[ResearchObjective, ...],
-        paper_skims: tuple[PaperSkim, ...],
-    ) -> set[str]:
-        return self._axis_key_set(
-            *(value for objective in objectives for value in objective.process_axes),
-            *(value for skim in paper_skims for value in skim.candidate_processes),
-            *(value for skim in paper_skims for value in skim.changed_variables),
-        )
-
-    def _allowed_property_axes(
-        self,
-        objectives: tuple[ResearchObjective, ...],
-        paper_skims: tuple[PaperSkim, ...],
-    ) -> set[str]:
-        return self._axis_key_set(
-            *(value for objective in objectives for value in objective.property_axes),
-            *(value for skim in paper_skims for value in skim.candidate_properties),
-        )
-
     def _axis_key_set(self, *values: Any) -> set[str]:
         return {self._axis_key(value) for value in values if self._axis_key(value)}
 
@@ -10590,39 +9900,6 @@ class ResearchObjectiveService:
             for value in getattr(objective, field_name):
                 self._append_unique_axis(merged, seen, value)
         return merged
-
-    def _build_research_objective_question(self, payload: dict[str, Any]) -> str:
-        process_text = (
-            self._join_axis_text(payload.get("process_axes"))
-            or "the studied process axes"
-        )
-        property_text = (
-            self._join_axis_text(payload.get("property_axes"))
-            or "the reported outcomes"
-        )
-        material_text = (
-            self._join_axis_text(payload.get("material_scope"))
-            or "the material system"
-        )
-        return f"How do {process_text} affect {property_text} of {material_text}?"
-
-    def _build_comparison_intent(self, payload: dict[str, Any]) -> str:
-        material_text = (
-            self._join_axis_text(payload.get("material_scope"))
-            or "the material system"
-        )
-        process_text = (
-            self._join_axis_text(payload.get("process_axes"))
-            or "the studied process axes"
-        )
-        property_text = (
-            self._join_axis_text(payload.get("property_axes"))
-            or "the reported outcomes"
-        )
-        return (
-            f"Compare {material_text} across {process_text} and evaluate changes in "
-            f"{property_text}."
-        )
 
     def _append_unique_axis(
         self,

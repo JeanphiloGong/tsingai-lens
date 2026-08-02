@@ -667,55 +667,18 @@ class StructuredTableMatrixRepair(_StrictModel):
         return _normalize_list_container(value)
 
 
-PaperSkimWarning = Literal[
-    "classification_uncertain",
-    "insufficient_content",
-    "modeling_only",
-    "objective_uncertain",
-    "profile_content_conflict",
-    "review_only",
-]
-
-
 class StructuredPaperSkim(_StrictModel):
-    doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = Field(
-        default="uncertain",
-        description="Coarse role of this paper based on the supplied compact content.",
+    doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
+        "uncertain"
     )
-    candidate_materials: list[str] = Field(
-        default_factory=list,
-        description="Explicitly named material systems relevant to candidate questions.",
-    )
-    candidate_processes: list[str] = Field(
-        default_factory=list,
-        description="Explicit process families relevant to candidate questions.",
-    )
-    candidate_properties: list[str] = Field(
-        default_factory=list,
-        description="Concrete measured or evaluated properties named in the input.",
-    )
-    changed_variables: list[str] = Field(
-        default_factory=list,
-        description="Variables explicitly varied or compared in this paper.",
-    )
-    possible_objectives: list[str] = Field(
-        default_factory=list,
-        description="Concise question-shaped process-property comparisons supported by the input.",
-    )
-    evidence_density: Literal["high", "medium", "low", "unknown"] = Field(
-        default="unknown",
-        description="Coverage of the proposed research map in the supplied compact content.",
-    )
-    confidence: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description="Confidence in the complete PaperSkim, from 0 to 1.",
-    )
-    warnings: list[PaperSkimWarning] = Field(
-        default_factory=list,
-        description="Applicable bounded warning codes; empty when no warning applies.",
-    )
+    candidate_materials: list[str] = Field(default_factory=list)
+    candidate_processes: list[str] = Field(default_factory=list)
+    candidate_properties: list[str] = Field(default_factory=list)
+    changed_variables: list[str] = Field(default_factory=list)
+    possible_objectives: list[str] = Field(default_factory=list)
+    evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
+    confidence: float = 0.0
+    warnings: list[str] = Field(default_factory=list)
 
     @field_validator(
         "candidate_materials",
@@ -750,55 +713,24 @@ class StructuredPaperSkim(_StrictModel):
 
 
 class StructuredResearchObjective(_StrictModel):
-    question: str = Field(
-        min_length=8,
-        max_length=240,
-        description="Exact question copied from a selected skim's possible_objectives.",
-    )
-    material_scope: list[str] = Field(
-        min_length=1,
-        max_length=3,
-        description="Material labels copied from the selected seed skims.",
-    )
-    process_axes: list[str] = Field(
-        min_length=1,
-        max_length=8,
-        description="Process or changed-variable labels copied from the seed skims.",
-    )
-    property_axes: list[str] = Field(
-        min_length=1,
-        max_length=8,
-        description="Measured property labels copied from the selected seed skims.",
-    )
-    comparison_intent: str = Field(
-        min_length=1,
-        max_length=240,
-        description="Concise comparison represented by this candidate objective.",
-    )
-    seed_document_ids: list[str] = Field(
-        min_length=1,
-        max_length=12,
-        description="Exact input document ids that directly support this candidate.",
-    )
-    excluded_document_ids: list[str] = Field(
-        max_length=12,
-        description="Exact input document ids clearly outside this candidate's scope.",
-    )
-    confidence: float = Field(
-        ge=0.0,
-        le=1.0,
-        description="Confidence in candidate selection and paper binding, from 0 to 1.",
-    )
-    reason: str = Field(
-        min_length=1,
-        max_length=200,
-        description="Short explanation grounded in the selected PaperSkim records.",
-    )
+    question: str
+    material_scope: list[str] = Field(default_factory=list)
+    variables: list[str] = Field(min_length=1)
+    outcomes: list[str] = Field(min_length=1)
+    mechanisms: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    requested_comparator: str | None = None
+    seed_document_ids: list[str] = Field(default_factory=list)
+    excluded_document_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    reason: str | None = None
 
     @field_validator(
         "material_scope",
-        "process_axes",
-        "property_axes",
+        "variables",
+        "outcomes",
+        "mechanisms",
+        "constraints",
         "seed_document_ids",
         "excluded_document_ids",
         mode="before",
@@ -807,21 +739,9 @@ class StructuredResearchObjective(_StrictModel):
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list_container(value)
 
-    @model_validator(mode="after")
-    def _validate_disjoint_document_ids(self) -> "StructuredResearchObjective":
-        overlap = set(self.seed_document_ids) & set(self.excluded_document_ids)
-        if overlap:
-            raise ValueError(
-                "seed_document_ids and excluded_document_ids must be disjoint"
-            )
-        return self
-
 
 class StructuredResearchObjectives(_StrictModel):
-    objectives: list[StructuredResearchObjective] = Field(
-        max_length=6,
-        description="Bounded supported candidates; empty when none are reviewable.",
-    )
+    objectives: list[StructuredResearchObjective] = Field(default_factory=list)
 
     @field_validator("objectives", mode="before")
     @classmethod
@@ -830,7 +750,7 @@ class StructuredResearchObjectives(_StrictModel):
 
 
 class StructuredAxisCanonicalizationGroup(_StrictModel):
-    axis_type: Literal["material", "process", "property"]
+    axis_type: Literal["material", "variable", "outcome", "mechanism", "constraint"]
     canonical: str
     aliases: list[str] = Field(default_factory=list)
     confidence: float = 0.0
@@ -857,17 +777,21 @@ class StructuredObjectiveMergeGroup(_StrictModel):
     source_objective_ids: list[str] = Field(default_factory=list)
     question: str
     material_scope: list[str] = Field(default_factory=list)
-    process_axes: list[str] = Field(default_factory=list)
-    property_axes: list[str] = Field(default_factory=list)
-    comparison_intent: str
+    variables: list[str] = Field(min_length=1)
+    outcomes: list[str] = Field(min_length=1)
+    mechanisms: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    requested_comparator: str | None = None
     confidence: float = 0.0
     reason: str
 
     @field_validator(
         "source_objective_ids",
         "material_scope",
-        "process_axes",
-        "property_axes",
+        "variables",
+        "outcomes",
+        "mechanisms",
+        "constraints",
         mode="before",
     )
     @classmethod

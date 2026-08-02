@@ -177,9 +177,11 @@ Example:
   "objective_id": "obj_lpbf_316l_heat_treatment_corrosion",
   "question": "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?",
   "material_scope": ["316L stainless steel"],
-  "process_axes": ["LPBF", "SLM", "heat treatment"],
-  "property_axes": ["corrosion", "EIS", "polarization"],
-  "comparison_intent": "compare as-built and heat-treated LPBF 316L corrosion behavior",
+  "variables": ["heat treatment"],
+  "outcomes": ["corrosion", "EIS", "polarization"],
+  "mechanisms": ["passive film stability"],
+  "constraints": ["LPBF/SLM processing"],
+  "requested_comparator": "compare as-built and heat-treated LPBF 316L corrosion behavior",
   "included_papers": ["P001", "P003"],
   "excluded_papers": ["P005"],
   "confidence": 0.86
@@ -327,39 +329,34 @@ New primary Core records should be:
 
 - `PaperSkim`
 - `ResearchObjective`
-- `ObjectiveContext`
-- `ObjectivePaperFrame`
-- `ObjectiveEvidenceRoute`
-- `ObjectiveEvidenceUnit`
-- `ObjectiveMeasurementResult`
-- `ObjectiveComparisonRow`
-- `ObjectiveLogicChain`
-- `ResearchUnderstanding`
+- `ObjectiveAnalysis`
+- `PaperContribution`
+- `ObjectiveEvidence`
+- `Finding`
+- `FindingRelation`
+- `FindingContext`
 
-The SQLite-backed Core repository should persist those records in tables such
-as:
+The PostgreSQL Core repository persists those records in the owning Objective
+tables:
 
-- `core_paper_skims`
-- `core_research_objectives`
-- `core_objective_contexts`
-- `core_objective_paper_frames`
-- `core_objective_evidence_routes`
-- `core_objective_evidence_units`
-- `core_objective_measurement_results`
-- `core_objective_comparison_rows`
-- `core_objective_logic_chains`
-- research-understanding artifacts owned by the collection build pipeline
+- `objective_paper_skims`
+- `research_objectives`
+- `objective_analyses`
+- `objective_paper_contributions`
+- `objective_evidence`
+- `objective_findings`
+- `objective_finding_relations`
+- `objective_finding_contexts`
 
-These records should carry objective provenance, but the final facts should
-still normalize reusable material, process, property, condition, baseline, and
-evidence fields. They should not become unstructured objective-local text
-results.
+`ResearchObjective` is the only owner of the question's scientific intent:
+material scope, variables, outcomes, mechanisms, constraints, and an optional
+requested comparator. Per-paper framing, evidence routing, and document state
+are transient analysis state; they do not define a second Objective contract.
 
-`ObjectiveEvidenceUnit` and `ObjectiveLogicChain` are the authoritative Core
-outputs for the objective-first path. Evidence cards, research-understanding
-workspaces, graph nodes, workspace panels, material views, and any comparison
-matrix should be generated from those records as projections for review,
-navigation, and presentation.
+`ObjectiveEvidence` and `Finding` are the authoritative Core outputs for the
+objective-first path. Evidence cards, research workspaces, graph nodes,
+workspace panels, material views, and comparison surfaces should be generated
+from those records as projections for review, navigation, and presentation.
 
 The old collection-wide `ComparisonRowRecord` shape should not be retained as
 an authoritative semantic surface. It is too flat for objective-first

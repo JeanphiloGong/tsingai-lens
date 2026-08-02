@@ -14,9 +14,11 @@ class ObjectiveSummaryResponse(BaseModel):
     objective_id: str
     question: str
     material_scope: list[str] = Field(default_factory=list)
-    process_axes: list[str] = Field(default_factory=list)
-    property_axes: list[str] = Field(default_factory=list)
-    comparison_intent: str | None = None
+    variables: list[str] = Field(default_factory=list)
+    outcomes: list[str] = Field(default_factory=list)
+    mechanisms: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    requested_comparator: str | None = None
     seed_document_ids: list[str] = Field(default_factory=list)
     excluded_document_ids: list[str] = Field(default_factory=list)
     confidence: float = 0.0

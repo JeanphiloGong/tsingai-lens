@@ -17,7 +17,7 @@ from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260722_0019"
+HEAD_REVISION = "20260802_0020"
 EXPECTED_TABLES = {
     "alembic_version",
     "artifact_versions",
@@ -137,6 +137,278 @@ def test_empty_database_upgrades_and_rejects_irreversible_downgrade(
 
             with pytest.raises(NotImplementedError, match="irreversible"):
                 command.downgrade(config, "20260722_0018")
+    finally:
+        engine.dispose()
+
+
+def test_objective_contract_migration_rebuilds_results_without_deleting_sessions(
+    tmp_path,
+) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "objective-contract.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    created_at = "2026-08-02 08:00:00+00:00"
+    empty_json = "[]"
+    empty_object = "{}"
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+            config.attributes["connection"] = connection
+            command.upgrade(config, "20260722_0019")
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO auth_users (
+                        user_id, email, display_name, password_hash, created_at
+                    ) VALUES (
+                        'user-objective', 'objective@example.com', NULL,
+                        'synthetic-password-hash', :created_at
+                    )
+                    """
+                ),
+                {"created_at": created_at},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO collections (
+                        collection_id, owner_user_id, name, description, status,
+                        paper_count, created_at, updated_at
+                    ) VALUES (
+                        'col-objective', 'user-objective', 'Objective migration',
+                        NULL, 'ready', 1, :created_at, :created_at
+                    )
+                    """
+                ),
+                {"created_at": created_at},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO tasks (
+                        task_id, collection_id, task_type, status, current_stage,
+                        progress_percent, progress_detail, output_path, errors,
+                        warnings, details, created_at, updated_at, started_at,
+                        finished_at
+                    ) VALUES (
+                        'task-objective', 'col-objective', 'build', 'completed',
+                        'completed', 100, NULL, NULL, :empty_json, :empty_json,
+                        :empty_object, :created_at, :created_at, :created_at,
+                        :created_at
+                    )
+                    """
+                ),
+                {
+                    "created_at": created_at,
+                    "empty_json": empty_json,
+                    "empty_object": empty_object,
+                },
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO collection_builds (
+                        build_id, task_id, collection_id, build_number, status,
+                        created_at, started_at, finished_at
+                    ) VALUES (
+                        'build-objective', 'task-objective', 'col-objective', 1,
+                        'succeeded', :created_at, :created_at, :created_at
+                    )
+                    """
+                ),
+                {"created_at": created_at},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO objective_builds (
+                        build_id, collection_id, research_objectives_ready
+                    ) VALUES ('build-objective', 'col-objective', true)
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO research_objectives (
+                        collection_id, objective_id, question, material_scope,
+                        process_axes, property_axes, comparison_intent,
+                        confidence, reason, confirmation_status,
+                        active_analysis_version, published_analysis_version,
+                        created_at, updated_at
+                    ) VALUES (
+                        'col-objective', 'obj-old',
+                        'How does heat treatment affect strength?', :material_scope,
+                        :process_axes, :property_axes, 'compare conditions', 0.9,
+                        'old contract', 'confirmed', 1, 1, :created_at, :created_at
+                    )
+                    """
+                ),
+                {
+                    "material_scope": '["316L"]',
+                    "process_axes": '["heat treatment"]',
+                    "property_axes": '["strength"]',
+                    "created_at": created_at,
+                },
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO objective_analyses (
+                        collection_id, objective_id, analysis_version,
+                        source_build_id, pipeline_version, model_name,
+                        prompt_versions, status, phase, processed_document_count,
+                        total_document_count, current_document_id,
+                        progress_message, error_code, error_message, created_at,
+                        started_at, completed_at
+                    ) VALUES (
+                        'col-objective', 'obj-old', 1, 'build-objective',
+                        'objective-analysis.v2', 'model', :empty_object,
+                        'succeeded', 'completed', 1, 1, NULL, 'Completed', NULL,
+                        NULL, :created_at, :created_at, :created_at
+                    )
+                    """
+                ),
+                {
+                    "empty_object": empty_object,
+                    "created_at": created_at,
+                },
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO objective_findings (
+                        collection_id, objective_id, analysis_version, finding_id,
+                        finding_level, statement, variables, mediators, outcomes,
+                        direction, scope_summary, evidence_strength,
+                        generalization_status, paper_count, confidence, display_rank
+                    ) VALUES (
+                        'col-objective', 'obj-old', 1, 'finding-old', 'paper',
+                        'Heat treatment increased strength.', :variables,
+                        :empty_json, :outcomes, 'increase', '316L', 'moderate',
+                        'paper_level_only', 1, 0.8, 0
+                    )
+                    """
+                ),
+                {
+                    "variables": '["heat treatment"]',
+                    "outcomes": '["strength"]',
+                    "empty_json": empty_json,
+                },
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO finding_feedback_records (
+                        feedback_id, collection_id, objective_id, analysis_version,
+                        finding_id, review_status, issue_type, note, reviewer,
+                        created_at
+                    ) VALUES (
+                        'feedback-old', 'col-objective', 'obj-old', 1,
+                        'finding-old', 'correct', 'none', NULL, 'expert', :created_at
+                    )
+                    """
+                ),
+                {"created_at": created_at},
+            )
+            for session_id, focused_objective_id in (
+                ("session-focused", "obj-old"),
+                ("session-unfocused", None),
+            ):
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO objective_sessions (
+                            session_id, user_id, collection_id, focused_material_id,
+                            focused_paper_id, focused_objective_id, goal_text,
+                            intent_brief, answer_mode, rolling_summary,
+                            last_evidence_ids, last_material_ids, last_paper_ids,
+                            collection_data_version, created_at, updated_at
+                        ) VALUES (
+                            :session_id, 'user-objective', 'col-objective', NULL,
+                            NULL, :focused_objective_id, NULL, :empty_object,
+                            'evidence', '', :empty_json, :empty_json, :empty_json,
+                            NULL, :created_at, :created_at
+                        )
+                        """
+                    ),
+                    {
+                        "session_id": session_id,
+                        "focused_objective_id": focused_objective_id,
+                        "empty_object": empty_object,
+                        "empty_json": empty_json,
+                        "created_at": created_at,
+                    },
+                )
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO objective_messages (
+                            message_id, session_id, position, role, content,
+                            source_mode, used_evidence_ids, warnings, links,
+                            source_links, review_gate, source_finding_refs, created_at
+                        ) VALUES (
+                            :message_id, :session_id, 0, 'user', 'Question', NULL,
+                            :empty_json, :empty_json, :empty_object, :empty_json,
+                            NULL, :empty_json, :created_at
+                        )
+                        """
+                    ),
+                    {
+                        "message_id": f"message-{session_id}",
+                        "session_id": session_id,
+                        "empty_json": empty_json,
+                        "empty_object": empty_object,
+                        "created_at": created_at,
+                    },
+                )
+
+            command.upgrade(config, "head")
+
+            assert connection.execute(
+                text("SELECT count(*) FROM research_objectives")
+            ).scalar_one() == 0
+            assert connection.execute(
+                text("SELECT count(*) FROM objective_analyses")
+            ).scalar_one() == 0
+            assert connection.execute(
+                text("SELECT count(*) FROM objective_findings")
+            ).scalar_one() == 0
+            assert connection.execute(
+                text("SELECT count(*) FROM finding_feedback_records")
+            ).scalar_one() == 0
+            assert connection.execute(
+                text(
+                    "SELECT research_objectives_ready FROM objective_builds "
+                    "WHERE build_id = 'build-objective'"
+                )
+            ).scalar_one() in (False, 0)
+            assert connection.execute(
+                text(
+                    "SELECT session_id, focused_objective_id "
+                    "FROM objective_sessions ORDER BY session_id"
+                )
+            ).all() == [
+                ("session-focused", None),
+                ("session-unfocused", None),
+            ]
+            assert connection.execute(
+                text("SELECT count(*) FROM objective_messages")
+            ).scalar_one() == 2
+            assert {
+                column["name"]
+                for column in inspect(connection).get_columns("research_objectives")
+            } >= {
+                "variables",
+                "outcomes",
+                "mechanisms",
+                "constraints",
+                "requested_comparator",
+            }
     finally:
         engine.dispose()
 

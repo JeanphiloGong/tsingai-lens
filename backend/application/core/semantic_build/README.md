@@ -11,11 +11,10 @@ semantic records.
   Discovers Objective candidates and runs confirmed Objective analysis. It
   traverses Source document trees with bounded transient state, emits one
   `PaperContribution` per included document, and emits `ObjectiveEvidence`
-  records containing exact excerpts and typed Source locators.
-- `objective_analysis_lens.py`
-  Owns the transient, typed extraction lens derived for one analysis run. It
-  separates variables, binding conditions, target properties, mediators, and
-  table-selection hints without becoming a persisted domain record.
+  records containing exact excerpts and typed Source locators. Discovery,
+  framing, routing, and extraction consume the persisted ResearchObjective
+  variables, outcomes, mechanisms, constraints, and requested comparator
+  directly. Table-selection hints remain transient service values.
 - `paper_facts_service.py`
   Extracts reusable evidence anchors, methods, sample variants, test
   conditions, baselines, measurements, and characterization observations.

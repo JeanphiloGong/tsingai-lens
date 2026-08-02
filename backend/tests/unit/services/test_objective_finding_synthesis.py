@@ -37,8 +37,8 @@ def _objective(**overrides) -> ResearchObjective:
         "objective_id": "obj-density",
         "question": "How do laser power and scan speed affect relative density?",
         "material_scope": ["316L stainless steel"],
-        "process_axes": ["laser power", "scan speed"],
-        "property_axes": ["relative density"],
+        "variables": ["laser power", "scan speed"],
+        "outcomes": ["relative density"],
         "confidence": 0.9,
         "confirmation_status": "confirmed",
         "active_analysis_version": 1,
@@ -124,7 +124,7 @@ def _evidence(
         "unit": "%",
         "baseline_context": {"laser_power_w": 150},
         "interpretation": "Relative density increased for the coupled parameter set.",
-        "join_keys": {"variable_process_axes": ["laser power", "scan speed"]},
+        "join_keys": {"variables": ["laser power", "scan speed"]},
         "anchor_ids": [f"anchor-{evidence_id}"],
         "resolution_status": "resolved",
         "confidence": 0.9,
@@ -559,20 +559,20 @@ def test_synthesis_processes_every_result_set_independently() -> None:
 
     findings = service.synthesize(
         collection_id="col-1",
-        objective=_objective(property_axes=["relative density", "elongation"]),
+        objective=_objective(outcomes=["relative density", "elongation"]),
         analysis=_analysis(),
         contributions=(_contribution("paper-1"),),
         evidence_records=(
             _evidence(
                 "density",
                 "paper-1",
-                join_keys={"variable_process_axes": ["laser power"]},
+                join_keys={"variables": ["laser power"]},
             ),
             _evidence(
                 "elongation",
                 "paper-1",
                 property_name="elongation",
-                join_keys={"variable_process_axes": ["scan speed"]},
+                join_keys={"variables": ["scan speed"]},
             ),
         ),
     )
@@ -610,20 +610,20 @@ def test_synthesis_continues_after_one_result_set_is_omitted() -> None:
 
     findings = service.synthesize(
         collection_id="col-1",
-        objective=_objective(property_axes=["relative density", "elongation"]),
+        objective=_objective(outcomes=["relative density", "elongation"]),
         analysis=_analysis(),
         contributions=(_contribution("paper-1"),),
         evidence_records=(
             _evidence(
                 "density",
                 "paper-1",
-                join_keys={"variable_process_axes": ["laser power"]},
+                join_keys={"variables": ["laser power"]},
             ),
             _evidence(
                 "elongation",
                 "paper-1",
                 property_name="elongation",
-                join_keys={"variable_process_axes": ["scan speed"]},
+                join_keys={"variables": ["scan speed"]},
             ),
         ),
     )

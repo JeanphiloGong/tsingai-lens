@@ -14,9 +14,11 @@ const objective = {
 	objective_id: objectiveId,
 	question: 'How does heat treatment affect LPBF 316L tensile strength?',
 	material_scope: ['316L stainless steel'],
-	process_axes: ['heat treatment'],
-	property_axes: ['yield strength'],
-	comparison_intent: 'Compare as-built and heat-treated LPBF 316L.',
+	variables: ['heat treatment'],
+	outcomes: ['yield strength'],
+	mechanisms: ['precipitate evolution'],
+	constraints: ['LPBF 316L'],
+	requested_comparator: 'Compare as-built and heat-treated LPBF 316L.',
 	seed_document_ids: [documentId],
 	excluded_document_ids: [],
 	confidence: 0.91,
@@ -209,19 +211,57 @@ async function mockApis(page: Page) {
 		if (path === '/api/v1/collections') return route.fulfill(json({ items: [] }));
 		if (path === `/api/v1/collections/${collectionId}`) {
 			return route.fulfill(
-				json({ collection_id: collectionId, id: collectionId, name: 'LPBF 316L objective set', status: 'failed', paper_count: 1 })
+				json({
+					collection_id: collectionId,
+					id: collectionId,
+					name: 'LPBF 316L objective set',
+					status: 'failed',
+					paper_count: 1
+				})
 			);
 		}
 		if (path === `/api/v1/collections/${collectionId}/workspace`) {
 			return route.fulfill(
 				json({
-					collection: { collection_id: collectionId, id: collectionId, name: 'LPBF 316L objective set', status: 'partial_success' },
+					collection: {
+						collection_id: collectionId,
+						id: collectionId,
+						name: 'LPBF 316L objective set',
+						status: 'partial_success'
+					},
 					file_count: 1,
 					status_summary: 'partial_ready',
-					workflow: { documents: 'ready', results: 'not_started', evidence: 'not_started', comparisons: 'not_started' },
-					document_summary: { total_documents: 1, doc_type_counts: { experimental: 1 }, warnings: [] },
-					artifacts: { documents_ready: true, document_profiles_ready: true, evidence_cards_ready: false, comparable_results_ready: false, comparison_rows_ready: false, graph_ready: false },
-					latest_task: { task_id: 'task-2', collection_id: collectionId, task_type: 'build', status: 'partial_success', current_stage: 'artifacts_ready', progress_percent: 100, errors: ['A later build failed.'], warnings: [], created_at: null, updated_at: null },
+					workflow: {
+						documents: 'ready',
+						results: 'not_started',
+						evidence: 'not_started',
+						comparisons: 'not_started'
+					},
+					document_summary: {
+						total_documents: 1,
+						doc_type_counts: { experimental: 1 },
+						warnings: []
+					},
+					artifacts: {
+						documents_ready: true,
+						document_profiles_ready: true,
+						evidence_cards_ready: false,
+						comparable_results_ready: false,
+						comparison_rows_ready: false,
+						graph_ready: false
+					},
+					latest_task: {
+						task_id: 'task-2',
+						collection_id: collectionId,
+						task_type: 'build',
+						status: 'partial_success',
+						current_stage: 'artifacts_ready',
+						progress_percent: 100,
+						errors: ['A later build failed.'],
+						warnings: [],
+						created_at: null,
+						updated_at: null
+					},
 					recent_tasks: [],
 					capabilities: {},
 					links: {}
@@ -241,12 +281,29 @@ async function mockApis(page: Page) {
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings`) {
 			return route.fulfill(
-				json({ collection_id: collectionId, objective_id: objectiveId, analysis_version: 1, items: [finding], offset: 0, limit: 50, total: 1 })
+				json({
+					collection_id: collectionId,
+					objective_id: objectiveId,
+					analysis_version: 1,
+					items: [finding],
+					offset: 0,
+					limit: 50,
+					total: 1
+				})
 			);
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence`) {
 			return route.fulfill(
-				json({ collection_id: collectionId, objective_id: objectiveId, analysis_version: 1, finding_id: 'finding-1', items: [evidence], offset: 0, limit: 100, total: 1 })
+				json({
+					collection_id: collectionId,
+					objective_id: objectiveId,
+					analysis_version: 1,
+					finding_id: 'finding-1',
+					items: [evidence],
+					offset: 0,
+					limit: 100,
+					total: 1
+				})
 			);
 		}
 		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/content`) {
@@ -262,7 +319,9 @@ async function mockApis(page: Page) {
 	});
 }
 
-test('objective workspace keeps published Findings readable after a failed retry', async ({ page }) => {
+test('objective workspace keeps published Findings readable after a failed retry', async ({
+	page
+}) => {
 	await mockApis(page);
 	await page.goto(`/collections/${collectionId}/objectives/${objectiveId}`);
 
@@ -296,14 +355,14 @@ test('objective workspace keeps published Findings readable after a failed retry
 		.poll(async () =>
 			page.evaluate(() => {
 				const body = document.querySelector<HTMLElement>('.markdown-reader__body');
-				const active = document.querySelector<HTMLElement>('[data-testid="markdown-active-source"]');
+				const active = document.querySelector<HTMLElement>(
+					'[data-testid="markdown-active-source"]'
+				);
 				if (!body || !active) return false;
 				const bodyRect = body.getBoundingClientRect();
 				const activeRect = active.getBoundingClientRect();
 				return (
-					body.scrollTop > 0 &&
-					activeRect.bottom > bodyRect.top &&
-					activeRect.top < bodyRect.bottom
+					body.scrollTop > 0 && activeRect.bottom > bodyRect.top && activeRect.top < bodyRect.bottom
 				);
 			})
 		)

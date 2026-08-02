@@ -23,8 +23,10 @@ def _objective(**overrides) -> ResearchObjective:
         "objective_id": "objective-1",
         "question": "How does heat treatment affect strength?",
         "material_scope": ["316L"],
-        "process_axes": ["heat treatment"],
-        "property_axes": ["strength"],
+        "variables": ["heat treatment"],
+        "outcomes": ["strength"],
+        "mechanisms": ["precipitation hardening"],
+        "constraints": ["LPBF 316L"],
         "seed_document_ids": ["paper-1", "paper-2"],
     }
     payload.update(overrides)
@@ -63,12 +65,26 @@ def _candidate_evidence(**overrides) -> ObjectiveEvidence:
     return ObjectiveEvidence.from_mapping(payload)
 
 
-def test_build_research_objective_id_is_stable_for_same_question() -> None:
+def test_build_research_objective_id_covers_complete_scientific_intent() -> None:
     question = "How does heat treatment affect corrosion resistance of LPBF 316L?"
+    scientific_intent = {
+        "question": question,
+        "material_scope": ("316L",),
+        "variables": ("heat treatment",),
+        "outcomes": ("corrosion resistance",),
+        "mechanisms": ("passive film stability",),
+        "constraints": ("LPBF",),
+        "requested_comparator": "as-built material",
+    }
 
-    assert build_research_objective_id(question) == build_research_objective_id(question)
-    assert build_research_objective_id(question).startswith(
+    objective_id = build_research_objective_id(**scientific_intent)
+
+    assert objective_id == build_research_objective_id(**scientific_intent)
+    assert objective_id.startswith(
         "obj_how-does-heat-treatment-affect-corrosion-resistance"
+    )
+    assert objective_id != build_research_objective_id(
+        **{**scientific_intent, "outcomes": ("pitting potential",)}
     )
 
 
@@ -78,8 +94,11 @@ def test_research_objective_normalizes_scope_and_round_trips() -> None:
             "collection_id": "collection-1",
             "question": "How does heat treatment affect corrosion resistance?",
             "material_scope": ["316L", "316L", ""],
-            "process_axes": ["LPBF", "heat treatment", None],
-            "property_axes": ("corrosion", "EIS"),
+            "variables": ["heat treatment", None],
+            "outcomes": ("corrosion", "EIS"),
+            "mechanisms": ["passive film stability"],
+            "constraints": ["LPBF", "room-temperature electrochemical testing"],
+            "requested_comparator": "as-built material",
             "seed_document_ids": ["paper-1", "paper-2"],
             "excluded_document_ids": ["paper-3"],
             "confidence": 1.2,
@@ -89,15 +108,43 @@ def test_research_objective_normalizes_scope_and_round_trips() -> None:
     record = objective.to_record()
 
     assert record["collection_id"] == "collection-1"
-    assert record["objective_id"] == build_research_objective_id(record["question"])
+    assert record["objective_id"] == build_research_objective_id(
+        question=record["question"],
+        material_scope=tuple(record["material_scope"]),
+        variables=tuple(record["variables"]),
+        outcomes=tuple(record["outcomes"]),
+        mechanisms=tuple(record["mechanisms"]),
+        constraints=tuple(record["constraints"]),
+        requested_comparator=record["requested_comparator"],
+    )
     assert record["material_scope"] == ["316L"]
-    assert record["process_axes"] == ["LPBF", "heat treatment"]
-    assert record["property_axes"] == ["corrosion", "EIS"]
+    assert record["variables"] == ["heat treatment"]
+    assert record["outcomes"] == ["corrosion", "EIS"]
+    assert record["mechanisms"] == ["passive film stability"]
+    assert record["constraints"] == [
+        "LPBF",
+        "room-temperature electrochemical testing",
+    ]
+    assert record["requested_comparator"] == "as-built material"
     assert record["confidence"] == 1.0
     assert record["confirmation_status"] == "candidate"
     assert "analysis_error" not in record
     assert "analysis_progress" not in record
     assert is_question_shaped_objective(objective) is True
+
+
+def test_research_objective_requires_explicit_variables_and_outcomes() -> None:
+    with pytest.raises(ValueError, match="at least one variable"):
+        _objective(variables=[])
+    with pytest.raises(ValueError, match="at least one outcome"):
+        _objective(outcomes=[])
+
+
+def test_research_objective_rejects_secondary_terms_that_duplicate_primary_terms() -> None:
+    with pytest.raises(ValueError, match="mechanisms duplicate"):
+        _objective(mechanisms=["strength"])
+    with pytest.raises(ValueError, match="constraints duplicate"):
+        _objective(constraints=["heat treatment"])
 
 
 def test_research_objective_rejects_overlapping_document_scope() -> None:

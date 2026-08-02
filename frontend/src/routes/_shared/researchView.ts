@@ -284,9 +284,11 @@ export type ObjectiveSummary = {
 	objective_id: string;
 	question: string;
 	material_scope: string[];
-	process_axes: string[];
-	property_axes: string[];
-	comparison_intent: string | null;
+	variables: string[];
+	outcomes: string[];
+	mechanisms: string[];
+	constraints: string[];
+	requested_comparator: string | null;
 	seed_document_ids: string[];
 	excluded_document_ids: string[];
 	confidence: number;
@@ -971,9 +973,11 @@ function normalizeObjectiveSummary(value: unknown): ObjectiveSummary | null {
 		objective_id: toText(record.objective_id),
 		question: toText(record.question),
 		material_scope: toStringList(record.material_scope),
-		process_axes: toStringList(record.process_axes),
-		property_axes: toStringList(record.property_axes),
-		comparison_intent: nonEmptyText(record.comparison_intent),
+		variables: toStringList(record.variables),
+		outcomes: toStringList(record.outcomes),
+		mechanisms: toStringList(record.mechanisms),
+		constraints: toStringList(record.constraints),
+		requested_comparator: nonEmptyText(record.requested_comparator),
 		seed_document_ids: toStringList(record.seed_document_ids),
 		excluded_document_ids: toStringList(record.excluded_document_ids),
 		confidence: toNumber(record.confidence),
@@ -1552,9 +1556,11 @@ function normalizeObjectiveAnalysis(value: unknown, collectionId: string): Objec
 				objective_id: '',
 				question: '',
 				material_scope: [],
-				process_axes: [],
-				property_axes: [],
-				comparison_intent: null,
+				variables: [],
+				outcomes: [],
+				mechanisms: [],
+				constraints: [],
+				requested_comparator: null,
 				seed_document_ids: [],
 				excluded_document_ids: [],
 				confidence: 0,

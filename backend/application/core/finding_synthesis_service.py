@@ -145,9 +145,11 @@ class FindingSynthesisService:
             "objective_id": objective.objective_id,
             "question": objective.question,
             "material_scope": list(objective.material_scope),
-            "process_axes": list(objective.process_axes),
-            "property_axes": list(objective.property_axes),
-            "comparison_intent": objective.comparison_intent,
+            "variables": list(objective.variables),
+            "outcomes": list(objective.outcomes),
+            "mechanisms": list(objective.mechanisms),
+            "constraints": list(objective.constraints),
+            "requested_comparator": objective.requested_comparator,
         }
         contribution_payloads = [
             self._contribution_payload(contribution)
@@ -328,7 +330,7 @@ class FindingSynthesisService:
             if variables and any(
                 _terms_match(variable, objective_axis)
                 for variable in variables
-                for objective_axis in objective.process_axes
+                for objective_axis in objective.variables
             ):
                 grouped[variables].append(evidence)
 
@@ -389,7 +391,7 @@ class FindingSynthesisService:
     ) -> tuple[str, ...]:
         explicit = _dedupe(
             [
-                *_strings(evidence.join_keys.get("variable_process_axes")),
+                *_strings(evidence.join_keys.get("variables")),
                 *_strings(evidence.join_keys.get("changed_variables")),
                 *_strings(evidence.process_context.get("changed_variables")),
                 *_strings(evidence.process_context.get("variable")),
@@ -409,8 +411,8 @@ class FindingSynthesisService:
         variables = _dedupe(_text(value) for value in fallback_candidates)
         if variables:
             return tuple(sorted(variables, key=str.casefold))
-        if len(objective.process_axes) == 1:
-            return objective.process_axes
+        if len(objective.variables) == 1:
+            return objective.variables
         return ()
 
     @staticmethod

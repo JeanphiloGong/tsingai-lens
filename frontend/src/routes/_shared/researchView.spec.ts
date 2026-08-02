@@ -23,9 +23,11 @@ const objective = {
 	objective_id: 'obj_1',
 	question: 'How does temperature affect strength?',
 	material_scope: ['Alloy A'],
-	process_axes: ['temperature'],
-	property_axes: ['strength'],
-	comparison_intent: 'Compare temperatures.',
+	variables: ['temperature'],
+	outcomes: ['strength'],
+	mechanisms: ['precipitate evolution'],
+	constraints: ['LPBF'],
+	requested_comparator: 'Compare temperatures.',
 	seed_document_ids: ['paper-1'],
 	excluded_document_ids: [],
 	confidence: 0.9,
@@ -69,6 +71,8 @@ describe('objective Finding API', () => {
 		expect(request).toHaveBeenCalledWith('/collections/col_123/objectives');
 		expect(result.objectives[0].confirmation_status).toBe('confirmed');
 		expect(result.objectives[0].published_analysis_version).toBe(1);
+		expect(result.objectives[0].mechanisms).toEqual(['precipitate evolution']);
+		expect(result.objectives[0].constraints).toEqual(['LPBF']);
 		expect(result.objectives[0]).not.toHaveProperty('evidence_unit_count');
 	});
 
@@ -101,31 +105,35 @@ describe('objective Finding API', () => {
 		await runObjectiveAnalysis('col_123', 'obj_1');
 		await fetchObjectiveAnalysis('col_123', 'obj_1');
 
-		expect(request).toHaveBeenNthCalledWith(
-			1,
-			'/collections/col_123/objectives/obj_1/confirm',
-			{ method: 'POST' }
-		);
-		expect(request).toHaveBeenNthCalledWith(
-			2,
-			'/collections/col_123/objectives/obj_1/analysis',
-			{ method: 'POST' }
-		);
-		expect(request).toHaveBeenNthCalledWith(
-			3,
-			'/collections/col_123/objectives/obj_1/analysis'
-		);
+		expect(request).toHaveBeenNthCalledWith(1, '/collections/col_123/objectives/obj_1/confirm', {
+			method: 'POST'
+		});
+		expect(request).toHaveBeenNthCalledWith(2, '/collections/col_123/objectives/obj_1/analysis', {
+			method: 'POST'
+		});
+		expect(request).toHaveBeenNthCalledWith(3, '/collections/col_123/objectives/obj_1/analysis');
 	});
 
 	it('requests versioned Finding and exact Evidence pages', async () => {
 		request
 			.mockResolvedValueOnce({
-				collection_id: 'col_123', objective_id: 'obj_1', analysis_version: 1,
-				items: [], offset: 0, limit: 20, total: 0
+				collection_id: 'col_123',
+				objective_id: 'obj_1',
+				analysis_version: 1,
+				items: [],
+				offset: 0,
+				limit: 20,
+				total: 0
 			})
 			.mockResolvedValueOnce({
-				collection_id: 'col_123', objective_id: 'obj_1', analysis_version: 1,
-				finding_id: 'finding-1', items: [], offset: 0, limit: 100, total: 0
+				collection_id: 'col_123',
+				objective_id: 'obj_1',
+				analysis_version: 1,
+				finding_id: 'finding-1',
+				items: [],
+				offset: 0,
+				limit: 100,
+				total: 0
 			});
 
 		await fetchObjectiveFindings('col_123', 'obj_1', 1, 0, 20);

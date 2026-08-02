@@ -264,8 +264,8 @@ def _published_objective_repository() -> MemoryObjectiveRepository:
             "objective_id": "obj-1",
             "question": "How does temperature affect strength?",
             "material_scope": ["Alloy A"],
-            "process_axes": ["temperature"],
-            "property_axes": ["strength"],
+            "variables": ["temperature"],
+            "outcomes": ["strength"],
             "seed_document_ids": ["doc-1"],
             "confidence": 0.9,
         }
@@ -435,8 +435,8 @@ def test_prediction_snapshot_rejects_unpublished_objective_candidates() -> None:
             "objective_id": "obj-candidate",
             "question": "How does temperature affect strength?",
             "material_scope": ["Alloy A"],
-            "process_axes": ["temperature"],
-            "property_axes": ["strength"],
+            "variables": ["temperature"],
+            "outcomes": ["strength"],
             "seed_document_ids": ["doc-1"],
             "confidence": 0.9,
         }

@@ -29,9 +29,7 @@ from application.core.semantic_build.research_objective_service import (
     ExtractedEvidenceDraft,
     PaperAnalysisFrame,
     ResearchObjectiveService as _ResearchObjectiveService,
-)
-from application.core.semantic_build.objective_analysis_lens import (
-    ObjectiveAnalysisLens,
+    SourceSelectionHint,
 )
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
@@ -53,31 +51,14 @@ from tests.support.source_artifact_repository import MemorySourceArtifactReposit
 
 def _research_objective(payload: dict[str, Any]) -> ResearchObjective:
     return ResearchObjective.from_mapping(
-        {"collection_id": "collection-test", **payload}
-    )
-
-
-def test_objective_discovery_skim_preserves_complete_candidate_question():
-    question = (
-        "How do laser energy density and scanning strategy affect relative density "
-        "and microstructure of laser powder bed fused 316L stainless steel?"
-    )
-    skim = PaperSkim.from_mapping(
         {
-            "document_id": "paper-1",
-            "doc_role": "experimental",
-            "candidate_materials": ["316L stainless steel"],
-            "candidate_processes": ["laser powder bed fusion"],
-            "candidate_properties": ["relative density", "microstructure"],
-            "changed_variables": ["laser energy density", "scanning strategy"],
-            "possible_objectives": [question],
+            "collection_id": "collection-test",
+            "question": "How does process condition affect the target outcome?",
+            "variables": ["process condition"],
+            "outcomes": ["target outcome"],
+            **payload,
         }
     )
-
-    compact_skim = _ResearchObjectiveService._build_objective_discovery_skim(skim)
-
-    assert len(question) > 80
-    assert compact_skim["possible_objectives"] == [question]
 
 
 def _build_research_objective_service(
@@ -271,9 +252,10 @@ class _ObjectiveExtractor:
                 StructuredResearchObjective(
                     question="How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?",
                     material_scope=["316L stainless steel"],
-                    process_axes=["LPBF", "heat treatment"],
-                    property_axes=["corrosion"],
-                    comparison_intent="compare as-built and heat-treated corrosion behavior",
+                    variables=["heat treatment"],
+                    outcomes=["corrosion"],
+                    constraints=["LPBF"],
+                    requested_comparator="compare as-built and heat-treated corrosion behavior",
                     seed_document_ids=["paper-1"],
                     excluded_document_ids=["paper-2"],
                     confidence=0.88,
@@ -312,9 +294,9 @@ class _ObjectiveExtractor:
                     source_objective_ids=[candidate["objective_id"]],
                     question=candidate["question"],
                     material_scope=candidate["material_scope"],
-                    process_axes=candidate["process_axes"],
-                    property_axes=candidate["property_axes"],
-                    comparison_intent=candidate["comparison_intent"],
+                    variables=candidate["variables"],
+                    outcomes=candidate["outcomes"],
+                    requested_comparator=candidate["requested_comparator"],
                     confidence=candidate["confidence"],
                     reason=candidate["reason"],
                 )
@@ -352,8 +334,8 @@ class _ObjectiveExtractor:
         relevant_tables = self._matching_frame_table_ids(
             table_summaries,
             axes=(
-                *objective.get("process_axes", ()),
-                *objective.get("property_axes", ()),
+                *objective.get("variables", ()),
+                *objective.get("outcomes", ()),
             ),
         )
         section_labels = [
@@ -367,7 +349,7 @@ class _ObjectiveExtractor:
             background="Paper directly supports the active research objective.",
             material_match=list(paper_skim.get("candidate_materials") or []),
             changed_variables=list(paper_skim.get("changed_variables") or []),
-            measured_property_scope=list(objective.get("property_axes") or []),
+            measured_property_scope=list(objective.get("outcomes") or []),
             test_environment_scope=[],
             relevant_sections=section_labels[:2],
             relevant_tables=relevant_tables,
@@ -443,14 +425,14 @@ class _ObjectiveExtractor:
                     " ".join(column_headers),
                 )
             ).lower()
-            property_axes = [
+            outcomes = [
                 str(axis or "").lower()
-                for axis in objective.get("property_axes", ())
+                for axis in objective.get("outcomes", ())
                 if str(axis or "").strip()
             ]
             role = (
                 "current_experimental_evidence"
-                if any(axis in text for axis in property_axes)
+                if any(axis in text for axis in outcomes)
                 else "process_or_treatment"
             )
             routes.append(
@@ -633,11 +615,10 @@ class _BroadObjectiveExtractor(_ObjectiveExtractor):
                         "and mechanical properties of 316L stainless steel?"
                     ),
                     material_scope=["316L stainless steel"],
-                    process_axes=["Selective Laser Melting"],
-                    property_axes=["mechanical properties"],
-                    comparison_intent=(
-                        "Compare mechanical properties across SLM processing parameters."
-                    ),
+                    variables=["processing parameters"],
+                    outcomes=["mechanical properties"],
+                    constraints=["Selective Laser Melting"],
+                    requested_comparator=None,
                     seed_document_ids=["paper-1"],
                     excluded_document_ids=[],
                     confidence=0.88,
@@ -663,14 +644,14 @@ class _DuplicateMechanicalObjectiveExtractor(_BroadObjectiveExtractor):
                         "Melting?"
                     ),
                     material_scope=["316L stainless steel"],
-                    process_axes=[
-                        "Selective Laser Melting",
+                    variables=[
                         "energy density",
                         "scanning strategy",
                         "scanning speed",
                     ],
-                    property_axes=["densification", "microstructure"],
-                    comparison_intent=(
+                    outcomes=["densification", "microstructure"],
+                    constraints=["Selective Laser Melting"],
+                    requested_comparator=(
                         "Compare the effects of energy density, scanning strategy, "
                         "and scanning speed on densification and microstructure."
                     ),
@@ -687,18 +668,18 @@ class _DuplicateMechanicalObjectiveExtractor(_BroadObjectiveExtractor):
                         "stainless steel?"
                     ),
                     material_scope=["316L stainless steel"],
-                    process_axes=[
-                        "Selective Laser Melting",
+                    variables=[
                         "energy density",
                         "scanning speed",
                     ],
-                    property_axes=[
+                    outcomes=[
                         "yield strength",
                         "ultimate tensile strength",
                         "elongation",
                         "microhardness",
                     ],
-                    comparison_intent=(
+                    constraints=["Selective Laser Melting"],
+                    requested_comparator=(
                         "Analyze how changes in energy density and scanning speed "
                         "influence mechanical properties."
                     ),
@@ -714,12 +695,10 @@ class _DuplicateMechanicalObjectiveExtractor(_BroadObjectiveExtractor):
                         "of 316L stainless steel in Selective Laser Melting?"
                     ),
                     material_scope=["316L stainless steel"],
-                    process_axes=[
-                        "Selective Laser Melting",
-                        "scanning strategy",
-                    ],
-                    property_axes=["yield strength", "microhardness"],
-                    comparison_intent=(
+                    variables=["scanning strategy"],
+                    outcomes=["yield strength", "microhardness"],
+                    constraints=["Selective Laser Melting"],
+                    requested_comparator=(
                         "Evaluate scanning strategy effects on yield strength "
                         "and microhardness."
                     ),
@@ -740,12 +719,12 @@ class _DuplicateMechanicalObjectiveExtractor(_BroadObjectiveExtractor):
         structure_candidates = [
             candidate
             for candidate in candidates
-            if "densification" in candidate["property_axes"]
+            if "densification" in candidate["outcomes"]
         ]
         mechanical_candidates = [
             candidate
             for candidate in candidates
-            if "yield strength" in candidate["property_axes"]
+            if "yield strength" in candidate["outcomes"]
         ]
         return StructuredObjectiveMergePlan(
             merged_objectives=[
@@ -756,9 +735,9 @@ class _DuplicateMechanicalObjectiveExtractor(_BroadObjectiveExtractor):
                     ],
                     question=structure_candidates[0]["question"],
                     material_scope=structure_candidates[0]["material_scope"],
-                    process_axes=structure_candidates[0]["process_axes"],
-                    property_axes=structure_candidates[0]["property_axes"],
-                    comparison_intent=structure_candidates[0]["comparison_intent"],
+                    variables=structure_candidates[0]["variables"],
+                    outcomes=structure_candidates[0]["outcomes"],
+                    requested_comparator=structure_candidates[0]["requested_comparator"],
                     confidence=0.9,
                     reason="kept structure objective separate",
                 ),
@@ -773,15 +752,15 @@ class _DuplicateMechanicalObjectiveExtractor(_BroadObjectiveExtractor):
                         "stainless steel?"
                     ),
                     material_scope=["316L stainless steel"],
-                    process_axes=_merge_candidate_values(
+                    variables=_merge_candidate_values(
                         mechanical_candidates,
-                        "process_axes",
+                        "variables",
                     ),
-                    property_axes=_merge_candidate_values(
+                    outcomes=_merge_candidate_values(
                         mechanical_candidates,
-                        "property_axes",
+                        "outcomes",
                     ),
-                    comparison_intent=(
+                    requested_comparator=(
                         "Compare the combined effects of energy density, scanning "
                         "speed, and scanning strategy on mechanical properties."
                     ),
@@ -805,9 +784,9 @@ class _DroppedObjectiveMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
                     source_objective_ids=[candidate["objective_id"]],
                     question=candidate["question"],
                     material_scope=candidate["material_scope"],
-                    process_axes=candidate["process_axes"],
-                    property_axes=candidate["property_axes"],
-                    comparison_intent=candidate["comparison_intent"],
+                    variables=candidate["variables"],
+                    outcomes=candidate["outcomes"],
+                    requested_comparator=candidate["requested_comparator"],
                     confidence=candidate["confidence"],
                     reason="invalid plan drops other candidates",
                 )
@@ -862,7 +841,7 @@ class _CanonicalizingAxisExtractor(_DuplicateMechanicalObjectiveExtractor):
             ]
             + [
                 StructuredAxisCanonicalizationGroup(
-                    axis_type="process",
+                    axis_type="variable",
                     canonical="scanning strategy",
                     aliases=["scanning strategy", "scan strategy"],
                     confidence=0.95,
@@ -870,25 +849,35 @@ class _CanonicalizingAxisExtractor(_DuplicateMechanicalObjectiveExtractor):
                 ),
                 *[
                     StructuredAxisCanonicalizationGroup(
-                        axis_type="process",
+                        axis_type="variable",
                         canonical=value,
                         aliases=[value],
                         confidence=1.0,
                         reason="kept separate",
                     )
-                    for value in payload["axis_candidates"]["process"]
+                    for value in payload["axis_candidates"]["variable"]
                     if value not in {"scanning strategy", "scan strategy"}
                 ],
             ]
             + [
                 StructuredAxisCanonicalizationGroup(
-                    axis_type="property",
+                    axis_type="outcome",
                     canonical=value,
                     aliases=[value],
                     confidence=1.0,
                     reason="kept separate",
                 )
-                for value in payload["axis_candidates"]["property"]
+                for value in payload["axis_candidates"]["outcome"]
+            ]
+            + [
+                StructuredAxisCanonicalizationGroup(
+                    axis_type="constraint",
+                    canonical=value,
+                    aliases=[value],
+                    confidence=1.0,
+                    reason="kept separate",
+                )
+                for value in payload["axis_candidates"]["constraint"]
             ]
         )
 
@@ -902,7 +891,7 @@ class _InvalidAxisCanonicalizationExtractor(_CanonicalizingAxisExtractor):
         return StructuredAxisCanonicalizationPlan(
             axis_groups=[
                 StructuredAxisCanonicalizationGroup(
-                    axis_type="process",
+                    axis_type="variable",
                     canonical="scanning strategy",
                     aliases=["scanning strategy", "scan strategy"],
                     confidence=0.95,
@@ -931,22 +920,22 @@ class _OverbroadAxisCanonicalizationExtractor(_CanonicalizingAxisExtractor):
             ]
             + [
                 StructuredAxisCanonicalizationGroup(
-                    axis_type="process",
+                    axis_type="variable",
                     canonical="Selective Laser Melting",
-                    aliases=payload["axis_candidates"]["process"],
+                    aliases=payload["axis_candidates"]["variable"],
                     confidence=0.9,
                     reason="invalidly collapses distinct process axes",
                 ),
             ]
             + [
                 StructuredAxisCanonicalizationGroup(
-                    axis_type="property",
+                    axis_type="outcome",
                     canonical=value,
                     aliases=[value],
                     confidence=1.0,
                     reason="kept separate",
                 )
-                for value in payload["axis_candidates"]["property"]
+                for value in payload["axis_candidates"]["outcome"]
             ]
         )
 
@@ -963,12 +952,12 @@ class _InventedAxisMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
                     source_objective_ids=[candidate["objective_id"]],
                     question=candidate["question"],
                     material_scope=candidate["material_scope"],
-                    process_axes=[
-                        *candidate["process_axes"],
+                    variables=[
+                        *candidate["variables"],
                         "laser power",
                     ],
-                    property_axes=candidate["property_axes"],
-                    comparison_intent=candidate["comparison_intent"],
+                    outcomes=candidate["outcomes"],
+                    requested_comparator=candidate["requested_comparator"],
                     confidence=candidate["confidence"],
                     reason="invalid plan invents an axis",
                 )
@@ -991,13 +980,13 @@ class _CrossObjectiveAxisMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
                         "strength and elongation of SLM 316L stainless steel?"
                     ),
                     material_scope=["316L stainless steel"],
-                    process_axes=[
+                    variables=[
                         "Selective Laser Melting",
                         "laser power",
                         "scanning speed",
                     ],
-                    property_axes=["yield strength", "elongation"],
-                    comparison_intent=(
+                    outcomes=["yield strength", "elongation"],
+                    requested_comparator=(
                         "Compare laser power and scanning speed effects on "
                         "mechanical properties."
                     ),
@@ -1012,9 +1001,10 @@ class _CrossObjectiveAxisMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
                         "pitting potential of SLM 316L stainless steel?"
                     ),
                     material_scope=["316L stainless steel"],
-                    process_axes=["Selective Laser Melting", "porosity"],
-                    property_axes=["corrosion potential", "pitting potential"],
-                    comparison_intent=(
+                    variables=["porosity"],
+                    outcomes=["corrosion potential", "pitting potential"],
+                    constraints=["Selective Laser Melting"],
+                    requested_comparator=(
                         "Compare corrosion response across porosity conditions."
                     ),
                     seed_document_ids=["paper-1"],
@@ -1032,17 +1022,17 @@ class _CrossObjectiveAxisMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
         self.merge_payloads.append(payload)
         groups: list[StructuredObjectiveMergeGroup] = []
         for candidate in payload["candidate_objectives"]:
-            process_axes = list(candidate["process_axes"])
-            if "yield strength" in candidate["property_axes"]:
-                process_axes.append("porosity")
+            variables = list(candidate["variables"])
+            if "yield strength" in candidate["outcomes"]:
+                variables.append("porosity")
             groups.append(
                 StructuredObjectiveMergeGroup(
                     source_objective_ids=[candidate["objective_id"]],
                     question=candidate["question"],
                     material_scope=candidate["material_scope"],
-                    process_axes=process_axes,
-                    property_axes=candidate["property_axes"],
-                    comparison_intent=candidate["comparison_intent"],
+                    variables=variables,
+                    outcomes=candidate["outcomes"],
+                    requested_comparator=candidate["requested_comparator"],
                     confidence=candidate["confidence"],
                     reason="invalid plan leaks axes between objectives",
                 )
@@ -1064,9 +1054,10 @@ class _UnmatchedSeedObjectiveExtractor(_DuplicateMechanicalObjectiveExtractor):
                         "SLM 316L stainless steel?"
                     ),
                     material_scope=["316L stainless steel"],
-                    process_axes=["Selective Laser Melting"],
-                    property_axes=["mechanical properties"],
-                    comparison_intent="Compare heat-treatment effects on strength.",
+                    variables=["heat treatment"],
+                    outcomes=["mechanical properties"],
+                    constraints=["Selective Laser Melting"],
+                    requested_comparator="Compare heat-treatment effects on strength.",
                     seed_document_ids=["P002-heat-treatment.pdf"],
                     excluded_document_ids=[],
                     confidence=0.9,
@@ -1091,7 +1082,7 @@ class _OverbroadPersistedObjectiveExtractor(_DuplicateMechanicalObjectiveExtract
                         "SLM 316L stainless steel?"
                     ),
                     material_scope=["316L stainless steel"],
-                    process_axes=[
+                    variables=[
                         "Selective Laser Melting",
                         "energy density",
                         "scanning speed",
@@ -1099,8 +1090,8 @@ class _OverbroadPersistedObjectiveExtractor(_DuplicateMechanicalObjectiveExtract
                         "heat treatment",
                         "scan strategy",
                     ],
-                    property_axes=["yield strength"],
-                    comparison_intent=(
+                    outcomes=["yield strength"],
+                    requested_comparator=(
                         "Compare reported yield strength across all process axes."
                     ),
                     seed_document_ids=["paper-1"],
@@ -1172,9 +1163,9 @@ class _DisjointPropertyMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
                         "stainless steel?"
                     ),
                     material_scope=["316L stainless steel"],
-                    process_axes=_merge_candidate_values(candidates, "process_axes"),
-                    property_axes=_merge_candidate_values(candidates, "property_axes"),
-                    comparison_intent=(
+                    variables=_merge_candidate_values(candidates, "variables"),
+                    outcomes=_merge_candidate_values(candidates, "outcomes"),
+                    requested_comparator=(
                         "Compare all reported structural and mechanical outcomes "
                         "under one objective."
                     ),
@@ -1195,12 +1186,12 @@ class _UnderSpecifiedMergeQuestionExtractor(_DuplicateMechanicalObjectiveExtract
         structure_candidates = [
             candidate
             for candidate in candidates
-            if "densification" in candidate["property_axes"]
+            if "densification" in candidate["outcomes"]
         ]
         mechanical_candidates = [
             candidate
             for candidate in candidates
-            if "yield strength" in candidate["property_axes"]
+            if "yield strength" in candidate["outcomes"]
         ]
         return StructuredObjectiveMergePlan(
             merged_objectives=[
@@ -1211,9 +1202,9 @@ class _UnderSpecifiedMergeQuestionExtractor(_DuplicateMechanicalObjectiveExtract
                     ],
                     question=structure_candidates[0]["question"],
                     material_scope=structure_candidates[0]["material_scope"],
-                    process_axes=structure_candidates[0]["process_axes"],
-                    property_axes=structure_candidates[0]["property_axes"],
-                    comparison_intent=structure_candidates[0]["comparison_intent"],
+                    variables=structure_candidates[0]["variables"],
+                    outcomes=structure_candidates[0]["outcomes"],
+                    requested_comparator=structure_candidates[0]["requested_comparator"],
                     confidence=0.9,
                     reason="kept structure objective separate",
                 ),
@@ -1227,15 +1218,15 @@ class _UnderSpecifiedMergeQuestionExtractor(_DuplicateMechanicalObjectiveExtract
                         "the mechanical properties of 316L stainless steel?"
                     ),
                     material_scope=["316L stainless steel"],
-                    process_axes=_merge_candidate_values(
+                    variables=_merge_candidate_values(
                         mechanical_candidates,
-                        "process_axes",
+                        "variables",
                     ),
-                    property_axes=_merge_candidate_values(
+                    outcomes=_merge_candidate_values(
                         mechanical_candidates,
-                        "property_axes",
+                        "outcomes",
                     ),
-                    comparison_intent=(
+                    requested_comparator=(
                         "Examine how variations in scanning speed influence "
                         "the mechanical properties of 316L stainless steel."
                     ),
@@ -1261,13 +1252,13 @@ class _SingleMixedObjectiveExtractor(_DuplicateMechanicalObjectiveExtractor):
                         "stainless steel?"
                     ),
                     material_scope=["316L stainless steel"],
-                    process_axes=[
+                    variables=[
                         "Selective Laser Melting",
                         "energy density",
                         "scanning strategy",
                         "scanning speed",
                     ],
-                    property_axes=[
+                    outcomes=[
                         "densification",
                         "microstructure",
                         "yield strength",
@@ -1275,7 +1266,7 @@ class _SingleMixedObjectiveExtractor(_DuplicateMechanicalObjectiveExtractor):
                         "elongation",
                         "microhardness",
                     ],
-                    comparison_intent=(
+                    requested_comparator=(
                         "Compare all reported structural and mechanical outcomes "
                         "under SLM parameter changes."
                     ),
@@ -1297,9 +1288,10 @@ class _DuplicateObjectiveIdExtractor(_ObjectiveExtractor):
         objective = StructuredResearchObjective(
             question="How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?",
             material_scope=["316L stainless steel"],
-            process_axes=["LPBF", "heat treatment"],
-            property_axes=["corrosion"],
-            comparison_intent="compare heat treatment effects on corrosion",
+            variables=["heat treatment"],
+            outcomes=["corrosion"],
+            constraints=["LPBF"],
+            requested_comparator="compare heat treatment effects on corrosion",
             seed_document_ids=["paper-1"],
             excluded_document_ids=[],
             confidence=0.88,
@@ -1392,19 +1384,19 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
             "objective_id": "obj-density",
             "question": "How does laser power affect relative density?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["laser power"],
-            "property_axes": ["relative density"],
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-density",
             "question": objective.question,
             "material_scope": ["316L stainless steel"],
-            "variable_process_axes": ["laser power"],
-            "process_context_axes": ["SLM"],
-            "target_property_axes": ["relative density"],
+            "variables": ["laser power"],
+            "constraints": ["SLM"],
+            "outcomes": ["relative density"],
             "confidence": 0.9,
         }
     )
@@ -1521,7 +1513,6 @@ def test_research_objective_service_continues_after_failed_objective_unit_route(
             collection_id="col-test",
             extractor=extractor,
             objectives=(objective,),
-            objective_contexts=(objective_context,),
             objective_paper_frames=(frame,),
             objective_evidence_routes=(
                 table_route,
@@ -1693,40 +1684,6 @@ def test_research_objective_text_source_payload_uses_document_tree(tmp_path):
     }
 
 
-def test_research_objective_text_source_payload_rejects_reference_block(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
-    route = EvidenceCandidate.from_mapping(
-        {
-            "objective_id": "obj-heat",
-            "document_id": "paper-1",
-            "source_kind": "text_window",
-            "source_ref": "reference-1",
-            "role": "process_or_treatment",
-            "extractable": True,
-        }
-    )
-    block = SimpleNamespace(
-        block_id="reference-1",
-        page=10,
-        block_type="list_item",
-        heading_path="References",
-        text=(
-            "W. Li et al., Effect of substrate preheating on nanohardness, "
-            "Scr. Mater. 118 (2016) 13-18. doi:10.1016/example."
-        ),
-    )
-
-    payload = service._build_objective_route_source_payload(
-        route=route,
-        blocks=[block],
-        tables=[],
-    )
-
-    assert payload == {}
-
-
 def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
@@ -1739,22 +1696,9 @@ def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_pa
                 "affect crystallographic texture and yield strength of LPBF 316L?"
             ),
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["scan strategy rotation angle", "build orientation angle"],
-            "property_axes": ["crystallographic texture", "yield strength"],
-            "confidence": 0.9,
-        }
-    )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "question": objective.question,
-            "material_scope": ["316L stainless steel"],
-            "variable_process_axes": [
-                "scan strategy rotation angle",
-                "build orientation angle",
-            ],
-            "process_context_axes": ["Laser Powder Bed Fusion"],
-            "target_property_axes": ["crystallographic texture", "yield strength"],
+            "variables": ["scan strategy rotation angle", "build orientation angle"],
+            "constraints": ["Laser Powder Bed Fusion"],
+            "outcomes": ["crystallographic texture", "yield strength"],
             "confidence": 0.9,
         }
     )
@@ -1852,7 +1796,6 @@ def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_pa
     payload = service._build_objective_paper_frame_payload(
         collection_id="col-test",
         objective=objective,
-        objective_context=objective_context,
         paper_skim=None,
         document=SimpleNamespace(
             document_id="paper-p006",
@@ -1868,19 +1811,16 @@ def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_pa
     assert "Results > Texture results" in labels
     assert "Results > Tensile properties" in labels
     assert len(labels) <= 12
-    assert set(payload["objective_context"]) == {
-        "objective_id",
-        "question",
-        "material_scope",
-        "variable_process_axes",
-        "process_context_axes",
-        "target_property_axes",
-        "excluded_property_axes",
-        "confidence",
-    }
-    assert "routing_hints" not in payload["objective_context"]
-    assert "objective_evidence_lens" not in payload["objective_context"]
-    assert "extraction_guidance" not in payload["objective_context"]
+    assert payload["objective"]["variables"] == [
+        "scan strategy rotation angle",
+        "build orientation angle",
+    ]
+    assert payload["objective"]["outcomes"] == [
+        "crystallographic texture",
+        "yield strength",
+    ]
+    assert payload["objective"]["constraints"] == ["Laser Powder Bed Fusion"]
+    assert "objective_context" not in payload
 
 
 def test_objective_paper_frame_payload_filters_unscored_tables(tmp_path):
@@ -1895,28 +1835,14 @@ def test_objective_paper_frame_payload_filters_unscored_tables(tmp_path):
                 "affect crystallographic texture and yield strength?"
             ),
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["scan strategy rotation angle", "build orientation angle"],
-            "property_axes": ["crystallographic texture", "yield strength"],
+            "variables": ["scan strategy rotation angle", "build orientation angle"],
+            "outcomes": ["crystallographic texture", "yield strength"],
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "question": objective.question,
-            "variable_process_axes": [
-                "scan strategy rotation angle",
-                "build orientation angle",
-            ],
-            "target_property_axes": ["crystallographic texture", "yield strength"],
-            "confidence": 0.9,
-        }
-    )
-
     payload = service._build_objective_paper_frame_payload(
         collection_id="col-test",
         objective=objective,
-        objective_context=objective_context,
         paper_skim=None,
         document=SimpleNamespace(
             document_id="paper-p006",
@@ -1979,20 +1905,8 @@ def test_deterministic_frame_requires_variable_and_property_axis(tmp_path):
                 "affect crystallographic texture and yield strength?"
             ),
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["scan strategy rotation angle", "build orientation angle"],
-            "property_axes": ["crystallographic texture", "yield strength"],
-            "confidence": 0.9,
-        }
-    )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "question": objective.question,
-            "variable_process_axes": [
-                "scan strategy rotation angle",
-                "build orientation angle",
-            ],
-            "target_property_axes": ["crystallographic texture", "yield strength"],
+            "variables": ["scan strategy rotation angle", "build orientation angle"],
+            "outcomes": ["crystallographic texture", "yield strength"],
             "confidence": 0.9,
         }
     )
@@ -2010,7 +1924,6 @@ def test_deterministic_frame_requires_variable_and_property_axis(tmp_path):
 
     record = service._build_deterministic_objective_paper_frame_record(
         objective=objective,
-        objective_context=objective_context,
         paper_skim=paper_skim,
         payload={
             "document": {
@@ -2158,18 +2071,18 @@ def test_research_objective_evidences_carry_forward_document_state(tmp_path):
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["yield strength"],
+            "variables": ["heat treatment"],
+            "outcomes": ["yield strength"],
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-heat",
             "question": objective.question,
             "material_scope": ["316L stainless steel"],
-            "variable_process_axes": ["heat treatment"],
-            "target_property_axes": ["yield strength"],
+            "variables": ["heat treatment"],
+            "outcomes": ["yield strength"],
             "confidence": 0.9,
         }
     )
@@ -2177,6 +2090,14 @@ def test_research_objective_evidences_carry_forward_document_state(tmp_path):
         {
             "objective_id": "obj-heat",
             "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    second_frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-2",
             "relevance": "high",
             "paper_role": "primary_experiment",
         }
@@ -2201,6 +2122,17 @@ def test_research_objective_evidences_carry_forward_document_state(tmp_path):
             "role": "current_experimental_evidence",
             "extractable": True,
             "confidence": 0.86,
+        }
+    )
+    second_document_route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-2",
+            "source_kind": "text_window",
+            "source_ref": "paper-2-results",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.8,
         }
     )
     blocks = [
@@ -2310,6 +2242,8 @@ def test_research_objective_evidences_carry_forward_document_state(tmp_path):
                         )
                     ]
                 )
+            if source_ref == "paper-2-results":
+                return StructuredEvidenceExtractions(extractions=[])
             state = payload["document_state"]
             process_context = state["process_contexts"][0]["value"]
             return StructuredEvidenceExtractions(
@@ -2337,40 +2271,59 @@ def test_research_objective_evidences_carry_forward_document_state(tmp_path):
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        objective_contexts=(objective_context,),
-        objective_paper_frames=(frame,),
-        objective_evidence_routes=(result_route, method_route),
-        blocks_by_document_id={"paper-1": blocks},
-        tables_by_document_id={"paper-1": []},
+        objective_paper_frames=(frame, second_frame),
+        objective_evidence_routes=(result_route, method_route, second_document_route),
+        blocks_by_document_id={
+            "paper-1": blocks,
+            "paper-2": [
+                SimpleNamespace(
+                    block_id="paper-2-results",
+                    document_id="paper-2",
+                    page=3,
+                    block_type="paragraph",
+                    heading_path="Results",
+                    text="The second paper reported 850 MPa.",
+                )
+            ],
+        },
+        tables_by_document_id={"paper-1": [], "paper-2": []},
         document_trees_by_document_id={"paper-1": document_tree},
     )
 
-    assert [payload["evidence_route"]["source_ref"] for payload in extractor.unit_payloads] == [
-        "methods",
-        "results",
-    ]
-    assert extractor.unit_payloads[0]["tree_position"]["section_path"] == ["Methods"]
-    assert extractor.unit_payloads[1]["tree_position"]["section_path"] == ["Results"]
-    assert extractor.unit_payloads[0]["document_state"]["evidence_counts_by_kind"] == {}
-    assert extractor.unit_payloads[1]["document_state"]["evidence_counts_by_kind"] == {
+    payload_by_source_ref = {
+        payload["evidence_route"]["source_ref"]: payload
+        for payload in extractor.unit_payloads
+    }
+    method_payload = payload_by_source_ref["methods"]
+    result_payload = payload_by_source_ref["results"]
+    second_document_payload = payload_by_source_ref["paper-2-results"]
+    assert method_payload["tree_position"]["section_path"] == ["Methods"]
+    assert result_payload["tree_position"]["section_path"] == ["Results"]
+    assert method_payload["document_state"]["evidence_counts_by_kind"] == {}
+    assert result_payload["document_state"]["evidence_counts_by_kind"] == {
         "process_context": 1,
     }
-    assert extractor.unit_payloads[1]["document_state"]["process_contexts"][0]["value"] == {
+    assert result_payload["document_state"]["process_contexts"][0]["value"] == {
         "aging_temperature_c": 650,
     }
-    assert extractor.unit_payloads[1]["document_state"]["open_joins"][0][
-        "join_keys"
-    ] == {"sample_key": "S1"}
-    assert extractor.unit_payloads[0]["objective"] == {
+    assert result_payload["document_state"]["open_joins"][0]["join_keys"] == {
+        "sample_key": "S1"
+    }
+    assert second_document_payload["document_state"]["evidence_counts_by_kind"] == {}
+    assert second_document_payload["document_state"]["process_contexts"] == []
+    assert second_document_payload["document_state"]["open_joins"] == []
+    assert method_payload["objective"] == {
         "objective_id": "obj-heat",
         "question": "How does heat treatment affect yield strength?",
         "material_scope": ["316L stainless steel"],
-        "process_axes": ["heat treatment"],
-        "property_axes": ["yield strength"],
-        "comparison_intent": None,
+        "variables": ["heat treatment"],
+        "outcomes": ["yield strength"],
+        "mechanisms": [],
+        "constraints": [],
+        "requested_comparator": None,
     }
-    assert "routing_hints" not in extractor.unit_payloads[0]["objective_context"]
-    assert set(extractor.unit_payloads[0]["paper_frame"]) == {
+    assert "objective_context" not in method_payload
+    assert set(method_payload["paper_frame"]) == {
         "document_id",
         "objective_id",
         "document_id",
@@ -2397,8 +2350,8 @@ def test_research_objective_evidence_prompt_compacts_long_text_source(
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["yield strength"],
+            "variables": ["heat treatment"],
+            "outcomes": ["yield strength"],
             "confidence": 0.9,
         }
     )
@@ -2450,7 +2403,6 @@ def test_research_objective_evidence_prompt_compacts_long_text_source(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        objective_contexts=(),
         objective_paper_frames=(frame,),
         objective_evidence_routes=(route,),
         blocks_by_document_id={"paper-1": [block]},
@@ -2474,18 +2426,18 @@ def test_research_objective_tree_state_supports_cross_block_evidence_context(tmp
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["yield strength"],
+            "variables": ["heat treatment"],
+            "outcomes": ["yield strength"],
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-heat",
             "question": objective.question,
             "material_scope": ["316L stainless steel"],
-            "variable_process_axes": ["heat treatment"],
-            "target_property_axes": ["yield strength"],
+            "variables": ["heat treatment"],
+            "outcomes": ["yield strength"],
             "confidence": 0.9,
         }
     )
@@ -2699,7 +2651,6 @@ def test_research_objective_tree_state_supports_cross_block_evidence_context(tmp
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        objective_contexts=(objective_context,),
         objective_paper_frames=(frame,),
         objective_evidence_routes=routes,
         blocks_by_document_id={"paper-1": blocks},
@@ -2728,16 +2679,16 @@ def test_research_objective_fragmented_table_cells_repair_table_matrix_before_ex
             "objective_id": "obj-density",
             "question": "How do process settings affect relative density?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["process settings"],
-            "property_axes": ["relative density"],
+            "variables": ["process settings"],
+            "outcomes": ["relative density"],
             "source_objective_ids": ["paper-1:obj"],
             "confidence": 0.88,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-density",
-            "target_property_axes": ["relative density"],
+            "outcomes": ["relative density"],
         }
     )
     frame = PaperAnalysisFrame.from_mapping(
@@ -2891,7 +2842,6 @@ def test_research_objective_fragmented_table_cells_repair_table_matrix_before_ex
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        objective_contexts=(objective_context,),
         objective_paper_frames=(frame,),
         objective_evidence_routes=(route,),
         blocks_by_document_id={"paper-1": []},
@@ -2981,7 +2931,7 @@ def test_research_objective_service_inherits_single_objective_material(tmp_path)
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-mechanical",
             "material_scope": ["316L stainless steel"],
@@ -3015,7 +2965,7 @@ def test_research_objective_service_inherits_single_objective_material(tmp_path)
 
     resolved = service._inherit_objective_material_systems(
         units,
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert resolved[0].material_system == {"family": "316L stainless steel"}
@@ -3028,7 +2978,7 @@ def test_research_objective_service_does_not_inherit_ambiguous_material(tmp_path
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-multi-material",
             "material_scope": ["316L stainless steel", "Ti-6Al-4V"],
@@ -3048,7 +2998,7 @@ def test_research_objective_service_does_not_inherit_ambiguous_material(tmp_path
 
     resolved = service._inherit_objective_material_systems(
         (unit,),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert resolved[0].material_system == {}
@@ -3078,10 +3028,10 @@ def test_research_objective_service_normalizes_result_table_values_to_measuremen
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-mechanical",
-            "target_property_axes": ["yield strength"],
+            "outcomes": ["yield strength"],
         }
     )
 
@@ -3144,10 +3094,10 @@ def test_research_objective_service_keeps_process_label_numbers_out_of_text_meas
             "confidence": 0.72,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-mechanical",
-            "target_property_axes": ["elongation"],
+            "outcomes": ["elongation"],
         }
     )
 
@@ -3202,10 +3152,10 @@ def test_research_objective_service_carries_route_evidence_role_to_source_refs(
             "page": 6,
             "text": "LoF defects located at melt pool boundaries were observed.",
         },
-        objective_context=ObjectiveAnalysisLens.from_mapping(
+        objective_context=_research_objective(
             {
                 "objective_id": "obj-corrosion",
-                "target_property_axes": ["pitting corrosion behavior"],
+                "outcomes": ["pitting corrosion behavior"],
             }
         ),
         extracted_record={
@@ -3270,10 +3220,10 @@ def test_research_objective_service_uses_main_number_after_leading_uncertainty(
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-mechanical",
-            "target_property_axes": ["hardness", "yield strength"],
+            "outcomes": ["hardness", "yield strength"],
         }
     )
 
@@ -3330,14 +3280,14 @@ def test_research_objective_service_keeps_non_ascii_process_headers_out_of_resul
             },
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-texture",
-            "variable_process_axes": [
+            "variables": [
                 "scan strategy rotation angle",
                 "build orientation",
             ],
-            "target_property_axes": [
+            "outcomes": [
                 "crystallographic texture",
                 "yield strength",
             ],
@@ -3399,14 +3349,14 @@ def test_research_objective_service_keeps_unrole_result_table_case_as_sample_key
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-texture",
-            "variable_process_axes": [
+            "variables": [
                 "scan strategy rotation angle",
                 "build orientation angle",
             ],
-            "target_property_axes": ["yield strength"],
+            "outcomes": ["yield strength"],
         }
     )
 
@@ -3463,17 +3413,17 @@ def test_research_objective_service_expands_fatigue_and_defect_result_columns(
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-fatigue",
-            "variable_process_axes": [
+            "variables": [
                 "volumetric energy density",
                 "laser power",
                 "scanning speed",
                 "hatch spacing",
                 "layer thickness",
             ],
-            "target_property_axes": ["defect structure", "fatigue strength"],
+            "outcomes": ["defect structure", "fatigue strength"],
         }
     )
 
@@ -3538,14 +3488,14 @@ def test_research_objective_service_uses_role_aliases_for_result_process_context
             },
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-texture",
-            "variable_process_axes": [
+            "variables": [
                 "scan strategy rotation angle",
                 "build orientation",
             ],
-            "target_property_axes": ["yield strength"],
+            "outcomes": ["yield strength"],
         }
     )
 
@@ -3603,10 +3553,10 @@ def test_research_objective_service_uses_specific_role_label_for_abbreviated_res
             "confidence": 0.82,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-mechanical",
-            "target_property_axes": ["elongation"],
+            "outcomes": ["elongation"],
         }
     )
 
@@ -3650,10 +3600,10 @@ def test_research_objective_service_uses_matching_result_headers_when_role_is_br
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-density",
-            "target_property_axes": ["densification"],
+            "outcomes": ["densification"],
         }
     )
 
@@ -3708,10 +3658,10 @@ def test_research_objective_service_keeps_routed_model_metric_columns(
             "confidence": 0.82,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-texture",
-            "target_property_axes": [
+            "outcomes": [
                 "yield strength",
                 "ultimate tensile strength",
                 "elongation",
@@ -3785,15 +3735,15 @@ def test_research_objective_service_treats_relative_density_as_structural_target
             "confidence": 0.84,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-density",
-            "variable_process_axes": [
+            "variables": [
                 "energy density",
                 "scanning strategy",
                 "scanning speed",
             ],
-            "target_property_axes": ["densification", "microstructure"],
+            "outcomes": ["densification", "microstructure"],
         }
     )
 
@@ -3955,10 +3905,10 @@ def test_research_objective_service_builds_method_conditions_and_binds_measureme
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-mechanical",
-            "target_property_axes": ["yield strength", "microhardness"],
+            "outcomes": ["yield strength", "microhardness"],
         }
     )
     frame = PaperAnalysisFrame.from_mapping(
@@ -3993,7 +3943,7 @@ def test_research_objective_service_builds_method_conditions_and_binds_measureme
     ]
 
     method_units = service._build_objective_method_family_test_condition_units(
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": blocks},
     )
@@ -4053,68 +4003,16 @@ def test_research_objective_service_builds_method_conditions_and_binds_measureme
     )
 
 
-def test_research_objective_service_method_conditions_skip_reference_blocks(
-    tmp_path,
-):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
-        {
-            "objective_id": "obj-mechanical",
-            "target_property_axes": ["yield strength"],
-        }
-    )
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-mechanical",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-        }
-    )
-    blocks = [
-        SimpleNamespace(
-            block_id="reference-entry",
-            page=10,
-            heading_path="References",
-            text=(
-                "Tensile stress-strain and yield strength testing using ASTM E8 "
-                "and an INSTRON machine at a controlled strain rate."
-            ),
-        ),
-        SimpleNamespace(
-            block_id="tensile-method",
-            page=5,
-            heading_path="2.2. Mechanical Testing",
-            text=(
-                "Tensile tests were performed with an INSTRON machine using "
-                "ASTM E8M specimens."
-            ),
-        ),
-    ]
-
-    method_units = service._build_objective_method_family_test_condition_units(
-        objective_contexts=(objective_context,),
-        objective_paper_frames=(frame,),
-        blocks_by_document_id={"paper-1": blocks},
-    )
-
-    assert len(method_units) == 1
-    assert method_units[0].source_refs[0]["source_ref"] == "tensile-method"
-    assert method_units[0].test_condition["standard"] == "ASTM E8M"
-
-
 def test_research_objective_service_derives_table_characterization_units(
     tmp_path,
 ):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-density",
-            "target_property_axes": ["densification", "microstructure"],
+            "outcomes": ["densification", "microstructure"],
         }
     )
 
@@ -4153,7 +4051,7 @@ def test_research_objective_service_derives_table_characterization_units(
             density_unit("density-s2", sample_number="2", strategy="B", value=97.7),
             density_unit("density-s3", sample_number="3", strategy="C", value=93.8),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     characterization_types = {
@@ -4487,11 +4385,11 @@ def test_research_objective_service_expands_mapped_density_interpretation(
             "confidence": 0.72,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-density",
             "question": "How do laser power and scan speed affect density?",
-            "target_property_axes": ["density"],
+            "outcomes": ["density"],
         }
     )
 
@@ -4751,16 +4649,16 @@ def test_research_objective_service_dedupes_shared_density_measurements(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    corrosion_context = ObjectiveAnalysisLens.from_mapping(
+    corrosion_context = _research_objective(
         {
             "objective_id": "obj-corrosion",
-            "target_property_axes": ["corrosion potential", "pitting potential"],
+            "outcomes": ["corrosion potential", "pitting potential"],
         }
     )
-    mechanical_context = ObjectiveAnalysisLens.from_mapping(
+    mechanical_context = _research_objective(
         {
             "objective_id": "obj-mechanical",
-            "target_property_axes": [
+            "outcomes": [
                 "yield strength",
                 "ultimate tensile strength",
                 "elongation",
@@ -4850,16 +4748,16 @@ def test_research_objective_service_reclassifies_off_target_text_measurements(
             "confidence": 0.72,
         }
     )
-    microstructure_context = ObjectiveAnalysisLens.from_mapping(
+    microstructure_context = _research_objective(
         {
             "objective_id": "obj-microstructure",
-            "target_property_axes": ["microstructure"],
+            "outcomes": ["microstructure"],
         }
     )
-    mechanical_context = ObjectiveAnalysisLens.from_mapping(
+    mechanical_context = _research_objective(
         {
             "objective_id": "obj-mechanical",
-            "target_property_axes": ["yield strength", "elongation"],
+            "outcomes": ["yield strength", "elongation"],
         }
     )
     extracted_record = {
@@ -4908,10 +4806,10 @@ def test_research_objective_service_preserves_numeric_text_mechanisms(
             "confidence": 0.72,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-preheat",
-            "target_property_axes": [
+            "outcomes": [
                 "yield strength",
                 "ultimate tensile strength",
                 "elongation",
@@ -5077,10 +4975,10 @@ def test_research_objective_service_expands_result_table_matrix_measurements(
             "confidence": 0.8,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-mechanical",
-            "target_property_axes": [
+            "outcomes": [
                 "yield strength",
                 "ultimate tensile strength",
                 "elongation",
@@ -5176,10 +5074,10 @@ def test_research_objective_service_normalizes_compact_tensile_headers(
             "confidence": 0.82,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-preheat",
-            "target_property_axes": [
+            "outcomes": [
                 "yield strength",
                 "ultimate tensile strength",
                 "elongation",
@@ -5258,11 +5156,11 @@ def test_research_objective_service_skips_reference_rows_and_keeps_condition_axi
             "confidence": 0.82,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-preheat",
-            "variable_process_axes": ["build platform preheating"],
-            "target_property_axes": [
+            "variables": ["build platform preheating"],
+            "outcomes": [
                 "yield strength",
                 "ultimate tensile strength",
                 "elongation",
@@ -5316,7 +5214,7 @@ def test_research_objective_service_skips_reference_rows_and_keeps_condition_axi
 
     comparison_units = service._build_objective_pairwise_comparison_units(
         tuple(ExtractedEvidenceDraft.from_mapping(record) for record in records),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert {
@@ -5357,10 +5255,10 @@ def test_research_objective_service_skips_non_target_result_property_columns(
             "confidence": 0.76,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-preheat",
-            "target_property_axes": [
+            "outcomes": [
                 "yield strength",
                 "ultimate tensile strength",
                 "elongation",
@@ -5456,10 +5354,10 @@ def test_research_objective_service_adds_sample_numbers_to_labeled_table_rows(
             "confidence": 0.8,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-density",
-            "target_property_axes": ["density"],
+            "outcomes": ["density"],
         }
     )
 
@@ -5483,7 +5381,9 @@ def test_research_objective_service_adds_sample_numbers_to_labeled_table_rows(
     ]
 
 
-def test_research_objective_service_builds_objective_analysis_lens(tmp_path):
+def test_research_objective_service_uses_objective_scientific_intent_directly(
+    tmp_path,
+):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
@@ -5495,44 +5395,24 @@ def test_research_objective_service_builds_objective_analysis_lens(tmp_path):
                 "corrosion behavior of SLM 316L?"
             ),
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["laser power", "SLM"],
-            "property_axes": ["pitting potential"],
+            "variables": ["laser power"],
+            "outcomes": ["pitting potential"],
+            "mechanisms": ["porosity", "pore size"],
+            "constraints": ["SLM"],
+            "requested_comparator": "lower laser power",
         }
     )
 
-    lens = service._build_objective_analysis_lenses(
-        paper_skims=(
-            PaperSkim.from_mapping(
-                {
-                    "document_id": "paper-1",
-                    "changed_variables": ["laser power"],
-                }
-            ),
-        ),
-        objectives=(objective,),
-        tables=(),
-    )[0]
-
-    assert lens.target_property_axes == ("pitting potential",)
-    assert lens.mediator_axes == ("porosity", "pore", "pore size")
-    assert lens.variable_process_axes == ("laser power",)
-    assert lens.process_context_axes == ("SLM",)
-    assert any("target_outcome_axis" in rule for rule in lens.direct_support_rules)
-    assert any("Mediator axes" in rule for rule in lens.direct_support_rules)
-
-
-@pytest.mark.parametrize(
-    "obsolete_field",
-    ["objective_evidence_lens", "extraction_guidance"],
-)
-def test_objective_analysis_lens_rejects_obsolete_nested_fields(obsolete_field):
-    with pytest.raises(ValueError, match="obsolete Objective analysis lens fields"):
-        ObjectiveAnalysisLens.from_mapping(
-            {
-                "objective_id": "obj-corrosion",
-                obsolete_field: {},
-            }
-        )
+    assert service._route_prompt_objective_record(objective) == {
+        "objective_id": "obj-corrosion",
+        "question": objective.question,
+        "material_scope": ["316L stainless steel"],
+        "variables": ["laser power"],
+        "outcomes": ["pitting potential"],
+        "mechanisms": ["porosity", "pore size"],
+        "constraints": ["SLM"],
+        "requested_comparator": "lower laser power",
+    }
 
 
 def test_research_objective_service_routes_matching_tables_beyond_seed_documents(
@@ -5546,8 +5426,8 @@ def test_research_objective_service_routes_matching_tables_beyond_seed_documents
             "objective_id": "obj-density",
             "question": "How does volumetric energy density affect density?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["volumetric energy density"],
-            "property_axes": ["density"],
+            "variables": ["volumetric energy density"],
+            "outcomes": ["density"],
             "seed_document_ids": ["paper-seed"],
         }
     )
@@ -5570,8 +5450,6 @@ def test_research_objective_service_routes_matching_tables_beyond_seed_documents
                 table_matrix=(("L-VED", "91.90"), ("H-VED", "99.60")),
             ),
         ),
-        target_property_axes=["density"],
-        variable_process_axes=["volumetric energy density"],
     )
 
     assert {
@@ -5598,8 +5476,8 @@ def test_research_objective_service_does_not_route_single_letter_acronym_tables(
             "objective_id": "obj-density",
             "question": "How does scan speed affect density?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["scan speed"],
-            "property_axes": ["density"],
+            "variables": ["scan speed"],
+            "outcomes": ["density"],
         }
     )
 
@@ -5621,8 +5499,6 @@ def test_research_objective_service_does_not_route_single_letter_acronym_tables(
                 table_matrix=(("sample-1", "-312.9", "-208.0", "124.7"),),
             ),
         ),
-        target_property_axes=["density"],
-        variable_process_axes=["scan speed"],
     )
 
     assert hints == ()
@@ -5639,8 +5515,8 @@ def test_research_objective_service_treats_energy_density_only_table_as_conditio
             "objective_id": "obj-density",
             "question": "How do laser power and scan speed affect density?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["laser power", "scan speed"],
-            "property_axes": ["density"],
+            "variables": ["laser power", "scan speed"],
+            "outcomes": ["density"],
         }
     )
 
@@ -5659,13 +5535,11 @@ def test_research_objective_service_treats_energy_density_only_table_as_conditio
                 table_matrix=(("375", "2100", "100"),),
             ),
         ),
-        target_property_axes=["density"],
-        variable_process_axes=["laser power", "scan speed"],
     )
 
     assert len(hints) == 1
     assert hints[0].role == "condition_context"
-    assert hints[0].matched_property_axes == ()
+    assert hints[0].matched_outcomes == ()
 
 
 def test_research_objective_service_normalizes_archimedes_density_column(
@@ -5674,11 +5548,11 @@ def test_research_objective_service_normalizes_archimedes_density_column(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-density",
             "question": "How does volumetric energy density affect density?",
-            "target_property_axes": ["density"],
+            "outcomes": ["density"],
         }
     )
 
@@ -5701,8 +5575,8 @@ def test_research_objective_service_ignores_analysis_purpose_as_table_result(
             "objective_id": "obj-microstructure",
             "question": "How does heat treatment affect microstructure?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["microstructure"],
+            "variables": ["heat treatment"],
+            "outcomes": ["microstructure"],
         }
     )
 
@@ -5720,8 +5594,6 @@ def test_research_objective_service_ignores_analysis_purpose_as_table_result(
                 table_matrix=(("1", "0", "0"), ("2", "15", "0")),
             ),
         ),
-        target_property_axes=["microstructure"],
-        variable_process_axes=["heat treatment"],
     )
 
     assert hints == ()
@@ -5738,13 +5610,13 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
             "objective_id": "obj-mechanical",
             "question": "How do LPBF parameters affect tensile properties?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": [
+            "variables": [
                 "volumetric energy density",
                 "laser power",
                 "scanning speed",
                 "hatch spacing",
             ],
-            "property_axes": [
+            "outcomes": [
                 "yield strength",
                 "ultimate tensile strength",
                 "elongation",
@@ -5792,16 +5664,14 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
     hints = service._build_objective_table_routing_hints(
         objective,
         tables=(condition_table, result_table),
-        target_property_axes=list(objective.property_axes),
-        variable_process_axes=list(objective.process_axes),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": objective.objective_id,
             "question": objective.question,
             "material_scope": list(objective.material_scope),
-            "variable_process_axes": list(objective.process_axes),
-            "target_property_axes": list(objective.property_axes),
+            "variables": list(objective.variables),
+            "outcomes": list(objective.outcomes),
             "routing_hints": hints,
             "confidence": 0.9,
         }
@@ -5813,8 +5683,8 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
             "relevance": "high",
             "paper_role": "primary_experiment",
             "material_match": ["316L stainless steel"],
-            "changed_variables": list(objective.process_axes),
-            "measured_property_scope": list(objective.property_axes),
+            "changed_variables": list(objective.variables),
+            "measured_property_scope": list(objective.outcomes),
             "relevant_tables": [],
             "excluded_tables": ["table-conditions", "table-results"],
         }
@@ -5824,7 +5694,6 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
         collection_id="col-test",
         extractor=_ObjectiveExtractor(),
         objectives=(objective,),
-        objective_contexts=(objective_context,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-independent": []},
         tables_by_document_id={
@@ -5858,8 +5727,8 @@ def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_re
                 "behavior of SLM 316L?"
             ),
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["laser power", "energy density"],
-            "property_axes": ["pitting corrosion behavior"],
+            "variables": ["laser power", "energy density"],
+            "outcomes": ["pitting corrosion behavior"],
         }
     )
 
@@ -5896,12 +5765,10 @@ def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_re
                 ),
             ),
         ),
-        target_property_axes=["pitting corrosion behavior"],
-        variable_process_axes=["laser power", "energy density"],
     )
 
     assert {
-        (hint.table_id, hint.role, hint.matched_property_axes)
+        (hint.table_id, hint.role, hint.matched_outcomes)
         for hint in hints
     } == {
         ("tbl-electrochemical", "result_table", ("pitting corrosion behavior",)),
@@ -5923,8 +5790,8 @@ def test_research_objective_service_keeps_density_out_of_defect_structure_result
                 "fatigue strength of LPBF 316L?"
             ),
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["volumetric energy density"],
-            "property_axes": ["defect structure", "fatigue strength"],
+            "variables": ["volumetric energy density"],
+            "outcomes": ["defect structure", "fatigue strength"],
         }
     )
 
@@ -5943,35 +5810,30 @@ def test_research_objective_service_keeps_density_out_of_defect_structure_result
                 ),
             ),
         ),
-        target_property_axes=["defect structure", "fatigue strength"],
-        variable_process_axes=["volumetric energy density"],
     )
 
     assert all(hint.role != "result_table" for hint in hints)
 
 
-def test_research_objective_service_route_payload_uses_flat_analysis_lens(
+def test_research_objective_service_route_payload_uses_objective_contract(
     tmp_path,
 ):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    context = ObjectiveAnalysisLens.from_mapping(
+    context = _research_objective(
         {
             "objective_id": "obj-corrosion",
             "question": "How does porosity affect pitting corrosion?",
-            "target_property_axes": ["pitting potential"],
-            "mediator_axes": ["porosity"],
-            "direct_support_rules": [
-                "Direct support must explicitly report a target outcome."
-            ],
+            "outcomes": ["pitting potential"],
+            "mechanisms": ["porosity"],
         }
     )
 
-    payload = service._route_prompt_objective_context_record(context)
+    payload = service._route_prompt_objective_record(context)
 
-    assert payload["target_property_axes"] == ["pitting potential"]
-    assert payload["mediator_axes"] == ["porosity"]
+    assert payload["outcomes"] == ["pitting potential"]
+    assert payload["mechanisms"] == ["porosity"]
     assert "objective_evidence_lens" not in payload
 
 
@@ -6048,10 +5910,10 @@ def test_research_objective_service_keeps_unlabeled_process_table_columns_as_con
             "confidence": 0.8,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-process",
-            "variable_process_axes": [
+            "variables": [
                 "scan strategy rotation angle",
                 "build orientation",
             ],
@@ -6832,16 +6694,16 @@ def test_research_objective_service_generates_pairwise_comparison_units(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-mechanical",
             "question": "How do process axes affect yield strength?",
-            "variable_process_axes": [
+            "variables": [
                 "energy density",
                 "scanning strategy",
                 "scanning speed",
             ],
-            "target_property_axes": ["yield strength"],
+            "outcomes": ["yield strength"],
         }
     )
 
@@ -6920,7 +6782,7 @@ def test_research_objective_service_generates_pairwise_comparison_units(
 
     comparison_units = service._build_objective_pairwise_comparison_units(
         measurements,
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert len(comparison_units) == 2
@@ -6958,12 +6820,12 @@ def test_pairwise_selection_keeps_valid_pairs_when_non_objective_axes_define_gro
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-density",
             "question": "How does scan speed affect density?",
-            "variable_process_axes": ["scan speed"],
-            "target_property_axes": ["density"],
+            "variables": ["scan speed"],
+            "outcomes": ["density"],
         }
     )
 
@@ -7036,7 +6898,7 @@ def test_pairwise_selection_keeps_valid_pairs_when_non_objective_axes_define_gro
                 density=96.2,
             ),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert {
@@ -7069,11 +6931,11 @@ def test_research_objective_service_matches_contextual_property_variants_for_pai
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-yield",
-            "variable_process_axes": ["scan strategy rotation angle"],
-            "target_property_axes": ["yield strength"],
+            "variables": ["scan strategy rotation angle"],
+            "outcomes": ["yield strength"],
         }
     )
 
@@ -7115,7 +6977,7 @@ def test_research_objective_service_matches_contextual_property_variants_for_pai
                 value=351.9,
             ),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert len(comparison_units) == 1
@@ -7130,14 +6992,14 @@ def test_research_objective_service_generates_pairwise_from_symbol_angle_axes(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-texture",
-            "variable_process_axes": [
+            "variables": [
                 "scan strategy rotation angle",
                 "build orientation angle",
             ],
-            "target_property_axes": ["yield strength"],
+            "outcomes": ["yield strength"],
         }
     )
 
@@ -7180,7 +7042,7 @@ def test_research_objective_service_generates_pairwise_from_symbol_angle_axes(
             measurement("oeu-yield-1", sample_number="1", theta="0", value=342.5),
             measurement("oeu-yield-7", sample_number="7", theta="90", value=410.2),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert len(comparison_units) == 1
@@ -7195,11 +7057,11 @@ def test_research_objective_service_selects_large_grid_pairs_from_raw_angle_axes
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-yield",
-            "variable_process_axes": ["scan strategy rotation angle"],
-            "target_property_axes": ["yield strength"],
+            "variables": ["scan strategy rotation angle"],
+            "outcomes": ["yield strength"],
         }
     )
 
@@ -7233,7 +7095,7 @@ def test_research_objective_service_selects_large_grid_pairs_from_raw_angle_axes
             measurement("oeu-yield-3", sample_number="3", theta="45", value=351.9),
             measurement("oeu-yield-4", sample_number="4", theta="90", value=365.6),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     comparison_pairs = {
@@ -7258,11 +7120,11 @@ def test_research_objective_service_orders_numeric_axis_comparison_before_value_
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-ved",
-            "variable_process_axes": ["volumetric energy density"],
-            "target_property_axes": ["ultimate tensile strength"],
+            "variables": ["volumetric energy density"],
+            "outcomes": ["ultimate tensile strength"],
         }
     )
 
@@ -7294,7 +7156,7 @@ def test_research_objective_service_orders_numeric_axis_comparison_before_value_
             measurement("oeu-l-uts", sample_label="L-VED", ved="50", value=610),
             measurement("oeu-h-uts", sample_label="H-VED", ved="150", value=560),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert len(comparison_units) == 1
@@ -7312,11 +7174,11 @@ def test_research_objective_service_does_not_use_ascii_raw_process_fallback(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-yield",
-            "variable_process_axes": ["scan strategy rotation angle"],
-            "target_property_axes": ["yield strength"],
+            "variables": ["scan strategy rotation angle"],
+            "outcomes": ["yield strength"],
         }
     )
 
@@ -7358,7 +7220,7 @@ def test_research_objective_service_does_not_use_ascii_raw_process_fallback(
                 value=351.9,
             ),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert comparison_units == ()
@@ -7370,16 +7232,16 @@ def test_research_objective_service_generates_small_set_multi_axis_comparisons(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-density",
             "question": "How do laser power and scan speed affect density?",
-            "variable_process_axes": [
+            "variables": [
                 "laser power",
                 "scan speed",
                 "energy density",
             ],
-            "target_property_axes": ["density"],
+            "outcomes": ["density"],
         }
     )
 
@@ -7438,7 +7300,7 @@ def test_research_objective_service_generates_small_set_multi_axis_comparisons(
                 density=99.26,
             ),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert {
@@ -7461,15 +7323,15 @@ def test_research_objective_service_skips_pair_when_unmodeled_hatch_spacing_chan
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-mechanical",
-            "variable_process_axes": [
+            "variables": [
                 "scanning strategy",
                 "scanning speed",
                 "energy density",
             ],
-            "target_property_axes": ["elongation"],
+            "outcomes": ["elongation"],
         }
     )
 
@@ -7522,7 +7384,7 @@ def test_research_objective_service_skips_pair_when_unmodeled_hatch_spacing_chan
                 value=41.9,
             ),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert comparison_units == ()
@@ -7534,11 +7396,11 @@ def test_research_objective_service_skips_pair_when_treatment_and_energy_input_c
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-mechanical",
-            "variable_process_axes": ["energy density", "scanning speed"],
-            "target_property_axes": ["yield strength"],
+            "variables": ["energy density", "scanning speed"],
+            "outcomes": ["yield strength"],
         }
     )
 
@@ -7594,7 +7456,7 @@ def test_research_objective_service_skips_pair_when_treatment_and_energy_input_c
                 value=265.1,
             ),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert comparison_units == ()
@@ -7606,11 +7468,11 @@ def test_research_objective_service_does_not_promote_ved_when_sample_controls_ch
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-elongation",
-            "variable_process_axes": ["energy density"],
-            "target_property_axes": ["elongation"],
+            "variables": ["energy density"],
+            "outcomes": ["elongation"],
         }
     )
 
@@ -7661,7 +7523,7 @@ def test_research_objective_service_does_not_promote_ved_when_sample_controls_ch
                 value=52.7,
             ),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert comparison_units == ()
@@ -7673,15 +7535,15 @@ def test_research_objective_service_attributes_derived_ved_change_to_scan_speed(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-density",
-            "variable_process_axes": [
+            "variables": [
                 "energy density",
                 "laser power",
                 "scan speed",
             ],
-            "target_property_axes": ["density"],
+            "outcomes": ["density"],
         }
     )
 
@@ -7734,7 +7596,7 @@ def test_research_objective_service_attributes_derived_ved_change_to_scan_speed(
                 density=97.83,
             ),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert len(comparison_units) == 1
@@ -7747,12 +7609,12 @@ def test_research_objective_service_generates_pairwise_from_sample_condition_axi
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-preheat",
             "question": "How does build platform preheating affect tensile properties?",
-            "variable_process_axes": ["build platform preheating"],
-            "target_property_axes": [
+            "variables": ["build platform preheating"],
+            "outcomes": [
                 "yield strength",
                 "ultimate tensile strength",
                 "elongation",
@@ -7842,7 +7704,7 @@ def test_research_objective_service_generates_pairwise_from_sample_condition_axi
                 unit="%",
             ),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert {
@@ -7875,12 +7737,12 @@ def test_research_objective_service_generates_pairwise_from_process_condition_ax
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-preheat",
             "question": "How does build platform preheating affect tensile properties?",
-            "variable_process_axes": ["build platform preheating"],
-            "target_property_axes": [
+            "variables": ["build platform preheating"],
+            "outcomes": [
                 "yield strength",
                 "ultimate tensile strength",
                 "elongation",
@@ -7967,7 +7829,7 @@ def test_research_objective_service_generates_pairwise_from_process_condition_ax
                 unit="%",
             ),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert {
@@ -8000,12 +7862,12 @@ def test_research_objective_service_limits_pairwise_to_target_properties(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-corrosion",
             "question": "How do process axes affect corrosion potential?",
-            "variable_process_axes": ["laser power"],
-            "target_property_axes": ["pitting potential"],
+            "variables": ["laser power"],
+            "outcomes": ["pitting potential"],
         }
     )
 
@@ -8067,7 +7929,7 @@ def test_research_objective_service_limits_pairwise_to_target_properties(
                 value=5.67,
             ),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     assert len(comparison_units) == 1
@@ -8081,12 +7943,12 @@ def test_research_objective_service_limits_large_grid_to_adjacent_axis_pairs(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-grid",
             "question": "How do laser power and scan speed affect yield strength?",
-            "variable_process_axes": ["laser power", "scan speed"],
-            "target_property_axes": ["yield strength"],
+            "variables": ["laser power", "scan speed"],
+            "outcomes": ["yield strength"],
         }
     )
 
@@ -8128,7 +7990,7 @@ def test_research_objective_service_limits_large_grid_to_adjacent_axis_pairs(
             measurement("5", laser_power="120", scan_speed="200", value=130),
             measurement("6", laser_power="140", scan_speed="200", value=150),
         ),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     comparison_pairs = {
@@ -8155,19 +8017,19 @@ def test_research_objective_service_caps_large_multiaxis_table_comparisons(
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-large-table",
             "question": (
                 "How do laser power, scan speed, and heat treatment affect "
                 "mechanical properties?"
             ),
-            "variable_process_axes": [
+            "variables": [
                 "laser power",
                 "scan speed",
                 "heat treatment type",
             ],
-            "target_property_axes": [
+            "outcomes": [
                 "yield strength",
                 "ultimate tensile strength",
                 "elongation",
@@ -8247,7 +8109,7 @@ def test_research_objective_service_caps_large_multiaxis_table_comparisons(
 
     comparison_units = service._build_objective_pairwise_comparison_units(
         tuple(units),
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     comparison_counts: dict[tuple[str | None, str], int] = {}
@@ -8274,28 +8136,28 @@ def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlle
     )
     density_objective_id = "obj-density"
     mechanical_objective_id = "obj-mechanical"
-    density_context = ObjectiveAnalysisLens.from_mapping(
+    density_context = _research_objective(
         {
             "objective_id": density_objective_id,
             "question": "How do process axes affect densification?",
-            "variable_process_axes": [
+            "variables": [
                 "energy density",
                 "scanning strategy",
                 "scanning speed",
             ],
-            "target_property_axes": ["densification", "microstructure"],
+            "outcomes": ["densification", "microstructure"],
         }
     )
-    mechanical_context = ObjectiveAnalysisLens.from_mapping(
+    mechanical_context = _research_objective(
         {
             "objective_id": mechanical_objective_id,
             "question": "How do process axes affect mechanical properties?",
-            "variable_process_axes": [
+            "variables": [
                 "energy density",
                 "scanning strategy",
                 "scanning speed",
             ],
-            "target_property_axes": [
+            "outcomes": [
                 "yield strength",
                 "ultimate tensile strength",
                 "elongation",
@@ -8425,7 +8287,7 @@ def test_research_objective_service_limits_pbf_pairwise_comparisons_to_controlle
 
     comparison_units = service._build_objective_pairwise_comparison_units(
         tuple(units),
-        objective_contexts=(density_context, mechanical_context),
+        objectives=(density_context, mechanical_context),
     )
 
     comparison_keys = {
@@ -8470,21 +8332,21 @@ def test_research_objective_service_resolves_ved_fatigue_table_from_printed_labe
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-fatigue",
             "question": (
                 "How do volumetric energy density and process parameters affect "
                 "defect structure and fatigue strength?"
             ),
-            "variable_process_axes": [
+            "variables": [
                 "volumetric energy density",
                 "laser power",
                 "scanning speed",
                 "hatch spacing",
                 "layer thickness",
             ],
-            "target_property_axes": ["defect structure", "fatigue strength"],
+            "outcomes": ["defect structure", "fatigue strength"],
         }
     )
 
@@ -8588,7 +8450,7 @@ def test_research_objective_service_resolves_ved_fatigue_table_from_printed_labe
     )
     comparison_units = service._build_objective_pairwise_comparison_units(
         resolved_units,
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     fatigue_units = [
@@ -8620,21 +8482,21 @@ def test_research_objective_service_inferrs_sample_and_defect_columns_without_mo
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-fatigue",
             "question": (
                 "How do volumetric energy density and process parameters affect "
                 "defect structure and fatigue strength?"
             ),
-            "variable_process_axes": [
+            "variables": [
                 "volumetric energy density",
                 "laser power",
                 "scanning speed",
                 "hatch spacing",
                 "layer thickness",
             ],
-            "target_property_axes": ["defect structure", "fatigue strength"],
+            "outcomes": ["defect structure", "fatigue strength"],
         }
     )
     process_route = EvidenceCandidate.from_mapping(
@@ -8736,7 +8598,7 @@ def test_research_objective_service_inferrs_sample_and_defect_columns_without_mo
     resolved_units = service._resolve_objective_evidence_contexts(units)
     comparison_units = service._build_objective_pairwise_comparison_units(
         resolved_units,
-        objective_contexts=(objective_context,),
+        objectives=(objective_context,),
     )
 
     result_by_property = {
@@ -8773,17 +8635,17 @@ def test_process_route_does_not_treat_result_columns_as_process_context(tmp_path
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-fatigue",
-            "variable_process_axes": [
+            "variables": [
                 "volumetric energy density",
                 "laser power",
                 "scanning speed",
                 "hatch spacing",
                 "layer thickness",
             ],
-            "target_property_axes": ["defect structure", "fatigue strength"],
+            "outcomes": ["defect structure", "fatigue strength"],
         }
     )
     misrouted_result_table = EvidenceCandidate.from_mapping(
@@ -8832,11 +8694,11 @@ def test_process_route_recovers_target_columns_from_mixed_table(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-fatigue",
-            "variable_process_axes": ["volumetric energy density"],
-            "target_property_axes": ["fatigue strength"],
+            "variables": ["volumetric energy density"],
+            "outcomes": ["fatigue strength"],
         }
     )
     mixed_route = EvidenceCandidate.from_mapping(
@@ -8904,24 +8766,16 @@ def test_research_objective_service_adds_context_hint_route_for_condition_table(
             "excluded_tables": ["table-1"],
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-mechanical",
             "question": "How do processing parameters affect yield strength?",
-            "variable_process_axes": [
+            "variables": [
                 "energy density",
                 "scanning strategy",
                 "scanning speed",
             ],
-            "target_property_axes": ["yield strength"],
-            "routing_hints": [
-                {
-                    "document_id": "paper-1",
-                    "table_id": "table-1",
-                    "role": "condition_context",
-                    "reason": "Table contains process variables.",
-                }
-            ],
+            "outcomes": ["yield strength"],
             "confidence": 0.9,
         }
     )
@@ -8932,6 +8786,16 @@ def test_research_objective_service_adds_context_hint_route_for_condition_table(
         seen=set(),
         frame=frame,
         objective_context=objective_context,
+        routing_hints=(
+            SourceSelectionHint.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "table_id": "table-1",
+                    "role": "condition_context",
+                    "reason": "Table contains process variables.",
+                }
+            ),
+        ),
         candidate_by_key={
             ("table", "table-1"): {
                 "source_kind": "table",
@@ -8983,12 +8847,12 @@ def test_research_objective_service_ranks_result_text_candidates(
             "relevant_sections": ["Paper title"],
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-structure",
             "material_scope": ["316L stainless steel"],
-            "variable_process_axes": ["scanning speed", "energy density"],
-            "target_property_axes": ["microstructure", "densification"],
+            "variables": ["scanning speed", "energy density"],
+            "outcomes": ["microstructure", "densification"],
         }
     )
     blocks = [
@@ -9067,17 +8931,14 @@ def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_suppo
             "measured_property_scope": ["pitting corrosion"],
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-corrosion",
             "material_scope": ["316L stainless steel"],
-            "variable_process_axes": ["laser power"],
-            "process_context_axes": ["SLM"],
-            "target_property_axes": ["pitting potential"],
-            "mediator_axes": ["porosity", "pore size", "lack of fusion"],
-            "direct_support_rules": [
-                "Direct support must explicitly report a target outcome."
-            ],
+            "variables": ["laser power"],
+            "constraints": ["SLM"],
+            "outcomes": ["pitting potential"],
+            "mechanisms": ["porosity", "pore size", "lack of fusion"],
         }
     )
     candidates = [
@@ -9129,8 +8990,8 @@ def test_research_objective_routing_uses_document_tree_order(tmp_path):
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["yield strength"],
+            "variables": ["heat treatment"],
+            "outcomes": ["yield strength"],
             "confidence": 0.9,
         }
     )
@@ -9224,7 +9085,6 @@ def test_research_objective_routing_uses_document_tree_order(tmp_path):
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        objective_contexts=(),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": blocks},
         tables_by_document_id={"paper-1": []},
@@ -9250,8 +9110,8 @@ def test_research_objective_routing_binds_current_source_to_model_decision(
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["yield strength"],
+            "variables": ["heat treatment"],
+            "outcomes": ["yield strength"],
             "confidence": 0.9,
         }
     )
@@ -9280,7 +9140,6 @@ def test_research_objective_routing_binds_current_source_to_model_decision(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        objective_contexts=(),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
         tables_by_document_id={"paper-1": [table]},
@@ -9289,11 +9148,17 @@ def test_research_objective_routing_binds_current_source_to_model_decision(
 
     assert len(extractor.route_payloads) == 1
     assert extractor.route_payloads[0]["current_source"]["source_ref"] == "table-1"
-    assert len(routes) == 1
-    assert routes[0].source_kind == "table"
-    assert routes[0].source_ref == "table-1"
-    assert routes[0].role == "current_experimental_evidence"
-    assert routes[0].join_plan["evidence_role"] == "direct_support"
+    assert {
+        (route.source_kind, route.source_ref, route.role)
+        for route in routes
+    } == {
+        ("table", "table-1", "current_experimental_evidence"),
+        ("table", "table-1", "process_or_treatment"),
+    }
+    result_route = next(
+        route for route in routes if route.role == "current_experimental_evidence"
+    )
+    assert result_route.join_plan["evidence_role"] == "direct_support"
 
 
 def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
@@ -9305,20 +9170,20 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["yield strength"],
-            "comparison_intent": "compare treated and untreated samples",
+            "variables": ["heat treatment"],
+            "outcomes": ["yield strength"],
+            "requested_comparator": "compare treated and untreated samples",
             "confidence": 0.9,
         }
     )
-    objective_context = ObjectiveAnalysisLens.from_mapping(
+    objective_context = _research_objective(
         {
             "objective_id": "obj-heat",
             "question": objective.question,
             "material_scope": ["316L stainless steel"],
-            "variable_process_axes": ["heat treatment"],
-            "process_context_axes": ["LPBF"],
-            "target_property_axes": ["yield strength"],
+            "variables": ["heat treatment"],
+            "constraints": ["LPBF"],
+            "outcomes": ["yield strength"],
             "routing_hints": [
                 {
                     "table_id": "table-1",
@@ -9360,7 +9225,6 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        objective_contexts=(objective_context,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
         tables_by_document_id={"paper-1": [table]},
@@ -9368,8 +9232,9 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
     )
 
     route_payload = extractor.route_payloads[0]
-    assert "routing_hints" not in route_payload["objective_context"]
-    assert "extraction_guidance" not in route_payload["objective_context"]
+    assert "routing_hints" not in route_payload["objective"]
+    assert "extraction_guidance" not in route_payload["objective"]
+    assert "objective_context" not in route_payload
     assert "background" not in route_payload["paper_frame"]
     assert "relevant_tables" not in route_payload["paper_frame"]
     assert "excluded_tables" not in route_payload["paper_frame"]
@@ -9391,8 +9256,8 @@ def test_research_objective_routing_uses_text_hint_not_source_text(tmp_path):
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["yield strength"],
+            "variables": ["heat treatment"],
+            "outcomes": ["yield strength"],
             "confidence": 0.9,
         }
     )
@@ -9441,7 +9306,6 @@ def test_research_objective_routing_uses_text_hint_not_source_text(tmp_path):
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        objective_contexts=(),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
         tables_by_document_id={"paper-1": []},
@@ -9463,8 +9327,8 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree(tm
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["yield strength"],
+            "variables": ["heat treatment"],
+            "outcomes": ["yield strength"],
             "confidence": 0.9,
         }
     )
@@ -9566,7 +9430,6 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree(tm
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        objective_contexts=(),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
         tables_by_document_id={"paper-1": []},
@@ -9592,8 +9455,8 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections(tmp_p
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["yield strength"],
+            "variables": ["heat treatment"],
+            "outcomes": ["yield strength"],
             "confidence": 0.9,
         }
     )
@@ -9674,7 +9537,6 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections(tmp_p
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        objective_contexts=(),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
         tables_by_document_id={"paper-1": []},
@@ -9697,8 +9559,8 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text(
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["yield strength"],
+            "variables": ["heat treatment"],
+            "outcomes": ["yield strength"],
             "confidence": 0.9,
         }
     )
@@ -9752,7 +9614,6 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        objective_contexts=(),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
         tables_by_document_id={"paper-1": []},
@@ -9776,8 +9637,8 @@ def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
             "objective_id": "obj-heat",
             "question": "How does heat treatment affect yield strength?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["heat treatment"],
-            "property_axes": ["yield strength"],
+            "variables": ["heat treatment"],
+            "outcomes": ["yield strength"],
             "confidence": 0.9,
         }
     )
@@ -9831,7 +9692,6 @@ def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        objective_contexts=(),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
         tables_by_document_id={"paper-1": []},
@@ -10113,19 +9973,7 @@ def test_research_objective_service_builds_and_persists_objective_records(
     assert extractor.skim_payloads[0]["headings"] == ["Abstract", "References"]
     assert "Additional abstract context" in extractor.skim_payloads[0]["text_preview"]
     assert "Reference text should not" not in extractor.skim_payloads[0]["text_preview"]
-    assert extractor.skim_payloads[0]["profile_hint"] == {
-        "role_hint": "experimental",
-        "source_quality_warnings": [],
-        "role_hint_confidence": 0.9,
-    }
-    assert "collection_id" not in extractor.skim_payloads[0]
-    assert "document_id" not in extractor.skim_payloads[0]
-    assert "document_profile" not in extractor.skim_payloads[0]
-    assert "table_id" not in extractor.skim_payloads[0]["table_captions"][0]
-    assert all(
-        "figure_id" not in item
-        for item in extractor.skim_payloads[0]["figure_captions"]
-    )
+    assert extractor.skim_payloads[0]["table_captions"][0]["table_id"] == "table-1"
     assert extractor.discovery_payloads[0]["paper_skims"][0]["document_id"] == "paper-1"
     discovery_skim = extractor.discovery_payloads[0]["paper_skims"][0]
     assert set(discovery_skim) == {
@@ -10156,7 +10004,7 @@ def test_research_objective_service_builds_and_persists_objective_records(
     assert not list(output_dir.glob("*objective*"))
 
 
-def test_research_objective_service_strengthens_broad_objective_axes(tmp_path):
+def test_research_objective_service_preserves_discovered_scientific_intent(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     collection = collection_service.create_collection("Objective Strengthening")
     collection_id = collection["collection_id"]
@@ -10202,14 +10050,11 @@ def test_research_objective_service_strengthens_broad_objective_axes(tmp_path):
 
     assert len(objectives) == 1
     objective = objectives[0]
-    assert objective.comparison_intent is not None
-    assert "energy density" in objective.process_axes
-    assert "scanning strategy" in objective.process_axes
-    assert "scanning speed" in objective.process_axes
-    assert "yield strength" in objective.property_axes
-    assert "ultimate tensile strength" in objective.property_axes
-    assert "elongation" in objective.property_axes
-    assert "microhardness" in objective.property_axes
+    assert objective.variables == ("processing parameters",)
+    assert objective.outcomes == ("mechanical properties",)
+    assert objective.constraints == ("Selective Laser Melting",)
+    assert objective.mechanisms == ()
+    assert objective.requested_comparator is None
 
 
 def test_research_objective_service_merges_overlapping_mechanical_objectives(
@@ -10262,18 +10107,18 @@ def test_research_objective_service_merges_overlapping_mechanical_objectives(
     structure_objective = next(
         objective
         for objective in objectives
-        if "densification" in objective.property_axes
+        if "densification" in objective.outcomes
     )
     mechanical_objective = next(
         objective
         for objective in objectives
-        if "yield strength" in objective.property_axes
+        if "yield strength" in objective.outcomes
     )
-    assert structure_objective.property_axes == ("densification", "microstructure")
-    assert "energy density" in mechanical_objective.process_axes
-    assert "scanning speed" in mechanical_objective.process_axes
-    assert "scanning strategy" in mechanical_objective.process_axes
-    assert mechanical_objective.property_axes == (
+    assert structure_objective.outcomes == ("densification", "microstructure")
+    assert "energy density" in mechanical_objective.variables
+    assert "scanning speed" in mechanical_objective.variables
+    assert "scanning strategy" in mechanical_objective.variables
+    assert mechanical_objective.outcomes == (
         "yield strength",
         "ultimate tensile strength",
         "elongation",
@@ -10381,18 +10226,18 @@ def test_research_objective_service_persists_definitions_without_analysis_artifa
     )
     facts = service.objective_repository.read(collection_id)
     structure_objective = next(
-        objective for objective in objectives if "densification" in objective.property_axes
+        objective for objective in objectives if "densification" in objective.outcomes
     )
     mechanical_objective = next(
-        objective for objective in objectives if "yield strength" in objective.property_axes
+        objective for objective in objectives if "yield strength" in objective.outcomes
     )
-    assert structure_objective.process_axes == (
-        "Selective Laser Melting",
+    assert structure_objective.variables == (
         "energy density",
         "scanning strategy",
         "scanning speed",
     )
-    assert mechanical_objective.property_axes == (
+    assert structure_objective.constraints == ("Selective Laser Melting",)
+    assert mechanical_objective.outcomes == (
         "yield strength",
         "ultimate tensile strength",
         "elongation",
@@ -10413,13 +10258,13 @@ def test_research_objective_service_canonicalizes_axis_aliases_with_llm(
     )
 
     assert len(objectives) == 2
-    all_process_axes = [
+    all_variables = [
         process_axis
         for objective in objectives
-        for process_axis in objective.process_axes
+        for process_axis in objective.variables
     ]
-    assert "scanning strategy" in all_process_axes
-    assert "scan strategy" not in all_process_axes
+    assert "scanning strategy" in all_variables
+    assert "scan strategy" not in all_variables
 
 
 def test_research_objective_service_falls_back_when_axis_plan_drops_axes(
@@ -10430,13 +10275,13 @@ def test_research_objective_service_falls_back_when_axis_plan_drops_axes(
         _InvalidAxisCanonicalizationExtractor(),
     )
 
-    all_process_axes = [
+    all_variables = [
         process_axis
         for objective in objectives
-        for process_axis in objective.process_axes
+        for process_axis in objective.variables
     ]
-    assert "scanning strategy" in all_process_axes
-    assert "scan strategy" in all_process_axes
+    assert "scanning strategy" in all_variables
+    assert "scan strategy" not in all_variables
 
 
 def test_research_objective_service_rejects_overbroad_axis_canonicalization(
@@ -10448,18 +10293,21 @@ def test_research_objective_service_rejects_overbroad_axis_canonicalization(
     )
 
     assert len(objectives) == 2
-    all_process_axes = [
+    all_variables = [
         process_axis
         for objective in objectives
-        for process_axis in objective.process_axes
+        for process_axis in objective.variables
     ]
-    assert "Selective Laser Melting" in all_process_axes
-    assert "energy density" in all_process_axes
-    assert "scanning speed" in all_process_axes
-    assert "scan strategy" in all_process_axes
+    assert "energy density" in all_variables
+    assert "scanning speed" in all_variables
+    assert "scanning strategy" in all_variables
+    assert all(
+        objective.constraints == ("Selective Laser Melting",)
+        for objective in objectives
+    )
 
 
-def test_research_objective_service_dedupes_subset_after_rejected_merge_plan(
+def test_research_objective_service_keeps_candidates_after_rejected_merge_plan(
     tmp_path,
 ):
     objectives = _build_duplicate_paper_objectives(
@@ -10467,18 +10315,12 @@ def test_research_objective_service_dedupes_subset_after_rejected_merge_plan(
         _DroppedObjectiveMergeExtractor(),
     )
 
-    assert len(objectives) == 2
-    mechanical_objective = next(
-        objective
-        for objective in objectives
-        if "yield strength" in objective.property_axes
-    )
-    assert mechanical_objective.property_axes == (
-        "yield strength",
-        "ultimate tensile strength",
-        "elongation",
-        "microhardness",
-    )
+    assert len(objectives) == 3
+    assert {objective.outcomes for objective in objectives} == {
+        ("densification", "microstructure"),
+        ("yield strength", "ultimate tensile strength", "elongation", "microhardness"),
+        ("yield strength", "microhardness"),
+    }
 
 
 def test_research_objective_service_falls_back_when_merge_plan_invents_axis(
@@ -10489,8 +10331,8 @@ def test_research_objective_service_falls_back_when_merge_plan_invents_axis(
         _InventedAxisMergeExtractor(),
     )
 
-    assert len(objectives) == 2
-    assert all("laser power" not in objective.process_axes for objective in objectives)
+    assert len(objectives) == 3
+    assert all("laser power" not in objective.variables for objective in objectives)
 
 
 def test_research_objective_service_rejects_merge_plan_with_cross_objective_axis(
@@ -10505,15 +10347,15 @@ def test_research_objective_service_rejects_merge_plan_with_cross_objective_axis
     mechanical_objective = next(
         objective
         for objective in objectives
-        if "yield strength" in objective.property_axes
+        if "yield strength" in objective.outcomes
     )
     corrosion_objective = next(
         objective
         for objective in objectives
-        if "corrosion potential" in objective.property_axes
+        if "corrosion potential" in objective.outcomes
     )
-    assert "porosity" not in mechanical_objective.process_axes
-    assert "porosity" in corrosion_objective.process_axes
+    assert "porosity" not in mechanical_objective.variables
+    assert "porosity" in corrosion_objective.variables
 
 
 def test_research_objective_service_does_not_global_fill_unmatched_seed_axes(
@@ -10526,8 +10368,9 @@ def test_research_objective_service_does_not_global_fill_unmatched_seed_axes(
 
     assert len(objectives) == 1
     objective = objectives[0]
-    assert objective.process_axes == ("Selective Laser Melting",)
-    assert objective.property_axes == ("mechanical properties",)
+    assert objective.variables == ("heat treatment",)
+    assert objective.outcomes == ("mechanical properties",)
+    assert objective.constraints == ("Selective Laser Melting",)
 
 
 def test_research_objective_service_keeps_candidate_definition_as_source_of_truth(
@@ -10580,7 +10423,7 @@ def test_research_objective_service_keeps_candidate_definition_as_source_of_trut
     assert objectives[0].published_analysis_version is None
 
 
-def test_research_objective_service_splits_merge_plan_with_disjoint_properties(
+def test_research_objective_service_rejects_merge_with_disjoint_outcomes(
     tmp_path,
 ):
     objectives = _build_duplicate_paper_objectives(
@@ -10588,12 +10431,15 @@ def test_research_objective_service_splits_merge_plan_with_disjoint_properties(
         _DisjointPropertyMergeExtractor(),
     )
 
-    assert len(objectives) == 2
-    assert any("densification" in objective.property_axes for objective in objectives)
-    assert any("yield strength" in objective.property_axes for objective in objectives)
+    assert len(objectives) == 3
+    assert {objective.outcomes for objective in objectives} == {
+        ("densification", "microstructure"),
+        ("yield strength", "ultimate tensile strength", "elongation", "microhardness"),
+        ("yield strength", "microhardness"),
+    }
 
 
-def test_research_objective_service_aligns_question_with_restored_process_axes(
+def test_research_objective_service_rejects_merge_that_drops_variable_intent(
     tmp_path,
 ):
     objectives = _build_duplicate_paper_objectives(
@@ -10601,22 +10447,15 @@ def test_research_objective_service_aligns_question_with_restored_process_axes(
         _UnderSpecifiedMergeQuestionExtractor(),
     )
 
-    mechanical_objective = next(
-        objective
+    assert len(objectives) == 3
+    assert all(
+        objective.question
+        != "What is the relationship between scanning speed and the mechanical properties of 316L stainless steel?"
         for objective in objectives
-        if "yield strength" in objective.property_axes
     )
-    assert mechanical_objective.question.startswith("How do")
-    assert "energy density" in mechanical_objective.question
-    assert "scanning strategy" in mechanical_objective.question
-    assert "scanning speed" in mechanical_objective.question
-    assert "Selective Laser Melting" in mechanical_objective.question
-    assert "energy density" in str(mechanical_objective.comparison_intent)
-    assert "scanning strategy" in str(mechanical_objective.comparison_intent)
-    assert "scanning speed" in str(mechanical_objective.comparison_intent)
 
 
-def test_research_objective_service_splits_single_mixed_property_objective(
+def test_research_objective_service_preserves_single_mixed_property_objective(
     tmp_path,
 ):
     objectives = _build_duplicate_paper_objectives(
@@ -10624,27 +10463,15 @@ def test_research_objective_service_splits_single_mixed_property_objective(
         _SingleMixedObjectiveExtractor(),
     )
 
-    assert len(objectives) == 2
-    structure_objective = next(
-        objective
-        for objective in objectives
-        if "densification" in objective.property_axes
-    )
-    mechanical_objective = next(
-        objective
-        for objective in objectives
-        if "yield strength" in objective.property_axes
-    )
-    assert structure_objective.property_axes == ("densification", "microstructure")
-    assert mechanical_objective.property_axes == (
+    assert len(objectives) == 1
+    assert objectives[0].outcomes == (
+        "densification",
+        "microstructure",
         "yield strength",
         "ultimate tensile strength",
         "elongation",
         "microhardness",
     )
-    assert "energy density" in mechanical_objective.question
-    assert "scanning strategy" in mechanical_objective.question
-    assert "scanning speed" in mechanical_objective.question
 
 
 def test_research_objective_service_dedupes_repeated_objective_ids_before_persist(
@@ -10739,9 +10566,9 @@ def test_objective_analysis_uses_deterministic_frame_when_frame_model_fails(
             "objective_id": "obj_texture_yield",
             "question": "How does scan strategy affect texture and yield strength?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["scan strategy rotation angle"],
-            "property_axes": ["crystallographic texture", "yield strength"],
-            "comparison_intent": "Compare texture and yield strength across scan strategy.",
+            "variables": ["scan strategy rotation angle"],
+            "outcomes": ["crystallographic texture", "yield strength"],
+            "requested_comparator": "Compare texture and yield strength across scan strategy.",
             "seed_document_ids": ["paper-1"],
             "confidence": 0.9,
         }
@@ -10836,9 +10663,10 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
             "objective_id": "obj_corrosion",
             "question": "How does heat treatment affect corrosion current?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["LPBF", "heat treatment"],
-            "property_axes": ["corrosion current"],
-            "comparison_intent": "Compare corrosion current before and after heat treatment.",
+            "variables": ["heat treatment"],
+            "outcomes": ["corrosion current"],
+            "constraints": ["LPBF"],
+            "requested_comparator": "Compare corrosion current before and after heat treatment.",
             "seed_document_ids": ["paper-1"],
             "confidence": 0.9,
         }
@@ -10937,9 +10765,10 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
             "objective_id": "obj_corrosion",
             "question": "How does heat treatment affect corrosion current?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["LPBF", "heat treatment"],
-            "property_axes": ["corrosion current"],
-            "comparison_intent": "Compare corrosion current before and after heat treatment.",
+            "variables": ["heat treatment"],
+            "outcomes": ["corrosion current"],
+            "constraints": ["LPBF"],
+            "requested_comparator": "Compare corrosion current before and after heat treatment.",
             "seed_document_ids": ["paper-1"],
             "confidence": 0.9,
         }

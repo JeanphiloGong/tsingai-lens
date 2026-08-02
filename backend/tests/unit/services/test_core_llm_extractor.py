@@ -32,6 +32,19 @@ from application.core.semantic_build.llm.schemas import (
 )
 
 
+@pytest.mark.parametrize("field", ["variables", "outcomes"])
+def test_structured_research_objective_requires_primary_scientific_axes(field):
+    payload = {
+        "question": "How does heat treatment affect yield strength?",
+        "variables": ["heat treatment"],
+        "outcomes": ["yield strength"],
+    }
+    payload[field] = []
+
+    with pytest.raises(ValidationError):
+        StructuredResearchObjective.model_validate(payload)
+
+
 class _FakeCompletions:
     def __init__(self, content: str) -> None:
         self._content = content
@@ -460,9 +473,10 @@ def test_core_llm_extractor_validates_research_objective_response():
             {
               "question": "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?",
               "material_scope": ["316L stainless steel"],
-              "process_axes": ["LPBF", "heat treatment"],
-              "property_axes": ["corrosion"],
-              "comparison_intent": "compare as-built and heat-treated corrosion behavior",
+              "variables": ["heat treatment"],
+              "outcomes": ["corrosion"],
+              "constraints": ["LPBF"],
+              "requested_comparator": "compare as-built and heat-treated corrosion behavior",
               "seed_document_ids": ["paper-1"],
               "excluded_document_ids": [],
               "confidence": 0.88,
@@ -580,7 +594,7 @@ def test_core_llm_extractor_validates_axis_canonicalization_response():
         {
           "axis_groups": [
             {
-              "axis_type": "process",
+              "axis_type": "variable",
               "canonical": "scanning strategy",
               "aliases": ["scanning strategy", "scan strategy"],
               "confidence": 0.95,
@@ -598,8 +612,8 @@ def test_core_llm_extractor_validates_axis_canonicalization_response():
             "paper_skims": [],
             "axis_candidates": {
                 "material": [],
-                "process": ["scanning strategy", "scan strategy"],
-                "property": [],
+                "variable": ["scanning strategy", "scan strategy"],
+                "outcome": [],
             },
         }
     )
@@ -620,9 +634,10 @@ def test_core_llm_extractor_validates_research_objective_merge_response():
               "source_objective_ids": ["obj-1", "obj-2"],
               "question": "How do SLM parameters affect mechanical properties of 316L stainless steel?",
               "material_scope": ["316L stainless steel"],
-              "process_axes": ["Selective Laser Melting", "energy density"],
-              "property_axes": ["yield strength", "elongation"],
-              "comparison_intent": "compare SLM parameter effects on mechanical properties",
+              "variables": ["energy density"],
+              "outcomes": ["yield strength", "elongation"],
+              "constraints": ["Selective Laser Melting"],
+              "requested_comparator": "compare SLM parameter effects on mechanical properties",
               "confidence": 0.88,
               "reason": "the source objectives describe the same mechanical comparison"
             }

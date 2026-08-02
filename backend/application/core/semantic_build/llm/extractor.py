@@ -401,6 +401,7 @@ class CoreLLMStructuredExtractor:
             )
         elif response_model is StructuredPaperSkim:
             request_kwargs["max_completion_tokens"] = _PAPER_SKIM_MAX_COMPLETION_TOKENS
+            request_kwargs["response_format"] = {"type": "json_object"}
         elif response_model is StructuredResearchObjectives:
             request_kwargs["max_completion_tokens"] = (
                 _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS
@@ -422,16 +423,29 @@ class CoreLLMStructuredExtractor:
             attempt_kwargs = dict(request_kwargs)
             attempt_messages = messages
             if attempt:
+                if response_model is StructuredPaperSkim:
+                    retry_instruction = (
+                        "Previous PaperSkim output failed validation: "
+                        f"{_trace_text(last_error, 400)}. Return one compact JSON "
+                        "object with exactly these keys: doc_role, "
+                        "candidate_materials, candidate_processes, "
+                        "candidate_properties, changed_variables, "
+                        "possible_objectives, evidence_density, confidence, and "
+                        "warnings. Remove every other key. Do not output analysis, "
+                        "markdown, or copied input."
+                    )
+                else:
+                    retry_instruction = (
+                        "Previous output was invalid. Return only the smallest valid "
+                        "JSON object matching the schema. Do not explain, repeat the "
+                        "prompt, or include markdown. For finding synthesis, return "
+                        "at most one finding."
+                    )
                 attempt_messages = [
                     *messages,
                     {
                         "role": "user",
-                        "content": (
-                            "Previous output was invalid. Return only the smallest valid "
-                            "JSON object matching the schema. Do not explain, repeat the "
-                            "prompt, or include markdown. For finding synthesis, return "
-                            "at most one finding."
-                        ),
+                        "content": retry_instruction,
                     },
                 ]
                 attempt_kwargs["messages"] = attempt_messages

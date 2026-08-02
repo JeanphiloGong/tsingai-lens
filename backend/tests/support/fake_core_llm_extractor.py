@@ -146,7 +146,11 @@ class FakeCoreLLMStructuredExtractor:
 
     def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         title = str(payload.get("title") or "").strip()
-        profile = payload.get("document_profile") if isinstance(payload.get("document_profile"), dict) else {}
+        profile_hint = (
+            payload.get("profile_hint")
+            if isinstance(payload.get("profile_hint"), dict)
+            else {}
+        )
         headings = payload.get("headings") if isinstance(payload.get("headings"), list) else []
         text_preview = str(payload.get("text_preview") or "")
         table_text = " ".join(
@@ -210,7 +214,7 @@ class FakeCoreLLMStructuredExtractor:
                 f"How does {process_phrase} affect {candidate_properties[0]} of {candidate_materials[0]}?"
             )
 
-        doc_role = str(profile.get("doc_type") or "").strip() or "uncertain"
+        doc_role = str(profile_hint.get("role_hint") or "").strip() or "uncertain"
         if doc_role not in {"experimental", "review", "mixed", "uncertain"}:
             doc_role = "uncertain"
         evidence_density = (

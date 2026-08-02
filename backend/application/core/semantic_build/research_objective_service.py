@@ -1070,7 +1070,6 @@ class ResearchObjectiveService:
                 len(document_figures),
             )
             payload = self._build_paper_skim_payload(
-                collection_id=collection_id,
                 document=document,
                 profile=profiles_by_document_id.get(document.document_id),
                 blocks=document_blocks,
@@ -9557,7 +9556,6 @@ class ResearchObjectiveService:
     def _build_paper_skim_payload(
         self,
         *,
-        collection_id: str,
         document: Any,
         profile: Any,
         blocks: list[Any],
@@ -9576,14 +9574,12 @@ class ResearchObjectiveService:
         if not text_preview:
             text_preview = self._build_text_preview(document, ordered_blocks)
         return {
-            "collection_id": collection_id,
-            "document_id": document.document_id,
             "title": str(document.title or "")[:160],
-            "document_profile": (
+            "profile_hint": (
                 {
-                    "doc_type": profile.doc_type,
-                    "parsing_warnings": list(profile.parsing_warnings)[:2],
-                    "confidence": profile.confidence,
+                    "role_hint": profile.doc_type,
+                    "source_quality_warnings": list(profile.parsing_warnings)[:2],
+                    "role_hint_confidence": profile.confidence,
                 }
                 if profile
                 else {}
@@ -9592,7 +9588,6 @@ class ResearchObjectiveService:
             "headings": headings[:4],
             "table_captions": [
                 {
-                    "table_id": table.table_id,
                     "caption_text": str(table.caption_text or "")[:160],
                     "heading_path": str(table.heading_path or "")[:120],
                     "column_headers": [
@@ -9605,7 +9600,6 @@ class ResearchObjectiveService:
             ],
             "figure_captions": [
                 {
-                    "figure_id": figure.figure_id,
                     "caption_text": str(figure.caption_text or "")[:160],
                     "heading_path": str(figure.heading_path or "")[:120],
                 }

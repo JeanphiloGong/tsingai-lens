@@ -667,18 +667,55 @@ class StructuredTableMatrixRepair(_StrictModel):
         return _normalize_list_container(value)
 
 
+PaperSkimWarning = Literal[
+    "classification_uncertain",
+    "insufficient_content",
+    "modeling_only",
+    "objective_uncertain",
+    "profile_content_conflict",
+    "review_only",
+]
+
+
 class StructuredPaperSkim(_StrictModel):
-    doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
-        "uncertain"
+    doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = Field(
+        default="uncertain",
+        description="Coarse role of this paper based on the supplied compact content.",
     )
-    candidate_materials: list[str] = Field(default_factory=list)
-    candidate_processes: list[str] = Field(default_factory=list)
-    candidate_properties: list[str] = Field(default_factory=list)
-    changed_variables: list[str] = Field(default_factory=list)
-    possible_objectives: list[str] = Field(default_factory=list)
-    evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
-    confidence: float = 0.0
-    warnings: list[str] = Field(default_factory=list)
+    candidate_materials: list[str] = Field(
+        default_factory=list,
+        description="Explicitly named material systems relevant to candidate questions.",
+    )
+    candidate_processes: list[str] = Field(
+        default_factory=list,
+        description="Explicit process families relevant to candidate questions.",
+    )
+    candidate_properties: list[str] = Field(
+        default_factory=list,
+        description="Concrete measured or evaluated properties named in the input.",
+    )
+    changed_variables: list[str] = Field(
+        default_factory=list,
+        description="Variables explicitly varied or compared in this paper.",
+    )
+    possible_objectives: list[str] = Field(
+        default_factory=list,
+        description="Concise question-shaped process-property comparisons supported by the input.",
+    )
+    evidence_density: Literal["high", "medium", "low", "unknown"] = Field(
+        default="unknown",
+        description="Coverage of the proposed research map in the supplied compact content.",
+    )
+    confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Confidence in the complete PaperSkim, from 0 to 1.",
+    )
+    warnings: list[PaperSkimWarning] = Field(
+        default_factory=list,
+        description="Applicable bounded warning codes; empty when no warning applies.",
+    )
 
     @field_validator(
         "candidate_materials",

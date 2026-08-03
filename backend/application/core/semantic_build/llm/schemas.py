@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from functools import lru_cache
 from typing import Any, Literal
 
 from pydantic import (
@@ -45,12 +46,32 @@ _OBJECTIVE_CLAUSE_BOUNDARY_PATTERN = re.compile(
 )
 _OBJECTIVE_ACRONYM_STOP_WORDS = {"a", "an", "and", "for", "of", "the", "to"}
 _OBJECTIVE_ROLE_FILLER_WORDS = {"a", "an", "and", "for", "of", "the", "to"}
-_OBJECTIVE_SCOPE_FILLER_WORDS = {"in", "processed"}
+_OBJECTIVE_SCOPE_CONNECTOR_WORDS = {
+    "after",
+    "at",
+    "by",
+    "during",
+    "for",
+    "in",
+    "of",
+    "through",
+    "under",
+    "using",
+    "via",
+    "with",
+}
+_OBJECTIVE_SCOPE_FILLER_WORDS = {
+    "fabricated",
+    "manufactured",
+    "processed",
+    "produced",
+}
 _OBJECTIVE_TOKEN_NORMALIZATIONS = {
     "analyses": "analysis",
     "axes": "axis",
     "gases": "gas",
 }
+_OBJECTIVE_ROLE_SEARCH_STATE_LIMIT = 4096
 
 _METHOD_FACT_METHOD_ROLES = {"process", "characterization", "test"}
 _TEXT_WINDOW_METHOD_ROLES = _METHOD_FACT_METHOD_ROLES | {"other"}
@@ -290,9 +311,10 @@ def _role_matches_declared_axes(
     declared_scope: list[str] | None = None,
 ) -> bool:
     role_tokens = _normalize_objective_axis_tokens(question_role)
-    spans_by_axis = [
-        _axis_role_spans(axis, question_role, role_tokens) for axis in axes
-    ]
+    spans_by_axis = sorted(
+        [_axis_role_spans(axis, question_role, role_tokens) for axis in axes],
+        key=len,
+    )
     if not role_tokens or any(not spans for spans in spans_by_axis):
         return False
     scope_indexes = frozenset(
@@ -301,23 +323,55 @@ def _role_matches_declared_axes(
         for start, end in _axis_role_spans(scope, question_role, role_tokens)
         for index in range(start, end)
     )
-    scope_filler_indexes = frozenset(
-        index
-        for index, token in enumerate(role_tokens)
-        if token in _OBJECTIVE_SCOPE_FILLER_WORDS
-        and (index - 1 in scope_indexes or index + 1 in scope_indexes)
-    )
 
+    search_state_count = 0
+
+    @lru_cache(maxsize=None)
     def covers_role(axis_index: int, covered_indexes: frozenset[int]) -> bool:
+        nonlocal search_state_count
+        if search_state_count >= _OBJECTIVE_ROLE_SEARCH_STATE_LIMIT:
+            return False
+        search_state_count += 1
         if axis_index == len(spans_by_axis):
-            return all(
-                index in covered_indexes
-                or index in scope_indexes
-                or index in scope_filler_indexes
-                or token in _OBJECTIVE_ROLE_FILLER_WORDS
+            uncovered = tuple(
+                index
                 for index, token in enumerate(role_tokens)
+                if index not in covered_indexes
+                and token not in _OBJECTIVE_ROLE_FILLER_WORDS
+            )
+            if not uncovered:
+                return True
+            if not declared_scope or not covered_indexes:
+                return False
+            last_axis_index = max(covered_indexes)
+            if any(index <= last_axis_index for index in uncovered):
+                return False
+            trailing_scope_indexes = tuple(
+                index for index in scope_indexes if index > last_axis_index
+            )
+            if not trailing_scope_indexes:
+                return False
+            first_scope_index = min(trailing_scope_indexes)
+            connector_indexes = tuple(
+                index
+                for index in range(last_axis_index + 1, first_scope_index + 1)
+                if role_tokens[index] in _OBJECTIVE_SCOPE_CONNECTOR_WORDS
+            )
+            if not connector_indexes:
+                return False
+            return all(
+                index in scope_indexes
+                or token in _OBJECTIVE_ROLE_FILLER_WORDS
+                or token in _OBJECTIVE_SCOPE_CONNECTOR_WORDS
+                or token in _OBJECTIVE_SCOPE_FILLER_WORDS
+                for index, token in enumerate(
+                    role_tokens[last_axis_index + 1 :],
+                    start=last_axis_index + 1,
+                )
             )
         for start, end in spans_by_axis[axis_index]:
+            if search_state_count >= _OBJECTIVE_ROLE_SEARCH_STATE_LIMIT:
+                return False
             span_indexes = frozenset(range(start, end))
             if covered_indexes.isdisjoint(span_indexes) and covers_role(
                 axis_index + 1,
@@ -385,6 +439,24 @@ def _validate_objective_question_roles(
     outcomes: list[str],
     declared_scope: list[str],
 ) -> None:
+    role_keys: dict[str, set[tuple[str, ...]]] = {}
+    for role_name, role_axes in (("variables", variables), ("outcomes", outcomes)):
+        seen_keys: set[tuple[str, ...]] = set()
+        for axis in role_axes:
+            axis_key = _normalize_objective_axis_tokens(axis)
+            if axis_key in seen_keys:
+                raise ValueError(
+                    "question roles do not align; duplicate axis in "
+                    f"{role_name}: {axis}"
+                )
+            seen_keys.add(axis_key)
+        role_keys[role_name] = seen_keys
+    if role_keys["variables"] & role_keys["outcomes"]:
+        raise ValueError(
+            "question roles do not align; the same axis cannot appear in both "
+            "variables and outcomes"
+        )
+
     role_candidates = _objective_question_roles(question)
     if not role_candidates:
         raise ValueError("question roles must use a supported active variable-to-outcome form")

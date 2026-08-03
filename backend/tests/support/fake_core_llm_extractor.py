@@ -258,6 +258,18 @@ class FakeCoreLLMStructuredExtractor:
                 continue
             seen_questions.add(key)
             document_id = str(skim.get("document_id") or "").strip()
+            outcome_match = re.fullmatch(
+                r"How does .+? affect (.+?) of .+\?",
+                candidate_question,
+                flags=re.IGNORECASE,
+            )
+            candidate_outcomes = [
+                str(item)
+                for item in skim.get("candidate_properties", [])
+                if str(item).strip()
+            ]
+            if not candidate_outcomes and outcome_match:
+                candidate_outcomes = [outcome_match.group(1).strip()]
             objectives.append(
                 StructuredResearchObjective(
                     question=candidate_question,
@@ -271,11 +283,7 @@ class FakeCoreLLMStructuredExtractor:
                         for item in skim.get("candidate_processes", [])
                         if str(item).strip()
                     ],
-                    outcomes=[
-                        str(item)
-                        for item in skim.get("candidate_properties", [])
-                        if str(item).strip()
-                    ],
+                    outcomes=candidate_outcomes,
                     requested_comparator="compare process or treatment effects across papers",
                     seed_document_ids=[document_id] if document_id else [],
                     excluded_document_ids=[

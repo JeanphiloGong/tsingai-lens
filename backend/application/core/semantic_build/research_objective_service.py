@@ -365,7 +365,7 @@ _SKIM_MODEL_TEXT_PREVIEW_CHARS = 400
 _SKIM_HEADING_LIMIT = 16
 _SKIM_CAPTION_LIMIT = 12
 _DISCOVERY_AXIS_VALUE_LIMIT = 2
-_DISCOVERY_OBJECTIVE_LIMIT = 1
+_DISCOVERY_OBJECTIVE_LIMIT = 3
 _DISCOVERY_TEXT_VALUE_CHARS = 80
 _DISCOVERY_OBJECTIVE_TEXT_CHARS = 180
 _FRAME_SECTION_SNIPPET_LIMIT = 12
@@ -1135,22 +1135,59 @@ class ResearchObjectiveService:
         )
         parsed_objectives = extractor.discover_research_objectives(objective_payload)
         discovered_objective_count = len(parsed_objectives.objectives)
-        research_objectives = tuple(
-            objective
-            for objective in (
-                self._canonicalize_objective_document_ids(
-                    ResearchObjective.from_mapping(
-                        {
-                            **item.model_dump(),
-                            "collection_id": collection_id,
-                        }
-                    ),
-                    documents=artifacts.documents,
-                )
-                for item in parsed_objectives.objectives
+        discovery_skims = {
+            str(skim["document_id"]): skim for skim in objective_payload["paper_skims"]
+        }
+        accepted_objectives: list[ResearchObjective] = []
+        for item in parsed_objectives.objectives:
+            objective = self._canonicalize_objective_document_ids(
+                ResearchObjective.from_mapping(
+                    {
+                        **item.model_dump(),
+                        "collection_id": collection_id,
+                    }
+                ),
+                documents=artifacts.documents,
             )
-            if is_question_shaped_objective(objective)
-        )
+            if not is_question_shaped_objective(objective):
+                continue
+            matching_document_ids: set[str] = set()
+            for document_id, skim in discovery_skims.items():
+                for candidate_question in skim["possible_objectives"]:
+                    try:
+                        StructuredResearchObjective.model_validate(
+                            {
+                                "question": candidate_question,
+                                "material_scope": [
+                                    *objective.material_scope,
+                                    *skim["candidate_materials"],
+                                ],
+                                "variables": objective.variables,
+                                "outcomes": objective.outcomes,
+                                "constraints": [
+                                    *objective.constraints,
+                                    *skim["candidate_processes"],
+                                ],
+                            }
+                        )
+                    except ValidationError:
+                        continue
+                    matching_document_ids.add(document_id)
+                    break
+            seed_document_ids = set(objective.seed_document_ids)
+            if not seed_document_ids or not seed_document_ids.issubset(
+                matching_document_ids
+            ):
+                logger.warning(
+                    "Research objective rejected because axes do not come from one "
+                    "seed candidate collection_id=%s question=%s seed_document_ids=%s",
+                    collection_id,
+                    objective.question,
+                    sorted(seed_document_ids),
+                )
+                continue
+            accepted_objectives.append(objective)
+        research_objectives = tuple(accepted_objectives)
         research_objectives = self._canonicalize_research_objective_axes_with_llm(
             collection_id=collection_id,
             extractor=extractor,
@@ -1163,6 +1200,14 @@ class ResearchObjectiveService:
             paper_skims=tuple(paper_skims),
             objectives=research_objectives,
         )
+        for objective in research_objectives:
+            StructuredResearchObjective.model_validate(
+                {
+                    key: value
+                    for key, value in objective.to_record().items()
+                    if key in StructuredResearchObjective.model_fields
+                }
+            )
         research_objectives = self._dedupe_research_objectives(research_objectives)
         logger.info(
             "Research objective discovery finished collection_id=%s paper_skim_count=%s discovered_objective_count=%s accepted_objective_count=%s",
@@ -1184,14 +1229,19 @@ class ResearchObjectiveService:
         def values(
             items: tuple[str, ...],
             limit: int,
-            *,
-            text_chars: int = _DISCOVERY_TEXT_VALUE_CHARS,
         ) -> list[str]:
             return [
-                str(item).strip()[:text_chars]
+                str(item).strip()[:_DISCOVERY_TEXT_VALUE_CHARS]
                 for item in items[:limit]
                 if str(item).strip()
             ]
+
+        possible_objectives = [
+            text
+            for item in skim.possible_objectives
+            if (text := str(item).strip())
+            and len(text) <= _DISCOVERY_OBJECTIVE_TEXT_CHARS
+        ][:_DISCOVERY_OBJECTIVE_LIMIT]
 
         return {
             "document_id": skim.document_id,
@@ -1204,11 +1254,7 @@ class ResearchObjectiveService:
                 skim.candidate_processes,
                 _DISCOVERY_AXIS_VALUE_LIMIT,
             ),
-            "possible_objectives": values(
-                skim.possible_objectives,
-                _DISCOVERY_OBJECTIVE_LIMIT,
-                text_chars=_DISCOVERY_OBJECTIVE_TEXT_CHARS,
-            ),
+            "possible_objectives": possible_objectives,
         }
 
     def _canonicalize_objective_document_ids(
@@ -7478,10 +7524,27 @@ class ResearchObjectiveService:
                 collection_id,
             )
             return objectives
-        return tuple(
+        canonicalized = tuple(
             self._apply_axis_canonicalization(objective, axis_mapping)
             for objective in objectives
         )
+        try:
+            for objective in canonicalized:
+                StructuredResearchObjective.model_validate(
+                    {
+                        key: value
+                        for key, value in objective.to_record().items()
+                        if key in StructuredResearchObjective.model_fields
+                    }
+                )
+        except ValidationError:
+            logger.warning(
+                "Research objective axis canonicalization broke question roles; "
+                "using original axes collection_id=%s",
+                collection_id,
+            )
+            return objectives
+        return canonicalized
 
     def _build_axis_canonicalization_candidates(
         self,

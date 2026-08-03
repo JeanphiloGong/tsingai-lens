@@ -305,6 +305,106 @@ def test_structured_research_objective_does_not_hide_source_axis_as_scope():
         )
 
 
+def test_structured_research_objective_does_not_hide_result_axis_as_scope():
+    with pytest.raises(ValidationError, match="result side"):
+        StructuredResearchObjective.model_validate(
+            {
+                "question": (
+                    "How does heat treatment affect yield strength and elongation?"
+                ),
+                "variables": ["heat treatment"],
+                "outcomes": ["yield strength"],
+                "constraints": ["elongation"],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("question", "constraint"),
+    [
+        (
+            "How does aging affect yield strength at room temperature?",
+            "room temperature",
+        ),
+        (
+            "How does aging affect yield strength under tensile testing?",
+            "tensile testing",
+        ),
+        (
+            "How does aging affect yield strength after solution treatment?",
+            "solution treatment",
+        ),
+        (
+            "How does aging affect yield strength during tensile testing?",
+            "tensile testing",
+        ),
+        (
+            "How does aging affect yield strength with argon shielding?",
+            "argon shielding",
+        ),
+        (
+            "How does aging affect yield strength using ASTM E8 testing?",
+            "ASTM E8 testing",
+        ),
+        (
+            "How does aging affect yield strength for room temperature testing?",
+            "room temperature testing",
+        ),
+        (
+            "How does aging affect yield strength via tensile testing?",
+            "tensile testing",
+        ),
+        (
+            "How does aging affect yield strength by tensile testing?",
+            "tensile testing",
+        ),
+        (
+            "How does aging affect yield strength through tensile testing?",
+            "tensile testing",
+        ),
+    ],
+)
+def test_structured_research_objective_allows_trailing_declared_test_scope(
+    question,
+    constraint,
+):
+    objective = StructuredResearchObjective.model_validate(
+        {
+            "question": question,
+            "variables": ["aging"],
+            "outcomes": ["yield strength"],
+            "constraints": [constraint],
+        }
+    )
+
+    assert objective.constraints == [constraint]
+
+
+def test_structured_research_objective_rejects_axis_in_both_roles():
+    with pytest.raises(ValidationError, match="both variables and outcomes"):
+        StructuredResearchObjective.model_validate(
+            {
+                "question": (
+                    "How do porosity and density affect density and roughness "
+                    "and porosity?"
+                ),
+                "variables": ["porosity", "density"],
+                "outcomes": ["density", "roughness", "porosity"],
+            }
+        )
+
+
+def test_structured_research_objective_rejects_duplicate_axes_before_assignment():
+    with pytest.raises(ValidationError, match="duplicate axis"):
+        StructuredResearchObjective.model_validate(
+            {
+                "question": "How do porosity and porosity affect density?",
+                "variables": ["porosity", "porosity"],
+                "outcomes": ["density"],
+            }
+        )
+
+
 def test_research_objective_discovery_contract_bounds_model_output():
     objective = {
         "question": "How does heat treatment affect yield strength?",
@@ -714,7 +814,6 @@ def test_finding_synthesis_prompt_requires_specific_single_factor_result():
     assert "Never return a generic restatement" in user_prompt
 
 
-
 def test_core_llm_extractor_allows_explicit_json_text_mode(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "json_text")
     client = _FakeOpenAIClient(
@@ -865,6 +964,64 @@ def test_core_llm_extractor_retries_reversed_research_objective_roles():
     assert "question roles" in repair_prompt
     assert "delete the missing label from the list" in repair_prompt
     assert "put the full missing label verbatim" in repair_prompt
+
+
+def test_core_llm_extractor_preserves_valid_objectives_during_role_repair():
+    valid_objective = {
+        "question": "How does heat treatment affect yield strength?",
+        "variables": ["heat treatment"],
+        "outcomes": ["yield strength"],
+    }
+    invalid_objective = {
+        "question": "How does porosity affect mechanical properties?",
+        "variables": ["laser power"],
+        "outcomes": ["porosity"],
+    }
+    repaired_objective = {
+        "question": "How does porosity affect mechanical properties?",
+        "variables": ["porosity"],
+        "outcomes": ["mechanical properties"],
+    }
+    first_response = json.dumps(
+        {"objectives": [valid_objective, invalid_objective]}
+    )
+    second_response = json.dumps(
+        {
+            "objectives": [
+                valid_objective,
+                invalid_objective,
+                repaired_objective,
+            ],
+            "`objectives.1`": "still invalid",
+        }
+    )
+    client = _FakeOpenAIClient(first_response)
+    responses = iter((first_response, second_response))
+
+    def create(**kwargs):  # noqa: ANN003
+        client.chat.completions.calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content=next(responses)))
+            ]
+        )
+
+    client.chat.completions.create = create
+    extractor = _json_text_extractor(client)
+
+    objectives = extractor.discover_research_objectives(
+        {"collection_id": "col-1", "paper_skims": []}
+    )
+
+    assert [objective.model_dump() for objective in objectives.objectives] == [
+        StructuredResearchObjective.model_validate(valid_objective).model_dump(),
+        StructuredResearchObjective.model_validate(repaired_objective).model_dump(),
+    ]
+    retry_messages = client.chat.completions.calls[1]["messages"]
+    assert retry_messages[-2] == {"role": "assistant", "content": first_response}
+    assert "Return corrections only for invalid objectives" in retry_messages[-1][
+        "content"
+    ]
 
 
 def test_core_llm_extractor_rejects_repeated_reversed_research_objective_roles():

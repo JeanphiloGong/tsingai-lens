@@ -1357,7 +1357,8 @@ class _ObjectiveExtractor:
             candidate_properties=["corrosion"],
             changed_variables=["heat treatment temperature"],
             possible_objectives=[
-                "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?"
+                "How does heat treatment affect corrosion resistance of LPBF 316L "
+                "stainless steel?"
             ],
             evidence_density="high",
             confidence=0.91,
@@ -1372,10 +1373,10 @@ class _ObjectiveExtractor:
         return StructuredResearchObjectives(
             objectives=[
                 StructuredResearchObjective(
-                    question="How does heat treatment affect corrosion?",
+                    question="How does heat treatment affect corrosion resistance?",
                     material_scope=["316L stainless steel"],
                     variables=["heat treatment"],
-                    outcomes=["corrosion"],
+                    outcomes=["corrosion resistance"],
                     constraints=["LPBF"],
                     requested_comparator="compare as-built and heat-treated corrosion behavior",
                     seed_document_ids=["paper-1"],
@@ -1740,8 +1741,8 @@ class _BroadObjectiveExtractor(_ObjectiveExtractor):
                 "scanning speed",
             ],
             possible_objectives=[
-                "What is the relationship between SLM processing parameters "
-                "and mechanical properties of 316L stainless steel?"
+                "What is the relationship between processing parameters "
+                "and mechanical properties?"
             ],
             evidence_density="high",
             confidence=0.91,
@@ -1775,6 +1776,25 @@ class _BroadObjectiveExtractor(_ObjectiveExtractor):
 
 
 class _DuplicateMechanicalObjectiveExtractor(_BroadObjectiveExtractor):
+    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        self.skim_payloads.append(payload)
+        return StructuredPaperSkim(
+            doc_role="experimental",
+            candidate_materials=["316L stainless steel"],
+            candidate_processes=["Selective Laser Melting"],
+            possible_objectives=[
+                "How do energy density, scanning strategy, and scanning speed "
+                "affect densification and microstructure?",
+                "What are the effects of energy density and scanning speed on "
+                "yield strength, ultimate tensile strength, elongation, and "
+                "microhardness?",
+                "How does scanning strategy influence yield strength and "
+                "microhardness?",
+            ],
+            evidence_density="high",
+            confidence=0.91,
+        )
+
     def discover_research_objectives(
         self,
         payload: dict[str, Any],
@@ -1958,7 +1978,13 @@ class _CanonicalizingAxisExtractor(_DuplicateMechanicalObjectiveExtractor):
                 "scanning speed",
             ],
             possible_objectives=[
-                "How do SLM processing parameters affect 316L stainless steel?"
+                "How do energy density, scanning strategy, and scanning speed "
+                "affect densification and microstructure?",
+                "What are the effects of energy density and scanning speed on "
+                "yield strength, ultimate tensile strength, elongation, and "
+                "microhardness?",
+                "How does scanning strategy influence yield strength and "
+                "microhardness?",
             ],
             evidence_density="high",
             confidence=0.91,
@@ -2109,6 +2135,21 @@ class _InventedAxisMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
 
 
 class _CrossObjectiveAxisMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
+    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        self.skim_payloads.append(payload)
+        return StructuredPaperSkim(
+            doc_role="experimental",
+            candidate_materials=["316L stainless steel"],
+            candidate_processes=["Selective Laser Melting"],
+            possible_objectives=[
+                "How do laser power and scanning speed affect yield strength and "
+                "elongation?",
+                "How does porosity influence corrosion potential and "
+                "pitting potential?",
+            ],
+            evidence_density="high",
+        )
+
     def discover_research_objectives(
         self,
         payload: dict[str, Any],
@@ -2182,6 +2223,17 @@ class _CrossObjectiveAxisMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
 
 
 class _OppositeDirectionMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
+    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        self.skim_payloads.append(payload)
+        return StructuredPaperSkim(
+            doc_role="experimental",
+            possible_objectives=[
+                "How does porosity affect density and roughness?",
+                "How does density affect porosity and roughness?",
+            ],
+            evidence_density="high",
+        )
+
     def discover_research_objectives(
         self,
         payload: dict[str, Any],
@@ -2223,6 +2275,91 @@ class _OppositeDirectionMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
                     outcomes=["porosity"],
                     reason="invalid opposite-direction merge",
                 )
+            ]
+        )
+
+
+class _CrossCandidateAxisExtractor(_ObjectiveExtractor):
+    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        self.skim_payloads.append(payload)
+        return StructuredPaperSkim(
+            doc_role="experimental",
+            possible_objectives=[
+                "How does laser power affect porosity?",
+                "How does heat treatment affect corrosion resistance?",
+            ],
+            evidence_density="high",
+        )
+
+    def discover_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchObjectives:
+        self.discovery_payloads.append(payload)
+        return StructuredResearchObjectives(
+            objectives=[
+                StructuredResearchObjective(
+                    question="How does laser power affect corrosion resistance?",
+                    variables=["laser power"],
+                    outcomes=["corrosion resistance"],
+                    seed_document_ids=["paper-1"],
+                )
+            ]
+        )
+
+
+class _AxisQuestionMismatchExtractor(_ObjectiveExtractor):
+    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        self.skim_payloads.append(payload)
+        return StructuredPaperSkim(
+            doc_role="experimental",
+            candidate_materials=["316L stainless steel"],
+            possible_objectives=["How does scan strategy affect porosity?"],
+            evidence_density="high",
+        )
+
+    def discover_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchObjectives:
+        self.discovery_payloads.append(payload)
+        return StructuredResearchObjectives(
+            objectives=[
+                StructuredResearchObjective(
+                    question="How does scan strategy affect porosity?",
+                    material_scope=["316L stainless steel"],
+                    variables=["scan strategy"],
+                    outcomes=["porosity"],
+                    seed_document_ids=["paper-1"],
+                )
+            ]
+        )
+
+    def canonicalize_research_objective_axes(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredAxisCanonicalizationPlan:
+        self.canonicalization_payloads.append(payload)
+        return StructuredAxisCanonicalizationPlan(
+            axis_groups=[
+                StructuredAxisCanonicalizationGroup(
+                    axis_type="material",
+                    canonical="316L stainless steel",
+                    aliases=["316L stainless steel"],
+                    reason="unchanged",
+                ),
+                StructuredAxisCanonicalizationGroup(
+                    axis_type="variable",
+                    canonical="scanning strategy",
+                    aliases=["scan strategy"],
+                    reason="canonicalized spelling",
+                ),
+                StructuredAxisCanonicalizationGroup(
+                    axis_type="outcome",
+                    canonical="porosity",
+                    aliases=["porosity"],
+                    reason="unchanged",
+                ),
             ]
         )
 
@@ -2501,10 +2638,10 @@ class _DuplicateObjectiveIdExtractor(_ObjectiveExtractor):
     ) -> StructuredResearchObjectives:
         self.discovery_payloads.append(payload)
         objective = StructuredResearchObjective(
-            question="How does heat treatment affect corrosion?",
+            question="How does heat treatment affect corrosion resistance?",
             material_scope=["316L stainless steel"],
             variables=["heat treatment"],
-            outcomes=["corrosion"],
+            outcomes=["corrosion resistance"],
             constraints=["LPBF"],
             requested_comparator="compare heat treatment effects on corrosion",
             seed_document_ids=["paper-1"],
@@ -4426,6 +4563,109 @@ def test_real_ved_process_and_defect_tables_form_joint_comparison(tmp_path):
     }
 
 
+def test_real_p001_density_table_retains_complete_changed_factor_tuple(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-p001-density",
+            "question": "How does energy density affect densification?",
+            "variables": ["energy density"],
+            "outcomes": ["densification"],
+        }
+    )
+    table = SimpleNamespace(
+        table_id="table-p001-1",
+        document_id="paper-p001",
+        caption_text="SLM processing parameters along with relative densities.",
+        heading_path="Materials and methods",
+        page=2,
+        column_headers=(
+            "Condition number",
+            "Sample number",
+            "Hatch space (mm)",
+            "Scan strategy",
+            "Scanning speed (mm/s)",
+            "Energy density (J/mm 3 )",
+            "Relative density",
+        ),
+        table_matrix=(
+            (
+                "Condition number",
+                "Sample number",
+                "Hatch space (mm)",
+                "Scan strategy",
+                "Scanning speed (mm/s)",
+                "Energy density (J/mm 3 )",
+                "Relative density",
+            ),
+            ("1", "1", "0.114", "A", "0.25", "70", "95.4"),
+            ("3", "6", "0.111", "B", "0.12", "150", "95.7"),
+        ),
+        row_count=3,
+        col_count=7,
+    )
+    hints = service._build_objective_table_routing_hints(
+        objective,
+        tables=(table,),
+    )
+    routes: list[EvidenceCandidate] = []
+    service._append_objective_context_hint_routes(
+        routes=routes,
+        seen=set(),
+        frame=PaperAnalysisFrame.from_mapping(
+            {
+                "objective_id": objective.objective_id,
+                "document_id": "paper-p001",
+                "relevance": "high",
+                "paper_role": "primary_experiment",
+                "relevant_tables": [table.table_id],
+            }
+        ),
+        objective_context=objective,
+        routing_hints=hints,
+        candidate_by_key={
+            ("table", table.table_id): {
+                "source_kind": "table",
+                "source_ref": table.table_id,
+                "frame_status": "relevant",
+                "table_schema": service._build_route_table_schema(table),
+            }
+        },
+    )
+    units = tuple(
+        ExtractedEvidenceDraft.from_mapping(record)
+        for route in routes
+        for record in service._objective_table_matrix_evidence_records(
+            route=route,
+            source=service._build_objective_route_source_payload(
+                route=route,
+                blocks=[],
+                tables=[table],
+            ),
+            objective_context=objective,
+        )
+    )
+    comparisons = service._build_objective_pairwise_comparison_units(
+        service._bind_objective_result_process_context(units),
+        objectives=(objective,),
+    )
+
+    assert len(comparisons) == 1
+    comparison = comparisons[0]
+    assert comparison.attribution_scope == "joint_effect"
+    assert {
+        service._normalize_property_label(item.name)
+        for item in comparison.changed_variables
+    } == {
+        "hatch space",
+        "scan strategy",
+        "scanning speed",
+        "energy density",
+    }
+
+
 def test_research_objective_service_does_not_route_single_letter_acronym_tables(
     tmp_path,
 ):
@@ -4463,6 +4703,30 @@ def test_research_objective_service_does_not_route_single_letter_acronym_tables(
     )
 
     assert hints == ()
+
+
+def test_objective_discovery_skim_keeps_three_complete_candidate_questions():
+    candidates = (
+        "How does " + "very long processing condition " * 8 + "affect porosity?",
+        "How does laser power affect porosity?",
+        "How does heat treatment affect corrosion resistance?",
+        "How does aging affect yield strength?",
+        "How does scanning speed affect density?",
+    )
+    skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "possible_objectives": candidates,
+        }
+    )
+
+    discovery_skim = _ResearchObjectiveService._build_objective_discovery_skim(skim)
+
+    assert discovery_skim["possible_objectives"] == list(candidates[1:4])
+    assert all(
+        candidate.endswith("?")
+        for candidate in discovery_skim["possible_objectives"]
+    )
 
 
 def test_research_objective_service_treats_energy_density_only_table_as_condition(
@@ -6560,6 +6824,19 @@ def test_research_objective_service_canonicalizes_axis_aliases_with_llm(
     assert "scan strategy" not in all_variables
 
 
+def test_research_objective_service_rejects_axis_canonicalization_that_breaks_question(
+    tmp_path,
+):
+    objectives = _build_duplicate_paper_objectives(
+        tmp_path,
+        _AxisQuestionMismatchExtractor(),
+    )
+
+    assert len(objectives) == 1
+    assert objectives[0].variables == ("scan strategy",)
+    assert objectives[0].question == "How does scan strategy affect porosity?"
+
+
 def test_research_objective_service_falls_back_when_axis_plan_drops_axes(
     tmp_path,
 ):
@@ -6670,6 +6947,17 @@ def test_research_objective_service_rejects_completed_opposite_direction_merge(
     }
 
 
+def test_research_objective_service_rejects_axes_combined_across_skim_candidates(
+    tmp_path,
+):
+    objectives = _build_duplicate_paper_objectives(
+        tmp_path,
+        _CrossCandidateAxisExtractor(),
+    )
+
+    assert objectives == ()
+
+
 def test_research_objective_service_does_not_global_fill_unmatched_seed_axes(
     tmp_path,
 ):
@@ -6678,14 +6966,10 @@ def test_research_objective_service_does_not_global_fill_unmatched_seed_axes(
         _UnmatchedSeedObjectiveExtractor(),
     )
 
-    assert len(objectives) == 1
-    objective = objectives[0]
-    assert objective.variables == ("heat treatment",)
-    assert objective.outcomes == ("mechanical properties",)
-    assert objective.constraints == ("Selective Laser Melting",)
+    assert objectives == ()
 
 
-def test_research_objective_service_keeps_candidate_definition_as_source_of_truth(
+def test_research_objective_service_rejects_overbroad_candidate_definition(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
@@ -6730,9 +7014,7 @@ def test_research_objective_service_keeps_candidate_definition_as_source_of_trut
     )
 
     assert service.objective_repository.list_objectives(collection_id) == objectives
-    assert objectives[0].confirmation_status == "candidate"
-    assert objectives[0].active_analysis_version is None
-    assert objectives[0].published_analysis_version is None
+    assert objectives == ()
 
 
 def test_research_objective_service_rejects_merge_with_disjoint_outcomes(
@@ -6767,7 +7049,7 @@ def test_research_objective_service_rejects_merge_that_drops_variable_intent(
     )
 
 
-def test_research_objective_service_preserves_single_mixed_property_objective(
+def test_research_objective_service_rejects_single_cross_candidate_objective(
     tmp_path,
 ):
     objectives = _build_duplicate_paper_objectives(
@@ -6775,15 +7057,7 @@ def test_research_objective_service_preserves_single_mixed_property_objective(
         _SingleMixedObjectiveExtractor(),
     )
 
-    assert len(objectives) == 1
-    assert objectives[0].outcomes == (
-        "densification",
-        "microstructure",
-        "yield strength",
-        "ultimate tensile strength",
-        "elongation",
-        "microhardness",
-    )
+    assert objectives == ()
 
 
 def test_research_objective_service_dedupes_repeated_objective_ids_before_persist(

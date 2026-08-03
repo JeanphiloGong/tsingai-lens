@@ -1,0 +1,76 @@
+{
+  "schema_version": "objective_finding_material_acceptance.v1",
+  "documents": [
+    {"paper_id": "P001", "sha256": "0c69bbe57c2dbdc922074d9eea02717287f3ae125990f2e085fceb26ebc022fb"},
+    {"paper_id": "P002", "sha256": "be2bd13f84929e25401a1df26feb4fa60e71a4b1e4f2623fd159ef07ebd1bf25"},
+    {"paper_id": "P003", "sha256": "c08a511b3d727e88d9d214839736dedb02c2930f3c63f0151ebc050a7b2440da"},
+    {"paper_id": "P004", "sha256": "b9a872c792dd7a441d69efdce0b0316427717e6615547d56aa771695928a52e7"},
+    {"paper_id": "P005", "sha256": "4deff818def42d0c1648888219405cec9d9ece47003c77b590aff73bfab19066"},
+    {"paper_id": "P006", "sha256": "644527a024dc1ff2171d93451a99f8d8cbfe6d51dddd4599729f707b7599d6f5"}
+  ],
+  "required_review_statuses": ["correct", "partial", "incorrect"],
+  "objectives": [
+    {
+      "key": "preheating_microstructure",
+      "question_term_groups": [["preheat", "build platform"]],
+      "expected_term_groups": [["preheat", "build platform"], ["microstructure", "grain", "dislocation"]]
+    },
+    {
+      "key": "heat_treatment_microstructure",
+      "question_term_groups": [["heat treatment", "hip"]],
+      "expected_term_groups": [["heat treatment", "hip"], ["density", "microstructure"]]
+    },
+    {
+      "key": "porosity_mechanical_properties",
+      "question_term_groups": [["porosity", "pore"], ["mechanical properties"]],
+      "expected_term_groups": [["porosity", "pore"], ["yield strength", "elongation", "ductility", "mechanical"]]
+    },
+    {
+      "key": "scan_orientation_strength",
+      "question_term_groups": [["orientation", "rotation angle"]],
+      "expected_term_groups": [["orientation", "rotation angle"], ["yield strength"]]
+    },
+    {
+      "key": "energy_density_relative_density",
+      "question_term_groups": [["energy density"], ["relative density"]],
+      "expected_term_groups": [["energy density", "ved"], ["relative density"]]
+    },
+    {
+      "key": "energy_density_defect_structure",
+      "question_term_groups": [["energy density", "ved"], ["defect structure"]],
+      "expected_term_groups": [["energy density", "ved"], ["defect", "porosity", "pore"]]
+    }
+  ],
+  "failure_modes": {
+    "coupled_variables": {
+      "changed_variables": [
+        {"name": "laser power", "baseline_value": 160, "target_value": 220},
+        {"name": "scan speed", "baseline_value": 875, "target_value": 725},
+        {"name": "volumetric energy density", "baseline_value": 50.8, "target_value": 84.3}
+      ],
+      "incorrect_finding_factors": ["volumetric energy density"]
+    },
+    "sample_state_confounding": {
+      "source_excerpt": "VED changed from 70 to 100 when the as-SLM sample was compared with the HIP-SLM sample; relative density increased to 99.6%.",
+      "changed_variables": [{"name": "volumetric energy density", "baseline_value": 70, "target_value": 100}]
+    },
+    "wrong_value_binding": {
+      "source_text": "Specimen | VED | Elongation\nas-SLM(140/100) | 389 | 40.8\nas-SLM(100/100) | 278 | 28.9",
+      "rows": [["Specimen", "VED", "Elongation"], ["as-SLM(140/100)", "389", "40.8"], ["as-SLM(100/100)", "278", "28.9"]],
+      "baseline_label": "as-SLM(100/100)",
+      "target_label": "as-SLM(140/100)",
+      "incorrect_baseline_value": 389,
+      "incorrect_target_value": 278,
+      "target_result_value": 40.8
+    },
+    "paper_association_cross_causality": {
+      "evidence_attribution_scope": "association_only",
+      "incorrect_finding_assertion_strength": "causal",
+      "incorrect_finding_synthesis_status": "agreement"
+    },
+    "source_mismatch": {
+      "incorrect_source_text": "A different source sentence.",
+      "incorrect_page": 7
+    }
+  }
+}

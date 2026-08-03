@@ -2,11 +2,27 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 ConfirmationStatus = Literal["candidate", "confirmed"]
 AnalysisStatus = Literal["queued", "running", "succeeded", "failed"]
+EvidenceAttributionScope = Literal[
+    "isolated_effect",
+    "joint_effect",
+    "association_only",
+    "descriptive_only",
+    "not_attributable",
+]
+EvidenceResultDirection = Literal[
+    "increase",
+    "decrease",
+    "improve",
+    "worsen",
+    "no_change",
+    "mixed",
+    "unknown",
+]
 
 
 class ObjectiveSummaryResponse(BaseModel):
@@ -14,9 +30,11 @@ class ObjectiveSummaryResponse(BaseModel):
     objective_id: str
     question: str
     material_scope: list[str] = Field(default_factory=list)
-    process_axes: list[str] = Field(default_factory=list)
-    property_axes: list[str] = Field(default_factory=list)
-    comparison_intent: str | None = None
+    variables: list[str] = Field(default_factory=list)
+    outcomes: list[str] = Field(default_factory=list)
+    mechanisms: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    requested_comparator: str | None = None
     seed_document_ids: list[str] = Field(default_factory=list)
     excluded_document_ids: list[str] = Field(default_factory=list)
     confidence: float = 0.0
@@ -49,58 +67,111 @@ class ObjectiveAnalysisStateResponse(BaseModel):
     completed_at: str | None = None
 
 
-class FindingRelationResponse(BaseModel):
-    relation_order: int
+class FindingMechanismResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     source_term: str
     relation_type: str
     target_term: str
-    direction: str | None = None
-    assertion_strength: str
-    supporting_evidence_ids: list[str] = Field(default_factory=list)
+    direction: EvidenceResultDirection | None = None
+    assertion_strength: Literal["causal", "associative", "descriptive"]
+    supporting_evidence_ids: list[str]
 
 
-class FindingContextResponse(BaseModel):
-    material_system: dict[str, Any] = Field(default_factory=dict)
-    process_conditions: list[dict[str, Any]] = Field(default_factory=list)
-    sample_state: dict[str, Any] = Field(default_factory=dict)
-    test_conditions: list[dict[str, Any]] = Field(default_factory=list)
-    comparison_baseline: dict[str, Any] = Field(default_factory=dict)
-    limitations: list[str] = Field(default_factory=list)
-    supporting_evidence_ids: list[str] = Field(default_factory=list)
+class FindingPaperContributionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_id: str
+    analysis_status: Literal["analyzed", "excluded", "failed"]
+    supporting_evidence_ids: list[str]
+    contradicting_evidence_ids: list[str]
+    context_evidence_ids: list[str]
+    condition_boundary_evidence_ids: list[str]
 
 
-class FindingDerivationResponse(BaseModel):
-    synthesis_mode: str
-    comparison_status: str
-    contributing_document_ids: list[str] = Field(default_factory=list)
-    supporting_evidence_ids: list[str] = Field(default_factory=list)
-    contradicting_evidence_ids: list[str] = Field(default_factory=list)
-    rationale: str
+class ObjectiveEvidenceAttributeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    value: str | int | float | bool
+    unit: str | None = None
+
+
+class ObjectiveEvidenceVariableResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    baseline_value: str | int | float | bool | None = None
+    target_value: str | int | float | bool | None = None
+    unit: str | None = None
+
+
+class ObjectiveEvidenceComparisonResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    baseline_label: str
+    target_label: str
+    axis_names: list[str] = Field(default_factory=list)
+    comparable: bool
+    incomparability_reasons: list[str] = Field(default_factory=list)
+
+
+class ObjectiveEvidenceResultResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: str
+    value: str | int | float | bool | None = None
+    unit: str | None = None
+    direction: EvidenceResultDirection
+    result_text: str
+
+
+class ObjectiveEvidenceContextResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    material: list[ObjectiveEvidenceAttributeResponse]
+    sample: list[ObjectiveEvidenceAttributeResponse]
+    process: list[ObjectiveEvidenceAttributeResponse]
+    test: list[ObjectiveEvidenceAttributeResponse]
 
 
 class FindingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     collection_id: str
     objective_id: str
-    analysis_version: int
+    analysis_version: int = Field(..., ge=1)
     finding_id: str
-    finding_level: str
     statement: str
-    variables: list[str] = Field(default_factory=list)
-    mediators: list[str] = Field(default_factory=list)
-    outcomes: list[str] = Field(default_factory=list)
-    direction: str | None = None
-    scope_summary: str
-    evidence_strength: str
-    generalization_status: str
-    paper_count: int
-    confidence: float
-    display_rank: int
-    relations: list[FindingRelationResponse] = Field(default_factory=list)
-    context: FindingContextResponse
-    derivation: FindingDerivationResponse
+    factors: list[str] = Field(..., min_length=1)
+    outcome: str
+    direction: EvidenceResultDirection
+    assertion_strength: Literal["causal", "associative", "descriptive"]
+    attribution_scope: Literal[
+        "isolated_effect",
+        "joint_effect",
+        "association_only",
+        "descriptive_only",
+    ]
+    synthesis_status: Literal[
+        "agreement",
+        "conflict",
+        "condition_dependent",
+        "insufficient_confirmation",
+    ]
+    certainty: float = Field(..., ge=0, le=1)
+    display_rank: int = Field(..., ge=0)
+    mechanisms: list[FindingMechanismResponse]
+    scientific_context: ObjectiveEvidenceContextResponse
+    limitations: list[str]
+    paper_contributions: list[FindingPaperContributionResponse] = Field(
+        ..., min_length=1
+    )
 
 
 class ObjectiveEvidenceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     collection_id: str
     objective_id: str
     analysis_version: int
@@ -114,18 +185,13 @@ class ObjectiveEvidenceResponse(BaseModel):
     evidence_role: str
     selection_status: str
     selection_reason: str | None = None
-    evidence_kind: str
-    property_normalized: str | None = None
-    material_system: dict[str, Any] = Field(default_factory=dict)
-    sample_context: dict[str, Any] = Field(default_factory=dict)
-    process_context: dict[str, Any] = Field(default_factory=dict)
-    test_condition: dict[str, Any] = Field(default_factory=dict)
-    resolved_condition: dict[str, Any] = Field(default_factory=dict)
-    value_payload: dict[str, Any] = Field(default_factory=dict)
-    unit: str | None = None
-    baseline_context: dict[str, Any] = Field(default_factory=dict)
-    interpretation: str | None = None
-    join_keys: dict[str, Any] = Field(default_factory=dict)
+    changed_variables: list[ObjectiveEvidenceVariableResponse] = Field(
+        default_factory=list
+    )
+    comparison: ObjectiveEvidenceComparisonResponse | None = None
+    reported_result: ObjectiveEvidenceResultResponse | None = None
+    attribution_scope: EvidenceAttributionScope
+    scientific_context: ObjectiveEvidenceContextResponse
     anchor_ids: list[str] = Field(default_factory=list)
     resolution_status: str
     failure_reason: str | None = None

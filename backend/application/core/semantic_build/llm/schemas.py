@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from typing import Any, Literal
 
 from pydantic import (
@@ -19,6 +21,36 @@ ClaimScope = Literal[
     "review_summary",
     "unclear",
 ]
+
+_OBJECTIVE_DIRECTION_PATTERN = re.compile(
+    r"\b(?:affects?|affecting|influences?|influencing|impacts?|impacting)\b",
+    re.IGNORECASE,
+)
+_OBJECTIVE_EFFECT_PATTERN = re.compile(
+    r"\beffects?\s+of\s+(?P<source>.+?)\s+on\s+(?P<result>.+?)(?:\?|$)",
+    re.IGNORECASE,
+)
+_OBJECTIVE_RELATIONSHIP_PATTERN = re.compile(
+    r"\brelationship\s+between\s+(?P<axes>.+?)(?:\?|$)",
+    re.IGNORECASE,
+)
+_OBJECTIVE_QUESTION_PREFIX = re.compile(
+    r"^(?:how|what|which)\s+(?:(?:does|do|did|can|could|will|would|is|are|"
+    r"was|were)\s+)?",
+    re.IGNORECASE,
+)
+_OBJECTIVE_CLAUSE_BOUNDARY_PATTERN = re.compile(
+    r"(?:[;,]|\b(?:and|but|whereas|while)\b)",
+    re.IGNORECASE,
+)
+_OBJECTIVE_ACRONYM_STOP_WORDS = {"a", "an", "and", "for", "of", "the", "to"}
+_OBJECTIVE_ROLE_FILLER_WORDS = {"a", "an", "and", "for", "of", "the", "to"}
+_OBJECTIVE_SCOPE_FILLER_WORDS = {"in", "processed"}
+_OBJECTIVE_TOKEN_NORMALIZATIONS = {
+    "analyses": "analysis",
+    "axes": "axis",
+    "gases": "gas",
+}
 
 _METHOD_FACT_METHOD_ROLES = {"process", "characterization", "test"}
 _TEXT_WINDOW_METHOD_ROLES = _METHOD_FACT_METHOD_ROLES | {"other"}
@@ -79,15 +111,29 @@ _OBJECTIVE_EVIDENCE_ROUTE_ROLES = {
     "modeling_or_prediction",
     "low_value_or_irrelevant",
 }
-_OBJECTIVE_EVIDENCE_KINDS = {
-    "measurement",
-    "test_condition",
-    "sample_context",
-    "process_context",
-    "characterization",
-    "baseline_reference",
-    "comparison",
-    "interpretation",
+_OBJECTIVE_EVIDENCE_ROLES = {
+    "direct_result",
+    "condition_context",
+    "mechanism_context",
+    "baseline_context",
+    "comparison_context",
+    "background_context",
+    "contradictory_result",
+    "irrelevant",
+}
+_OBJECTIVE_EVIDENCE_ATTRIBUTION_SCOPES = {
+    "isolated_effect",
+    "joint_effect",
+    "association_only",
+    "descriptive_only",
+    "not_attributable",
+}
+_OBJECTIVE_EVIDENCE_RESULT_DIRECTIONS = {
+    "increase",
+    "decrease",
+    "improve",
+    "worsen",
+    "no_change",
     "mixed",
     "unknown",
 }
@@ -99,21 +145,15 @@ _OBJECTIVE_EVIDENCE_RESOLUTION_STATUSES = {
     "unknown",
 }
 _FINDING_DIRECTIONS = {
-    "increases",
-    "decreases",
-    "improves",
-    "reduces",
-    "changes",
+    "increase",
+    "decrease",
+    "improve",
+    "worsen",
+    "no_change",
     "mixed",
-    "conditional",
     "unknown",
 }
-_FINDING_SYNTHESIS_STATUSES = {
-    "agreement",
-    "conflict",
-    "condition_dependent",
-    "insufficient_confirmation",
-}
+_FINDING_ASSERTION_STRENGTHS = {"causal", "associative", "descriptive"}
 
 
 def _normalize_literal_choice(value: object, *, allowed: set[str], default: str) -> str:
@@ -146,6 +186,257 @@ def _normalize_list_container(value: object) -> object:
 
 def _normalize_object_container(value: object) -> object:
     return {} if value is None else value
+
+
+def _normalize_objective_axis_tokens(value: str) -> tuple[str, ...]:
+    normalized_value = unicodedata.normalize("NFKC", value)
+    tokens = re.findall(r"[^\W_]+", normalized_value.casefold(), flags=re.UNICODE)
+    normalized: list[str] = []
+    for token in tokens:
+        if token in _OBJECTIVE_TOKEN_NORMALIZATIONS:
+            normalized.append(_OBJECTIVE_TOKEN_NORMALIZATIONS[token])
+        elif len(token) > 4 and token.endswith("ies"):
+            normalized.append(f"{token[:-3]}y")
+        elif len(token) > 4 and token.endswith(("ches", "shes", "sses", "xes", "zes")):
+            normalized.append(token[:-2])
+        elif len(token) > 3 and token.endswith("s") and not token.endswith(
+            ("is", "ss", "us")
+        ):
+            normalized.append(token[:-1])
+        else:
+            normalized.append(token)
+    return tuple(normalized)
+
+
+def _token_sequence_spans(
+    container: tuple[str, ...],
+    sequence: tuple[str, ...],
+) -> tuple[tuple[int, int], ...]:
+    if not sequence:
+        return ()
+    return tuple(
+        (index, index + len(sequence))
+        for index in range(len(container) - len(sequence) + 1)
+        if container[index : index + len(sequence)] == sequence
+    )
+
+
+def _axis_role_spans(
+    axis: str,
+    question_role: str,
+    role_tokens: tuple[str, ...],
+) -> tuple[tuple[int, int], ...]:
+    axis_tokens = _normalize_objective_axis_tokens(axis)
+    normalized_axis = unicodedata.normalize("NFKC", axis)
+    normalized_role = unicodedata.normalize("NFKC", question_role)
+    compact_axis = re.sub(r"[^A-Za-z0-9]", "", normalized_axis)
+    axis_is_acronym = (
+        2 <= len(compact_axis) <= 8
+        and compact_axis.isupper()
+        and any(character.isalpha() for character in compact_axis)
+    )
+    uppercase_role_indexes = {
+        index
+        for index, token in enumerate(
+            re.findall(r"[^\W_]+", normalized_role, flags=re.UNICODE)
+        )
+        if len(token) >= 2
+        and token.isupper()
+        and any(character.isalpha() for character in token)
+    }
+    spans: set[tuple[int, int]] = set()
+
+    if axis_is_acronym:
+        acronym = compact_axis.casefold()
+        spans.update(
+            (index, index + 1)
+            for index in uppercase_role_indexes
+            if role_tokens[index] == acronym
+        )
+        return tuple(sorted(spans))
+
+    spans.update(_token_sequence_spans(role_tokens, axis_tokens))
+    explicit_axis_acronyms = {
+        token.casefold()
+        for token in re.findall(r"[^\W_]+", normalized_axis, flags=re.UNICODE)
+        if 2 <= len(token) <= 8
+        and token.isupper()
+        and any(character.isalpha() for character in token)
+    }
+    spans.update(
+        (index, index + 1)
+        for index in uppercase_role_indexes
+        if role_tokens[index] in explicit_axis_acronyms
+    )
+
+    significant_axis_tokens = tuple(
+        token for token in axis_tokens if token not in _OBJECTIVE_ACRONYM_STOP_WORDS
+    )
+    if len(significant_axis_tokens) > 1:
+        acronym = "".join(token[0] for token in significant_axis_tokens)
+        if len(acronym) >= 2:
+            spans.update(
+                (index, index + 1)
+                for index in uppercase_role_indexes
+                if role_tokens[index] == acronym
+            )
+    return tuple(sorted(spans))
+
+
+def _role_matches_declared_axes(
+    question_role: str,
+    axes: list[str],
+    *,
+    declared_scope: list[str] | None = None,
+) -> bool:
+    role_tokens = _normalize_objective_axis_tokens(question_role)
+    spans_by_axis = [
+        _axis_role_spans(axis, question_role, role_tokens) for axis in axes
+    ]
+    if not role_tokens or any(not spans for spans in spans_by_axis):
+        return False
+    scope_indexes = frozenset(
+        index
+        for scope in declared_scope or []
+        for start, end in _axis_role_spans(scope, question_role, role_tokens)
+        for index in range(start, end)
+    )
+    scope_filler_indexes = frozenset(
+        index
+        for index, token in enumerate(role_tokens)
+        if token in _OBJECTIVE_SCOPE_FILLER_WORDS
+        and (index - 1 in scope_indexes or index + 1 in scope_indexes)
+    )
+
+    def covers_role(axis_index: int, covered_indexes: frozenset[int]) -> bool:
+        if axis_index == len(spans_by_axis):
+            return all(
+                index in covered_indexes
+                or index in scope_indexes
+                or index in scope_filler_indexes
+                or token in _OBJECTIVE_ROLE_FILLER_WORDS
+                for index, token in enumerate(role_tokens)
+            )
+        for start, end in spans_by_axis[axis_index]:
+            span_indexes = frozenset(range(start, end))
+            if covered_indexes.isdisjoint(span_indexes) and covers_role(
+                axis_index + 1,
+                covered_indexes | span_indexes,
+            ):
+                return True
+        return False
+
+    return covers_role(0, frozenset())
+
+
+def _strip_objective_question_prefix(value: str) -> str:
+    return _OBJECTIVE_QUESTION_PREFIX.sub("", value, count=1).strip(" ,:")
+
+
+def _objective_question_roles(question: str) -> tuple[tuple[str, str], ...]:
+    effect_match = _OBJECTIVE_EFFECT_PATTERN.search(question)
+    relationship_match = _OBJECTIVE_RELATIONSHIP_PATTERN.search(question)
+    direction_matches = tuple(_OBJECTIVE_DIRECTION_PATTERN.finditer(question))
+    if effect_match and relationship_match:
+        return ()
+    nominal_match = effect_match or relationship_match
+    if nominal_match and any(
+        match.start() < nominal_match.start() for match in direction_matches
+    ):
+        return ()
+    if effect_match:
+        return ((effect_match.group("source"), effect_match.group("result")),)
+
+    if relationship_match:
+        axes = relationship_match.group("axes")
+        separators = tuple(re.finditer(r"\s+and\s+", axes, flags=re.IGNORECASE))
+        return tuple(
+            (axes[: separator.start()].strip(), axes[separator.end() :].strip())
+            for separator in separators
+        )
+
+    if any(
+        _OBJECTIVE_CLAUSE_BOUNDARY_PATTERN.search(
+            question[current.end() : following.start()]
+        )
+        for current, following in zip(direction_matches, direction_matches[1:])
+    ):
+        return ()
+
+    return tuple(
+        (
+            _strip_objective_question_prefix(question[: direction_match.start()]),
+            question[
+                direction_match.end() : (
+                    direction_matches[index + 1].start()
+                    if index + 1 < len(direction_matches)
+                    else len(question)
+                )
+            ].strip(" ,:?\t\n"),
+        )
+        for index, direction_match in enumerate(direction_matches)
+    )
+
+
+def _validate_objective_question_roles(
+    *,
+    question: str,
+    variables: list[str],
+    outcomes: list[str],
+    declared_scope: list[str],
+) -> None:
+    role_candidates = _objective_question_roles(question)
+    if not role_candidates:
+        raise ValueError("question roles must use a supported active variable-to-outcome form")
+
+    candidate_errors: list[tuple[bool, bool, str, str]] = []
+    for source_role, result_role in role_candidates:
+        variables_align = _role_matches_declared_axes(source_role, variables)
+        outcomes_align = _role_matches_declared_axes(
+            result_role,
+            outcomes,
+            declared_scope=declared_scope,
+        )
+        if variables_align and outcomes_align:
+            return
+        candidate_errors.append(
+            (variables_align, outcomes_align, source_role, result_role)
+        )
+
+    variables_align, outcomes_align, source_role, result_role = max(
+        candidate_errors,
+        key=lambda alignment: int(alignment[0]) + int(alignment[1]),
+    )
+    details: list[str] = []
+    if not variables_align:
+        missing_variables = [
+            axis
+            for axis in variables
+            if not _axis_role_spans(
+                axis,
+                source_role,
+                _normalize_objective_axis_tokens(source_role),
+            )
+        ]
+        details.append(
+            "source side does not exactly contain the declared variables"
+            + (f": {', '.join(missing_variables)}" if missing_variables else "")
+        )
+    if not outcomes_align:
+        missing_outcomes = [
+            axis
+            for axis in outcomes
+            if not _axis_role_spans(
+                axis,
+                result_role,
+                _normalize_objective_axis_tokens(result_role),
+            )
+        ]
+        details.append(
+            "result side does not exactly contain the declared outcomes"
+            + (f": {', '.join(missing_outcomes)}" if missing_outcomes else "")
+        )
+    raise ValueError("question roles do not align; " + "; ".join(details))
 
 
 class _StrictModel(BaseModel):
@@ -667,55 +958,18 @@ class StructuredTableMatrixRepair(_StrictModel):
         return _normalize_list_container(value)
 
 
-PaperSkimWarning = Literal[
-    "classification_uncertain",
-    "insufficient_content",
-    "modeling_only",
-    "objective_uncertain",
-    "profile_content_conflict",
-    "review_only",
-]
-
-
 class StructuredPaperSkim(_StrictModel):
-    doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = Field(
-        default="uncertain",
-        description="Coarse role of this paper based on the supplied compact content.",
+    doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
+        "uncertain"
     )
-    candidate_materials: list[str] = Field(
-        default_factory=list,
-        description="Explicitly named material systems relevant to candidate questions.",
-    )
-    candidate_processes: list[str] = Field(
-        default_factory=list,
-        description="Explicit process families relevant to candidate questions.",
-    )
-    candidate_properties: list[str] = Field(
-        default_factory=list,
-        description="Concrete measured or evaluated properties named in the input.",
-    )
-    changed_variables: list[str] = Field(
-        default_factory=list,
-        description="Variables explicitly varied or compared in this paper.",
-    )
-    possible_objectives: list[str] = Field(
-        default_factory=list,
-        description="Concise question-shaped process-property comparisons supported by the input.",
-    )
-    evidence_density: Literal["high", "medium", "low", "unknown"] = Field(
-        default="unknown",
-        description="Coverage of the proposed research map in the supplied compact content.",
-    )
-    confidence: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description="Confidence in the complete PaperSkim, from 0 to 1.",
-    )
-    warnings: list[PaperSkimWarning] = Field(
-        default_factory=list,
-        description="Applicable bounded warning codes; empty when no warning applies.",
-    )
+    candidate_materials: list[str] = Field(default_factory=list)
+    candidate_processes: list[str] = Field(default_factory=list)
+    candidate_properties: list[str] = Field(default_factory=list)
+    changed_variables: list[str] = Field(default_factory=list)
+    possible_objectives: list[str] = Field(default_factory=list)
+    evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
+    confidence: float = 0.0
+    warnings: list[str] = Field(default_factory=list)
 
     @field_validator(
         "candidate_materials",
@@ -750,55 +1004,24 @@ class StructuredPaperSkim(_StrictModel):
 
 
 class StructuredResearchObjective(_StrictModel):
-    question: str = Field(
-        min_length=8,
-        max_length=240,
-        description="Exact question copied from a selected skim's possible_objectives.",
-    )
-    material_scope: list[str] = Field(
-        min_length=1,
-        max_length=3,
-        description="Material labels copied from the selected seed skims.",
-    )
-    process_axes: list[str] = Field(
-        min_length=1,
-        max_length=8,
-        description="Process or changed-variable labels copied from the seed skims.",
-    )
-    property_axes: list[str] = Field(
-        min_length=1,
-        max_length=8,
-        description="Measured property labels copied from the selected seed skims.",
-    )
-    comparison_intent: str = Field(
-        min_length=1,
-        max_length=240,
-        description="Concise comparison represented by this candidate objective.",
-    )
-    seed_document_ids: list[str] = Field(
-        min_length=1,
-        max_length=12,
-        description="Exact input document ids that directly support this candidate.",
-    )
-    excluded_document_ids: list[str] = Field(
-        max_length=12,
-        description="Exact input document ids clearly outside this candidate's scope.",
-    )
-    confidence: float = Field(
-        ge=0.0,
-        le=1.0,
-        description="Confidence in candidate selection and paper binding, from 0 to 1.",
-    )
-    reason: str = Field(
-        min_length=1,
-        max_length=200,
-        description="Short explanation grounded in the selected PaperSkim records.",
-    )
+    question: str = Field(max_length=180)
+    material_scope: list[str] = Field(default_factory=list)
+    variables: list[str] = Field(min_length=1)
+    outcomes: list[str] = Field(min_length=1)
+    mechanisms: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    requested_comparator: str | None = Field(default=None, max_length=160)
+    seed_document_ids: list[str] = Field(default_factory=list)
+    excluded_document_ids: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    reason: str | None = Field(default=None, max_length=120)
 
     @field_validator(
         "material_scope",
-        "process_axes",
-        "property_axes",
+        "variables",
+        "outcomes",
+        "mechanisms",
+        "constraints",
         "seed_document_ids",
         "excluded_document_ids",
         mode="before",
@@ -808,19 +1031,20 @@ class StructuredResearchObjective(_StrictModel):
         return _normalize_list_container(value)
 
     @model_validator(mode="after")
-    def _validate_disjoint_document_ids(self) -> "StructuredResearchObjective":
-        overlap = set(self.seed_document_ids) & set(self.excluded_document_ids)
-        if overlap:
-            raise ValueError(
-                "seed_document_ids and excluded_document_ids must be disjoint"
-            )
+    def _validate_question_roles(self) -> "StructuredResearchObjective":
+        _validate_objective_question_roles(
+            question=self.question,
+            variables=self.variables,
+            outcomes=self.outcomes,
+            declared_scope=[*self.material_scope, *self.constraints],
+        )
         return self
 
 
 class StructuredResearchObjectives(_StrictModel):
     objectives: list[StructuredResearchObjective] = Field(
+        default_factory=list,
         max_length=6,
-        description="Bounded supported candidates; empty when none are reviewable.",
     )
 
     @field_validator("objectives", mode="before")
@@ -830,7 +1054,7 @@ class StructuredResearchObjectives(_StrictModel):
 
 
 class StructuredAxisCanonicalizationGroup(_StrictModel):
-    axis_type: Literal["material", "process", "property"]
+    axis_type: Literal["material", "variable", "outcome", "mechanism", "constraint"]
     canonical: str
     aliases: list[str] = Field(default_factory=list)
     confidence: float = 0.0
@@ -857,22 +1081,36 @@ class StructuredObjectiveMergeGroup(_StrictModel):
     source_objective_ids: list[str] = Field(default_factory=list)
     question: str
     material_scope: list[str] = Field(default_factory=list)
-    process_axes: list[str] = Field(default_factory=list)
-    property_axes: list[str] = Field(default_factory=list)
-    comparison_intent: str
+    variables: list[str] = Field(min_length=1)
+    outcomes: list[str] = Field(min_length=1)
+    mechanisms: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    requested_comparator: str | None = None
     confidence: float = 0.0
     reason: str
 
     @field_validator(
         "source_objective_ids",
         "material_scope",
-        "process_axes",
-        "property_axes",
+        "variables",
+        "outcomes",
+        "mechanisms",
+        "constraints",
         mode="before",
     )
     @classmethod
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list_container(value)
+
+    @model_validator(mode="after")
+    def _validate_question_roles(self) -> "StructuredObjectiveMergeGroup":
+        _validate_objective_question_roles(
+            question=self.question,
+            variables=self.variables,
+            outcomes=self.outcomes,
+            declared_scope=[*self.material_scope, *self.constraints],
+        )
+        return self
 
 
 class StructuredPaperContributionDraft(_StrictModel):
@@ -967,30 +1205,102 @@ class StructuredEvidenceSelections(_StrictModel):
         return _normalize_list_container(value)
 
 
-class StructuredEvidenceExtraction(_StrictModel):
-    evidence_kind: Literal[
-        "measurement",
-        "test_condition",
-        "sample_context",
-        "process_context",
-        "characterization",
-        "baseline_reference",
-        "comparison",
-        "interpretation",
+ScientificScalar = str | int | float | bool
+
+
+class StructuredEvidenceAttribute(_StrictModel):
+    name: str
+    value: ScientificScalar
+    unit: str | None = None
+
+
+class StructuredEvidenceVariable(_StrictModel):
+    name: str
+    baseline_value: ScientificScalar | None = None
+    target_value: ScientificScalar | None = None
+    unit: str | None = None
+
+
+class StructuredEvidenceComparison(_StrictModel):
+    baseline_label: str
+    target_label: str
+    axis_names: list[str] = Field(min_length=1)
+    comparable: bool
+    incomparability_reasons: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_comparability(self) -> "StructuredEvidenceComparison":
+        if not self.comparable and not self.incomparability_reasons:
+            raise ValueError("incomparable evidence requires reasons")
+        if self.comparable and self.incomparability_reasons:
+            raise ValueError("comparable evidence cannot have incomparability reasons")
+        return self
+
+
+class StructuredEvidenceResult(_StrictModel):
+    outcome: str
+    value: ScientificScalar | None = None
+    unit: str | None = None
+    direction: Literal[
+        "increase",
+        "decrease",
+        "improve",
+        "worsen",
+        "no_change",
         "mixed",
         "unknown",
     ] = "unknown"
-    property_normalized: str | None = None
-    material_system: dict[str, Any] = Field(default_factory=dict)
-    sample_context: dict[str, Any] = Field(default_factory=dict)
-    process_context: dict[str, Any] = Field(default_factory=dict)
-    resolved_condition: dict[str, Any] = Field(default_factory=dict)
-    test_condition: dict[str, Any] = Field(default_factory=dict)
-    value_payload: dict[str, Any] = Field(default_factory=dict)
-    unit: str | None = None
-    baseline_context: dict[str, Any] = Field(default_factory=dict)
-    interpretation: str | None = None
-    join_keys: dict[str, Any] = Field(default_factory=dict)
+    result_text: str
+
+    @field_validator("direction", mode="before")
+    @classmethod
+    def _normalize_direction(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_OBJECTIVE_EVIDENCE_RESULT_DIRECTIONS,
+            default="unknown",
+        )
+
+
+class StructuredEvidenceContext(_StrictModel):
+    material: list[StructuredEvidenceAttribute] = Field(default_factory=list)
+    sample: list[StructuredEvidenceAttribute] = Field(default_factory=list)
+    process: list[StructuredEvidenceAttribute] = Field(default_factory=list)
+    test: list[StructuredEvidenceAttribute] = Field(default_factory=list)
+
+    @field_validator("material", "sample", "process", "test", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredEvidenceExtraction(_StrictModel):
+    evidence_role: Literal[
+        "direct_result",
+        "condition_context",
+        "mechanism_context",
+        "baseline_context",
+        "comparison_context",
+        "background_context",
+        "contradictory_result",
+        "irrelevant",
+    ] = "irrelevant"
+    changed_variables: list[StructuredEvidenceVariable] = Field(
+        default_factory=list,
+        max_length=12,
+    )
+    comparison: StructuredEvidenceComparison | None = None
+    reported_result: StructuredEvidenceResult | None = None
+    attribution_scope: Literal[
+        "isolated_effect",
+        "joint_effect",
+        "association_only",
+        "descriptive_only",
+        "not_attributable",
+    ] = "not_attributable"
+    scientific_context: StructuredEvidenceContext = Field(
+        default_factory=StructuredEvidenceContext
+    )
     resolution_status: Literal[
         "resolved",
         "partial",
@@ -1000,13 +1310,22 @@ class StructuredEvidenceExtraction(_StrictModel):
     ] = "partial"
     confidence: float = 0.0
 
-    @field_validator("evidence_kind", mode="before")
+    @field_validator("evidence_role", mode="before")
     @classmethod
-    def _normalize_evidence_kind(cls, value: object) -> str:
+    def _normalize_evidence_role(cls, value: object) -> str:
         return _normalize_underscored_choice(
             value,
-            allowed=_OBJECTIVE_EVIDENCE_KINDS,
-            default="unknown",
+            allowed=_OBJECTIVE_EVIDENCE_ROLES,
+            default="irrelevant",
+        )
+
+    @field_validator("attribution_scope", mode="before")
+    @classmethod
+    def _normalize_attribution_scope(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_OBJECTIVE_EVIDENCE_ATTRIBUTION_SCOPES,
+            default="not_attributable",
         )
 
     @field_validator("resolution_status", mode="before")
@@ -1018,29 +1337,52 @@ class StructuredEvidenceExtraction(_StrictModel):
             default="partial",
         )
 
-    @field_validator(
-        "material_system",
-        "sample_context",
-        "process_context",
-        "resolved_condition",
-        "test_condition",
-        "value_payload",
-        "baseline_context",
-        "join_keys",
-        mode="before",
-    )
+    @field_validator("changed_variables", mode="before")
     @classmethod
-    def _normalize_objects(cls, value: object, info: ValidationInfo) -> object:
-        if value is None:
-            return {}
-        if isinstance(value, dict):
-            return value
-        if info.field_name == "value_payload":
-            return {
-                "value": value,
-                "source_value_text": str(value),
-            }
-        return {}
+    def _normalize_changed_variables(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+    @model_validator(mode="after")
+    def _validate_scientific_contract(self) -> "StructuredEvidenceExtraction":
+        result_role = self.evidence_role in {"direct_result", "contradictory_result"}
+        if result_role and self.reported_result is None:
+            raise ValueError("result evidence requires one reported result")
+        if not result_role and self.reported_result is not None:
+            raise ValueError("context evidence cannot report an experimental result")
+        if not result_role and self.attribution_scope in {
+            "isolated_effect",
+            "joint_effect",
+        }:
+            raise ValueError("context evidence cannot claim experimental attribution")
+        if self.comparison is not None and not self.comparison.comparable:
+            if self.attribution_scope != "not_attributable":
+                raise ValueError("incomparable evidence cannot be attributed")
+        if self.attribution_scope in {"isolated_effect", "joint_effect"}:
+            if self.comparison is None or not self.comparison.comparable:
+                raise ValueError("experimental attribution requires comparison")
+            variables = {item.name.casefold() for item in self.changed_variables}
+            axes = {item.casefold() for item in self.comparison.axis_names}
+            if variables != axes:
+                raise ValueError("comparison axes must match changed variables")
+            if any(
+                item.baseline_value is None or item.target_value is None
+                for item in self.changed_variables
+            ):
+                raise ValueError(
+                    "experimental attribution requires baseline and target values"
+                )
+            if any(
+                item.baseline_value == item.target_value
+                for item in self.changed_variables
+            ):
+                raise ValueError(
+                    "experimental attribution requires changed variable values"
+                )
+            if self.attribution_scope == "isolated_effect" and len(variables) != 1:
+                raise ValueError("isolated effect requires one changed variable")
+            if self.attribution_scope == "joint_effect" and len(variables) < 2:
+                raise ValueError("joint effect requires multiple changed variables")
+        return self
 
 
 class StructuredEvidenceExtractions(_StrictModel):
@@ -1055,20 +1397,64 @@ class StructuredEvidenceExtractions(_StrictModel):
         return _normalize_list_container(value)
 
 
-class StructuredFindingSynthesisOutcome(_StrictModel):
-    concept: str
+class StructuredFindingMechanism(_StrictModel):
+    source_term: str = Field(min_length=1)
+    relation_type: str = Field(min_length=1)
+    target_term: str = Field(min_length=1)
+    direction: str | None = None
+    assertion_strength: Literal["causal", "associative", "descriptive"] = (
+        "descriptive"
+    )
+    supporting_evidence_ids: list[str] = Field(min_length=1, max_length=16)
+
+    @field_validator("source_term", "relation_type", "target_term")
+    @classmethod
+    def _require_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("finding mechanism terms cannot be blank")
+        return text
+
+    @field_validator("supporting_evidence_ids")
+    @classmethod
+    def _require_unique_evidence(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("finding mechanism evidence ids must be unique")
+        return value
+
+    @field_validator("assertion_strength", mode="before")
+    @classmethod
+    def _normalize_assertion_strength(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_FINDING_ASSERTION_STRENGTHS,
+            default="descriptive",
+        )
+
+
+class StructuredFindingSynthesisItem(_StrictModel):
+    result_set_id: str = Field(min_length=1)
+    statement: str = Field(min_length=1)
     direction: Literal[
-        "increases",
-        "decreases",
-        "improves",
-        "reduces",
-        "changes",
+        "increase",
+        "decrease",
+        "improve",
+        "worsen",
+        "no_change",
         "mixed",
-        "conditional",
         "unknown",
     ] = "unknown"
-    statement: str
-    conflicting_evidence_ids: list[str] = Field(default_factory=list, max_length=16)
+    assertion_strength: Literal["causal", "associative", "descriptive"] = (
+        "descriptive"
+    )
+    condition_boundary_evidence_ids: list[str] = Field(
+        default_factory=list, max_length=24
+    )
+    context_evidence_ids: list[str] = Field(default_factory=list, max_length=24)
+    mechanisms: list[StructuredFindingMechanism] = Field(
+        default_factory=list, max_length=8
+    )
+    limitations: list[str] = Field(default_factory=list, max_length=12)
 
     @field_validator("direction", mode="before")
     @classmethod
@@ -1079,43 +1465,30 @@ class StructuredFindingSynthesisOutcome(_StrictModel):
             default="unknown",
         )
 
-
-class StructuredFindingSynthesisItem(_StrictModel):
-    result_set_id: str = Field(min_length=1)
-    source_concept: str
-    outcomes: list[StructuredFindingSynthesisOutcome] = Field(
-        min_length=1,
-        max_length=8,
-    )
-    mediator_concepts: list[str] = Field(default_factory=list, max_length=5)
-    statement: str
-    synthesis_status: Literal[
-        "agreement",
-        "conflict",
-        "condition_dependent",
-        "insufficient_confirmation",
-    ] = "insufficient_confirmation"
-    context_evidence_ids: list[str] = Field(default_factory=list, max_length=16)
-    mechanism_evidence_ids: list[str] = Field(default_factory=list, max_length=16)
-    common_conditions: list[str] = Field(default_factory=list, max_length=10)
-    incomparable_conditions: list[str] = Field(default_factory=list, max_length=10)
-    confidence: float = 0.0
-    warnings: list[str] = Field(default_factory=list, max_length=8)
-
-    @field_validator("synthesis_status", mode="before")
+    @field_validator("assertion_strength", mode="before")
     @classmethod
-    def _normalize_synthesis_status(cls, value: object) -> str:
+    def _normalize_assertion_strength(cls, value: object) -> str:
         return _normalize_underscored_choice(
             value,
-            allowed=_FINDING_SYNTHESIS_STATUSES,
-            default="insufficient_confirmation",
+            allowed=_FINDING_ASSERTION_STRENGTHS,
+            default="descriptive",
         )
+
+    @field_validator(
+        "condition_boundary_evidence_ids",
+        "context_evidence_ids",
+    )
+    @classmethod
+    def _require_unique_evidence(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("finding evidence ids must be unique within each role")
+        return value
 
 
 class StructuredFindingSynthesis(_StrictModel):
     findings: list[StructuredFindingSynthesisItem] = Field(
         default_factory=list,
-        max_length=6,
+        max_length=1,
     )
 
     @field_validator("findings", mode="before")

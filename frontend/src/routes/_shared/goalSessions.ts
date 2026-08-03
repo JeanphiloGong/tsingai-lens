@@ -14,6 +14,15 @@ export type GoalSourceLink = {
 	href: string;
 };
 
+export type GoalFindingSource = {
+	objective_id: string;
+	finding_id: string;
+	analysis_version: number;
+	finding_fingerprint: string;
+	evidence_fingerprint: string;
+	evidence_ids: string[];
+};
+
 export type GoalSession = {
 	session_id: string;
 	user_id: string;
@@ -45,6 +54,9 @@ export type GoalSessionMessage = {
 	links?: Record<string, string>;
 	source_links?: GoalSourceLink[];
 	review_gate?: string | null;
+	source_finding_refs?: GoalFindingSource[];
+	source_validity?: 'current' | 'stale' | null;
+	source_validity_reasons?: string[];
 	created_at: string;
 };
 
@@ -60,6 +72,9 @@ export type GoalSessionMessageResponse = {
 	links: Record<string, string>;
 	source_links: GoalSourceLink[];
 	review_gate: string | null;
+	source_finding_refs: GoalFindingSource[];
+	source_validity: 'current' | 'stale' | null;
+	source_validity_reasons: string[];
 	created_at: string;
 };
 

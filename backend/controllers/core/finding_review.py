@@ -64,13 +64,18 @@ async def list_finding_feedback(
     request: Request,
     analysis_version: int = Query(..., ge=1),
 ) -> FindingFeedbackListResponse:
-    records = await run_in_threadpool(
-        request.app.state.finding_feedback_service.list_feedback,
-        collection_id=collection_id,
-        objective_id=objective_id,
-        analysis_version=analysis_version,
-        finding_id=finding_id,
-    )
+    try:
+        records = await run_in_threadpool(
+            request.app.state.finding_feedback_service.list_feedback,
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
+            finding_id=finding_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return FindingFeedbackListResponse(
         collection_id=collection_id,
         objective_id=objective_id,
@@ -100,15 +105,7 @@ async def record_finding_curation(
             analysis_version=payload.analysis_version,
             finding_id=finding_id,
             curated_status=payload.curated_status,
-            curated_statement=payload.curated_statement,
-            curated_evidence_ids=payload.curated_evidence_ids,
-            curated_support_grade=payload.curated_support_grade,
-            curated_review_status=payload.curated_review_status,
-            curated_variables=payload.curated_variables,
-            curated_mediators=payload.curated_mediators,
-            curated_outcomes=payload.curated_outcomes,
-            curated_direction=payload.curated_direction,
-            curated_scope_summary=payload.curated_scope_summary,
+            curated_finding=payload.curated_finding.model_dump(),
             note=payload.note,
             reviewer=payload.reviewer,
         )
@@ -131,13 +128,18 @@ async def list_finding_curations(
     request: Request,
     analysis_version: int = Query(..., ge=1),
 ) -> FindingCurationListResponse:
-    records = await run_in_threadpool(
-        request.app.state.finding_feedback_service.list_curations,
-        collection_id=collection_id,
-        objective_id=objective_id,
-        analysis_version=analysis_version,
-        finding_id=finding_id,
-    )
+    try:
+        records = await run_in_threadpool(
+            request.app.state.finding_feedback_service.list_curations,
+            collection_id=collection_id,
+            objective_id=objective_id,
+            analysis_version=analysis_version,
+            finding_id=finding_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return FindingCurationListResponse(
         collection_id=collection_id,
         objective_id=objective_id,
@@ -219,7 +221,8 @@ def _dataset_response(payload: dict, format: str):
             ensure_ascii=False,
         )
         for item in payload["items"]
-        if item["training_messages"]
+        if item["dataset_use_status"] == "training_ready"
+        and item["training_messages"]
     )
     return Response(
         content=f"{body}\n" if body else "",

@@ -62,36 +62,97 @@ Run the canonical Objective benchmark:
 The benchmark exports and evaluates published Findings. It does not construct
 an intermediate target model.
 
-For the maintained six-paper 316L source audit:
+Run real acceptance against an isolated PostgreSQL database migrated to the
+current head. The backend and checker must use the same `LENS_DATABASE_URL`
+because API records and Source locators must resolve from the same collection
+state. Use an empty `*_test` database and run `alembic upgrade head` before
+uploading the six approved PDFs. Do not migrate a retained development database
+merely to run this check.
+
+Use the newly generated runtime ids and the committed paper/expectation
+manifest:
 
 ```bash
 ./.venv/bin/python \
-  scripts/evaluation/expert_gold/check_objective_findings_projection.py
+  scripts/evaluation/expert_gold/check_objective_findings_projection.py \
+  --collection-id col_xxx \
+  --objective-id obj_preheating_xxx \
+  --objective-id obj_corrosion_xxx \
+  --objective-id obj_fatigue_xxx \
+  --acceptance-manifest \
+  tests/fixtures/expert_gold/objective_finding_acceptance.json
 ```
 
 To check a running authenticated API instead of direct local repositories:
 
 ```bash
-LENS_CHECK_EMAIL=lens-admin@example.com \
-LENS_CHECK_PASSWORD=admin.. \
+LENS_CHECK_EMAIL=<acceptance-user-email> \
+LENS_CHECK_PASSWORD=<acceptance-user-password> \
+LENS_DATABASE_URL=<isolated-current-schema-database-url> \
 ./.venv/bin/python \
   scripts/evaluation/expert_gold/check_objective_findings_projection.py \
-  --api-base-url http://localhost:5173
+  --api-base-url http://localhost:8011 \
+  --collection-id col_xxx \
+  --objective-id obj_preheating_xxx \
+  --objective-id obj_corrosion_xxx \
+  --objective-id obj_fatigue_xxx \
+  --acceptance-manifest \
+  tests/fixtures/expert_gold/objective_finding_acceptance.json
 ```
 
 The checker requires every selected Objective to be confirmed and to have a
 succeeded published analysis with non-empty Findings. It validates:
 
+- exactly six manifest papers and at least three distinct runtime Objectives;
+
+- exact coverage of the six approved PDF content hashes and complete
+  successful/excluded paper traversal;
 - complete `(collection_id, objective_id, analysis_version, finding_id)`
   identity;
-- variables, outcomes, Finding level, and paper count;
+- non-empty factors, exactly one outcome, direction, attribution, and synthesis
+  status aligned to direct Evidence;
+- one exact baseline-to-target comparison interval per result set; scientific
+  Context remains Evidence and does not silently merge non-monotonic intervals;
+- categorical and numeric variable/result values, units, and table experiment
+  groups against the named Source column and exact row;
+- pairwise excerpts assembled from separate process and result tables against
+  every referenced row and its declared PDF page;
+- coupled-variable and as-SLM/HIP-SLM confounding boundaries;
+- direct Evidence ids bound to the same document as each PaperContribution;
+- condition dependence only when opposing direct results from different papers
+  contain the same Context attribute with disjoint values;
 - at least one supporting direct-result Evidence record;
 - exact Evidence membership for each Finding;
-- Source locator, excerpt, and page resolution;
-- expected objective-specific materials-science concepts.
+- Source locator, excerpt, and one unambiguous page resolution;
+- expected objective-specific materials-science concepts;
+- persisted `correct`, `partial`, and `incorrect` feedback plus latest-event
+  JSON dataset and `training_jsonl` selection; JSONL must use `user` then
+  `assistant`, include every current Evidence excerpt, and encode the same
+  `training_target` in assistant JSON.
 
-An empty Finding set, unresolved source location, or scientifically weak result
-is a failed gate.
+The output verdict is `pass`, `partial`, or `fail`. Execution, paper traversal,
+approved-paper coverage, Source identity, and required feedback are blocking;
+scientific-quality failures produce `partial` when the runtime chain remains
+auditable. The manifest deliberately contains stable PDF SHA-256 hashes and
+question matching terms, not runtime Source document, collection, or Objective
+ids. The checker resolves each hash to exactly one document in the active
+Source build before auditing traversal. A missing manifest, fewer than six
+manifest papers, or fewer than three selected runtime Objectives is rejected
+before the scientific audit starts.
+
+Persist review decisions through the authenticated API before the final check:
+
+```text
+POST /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}/feedback
+GET  /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}/feedback?analysis_version={version}
+GET  /api/v1/collections/{collection_id}/objectives/{objective_id}/finding-dataset
+```
+
+The POST body must include `analysis_version`, `review_status`, `issue_type`,
+and an identified human `reviewer`. Record at least one `correct`, one
+`partial`, and one `incorrect` decision across the selected Objectives. Post a
+newer decision for one Finding and rerun the checker to prove that the latest
+event controls `label_status`, `dataset_use_status`, and training inclusion.
 
 ## Finding Review
 
@@ -102,8 +163,8 @@ collection_id + objective_id + analysis_version + finding_id
 ```
 
 Review decisions use `accept`, `reject`, `correct`, or `skip`. A correction
-must provide a curated statement and Evidence IDs belonging to the same
-Finding version.
+must provide one complete canonical `curated_finding` whose identity,
+PaperContributions, and Evidence all belong to the same published version.
 
 Import a JSONL decision file:
 
@@ -128,8 +189,38 @@ Minimal accept row:
 Minimal correction row:
 
 ```json
-{"collection_id":"col_xxx","objective_id":"obj_xxx","analysis_version":2,"finding_id":"finding_xxx","action":"correct","suggested_target":{"statement":"Under the reported LPBF conditions, preheating was associated with higher elongation.","evidence_ids":["evidence_xxx"]}}
+{
+  "collection_id": "col_xxx",
+  "objective_id": "obj_xxx",
+  "analysis_version": 2,
+  "finding_id": "finding_xxx",
+  "action": "correct",
+  "curated_status": "limited",
+  "curated_finding": {
+    "collection_id": "col_xxx",
+    "objective_id": "obj_xxx",
+    "analysis_version": 2,
+    "finding_id": "finding_xxx",
+    "statement": "Under the reported LPBF conditions, preheating was associated with higher elongation.",
+    "factors": ["preheating"],
+    "outcome": "elongation",
+    "direction": "increase",
+    "assertion_strength": "associative",
+    "attribution_scope": "isolated_effect",
+    "synthesis_status": "insufficient_confirmation",
+    "certainty": 0.5,
+    "display_rank": 0,
+    "mechanisms": [],
+    "scientific_context": {"material": [], "sample": [], "process": [], "test": []},
+    "limitations": ["One directly contributing paper."],
+    "paper_contributions": [{"document_id": "paper_xxx", "analysis_status": "analyzed", "supporting_evidence_ids": ["evidence_xxx"], "contradicting_evidence_ids": [], "context_evidence_ids": [], "condition_boundary_evidence_ids": []}]
+  }
+}
 ```
+
+For `merge_expert_decision_board.py`, the TSV carries the same complete object
+as JSON text in `curated_finding_json`; scalar correction columns are not
+supported.
 
 ## Independent Agent Drafts
 
@@ -142,9 +233,8 @@ the final label human-owned:
 - `merge_expert_decision_board.py`
 
 Agent drafts remain `action=skip` and `human_confirmed=false`. They are keyed by
-`finding_id`; the surrounding decision template must also retain collection,
-Objective, and analysis-version identity. A human converts an advisory row into
-an explicit import action.
+the complete `(collection_id, objective_id, analysis_version, finding_id)`
+identity. A human converts an advisory row into an explicit import action.
 
 ## Dataset Export
 
@@ -164,7 +254,7 @@ Use `format=training_jsonl` for fine-tuning rows. Each line contains:
     {"role": "assistant", "content": "Structured Finding target"}
   ],
   "metadata": {
-    "schema_version": "objective_finding_training.v1",
+    "schema_version": "objective_finding_training.v2",
     "collection_id": "col_xxx",
     "objective_id": "obj_xxx",
     "analysis_version": 2,
@@ -174,5 +264,6 @@ Use `format=training_jsonl` for fine-tuning rows. Each line contains:
 }
 ```
 
-The model input contains source text. `evidence_ids` preserve audit identity;
-they are never the only Evidence content supplied to training.
+Only `training_ready` samples produce JSONL rows. The model input contains
+exact source text and scientific context. `evidence_ids` preserve audit
+identity; they are never the only Evidence content supplied to training.

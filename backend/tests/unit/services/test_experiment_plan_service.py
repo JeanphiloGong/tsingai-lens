@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from application.evaluation.finding_feedback_service import _source_snapshot_validity
 from application.goal.experiment_plan_service import ExperimentPlanService
 from domain.goal import ExperimentPlanRecord
 from tests.support.objective_workspace_repository import (
@@ -40,25 +41,24 @@ def _ved_protocol(*, operational: bool) -> str:
     )
 
 
-def _protocol_source_item(
+def _reviewed_source_item(
     *,
-    protocol_source_fingerprint: str = "protocol-source.v1:def",
+    evidence_fingerprint: str = "evidence.v2:def",
     dataset_use_status: str = "training_ready",
-    protocol_status: str = "protocol_ready",
 ) -> dict:
     return {
         "finding_id": "finding-1",
-        "finding_fingerprint": "finding.v1:abc",
-        "protocol_source_fingerprint": protocol_source_fingerprint,
+        "analysis_version": 1,
+        "finding_fingerprint": "finding.v2:abc",
+        "evidence_fingerprint": evidence_fingerprint,
         "dataset_use_status": dataset_use_status,
-        "protocol_readiness": {"status": protocol_status},
-        "training_evidence_refs": [{"evidence_ref_id": "ev_1"}],
+        "evidence": [{"evidence_id": "ev_1"}],
     }
 
 
 class _FindingFeedbackService:
     def __init__(self, items: list[dict] | None = None) -> None:
-        self.items = list(items if items is not None else [_protocol_source_item()])
+        self.items = list(items if items is not None else [_reviewed_source_item()])
 
     def export_dataset(self, **kwargs):  # noqa: ANN003, ANN201
         return {
@@ -67,14 +67,15 @@ class _FindingFeedbackService:
             "items": self.items,
         }
 
+    def source_snapshot_validity(self, **kwargs):  # noqa: ANN003, ANN201
+        return _source_snapshot_validity(kwargs["source_findings"], self.items)
+
 
 def _experiment_plan_service(
     *,
     repository: InMemoryObjectiveWorkspaceRepository,
     goal_session_repository: InMemoryObjectiveWorkspaceRepository | None = None,
-    finding_feedback_service: (
-        _FindingFeedbackService | None
-    ) = None,
+    finding_feedback_service: _FindingFeedbackService | None = None,
 ) -> ExperimentPlanService:
     return ExperimentPlanService(
         repository=repository,
@@ -82,8 +83,7 @@ def _experiment_plan_service(
             goal_session_repository or InMemoryObjectiveWorkspaceRepository()
         ),
         finding_feedback_service=(
-            finding_feedback_service
-            or _FindingFeedbackService()
+            finding_feedback_service or _FindingFeedbackService()
         ),
     )
 
@@ -147,10 +147,12 @@ def _write_goal_message(
                 "source_finding_refs": source_finding_refs
                 or [
                     {
+                        "objective_id": "objective_1",
                         "finding_id": "finding-1",
-                        "finding_fingerprint": "finding.v1:abc",
-                        "protocol_source_fingerprint": "protocol-source.v1:def",
-                        "evidence_ref_ids": used_evidence_ids or ["ev_1"],
+                        "analysis_version": 1,
+                        "finding_fingerprint": "finding.v2:abc",
+                        "evidence_fingerprint": "evidence.v2:def",
+                        "evidence_ids": used_evidence_ids or ["ev_1"],
                     }
                 ],
                 "created_at": "2026-07-13T00:01:00+00:00",
@@ -163,15 +165,13 @@ def test_experiment_plan_service_saves_and_lists_objective_scoped_drafts(tmp_pat
     goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
         content=_structured_protocol(),
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        finding_feedback_service=(
-            _FindingFeedbackService()
-        ),
+        finding_feedback_service=(_FindingFeedbackService()),
     )
 
     draft = service.create_plan(
@@ -205,13 +205,15 @@ def test_experiment_plan_service_saves_and_lists_objective_scoped_drafts(tmp_pat
     assert draft.metadata["source_session_id"] == "session_1"
     assert draft.metadata["source_mode"] == "collection_grounded"
     assert draft.metadata["used_evidence_ids"] == ["ev_1"]
-    assert draft.metadata["review_gate"] == "protocol_ready_findings"
+    assert draft.metadata["review_gate"] == "reviewed_findings"
     assert draft.metadata["source_findings"] == [
         {
+            "objective_id": "objective_1",
             "finding_id": "finding-1",
-            "finding_fingerprint": "finding.v1:abc",
-            "protocol_source_fingerprint": "protocol-source.v1:def",
-            "evidence_ref_ids": ["ev_1"],
+            "analysis_version": 1,
+            "finding_fingerprint": "finding.v2:abc",
+            "evidence_fingerprint": "evidence.v2:def",
+            "evidence_ids": ["ev_1"],
         }
     ]
     assert draft.metadata["source_validity"] == "current"
@@ -225,7 +227,7 @@ def test_experiment_plan_service_marks_changed_sources_stale_and_blocks_review(
     goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
         content=_structured_protocol(),
     )
     feedback_service = _FindingFeedbackService()
@@ -244,27 +246,24 @@ def test_experiment_plan_service_marks_changed_sources_stale_and_blocks_review(
     )
 
     feedback_service.items = [
-        _protocol_source_item(
-            protocol_source_fingerprint="protocol-source.v1:changed"
-        )
+        _reviewed_source_item(evidence_fingerprint="evidence.v2:changed")
     ]
     stale = service.list_plans("col_1", "objective_1")[0]
 
     assert stale.plan_id == draft.plan_id
     assert stale.metadata["source_validity"] == "stale"
-    assert stale.metadata["source_validity_reasons"] == ["source_finding_changed"]
+    assert stale.metadata["source_validity_reasons"] == ["source_evidence_changed"]
     feedback_service.items = [
-        _protocol_source_item(
+        _reviewed_source_item(
             dataset_use_status="review_candidate",
-            protocol_status="ready_after_review",
         )
     ]
     no_longer_ready = service.list_plans("col_1", "objective_1")[0]
     assert no_longer_ready.metadata["source_validity"] == "stale"
     assert no_longer_ready.metadata["source_validity_reasons"] == [
-        "source_finding_no_longer_protocol_ready"
+        "source_finding_no_longer_reviewed"
     ]
-    with pytest.raises(ValueError, match="source Findings are stale or unverified"):
+    with pytest.raises(ValueError, match="source Findings are stale"):
         service.update_plan(
             collection_id="col_1",
             objective_id="objective_1",
@@ -294,21 +293,22 @@ def test_experiment_plan_service_marks_existing_inconsistent_ved_plan_stale(
                         "kind": "evidence",
                         "label": "Source 1",
                         "href": (
-                            "/collections/col_1/documents/"
-                            "paper-a?evidence_id=ev_1"
+                            "/collections/col_1/documents/" "paper-a?evidence_id=ev_1"
                         ),
                     }
                 ],
                 "metadata": {
                     "source": "goal_copilot",
-                    "review_gate": "protocol_ready_findings",
+                    "review_gate": "reviewed_findings",
                     "used_evidence_ids": ["ev_1"],
                     "source_findings": [
                         {
+                            "objective_id": "objective_1",
                             "finding_id": "finding-1",
-                            "finding_fingerprint": "finding.v1:abc",
-                            "protocol_source_fingerprint": "protocol-source.v1:def",
-                            "evidence_ref_ids": ["ev_1"],
+                            "analysis_version": 1,
+                            "finding_fingerprint": "finding.v2:abc",
+                            "evidence_fingerprint": "evidence.v2:def",
+                            "evidence_ids": ["ev_1"],
                         }
                     ],
                 },
@@ -320,9 +320,7 @@ def test_experiment_plan_service_marks_existing_inconsistent_ved_plan_stale(
     )
     service = _experiment_plan_service(
         repository=repository,
-        finding_feedback_service=(
-            _FindingFeedbackService()
-        ),
+        finding_feedback_service=(_FindingFeedbackService()),
     )
 
     listed = service.list_plans("col_1", "objective_1")[0]
@@ -334,7 +332,7 @@ def test_experiment_plan_service_marks_existing_inconsistent_ved_plan_stale(
     ]
 
 
-def test_experiment_plan_service_marks_legacy_source_without_snapshot_unverified(
+def test_experiment_plan_service_marks_source_without_snapshot_stale(
     tmp_path,
 ):
     repository = InMemoryObjectiveWorkspaceRepository()
@@ -353,14 +351,13 @@ def test_experiment_plan_service_marks_legacy_source_without_snapshot_unverified
                         "kind": "evidence",
                         "label": "Source 1",
                         "href": (
-                            "/collections/col_1/documents/"
-                            "paper-a?evidence_id=ev_1"
+                            "/collections/col_1/documents/" "paper-a?evidence_id=ev_1"
                         ),
                     }
                 ],
                 "metadata": {
                     "source": "goal_copilot",
-                    "review_gate": "protocol_ready_findings",
+                    "review_gate": "reviewed_findings",
                     "used_evidence_ids": ["ev_1"],
                 },
                 "created_by": "expert-a",
@@ -371,15 +368,13 @@ def test_experiment_plan_service_marks_legacy_source_without_snapshot_unverified
     )
     service = _experiment_plan_service(
         repository=repository,
-        finding_feedback_service=(
-            _FindingFeedbackService()
-        ),
+        finding_feedback_service=(_FindingFeedbackService()),
     )
 
     listed = service.list_plans("col_1", "objective_1")[0]
 
     assert listed.plan_id == legacy.plan_id
-    assert listed.metadata["source_validity"] == "unverified"
+    assert listed.metadata["source_validity"] == "stale"
     assert listed.metadata["source_validity_reasons"] == [
         "source_finding_snapshot_missing"
     ]
@@ -390,14 +385,12 @@ def test_experiment_plan_service_rejects_unstructured_goal_copilot_plan(tmp_path
     _write_goal_message(
         goal_session_repository,
         content="Run 25 C and 150 C LPBF 316L builds [Source 1].",
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        finding_feedback_service=(
-            _FindingFeedbackService()
-        ),
+        finding_feedback_service=(_FindingFeedbackService()),
     )
 
     with pytest.raises(ValueError, match="structured protocol draft"):
@@ -422,7 +415,7 @@ def test_experiment_plan_service_rejects_goal_copilot_source_without_review_gate
         goal_session_repository=goal_session_repository,
     )
 
-    with pytest.raises(ValueError, match="protocol-ready findings"):
+    with pytest.raises(ValueError, match="reviewed findings"):
         service.create_plan(
             collection_id="col_1",
             objective_id="objective_1",
@@ -434,7 +427,7 @@ def test_experiment_plan_service_rejects_goal_copilot_source_without_review_gate
         )
 
 
-def test_experiment_plan_service_rejects_training_ready_only_review_gate(tmp_path):
+def test_experiment_plan_service_rejects_obsolete_review_gate(tmp_path):
     goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
@@ -446,7 +439,7 @@ def test_experiment_plan_service_rejects_training_ready_only_review_gate(tmp_pat
         goal_session_repository=goal_session_repository,
     )
 
-    with pytest.raises(ValueError, match="protocol-ready findings"):
+    with pytest.raises(ValueError, match="reviewed findings"):
         service.create_plan(
             collection_id="col_1",
             objective_id="objective_1",
@@ -462,8 +455,8 @@ def test_experiment_plan_service_rejects_unreviewed_goal_copilot_source(tmp_path
     goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
-        warnings=["curated_research_findings_empty"],
-        review_gate="protocol_ready_findings",
+        warnings=["reviewed_findings_empty"],
+        review_gate="reviewed_findings",
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
@@ -487,7 +480,7 @@ def test_experiment_plan_service_rejects_invalid_protocol_contract_warning(tmp_p
     _write_goal_message(
         goal_session_repository,
         warnings=["goal_copilot_protocol_contract_invalid"],
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
         content=_structured_protocol(),
     )
     service = _experiment_plan_service(
@@ -514,14 +507,12 @@ def test_experiment_plan_service_rejects_ved_plan_without_operational_constituen
     _write_goal_message(
         goal_session_repository,
         content=_ved_protocol(operational=False),
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        finding_feedback_service=(
-            _FindingFeedbackService()
-        ),
+        finding_feedback_service=(_FindingFeedbackService()),
     )
 
     with pytest.raises(ValueError, match="VED design"):
@@ -545,14 +536,12 @@ def test_experiment_plan_service_rejects_ved_only_isolation_claim(tmp_path):
     _write_goal_message(
         goal_session_repository,
         content=content,
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        finding_feedback_service=(
-            _FindingFeedbackService()
-        ),
+        finding_feedback_service=(_FindingFeedbackService()),
     )
 
     with pytest.raises(ValueError, match="VED design"):
@@ -578,14 +567,12 @@ def test_experiment_plan_service_rejects_ved_only_effect_as_validation_target(
     _write_goal_message(
         goal_session_repository,
         content=content,
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        finding_feedback_service=(
-            _FindingFeedbackService()
-        ),
+        finding_feedback_service=(_FindingFeedbackService()),
     )
 
     with pytest.raises(ValueError, match="VED design"):
@@ -622,14 +609,12 @@ Coupled VED parameter sets were associated with fatigue strength [Source 1].
     _write_goal_message(
         goal_session_repository,
         content=content,
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        finding_feedback_service=(
-            _FindingFeedbackService()
-        ),
+        finding_feedback_service=(_FindingFeedbackService()),
     )
 
     with pytest.raises(ValueError, match="Proposed design choice"):
@@ -649,7 +634,7 @@ def test_experiment_plan_service_rejects_answer_without_source_label(tmp_path):
     _write_goal_message(
         goal_session_repository,
         content="Run a traceable validation matrix based on the accepted evidence.",
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
@@ -673,7 +658,7 @@ def test_experiment_plan_service_rejects_plan_content_without_source_label(tmp_p
     _write_goal_message(
         goal_session_repository,
         content=_structured_protocol(),
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
@@ -704,14 +689,16 @@ def test_experiment_plan_service_rejects_source_link_without_used_evidence(tmp_p
         goal_session_repository,
         used_evidence_ids=["ev_1"],
         source_href="/collections/col_1/documents/paper-a?evidence_id=ev_other",
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
     )
 
-    with pytest.raises(ValueError, match="source links do not match evidence citations"):
+    with pytest.raises(
+        ValueError, match="source links do not match evidence citations"
+    ):
         service.create_plan(
             collection_id="col_1",
             objective_id="objective_1",
@@ -730,7 +717,7 @@ def test_experiment_plan_service_rejects_used_evidence_without_source_link(tmp_p
         used_evidence_ids=["ev_1", "ev_2"],
         source_href="/collections/col_1/documents/paper-a?evidence_id=ev_1",
         content="Run a traceable validation matrix [Source 1].",
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
@@ -754,7 +741,7 @@ def test_experiment_plan_service_rejects_cross_objective_source_message(tmp_path
     _write_goal_message(
         goal_session_repository,
         objective_id="objective_other",
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
@@ -776,7 +763,7 @@ def test_experiment_plan_service_rejects_source_message_without_user(tmp_path):
     goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
@@ -842,15 +829,13 @@ def test_experiment_plan_service_preserves_copilot_traceability_on_update(tmp_pa
     goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
         content=_structured_protocol(),
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        finding_feedback_service=(
-            _FindingFeedbackService()
-        ),
+        finding_feedback_service=(_FindingFeedbackService()),
     )
     draft = service.create_plan(
         collection_id="col_1",
@@ -878,7 +863,7 @@ def test_experiment_plan_service_preserves_copilot_traceability_on_update(tmp_pa
     )
 
     assert updated.status == "ready_for_review"
-    assert updated.metadata["review_gate"] == "protocol_ready_findings"
+    assert updated.metadata["review_gate"] == "reviewed_findings"
     assert updated.source_links[0]["label"] == "Source 1"
 
 
@@ -886,7 +871,7 @@ def test_experiment_plan_service_rejects_copilot_update_without_source_label(tmp
     goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
         content=_structured_protocol(),
     )
     service = _experiment_plan_service(
@@ -926,7 +911,7 @@ def test_experiment_plan_service_rejects_copilot_update_without_protocol_structu
     goal_session_repository = InMemoryObjectiveWorkspaceRepository()
     _write_goal_message(
         goal_session_repository,
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
         content=_structured_protocol(),
     )
     service = _experiment_plan_service(
@@ -959,14 +944,12 @@ def test_experiment_plan_service_rejects_ved_conflict_added_by_plan_edit(tmp_pat
     _write_goal_message(
         goal_session_repository,
         content=_ved_protocol(operational=True),
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
     )
     service = _experiment_plan_service(
         repository=InMemoryObjectiveWorkspaceRepository(),
         goal_session_repository=goal_session_repository,
-        finding_feedback_service=(
-            _FindingFeedbackService()
-        ),
+        finding_feedback_service=(_FindingFeedbackService()),
     )
     draft = service.create_plan(
         collection_id="col_1",

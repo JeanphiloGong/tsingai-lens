@@ -95,6 +95,19 @@ class GoalSourceLinkResponse(BaseModel):
     href: str = Field(..., description="Frontend route for source verification")
 
 
+class GoalFindingSourceResponse(BaseModel):
+    """Versioned Finding and Evidence identity used by one answer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    objective_id: str
+    finding_id: str
+    analysis_version: int = Field(..., ge=1)
+    finding_fingerprint: str
+    evidence_fingerprint: str
+    evidence_ids: list[str]
+
+
 class GoalSessionMessageResponse(BaseModel):
     """Assistant response for one goal session message."""
 
@@ -116,8 +129,11 @@ class GoalSessionMessageResponse(BaseModel):
     )
     review_gate: str | None = Field(
         default=None,
-        description="Review gate satisfied by the answer, such as protocol_ready_findings",
+        description="Review gate satisfied by the answer, such as reviewed_findings",
     )
+    source_finding_refs: list[GoalFindingSourceResponse] = Field(default_factory=list)
+    source_validity: Literal["current", "stale"] | None = None
+    source_validity_reasons: list[str] = Field(default_factory=list)
     created_at: str = Field(..., description="Creation timestamp")
 
 

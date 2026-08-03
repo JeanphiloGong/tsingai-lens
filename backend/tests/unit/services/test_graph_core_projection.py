@@ -30,8 +30,10 @@ def _objective(collection_id: str) -> ResearchObjective:
             "objective_id": "obj-1",
             "question": "How does scan speed affect LPBF 316L strength?",
             "material_scope": ["316L stainless steel"],
-            "process_axes": ["scan speed"],
-            "property_axes": ["yield strength"],
+            "variables": ["scan speed"],
+            "outcomes": ["yield strength"],
+            "mechanisms": ["porosity reduction"],
+            "constraints": ["LPBF"],
             "seed_document_ids": ["paper-1"],
             "confidence": 0.9,
         }
@@ -121,6 +123,18 @@ def test_core_projection_keeps_objective_as_definition_only():
     assert truncated is False
     assert [node["id"] for node in nodes] == ["obj:obj-1"]
     assert nodes[0]["type"] == "objective"
+    assert nodes[0]["metrics"] == {
+        "material_scope_count": 1,
+        "variable_count": 1,
+        "outcome_count": 1,
+        "mechanism_count": 1,
+        "constraint_count": 1,
+    }
+    assert nodes[0]["detail_rows"][0]["variables"] == "scan speed"
+    assert nodes[0]["detail_rows"][0]["outcomes"] == "yield strength"
+    assert nodes[0]["detail_rows"][0]["constraints"] == "LPBF"
+    assert "process" not in nodes[0]["detail_rows"][0]
+    assert "property" not in nodes[0]["detail_rows"][0]
     assert edges == []
 
 

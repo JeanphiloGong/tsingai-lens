@@ -14,8 +14,8 @@ def _objective() -> ResearchObjective:
             "objective_id": "obj-1",
             "question": "How does temperature affect strength?",
             "material_scope": ["Alloy A"],
-            "process_axes": ["temperature"],
-            "property_axes": ["strength"],
+            "variables": ["temperature"],
+            "outcomes": ["strength"],
             "seed_document_ids": ["paper-1"],
             "confidence": 0.9,
             "confirmation_status": "confirmed",
@@ -26,16 +26,20 @@ def _objective() -> ResearchObjective:
 
 
 def _analysis() -> ObjectiveAnalysis:
-    return ObjectiveAnalysis(
-        collection_id="col-1",
-        objective_id="obj-1",
-        analysis_version=1,
-        source_build_id="build-1",
-        pipeline_version="test.v1",
-        model_name="model-1",
-        prompt_versions={},
-        total_document_count=1,
-    ).start().succeed()
+    return (
+        ObjectiveAnalysis(
+            collection_id="col-1",
+            objective_id="obj-1",
+            analysis_version=1,
+            source_build_id="build-1",
+            pipeline_version="test.v1",
+            model_name="model-1",
+            prompt_versions={},
+            total_document_count=1,
+        )
+        .start()
+        .succeed()
+    )
 
 
 def _finding() -> Finding:
@@ -45,33 +49,30 @@ def _finding() -> Finding:
             "objective_id": "obj-1",
             "analysis_version": 1,
             "finding_id": "finding-1",
-            "finding_level": "paper",
             "statement": "Higher temperature was associated with greater strength.",
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-            "scope_summary": "Alloy A",
-            "evidence_strength": "weak",
-            "generalization_status": "paper_level_only",
-            "paper_count": 1,
-            "confidence": 0.8,
+            "factors": ["temperature"],
+            "outcome": "strength",
+            "direction": "increase",
+            "assertion_strength": "associative",
+            "attribution_scope": "isolated_effect",
+            "synthesis_status": "insufficient_confirmation",
+            "certainty": 0.5,
             "display_rank": 0,
-            "relations": [
+            "mechanisms": [],
+            "scientific_context": {
+                "material": [],
+                "sample": [],
+                "process": [],
+                "test": [],
+            },
+            "limitations": ["Supported by one paper."],
+            "paper_contributions": [
                 {
-                    "source_term": "temperature",
-                    "relation_type": "associated_with",
-                    "target_term": "strength",
-                    "assertion_strength": "associative",
+                    "document_id": "paper-1",
+                    "analysis_status": "analyzed",
                     "supporting_evidence_ids": ["evidence-1"],
                 }
             ],
-            "context": {"supporting_evidence_ids": ["evidence-1"]},
-            "derivation": {
-                "synthesis_mode": "paper",
-                "comparison_status": "insufficient_confirmation",
-                "contributing_document_ids": ["paper-1"],
-                "supporting_evidence_ids": ["evidence-1"],
-                "rationale": "One paper reported the direct result.",
-            },
         }
     )
 
@@ -90,9 +91,34 @@ def _evidence() -> ObjectiveEvidence:
             "page_numbers": [7],
             "evidence_role": "direct_result",
             "selection_status": "extracted",
-            "evidence_kind": "measurement",
-            "property_normalized": "strength",
-            "value_payload": {"value": 620},
+            "changed_variables": [
+                {
+                    "name": "temperature",
+                    "baseline_value": 400,
+                    "target_value": 500,
+                    "unit": "C",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "400 C",
+                "target_label": "500 C",
+                "axis_names": ["temperature"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "strength",
+                "value": 620,
+                "unit": "MPa",
+                "direction": "increase",
+                "result_text": "Tensile strength increased to 620 MPa.",
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {
+                "material": [],
+                "sample": [],
+                "process": [],
+                "test": [],
+            },
             "resolution_status": "resolved",
             "confidence": 0.9,
         }
@@ -185,7 +211,12 @@ def test_finding_api_returns_canonical_finding_without_claim_identity() -> None:
     payload = response.json()
     assert payload["total"] == 1
     assert payload["items"][0]["finding_id"] == "finding-1"
-    assert payload["items"][0]["relations"][0]["relation_order"] == 0
+    assert payload["items"][0]["factors"] == ["temperature"]
+    assert payload["items"][0]["outcome"] == "strength"
+    assert payload["items"][0]["paper_contributions"][0]["supporting_evidence_ids"] == [
+        "evidence-1"
+    ]
+    assert "finding_level" not in str(payload)
     assert "claim_id" not in str(payload)
     assert "logic_chain_id" not in str(payload)
 

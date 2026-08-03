@@ -102,7 +102,7 @@
 					<div class="heading">
 						<div>
 							<h3>{objective.question}</h3>
-							<p>{objective.comparison_intent || '尚未设置比较意图'}</p>
+							<p>{objective.requested_comparator || '尚未设置比较意图'}</p>
 						</div>
 						<span class:published={objective.published_analysis_version !== null}>
 							{objective.published_analysis_version !== null
@@ -113,10 +113,30 @@
 						</span>
 					</div>
 					<dl>
-						<div><dt>材料</dt><dd>{joined(objective.material_scope)}</dd></div>
-						<div><dt>变量</dt><dd>{joined(objective.process_axes)}</dd></div>
-						<div><dt>结果</dt><dd>{joined(objective.property_axes)}</dd></div>
-						<div><dt>文献范围</dt><dd>{objective.seed_document_ids.length} 篇</dd></div>
+						<div>
+							<dt>材料</dt>
+							<dd>{joined(objective.material_scope)}</dd>
+						</div>
+						<div>
+							<dt>变量</dt>
+							<dd>{joined(objective.variables)}</dd>
+						</div>
+						<div>
+							<dt>结果</dt>
+							<dd>{joined(objective.outcomes)}</dd>
+						</div>
+						<div>
+							<dt>机制</dt>
+							<dd>{joined(objective.mechanisms)}</dd>
+						</div>
+						<div>
+							<dt>约束</dt>
+							<dd>{joined(objective.constraints)}</dd>
+						</div>
+						<div>
+							<dt>文献范围</dt>
+							<dd>{objective.seed_document_ids.length} 篇</dd>
+						</div>
 					</dl>
 					<div class="actions">
 						{#if objective.published_analysis_version === null}
@@ -140,32 +160,125 @@
 </section>
 
 <style>
-	.objectives-page { width: min(1120px, 100%); margin: 0 auto; display: grid; gap: 20px; }
-	header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; border-bottom: 1px solid var(--border-default); padding-bottom: 16px; }
-	h2, h3, p { margin: 0; }
-	header p, article p, dt, .summary span { color: var(--text-secondary); }
-	header p { margin-top: 6px; max-width: 720px; }
-	.state { padding: 28px 0; color: var(--text-secondary); }
-	.state--error { color: var(--danger, #b42318); }
-	.summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--border-default); }
-	.summary div { display: grid; gap: 2px; padding: 14px 18px; border-right: 1px solid var(--border-default); }
-	.summary div:last-child { border-right: 0; }
-	.summary strong { font-size: 20px; }
-	.objective-list { display: grid; gap: 10px; }
-	article { border-bottom: 1px solid var(--border-default); padding: 18px 0; display: grid; gap: 16px; }
-	.heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
-	.heading h3 { font-size: 17px; line-height: 1.45; }
-	.heading p { margin-top: 5px; }
-	.heading > span { white-space: nowrap; padding: 4px 8px; border: 1px solid var(--border-default); font-size: 12px; }
-	.heading > span.published { border-color: #3a7d5d; color: #256346; }
-	dl { margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-	dt { font-size: 12px; margin-bottom: 4px; }
-	dd { margin: 0; line-height: 1.45; overflow-wrap: anywhere; }
-	.actions { display: flex; gap: 8px; }
+	.objectives-page {
+		width: min(1120px, 100%);
+		margin: 0 auto;
+		display: grid;
+		gap: 20px;
+	}
+	header {
+		display: flex;
+		justify-content: space-between;
+		gap: 20px;
+		align-items: flex-start;
+		border-bottom: 1px solid var(--border-default);
+		padding-bottom: 16px;
+	}
+	h2,
+	h3,
+	p {
+		margin: 0;
+	}
+	header p,
+	article p,
+	dt,
+	.summary span {
+		color: var(--text-secondary);
+	}
+	header p {
+		margin-top: 6px;
+		max-width: 720px;
+	}
+	.state {
+		padding: 28px 0;
+		color: var(--text-secondary);
+	}
+	.state--error {
+		color: var(--danger, #b42318);
+	}
+	.summary {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		border-block: 1px solid var(--border-default);
+	}
+	.summary div {
+		display: grid;
+		gap: 2px;
+		padding: 14px 18px;
+		border-right: 1px solid var(--border-default);
+	}
+	.summary div:last-child {
+		border-right: 0;
+	}
+	.summary strong {
+		font-size: 20px;
+	}
+	.objective-list {
+		display: grid;
+		gap: 10px;
+	}
+	article {
+		border-bottom: 1px solid var(--border-default);
+		padding: 18px 0;
+		display: grid;
+		gap: 16px;
+	}
+	.heading {
+		display: flex;
+		justify-content: space-between;
+		gap: 20px;
+		align-items: flex-start;
+	}
+	.heading h3 {
+		font-size: 17px;
+		line-height: 1.45;
+	}
+	.heading p {
+		margin-top: 5px;
+	}
+	.heading > span {
+		white-space: nowrap;
+		padding: 4px 8px;
+		border: 1px solid var(--border-default);
+		font-size: 12px;
+	}
+	.heading > span.published {
+		border-color: #3a7d5d;
+		color: #256346;
+	}
+	dl {
+		margin: 0;
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 14px;
+	}
+	dt {
+		font-size: 12px;
+		margin-bottom: 4px;
+	}
+	dd {
+		margin: 0;
+		line-height: 1.45;
+		overflow-wrap: anywhere;
+	}
+	.actions {
+		display: flex;
+		gap: 8px;
+	}
 	@media (max-width: 760px) {
-		header, .heading { flex-direction: column; }
-		dl { grid-template-columns: 1fr 1fr; }
-		.summary { grid-template-columns: 1fr; }
-		.summary div { border-right: 0; border-bottom: 1px solid var(--border-default); }
+		header,
+		.heading {
+			flex-direction: column;
+		}
+		dl {
+			grid-template-columns: 1fr 1fr;
+		}
+		.summary {
+			grid-template-columns: 1fr;
+		}
+		.summary div {
+			border-right: 0;
+			border-bottom: 1px solid var(--border-default);
+		}
 	}
 </style>

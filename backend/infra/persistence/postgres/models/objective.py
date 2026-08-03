@@ -123,9 +123,11 @@ class ObjectiveResearchRecord(Base):
     objective_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     question: Mapped[str] = mapped_column(Text, nullable=False)
     material_scope: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    process_axes: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    property_axes: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    comparison_intent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    variables: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    outcomes: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    mechanisms: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    constraints: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    requested_comparator: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     confirmation_status: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -308,6 +310,11 @@ class ObjectiveEvidenceRecord(Base):
             "source_kind IN ('text_window', 'table', 'figure')",
             name="source_kind_valid",
         ),
+        CheckConstraint(
+            "attribution_scope IN ('isolated_effect', 'joint_effect', "
+            "'association_only', 'descriptive_only', 'not_attributable')",
+            name="attribution_scope_valid",
+        ),
         CheckConstraint("length(source_excerpt) > 0", name="source_excerpt_non_empty"),
         CheckConstraint(
             "selection_status != 'failed' OR failure_reason IS NOT NULL",
@@ -357,22 +364,19 @@ class ObjectiveEvidenceRecord(Base):
     evidence_role: Mapped[str] = mapped_column(String(32), nullable=False)
     selection_status: Mapped[str] = mapped_column(String(16), nullable=False)
     selection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    evidence_kind: Mapped[str] = mapped_column(String(64), nullable=False)
-    property_normalized: Mapped[str | None] = mapped_column(Text, nullable=True)
-    material_system: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    sample_context: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    process_context: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    test_condition: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    resolved_condition: Mapped[dict[str, Any]] = mapped_column(
+    changed_variables: Mapped[list[dict[str, Any]]] = mapped_column(
         _JSON_DOCUMENT, nullable=False
     )
-    value_payload: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    unit: Mapped[str | None] = mapped_column(Text, nullable=True)
-    baseline_context: Mapped[dict[str, Any]] = mapped_column(
+    comparison: Mapped[dict[str, Any] | None] = mapped_column(
+        _JSON_DOCUMENT, nullable=True
+    )
+    reported_result: Mapped[dict[str, Any] | None] = mapped_column(
+        _JSON_DOCUMENT, nullable=True
+    )
+    attribution_scope: Mapped[str] = mapped_column(String(32), nullable=False)
+    scientific_context: Mapped[dict[str, Any]] = mapped_column(
         _JSON_DOCUMENT, nullable=False
     )
-    interpretation: Mapped[str | None] = mapped_column(Text, nullable=True)
-    join_keys: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     anchor_ids: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     resolution_status: Mapped[str] = mapped_column(String(32), nullable=False)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -382,15 +386,26 @@ class ObjectiveEvidenceRecord(Base):
 class ObjectiveFindingRecord(Base):
     __tablename__ = "objective_findings"
     __table_args__ = (
-        CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
-        CheckConstraint("paper_count > 0", name="paper_count_positive"),
+        CheckConstraint("certainty >= 0 AND certainty <= 1", name="certainty_range"),
         CheckConstraint("display_rank >= 0", name="display_rank_non_negative"),
         CheckConstraint(
-            "finding_level IN ('paper', 'cross_paper')", name="finding_level_valid"
+            "direction IN ('increase', 'decrease', 'improve', 'worsen', "
+            "'no_change', 'mixed', 'unknown')",
+            name="direction_valid",
         ),
         CheckConstraint(
-            "evidence_strength IN ('strong', 'moderate', 'weak', 'insufficient')",
-            name="evidence_strength_valid",
+            "assertion_strength IN ('causal', 'associative', 'descriptive')",
+            name="assertion_strength_valid",
+        ),
+        CheckConstraint(
+            "attribution_scope IN ('isolated_effect', 'joint_effect', "
+            "'association_only', 'descriptive_only')",
+            name="attribution_scope_valid",
+        ),
+        CheckConstraint(
+            "synthesis_status IN ('agreement', 'conflict', "
+            "'condition_dependent', 'insufficient_confirmation')",
+            name="synthesis_status_valid",
         ),
         ForeignKeyConstraint(
             ["collection_id", "objective_id", "analysis_version"],
@@ -408,17 +423,14 @@ class ObjectiveFindingRecord(Base):
     objective_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     analysis_version: Mapped[int] = mapped_column(Integer, primary_key=True)
     finding_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    finding_level: Mapped[str] = mapped_column(String(16), nullable=False)
     statement: Mapped[str] = mapped_column(Text, nullable=False)
-    variables: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    mediators: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    outcomes: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    direction: Mapped[str | None] = mapped_column(Text, nullable=True)
-    scope_summary: Mapped[str] = mapped_column(Text, nullable=False)
-    evidence_strength: Mapped[str] = mapped_column(String(16), nullable=False)
-    generalization_status: Mapped[str] = mapped_column(String(32), nullable=False)
-    paper_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    factors: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    direction: Mapped[str] = mapped_column(String(32), nullable=False)
+    assertion_strength: Mapped[str] = mapped_column(String(16), nullable=False)
+    attribution_scope: Mapped[str] = mapped_column(String(32), nullable=False)
+    synthesis_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    certainty: Mapped[float] = mapped_column(Float, nullable=False)
     display_rank: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
@@ -427,7 +439,7 @@ class ObjectiveFindingRelationRecord(Base):
     __table_args__ = (
         CheckConstraint("relation_order >= 0", name="relation_order_non_negative"),
         CheckConstraint(
-            "assertion_strength IN ('causal', 'associative', 'descriptive', 'uncertain')",
+            "assertion_strength IN ('causal', 'associative', 'descriptive')",
             name="assertion_strength_valid",
         ),
         ForeignKeyConstraint(
@@ -475,30 +487,25 @@ class ObjectiveFindingContextRecord(Base):
     objective_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     analysis_version: Mapped[int] = mapped_column(Integer, primary_key=True)
     finding_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    material_system: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    process_conditions: Mapped[list[dict[str, Any]]] = mapped_column(
-        _JSON_DOCUMENT, nullable=False
-    )
-    sample_state: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    test_conditions: Mapped[list[dict[str, Any]]] = mapped_column(
-        _JSON_DOCUMENT, nullable=False
-    )
-    comparison_baseline: Mapped[dict[str, Any]] = mapped_column(
+    scientific_context: Mapped[dict[str, Any]] = mapped_column(
         _JSON_DOCUMENT, nullable=False
     )
     limitations: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
 
 
-class ObjectiveFindingDerivationRecord(Base):
-    __tablename__ = "objective_finding_derivations"
+class ObjectiveFindingPaperContributionRecord(Base):
+    __tablename__ = "objective_finding_paper_contributions"
     __table_args__ = (
-        CheckConstraint(
-            "synthesis_mode IN ('paper', 'cross_paper')", name="synthesis_mode_valid"
-        ),
-        CheckConstraint(
-            "comparison_status IN ('agreement', 'conflict', 'condition_dependent', "
-            "'insufficient_confirmation')",
-            name="comparison_status_valid",
+        CheckConstraint("paper_order >= 0", name="paper_order_non_negative"),
+        UniqueConstraint(
+            "collection_id",
+            "objective_id",
+            "analysis_version",
+            "finding_id",
+            "paper_order",
+            name=(
+                "uq_objective_finding_paper_contributions_paper_order_unique"
+            ),
         ),
         ForeignKeyConstraint(
             ["collection_id", "objective_id", "analysis_version", "finding_id"],
@@ -508,7 +515,23 @@ class ObjectiveFindingDerivationRecord(Base):
                 "objective_findings.analysis_version",
                 "objective_findings.finding_id",
             ],
-            name="fk_objective_finding_derivations_finding",
+            name="fk_objective_finding_paper_contributions_finding",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            [
+                "collection_id",
+                "objective_id",
+                "analysis_version",
+                "source_document_id",
+            ],
+            [
+                "objective_paper_contributions.collection_id",
+                "objective_paper_contributions.objective_id",
+                "objective_paper_contributions.analysis_version",
+                "objective_paper_contributions.source_document_id",
+            ],
+            name="fk_objective_finding_paper_contributions_contribution",
             ondelete="CASCADE",
         ),
     )
@@ -517,12 +540,8 @@ class ObjectiveFindingDerivationRecord(Base):
     objective_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     analysis_version: Mapped[int] = mapped_column(Integer, primary_key=True)
     finding_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    synthesis_mode: Mapped[str] = mapped_column(String(16), nullable=False)
-    comparison_status: Mapped[str] = mapped_column(String(32), nullable=False)
-    contributing_document_ids: Mapped[list[str]] = mapped_column(
-        _JSON_DOCUMENT, nullable=False
-    )
-    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    source_document_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    paper_order: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 objective_finding_evidence_links = Table(
@@ -536,8 +555,18 @@ objective_finding_evidence_links = Table(
     Column("link_role", String(16), primary_key=True),
     Column("position", Integer, nullable=False),
     CheckConstraint(
-        "link_role IN ('supporting', 'contradicting', 'context')",
+        "link_role IN ('supporting', 'contradicting', 'context', 'boundary')",
         name="link_role_valid",
+    ),
+    CheckConstraint("position >= 0", name="position_non_negative"),
+    UniqueConstraint(
+        "collection_id",
+        "objective_id",
+        "analysis_version",
+        "finding_id",
+        "link_role",
+        "position",
+        name="uq_objective_finding_evidence_links_link_role_position_unique",
     ),
     ForeignKeyConstraint(
         ["collection_id", "objective_id", "analysis_version", "finding_id"],
@@ -574,6 +603,16 @@ objective_finding_relation_evidence_links = Table(
     Column("relation_order", Integer, primary_key=True),
     Column("evidence_id", String(128), primary_key=True),
     Column("position", Integer, nullable=False),
+    CheckConstraint("position >= 0", name="position_non_negative"),
+    UniqueConstraint(
+        "collection_id",
+        "objective_id",
+        "analysis_version",
+        "finding_id",
+        "relation_order",
+        "position",
+        name="uq_obj_find_rel_evidence_relation_position",
+    ),
     ForeignKeyConstraint(
         [
             "collection_id",
@@ -611,7 +650,7 @@ __all__ = [
     "ObjectiveBuild",
     "ObjectiveEvidenceRecord",
     "ObjectiveFindingContextRecord",
-    "ObjectiveFindingDerivationRecord",
+    "ObjectiveFindingPaperContributionRecord",
     "ObjectiveFindingRecord",
     "ObjectiveFindingRelationRecord",
     "ObjectivePaperContributionRecord",

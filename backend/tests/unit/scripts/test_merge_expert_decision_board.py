@@ -32,31 +32,21 @@ def _template_row(**overrides):
     row = {
         "collection_id": "col-1",
         "objective_id": "objective-1",
+        "analysis_version": 2,
         "finding_id": "finding-1",
-        "claim_id": "claim-1",
         "action": "skip",
         "issue_type": "",
         "expert_note": "",
         "statement": "Preheating improved ductility.",
-        "variables": ["preheating"],
-        "outcomes": ["ductility"],
+        "factors": ["preheating"],
+        "outcome": "ductility",
         "direction": "increase",
-        "support_grade": "partial",
         "acceptance_gate": {
             "accept_allowed": True,
             "requires_correction": False,
             "accept_blockers": [],
         },
         "protocol_blocking_missing": [],
-        "curated_evidence_ref_ids": ["ev-1"],
-        "suggested_target": {
-            "statement": "Preheating improved ductility.",
-            "variables": ["preheating"],
-            "outcomes": ["ductility"],
-            "direction": "increase",
-            "support_grade": "partial",
-            "evidence_ref_ids": ["ev-1"],
-        },
     }
     row.update(overrides)
     return row
@@ -66,19 +56,61 @@ def _board_row(**overrides):
     row = {
         "collection_id": "col-1",
         "objective_id": "objective-1",
+        "analysis_version": "2",
         "finding_id": "finding-1",
         "expert_action": "",
         "issue_type": "",
         "expert_note": "",
-        "corrected_statement": "",
-        "corrected_variables": "",
-        "corrected_mediators": "",
-        "corrected_outcomes": "",
-        "corrected_direction": "",
-        "corrected_scope_summary": "",
-        "corrected_support_grade": "",
-        "corrected_evidence_ref_ids": "",
+        "curated_status": "",
+        "curated_finding_json": "",
         "accept_allowed": "yes",
+    }
+    row.update(overrides)
+    return row
+
+
+def _curated_finding(**overrides):
+    row = {
+        "collection_id": "col-1",
+        "objective_id": "objective-1",
+        "analysis_version": 2,
+        "finding_id": "finding-1",
+        "statement": "Preheating increased ductility by 14%.",
+        "factors": ["preheating", "build plate temperature"],
+        "outcome": "ductility",
+        "direction": "increase",
+        "assertion_strength": "associative",
+        "attribution_scope": "isolated_effect",
+        "synthesis_status": "insufficient_confirmation",
+        "certainty": 0.9,
+        "display_rank": 0,
+        "mechanisms": [
+            {
+                "source_term": "preheating",
+                "relation_type": "associated_with",
+                "target_term": "homogenized microstructure",
+                "direction": "increase",
+                "assertion_strength": "associative",
+                "supporting_evidence_ids": ["ev-1"],
+            }
+        ],
+        "scientific_context": {
+            "material": [{"name": "alloy", "value": "316L", "unit": None}],
+            "sample": [],
+            "process": [],
+            "test": [],
+        },
+        "limitations": ["One directly contributing paper."],
+        "paper_contributions": [
+            {
+                "document_id": "paper-1",
+                "analysis_status": "analyzed",
+                "supporting_evidence_ids": ["ev-1"],
+                "contradicting_evidence_ids": [],
+                "context_evidence_ids": [],
+                "condition_boundary_evidence_ids": [],
+            }
+        ],
     }
     row.update(overrides)
     return row
@@ -108,7 +140,7 @@ def test_merge_expert_decision_board_keeps_blank_actions_skipped():
     )
 
     assert rows[0]["action"] == "skip"
-    assert rows[0]["expert_note"] == ""
+    assert "expert_note" not in rows[0]
 
 
 def test_merge_expert_decision_board_applies_accept_reject_and_correct():
@@ -136,32 +168,19 @@ def test_merge_expert_decision_board_applies_accept_reject_and_correct():
                 finding_id="finding-correct",
                 expert_action="correct",
                 expert_note="Use the measured ductility result.",
-                corrected_statement="Preheating increased ductility by 14%.",
-                corrected_variables="preheating; build plate temperature",
-                corrected_mediators="homogenized microstructure",
-                corrected_outcomes="ductility",
-                corrected_direction="increase",
-                corrected_scope_summary="LPBF 316L",
-                corrected_support_grade="partial",
-                corrected_evidence_ref_ids="ev-1",
+                curated_status="limited",
+                curated_finding_json=json.dumps(
+                    _curated_finding(finding_id="finding-correct")
+                ),
             ),
         ],
     )
 
     assert [row["action"] for row in rows] == ["accept", "reject", "correct"]
-    assert rows[0]["expert_note"] == "Confirmed against the source quote."
+    assert rows[0]["note"] == "Confirmed against the source quote."
     assert rows[1]["issue_type"] == "wrong_direction"
-    assert rows[2]["suggested_target"] == {
-        "statement": "Preheating increased ductility by 14%.",
-        "variables": ["preheating", "build plate temperature"],
-        "outcomes": ["ductility"],
-        "direction": "increase",
-        "support_grade": "partial",
-        "evidence_ref_ids": ["ev-1"],
-        "mediators": ["homogenized microstructure"],
-        "scope_summary": "LPBF 316L",
-    }
-    assert rows[2]["curated_evidence_ref_ids"] == ["ev-1"]
+    assert rows[2]["curated_finding"] == _curated_finding(finding_id="finding-correct")
+    assert rows[2]["curated_status"] == "limited"
 
 
 def test_merge_expert_decision_board_rejects_blocked_accept():
@@ -196,8 +215,7 @@ def test_merge_expert_decision_board_requires_corrected_target():
         )
     except ValueError as exc:
         assert str(exc) == (
-            "line 2: correct requires corrected_statement\n"
-            "line 2: correct requires corrected_evidence_ref_ids"
+            "line 2: correct requires one complete curated_finding_json"
         )
     else:
         raise AssertionError("expected incomplete correction to fail")
@@ -247,4 +265,4 @@ def test_merge_expert_decision_board_cli_writes_jsonl(tmp_path):
         for line in output_path.read_text(encoding="utf-8").splitlines()
     ]
     assert rows[0]["action"] == "accept"
-    assert rows[0]["expert_note"] == "Confirmed against the source quote."
+    assert rows[0]["note"] == "Confirmed against the source quote."

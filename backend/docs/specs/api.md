@@ -100,14 +100,14 @@ filter.
 
 A Finding contains:
 
-- `finding_id`, `finding_level`, statement, variables, mediators, outcomes,
-  direction, and scope summary;
-- evidence strength, generalization status, paper count, confidence, and
+- `finding_id`, statement, one complete `factors` tuple, one `outcome`, and
+  direction;
+- assertion strength, attribution scope, synthesis status, certainty, and
   display rank;
-- ordered Relations;
-- structured Context;
-- Derivation with contributing documents, supporting/contradicting Evidence,
-  comparison status, and rationale.
+- subordinate mechanisms and typed material/sample/process/test scientific
+  context;
+- explicit limitations and one PaperContribution binding for every analyzed,
+  excluded, or failed paper.
 
 An Evidence record contains:
 
@@ -123,9 +123,11 @@ The consumer identity is always:
 (collection_id, objective_id, analysis_version, finding_id)
 ```
 
-A paper Finding has direct-result support from one paper and remains
-paper-level. A cross-paper Finding requires comparable direct results from at
-least two distinct papers. Context-only Evidence cannot establish an outcome.
+Direct contributing paper count is computed from PaperContribution Evidence
+bindings rather than stored as a second declaration. `agreement`, `conflict`,
+and `condition_dependent` require direct results from at least two distinct
+papers; otherwise synthesis remains `insufficient_confirmation`. Context-only
+Evidence cannot establish an outcome.
 
 ### Finding Feedback, Curation, And Dataset Export
 
@@ -138,16 +140,20 @@ least two distinct papers. Context-only Evidence cannot establish an outcome.
 - `GET /api/v1/collections/{collection_id}/finding-gold-draft`
 
 Feedback requires `analysis_version`, `review_status`, and `issue_type`.
-Curation requires `analysis_version`, a corrected statement, and version-local
-Evidence IDs. Unknown, stale, unpublished, and cross-version references return
-`404` or `409` and are never silently rebound.
+Curation requires `analysis_version` and one complete canonical
+`curated_finding`. The service validates its exact identity and every
+version-local Evidence/PaperContribution binding. Unknown, stale, unpublished,
+partial, and cross-version references return `404`, `409`, or `422` and are
+never silently rebound.
 
 Dataset export supports `format=json | training_jsonl` plus optional
-`label_status` and `dataset_use_status` filters. `objective_finding_dataset.v1`
-includes system prediction, optional expert target, and exact Evidence excerpts
-with document/page/locator provenance. `training_jsonl` contains one
+`label_status` and `dataset_use_status` filters. `objective_finding_dataset.v2`
+includes canonical system prediction, optional expert target, resolved training
+target, deterministic Finding/Evidence fingerprints, and exact Evidence
+excerpts with document/page/locator provenance. `training_jsonl` contains one
 `{messages, metadata}` object per line and omits samples without valid training
-messages. IDs preserve lineage; source text is part of model input.
+messages. IDs preserve lineage; source text and scientific context are part of
+model input. The latest feedback or curation event controls dataset status.
 
 ### Objective Experiment Plans
 

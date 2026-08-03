@@ -44,7 +44,7 @@ def test_goal_session_record_updates_chat_state_after_answer() -> None:
         content="Answer",
         source_mode="collection_grounded",
         used_evidence_ids=["E01", "E01", "E02"],
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
         source_links=[
             {
                 "kind": "evidence",
@@ -54,10 +54,12 @@ def test_goal_session_record_updates_chat_state_after_answer() -> None:
         ],
         source_finding_refs=[
             {
+                "objective_id": "obj_lpbf",
                 "finding_id": "finding-1",
-                "finding_fingerprint": "finding.v1:abc",
-                "protocol_source_fingerprint": "protocol-source.v1:def",
-                "evidence_ref_ids": ["E01", "E02"],
+                "analysis_version": 1,
+                "finding_fingerprint": "finding.v2:abc",
+                "evidence_fingerprint": "evidence.v2:def",
+                "evidence_ids": ["E01", "E02"],
             }
         ],
         created_at="2026-05-10T00:01:00+00:00",
@@ -74,13 +76,15 @@ def test_goal_session_record_updates_chat_state_after_answer() -> None:
     )
 
     assert updated.last_evidence_ids == ("E01", "E02")
-    assert assistant_message.review_gate == "protocol_ready_findings"
+    assert assistant_message.review_gate == "reviewed_findings"
     assert assistant_message.source_finding_refs == (
         {
+            "objective_id": "obj_lpbf",
             "finding_id": "finding-1",
-            "finding_fingerprint": "finding.v1:abc",
-            "protocol_source_fingerprint": "protocol-source.v1:def",
-            "evidence_ref_ids": ["E01", "E02"],
+            "analysis_version": 1,
+            "finding_fingerprint": "finding.v2:abc",
+            "evidence_fingerprint": "evidence.v2:def",
+            "evidence_ids": ["E01", "E02"],
         },
     )
     assert updated.last_material_ids == ("mat-316l",)
@@ -104,13 +108,15 @@ def test_goal_message_record_keeps_general_answers_unlinked() -> None:
             }
         ],
         warnings=["no_collection_evidence_found"],
-        review_gate="protocol_ready_findings",
+        review_gate="reviewed_findings",
         source_finding_refs=[
             {
+                "objective_id": "obj_lpbf",
                 "finding_id": "finding-1",
-                "finding_fingerprint": "finding.v1:abc",
-                "protocol_source_fingerprint": "protocol-source.v1:def",
-                "evidence_ref_ids": ["E01"],
+                "analysis_version": 1,
+                "finding_fingerprint": "finding.v2:abc",
+                "evidence_fingerprint": "evidence.v2:def",
+                "evidence_ids": ["E01"],
             }
         ],
         created_at="2026-05-10T00:01:00+00:00",

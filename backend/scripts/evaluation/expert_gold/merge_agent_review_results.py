@@ -8,6 +8,13 @@ import sys
 from typing import Any
 
 
+BACKEND_ROOT = Path(__file__).resolve().parents[3]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+from domain.core import Finding  # noqa: E402
+
+
 RECOMMENDATIONS = {"accept", "reject", "correct", "unclear", "skip"}
 
 
@@ -46,14 +53,14 @@ def merge_agent_review_results(
     decision_rows: list[dict[str, Any]],
     agent_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    reviews = _agent_reviews_by_finding_id(agent_rows)
+    reviews = _agent_reviews_by_identity(agent_rows)
     merged = []
     for row in decision_rows:
-        finding_id = _text(row.get("finding_id"))
+        identity = _identity(row)
         output = dict(row)
         output["action"] = "skip"
-        if finding_id in reviews:
-            output["agent_review"] = reviews[finding_id]
+        if identity in reviews:
+            output["agent_review"] = reviews[identity]
         merged.append(output)
     return merged
 
@@ -75,18 +82,19 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def _agent_reviews_by_finding_id(
+def _agent_reviews_by_identity(
     rows: list[dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    reviews: dict[str, dict[str, Any]] = {}
+) -> dict[tuple[str, str, int, str], dict[str, Any]]:
+    reviews: dict[tuple[str, str, int, str], dict[str, Any]] = {}
     for line_number, row in enumerate(rows, start=1):
-        finding_id = _text(row.get("finding_id"))
-        if not finding_id:
-            raise ValueError(f"line {line_number}: finding_id is required")
-        if finding_id in reviews:
-            raise ValueError(f"line {line_number}: duplicate finding_id {finding_id}")
+        try:
+            identity = _identity(row)
+        except ValueError as exc:
+            raise ValueError(f"line {line_number}: {exc}") from exc
+        if identity in reviews:
+            raise ValueError(f"line {line_number}: duplicate Finding identity")
         review = _validated_agent_review(row, line_number=line_number)
-        reviews[finding_id] = review
+        reviews[identity] = review
     return reviews
 
 
@@ -113,10 +121,33 @@ def _validated_agent_review(
         "note": _text(review.get("note")),
         "human_confirmed": False,
     }
-    suggested_target = _mapping(review.get("suggested_target"))
-    if suggested_target:
-        output["suggested_target"] = suggested_target
+    curated_finding = _mapping(review.get("curated_finding"))
+    if curated_finding:
+        finding = Finding.from_mapping(curated_finding)
+        if finding.to_record() != curated_finding:
+            raise ValueError(
+                f"line {line_number}: agent_review.curated_finding is not canonical"
+            )
+        output["curated_finding"] = finding.to_record()
     return {key: value for key, value in output.items() if value not in ("", {}, [])}
+
+
+def _identity(row: dict[str, Any]) -> tuple[str, str, int, str]:
+    try:
+        analysis_version = int(row.get("analysis_version") or 0)
+    except (TypeError, ValueError):
+        analysis_version = 0
+    identity = (
+        _text(row.get("collection_id")),
+        _text(row.get("objective_id")),
+        analysis_version,
+        _text(row.get("finding_id")),
+    )
+    if not identity[0] or not identity[1] or identity[2] < 1 or not identity[3]:
+        raise ValueError(
+            "collection_id, objective_id, analysis_version, and finding_id are required"
+        )
+    return identity
 
 
 def _is_agent_reviewer(value: str) -> bool:

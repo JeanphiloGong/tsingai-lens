@@ -4,10 +4,10 @@ import pytest
 
 from domain.core import (
     Finding,
-    FindingContext,
-    FindingDerivation,
-    FindingRelation,
+    FindingMechanismRelation,
+    FindingPaperContribution,
     ObjectiveEvidence,
+    PaperContribution,
 )
 
 
@@ -17,8 +17,21 @@ def _evidence(
     *,
     analysis_version: int = 1,
     role: str = "direct_result",
-    isolated: bool = True,
+    factors: tuple[str, ...] = ("preheating",),
+    attribution_scope: str = "isolated_effect",
+    confidence: float = 0.9,
+    material: str = "316L",
+    direction: str = "increase",
 ) -> ObjectiveEvidence:
+    result_role = role in {"direct_result", "contradictory_result"}
+    variables = [
+        {
+            "name": factor,
+            "baseline_value": f"baseline {factor}",
+            "target_value": f"target {factor}",
+        }
+        for factor in factors
+    ]
     return ObjectiveEvidence.from_mapping(
         {
             "collection_id": "collection-1",
@@ -31,199 +44,364 @@ def _evidence(
             "source_excerpt": "Preheating was associated with higher ductility.",
             "evidence_role": role,
             "selection_status": "extracted",
-            "evidence_kind": "measurement",
-            "property_normalized": "ductility",
-            "value_payload": {"direction": "increase"},
-            "join_keys": {"isolated_variable": "preheating"} if isolated else {},
+            "changed_variables": variables if result_role else [],
+            "comparison": (
+                {
+                    "baseline_label": "baseline",
+                    "target_label": "target",
+                    "axis_names": list(factors),
+                    "comparable": True,
+                }
+                if result_role
+                else None
+            ),
+            "reported_result": (
+                {
+                    "outcome": "ductility",
+                    "value": None,
+                    "unit": None,
+                    "direction": direction,
+                    "result_text": "Preheating was associated with higher ductility.",
+                }
+                if result_role
+                else None
+            ),
+            "attribution_scope": attribution_scope if result_role else "not_attributable",
+            "scientific_context": {
+                "material": [{"name": "alloy", "value": material}],
+                "test": [{"name": "temperature", "value": 25, "unit": "C"}],
+            },
             "resolution_status": "resolved",
+            "confidence": confidence,
+        }
+    )
+
+
+def _contribution(
+    document_id: str,
+    *,
+    analysis_status: str = "analyzed",
+) -> PaperContribution:
+    return PaperContribution.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 1,
+            "document_id": document_id,
+            "analysis_status": analysis_status,
+            "relevance": "high" if analysis_status == "analyzed" else "irrelevant",
+            "paper_role": (
+                "primary_experiment" if analysis_status == "analyzed" else "irrelevant"
+            ),
+            "contribution_summary": "Direct preheating experiment.",
+            "exclusion_reason": (
+                None if analysis_status == "analyzed" else "No relevant experiment."
+            ),
             "confidence": 0.9,
         }
     )
 
 
-def _paper_finding(**overrides) -> Finding:
+def _finding(**overrides) -> Finding:
     payload = {
         "collection_id": "collection-1",
         "objective_id": "objective-1",
         "analysis_version": 1,
         "finding_id": "finding-1",
-        "finding_level": "paper",
         "statement": "Preheating was associated with higher ductility in paper 1.",
-        "variables": ["preheating"],
-        "mediators": ["microstructure"],
-        "outcomes": ["ductility"],
+        "factors": ["preheating"],
+        "outcome": "ductility",
         "direction": "increase",
-        "scope_summary": "LPBF 316L under the reported tensile test.",
-        "evidence_strength": "moderate",
-        "generalization_status": "paper_level_only",
-        "paper_count": 1,
-        "confidence": 0.8,
+        "assertion_strength": "associative",
+        "attribution_scope": "isolated_effect",
+        "synthesis_status": "insufficient_confirmation",
+        "certainty": 0.5,
         "display_rank": 0,
-        "relations": [
+        "mechanisms": [],
+        "scientific_context": {
+            "material": [{"name": "alloy", "value": "316L"}],
+            "test": [{"name": "temperature", "value": 25, "unit": "C"}],
+        },
+        "limitations": ["Cross-paper confirmation is absent."],
+        "paper_contributions": [
             {
-                "source_term": "preheating",
-                "relation_type": "associated_with",
-                "target_term": "ductility",
-                "direction": "increase",
-                "assertion_strength": "associative",
+                "document_id": "paper-1",
+                "analysis_status": "analyzed",
                 "supporting_evidence_ids": ["evidence-1"],
             }
         ],
-        "context": {
-            "material_system": {"alloy": "316L"},
-            "limitations": ["single paper"],
-            "supporting_evidence_ids": ["evidence-1"],
-        },
-        "derivation": {
-            "synthesis_mode": "paper",
-            "comparison_status": "insufficient_confirmation",
-            "contributing_document_ids": ["paper-1"],
-            "supporting_evidence_ids": ["evidence-1"],
-            "rationale": "One direct result supports a paper-level finding.",
-        },
     }
     payload.update(overrides)
     return Finding.from_mapping(payload)
 
 
-def test_finding_round_trips_without_claim_or_logic_chain_identity() -> None:
-    finding = _paper_finding()
+def test_finding_round_trips_one_atomic_outcome_without_legacy_fields() -> None:
+    finding = _finding()
     record = finding.to_record()
 
     assert finding.key == ("collection-1", "objective-1", 1, "finding-1")
-    assert record["statement"].startswith("Preheating")
-    assert "claim_id" not in record
-    assert "logic_chain_id" not in record
-    assert "context_id" not in record["context"]
-    assert "relation_id" not in record["relations"][0]
+    assert record["factors"] == ["preheating"]
+    assert record["outcome"] == "ductility"
+    assert finding.support_scope == "paper"
+    assert finding.direct_document_count == 1
+    for removed in (
+        "finding_level",
+        "variables",
+        "mediators",
+        "outcomes",
+        "scope_summary",
+        "evidence_strength",
+        "generalization_status",
+        "paper_count",
+        "confidence",
+        "relations",
+        "context",
+        "derivation",
+    ):
+        assert removed not in record
 
 
-def test_paper_finding_validates_direct_result_evidence() -> None:
-    finding = _paper_finding()
-
-    finding.validate_evidence((_evidence("evidence-1", "paper-1"),))
-
-
-def test_finding_rejects_missing_and_cross_version_evidence() -> None:
-    finding = _paper_finding()
-
-    with pytest.raises(ValueError, match="missing evidence"):
-        finding.validate_evidence(())
-    with pytest.raises(ValueError, match="cross-version"):
-        finding.validate_evidence(
-            (_evidence("evidence-1", "paper-1", analysis_version=2),)
-        )
-
-
-def test_condition_context_cannot_replace_direct_result() -> None:
-    finding = _paper_finding()
-    context = _evidence(
-        "evidence-1",
-        "paper-1",
-        role="condition_context",
-    )
-
-    with pytest.raises(ValueError, match="direct result"):
-        finding.validate_evidence((context,))
-
-
-def test_cross_paper_finding_requires_two_direct_documents() -> None:
-    finding = _paper_finding(
-        finding_level="cross_paper",
-        generalization_status="cross_paper_agreement",
-        paper_count=2,
-        derivation={
-            "synthesis_mode": "cross_paper",
-            "comparison_status": "agreement",
-            "contributing_document_ids": ["paper-1", "paper-2"],
-            "supporting_evidence_ids": ["evidence-1", "evidence-2"],
-            "rationale": "Two papers report comparable direct results.",
-        },
-        relations=[
+def test_finding_validates_direct_evidence_and_complete_paper_coverage() -> None:
+    finding = _finding(
+        paper_contributions=[
             {
-                "source_term": "preheating",
-                "relation_type": "associated_with",
-                "target_term": "ductility",
-                "assertion_strength": "associative",
-                "supporting_evidence_ids": ["evidence-1", "evidence-2"],
-            }
-        ],
-        context={"supporting_evidence_ids": ["evidence-1", "evidence-2"]},
-    )
-
-    finding.validate_evidence(
-        (
-            _evidence("evidence-1", "paper-1"),
-            _evidence("evidence-2", "paper-2"),
-        )
-    )
-
-    with pytest.raises(ValueError, match="missing evidence"):
-        finding.validate_evidence((_evidence("evidence-1", "paper-1"),))
-
-
-def test_cross_paper_finding_constructor_rejects_single_paper() -> None:
-    with pytest.raises(ValueError, match="at least two papers"):
-        _paper_finding(
-            finding_level="cross_paper",
-            generalization_status="cross_paper_agreement",
-            derivation={
-                "synthesis_mode": "cross_paper",
-                "comparison_status": "agreement",
-                "contributing_document_ids": ["paper-1"],
+                "document_id": "paper-1",
+                "analysis_status": "analyzed",
                 "supporting_evidence_ids": ["evidence-1"],
-                "rationale": "Insufficient direct confirmation.",
             },
-        )
-
-
-def test_causal_relation_requires_isolated_variable_evidence() -> None:
-    finding = _paper_finding(
-        relations=[
-            {
-                "source_term": "preheating",
-                "relation_type": "increases",
-                "target_term": "ductility",
-                "assertion_strength": "causal",
-                "supporting_evidence_ids": ["evidence-1"],
-            }
+            {"document_id": "paper-2", "analysis_status": "excluded"},
         ]
     )
 
-    with pytest.raises(ValueError, match="lacks isolated-variable"):
-        finding.validate_evidence(
-            (_evidence("evidence-1", "paper-1", isolated=False),)
+    finding.validate_sources(
+        (_evidence("evidence-1", "paper-1"),),
+        (_contribution("paper-1"), _contribution("paper-2", analysis_status="excluded")),
+    )
+
+    with pytest.raises(ValueError, match="paper coverage"):
+        finding.validate_sources(
+            (_evidence("evidence-1", "paper-1"),),
+            (_contribution("paper-1"),),
         )
 
-    finding.validate_evidence((_evidence("evidence-1", "paper-1"),))
+
+def test_finding_rejects_missing_and_cross_version_evidence() -> None:
+    finding = _finding()
+    contributions = (_contribution("paper-1"),)
+
+    with pytest.raises(ValueError, match="missing evidence"):
+        finding.validate_sources((), contributions)
+    with pytest.raises(ValueError, match="cross-version"):
+        finding.validate_sources(
+            (_evidence("evidence-1", "paper-1", analysis_version=2),),
+            contributions,
+        )
+
+
+def test_context_evidence_cannot_replace_direct_result() -> None:
+    finding = _finding()
+
+    with pytest.raises(ValueError, match="must have a result role"):
+        finding.validate_sources(
+            (_evidence("evidence-1", "paper-1", role="condition_context"),),
+            (_contribution("paper-1"),),
+        )
+
+
+def test_cross_paper_agreement_is_derived_from_independent_direct_results() -> None:
+    finding = _finding(
+        synthesis_status="agreement",
+        certainty=0.9,
+        paper_contributions=[
+            {
+                "document_id": "paper-1",
+                "analysis_status": "analyzed",
+                "supporting_evidence_ids": ["evidence-1"],
+            },
+            {
+                "document_id": "paper-2",
+                "analysis_status": "analyzed",
+                "supporting_evidence_ids": ["evidence-2"],
+            },
+        ],
+    )
+    evidence = (
+        _evidence("evidence-1", "paper-1"),
+        _evidence("evidence-2", "paper-2"),
+    )
+
+    finding.validate_sources(
+        evidence,
+        (_contribution("paper-1"), _contribution("paper-2")),
+    )
+    assert finding.support_scope == "cross_paper"
+    assert finding.supporting_document_ids == ("paper-1", "paper-2")
+
+
+def test_finding_rejects_declared_status_that_differs_from_paper_evidence() -> None:
+    with pytest.raises(ValueError, match="synthesis status differs"):
+        _finding(synthesis_status="agreement")
+
+
+def test_joint_factor_finding_cannot_claim_isolated_or_causal_effect() -> None:
+    paper = [
+        {
+            "document_id": "paper-1",
+            "analysis_status": "analyzed",
+            "supporting_evidence_ids": ["evidence-1"],
+        }
+    ]
+    with pytest.raises(ValueError, match="one factor"):
+        _finding(
+            factors=["laser power", "scan speed"],
+            attribution_scope="isolated_effect",
+            paper_contributions=paper,
+        )
+    with pytest.raises(ValueError, match="causal Finding requires"):
+        _finding(
+            factors=["laser power", "scan speed"],
+            attribution_scope="joint_effect",
+            assertion_strength="causal",
+            paper_contributions=paper,
+        )
+
+
+def test_finding_mechanism_remains_subordinate_and_requires_mechanism_evidence() -> None:
+    finding = _finding(
+        mechanisms=[
+            {
+                "source_term": "preheating",
+                "relation_type": "changes",
+                "target_term": "dislocation structure",
+                "assertion_strength": "associative",
+                "supporting_evidence_ids": ["mechanism-1"],
+            }
+        ],
+        paper_contributions=[
+            {
+                "document_id": "paper-1",
+                "analysis_status": "analyzed",
+                "supporting_evidence_ids": ["evidence-1"],
+                "context_evidence_ids": ["mechanism-1"],
+            }
+        ],
+    )
+
+    finding.validate_sources(
+        (
+            _evidence("evidence-1", "paper-1"),
+            _evidence("mechanism-1", "paper-1", role="mechanism_context"),
+        ),
+        (_contribution("paper-1"),),
+    )
+    assert finding.factors == ("preheating",)
+    assert finding.outcome == "ductility"
+
+    with pytest.raises(ValueError, match="lacks mechanism evidence"):
+        finding.validate_sources(
+            (
+                _evidence("evidence-1", "paper-1"),
+                _evidence("mechanism-1", "paper-1", role="condition_context"),
+            ),
+            (_contribution("paper-1"),),
+        )
+
+
+def test_finding_requires_mechanism_evidence_in_paper_context_binding() -> None:
+    with pytest.raises(ValueError, match="must bind as paper context"):
+        _finding(
+            mechanisms=[
+                {
+                    "source_term": "preheating",
+                    "relation_type": "changes",
+                    "target_term": "dislocation structure",
+                    "assertion_strength": "associative",
+                    "supporting_evidence_ids": ["mechanism-1"],
+                }
+            ]
+        )
+
+
+def test_finding_rejects_support_or_contradiction_with_wrong_direction() -> None:
+    contributions = (_contribution("paper-1"), _contribution("paper-2"))
+    support = _evidence("evidence-1", "paper-1")
+    same_direction = _evidence(
+        "evidence-2",
+        "paper-2",
+        role="contradictory_result",
+    )
+    finding = _finding(
+        synthesis_status="conflict",
+        certainty=0.9,
+        paper_contributions=[
+            {
+                "document_id": "paper-1",
+                "analysis_status": "analyzed",
+                "supporting_evidence_ids": ["evidence-1"],
+            },
+            {
+                "document_id": "paper-2",
+                "analysis_status": "analyzed",
+                "contradicting_evidence_ids": ["evidence-2"],
+            },
+        ],
+    )
+
+    with pytest.raises(ValueError, match="does not oppose"):
+        finding.validate_sources((support, same_direction), contributions)
+
+    opposite = _evidence(
+        "evidence-2",
+        "paper-2",
+        role="direct_result",
+        direction="decrease",
+    )
+    finding.validate_sources((support, opposite), contributions)
+
+
+def test_common_scientific_context_keeps_only_exact_shared_attributes() -> None:
+    common = Finding.common_scientific_context_for(
+        (
+            _evidence("evidence-1", "paper-1", material="316L"),
+            _evidence("evidence-2", "paper-2", material="316L"),
+        )
+    )
+    different = Finding.common_scientific_context_for(
+        (
+            _evidence("evidence-1", "paper-1", material="316L"),
+            _evidence("evidence-2", "paper-2", material="304L"),
+        )
+    )
+
+    assert common.material[0].value == "316L"
+    assert different.material == ()
+    assert len(different.test) == 1
+
+
+def test_certainty_is_evidence_derived_and_single_paper_capped() -> None:
+    evidence = (_evidence("evidence-1", "paper-1", confidence=0.93),)
+
+    assert Finding.certainty_for("insufficient_confirmation", evidence) == 0.5
+    assert Finding.certainty_for("agreement", evidence) == 0.93
 
 
 def test_finding_subordinates_have_no_independent_business_ids() -> None:
-    relation = FindingRelation.from_mapping(
+    mechanism = FindingMechanismRelation.from_mapping(
         {
             "source_term": "porosity",
-            "relation_type": "associated_with",
-            "target_term": "pitting potential",
+            "relation_type": "affects",
+            "target_term": "passive film stability",
             "assertion_strength": "associative",
-            "supporting_evidence_ids": ["evidence-1"],
+            "supporting_evidence_ids": ["mechanism-1"],
         }
     )
-    context = FindingContext.from_mapping(
+    paper = FindingPaperContribution.from_mapping(
         {
-            "material_system": {"alloy": "316L"},
+            "document_id": "paper-1",
+            "analysis_status": "analyzed",
             "supporting_evidence_ids": ["evidence-1"],
-        }
-    )
-    derivation = FindingDerivation.from_mapping(
-        {
-            "synthesis_mode": "paper",
-            "comparison_status": "insufficient_confirmation",
-            "contributing_document_ids": ["paper-1"],
-            "supporting_evidence_ids": ["evidence-1"],
-            "rationale": "One paper reports the result.",
         }
     )
 
-    assert "relation_id" not in relation.to_record()
-    assert "context_id" not in context.to_record()
-    assert "derivation_id" not in derivation.to_record()
+    assert "relation_id" not in mechanism.to_record()
+    assert "contribution_id" not in paper.to_record()

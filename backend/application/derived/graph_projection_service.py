@@ -286,17 +286,21 @@ def _build_objective_record(row: Mapping[str, Any]) -> dict[str, Any]:
     objective_id = _as_text(row.get("objective_id")) or ""
     question = _as_text(row.get("question")) or objective_id
     material_scope = _string_list(row.get("material_scope"))
-    process_axes = _string_list(row.get("process_axes"))
-    property_axes = _string_list(row.get("property_axes"))
+    variables = _string_list(row.get("variables"))
+    outcomes = _string_list(row.get("outcomes"))
+    mechanisms = _string_list(row.get("mechanisms"))
+    constraints = _string_list(row.get("constraints"))
     detail_rows = [
         _drop_empty_values(
             {
                 "label": "Research objective",
                 "objective_id": objective_id,
                 "material": _join_terms(material_scope),
-                "process": _join_terms(process_axes),
-                "property": _join_terms(property_axes),
-                "interpretation": _as_text(row.get("comparison_intent")),
+                "variables": _join_terms(variables),
+                "outcomes": _join_terms(outcomes),
+                "mechanisms": _join_terms(mechanisms),
+                "constraints": _join_terms(constraints),
+                "requested_comparator": _as_text(row.get("requested_comparator")),
                 "confidence": row.get("confidence"),
             }
         )
@@ -305,8 +309,10 @@ def _build_objective_record(row: Mapping[str, Any]) -> dict[str, Any]:
         "objective_id": objective_id,
         "question": question,
         "material_scope": material_scope,
-        "process_axes": process_axes,
-        "property_axes": property_axes,
+        "variables": variables,
+        "outcomes": outcomes,
+        "mechanisms": mechanisms,
+        "constraints": constraints,
         "node": {
             "id": f"obj:{objective_id}",
             "label": _shorten_text(question, 120),
@@ -315,8 +321,10 @@ def _build_objective_record(row: Mapping[str, Any]) -> dict[str, Any]:
             "summary": question,
             "metrics": {
                 "material_scope_count": len(material_scope),
-                "process_axis_count": len(process_axes),
-                "property_axis_count": len(property_axes),
+                "variable_count": len(variables),
+                "outcome_count": len(outcomes),
+                "mechanism_count": len(mechanisms),
+                "constraint_count": len(constraints),
             },
             "detail_rows": detail_rows,
             "objective_id": objective_id,

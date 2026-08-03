@@ -305,9 +305,9 @@
         "objective_id": "objective_strength",
         "question": "How does heat treatment affect yield strength of Synthetic Alloy A?",
         "material_scope": ["Synthetic Alloy A"],
-        "process_axes": ["heat treatment"],
-        "property_axes": ["yield strength"],
-        "comparison_intent": "compare heat-treated and as-built synthetic samples",
+        "variables": ["heat treatment"],
+        "outcomes": ["yield strength"],
+        "requested_comparator": "compare heat-treated and as-built synthetic samples",
         "seed_document_ids": ["doc_strength"],
         "excluded_document_ids": [],
         "confidence": 1.0,
@@ -368,18 +368,29 @@
         "evidence_role": "direct_result",
         "selection_status": "extracted",
         "selection_reason": "Direct objective result.",
-        "evidence_kind": "measurement",
-        "property_normalized": "yield strength",
-        "material_system": {"name": "Synthetic Alloy A"},
-        "sample_context": {"state": "heat-treated"},
-        "process_context": {"heat_treatment_c": 700},
-        "test_condition": {"temperature_c": 25},
-        "resolved_condition": {},
-        "value_payload": {"value": 620},
-        "unit": "MPa",
-        "baseline_context": {"label": "as-built"},
-        "interpretation": "The heat-treated sample reached 620 MPa yield strength.",
-        "join_keys": {"variable_process_axes": ["heat treatment"]},
+        "changed_variables": [
+          {
+            "name": "heat treatment",
+            "baseline_value": null,
+            "target_value": "heat-treated",
+            "unit": null
+          }
+        ],
+        "comparison": null,
+        "reported_result": {
+          "outcome": "yield strength",
+          "value": 620,
+          "unit": "MPa",
+          "direction": "unknown",
+          "result_text": "The heat-treated sample reached 620 MPa yield strength."
+        },
+        "attribution_scope": "descriptive_only",
+        "scientific_context": {
+          "material": [{"name": "name", "value": "Synthetic Alloy A", "unit": null}],
+          "sample": [{"name": "state", "value": "heat-treated", "unit": null}],
+          "process": [{"name": "heat treatment", "value": 700, "unit": "C"}],
+          "test": [{"name": "temperature", "value": 25, "unit": "C"}]
+        },
         "anchor_ids": ["anchor_strength"],
         "resolution_status": "resolved",
         "confidence": 1.0
@@ -391,45 +402,33 @@
         "objective_id": "objective_strength",
         "analysis_version": 1,
         "finding_id": "finding_strength",
-        "finding_level": "paper",
         "statement": "Heat-treated Synthetic Alloy A reached 620 MPa yield strength.",
-        "variables": ["heat treatment"],
-        "mediators": [],
-        "outcomes": ["yield strength"],
-        "direction": "reports",
-        "scope_summary": "Synthetic Alloy A under a room-temperature tensile test.",
-        "evidence_strength": "moderate",
-        "generalization_status": "paper_level_only",
-        "paper_count": 1,
-        "confidence": 1.0,
+        "factors": ["heat treatment"],
+        "outcome": "yield strength",
+        "direction": "unknown",
+        "assertion_strength": "descriptive",
+        "attribution_scope": "descriptive_only",
+        "synthesis_status": "insufficient_confirmation",
+        "certainty": 0.5,
         "display_rank": 0,
-        "relations": [
-          {
-            "source_term": "heat treatment",
-            "relation_type": "associated_with",
-            "target_term": "yield strength",
-            "direction": "reports",
-            "assertion_strength": "associative",
-            "supporting_evidence_ids": ["evidence_strength"]
-          }
-        ],
-        "context": {
-          "material_system": {"name": "Synthetic Alloy A"},
-          "process_conditions": [{"heat_treatment_c": 700}],
-          "sample_state": {"state": "heat-treated"},
-          "test_conditions": [{"temperature_c": 25}],
-          "comparison_baseline": {"label": "as-built"},
-          "limitations": ["single paper"],
-          "supporting_evidence_ids": ["evidence_strength"]
+        "mechanisms": [],
+        "scientific_context": {
+          "material": [{"name": "name", "value": "Synthetic Alloy A", "unit": null}],
+          "sample": [{"name": "state", "value": "heat-treated", "unit": null}],
+          "process": [{"name": "heat treatment", "value": 700, "unit": "C"}],
+          "test": [{"name": "temperature", "value": 25, "unit": "C"}]
         },
-        "derivation": {
-          "synthesis_mode": "paper",
-          "comparison_status": "insufficient_confirmation",
-          "contributing_document_ids": ["doc_strength"],
-          "supporting_evidence_ids": ["evidence_strength"],
-          "contradicting_evidence_ids": [],
-          "rationale": "One direct result supports this paper-level Finding."
-        }
+        "limitations": ["single paper"],
+        "paper_contributions": [
+          {
+            "document_id": "doc_strength",
+            "analysis_status": "analyzed",
+            "supporting_evidence_ids": ["evidence_strength"],
+            "contradicting_evidence_ids": [],
+            "context_evidence_ids": [],
+            "condition_boundary_evidence_ids": []
+          }
+        ]
       }
     ],
     "goal_sessions": [
@@ -470,7 +469,9 @@
         "used_evidence_ids": ["evidence_strength"],
         "warnings": [],
         "links": {"workspace": "/collections/col_baseline"},
-        "review_gate": "protocol_ready_findings",
+        "review_gate": "reviewed_findings",
+        "source_validity": "current",
+        "source_validity_reasons": [],
         "source_links": [
           {
             "kind": "evidence",
@@ -478,7 +479,16 @@
             "href": "/collections/col_baseline/documents/doc_strength?block_id=block_result"
           }
         ],
-        "source_finding_refs": [],
+        "source_finding_refs": [
+          {
+            "objective_id": "objective_strength",
+            "finding_id": "finding_strength",
+            "analysis_version": 1,
+            "finding_fingerprint": "finding.v2:fixture-strength",
+            "evidence_fingerprint": "evidence.v2:fixture-strength",
+            "evidence_ids": ["evidence_strength"]
+          }
+        ],
         "created_at": "2026-01-01T00:03:20+00:00"
       }
     ],
@@ -526,15 +536,47 @@
         "analysis_version": 1,
         "finding_id": "finding_strength",
         "curated_status": "supported",
-        "curated_statement": "Heat-treated Synthetic Alloy A reached 620 MPa yield strength.",
-        "curated_support_grade": "direct",
-        "curated_review_status": "accepted",
-        "curated_variables": ["heat treatment"],
-        "curated_mediators": [],
-        "curated_outcomes": ["yield strength"],
-        "curated_direction": "reports",
-        "curated_scope_summary": "Synthetic Alloy A",
-        "curated_evidence_ids": ["evidence_strength"],
+        "curated_finding": {
+          "collection_id": "col_baseline",
+          "objective_id": "objective_strength",
+          "analysis_version": 1,
+          "finding_id": "finding_strength",
+          "statement": "Heat-treated Synthetic Alloy A reached 620 MPa yield strength.",
+          "factors": ["heat treatment"],
+          "outcome": "yield strength",
+          "direction": "unknown",
+          "assertion_strength": "descriptive",
+          "attribution_scope": "descriptive_only",
+          "synthesis_status": "insufficient_confirmation",
+          "certainty": 0.5,
+          "display_rank": 0,
+          "mechanisms": [],
+          "scientific_context": {
+            "material": [
+              {"name": "name", "value": "Synthetic Alloy A", "unit": null}
+            ],
+            "sample": [
+              {"name": "state", "value": "heat-treated", "unit": null}
+            ],
+            "process": [
+              {"name": "heat treatment", "value": 700, "unit": "C"}
+            ],
+            "test": [
+              {"name": "temperature", "value": 25, "unit": "C"}
+            ]
+          },
+          "limitations": ["single paper"],
+          "paper_contributions": [
+            {
+              "document_id": "doc_strength",
+              "analysis_status": "analyzed",
+              "supporting_evidence_ids": ["evidence_strength"],
+              "contradicting_evidence_ids": [],
+              "context_evidence_ids": [],
+              "condition_boundary_evidence_ids": []
+            }
+          ]
+        },
         "note": "Synthetic curation record.",
         "reviewer": "fixture-reviewer",
         "updated_at": "2026-01-01T00:04:30+00:00"

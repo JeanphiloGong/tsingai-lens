@@ -415,6 +415,13 @@ class ObjectiveRepository(Protocol):
         objective_id: str,
     ) -> ObjectiveAnalysis | None: ...
 
+    def list_contributions(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> tuple[PaperContribution, ...]: ...
+
     def list_findings(
         self,
         collection_id: str,

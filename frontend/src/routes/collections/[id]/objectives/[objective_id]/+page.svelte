@@ -10,6 +10,7 @@
 		fetchObjective,
 		fetchObjectiveAnalysis,
 		fetchObjectiveEvidence,
+		fetchObjectiveFinding,
 		fetchObjectiveFindings,
 		runObjectiveAnalysis,
 		type ObjectiveAnalysis,
@@ -21,6 +22,7 @@
 	let analysis: ObjectiveAnalysis | null = null;
 	let findings: ObjectiveFinding[] = [];
 	let evidence: ObjectiveEvidence[] = [];
+	let selectedFinding: ObjectiveFinding | null = null;
 	let selectedFindingId = '';
 	let loading = false;
 	let findingLoading = false;
@@ -29,6 +31,7 @@
 	let actionError = '';
 	let loadedKey = '';
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
+	let findingRequestSequence = 0;
 
 	$: collectionId = $page.params.id ?? '';
 	$: objectiveId = $page.params.objective_id ?? '';
@@ -36,7 +39,6 @@
 	$: requestedFindingId = $page.url.searchParams.get('finding_id') ?? '';
 	$: active = analysis?.active_analysis ?? null;
 	$: published = analysis?.published_analysis ?? null;
-	$: selectedFinding = findings.find((item) => item.finding_id === selectedFindingId) ?? null;
 	$: isProcessing = active?.status === 'queued' || active?.status === 'running';
 	$: if (browser && collectionId && objectiveId && `${collectionId}:${objectiveId}` !== loadedKey) {
 		loadedKey = `${collectionId}:${objectiveId}`;
@@ -46,6 +48,7 @@
 	onDestroy(clearPoll);
 
 	async function loadObjective() {
+		findingRequestSequence += 1;
 		loading = true;
 		error = '';
 		clearPoll();
@@ -58,6 +61,7 @@
 			analysis = null;
 			findings = [];
 			evidence = [];
+			selectedFinding = null;
 		} finally {
 			loading = false;
 		}
@@ -65,17 +69,28 @@
 
 	async function loadFindings() {
 		if (!analysis?.objective.published_analysis_version) {
+			findingRequestSequence += 1;
 			findings = [];
 			evidence = [];
+			selectedFinding = null;
 			selectedFindingId = '';
 			return;
 		}
-		const page = await fetchObjectiveFindings(
-			collectionId,
-			objectiveId,
-			analysis.objective.published_analysis_version
-		);
-		findings = page.items;
+		const analysisVersion = analysis.objective.published_analysis_version;
+		const loadedFindings: ObjectiveFinding[] = [];
+		while (true) {
+			const page = await fetchObjectiveFindings(
+				collectionId,
+				objectiveId,
+				analysisVersion,
+				loadedFindings.length,
+				200
+			);
+			loadedFindings.push(...page.items);
+			if (loadedFindings.length >= page.total) break;
+			if (!page.items.length) throw new Error('Finding 分页结果不完整。');
+		}
+		findings = loadedFindings;
 		const nextId =
 			(requestedFindingId && findings.some((item) => item.finding_id === requestedFindingId)
 				? requestedFindingId
@@ -86,18 +101,43 @@
 	}
 
 	async function selectFinding(findingId: string, updateUrl = true) {
+		const requestSequence = ++findingRequestSequence;
 		selectedFindingId = findingId;
+		selectedFinding = null;
 		evidence = [];
 		if (!findingId || !analysis?.objective.published_analysis_version) return;
+		const analysisVersion = analysis.objective.published_analysis_version;
+		const requestKey = `${collectionId}:${objectiveId}:${analysisVersion}:${findingId}`;
 		findingLoading = true;
+		actionError = '';
 		try {
-			const page = await fetchObjectiveEvidence(
+			const detailPromise = fetchObjectiveFinding(
 				collectionId,
 				objectiveId,
-				analysis.objective.published_analysis_version,
+				analysisVersion,
 				findingId
 			);
-			evidence = page.items;
+			const evidencePromise = (async () => {
+				const loadedEvidence: ObjectiveEvidence[] = [];
+				while (true) {
+					const page = await fetchObjectiveEvidence(
+						collectionId,
+						objectiveId,
+						analysisVersion,
+						findingId,
+						loadedEvidence.length,
+						500
+					);
+					loadedEvidence.push(...page.items);
+					if (loadedEvidence.length >= page.total) return loadedEvidence;
+					if (!page.items.length) throw new Error('Evidence 分页结果不完整。');
+				}
+			})();
+			const [detail, loadedEvidence] = await Promise.all([detailPromise, evidencePromise]);
+			const currentRequestKey = `${collectionId}:${objectiveId}:${analysis?.objective.published_analysis_version ?? ''}:${selectedFindingId}`;
+			if (requestSequence !== findingRequestSequence || requestKey !== currentRequestKey) return;
+			selectedFinding = detail.finding;
+			evidence = loadedEvidence;
 			if (updateUrl) {
 				const url = new URL(currentUrl);
 				url.searchParams.set('finding_id', findingId);
@@ -108,10 +148,25 @@
 				});
 			}
 		} catch (err) {
-			actionError = errorMessage(err);
+			if (requestSequence === findingRequestSequence) actionError = errorMessage(err);
 		} finally {
-			findingLoading = false;
+			if (requestSequence === findingRequestSequence) findingLoading = false;
 		}
+	}
+
+	function directPaperCount(finding: ObjectiveFinding) {
+		return finding.paper_contributions.filter(
+			(item) => item.supporting_evidence_ids.length || item.contradicting_evidence_ids.length
+		).length;
+	}
+
+	function synthesisLabel(value: ObjectiveFinding['synthesis_status']) {
+		return {
+			agreement: '多文献一致',
+			conflict: '文献冲突',
+			condition_dependent: '条件依赖',
+			insufficient_confirmation: '证据待确认'
+		}[value];
 	}
 
 	async function startAnalysis() {
@@ -133,14 +188,25 @@
 
 	function schedulePoll() {
 		clearPoll();
-		if (!browser || !isProcessing) return;
+		const status = analysis?.active_analysis?.status;
+		if (!browser || (status !== 'queued' && status !== 'running')) return;
 		pollTimer = setTimeout(refreshAnalysis, POLL_DELAY_MS);
 	}
 
 	async function refreshAnalysis() {
 		try {
-			analysis = await fetchObjectiveAnalysis(collectionId, objectiveId);
-			if (analysis.active_analysis?.status === 'succeeded') await loadFindings();
+			const previousVersion = analysis?.objective.published_analysis_version ?? null;
+			const refreshed = await fetchObjectiveAnalysis(collectionId, objectiveId);
+			const nextVersion = refreshed.objective.published_analysis_version;
+			if (nextVersion !== previousVersion) {
+				findingRequestSequence += 1;
+				selectedFinding = null;
+				evidence = [];
+			}
+			analysis = refreshed;
+			if (nextVersion !== previousVersion || analysis.active_analysis?.status === 'succeeded') {
+				await loadFindings();
+			}
 			schedulePoll();
 		} catch (err) {
 			actionError = errorMessage(err);
@@ -182,7 +248,7 @@
 			<div>
 				<a href={`/collections/${collectionId}/objectives`}>研究目标</a>
 				<h1>{analysis.objective.question}</h1>
-				<p>{analysis.objective.comparison_intent || '尚未设置比较意图'}</p>
+				<p>{analysis.objective.requested_comparator || '尚未设置比较意图'}</p>
 			</div>
 			<div class="header-actions">
 				<a class="btn btn--ghost btn--small" href={datasetUrl()}>导出训练数据</a>
@@ -201,8 +267,10 @@
 
 		<div class="scope-strip">
 			<div><span>材料</span><strong>{joined(analysis.objective.material_scope)}</strong></div>
-			<div><span>变量</span><strong>{joined(analysis.objective.process_axes)}</strong></div>
-			<div><span>结果</span><strong>{joined(analysis.objective.property_axes)}</strong></div>
+			<div><span>变量</span><strong>{joined(analysis.objective.variables)}</strong></div>
+			<div><span>结果</span><strong>{joined(analysis.objective.outcomes)}</strong></div>
+			<div><span>机制</span><strong>{joined(analysis.objective.mechanisms)}</strong></div>
+			<div><span>约束</span><strong>{joined(analysis.objective.constraints)}</strong></div>
 			<div><span>文献</span><strong>{analysis.objective.seed_document_ids.length} 篇</strong></div>
 		</div>
 
@@ -234,19 +302,26 @@
 					</div>
 					<span>{findings.length} 条 · v{published.analysis_version}</span>
 				</div>
-				<div class="finding-list" role="list">
+				<ul class="finding-list">
 					{#each findings as item (item.finding_id)}
-						<button
-							type="button"
-							class:selected={item.finding_id === selectedFindingId}
-							on:click={() => selectFinding(item.finding_id)}
-						>
-							<span>{item.statement}</span>
-							<small>{joined(item.variables)} → {joined(item.outcomes)}</small>
-							<em>{item.evidence_strength} · {item.paper_count} 篇</em>
-						</button>
+						<li>
+							<button
+								type="button"
+								aria-pressed={item.finding_id === selectedFindingId}
+								class:selected={item.finding_id === selectedFindingId}
+								on:click={() => selectFinding(item.finding_id)}
+							>
+								<span>{item.statement}</span>
+								<small>{joined(item.factors)} → {item.outcome}</small>
+								<em
+									>{synthesisLabel(item.synthesis_status)} · {Math.round(item.certainty * 100)}% · {directPaperCount(
+										item
+									)} 篇</em
+								>
+							</button>
+						</li>
 					{/each}
-				</div>
+				</ul>
 			</section>
 
 			<section class="finding-workspace">
@@ -304,7 +379,7 @@
 	}
 	.scope-strip {
 		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		border-block: 1px solid var(--border-default);
 	}
 	.scope-strip div {
@@ -361,6 +436,9 @@
 		font-size: 12px;
 	}
 	.finding-list {
+		margin: 0;
+		padding: 0;
+		list-style: none;
 		border-top: 1px solid var(--border-default);
 	}
 	.finding-list button {

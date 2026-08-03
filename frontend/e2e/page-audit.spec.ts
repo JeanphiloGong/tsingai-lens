@@ -455,6 +455,18 @@ async function mockApis(page: Page) {
 				})
 			);
 		}
+		if (
+			path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings/finding-1`
+		) {
+			return route.fulfill(
+				json({
+					collection_id: collectionId,
+					objective_id: objectiveId,
+					analysis_version: 1,
+					finding: objectiveFinding()
+				})
+			);
+		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence`) {
 			return route.fulfill(
 				json({
@@ -1147,9 +1159,11 @@ function objectives() {
 				objective_id: objectiveId,
 				question: 'How does heat treatment affect LPBF 316L tensile strength?',
 				material_scope: ['316L stainless steel'],
-				process_axes: ['heat treatment'],
-				property_axes: ['yield strength'],
-				comparison_intent: 'Compare as-built and heat-treated LPBF 316L.',
+				variables: ['heat treatment'],
+				outcomes: ['yield strength'],
+				mechanisms: ['precipitate evolution'],
+				constraints: ['LPBF 316L'],
+				requested_comparator: 'Compare as-built and heat-treated LPBF 316L.',
 				seed_document_ids: [documentId],
 				excluded_document_ids: [],
 				confidence: 0.91,
@@ -1204,21 +1218,17 @@ function objectiveFinding() {
 		objective_id: objectiveId,
 		analysis_version: 1,
 		finding_id: 'finding-1',
-		finding_level: 'paper',
 		statement: 'Annealing was associated with higher tensile strength.',
-		variables: ['heat treatment'],
-		mediators: [],
-		outcomes: ['tensile strength'],
+		factors: ['heat treatment'],
+		outcome: 'tensile strength',
 		direction: 'increase',
-		scope_summary: 'LPBF 316L under the reported tensile-test condition.',
-		evidence_strength: 'moderate',
-		generalization_status: 'paper_level_only',
-		paper_count: 1,
-		confidence: 0.88,
+		assertion_strength: 'associative',
+		attribution_scope: 'isolated_effect',
+		synthesis_status: 'insufficient_confirmation',
+		certainty: 0.88,
 		display_rank: 0,
-		relations: [
+		mechanisms: [
 			{
-				relation_order: 0,
 				source_term: 'annealing',
 				relation_type: 'associated_with',
 				target_term: 'tensile strength',
@@ -1227,23 +1237,23 @@ function objectiveFinding() {
 				supporting_evidence_ids: ['evidence-1']
 			}
 		],
-		context: {
-			material_system: { name: '316L' },
-			process_conditions: [{ state: 'annealed' }],
-			sample_state: {},
-			test_conditions: [{ method: 'tensile test' }],
-			comparison_baseline: { state: 'as-built' },
-			limitations: ['Single paper only.'],
-			supporting_evidence_ids: ['evidence-1']
+		scientific_context: {
+			material: [{ name: 'alloy', value: '316L', unit: null }],
+			sample: [{ name: 'state', value: 'annealed', unit: null }],
+			process: [{ name: 'process', value: 'LPBF', unit: null }],
+			test: [{ name: 'method', value: 'tensile test', unit: null }]
 		},
-		derivation: {
-			synthesis_mode: 'paper',
-			comparison_status: 'insufficient_confirmation',
-			contributing_document_ids: [documentId],
-			supporting_evidence_ids: ['evidence-1'],
-			contradicting_evidence_ids: [],
-			rationale: 'One direct result supports this paper-level Finding.'
-		}
+		limitations: ['Single paper only.'],
+		paper_contributions: [
+			{
+				document_id: documentId,
+				analysis_status: 'analyzed',
+				supporting_evidence_ids: ['evidence-1'],
+				contradicting_evidence_ids: [],
+				context_evidence_ids: [],
+				condition_boundary_evidence_ids: []
+			}
+		]
 	};
 }
 
@@ -1262,18 +1272,35 @@ function objectiveEvidence() {
 		evidence_role: 'direct_result',
 		selection_status: 'extracted',
 		selection_reason: 'Direct result.',
-		evidence_kind: 'measurement',
-		property_normalized: 'tensile strength',
-		material_system: { name: '316L' },
-		sample_context: {},
-		process_context: {},
-		test_condition: {},
-		resolved_condition: {},
-		value_payload: { value: 620 },
-		unit: 'MPa',
-		baseline_context: {},
-		interpretation: null,
-		join_keys: {},
+		changed_variables: [
+			{
+				name: 'heat treatment',
+				baseline_value: 'as-built',
+				target_value: 'annealed',
+				unit: null
+			}
+		],
+		comparison: {
+			baseline_label: 'as-built',
+			target_label: 'annealed',
+			axis_names: ['heat treatment'],
+			comparable: true,
+			incomparability_reasons: []
+		},
+		reported_result: {
+			outcome: 'tensile strength',
+			value: 620,
+			unit: 'MPa',
+			direction: 'increase',
+			result_text: 'After annealing, tensile strength increased to 620 MPa.'
+		},
+		attribution_scope: 'isolated_effect',
+		scientific_context: {
+			material: [{ name: 'alloy', value: '316L', unit: null }],
+			sample: [{ name: 'state', value: 'annealed', unit: null }],
+			process: [{ name: 'process', value: 'LPBF', unit: null }],
+			test: [{ name: 'method', value: 'tensile test', unit: null }]
+		},
 		anchor_ids: [],
 		resolution_status: 'resolved',
 		failure_reason: null,

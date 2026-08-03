@@ -14,9 +14,11 @@ const objective = {
 	objective_id: objectiveId,
 	question: 'How does heat treatment affect LPBF 316L tensile strength?',
 	material_scope: ['316L stainless steel'],
-	process_axes: ['heat treatment'],
-	property_axes: ['yield strength'],
-	comparison_intent: 'Compare as-built and heat-treated LPBF 316L.',
+	variables: ['heat treatment'],
+	outcomes: ['yield strength'],
+	mechanisms: ['precipitate evolution'],
+	constraints: ['LPBF 316L'],
+	requested_comparator: 'Compare as-built and heat-treated LPBF 316L.',
 	seed_document_ids: [documentId],
 	excluded_document_ids: [],
 	confidence: 0.91,
@@ -56,21 +58,17 @@ const finding = {
 	objective_id: objectiveId,
 	analysis_version: 1,
 	finding_id: 'finding-1',
-	finding_level: 'paper',
 	statement: 'Annealing was associated with higher tensile strength.',
-	variables: ['heat treatment'],
-	mediators: [],
-	outcomes: ['tensile strength'],
+	factors: ['heat treatment'],
+	outcome: 'tensile strength',
 	direction: 'increase',
-	scope_summary: 'LPBF 316L in the reported tensile-test condition.',
-	evidence_strength: 'moderate',
-	generalization_status: 'paper_level_only',
-	paper_count: 1,
-	confidence: 0.88,
+	assertion_strength: 'associative',
+	attribution_scope: 'isolated_effect',
+	synthesis_status: 'insufficient_confirmation',
+	certainty: 0.88,
 	display_rank: 0,
-	relations: [
+	mechanisms: [
 		{
-			relation_order: 0,
 			source_term: 'annealing',
 			relation_type: 'associated_with',
 			target_term: 'tensile strength',
@@ -79,23 +77,23 @@ const finding = {
 			supporting_evidence_ids: ['evidence-1']
 		}
 	],
-	context: {
-		material_system: { name: '316L' },
-		process_conditions: [{ state: 'annealed' }],
-		sample_state: {},
-		test_conditions: [{ method: 'tensile test' }],
-		comparison_baseline: { state: 'as-built' },
-		limitations: ['Single paper only.'],
-		supporting_evidence_ids: ['evidence-1']
+	scientific_context: {
+		material: [{ name: 'alloy', value: '316L', unit: null }],
+		sample: [{ name: 'state', value: 'annealed', unit: null }],
+		process: [{ name: 'process', value: 'LPBF', unit: null }],
+		test: [{ name: 'method', value: 'tensile test', unit: null }]
 	},
-	derivation: {
-		synthesis_mode: 'paper',
-		comparison_status: 'insufficient_confirmation',
-		contributing_document_ids: [documentId],
-		supporting_evidence_ids: ['evidence-1'],
-		contradicting_evidence_ids: [],
-		rationale: 'One direct result supports this paper-level Finding.'
-	}
+	limitations: ['Single paper only.'],
+	paper_contributions: [
+		{
+			document_id: documentId,
+			analysis_status: 'analyzed',
+			supporting_evidence_ids: ['evidence-1'],
+			contradicting_evidence_ids: [],
+			context_evidence_ids: [],
+			condition_boundary_evidence_ids: []
+		}
+	]
 };
 
 const evidence = {
@@ -112,18 +110,35 @@ const evidence = {
 	evidence_role: 'direct_result',
 	selection_status: 'extracted',
 	selection_reason: 'Direct result.',
-	evidence_kind: 'measurement',
-	property_normalized: 'tensile strength',
-	material_system: { name: '316L' },
-	sample_context: {},
-	process_context: {},
-	test_condition: {},
-	resolved_condition: {},
-	value_payload: { value: 620 },
-	unit: 'MPa',
-	baseline_context: {},
-	interpretation: null,
-	join_keys: {},
+	changed_variables: [
+		{
+			name: 'heat treatment',
+			baseline_value: 'as-built',
+			target_value: 'annealed',
+			unit: null
+		}
+	],
+	comparison: {
+		baseline_label: 'as-built',
+		target_label: 'annealed',
+		axis_names: ['heat treatment'],
+		comparable: true,
+		incomparability_reasons: []
+	},
+	reported_result: {
+		outcome: 'tensile strength',
+		value: 620,
+		unit: 'MPa',
+		direction: 'increase',
+		result_text: 'After annealing, tensile strength increased to 620 MPa.'
+	},
+	attribution_scope: 'isolated_effect',
+	scientific_context: {
+		material: [{ name: 'alloy', value: '316L', unit: null }],
+		sample: [{ name: 'state', value: 'annealed', unit: null }],
+		process: [{ name: 'process', value: 'LPBF', unit: null }],
+		test: [{ name: 'method', value: 'tensile test', unit: null }]
+	},
 	anchor_ids: [],
 	resolution_status: 'resolved',
 	failure_reason: null,
@@ -209,19 +224,57 @@ async function mockApis(page: Page) {
 		if (path === '/api/v1/collections') return route.fulfill(json({ items: [] }));
 		if (path === `/api/v1/collections/${collectionId}`) {
 			return route.fulfill(
-				json({ collection_id: collectionId, id: collectionId, name: 'LPBF 316L objective set', status: 'failed', paper_count: 1 })
+				json({
+					collection_id: collectionId,
+					id: collectionId,
+					name: 'LPBF 316L objective set',
+					status: 'failed',
+					paper_count: 1
+				})
 			);
 		}
 		if (path === `/api/v1/collections/${collectionId}/workspace`) {
 			return route.fulfill(
 				json({
-					collection: { collection_id: collectionId, id: collectionId, name: 'LPBF 316L objective set', status: 'partial_success' },
+					collection: {
+						collection_id: collectionId,
+						id: collectionId,
+						name: 'LPBF 316L objective set',
+						status: 'partial_success'
+					},
 					file_count: 1,
 					status_summary: 'partial_ready',
-					workflow: { documents: 'ready', results: 'not_started', evidence: 'not_started', comparisons: 'not_started' },
-					document_summary: { total_documents: 1, doc_type_counts: { experimental: 1 }, warnings: [] },
-					artifacts: { documents_ready: true, document_profiles_ready: true, evidence_cards_ready: false, comparable_results_ready: false, comparison_rows_ready: false, graph_ready: false },
-					latest_task: { task_id: 'task-2', collection_id: collectionId, task_type: 'build', status: 'partial_success', current_stage: 'artifacts_ready', progress_percent: 100, errors: ['A later build failed.'], warnings: [], created_at: null, updated_at: null },
+					workflow: {
+						documents: 'ready',
+						results: 'not_started',
+						evidence: 'not_started',
+						comparisons: 'not_started'
+					},
+					document_summary: {
+						total_documents: 1,
+						doc_type_counts: { experimental: 1 },
+						warnings: []
+					},
+					artifacts: {
+						documents_ready: true,
+						document_profiles_ready: true,
+						evidence_cards_ready: false,
+						comparable_results_ready: false,
+						comparison_rows_ready: false,
+						graph_ready: false
+					},
+					latest_task: {
+						task_id: 'task-2',
+						collection_id: collectionId,
+						task_type: 'build',
+						status: 'partial_success',
+						current_stage: 'artifacts_ready',
+						progress_percent: 100,
+						errors: ['A later build failed.'],
+						warnings: [],
+						created_at: null,
+						updated_at: null
+					},
 					recent_tasks: [],
 					capabilities: {},
 					links: {}
@@ -241,12 +294,41 @@ async function mockApis(page: Page) {
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings`) {
 			return route.fulfill(
-				json({ collection_id: collectionId, objective_id: objectiveId, analysis_version: 1, items: [finding], offset: 0, limit: 50, total: 1 })
+				json({
+					collection_id: collectionId,
+					objective_id: objectiveId,
+					analysis_version: 1,
+					items: [finding],
+					offset: 0,
+					limit: 50,
+					total: 1
+				})
+			);
+		}
+		if (
+			path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings/finding-1`
+		) {
+			return route.fulfill(
+				json({
+					collection_id: collectionId,
+					objective_id: objectiveId,
+					analysis_version: 1,
+					finding
+				})
 			);
 		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence`) {
 			return route.fulfill(
-				json({ collection_id: collectionId, objective_id: objectiveId, analysis_version: 1, finding_id: 'finding-1', items: [evidence], offset: 0, limit: 100, total: 1 })
+				json({
+					collection_id: collectionId,
+					objective_id: objectiveId,
+					analysis_version: 1,
+					finding_id: 'finding-1',
+					items: [evidence],
+					offset: 0,
+					limit: 100,
+					total: 1
+				})
 			);
 		}
 		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/content`) {
@@ -262,54 +344,67 @@ async function mockApis(page: Page) {
 	});
 }
 
-test('objective workspace keeps published Findings readable after a failed retry', async ({ page }) => {
-	await mockApis(page);
-	await page.goto(`/collections/${collectionId}/objectives/${objectiveId}`);
+for (const viewport of [
+	{ name: 'desktop', width: 1280, height: 720 },
+	{ name: 'mobile', width: 390, height: 844 }
+]) {
+	test(`objective workspace keeps published Findings readable after a failed retry (${viewport.name})`, async ({
+		page
+	}) => {
+		await page.setViewportSize({ width: viewport.width, height: viewport.height });
+		await mockApis(page);
+		await page.goto(`/collections/${collectionId}/objectives/${objectiveId}`);
 
-	await expect(page.getByText('Evidence extraction failed.')).toBeVisible();
-	await expect(page.getByText(finding.statement).first()).toBeVisible();
-	await expect(page.getByText(evidence.source_excerpt)).toBeVisible();
-	await expect(page.getByText('associated_with')).toBeVisible();
-	await expect(page.getByText('Single paper only.')).toBeVisible();
-	const sourceLink = page.getByRole('link', { name: /打开原文|Open source/ });
-	await expect(sourceLink).toHaveAttribute(
-		'href',
-		`/collections/${collectionId}/documents/${documentId}?view=parsed-paper&source_ref=${tableSourceRef}&page=7&quote=After+annealing%2C+tensile+strength+increased+to+620+MPa.&return_to=%2Fcollections%2F${collectionId}%2Fobjectives%2F${objectiveId}`
-	);
-	await page.screenshot({ path: 'test-results/objective-finding-workspace.png', fullPage: true });
+		await expect(page.getByText('Evidence extraction failed.')).toBeVisible();
+		await expect(page.getByText(finding.statement).first()).toBeVisible();
+		await expect(page.getByRole('blockquote')).toHaveText(evidence.source_excerpt);
+		await expect(page.getByText('associated_with')).toBeVisible();
+		await expect(page.getByText('Single paper only.')).toBeVisible();
+		const sourceLink = page.getByRole('link', { name: /打开原文|Open source/ });
+		await expect(sourceLink).toHaveAttribute(
+			'href',
+			`/collections/${collectionId}/documents/${documentId}?view=parsed-paper&evidence_id=evidence-1&source_ref=${tableSourceRef}&quote=After+annealing%2C+tensile+strength+increased+to+620+MPa.&return_to=%2Fcollections%2F${collectionId}%2Fobjectives%2F${objectiveId}%3Ffinding_id%3Dfinding-1&page=7`
+		);
+		await page.screenshot({
+			path: `test-results/objective-finding-workspace-${viewport.name}.png`,
+			fullPage: true
+		});
 
-	const sourceApiPaths: string[] = [];
-	page.on('request', (request) => {
-		const path = new URL(request.url()).pathname;
-		if (path.includes(`/documents/${documentId}`)) sourceApiPaths.push(path);
+		const sourceApiPaths: string[] = [];
+		page.on('request', (request) => {
+			const path = new URL(request.url()).pathname;
+			if (path.includes(`/documents/${documentId}`)) sourceApiPaths.push(path);
+		});
+		await sourceLink.click();
+		await page.waitForURL(`**/documents/${documentId}?view=parsed-paper**`);
+		const activeSource = page.getByTestId('markdown-active-source');
+		await expect(activeSource).toHaveAttribute('aria-current', 'location');
+		await expect(activeSource).toContainText('Annealed');
+		await expect(activeSource).toContainText('620 MPa');
+		await expect(page.getByTestId('markdown-selected-evidence-quote')).toContainText(
+			'After annealing, tensile strength increased to 620 MPa.'
+		);
+		await expect
+			.poll(async () =>
+				page.evaluate(() => {
+					const body = document.querySelector<HTMLElement>('.markdown-reader__body');
+					const active = document.querySelector<HTMLElement>(
+						'[data-testid="markdown-active-source"]'
+					);
+					if (!body || !active) return false;
+					const bodyRect = body.getBoundingClientRect();
+					const activeRect = active.getBoundingClientRect();
+					return (
+						body.scrollTop > 0 &&
+						activeRect.bottom > bodyRect.top &&
+						activeRect.top < bodyRect.bottom
+					);
+				})
+			)
+			.toBe(true);
+		expect(sourceApiPaths).not.toContain(`/api/v1/collections/${collectionId}/results`);
+		expect(sourceApiPaths).not.toContain(
+			`/api/v1/collections/${collectionId}/documents/${documentId}/comparison-semantics`
+		);
 	});
-	await sourceLink.click();
-	await page.waitForURL(`**/documents/${documentId}?view=parsed-paper**`);
-	const activeSource = page.getByTestId('markdown-active-source');
-	await expect(activeSource).toHaveAttribute('aria-current', 'location');
-	await expect(activeSource).toContainText('Annealed');
-	await expect(activeSource).toContainText('620 MPa');
-	await expect(page.getByTestId('markdown-selected-evidence-quote')).toContainText(
-		'After annealing, tensile strength increased to 620 MPa.'
-	);
-	await expect
-		.poll(async () =>
-			page.evaluate(() => {
-				const body = document.querySelector<HTMLElement>('.markdown-reader__body');
-				const active = document.querySelector<HTMLElement>('[data-testid="markdown-active-source"]');
-				if (!body || !active) return false;
-				const bodyRect = body.getBoundingClientRect();
-				const activeRect = active.getBoundingClientRect();
-				return (
-					body.scrollTop > 0 &&
-					activeRect.bottom > bodyRect.top &&
-					activeRect.top < bodyRect.bottom
-				);
-			})
-		)
-		.toBe(true);
-	expect(sourceApiPaths).not.toContain(`/api/v1/collections/${collectionId}/results`);
-	expect(sourceApiPaths).not.toContain(
-		`/api/v1/collections/${collectionId}/documents/${documentId}/comparison-semantics`
-	);
-});
+}

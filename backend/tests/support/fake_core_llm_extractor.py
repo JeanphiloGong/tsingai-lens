@@ -266,17 +266,17 @@ class FakeCoreLLMStructuredExtractor:
                         for item in skim.get("candidate_materials", [])
                         if str(item).strip()
                     ],
-                    process_axes=[
+                    variables=[
                         str(item)
                         for item in skim.get("candidate_processes", [])
                         if str(item).strip()
                     ],
-                    property_axes=[
+                    outcomes=[
                         str(item)
                         for item in skim.get("candidate_properties", [])
                         if str(item).strip()
                     ],
-                    comparison_intent="compare process or treatment effects across papers",
+                    requested_comparator="compare process or treatment effects across papers",
                     seed_document_ids=[document_id] if document_id else [],
                     excluded_document_ids=[
                         str(item.get("document_id") or "").strip()
@@ -350,8 +350,8 @@ class FakeCoreLLMStructuredExtractor:
         axes = [
             str(value).lower()
             for value in (
-                *(objective.get("process_axes") or []),
-                *(objective.get("property_axes") or []),
+                *(objective.get("variables") or []),
+                *(objective.get("outcomes") or []),
             )
             if str(value).strip()
         ]
@@ -395,7 +395,7 @@ class FakeCoreLLMStructuredExtractor:
             ],
             measured_property_scope=[
                 str(item)
-                for item in objective.get("property_axes", [])
+                for item in objective.get("outcomes", [])
                 if str(item).strip()
             ],
             test_environment_scope=[],
@@ -409,9 +409,9 @@ class FakeCoreLLMStructuredExtractor:
         payload: dict[str, Any],
     ) -> StructuredEvidenceSelections:
         objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
-        property_axes = [
+        outcomes = [
             str(value).lower()
-            for value in objective.get("property_axes", [])
+            for value in objective.get("outcomes", [])
             if str(value).strip()
         ]
         if not isinstance(payload.get("current_source"), dict):
@@ -460,7 +460,7 @@ class FakeCoreLLMStructuredExtractor:
                 ).lower()
                 role = (
                     "current_experimental_evidence"
-                    if any(axis in table_text for axis in property_axes)
+                    if any(axis in table_text for axis in outcomes)
                     else "process_or_treatment"
                 )
                 routes.append(
@@ -512,7 +512,6 @@ class FakeCoreLLMStructuredExtractor:
                 ),
                 headers[-1] if headers else "value",
             )
-            extractions: list[StructuredEvidenceExtraction] = []
             for row in matrix[1:]:
                 if not isinstance(row, list) or len(row) < 2:
                     continue
@@ -520,24 +519,50 @@ class FakeCoreLLMStructuredExtractor:
                 value_text = str(row[-1]).strip()
                 if not sample_label or not value_text:
                     continue
-                extractions.append(
-                    StructuredEvidenceExtraction(
-                        evidence_kind="measurement",
-                        property_normalized=property_header,
-                        sample_context={"label": sample_label},
-                        value_payload={"source_value_text": value_text},
-                        join_keys={"sample_key": sample_label},
-                        resolution_status="partial",
-                        confidence=0.78,
-                    )
+                numeric_match = _FLOAT_PATTERN.search(value_text.replace(",", ""))
+                return StructuredEvidenceExtractions(
+                    extractions=[
+                        StructuredEvidenceExtraction(
+                            evidence_role="direct_result",
+                            reported_result={
+                                "outcome": property_header,
+                                "value": (
+                                    float(numeric_match.group(0))
+                                    if numeric_match
+                                    else value_text
+                                ),
+                                "unit": None,
+                                "direction": "unknown",
+                                "result_text": (
+                                    f"{sample_label}: {property_header} = {value_text}"
+                                ),
+                            },
+                            attribution_scope="descriptive_only",
+                            scientific_context={
+                                "sample": [
+                                    {"name": "label", "value": sample_label}
+                                ]
+                            },
+                            resolution_status="partial",
+                            confidence=0.78,
+                        )
+                    ]
                 )
-            return StructuredEvidenceExtractions(extractions=extractions)
+            return StructuredEvidenceExtractions()
         if route.get("source_kind") == "text_window" and source.get("text"):
             return StructuredEvidenceExtractions(
                 extractions=[
                     StructuredEvidenceExtraction(
-                        evidence_kind="process_context",
-                        value_payload={"statement": str(source.get("text"))[:160]},
+                        evidence_role="condition_context",
+                        attribution_scope="not_attributable",
+                        scientific_context={
+                            "process": [
+                                {
+                                    "name": "source_statement",
+                                    "value": str(source.get("text"))[:160],
+                                }
+                            ]
+                        },
                         resolution_status="partial",
                         confidence=0.7,
                     )

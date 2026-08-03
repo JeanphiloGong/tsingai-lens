@@ -77,6 +77,8 @@ PROCESS_UNIT_SUFFIXES = (
     ("strain_rate_s-1", "s^-1"),
     ("frequency_hz", "Hz"),
 )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -197,15 +199,16 @@ def build_prediction_bundle(
         uncertainties = [
             {
                 "finding_id": finding.get("finding_id"),
-                "generalization_status": finding.get("generalization_status"),
-                "limitations": (finding.get("context") or {}).get("limitations", []),
+                "synthesis_status": finding.get("synthesis_status"),
+                "attribution_scope": finding.get("attribution_scope"),
+                "certainty": finding.get("certainty"),
+                "limitations": finding.get("limitations", []),
                 "source": _source("objective_findings", row_number),
             }
             for row_number, finding in _rows_with_numbers(
                 records_by_artifact["objective_findings"]
             )
-            if finding.get("generalization_status")
-            != "cross_paper_agreement"
+            if finding.get("synthesis_status") != "agreement"
         ]
     else:
         samples = _convert_samples(records_by_artifact["sample_variants"])
@@ -491,9 +494,9 @@ def _convert_process_parameters(
                 {
                     "paper_id": _text(row, "document_id"),
                     "sample_reference": _text(row, "variant_id"),
-                    "sample_ids": [_text(row, "variant_id")]
-                    if _text(row, "variant_id")
-                    else [],
+                    "sample_ids": (
+                        [_text(row, "variant_id")] if _text(row, "variant_id") else []
+                    ),
                     "sample_scope": "single_sample",
                     "parameter_category": "process_context",
                     "original_parameter_name": key,
@@ -627,9 +630,9 @@ def _convert_measurement_results(rows: list[dict[str, Any]]) -> list[dict[str, A
                 "paper_id": _text(row, "document_id"),
                 "result_id": _text(row, "result_id"),
                 "sample_id": _text(row, "variant_id"),
-                "sample_ids": [_text(row, "variant_id")]
-                if _text(row, "variant_id")
-                else [],
+                "sample_ids": (
+                    [_text(row, "variant_id")] if _text(row, "variant_id") else []
+                ),
                 "test_condition_id": _text(row, "test_condition_id"),
                 "metric_name": _text(row, "property_normalized"),
                 "value_or_trend": _summarize_value_payload(value_payload),
@@ -664,9 +667,11 @@ def _convert_comparisons(
                 "comparison_id": _text(row, "relation_id"),
                 "current_sample_id": _text(row, "current_variant_id"),
                 "baseline_reference": _text(row, "reference_variant_id"),
-                "baseline_sample_ids": [_text(row, "reference_variant_id")]
-                if _text(row, "reference_variant_id")
-                else [],
+                "baseline_sample_ids": (
+                    [_text(row, "reference_variant_id")]
+                    if _text(row, "reference_variant_id")
+                    else []
+                ),
                 "comparison_type": "pairwise_sample_relation",
                 "comparison_axis": _text(row, "comparison_axis"),
                 "comparison_metric": _text(row, "property_normalized"),
@@ -719,9 +724,9 @@ def _convert_comparisons(
             "comparison_id": _text(row, "baseline_id"),
             "current_sample_id": "",
             "baseline_reference": _text(row, "baseline_label"),
-            "baseline_sample_ids": [_text(row, "variant_id")]
-            if _text(row, "variant_id")
-            else [],
+            "baseline_sample_ids": (
+                [_text(row, "variant_id")] if _text(row, "variant_id") else []
+            ),
             "comparison_type": _text(row, "baseline_type"),
             "comparison_metric": "",
             "current_value": "",
@@ -747,14 +752,16 @@ def _convert_observations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "paper_id": _text(row, "document_id"),
                 "observation_id": _text(row, "observation_id"),
                 "sample_id": _text(row, "variant_id"),
-                "sample_ids": [_text(row, "variant_id")]
-                if _text(row, "variant_id")
-                else [],
+                "sample_ids": (
+                    [_text(row, "variant_id")] if _text(row, "variant_id") else []
+                ),
                 "characterization_method": _text(row, "characterization_type"),
                 "observed_object": _text(row, "characterization_type"),
-                "value_or_description": _first_value(row, "observed_value")
-                if _present(_first_value(row, "observed_value"))
-                else _text(row, "observation_text"),
+                "value_or_description": (
+                    _first_value(row, "observed_value")
+                    if _present(_first_value(row, "observed_value"))
+                    else _text(row, "observation_text")
+                ),
                 "unit": _text(row, "observed_unit"),
                 "author_interpretation": _text(row, "observation_text"),
                 "condition_context": _first_value(row, "condition_context"),

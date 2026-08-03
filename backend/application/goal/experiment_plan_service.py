@@ -10,13 +10,12 @@ from application.goal.protocol_contract import (
     proposed_design_choices_are_source_independent,
     ved_design_is_scientifically_consistent,
 )
+from application.goal.session_service import REVIEWED_FINDING_GATE
 from domain.goal import ExperimentPlanRecord, GoalMessageRecord, GoalSessionRecord
 from domain.ports import ExperimentPlanRepository, GoalSessionRepository
 
-PROTOCOL_READY_REVIEW_GATE = "protocol_ready_findings"
-
 BLOCKED_GOAL_COPILOT_WARNINGS = {
-    "curated_research_findings_empty",
+    "reviewed_findings_empty",
     "goal_copilot_model_unavailable",
     "goal_copilot_protocol_contract_invalid",
 }
@@ -76,7 +75,7 @@ class ExperimentPlanService:
                 "source_session_id": source_session.session_id,
                 "source_mode": source_message.source_mode,
                 "used_evidence_ids": list(source_message.used_evidence_ids),
-                "review_gate": PROTOCOL_READY_REVIEW_GATE,
+                "review_gate": REVIEWED_FINDING_GATE,
                 "source_findings": [
                     dict(source_finding_ref)
                     for source_finding_ref in source_message.source_finding_refs
@@ -106,13 +105,14 @@ class ExperimentPlanService:
                 "updated_at": now,
             }
         )
+        if validated_source is not None:
+            checked = self._with_source_validity(plan)
+            if checked.metadata.get("source_validity") != "current":
+                raise ValueError("goal copilot source Findings are stale")
         stored = self.repository.upsert_plan(plan)
         if validated_source is None:
             return stored
-        return self._with_source_validity(
-            stored,
-            self._current_dataset_items(collection_id, objective_id),
-        )
+        return self._with_source_validity(stored)
 
     def _validate_goal_copilot_source(
         self,
@@ -130,7 +130,9 @@ class ExperimentPlanService:
             return None
         context = self.goal_session_repository.read_message_context(source_message_id)
         if context is None:
-            raise ValueError("source_message_id does not reference a saved goal message")
+            raise ValueError(
+                "source_message_id does not reference a saved goal message"
+            )
         session = GoalSessionRecord.from_mapping(context["session"])
         message = GoalMessageRecord.from_mapping(context["message"])
         if not created_by:
@@ -144,36 +146,32 @@ class ExperimentPlanService:
         if message.role != "assistant":
             raise ValueError("source_message_id must reference an assistant message")
         if message.source_mode != "collection_grounded":
-            raise ValueError("goal copilot experiment plans require collection-grounded answers")
-        if message.review_gate != PROTOCOL_READY_REVIEW_GATE:
             raise ValueError(
-                "goal copilot experiment plans require protocol-ready findings"
+                "goal copilot experiment plans require collection-grounded answers"
             )
+        if message.review_gate != REVIEWED_FINDING_GATE:
+            raise ValueError("goal copilot experiment plans require reviewed findings")
         if BLOCKED_GOAL_COPILOT_WARNINGS.intersection(message.warnings):
-            raise ValueError("goal copilot answer is not eligible for experiment plan saving")
+            raise ValueError(
+                "goal copilot answer is not eligible for experiment plan saving"
+            )
         if not message.source_links:
             raise ValueError("goal copilot answer has no auditable source links")
         if not message.used_evidence_ids:
             raise ValueError("goal copilot answer has no evidence citations")
         if not message.source_finding_refs:
-            raise ValueError(
-                "goal copilot answer has no protocol source Finding snapshot"
-            )
+            raise ValueError("goal copilot answer has no reviewed Finding snapshot")
         visible_source_labels = [
             link.label for link in message.source_links if link.label.strip()
         ]
         if visible_source_labels and not any(
             label in message.content for label in visible_source_labels
         ):
-            raise ValueError(
-                "goal copilot answer does not cite a visible source label"
-            )
+            raise ValueError("goal copilot answer does not cite a visible source label")
         if visible_source_labels and not any(
             label in content for label in visible_source_labels
         ):
-            raise ValueError(
-                "goal copilot answer does not cite a visible source label"
-            )
+            raise ValueError("goal copilot answer does not cite a visible source label")
         linked_evidence_ids = {
             evidence_id
             for link in message.source_links
@@ -185,7 +183,9 @@ class ExperimentPlanService:
             raise ValueError(
                 "goal copilot source links do not match evidence citations"
             )
-        missing_linked_evidence_ids = set(message.used_evidence_ids) - linked_evidence_ids
+        missing_linked_evidence_ids = (
+            set(message.used_evidence_ids) - linked_evidence_ids
+        )
         if missing_linked_evidence_ids:
             raise ValueError(
                 "goal copilot answer is missing source links for evidence citations"
@@ -199,9 +199,7 @@ class ExperimentPlanService:
         if requested_hrefs and not requested_hrefs.issubset(message_hrefs):
             raise ValueError("source_links must come from the saved goal message")
         if not _has_protocol_draft_structure(content):
-            raise ValueError(
-                "goal copilot answer is not a structured protocol draft"
-            )
+            raise ValueError("goal copilot answer is not a structured protocol draft")
         _validate_proposed_design_choices(content)
         _validate_ved_design(content)
         return session, message
@@ -214,10 +212,7 @@ class ExperimentPlanService:
         plans = self.repository.list_plans(collection_id, objective_id)
         if not any(_is_goal_copilot_plan(plan) for plan in plans):
             return plans
-        dataset_items = self._current_dataset_items(collection_id, objective_id)
-        return tuple(
-            self._with_source_validity(plan, dataset_items) for plan in plans
-        )
+        return tuple(self._with_source_validity(plan) for plan in plans)
 
     def update_plan(
         self,
@@ -233,18 +228,13 @@ class ExperimentPlanService:
         if plan is None:
             raise ExperimentPlanNotFoundError(collection_id, objective_id, plan_id)
         is_goal_copilot_plan = _is_goal_copilot_plan(plan)
-        dataset_items = None
         if is_goal_copilot_plan:
             _validate_goal_copilot_plan_edit(plan, content)
-            dataset_items = self._current_dataset_items(collection_id, objective_id)
             if status == "ready_for_review":
-                checked = self._with_source_validity(
-                    plan,
-                    dataset_items,
-                )
+                checked = self._with_source_validity(plan)
                 if checked.metadata.get("source_validity") != "current":
                     raise ValueError(
-                        "goal copilot source Findings are stale or unverified"
+                        "goal copilot source Findings are stale"
                     )
         updated = plan.with_updates(
             title=title,
@@ -255,33 +245,29 @@ class ExperimentPlanService:
         stored = self.repository.upsert_plan(updated)
         if not is_goal_copilot_plan:
             return stored
-        return self._with_source_validity(stored, dataset_items)
-
-    def _current_dataset_items(
-        self,
-        collection_id: str,
-        objective_id: str,
-    ) -> tuple[Mapping[str, Any], ...] | None:
-        try:
-            dataset = self.finding_feedback_service.export_dataset(
-                collection_id=collection_id,
-                objective_id=objective_id,
-            )
-        except (FileNotFoundError, ValueError):
-            return None
-        items = dataset.get("items") if isinstance(dataset, Mapping) else None
-        if not isinstance(items, list):
-            return None
-        return tuple(item for item in items if isinstance(item, Mapping))
+        return self._with_source_validity(stored)
 
     def _with_source_validity(
         self,
         plan: ExperimentPlanRecord,
-        dataset_items: tuple[Mapping[str, Any], ...] | None,
     ) -> ExperimentPlanRecord:
         if not _is_goal_copilot_plan(plan):
             return plan
-        validity, reasons = _source_validity(plan, dataset_items)
+        if not proposed_design_choices_are_source_independent(
+            plan.content
+        ) or not ved_design_is_scientifically_consistent(plan.content):
+            validity, reasons = "stale", ["protocol_design_inconsistent"]
+        else:
+            source_findings = tuple(
+                item
+                for item in plan.metadata.get("source_findings", [])
+                if isinstance(item, Mapping)
+            )
+            validity, reasons = self.finding_feedback_service.source_snapshot_validity(
+                collection_id=plan.collection_id,
+                objective_id=plan.objective_id,
+                source_findings=source_findings,
+            )
         payload = plan.to_record()
         payload["metadata"] = {
             **dict(plan.metadata),
@@ -310,80 +296,7 @@ def _is_goal_copilot_plan(plan: ExperimentPlanRecord) -> bool:
     return (
         bool(plan.source_message_id)
         or plan.metadata.get("source") == "goal_copilot"
-        or plan.metadata.get("review_gate") == PROTOCOL_READY_REVIEW_GATE
-    )
-
-
-def _source_validity(
-    plan: ExperimentPlanRecord,
-    dataset_items: tuple[Mapping[str, Any], ...] | None,
-) -> tuple[str, list[str]]:
-    if not proposed_design_choices_are_source_independent(
-        plan.content
-    ) or not ved_design_is_scientifically_consistent(plan.content):
-        return "stale", ["protocol_design_inconsistent"]
-    if dataset_items is None:
-        return "unverified", ["source_dataset_unavailable"]
-    current_by_finding_id = {
-        finding_id: item
-        for item in dataset_items
-        if (finding_id := _text(item.get("finding_id")))
-    }
-    source_findings = [
-        item
-        for item in plan.metadata.get("source_findings", [])
-        if isinstance(item, Mapping)
-        and _text(item.get("finding_id"))
-        and _text(item.get("protocol_source_fingerprint"))
-    ]
-    if not source_findings:
-        used_evidence_ids = {
-            evidence_id
-            for raw_evidence_id in plan.metadata.get("used_evidence_ids", [])
-            if (evidence_id := _text(raw_evidence_id))
-        }
-        current_protocol_evidence_ids = {
-            evidence_id
-            for item in dataset_items
-            if _is_protocol_ready_item(item)
-            for evidence in item.get("training_evidence_refs", [])
-            if isinstance(evidence, Mapping)
-            if (evidence_id := _text(evidence.get("evidence_ref_id")))
-        }
-        if used_evidence_ids and not used_evidence_ids.issubset(
-            current_protocol_evidence_ids
-        ):
-            return "stale", ["source_findings_no_longer_protocol_ready"]
-        return "unverified", ["source_finding_snapshot_missing"]
-
-    reasons: list[str] = []
-    for source_finding in source_findings:
-        finding_id = _text(source_finding.get("finding_id"))
-        current = current_by_finding_id.get(finding_id)
-        if current is None:
-            reasons.append("source_finding_missing")
-            continue
-        if not _is_protocol_ready_item(current):
-            reasons.append("source_finding_no_longer_protocol_ready")
-            continue
-        if (
-            _text(current.get("finding_fingerprint"))
-            != _text(source_finding.get("finding_fingerprint"))
-            or _text(current.get("protocol_source_fingerprint"))
-            != _text(source_finding.get("protocol_source_fingerprint"))
-        ):
-            reasons.append("source_finding_changed")
-    if reasons:
-        return "stale", list(dict.fromkeys(reasons))
-    return "current", []
-
-
-def _is_protocol_ready_item(item: Mapping[str, Any]) -> bool:
-    readiness = item.get("protocol_readiness")
-    return (
-        item.get("dataset_use_status") == "training_ready"
-        and isinstance(readiness, Mapping)
-        and readiness.get("status") == "protocol_ready"
+        or plan.metadata.get("review_gate") == REVIEWED_FINDING_GATE
     )
 
 
@@ -404,7 +317,9 @@ def _validate_goal_copilot_plan_edit(
         for link in plan.source_links
         if (label := str(link.get("label") or "").strip())
     ]
-    if visible_source_labels and not any(label in content for label in visible_source_labels):
+    if visible_source_labels and not any(
+        label in content for label in visible_source_labels
+    ):
         raise ValueError("goal copilot answer does not cite a visible source label")
 
 

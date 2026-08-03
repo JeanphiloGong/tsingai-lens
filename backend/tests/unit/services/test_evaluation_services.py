@@ -20,6 +20,7 @@ from domain.core import (
     ResearchObjective,
 )
 from domain.core.paper_fact import PaperFactSet
+from domain.evaluation import FindingCuration, FindingFeedback
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
@@ -165,7 +166,6 @@ class FakeEvaluationRepository:
         )
 
 
-
 def test_evaluation_gold_service_registers_gold_set_for_collection():
     repository = FakeEvaluationRepository()
     service = EvaluationGoldService(
@@ -264,8 +264,8 @@ def _published_objective_repository() -> MemoryObjectiveRepository:
             "objective_id": "obj-1",
             "question": "How does temperature affect strength?",
             "material_scope": ["Alloy A"],
-            "process_axes": ["temperature"],
-            "property_axes": ["strength"],
+            "variables": ["temperature"],
+            "outcomes": ["strength"],
             "seed_document_ids": ["doc-1"],
             "confidence": 0.9,
         }
@@ -301,9 +301,35 @@ def _published_objective_repository() -> MemoryObjectiveRepository:
             "page_numbers": [7],
             "evidence_role": "direct_result",
             "selection_status": "extracted",
-            "evidence_kind": "measurement",
-            "property_normalized": "strength",
-            "value_payload": {"value": 620, "unit": "MPa"},
+            "changed_variables": [
+                {
+                    "name": "temperature",
+                    "baseline_value": 400,
+                    "target_value": 500,
+                    "unit": "C",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "400 C",
+                "target_label": "500 C",
+                "axis_names": ["temperature"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "strength",
+                "value": 620,
+                "unit": "MPa",
+                "direction": "increase",
+                "result_text": "At 500 C, tensile strength increased to 620 MPa.",
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {
+                "material": [{"name": "alloy", "value": "Alloy A"}],
+                "sample": [],
+                "process": [],
+                "test": [{"name": "test", "value": "tensile"}],
+            },
             "resolution_status": "resolved",
             "confidence": 0.9,
         }
@@ -314,32 +340,29 @@ def _published_objective_repository() -> MemoryObjectiveRepository:
             "objective_id": "obj-1",
             "analysis_version": 1,
             "finding_id": "finding-1",
-            "finding_level": "paper",
             "statement": "Higher temperature was associated with greater strength.",
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-            "scope_summary": "Alloy A",
-            "evidence_strength": "weak",
-            "generalization_status": "paper_level_only",
-            "paper_count": 1,
-            "confidence": 0.8,
-            "relations": [
+            "factors": ["temperature"],
+            "outcome": "strength",
+            "direction": "increase",
+            "assertion_strength": "associative",
+            "attribution_scope": "isolated_effect",
+            "synthesis_status": "insufficient_confirmation",
+            "certainty": 0.5,
+            "display_rank": 0,
+            "scientific_context": {
+                "material": [{"name": "alloy", "value": "Alloy A"}],
+                "sample": [],
+                "process": [],
+                "test": [{"name": "test", "value": "tensile"}],
+            },
+            "limitations": ["Only one paper directly supports this Finding."],
+            "paper_contributions": [
                 {
-                    "source_term": "temperature",
-                    "relation_type": "associated_with",
-                    "target_term": "strength",
-                    "assertion_strength": "associative",
+                    "document_id": "doc-1",
+                    "analysis_status": "analyzed",
                     "supporting_evidence_ids": ["evidence-1"],
                 }
             ],
-            "context": {"supporting_evidence_ids": ["evidence-1"]},
-            "derivation": {
-                "synthesis_mode": "paper",
-                "comparison_status": "insufficient_confirmation",
-                "contributing_document_ids": ["doc-1"],
-                "supporting_evidence_ids": ["evidence-1"],
-                "rationale": "One direct paper result.",
-            },
         }
     )
     repository.publish_analysis(
@@ -435,8 +458,8 @@ def test_prediction_snapshot_rejects_unpublished_objective_candidates() -> None:
             "objective_id": "obj-candidate",
             "question": "How does temperature affect strength?",
             "material_scope": ["Alloy A"],
-            "process_axes": ["temperature"],
-            "property_axes": ["strength"],
+            "variables": ["temperature"],
+            "outcomes": ["strength"],
             "seed_document_ids": ["doc-1"],
             "confidence": 0.9,
         }
@@ -471,6 +494,145 @@ def test_finding_feedback_rejects_stale_analysis_version() -> None:
         )
 
 
+def test_finding_feedback_rejects_inconsistent_review_decisions() -> None:
+    service = _finding_feedback_service()
+
+    with pytest.raises(ValueError, match="correct finding feedback cannot report"):
+        service.record_feedback(
+            collection_id="col-gold",
+            objective_id="obj-1",
+            analysis_version=1,
+            finding_id="finding-1",
+            review_status="correct",
+            issue_type="evidence_not_grounded",
+        )
+    with pytest.raises(ValueError, match="partial finding feedback requires an issue"):
+        service.record_feedback(
+            collection_id="col-gold",
+            objective_id="obj-1",
+            analysis_version=1,
+            finding_id="finding-1",
+            review_status="partial",
+            issue_type="none",
+        )
+
+
+def test_finding_review_rejects_unknown_status_values() -> None:
+    service = _finding_feedback_service()
+    published = service.objective_repository.read_finding(
+        "col-gold", "obj-1", 1, "finding-1"
+    )
+    assert published is not None
+
+    with pytest.raises(ValueError, match="unsupported finding review status"):
+        service.record_feedback(
+            collection_id="col-gold",
+            objective_id="obj-1",
+            analysis_version=1,
+            finding_id="finding-1",
+            review_status="bogus",
+            issue_type="none",
+        )
+    with pytest.raises(ValueError, match="unsupported finding curation status"):
+        service.record_curation(
+            collection_id="col-gold",
+            objective_id="obj-1",
+            analysis_version=1,
+            finding_id="finding-1",
+            curated_status="bogus",
+            curated_finding=published.to_record(),
+        )
+
+
+def test_finding_curation_rejects_evidence_outside_published_finding() -> None:
+    service = _finding_feedback_service()
+    published = service.objective_repository.read_finding(
+        "col-gold", "obj-1", 1, "finding-1"
+    )
+    assert published is not None
+    curated = published.to_record()
+    curated["paper_contributions"][0]["supporting_evidence_ids"] = ["evidence-outside"]
+
+    with pytest.raises(ValueError, match="references missing evidence"):
+        service.record_curation(
+            collection_id="col-gold",
+            objective_id="obj-1",
+            analysis_version=1,
+            finding_id="finding-1",
+            curated_status="limited",
+            curated_finding=curated,
+        )
+
+
+def test_latest_feedback_or_curation_controls_dataset_status() -> None:
+    service = _finding_feedback_service()
+    candidate = service.export_dataset(collection_id="col-gold", objective_id="obj-1")[
+        "items"
+    ][0]
+    assert candidate["dataset_use_status"] == "review_candidate"
+    assert candidate["training_messages"] == []
+
+    published = service.objective_repository.read_finding(
+        "col-gold", "obj-1", 1, "finding-1"
+    )
+    assert published is not None
+    identity = {
+        "collection_id": "col-gold",
+        "objective_id": "obj-1",
+        "analysis_version": 1,
+        "finding_id": "finding-1",
+    }
+    service.review_repository.upsert_curation(
+        FindingCuration.from_mapping(
+            {
+                "curation_id": "curation-1",
+                **identity,
+                "curated_status": "limited",
+                "curated_finding": published.to_record(),
+                "updated_at": "2026-08-02T10:00:00+00:00",
+            }
+        )
+    )
+    service.review_repository.upsert_feedback(
+        FindingFeedback.from_mapping(
+            {
+                "feedback_id": "feedback-1",
+                **identity,
+                "review_status": "incorrect",
+                "issue_type": "overclaim",
+                "created_at": "2026-08-02T11:00:00+00:00",
+            }
+        )
+    )
+
+    rejected = service.export_dataset(collection_id="col-gold", objective_id="obj-1")[
+        "items"
+    ][0]
+    assert rejected["label_status"] == "rejected"
+    assert rejected["dataset_use_status"] == "rejected"
+    assert rejected["expert_target"] is None
+    assert rejected["training_messages"] == []
+
+    service.review_repository.upsert_curation(
+        FindingCuration.from_mapping(
+            {
+                "curation_id": "curation-1",
+                **identity,
+                "curated_status": "limited",
+                "curated_finding": published.to_record(),
+                "updated_at": "2026-08-02T12:00:00+00:00",
+            }
+        )
+    )
+
+    curated = service.export_dataset(collection_id="col-gold", objective_id="obj-1")[
+        "items"
+    ][0]
+    assert curated["label_status"] == "gold"
+    assert curated["dataset_use_status"] == "training_ready"
+    assert curated["expert_target"] == published.to_record()
+
+
 def test_finding_feedback_export_contains_exact_source_text() -> None:
     service = _finding_feedback_service()
     service.record_feedback(
@@ -492,9 +654,98 @@ def test_finding_feedback_export_contains_exact_source_text() -> None:
     sample = dataset["items"][0]
     assert sample["label_status"] == "gold"
     assert sample["dataset_use_status"] == "training_ready"
+    assert sample["system_prediction"]["factors"] == ["temperature"]
+    assert sample["training_target"]["outcome"] == "strength"
+    assert sample["finding_fingerprint"].startswith("finding.v2:")
+    assert sample["evidence_fingerprint"].startswith("evidence.v2:")
     assert sample["evidence"][0]["source_excerpt"] == (
         "At 500 C, tensile strength increased to 620 MPa."
     )
     assert "At 500 C" in sample["training_messages"][0]["content"]
     assert sample["metadata"]["analysis_version"] == 1
+    assert sample["metadata"]["finding_fingerprint"] == sample["finding_fingerprint"]
     assert "claim_id" not in str(sample)
+
+
+@pytest.mark.parametrize(
+    ("snapshot_change", "expected_reason"),
+    [
+        ({"analysis_version": 2}, "source_analysis_version_changed"),
+        ({"finding_fingerprint": "finding.v2:changed"}, "source_finding_changed"),
+        ({"evidence_fingerprint": "evidence.v2:changed"}, "source_evidence_changed"),
+        ({"evidence_ids": ["evidence-replaced"]}, "source_evidence_ids_changed"),
+    ],
+)
+def test_finding_source_snapshot_detects_each_stale_dimension(
+    snapshot_change: dict,
+    expected_reason: str,
+) -> None:
+    service = _finding_feedback_service()
+    service.record_feedback(
+        collection_id="col-gold",
+        objective_id="obj-1",
+        analysis_version=1,
+        finding_id="finding-1",
+        review_status="correct",
+        issue_type="none",
+    )
+    item = service.export_dataset(
+        collection_id="col-gold",
+        objective_id="obj-1",
+    )["items"][0]
+    source_finding = {
+        "finding_id": item["finding_id"],
+        "analysis_version": item["analysis_version"],
+        "finding_fingerprint": item["finding_fingerprint"],
+        "evidence_fingerprint": item["evidence_fingerprint"],
+        "evidence_ids": [entry["evidence_id"] for entry in item["evidence"]],
+        **snapshot_change,
+    }
+
+    validity, reasons = service.source_snapshot_validity(
+        collection_id="col-gold",
+        objective_id="obj-1",
+        source_findings=[source_finding],
+    )
+
+    assert validity == "stale"
+    assert reasons == [expected_reason]
+
+
+def test_finding_source_snapshot_is_stale_when_dataset_is_unavailable() -> None:
+    service = _finding_feedback_service()
+
+    validity, reasons = service.source_snapshot_validity(
+        collection_id="missing-collection",
+        objective_id="missing-objective",
+        source_findings=[{"finding_id": "finding-1"}],
+    )
+
+    assert validity == "stale"
+    assert reasons == ["source_dataset_unavailable"]
+
+
+def test_only_training_ready_samples_include_training_messages() -> None:
+    candidate_service = _finding_feedback_service()
+    candidate = candidate_service.export_dataset(
+        collection_id="col-gold",
+        objective_id="obj-1",
+    )["items"][0]
+    assert candidate["dataset_use_status"] == "review_candidate"
+    assert candidate["training_messages"] == []
+
+    rejected_service = _finding_feedback_service()
+    rejected_service.record_feedback(
+        collection_id="col-gold",
+        objective_id="obj-1",
+        analysis_version=1,
+        finding_id="finding-1",
+        review_status="incorrect",
+        issue_type="overclaim",
+    )
+    rejected = rejected_service.export_dataset(
+        collection_id="col-gold",
+        objective_id="obj-1",
+    )["items"][0]
+    assert rejected["dataset_use_status"] == "rejected"
+    assert rejected["training_messages"] == []

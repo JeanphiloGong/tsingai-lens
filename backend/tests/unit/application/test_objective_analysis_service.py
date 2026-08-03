@@ -22,8 +22,8 @@ def _objective(*, published: int | None = None) -> ResearchObjective:
             "objective_id": "objective-1",
             "question": "How does temperature affect strength?",
             "material_scope": ["Alloy A"],
-            "process_axes": ["temperature"],
-            "property_axes": ["strength"],
+            "variables": ["temperature"],
+            "outcomes": ["strength"],
             "seed_document_ids": ["paper-1"],
             "confidence": 0.9,
             "confirmation_status": "confirmed",
@@ -66,10 +66,35 @@ def _evidence(version: int) -> ObjectiveEvidence:
             "source_excerpt": "Temperature changed strength.",
             "evidence_role": "direct_result",
             "selection_status": "extracted",
-            "evidence_kind": "measurement",
-            "property_normalized": "strength",
-            "value_payload": {"direction": "changes"},
-            "join_keys": {"isolated_variable": "temperature"},
+            "changed_variables": [
+                {
+                    "name": "temperature",
+                    "baseline_value": 500,
+                    "target_value": 600,
+                    "unit": "C",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "500 C",
+                "target_label": "600 C",
+                "axis_names": ["temperature"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "strength",
+                "value": 620,
+                "unit": "MPa",
+                "direction": "increase",
+                "result_text": "Strength increased at 600 C.",
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {
+                "material": [{"name": "alloy", "value": "Alloy A"}],
+                "sample": [],
+                "process": [],
+                "test": [],
+            },
             "resolution_status": "resolved",
             "confidence": 0.9,
         }
@@ -83,32 +108,28 @@ def _finding(version: int) -> Finding:
             "objective_id": "objective-1",
             "analysis_version": version,
             "finding_id": "finding-1",
-            "finding_level": "paper",
             "statement": "Temperature was associated with strength.",
-            "variables": ["temperature"],
-            "outcomes": ["strength"],
-            "scope_summary": "Alloy A",
-            "evidence_strength": "weak",
-            "generalization_status": "paper_level_only",
-            "paper_count": 1,
-            "confidence": 0.8,
-            "relations": [
+            "factors": ["temperature"],
+            "outcome": "strength",
+            "direction": "increase",
+            "assertion_strength": "associative",
+            "attribution_scope": "isolated_effect",
+            "synthesis_status": "insufficient_confirmation",
+            "certainty": 0.5,
+            "mechanisms": [],
+            "scientific_context": {
+                "material": [{"name": "alloy", "value": "Alloy A"}],
+                "sample": [],
+                "process": [],
+                "test": [],
+            },
+            "paper_contributions": [
                 {
-                    "source_term": "temperature",
-                    "relation_type": "associated_with",
-                    "target_term": "strength",
-                    "assertion_strength": "associative",
+                    "document_id": "paper-1",
+                    "analysis_status": "analyzed",
                     "supporting_evidence_ids": ["evidence-1"],
                 }
             ],
-            "context": {"supporting_evidence_ids": ["evidence-1"]},
-            "derivation": {
-                "synthesis_mode": "paper",
-                "comparison_status": "insufficient_confirmation",
-                "contributing_document_ids": ["paper-1"],
-                "supporting_evidence_ids": ["evidence-1"],
-                "rationale": "One direct result.",
-            },
         }
     )
 
@@ -249,6 +270,39 @@ def test_objective_analysis_publishes_one_complete_version() -> None:
     assert result["objective"].published_analysis_version == 1
     assert result["findings"] == (_finding(1),)
     assert repository.published_calls == 1
+
+
+def test_route_progress_does_not_replace_paper_counts() -> None:
+    service, repository, _analyzer = _service()
+    service.queue_analysis("collection-1", "objective-1")
+    running = repository.claim_analysis("collection-1", "objective-1", 1)
+    assert running is not None
+
+    progress = service._build_progress_callback(running)
+    progress(
+        {
+            "phase": "objective_evidence_routing_started",
+            "current": 6,
+            "total": 6,
+            "unit": "frames",
+            "active_document_id": "paper-6",
+            "message": "Routing the sixth paper.",
+        }
+    )
+    progress(
+        {
+            "phase": "objective_evidence_extraction_started",
+            "current": 26,
+            "total": 26,
+            "unit": "selections",
+            "active_document_id": "paper-6",
+            "message": "Extracting selected evidence.",
+        }
+    )
+
+    progressed = repository.read_analysis("collection-1", "objective-1", 1)
+    assert progressed.processed_document_count == 6
+    assert progressed.total_document_count == 6
 
 
 def test_empty_finding_output_fails_version_without_publication() -> None:

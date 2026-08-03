@@ -8,6 +8,13 @@ import sys
 from typing import Any
 
 
+BACKEND_ROOT = Path(__file__).resolve().parents[3]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+from domain.core import Finding  # noqa: E402
+
+
 DEFAULT_REVIEWER = "ai-reviewer-codex"
 
 
@@ -80,7 +87,7 @@ def _draft_row(row: dict[str, Any], *, reviewer: str) -> dict[str, Any]:
         "recommendation": "unclear",
         "issue_type": "",
         "note": _initial_note(draft),
-        "suggested_target": _suggested_target(draft),
+        "curated_finding": _curated_finding(draft),
     }
     return draft
 
@@ -94,25 +101,22 @@ def _initial_note(row: dict[str, Any]) -> str:
     if blockers:
         bits.append("Protocol draft is missing: " + ", ".join(blockers))
     if not bits:
-        bits.append("Review the finding, variables, direction, scope, and evidence.")
+        bits.append("Review the Finding, factors, outcome, attribution, and Evidence.")
     return " ".join(bits)
 
 
-def _suggested_target(row: dict[str, Any]) -> dict[str, Any]:
-    target = _mapping(row.get("suggested_target"))
+def _curated_finding(row: dict[str, Any]) -> dict[str, Any]:
+    target = (
+        _mapping(row.get("curated_finding"))
+        or _mapping(row.get("training_target"))
+        or _mapping(row.get("system_prediction"))
+    )
     if not target:
-        target = {
-            "statement": _text(row.get("statement")),
-            "variables": _strings(row.get("variables")),
-            "outcomes": _strings(row.get("outcomes")),
-            "direction": _text(row.get("direction")),
-            "evidence_ref_ids": _strings(row.get("curated_evidence_ref_ids")),
-        }
-    return {
-        key: value
-        for key, value in target.items()
-        if value not in ("", [], {}, None)
-    }
+        raise ValueError("decision row requires one complete canonical Finding")
+    finding = Finding.from_mapping(target)
+    if finding.to_record() != target:
+        raise ValueError("decision row Finding is not canonical")
+    return finding.to_record()
 
 
 def _agent_reviewer(value: str) -> str:

@@ -124,15 +124,6 @@ def goal_session_services(tmp_path):
     )
     service = GoalSessionService(
         collection_service=collection_service,
-        research_view_service=ResearchViewAggregationService(
-            collection_service=collection_service,
-            paper_fact_repository=paper_fact_repository,
-            comparison_service=comparison_service,
-        ),
-        workspace_service=workspace_service,
-        objective_repository=objective_repository,
-        comparison_service=comparison_service,
-        paper_facts_service=paper_facts_service,
         finding_feedback_service=(
             _EmptyFindingFeedbackService()
         ),
@@ -180,9 +171,12 @@ def test_goal_sessions_route_creates_minimal_session_and_messages(
     assert session.goal_text is None
     assert session.goal_brief_json == {}
     assert session.answer_mode == "hybrid"
-    assert response.source_mode == "general_fallback"
+    assert response.source_mode == "collection_limited"
     assert response.used_evidence_ids == []
     assert response.source_links == []
+    assert response.source_validity is None
+    assert response.source_finding_refs == []
+    assert response.source_validity_reasons == []
     assert len(messages.items) == 2
 
 

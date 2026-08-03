@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from application.core.semantic_build.llm.prompts import (
+    build_objective_evidence_route_prompt,
     build_objective_evidence_prompt,
     build_finding_synthesis_prompt,
     build_paper_skim_prompt,
@@ -210,7 +211,7 @@ def test_core_llm_extractor_defaults_to_provider_parse_mode(monkeypatch):
 
 def test_core_llm_extractor_synthesizes_goal_findings_with_distinct_trace():
     parsed = StructuredFindingSynthesis(findings=[])
-    client = _FakeOpenAIClient("unused", parsed=parsed)
+    client = _FakeOpenAIClient('{"findings": []}', parsed=parsed)
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
     payload = {
         "objective": {"question": "How does energy density affect density?"},
@@ -239,13 +240,15 @@ def test_core_llm_extractor_synthesizes_goal_findings_with_distinct_trace():
     result = extractor.synthesize_findings(payload)
 
     assert result == parsed
-    parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is StructuredFindingSynthesis
-    assert parse_call["max_completion_tokens"] == 2048
+    assert client.beta.chat.completions.calls == []
+    text_call = client.chat.completions.calls[0]
+    assert text_call["response_format"] == {"type": "json_object"}
+    assert text_call["max_completion_tokens"] == 2048
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v1"
+    assert trace["prompt_version"] == "finding_synthesis.v2"
+    assert trace["extraction_mode"] == "json_text"
     assert trace["parsed_output"] == {"findings": []}
 
 
@@ -262,9 +265,12 @@ def test_core_llm_extractor_bounds_json_text_finding_synthesis_output():
 
     assert result == StructuredFindingSynthesis(findings=[])
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
+    assert client.chat.completions.calls[0]["response_format"] == {
+        "type": "json_object"
+    }
 
 
-def test_finding_synthesis_prompt_uses_goal_level_contract():
+def test_finding_synthesis_prompt_uses_relationship_level_contract():
     payload = {
         "objective": {"question": "How does energy density affect density?"},
         "result_sets": [],
@@ -276,7 +282,8 @@ def test_finding_synthesis_prompt_uses_goal_level_contract():
 
     assert "INPUT SCHEMA" in system_prompt
     assert "DECISION PROCESS" in system_prompt
-    assert "one goal-level synthesis pass" in system_prompt
+    assert "one relationship within" in system_prompt
+    assert "Produce one final Finding" in system_prompt
     normalized_system_prompt = " ".join(system_prompt.split())
     assert "paper_contributions" in normalized_system_prompt
     assert "cannot replace direct evidence" in normalized_system_prompt
@@ -315,12 +322,18 @@ def test_finding_synthesis_prompt_uses_goal_level_contract():
         normalized_system_prompt
     )
     assert "directly supported by one paper" in normalized_system_prompt
+    assert "A small numeric difference alone is not a significance test" in (
+        normalized_system_prompt
+    )
     assert "cannot increase the contributing paper count" in normalized_system_prompt
     outcome_schema = StructuredFindingSynthesisOutcome.model_json_schema()
     assert "supporting_evidence_ids" not in outcome_schema["properties"]
     assert "backend binds all matching direct-result ids" in normalized_system_prompt
     assert "`agreement`: at least two independent papers" in user_prompt
     assert "`insufficient_confirmation`" in user_prompt
+    assert "only one paper provides a direct result" in user_prompt
+    assert "directly supported by one paper" in normalized_system_prompt
+    assert "Return at most one Finding" in user_prompt
     assert json.dumps(payload, ensure_ascii=False, separators=(",", ":")) in user_prompt
 
 
@@ -593,6 +606,9 @@ def test_core_llm_extractor_validates_axis_canonicalization_response():
 
     assert isinstance(canonicalization_plan, StructuredAxisCanonicalizationPlan)
     assert canonicalization_plan.axis_groups[0].canonical == "scanning strategy"
+    text_call = client.chat.completions.calls[0]
+    assert text_call["max_completion_tokens"] == 2048
+    assert text_call["response_format"] == {"type": "json_object"}
 
 
 def test_core_llm_extractor_validates_research_objective_merge_response():
@@ -626,6 +642,9 @@ def test_core_llm_extractor_validates_research_objective_merge_response():
 
     assert isinstance(merge_plan, StructuredObjectiveMergePlan)
     assert merge_plan.merged_objectives[0].source_objective_ids == ["obj-1", "obj-2"]
+    text_call = client.chat.completions.calls[0]
+    assert text_call["max_completion_tokens"] == 2048
+    assert text_call["response_format"] == {"type": "json_object"}
 
 
 def test_core_llm_extractor_validates_objective_paper_frame_response():
@@ -660,6 +679,26 @@ def test_core_llm_extractor_validates_objective_paper_frame_response():
     assert isinstance(frame, StructuredPaperContributionDraft)
     assert frame.relevance == "high"
     assert frame.relevant_tables == ["table-1"]
+    text_call = client.chat.completions.calls[0]
+    assert text_call["max_completion_tokens"] == 1024
+    assert text_call["response_format"] == {"type": "json_object"}
+
+
+def test_objective_evidence_route_prompt_matches_selection_schema():
+    system_prompt, user_prompt = build_objective_evidence_route_prompt(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "paper_frame": {"relevance": "high"},
+            "current_source": {"source_kind": "text_window", "text": "Result."},
+        }
+    )
+    prompt = f"{system_prompt}\n{user_prompt}"
+
+    assert "`selections`" in prompt
+    assert '{"selections":[]}' in prompt.replace(" ", "")
+    assert "`routes`" not in prompt
+    assert '{"routes":[]}' not in prompt.replace(" ", "")
 
 
 def test_core_llm_extractor_validates_objective_evidence_routes_response():
@@ -690,6 +729,8 @@ def test_core_llm_extractor_validates_objective_evidence_routes_response():
     assert isinstance(routes, StructuredEvidenceSelections)
     assert routes.selections[0].role == "current_experimental_evidence"
     assert "reason" not in routes.selections[0].model_dump()
+    text_call = client.chat.completions.calls[0]
+    assert text_call["response_format"] == {"type": "json_object"}
 
 
 def test_core_llm_extractor_rejects_legacy_objective_route_batches():
@@ -816,11 +857,14 @@ def test_core_llm_extractor_validates_objective_evidence_response():
     assert isinstance(extractions, StructuredEvidenceExtractions)
     assert extractions.extractions[0].evidence_kind == "measurement"
     assert extractions.extractions[0].resolution_status == "resolved"
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
+    assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
+    assert client.chat.completions.calls[0]["response_format"] == {
+        "type": "json_object"
+    }
 
 
 def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
-    _, prompt = build_objective_evidence_prompt(
+    system_prompt, prompt = build_objective_evidence_prompt(
         {
             "collection_id": "col-1",
             "objective": {"question": "How does preheating affect 316L?"},
@@ -848,6 +892,9 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     assert "1.43x10^6 C/s for P150" in prompt
     assert "1.65x10^6 C/s for NP" in prompt
     assert "Bad text example" in prompt
+    normalized_system_prompt = " ".join(system_prompt.split())
+    assert "objective and paper frame are not factual evidence" in normalized_system_prompt
+    assert "Never infer sample ids, standards, orientations" in normalized_system_prompt
 
 
 def test_core_llm_extractor_rejects_backend_bound_objective_evidence_fields():
@@ -1182,6 +1229,61 @@ def test_research_objective_retry_uses_task_specific_validation_contract():
     assert "For finding synthesis" not in retry_instruction
 
 
+@pytest.mark.parametrize(
+    ("method_name", "payload", "invalid_content", "response_label", "top_level_key"),
+    [
+        (
+            "select_objective_evidence",
+            {
+                "objective": {"question": "How does preheating affect elongation?"},
+                "current_source": {"source_kind": "table", "source_ref": "table-1"},
+            },
+            '{"objective":{"question":"copied input"}}',
+            "evidence routing",
+            "selections",
+        ),
+        (
+            "extract_objective_evidence",
+            {
+                "objective": {"question": "How does preheating affect elongation?"},
+                "evidence_route": {"role": "current_experimental_evidence"},
+                "source": {"source_kind": "table", "source_ref": "table-1"},
+            },
+            '{"source":{"source_kind":"table"}}',
+            "evidence extraction",
+            "extractions",
+        ),
+        (
+            "synthesize_findings",
+            {
+                "objective": {"question": "How does preheating affect elongation?"},
+                "result_sets": [{"result_set_id": "result_set_1"}],
+            },
+            '{"result_sets":[{"result_set_id":"result_set_1"}]}',
+            "Finding synthesis",
+            "findings",
+        ),
+    ],
+)
+def test_objective_pipeline_retries_use_task_specific_top_level_contract(
+    method_name,
+    payload,
+    invalid_content,
+    response_label,
+    top_level_key,
+):
+    client = _FakeOpenAIClient(invalid_content)
+    extractor = _json_text_extractor(client)
+
+    with pytest.raises(ValidationError):
+        getattr(extractor, method_name)(payload)
+
+    retry_instruction = client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert f"Previous {response_label} output failed validation" in retry_instruction
+    assert f"exactly one top-level key: {top_level_key}" in retry_instruction
+    assert "copied input" in retry_instruction
+
+
 def test_core_llm_extractor_can_opt_in_to_provider_thinking(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     monkeypatch.setenv("LLM_ENABLE_THINKING", "true")
@@ -1200,11 +1302,12 @@ def test_core_llm_extractor_can_opt_in_to_provider_thinking(monkeypatch):
     assert "extra_body" not in client.beta.chat.completions.calls[0]
 
 
-def test_core_llm_extractor_routes_objective_selections_directly_to_bounded_json_text(
+def test_core_llm_extractor_routes_objective_selections_with_provider_schema(
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
-    client = _FakeOpenAIClient('{"selections":[]}')
+    parsed = StructuredEvidenceSelections()
+    client = _FakeOpenAIClient("unused", parsed=parsed)
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
     routes = extractor.select_objective_evidence(
@@ -1216,22 +1319,24 @@ def test_core_llm_extractor_routes_objective_selections_directly_to_bounded_json
         }
     )
 
-    assert routes == StructuredEvidenceSelections()
-    assert client.beta.chat.completions.calls == []
-    text_call = client.chat.completions.calls[0]
-    assert text_call["max_completion_tokens"] == 512
-    assert "JSON schema:" in text_call["messages"][1]["content"]
-    assert text_call["extra_body"] == {
+    assert routes == parsed
+    assert client.chat.completions.calls == []
+    parse_call = client.beta.chat.completions.calls[0]
+    assert parse_call["max_completion_tokens"] == 512
+    assert parse_call["response_format"] is StructuredEvidenceSelections
+    assert "JSON schema:" not in parse_call["messages"][1]["content"]
+    assert parse_call["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
     }
-    assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
+    assert extractor.consume_last_trace()["extraction_mode"] == "provider_parse"
 
 
-def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_objective_units(
+def test_core_llm_extractor_extracts_objective_evidence_with_provider_schema(
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
-    client = _FakeOpenAIClient('{"extractions": []}')
+    parsed = StructuredEvidenceExtractions()
+    client = _FakeOpenAIClient("unused", parsed=parsed)
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
     units = extractor.extract_objective_evidence(
@@ -1243,12 +1348,76 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_objective_
         }
     )
 
-    assert units == StructuredEvidenceExtractions()
-    assert client.beta.chat.completions.calls == []
-    text_call = client.chat.completions.calls[0]
-    assert text_call["max_completion_tokens"] == 1024
-    assert "JSON schema:" in text_call["messages"][1]["content"]
-    assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
+    assert units == parsed
+    assert client.chat.completions.calls == []
+    parse_call = client.beta.chat.completions.calls[0]
+    assert parse_call["max_completion_tokens"] == 2048
+    assert parse_call["response_format"] is StructuredEvidenceExtractions
+    assert "JSON schema:" not in parse_call["messages"][1]["content"]
+    assert extractor.consume_last_trace()["extraction_mode"] == "provider_parse"
+
+
+def test_core_llm_extractor_removes_unsupported_evidence_context(monkeypatch):
+    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
+    parsed = StructuredEvidenceExtractions(
+        extractions=[
+            {
+                "evidence_kind": "measurement",
+                "property_normalized": "elongation",
+                "material_system": {"material": "316L stainless steel"},
+                "sample_context": {
+                    "condition": "non-preheated",
+                    "sample_id": "NP",
+                    "orientation": "XY",
+                },
+                "process_context": {"process": "LPBF", "power": "200 W"},
+                "test_condition": {"standard": "ASTM E8/E8M"},
+                "resolved_condition": {"temperature": "room temperature"},
+                "value_payload": {
+                    "non_preheated": 72,
+                    "preheated": 82,
+                    "cooling_rate": "1.43x10^6 C/s",
+                },
+                "baseline_context": {"condition": "non-preheated", "value": 72},
+                "join_keys": {"row_index": 1, "col_index": 1},
+                "resolution_status": "resolved",
+                "confidence": 0.95,
+            }
+        ]
+    )
+    client = _FakeOpenAIClient("unused", parsed=parsed)
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    result = extractor.extract_objective_evidence(
+        {
+            "objective": {
+                "question": "How does preheating affect 316L elongation?"
+            },
+            "document_state": {"retained_evidence": []},
+            "evidence_route": {"role": "current_experimental_evidence"},
+            "source": {
+                "source_kind": "table",
+                "table_matrix": [
+                    ["Condition", "Elongation (%)"],
+                    ["Non-preheated", "72"],
+                    ["Preheated", "82"],
+                ],
+            },
+        }
+    )
+
+    extraction = result.extractions[0]
+    assert extraction.material_system == {}
+    assert extraction.sample_context == {"condition": "non-preheated"}
+    assert extraction.process_context == {}
+    assert extraction.test_condition == {}
+    assert extraction.resolved_condition == {}
+    assert extraction.baseline_context == {
+        "condition": "non-preheated",
+        "value": 72,
+    }
+    assert extraction.value_payload == {"non_preheated": 72, "preheated": 82}
+    assert extraction.join_keys == {"row_index": 1, "col_index": 1}
 
 
 def test_core_llm_extractor_validates_lightweight_table_batch_mentions():

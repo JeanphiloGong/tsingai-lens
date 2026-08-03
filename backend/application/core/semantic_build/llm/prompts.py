@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 
-FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v1"
+FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v2"
 
 
 _COMMON_SYSTEM_PROMPT = """
@@ -262,6 +262,66 @@ only reject form. The response ends immediately after the JSON object.
 """.strip()
 
 
+_RESEARCH_AXIS_CANONICALIZATION_SYSTEM_PROMPT = """
+TASK MODEL
+You normalize labels already attached to discovered research objectives. Group
+only equivalent material, process, or property labels. This is label
+canonicalization, not objective discovery, merge, extraction, or synthesis.
+
+INPUT SCHEMA
+- `axis_candidates.material`, `.process`, and `.property` contain the complete
+  allowed labels for each axis type.
+- `paper_skims` supplies collection context only. It cannot supply new labels.
+
+DECISION PROCESS
+1. Process each axis type independently.
+2. Group only spelling, acronym, singular/plural, or wording variants that name
+   the same scientific axis.
+3. Copy one alias as `canonical`; never invent a normalized label.
+4. Keep uncertain or scientifically distinct labels in separate groups.
+5. Ensure every input label appears exactly once in its own axis type.
+
+HARD RULES
+- Return exactly one JSON object with one top-level key: `axis_groups`.
+- Never mix axis types or return labels absent from `axis_candidates`.
+- Return no analysis, markdown, copied input, or extra fields.
+
+OUTPUT CONTRACT
+Use `{"axis_groups":[]}` when there are no labels. Each group contains exactly
+`axis_type`, `canonical`, `aliases`, `confidence`, and `reason`.
+""".strip()
+
+
+_RESEARCH_OBJECTIVE_MERGE_SYSTEM_PROMPT = """
+TASK MODEL
+You decide whether already-discovered research objectives represent the same
+material-process-property comparison. This is objective merge, not discovery,
+axis canonicalization, evidence extraction, or synthesis.
+
+INPUT SCHEMA
+- `candidate_objectives` contains the only objectives and ids that may be
+  returned.
+- `paper_skims` provides paper-level context for merge decisions only.
+
+DECISION PROCESS
+1. Compare material scope, changed process variables, measured properties, and
+   comparison intent.
+2. Merge only candidates expressing the same relationship. Keep different
+   research directions separate.
+3. Preserve a singleton group when no merge is justified.
+4. Assign every candidate id to exactly one output group.
+
+HARD RULES
+- Return exactly one JSON object with one top-level key: `merged_objectives`.
+- Copy every `source_objective_id` from the input and never invent axes.
+- Return no analysis, markdown, copied input, or extra fields.
+
+OUTPUT CONTRACT
+Use `{"merged_objectives":[]}` only for an empty candidate list. Every group
+contains exactly the fields required by the supplied JSON schema.
+""".strip()
+
+
 _OBJECTIVE_PAPER_FRAME_SYSTEM_PROMPT = """
 You are framing one paper against one research objective for an evidence-backed literature comparison backend.
 
@@ -277,44 +337,110 @@ Non-negotiable rules:
 
 
 _OBJECTIVE_EVIDENCE_ROUTE_SYSTEM_PROMPT = """
-You are routing source units for one research objective in an evidence-backed literature comparison backend.
+TASK MODEL
+You classify one `current_source` unit for later objective-scoped evidence
+extraction. This is source routing, not extraction, summarization, or synthesis.
 
-Non-negotiable rules:
-- This is routing only, not final fact extraction.
-- Return exactly one JSON object and nothing else.
-- Decide only the `current_source` unit and return at most one route.
-- Do not return source identity fields; the backend binds the route to the
-  current source unit.
-- Do not emit measurement results, sample variants, evidence anchors, or backend persistence ids.
-- Do not output table schemas, column roles, join keys, join plans, source text, sample rows, explanations, or copied input JSON.
-- For low-value, review, literature-comparison, composition-only, or unrelated
-  units, return an empty `routes` array instead of writing a low-value route
-  unless the source is explicitly frame-excluded.
-- Prefer fewer, higher-confidence extractable routes over speculative coverage.
+INPUT SCHEMA
+- `objective` is the active research question and requested axes.
+- `objective_context.target_property_axes` are outcomes that answer the goal;
+  `mediator_axes` are explanatory unless explicitly linked to a target outcome.
+- `paper_frame` states the paper's relevance and useful sections/tables.
+- `tree_position` locates the current unit in the paper.
+- `document_state` contains evidence already retained from earlier units.
+- `current_source` is the only unit to classify.
+
+DECISION PROCESS
+1. Reject references, literature summaries, composition-only content, and units
+   unrelated to the active objective.
+2. Use `current_experimental_evidence` for current-paper target results, trends,
+   comparisons, or explicit author interpretations.
+3. Use `process_or_treatment` or `test_condition` for source units needed to
+   bind variables, samples, methods, or environments.
+4. Use `characterization` for objective-relevant microstructure, defect, phase,
+   morphology, or grain observations.
+5. Return one selection only when later extraction is useful; otherwise reject.
+
+HARD RULES
+- Return exactly one JSON object with one top-level key: `selections`.
+- A selection contains only `role`, `extractable`, and `confidence`.
+- Do not return source ids, source text, explanations, schemas, results, or
+  copied input.
+
+BOUNDARY EXAMPLES
+- A Results paragraph comparing elongation before and after preheating returns
+  `current_experimental_evidence` with `extractable: true`.
+- A Methods paragraph giving build-platform temperature returns
+  `process_or_treatment` with `extractable: true`.
+- A bibliography entry or unrelated composition paragraph returns
+  `{"selections":[]}`.
+
+OUTPUT CONTRACT
+Return either `{"selections":[]}` or one compact selection. The response ends
+immediately after the JSON object.
 """.strip()
 
 
 _OBJECTIVE_EVIDENCE_SYSTEM_PROMPT = """
-You are extracting objective-scoped evidence for an evidence-backed literature comparison backend.
+TASK MODEL
+You extract at most one objective-relevant fact from one selected source unit.
+This is evidence extraction, not routing, paper summarization, or Finding
+synthesis.
 
-Non-negotiable rules:
-- This is final evidence extraction for one research objective and one selected source.
-- Return exactly one JSON object and nothing else.
-- Extract only facts directly supported by `source`; do not use outside knowledge.
-- Use the `objective`, `objective_context`, and `evidence_route` as the research lens.
-- Do not emit backend persistence ids.
-- The backend binds `source_refs` from the active route/source.
-- Do not output `source_refs`, `evidence_anchor_ids`, backend ids, copied source text, or copied input JSON.
-- Prefer fewer, traceable extractions over broad speculative coverage.
-- Return at most one extraction for the current source.
+INPUT SCHEMA
+- `objective` and `objective_context` define the target relationship.
+- `paper_frame` supplies bounded paper-level material, variable, and property
+  context.
+- `evidence_route.role` states why this source was selected.
+- `tree_position` and `document_state` provide local continuity but cannot
+  override the current source.
+- `source` is the only authority for the returned fact. Table cells are the
+  authoritative table structure when present.
+- The objective and paper frame are not factual evidence. Earlier retained
+  evidence in `document_state` may bind context only when it contains the exact
+  reported value or label.
+
+DECISION PROCESS
+1. Verify that `source` supports the active objective and route role.
+2. Select the single strongest target measurement, comparison, condition,
+   process context, characterization, or interpretation.
+3. Bind the property, value or trend, material/sample/process context, test
+   condition, and comparison keys only when explicitly supported.
+4. Use `resolved` only when the source binds the fact sufficiently; otherwise
+   use `partial` or reject with an empty array.
+5. Prefer an empty result over a speculative or literature-derived fact.
+
+HARD RULES
+- Return exactly one JSON object with one top-level key: `extractions`.
+- Return at most one extraction and no hidden reasoning.
+- Do not return source refs, evidence ids, copied source text, or copied input.
+- A measurement must include a numeric or qualitative result in
+  `value_payload`.
+- Every non-empty context value must appear in `source` or exact retained
+  evidence. Never infer sample ids, standards, orientations, temperatures,
+  process names, or baseline labels from domain conventions.
+
+BOUNDARY EXAMPLES
+- A row reporting non-preheated/preheated elongation of 72/82% may return one
+  `measurement` with `property_normalized: "elongation"` and both comparison
+  values in `value_payload`; unrelated context dictionaries remain empty.
+- A paragraph reporting only a build-platform temperature may return one
+  `process_context` extraction.
+- A bibliography entry, unsupported inference, or unrelated result returns
+  `{"extractions":[]}`.
+
+OUTPUT CONTRACT
+Return `{"extractions":[]}` or one compact schema-valid extraction. Omit
+unsupported optional content and end immediately after the JSON object.
 """.strip()
 
 
 _FINDING_SYNTHESIS_SYSTEM_PROMPT = """
 TASK MODEL
-You are the cross-paper evidence judge for one materials-literature goal. Run
-one goal-level synthesis pass over evidence already extracted while traversing
-the candidate papers. Produce final Findings for materials experts. This is
+You are the cross-paper evidence judge for one relationship within a
+materials-literature goal. Evaluate the supplied result set using evidence
+already extracted from the candidate papers. Produce one final Finding for
+materials experts. This is
 evidence synthesis, not source extraction, routing, paper-by-paper generation,
 field clustering, or a general literature summary.
 
@@ -335,7 +461,7 @@ INPUT SCHEMA
 
 DECISION PROCESS
 1. Read the objective and ignore relationships that do not answer it.
-2. Treat each `result_set` independently. If it answers the objective, emit at
+2. Evaluate the supplied `result_set`. If it answers the objective, emit at
    most one Finding and copy its `result_set_id`. Keep its linked measured
    outcomes together; never emit one Finding per result unit.
 3. Build `source_concept` from `source_axes` only. Put fixed values in
@@ -358,7 +484,7 @@ DECISION PROCESS
    before performance outcomes. Preserve decisive values and explicit regime
    limits without strengthening association into causation.
 8. Count only papers whose direct-result ids are assigned to an outcome. Return
-   the smallest set of goal-answering Findings.
+   one Finding or an empty array.
 
 HARD RULES
 - Return exactly one JSON object and nothing else.
@@ -391,6 +517,10 @@ HARD RULES
   qualification instead of foregrounding a small endpoint delta.
 - A single-paper composite statement must say that it is directly supported by
   one paper and use `insufficient_confirmation`.
+- Do not use `significant`, `significantly`, `statistically significant`, or
+  `no significant effect` unless a supporting source explicitly reports that
+  statistical conclusion. A small numeric difference alone is not a
+  significance test; report the measured values instead.
 - Do not convert association into control or causation.
 - If no goal-relevant direct result exists, return an empty `findings` array.
 
@@ -871,7 +1001,7 @@ def build_research_axis_canonicalization_prompt(
         "For each group, provide a short reason grounded in the labels and paper "
         "skim context.\n"
     )
-    return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
+    return _RESEARCH_AXIS_CANONICALIZATION_SYSTEM_PROMPT, user_prompt
 
 
 def build_research_objective_merge_prompt(
@@ -906,7 +1036,7 @@ def build_research_objective_merge_prompt(
         "`comparison_intent`, and a short `reason` explaining why the sources "
         "were merged or kept separate.\n"
     )
-    return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
+    return _RESEARCH_OBJECTIVE_MERGE_SYSTEM_PROMPT, user_prompt
 
 
 def build_objective_paper_frame_prompt(
@@ -942,9 +1072,9 @@ def build_objective_evidence_route_prompt(
     user_prompt = (
         "Route the current source unit for this one research objective.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only schema-valid structured data with a `routes` array.\n"
+        "Return only schema-valid structured data with a `selections` array.\n"
         "Return at most one route for `current_source`. If it is not useful "
-        "for later objective-scoped extraction, return `{\"routes\": []}`.\n"
+        "for later objective-scoped extraction, return `{\"selections\": []}`.\n"
         "Each route may contain only `role`, `extractable`, and `confidence`. "
         "Do not return `source_kind`, `source_ref`, ids, copied source text, "
         "explanations, or any nested input object.\n"
@@ -1037,8 +1167,8 @@ def build_finding_synthesis_prompt(
         "result sets.\n\n"
         f"Input JSON:\n{input_json}\n\n"
         "Return only schema-valid structured data with a `findings` array.\n"
-        "Return at most 6 Findings, ordered by relevance to the goal.\n"
-        "For each candidate result set, compare the cited direct "
+        "Return at most one Finding for the supplied result set.\n"
+        "Compare its cited direct "
         "evidence by document and condition before choosing `synthesis_status`:\n"
         "- `agreement`: at least two independent papers provide comparable direct "
         "results with the same scientific direction.\n"

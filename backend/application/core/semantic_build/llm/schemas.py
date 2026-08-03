@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from typing import Any, Literal
 
 from pydantic import (
@@ -19,6 +21,36 @@ ClaimScope = Literal[
     "review_summary",
     "unclear",
 ]
+
+_OBJECTIVE_DIRECTION_PATTERN = re.compile(
+    r"\b(?:affects?|affecting|influences?|influencing|impacts?|impacting)\b",
+    re.IGNORECASE,
+)
+_OBJECTIVE_EFFECT_PATTERN = re.compile(
+    r"\beffects?\s+of\s+(?P<source>.+?)\s+on\s+(?P<result>.+?)(?:\?|$)",
+    re.IGNORECASE,
+)
+_OBJECTIVE_RELATIONSHIP_PATTERN = re.compile(
+    r"\brelationship\s+between\s+(?P<axes>.+?)(?:\?|$)",
+    re.IGNORECASE,
+)
+_OBJECTIVE_QUESTION_PREFIX = re.compile(
+    r"^(?:how|what|which)\s+(?:(?:does|do|did|can|could|will|would|is|are|"
+    r"was|were)\s+)?",
+    re.IGNORECASE,
+)
+_OBJECTIVE_CLAUSE_BOUNDARY_PATTERN = re.compile(
+    r"(?:[;,]|\b(?:and|but|whereas|while)\b)",
+    re.IGNORECASE,
+)
+_OBJECTIVE_ACRONYM_STOP_WORDS = {"a", "an", "and", "for", "of", "the", "to"}
+_OBJECTIVE_ROLE_FILLER_WORDS = {"a", "an", "and", "for", "of", "the", "to"}
+_OBJECTIVE_SCOPE_FILLER_WORDS = {"in", "processed"}
+_OBJECTIVE_TOKEN_NORMALIZATIONS = {
+    "analyses": "analysis",
+    "axes": "axis",
+    "gases": "gas",
+}
 
 _METHOD_FACT_METHOD_ROLES = {"process", "characterization", "test"}
 _TEXT_WINDOW_METHOD_ROLES = _METHOD_FACT_METHOD_ROLES | {"other"}
@@ -154,6 +186,257 @@ def _normalize_list_container(value: object) -> object:
 
 def _normalize_object_container(value: object) -> object:
     return {} if value is None else value
+
+
+def _normalize_objective_axis_tokens(value: str) -> tuple[str, ...]:
+    normalized_value = unicodedata.normalize("NFKC", value)
+    tokens = re.findall(r"[^\W_]+", normalized_value.casefold(), flags=re.UNICODE)
+    normalized: list[str] = []
+    for token in tokens:
+        if token in _OBJECTIVE_TOKEN_NORMALIZATIONS:
+            normalized.append(_OBJECTIVE_TOKEN_NORMALIZATIONS[token])
+        elif len(token) > 4 and token.endswith("ies"):
+            normalized.append(f"{token[:-3]}y")
+        elif len(token) > 4 and token.endswith(("ches", "shes", "sses", "xes", "zes")):
+            normalized.append(token[:-2])
+        elif len(token) > 3 and token.endswith("s") and not token.endswith(
+            ("is", "ss", "us")
+        ):
+            normalized.append(token[:-1])
+        else:
+            normalized.append(token)
+    return tuple(normalized)
+
+
+def _token_sequence_spans(
+    container: tuple[str, ...],
+    sequence: tuple[str, ...],
+) -> tuple[tuple[int, int], ...]:
+    if not sequence:
+        return ()
+    return tuple(
+        (index, index + len(sequence))
+        for index in range(len(container) - len(sequence) + 1)
+        if container[index : index + len(sequence)] == sequence
+    )
+
+
+def _axis_role_spans(
+    axis: str,
+    question_role: str,
+    role_tokens: tuple[str, ...],
+) -> tuple[tuple[int, int], ...]:
+    axis_tokens = _normalize_objective_axis_tokens(axis)
+    normalized_axis = unicodedata.normalize("NFKC", axis)
+    normalized_role = unicodedata.normalize("NFKC", question_role)
+    compact_axis = re.sub(r"[^A-Za-z0-9]", "", normalized_axis)
+    axis_is_acronym = (
+        2 <= len(compact_axis) <= 8
+        and compact_axis.isupper()
+        and any(character.isalpha() for character in compact_axis)
+    )
+    uppercase_role_indexes = {
+        index
+        for index, token in enumerate(
+            re.findall(r"[^\W_]+", normalized_role, flags=re.UNICODE)
+        )
+        if len(token) >= 2
+        and token.isupper()
+        and any(character.isalpha() for character in token)
+    }
+    spans: set[tuple[int, int]] = set()
+
+    if axis_is_acronym:
+        acronym = compact_axis.casefold()
+        spans.update(
+            (index, index + 1)
+            for index in uppercase_role_indexes
+            if role_tokens[index] == acronym
+        )
+        return tuple(sorted(spans))
+
+    spans.update(_token_sequence_spans(role_tokens, axis_tokens))
+    explicit_axis_acronyms = {
+        token.casefold()
+        for token in re.findall(r"[^\W_]+", normalized_axis, flags=re.UNICODE)
+        if 2 <= len(token) <= 8
+        and token.isupper()
+        and any(character.isalpha() for character in token)
+    }
+    spans.update(
+        (index, index + 1)
+        for index in uppercase_role_indexes
+        if role_tokens[index] in explicit_axis_acronyms
+    )
+
+    significant_axis_tokens = tuple(
+        token for token in axis_tokens if token not in _OBJECTIVE_ACRONYM_STOP_WORDS
+    )
+    if len(significant_axis_tokens) > 1:
+        acronym = "".join(token[0] for token in significant_axis_tokens)
+        if len(acronym) >= 2:
+            spans.update(
+                (index, index + 1)
+                for index in uppercase_role_indexes
+                if role_tokens[index] == acronym
+            )
+    return tuple(sorted(spans))
+
+
+def _role_matches_declared_axes(
+    question_role: str,
+    axes: list[str],
+    *,
+    declared_scope: list[str] | None = None,
+) -> bool:
+    role_tokens = _normalize_objective_axis_tokens(question_role)
+    spans_by_axis = [
+        _axis_role_spans(axis, question_role, role_tokens) for axis in axes
+    ]
+    if not role_tokens or any(not spans for spans in spans_by_axis):
+        return False
+    scope_indexes = frozenset(
+        index
+        for scope in declared_scope or []
+        for start, end in _axis_role_spans(scope, question_role, role_tokens)
+        for index in range(start, end)
+    )
+    scope_filler_indexes = frozenset(
+        index
+        for index, token in enumerate(role_tokens)
+        if token in _OBJECTIVE_SCOPE_FILLER_WORDS
+        and (index - 1 in scope_indexes or index + 1 in scope_indexes)
+    )
+
+    def covers_role(axis_index: int, covered_indexes: frozenset[int]) -> bool:
+        if axis_index == len(spans_by_axis):
+            return all(
+                index in covered_indexes
+                or index in scope_indexes
+                or index in scope_filler_indexes
+                or token in _OBJECTIVE_ROLE_FILLER_WORDS
+                for index, token in enumerate(role_tokens)
+            )
+        for start, end in spans_by_axis[axis_index]:
+            span_indexes = frozenset(range(start, end))
+            if covered_indexes.isdisjoint(span_indexes) and covers_role(
+                axis_index + 1,
+                covered_indexes | span_indexes,
+            ):
+                return True
+        return False
+
+    return covers_role(0, frozenset())
+
+
+def _strip_objective_question_prefix(value: str) -> str:
+    return _OBJECTIVE_QUESTION_PREFIX.sub("", value, count=1).strip(" ,:")
+
+
+def _objective_question_roles(question: str) -> tuple[tuple[str, str], ...]:
+    effect_match = _OBJECTIVE_EFFECT_PATTERN.search(question)
+    relationship_match = _OBJECTIVE_RELATIONSHIP_PATTERN.search(question)
+    direction_matches = tuple(_OBJECTIVE_DIRECTION_PATTERN.finditer(question))
+    if effect_match and relationship_match:
+        return ()
+    nominal_match = effect_match or relationship_match
+    if nominal_match and any(
+        match.start() < nominal_match.start() for match in direction_matches
+    ):
+        return ()
+    if effect_match:
+        return ((effect_match.group("source"), effect_match.group("result")),)
+
+    if relationship_match:
+        axes = relationship_match.group("axes")
+        separators = tuple(re.finditer(r"\s+and\s+", axes, flags=re.IGNORECASE))
+        return tuple(
+            (axes[: separator.start()].strip(), axes[separator.end() :].strip())
+            for separator in separators
+        )
+
+    if any(
+        _OBJECTIVE_CLAUSE_BOUNDARY_PATTERN.search(
+            question[current.end() : following.start()]
+        )
+        for current, following in zip(direction_matches, direction_matches[1:])
+    ):
+        return ()
+
+    return tuple(
+        (
+            _strip_objective_question_prefix(question[: direction_match.start()]),
+            question[
+                direction_match.end() : (
+                    direction_matches[index + 1].start()
+                    if index + 1 < len(direction_matches)
+                    else len(question)
+                )
+            ].strip(" ,:?\t\n"),
+        )
+        for index, direction_match in enumerate(direction_matches)
+    )
+
+
+def _validate_objective_question_roles(
+    *,
+    question: str,
+    variables: list[str],
+    outcomes: list[str],
+    declared_scope: list[str],
+) -> None:
+    role_candidates = _objective_question_roles(question)
+    if not role_candidates:
+        raise ValueError("question roles must use a supported active variable-to-outcome form")
+
+    candidate_errors: list[tuple[bool, bool, str, str]] = []
+    for source_role, result_role in role_candidates:
+        variables_align = _role_matches_declared_axes(source_role, variables)
+        outcomes_align = _role_matches_declared_axes(
+            result_role,
+            outcomes,
+            declared_scope=declared_scope,
+        )
+        if variables_align and outcomes_align:
+            return
+        candidate_errors.append(
+            (variables_align, outcomes_align, source_role, result_role)
+        )
+
+    variables_align, outcomes_align, source_role, result_role = max(
+        candidate_errors,
+        key=lambda alignment: int(alignment[0]) + int(alignment[1]),
+    )
+    details: list[str] = []
+    if not variables_align:
+        missing_variables = [
+            axis
+            for axis in variables
+            if not _axis_role_spans(
+                axis,
+                source_role,
+                _normalize_objective_axis_tokens(source_role),
+            )
+        ]
+        details.append(
+            "source side does not exactly contain the declared variables"
+            + (f": {', '.join(missing_variables)}" if missing_variables else "")
+        )
+    if not outcomes_align:
+        missing_outcomes = [
+            axis
+            for axis in outcomes
+            if not _axis_role_spans(
+                axis,
+                result_role,
+                _normalize_objective_axis_tokens(result_role),
+            )
+        ]
+        details.append(
+            "result side does not exactly contain the declared outcomes"
+            + (f": {', '.join(missing_outcomes)}" if missing_outcomes else "")
+        )
+    raise ValueError("question roles do not align; " + "; ".join(details))
 
 
 class _StrictModel(BaseModel):
@@ -747,6 +1030,16 @@ class StructuredResearchObjective(_StrictModel):
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list_container(value)
 
+    @model_validator(mode="after")
+    def _validate_question_roles(self) -> "StructuredResearchObjective":
+        _validate_objective_question_roles(
+            question=self.question,
+            variables=self.variables,
+            outcomes=self.outcomes,
+            declared_scope=[*self.material_scope, *self.constraints],
+        )
+        return self
+
 
 class StructuredResearchObjectives(_StrictModel):
     objectives: list[StructuredResearchObjective] = Field(
@@ -808,6 +1101,16 @@ class StructuredObjectiveMergeGroup(_StrictModel):
     @classmethod
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list_container(value)
+
+    @model_validator(mode="after")
+    def _validate_question_roles(self) -> "StructuredObjectiveMergeGroup":
+        _validate_objective_question_roles(
+            question=self.question,
+            variables=self.variables,
+            outcomes=self.outcomes,
+            declared_scope=[*self.material_scope, *self.constraints],
+        )
+        return self
 
 
 class StructuredPaperContributionDraft(_StrictModel):

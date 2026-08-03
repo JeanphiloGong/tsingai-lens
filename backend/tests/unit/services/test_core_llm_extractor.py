@@ -19,6 +19,7 @@ from application.core.semantic_build.llm.schemas import (
     StructuredEvidenceExtraction,
     StructuredEvidenceSelections,
     StructuredEvidenceExtractions,
+    StructuredObjectiveMergeGroup,
     StructuredObjectiveMergePlan,
     StructuredPaperContributionDraft,
     StructuredPaperSkim,
@@ -42,6 +43,266 @@ def test_structured_research_objective_requires_primary_scientific_axes(field):
 
     with pytest.raises(ValidationError):
         StructuredResearchObjective.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("question", "variables", "outcomes"),
+    [
+        (
+            "How does porosity affect mechanical properties?",
+            ["Laser power", "Scan speed"],
+            ["Porosity"],
+        ),
+        (
+            "How does heat treatment affect yield strength?",
+            ["yield strength"],
+            ["heat treatment"],
+        ),
+        (
+            "How do heat treatment and temperature affect yield strength?",
+            ["heat treatment", "duration"],
+            ["yield strength"],
+        ),
+        (
+            "How does heat treatment affect yield strength?",
+            ["heat treatment"],
+            ["yield strength", "elongation"],
+        ),
+        (
+            "How is fracture toughness affected by impact energy?",
+            ["impact energy"],
+            ["fracture toughness"],
+        ),
+        (
+            "How does low porosity affect density?",
+            ["LP"],
+            ["density"],
+        ),
+        (
+            "How does hip affect porosity?",
+            ["hot isostatic pressing"],
+            ["porosity"],
+        ),
+        (
+            "How does laser power affect porosity while scanning speed influences density?",
+            ["laser power"],
+            ["density"],
+        ),
+        (
+            "How does energy density affect relative density?",
+            ["density"],
+            ["relative density"],
+        ),
+        (
+            "How does energy density affect relative density?",
+            ["energy density"],
+            ["density"],
+        ),
+        (
+            "How does energy density affect porosity, and porosity affect strength?",
+            ["energy density"],
+            ["strength"],
+        ),
+        (
+            "How do laser power and scan speed affect density?",
+            ["laser power"],
+            ["density"],
+        ),
+        (
+            "How does temperature affect yield strength and elongation?",
+            ["temperature"],
+            ["yield strength"],
+        ),
+        (
+            "How does temperature affect the relationship between porosity and density?",
+            ["porosity"],
+            ["density"],
+        ),
+        (
+            "How does temperature affect the effects of porosity on density?",
+            ["porosity"],
+            ["density"],
+        ),
+        (
+            "What is the relationship between laser power and scan speed and density?",
+            ["laser power"],
+            ["scan speed"],
+        ),
+        (
+            "How does high impact pressure affect porosity?",
+            ["HIP"],
+            ["porosity"],
+        ),
+        (
+            "How does aged condition affect hardness?",
+            ["aging condition"],
+            ["hardness"],
+        ),
+    ],
+)
+def test_structured_research_objective_rejects_misaligned_question_roles(
+    question,
+    variables,
+    outcomes,
+):
+    with pytest.raises(ValidationError, match="question roles"):
+        StructuredResearchObjective.model_validate(
+            {
+                "question": question,
+                "variables": variables,
+                "outcomes": outcomes,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("question", "variables", "outcomes"),
+    [
+        (
+            "How does porosity affect mechanical properties?",
+            ["porosity"],
+            ["mechanical property"],
+        ),
+        (
+            "What are the effects of volumetric energy density on densities?",
+            ["volumetric energy density"],
+            ["density"],
+        ),
+        (
+            "How does scanning strategy influence porosity?",
+            ["scanning strategy"],
+            ["porosity"],
+        ),
+        (
+            "What is the relationship between laser power and scanning speed "
+            "and relative density?",
+            ["laser power", "scanning speed"],
+            ["relative density"],
+        ),
+        (
+            "What is the relationship between energy density and relative density "
+            "and porosity?",
+            ["energy density"],
+            ["relative density", "porosity"],
+        ),
+        (
+            "How does impact energy affect fracture toughness?",
+            ["impact energy"],
+            ["fracture toughness"],
+        ),
+        (
+            "How does the rotation axis affect residual stresses?",
+            ["rotation axes"],
+            ["residual stress"],
+        ),
+        (
+            "How does cafe\u0301 temperature affect gas analysis?",
+            ["caf\u00e9 temperature"],
+            ["gases analyses"],
+        ),
+        (
+            "How does VED affect density?",
+            ["volumetric energy density"],
+            ["density"],
+        ),
+        (
+            "How does HIP affect porosity?",
+            ["hot isostatic pressing"],
+            ["porosity"],
+        ),
+        (
+            "How does a scanned surface affect roughness?",
+            ["scanned surface"],
+            ["roughness"],
+        ),
+        (
+            "How do processing parameters affect pressed surface roughness?",
+            ["processing parameters"],
+            ["pressed surface roughness"],
+        ),
+        (
+            "How does AM affect density?",
+            ["additive manufacturing"],
+            ["density"],
+        ),
+    ],
+)
+def test_structured_research_objective_accepts_aligned_question_roles(
+    question,
+    variables,
+    outcomes,
+):
+    objective = StructuredResearchObjective.model_validate(
+        {
+            "question": question,
+            "variables": variables,
+            "outcomes": outcomes,
+        }
+    )
+
+    assert objective.variables == variables
+    assert objective.outcomes == outcomes
+
+
+@pytest.mark.parametrize(
+    ("question", "material_scope", "variables", "outcomes", "constraints"),
+    [
+        (
+            "How does porosity affect the mechanical properties of SLM 316L "
+            "stainless steel?",
+            ["316L stainless steel"],
+            ["porosity"],
+            ["mechanical properties"],
+            ["Selective laser melting (SLM)"],
+        ),
+        (
+            "How does volumetric energy density affect defect structure in powder "
+            "bed fusion 316L stainless steel?",
+            ["316L stainless steel"],
+            ["volumetric energy density"],
+            ["defect structure"],
+            ["Powder bed fusion"],
+        ),
+        (
+            "How does heat treatment affect microstructure of SLM-processed SS316L?",
+            ["SS316L"],
+            ["heat treatment"],
+            ["microstructure"],
+            ["Selective laser melting (SLM)"],
+        ),
+    ],
+)
+def test_structured_research_objective_allows_declared_result_scope(
+    question,
+    material_scope,
+    variables,
+    outcomes,
+    constraints,
+):
+    objective = StructuredResearchObjective.model_validate(
+        {
+            "question": question,
+            "material_scope": material_scope,
+            "variables": variables,
+            "outcomes": outcomes,
+            "constraints": constraints,
+        }
+    )
+
+    assert objective.material_scope == material_scope
+    assert objective.constraints == constraints
+
+
+def test_structured_research_objective_does_not_hide_source_axis_as_scope():
+    with pytest.raises(ValidationError, match="source side"):
+        StructuredResearchObjective.model_validate(
+            {
+                "question": "How do laser power and scan speed affect density?",
+                "variables": ["laser power"],
+                "outcomes": ["density"],
+                "constraints": ["scan speed"],
+            }
+        )
 
 
 def test_research_objective_discovery_contract_bounds_model_output():
@@ -70,9 +331,26 @@ def test_research_objective_discovery_prompt_requires_focused_concise_objectives
     )
 
     assert "at most six objectives" in user_prompt
+    assert "six highest-signal objectives total" in user_prompt
+    assert "never emit a seventh objective" in user_prompt
+    assert "exactly one key: `objectives`" in user_prompt
+    assert "Return fewer than six" in user_prompt
     assert "only tightly related outcomes" in user_prompt
+    assert "variable-to-outcome" in user_prompt
+    assert "separate exact role regions" in user_prompt
+    assert "choose exactly one skim `possible_objectives` entry" in user_prompt
+    assert "phrases verbatim from that same candidate" in user_prompt
+    assert "every skim `possible_objectives` entry as an independent candidate" in user_prompt
+    assert "Never combine variables or outcomes" in user_prompt
+    assert "invent an axis absent from the selected candidate" in user_prompt
+    assert "variables precede the active relation" in user_prompt
+    assert "variables occur between `of` and `on`" in user_prompt
+    assert "use one separating `and`" in user_prompt
+    assert "Passive forms are invalid" in user_prompt
+    assert "same variable-outcome combination" in user_prompt
+    assert "Omit optional fields" in user_prompt
+    assert "compact JSON" in user_prompt
     assert "Do not put another measured property in `mechanisms`" in user_prompt
-    assert "Set `reason` to null" in user_prompt
 
 
 class _FakeCompletions:
@@ -252,6 +530,35 @@ def test_core_llm_extractor_defaults_to_provider_parse_mode(monkeypatch):
     assert parse_call["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
     }
+
+
+def test_core_llm_extractor_routes_research_objectives_to_bounded_json_text(
+    monkeypatch,
+):
+    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
+    parsed_objectives = StructuredResearchObjectives(
+        objectives=[
+            StructuredResearchObjective(
+                question="How does heat treatment affect yield strength?",
+                variables=["heat treatment"],
+                outcomes=["yield strength"],
+            )
+        ]
+    )
+    client = _FakeOpenAIClient(parsed_objectives.model_dump_json())
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    objectives = extractor.discover_research_objectives(
+        {"collection_id": "col-1", "paper_skims": []}
+    )
+
+    assert objectives == parsed_objectives
+    assert client.beta.chat.completions.calls == []
+    text_call = client.chat.completions.calls[0]
+    assert text_call["response_format"] == {"type": "json_object"}
+    assert text_call["max_completion_tokens"] == 2400
+    assert "JSON schema:" in text_call["messages"][1]["content"]
+    assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
 
 
 
@@ -477,10 +784,10 @@ def test_core_llm_extractor_validates_research_objective_response():
         {
           "objectives": [
             {
-              "question": "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?",
+              "question": "How does heat treatment affect corrosion resistance?",
               "material_scope": ["316L stainless steel"],
               "variables": ["heat treatment"],
-              "outcomes": ["corrosion"],
+              "outcomes": ["corrosion resistance"],
               "constraints": ["LPBF"],
               "requested_comparator": "compare as-built and heat-treated corrosion behavior",
               "seed_document_ids": ["paper-1"],
@@ -504,8 +811,83 @@ def test_core_llm_extractor_validates_research_objective_response():
     assert isinstance(objectives, StructuredResearchObjectives)
     assert objectives.objectives[0].question.startswith("How does heat treatment")
     text_call = client.chat.completions.calls[0]
-    assert text_call["max_completion_tokens"] == 1400
+    assert text_call["max_completion_tokens"] == 2400
     assert text_call["response_format"] == {"type": "json_object"}
+
+
+def test_core_llm_extractor_retries_reversed_research_objective_roles():
+    invalid = json.dumps(
+        {
+            "objectives": [
+                {
+                    "question": "How does porosity affect mechanical properties?",
+                    "variables": ["Laser power", "Scan speed"],
+                    "outcomes": ["Porosity"],
+                }
+            ]
+        }
+    )
+    valid = json.dumps(
+        {
+            "objectives": [
+                {
+                    "question": "How does porosity affect mechanical properties?",
+                    "variables": ["Porosity"],
+                    "outcomes": ["Mechanical properties"],
+                }
+            ]
+        }
+    )
+    client = _FakeOpenAIClient(invalid)
+    responses = iter((invalid, valid))
+
+    def create(**kwargs):  # noqa: ANN003
+        client.chat.completions.calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=next(responses)),
+                )
+            ]
+        )
+
+    client.chat.completions.create = create
+    extractor = _json_text_extractor(client)
+
+    objectives = extractor.discover_research_objectives(
+        {"collection_id": "col-1", "paper_skims": []}
+    )
+
+    assert objectives.objectives[0].variables == ["Porosity"]
+    assert objectives.objectives[0].outcomes == ["Mechanical properties"]
+    assert len(client.chat.completions.calls) == 2
+    repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "question roles" in repair_prompt
+    assert "delete the missing label from the list" in repair_prompt
+    assert "put the full missing label verbatim" in repair_prompt
+
+
+def test_core_llm_extractor_rejects_repeated_reversed_research_objective_roles():
+    invalid = json.dumps(
+        {
+            "objectives": [
+                {
+                    "question": "How does porosity affect mechanical properties?",
+                    "variables": ["Laser power", "Scan speed"],
+                    "outcomes": ["Porosity"],
+                }
+            ]
+        }
+    )
+    client = _FakeOpenAIClient(invalid)
+    extractor = _json_text_extractor(client)
+
+    with pytest.raises(ValidationError, match="question roles"):
+        extractor.discover_research_objectives(
+            {"collection_id": "col-1", "paper_skims": []}
+        )
+
+    assert len(client.chat.completions.calls) == 2
 
 
 def test_core_llm_extractor_validates_axis_canonicalization_response():
@@ -549,7 +931,7 @@ def test_core_llm_extractor_validates_research_objective_merge_response():
           "merged_objectives": [
             {
               "source_objective_ids": ["obj-1", "obj-2"],
-              "question": "How do SLM parameters affect mechanical properties of 316L stainless steel?",
+              "question": "How does energy density affect yield strength and elongation?",
               "material_scope": ["316L stainless steel"],
               "variables": ["energy density"],
               "outcomes": ["yield strength", "elongation"],
@@ -574,6 +956,97 @@ def test_core_llm_extractor_validates_research_objective_merge_response():
 
     assert isinstance(merge_plan, StructuredObjectiveMergePlan)
     assert merge_plan.merged_objectives[0].source_objective_ids == ["obj-1", "obj-2"]
+
+
+def test_structured_objective_merge_group_rejects_reversed_question_roles():
+    with pytest.raises(ValidationError, match="question roles"):
+        StructuredObjectiveMergeGroup.model_validate(
+            {
+                "source_objective_ids": ["obj-1"],
+                "question": "How does porosity affect laser power?",
+                "variables": ["laser power"],
+                "outcomes": ["porosity"],
+                "reason": "kept separate",
+            }
+        )
+
+
+def test_core_llm_extractor_retries_reversed_objective_merge_roles():
+    invalid = json.dumps(
+        {
+            "merged_objectives": [
+                {
+                    "source_objective_ids": ["obj-1"],
+                    "question": "How does porosity affect laser power?",
+                    "variables": ["laser power"],
+                    "outcomes": ["porosity"],
+                    "reason": "kept separate",
+                }
+            ]
+        }
+    )
+    valid = json.dumps(
+        {
+            "merged_objectives": [
+                {
+                    "source_objective_ids": ["obj-1"],
+                    "question": "How does laser power affect porosity?",
+                    "variables": ["laser power"],
+                    "outcomes": ["porosity"],
+                    "reason": "kept separate",
+                }
+            ]
+        }
+    )
+    client = _FakeOpenAIClient(invalid)
+    responses = iter((invalid, valid))
+
+    def create(**kwargs):  # noqa: ANN003
+        client.chat.completions.calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=next(responses)))]
+        )
+
+    client.chat.completions.create = create
+    extractor = _json_text_extractor(client)
+
+    merge_plan = extractor.merge_research_objectives(
+        {"collection_id": "col-1", "paper_skims": [], "candidate_objectives": []}
+    )
+
+    assert merge_plan.merged_objectives[0].variables == ["laser power"]
+    assert len(client.chat.completions.calls) == 2
+    repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "question roles" in repair_prompt
+
+
+def test_core_llm_extractor_rejects_repeated_reversed_objective_merge_roles():
+    invalid = json.dumps(
+        {
+            "merged_objectives": [
+                {
+                    "source_objective_ids": ["obj-1"],
+                    "question": "How does porosity affect laser power?",
+                    "variables": ["laser power"],
+                    "outcomes": ["porosity"],
+                    "reason": "kept separate",
+                }
+            ]
+        }
+    )
+    client = _FakeOpenAIClient(invalid)
+    extractor = _json_text_extractor(client)
+
+    with pytest.raises(ValidationError, match="question roles"):
+        extractor.merge_research_objectives(
+            {
+                "collection_id": "col-1",
+                "paper_skims": [],
+                "candidate_objectives": [],
+            }
+        )
+
+    assert len(client.chat.completions.calls) == 2
 
 
 def test_core_llm_extractor_validates_objective_paper_frame_response():
@@ -789,7 +1262,7 @@ def test_core_llm_extractor_validates_objective_evidence_response():
     assert extraction.reported_result.outcome == "corrosion current density"
     assert extraction.attribution_scope == "association_only"
     assert extractions.extractions[0].resolution_status == "resolved"
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
+    assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
 
 
 def test_structured_objective_evidence_rejects_effect_without_variable_change():
@@ -865,10 +1338,12 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
         {
             "collection_id": "col-1",
             "objective": {"question": "How does preheating affect 316L?"},
+            "paper_frame": {"background": "must not become evidence"},
             "evidence_route": {
                 "source_kind": "text_window",
                 "source_ref": "block-1",
             },
+            "document_state": {"prior_value": "must not be copied"},
             "source": {
                 "source_kind": "text_window",
                 "source_ref": "block-1",
@@ -880,21 +1355,24 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
         }
     )
 
-    assert "For text routes, return at most one extraction" in prompt
-    assert "Do not enumerate every possible number" in prompt
-    assert "The backend binds the exact source excerpt and Source locators" in prompt
-    assert "Do not output `source_refs`" in prompt
-    assert "one extraction per binding" not in prompt
-    assert "Do not merge those bindings into one `interpretation`" not in prompt
+    assert "Extract at most one objective-relevant fact" in system_prompt
+    assert "`SOURCE` is the only scientific authority" in system_prompt
+    assert "Return at most one extraction" in system_prompt
+    assert "one top-level key: `extractions`" in system_prompt
     assert "1.43x10^6 C/s for P150" in prompt
     assert "1.65x10^6 C/s for NP" in prompt
-    assert "Bad text example" in prompt
-    assert "Every changed variable should include" in system_prompt
-    assert "exact source group labels as endpoints" in system_prompt
-    assert "Context roles must return `reported_result: null`" in system_prompt
-    assert "numeric `confidence` after `resolution_status`" in system_prompt
-    assert "qualitative observation" in prompt
-    assert "it is not mechanism_context" in prompt
+    assert "OUTPUT JSON:" in prompt
+    assert "collection_id" not in prompt
+    assert "paper_frame" not in prompt
+    assert "document_state" not in prompt
+    assert "must not become evidence" not in prompt
+    assert "must not be copied" not in prompt
+    assert "Identify every changed" in system_prompt
+    assert "exact source group labels" in system_prompt
+    assert "Context source" in system_prompt
+    assert "numeric `confidence` for every extraction" in system_prompt
+    assert "Generic composition or background" in system_prompt
+    assert "Unrelated composition example" in system_prompt
 
 
 def test_core_llm_extractor_rejects_backend_bound_objective_evidence_fields():
@@ -1157,12 +1635,12 @@ def test_core_llm_extractor_routes_objective_selections_directly_to_bounded_json
     assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
 
 
-def test_core_llm_extractor_routes_objective_units_through_bounded_provider_parse(
+def test_core_llm_extractor_routes_objective_units_through_bounded_json_text(
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     client = _FakeOpenAIClient(
-        "unused",
+        '{"extractions":[]}',
         parsed=StructuredEvidenceExtractions(),
     )
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
@@ -1177,28 +1655,37 @@ def test_core_llm_extractor_routes_objective_units_through_bounded_provider_pars
     )
 
     assert units == StructuredEvidenceExtractions()
-    assert client.chat.completions.calls == []
-    parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["max_completion_tokens"] == 1024
-    assert parse_call["response_format"] is StructuredEvidenceExtractions
-    assert "JSON schema:" not in parse_call["messages"][1]["content"]
-    assert extractor.consume_last_trace()["extraction_mode"] == "provider_parse"
+    assert client.beta.chat.completions.calls == []
+    text_call = client.chat.completions.calls[0]
+    assert text_call["max_completion_tokens"] == 2048
+    assert text_call["response_format"] == {"type": "json_object"}
+    assert "JSON schema:" not in text_call["messages"][1]["content"]
+    assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
 
 
 def test_objective_evidence_prompt_requires_verbatim_outcome_bound_result_text() -> None:
-    _system_prompt, user_prompt = build_objective_evidence_prompt(
+    system_prompt, user_prompt = build_objective_evidence_prompt(
         {
             "objective": {"outcomes": ["microstructure"]},
             "source": {"text": "P150 formed an equiaxed cellular structure."},
         }
     )
 
-    assert "one short verbatim substring" in user_prompt
-    assert "direction must describe that outcome" in user_prompt
-    assert "use `mixed` for a qualitative morphology change" in user_prompt
-    assert "mixes the authors' current result with cited literature" in user_prompt
-    assert "`incomparability_reasons` must be empty" in user_prompt
-    assert "conditions from cited literature" in user_prompt
+    contract = f"{system_prompt}\n{user_prompt}"
+
+    assert "verbatim substring" in contract
+    assert "direction describes the objective outcome" in contract
+    assert "Use `mixed` for an unordered qualitative change" in contract
+    assert "mixes current work with cited literature" in contract
+    assert "`incomparability_reasons` must be empty" in contract
+    assert "Conditions from cited literature" in contract
+    assert "TASK MODEL" in system_prompt
+    assert "INPUT SCHEMA" in system_prompt
+    assert "DECISION PROCESS" in system_prompt
+    assert "BOUNDARY EXAMPLES" in system_prompt
+    assert '{"extractions":[]}' in system_prompt
+    assert "`result_text` is the only source text" in system_prompt
+    assert "Do not output source excerpts" not in system_prompt
 
 
 def test_core_llm_extractor_retries_with_structured_validation_error(monkeypatch):
@@ -1301,6 +1788,8 @@ def test_core_llm_extractor_retries_with_structured_validation_error(monkeypatch
     assert len(client.chat.completions.calls) == 2
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
     assert "experimental attribution requires comparison" in repair_prompt
+    assert "Return at most one schema-valid extraction" in repair_prompt
+    assert "For finding synthesis" not in repair_prompt
 
 
 

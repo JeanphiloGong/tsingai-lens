@@ -10,6 +10,7 @@ import re
 from typing import Any, Callable, Iterable, Mapping
 
 from openai import OpenAIError
+from pydantic import ValidationError
 
 from application.core.semantic_build.document_profile_service import (
     DocumentProfileService,
@@ -48,6 +49,7 @@ from .llm.extractor import (
 from .llm.schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredObjectiveMergePlan,
+    StructuredResearchObjective,
 )
 
 logger = logging.getLogger(__name__)
@@ -365,7 +367,7 @@ _SKIM_CAPTION_LIMIT = 12
 _DISCOVERY_AXIS_VALUE_LIMIT = 2
 _DISCOVERY_OBJECTIVE_LIMIT = 1
 _DISCOVERY_TEXT_VALUE_CHARS = 80
-_DISCOVERY_OBJECTIVE_TEXT_CHARS = 240
+_DISCOVERY_OBJECTIVE_TEXT_CHARS = 180
 _FRAME_SECTION_SNIPPET_LIMIT = 12
 _FRAME_SECTION_TEXT_CHARS = 420
 _FRAME_SECTION_OVERVIEW_LIMIT = 4
@@ -1082,6 +1084,7 @@ class ResearchObjectiveService:
                 len(document_figures),
             )
             payload = self._build_paper_skim_payload(
+                collection_id=collection_id,
                 document=document,
                 profile=profiles_by_document_id.get(document.document_id),
                 blocks=document_blocks,
@@ -1181,6 +1184,7 @@ class ResearchObjectiveService:
         def values(
             items: tuple[str, ...],
             limit: int,
+            *,
             text_chars: int = _DISCOVERY_TEXT_VALUE_CHARS,
         ) -> list[str]:
             return [
@@ -1200,18 +1204,10 @@ class ResearchObjectiveService:
                 skim.candidate_processes,
                 _DISCOVERY_AXIS_VALUE_LIMIT,
             ),
-            "changed_variables": values(
-                skim.changed_variables,
-                _DISCOVERY_AXIS_VALUE_LIMIT,
-            ),
-            "candidate_properties": values(
-                skim.candidate_properties,
-                _DISCOVERY_AXIS_VALUE_LIMIT,
-            ),
             "possible_objectives": values(
                 skim.possible_objectives,
                 _DISCOVERY_OBJECTIVE_LIMIT,
-                _DISCOVERY_OBJECTIVE_TEXT_CHARS,
+                text_chars=_DISCOVERY_OBJECTIVE_TEXT_CHARS,
             ),
         }
 
@@ -3055,14 +3051,6 @@ class ResearchObjectiveService:
     ) -> tuple[Any, str, dict[str, Any]] | None:
         best: tuple[int, int, Any, str, dict[str, Any]] | None = None
         for position, block in enumerate(blocks):
-            heading_key = self._objective_column_key(
-                getattr(block, "heading_path", "")
-            )
-            if any(
-                section in {"references", "bibliography"}
-                for section in heading_key.split("_")
-            ):
-                continue
             text = str(getattr(block, "text", "") or "").strip()
             if not text:
                 continue
@@ -4016,22 +4004,6 @@ class ResearchObjectiveService:
                     route=route,
                     document_tree=document_tree,
                 )
-            node = (
-                self._tree_node_for_route_source(
-                    document_tree=document_tree,
-                    source_ref_kind="block",
-                    source_ref_id=source_block_id,
-                )
-                if document_tree is not None
-                else None
-            )
-            if (
-                node is not None
-                and self._tree_node_in_reference_branch(document_tree, node)
-            ) or "references" in self._objective_column_key(
-                getattr(block, "heading_path", "")
-            ):
-                return {}
             text = str(getattr(block, "text", "") or "").strip()
             return {
                 "source_kind": "text_window",
@@ -7308,6 +7280,7 @@ class ResearchObjectiveService:
     def _build_paper_skim_payload(
         self,
         *,
+        collection_id: str,
         document: Any,
         profile: Any,
         blocks: list[Any],
@@ -7326,12 +7299,14 @@ class ResearchObjectiveService:
         if not text_preview:
             text_preview = self._build_text_preview(document, ordered_blocks)
         return {
+            "collection_id": collection_id,
+            "document_id": document.document_id,
             "title": str(document.title or "")[:160],
-            "profile_hint": (
+            "document_profile": (
                 {
-                    "role_hint": profile.doc_type,
-                    "source_quality_warnings": list(profile.parsing_warnings)[:2],
-                    "role_hint_confidence": profile.confidence,
+                    "doc_type": profile.doc_type,
+                    "parsing_warnings": list(profile.parsing_warnings)[:2],
+                    "confidence": profile.confidence,
                 }
                 if profile
                 else {}
@@ -7340,6 +7315,7 @@ class ResearchObjectiveService:
             "headings": headings[:4],
             "table_captions": [
                 {
+                    "table_id": table.table_id,
                     "caption_text": str(table.caption_text or "")[:160],
                     "heading_path": str(table.heading_path or "")[:120],
                     "column_headers": [
@@ -7352,6 +7328,7 @@ class ResearchObjectiveService:
             ],
             "figure_captions": [
                 {
+                    "figure_id": figure.figure_id,
                     "caption_text": str(figure.caption_text or "")[:160],
                     "heading_path": str(figure.heading_path or "")[:120],
                 }
@@ -7755,20 +7732,7 @@ class ResearchObjectiveService:
                     return None
                 if group.requested_comparator != source.requested_comparator:
                     return None
-            else:
-                merged_text = " ".join(
-                    value
-                    for value in (group.question, group.requested_comparator)
-                    if value
-                )
-                if any(
-                    not self._axis_label_is_mentioned(merged_text, variable)
-                    for variable in variables
-                ):
-                    return None
-
-            payload = {
-                "collection_id": source_objectives[0].collection_id,
+            objective_payload = {
                 "question": group.question,
                 "material_scope": material_scope,
                 "variables": variables,
@@ -7787,7 +7751,16 @@ class ResearchObjectiveService:
                 "confidence": group.confidence,
                 "reason": group.reason,
             }
-            objective = ResearchObjective.from_mapping(payload)
+            try:
+                StructuredResearchObjective.model_validate(objective_payload)
+            except ValidationError:
+                return None
+            objective = ResearchObjective.from_mapping(
+                {
+                    "collection_id": source_objectives[0].collection_id,
+                    **objective_payload,
+                }
+            )
             if not is_question_shaped_objective(objective):
                 return None
             merged_objectives.append(objective)

@@ -83,41 +83,64 @@ Non-negotiable rules:
 
 
 _OBJECTIVE_EVIDENCE_SYSTEM_PROMPT = """
-You are extracting objective-scoped evidence for an evidence-backed literature comparison backend.
+TASK MODEL
+Extract at most one objective-relevant fact from one selected source unit. This
+is evidence extraction, not routing, summarization, or Finding synthesis.
 
-Non-negotiable rules:
-- This is final evidence extraction for one research objective and one selected source.
-- Return exactly one JSON object and nothing else.
-- Extract only facts directly supported by `source`; do not use outside knowledge.
-- Use the `objective` and `evidence_route` as the research scope.
-- Do not emit backend persistence ids.
-- The backend binds the exact source excerpt and Source locators from the active route/source.
-- Do not output source refs, evidence anchor ids, backend ids, source excerpts, or copied input JSON.
-- `document_state` is coverage metadata only. It is not scientific source text;
-  never copy prior values or context into the current extraction.
-- Classify the final evidence role from the active source; the route role is only a selection hint.
-- Preserve every factor that changes between compared groups. Never choose one
-  convenient variable when scan speed, hatch spacing, energy density, treatment,
-  sample state, or test regime change together.
-- Keep fixed material, sample, process, and test conditions in scientific_context;
-  fixed conditions are not changed variables.
-- A direct or contradictory result must bind exactly one objective outcome to one
-  reported result from this source.
-- Every changed variable should include a source-reported baseline or target value.
-  For categorical comparisons, use the exact source group labels as endpoints when
-  numeric values are absent. Omit a variable when no endpoint is present in source.
-- `isolated_effect` and `joint_effect` require a comparable `comparison` whose
-  axis names exactly match the changed variables and whose baseline and target
-  values are both present.
-- Context roles must return `reported_result: null`, empty changed variables,
-  and `not_attributable`; use a result role when the source reports a result.
-- Use isolated_effect only for one changed variable in a comparable experiment.
-  Use joint_effect for two or more jointly varied factors, association_only for
-  non-isolating associations, descriptive_only without an effect comparison, and
-  not_attributable when groups are scientifically incomparable.
-- Prefer fewer, traceable extractions over broad speculative coverage.
-- Return at most one extraction for the current source.
-- Always include a numeric `confidence` after `resolution_status` for every extraction.
+INPUT SCHEMA AND AUTHORITY
+- `OBJECTIVE` limits relevance and allowed outcomes; it is not evidence.
+- `ROUTE HINT` is only a selection hint.
+- `SOURCE` is the only scientific authority for every returned value.
+
+DECISION PROCESS
+1. If SOURCE does not report an objective outcome or useful objective-specific
+   context, return `{"extractions":[]}`.
+2. Context source: choose its context role and return no changed variables, no
+   comparison, no reported result, and `not_attributable`.
+3. Result source: include exactly one `reported_result`. Identify every changed
+   factor and use exact source group labels or values as endpoints.
+4. Use `isolated_effect` only for one changed factor with a complete comparable
+   baseline/target comparison. Use `joint_effect` for two or more. Otherwise use
+   `association_only`, `descriptive_only`, or `not_attributable`.
+5. Return empty output rather than inventing a missing binding.
+
+HARD RULES
+- Return exactly one compact JSON object with one top-level key: `extractions`.
+- Return at most one extraction. Never repeat the input or output reasoning,
+  markdown, source ids, or backend ids.
+- `result_text` is the only source text allowed in output and must be a short
+  verbatim substring.
+- A result direction describes the objective outcome, never an intermediate
+  mechanism. Use `mixed` for an unordered qualitative change.
+- When SOURCE mixes current work with cited literature, extract current work only.
+  Conditions from cited literature are not current-work comparison conditions.
+- Generic composition or background is irrelevant unless OBJECTIVE explicitly
+  asks about that composition, material identity, or background concept.
+- For a comparable comparison, `incomparability_reasons` must be empty. For an
+  incomparable comparison, provide at least one source-supported reason.
+- Include `resolution_status` and numeric `confidence` for every extraction.
+
+BOUNDARY EXAMPLES
+Context source:
+{"extractions":[{"evidence_role":"condition_context","changed_variables":[],"comparison":null,"reported_result":null,"attribution_scope":"not_attributable","scientific_context":{"material":[],"sample":[],"process":[{"name":"build platform temperature","value":100,"unit":"C"}],"test":[]},"resolution_status":"resolved","confidence":0.9}]}
+
+Joint result source:
+{"extractions":[{"evidence_role":"direct_result","changed_variables":[{"name":"laser power","baseline_value":100,"target_value":200,"unit":"W"},{"name":"scan speed","baseline_value":500,"target_value":900,"unit":"mm/s"}],"comparison":{"baseline_label":"A","target_label":"B","axis_names":["laser power","scan speed"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"relative density","value":98.0,"unit":"%","direction":"increase","result_text":"relative density increased to 98.0%"},"attribution_scope":"joint_effect","scientific_context":{"material":[],"sample":[],"process":[],"test":[]},"resolution_status":"resolved","confidence":0.9}]}
+
+Unsupported or ambiguous source:
+{"extractions":[]}
+
+Unrelated composition example:
+OBJECTIVE OUTCOME: fatigue life
+ROUTE HINT: composition_or_background
+SOURCE: The nominal alloy composition contains chromium and nickel.
+OUTPUT: {"extractions":[]}
+
+OUTPUT CONTRACT
+Allowed result directions are `increase`, `decrease`, `improve`, `worsen`,
+`no_change`, `mixed`, and `unknown`. Allowed resolution statuses are `resolved`,
+`partial`, `unresolved`, `skipped`, and `unknown`. Return the smallest valid object
+and stop immediately after it.
 """.strip()
 
 
@@ -614,23 +637,59 @@ def build_research_objective_discovery_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
     user_prompt = (
-        "Create a small set of comparison questions from these compact paper skims.\n"
+        "Create a small set of variable-to-outcome research comparison questions "
+        "from these paper skims.\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
-        "Return only the schema object with at most six objectives. Keep each "
-        "objective question-shaped and focused: name all jointly changed variables "
-        "needed for the comparison and only tightly related outcomes. Keep distinct "
-        "variable-outcome families separate. Put only explanatory intermediate "
-        "concepts explicitly supported by a skim in `mechanisms`; otherwise use an "
-        "empty list. Do not put another measured property in `mechanisms`. Put fixed "
-        "material, process, sample, and test scope in `constraints`, and an explicitly "
-        "requested comparison target in optional `requested_comparator`. Do not copy "
-        "every process or property from a paper skim into an objective. Use exact "
-        "document_id values for seed/excluded ids. Set `reason` to null unless one "
-        "short clause is needed; never explain the field assignment."
+        "HARD RULES\n"
+        "- The top-level object must contain exactly one key: `objectives`. Never echo "
+        "`collection_id` or any other input metadata. Return at most six objectives. "
+        "Rank across all skims and keep only the six highest-signal objectives total; "
+        "never emit a seventh objective. Return fewer than six when another candidate cannot align "
+        "its question, variables, and outcomes exactly; skip that candidate instead "
+        "of weakening, broadening, or hiding a field label.\n"
+        "- For each item, choose exactly one skim `possible_objectives` entry. Copy "
+        "the variable and outcome phrases verbatim from that same candidate, then "
+        "reconstruct `question` from those labels. Prefer 'How does/do <variables "
+        "joined with and> affect <outcomes joined with and>?'. Do not insert, remove, "
+        "or paraphrase words inside a selected label. If the axes cannot be separated "
+        "from one candidate, skip it.\n"
+        "- Supported question forms have separate exact role regions: in '<variables> "
+        "affect/influence/impact <outcomes>', variables precede the active relation "
+        "and outcomes follow it; in 'effects of <variables> on <outcomes>', variables "
+        "occur between `of` and `on` and outcomes follow `on`; in 'relationship "
+        "between <variables> and <outcomes>', use one separating `and` such that all "
+        "declared variables occur before it and all declared outcomes follow it. "
+        "Passive forms are invalid. Every selected label must occur verbatim in its "
+        "assigned role region.\n"
+        "- Treat every skim `possible_objectives` entry as an independent candidate. "
+        "Never combine variables or outcomes from different candidate questions or "
+        "invent an axis absent from the selected candidate. Keep only tightly related "
+        "outcomes.\n"
+        "- Do not repeat the same variable-outcome combination. Keep distinct "
+        "variable-outcome families separate.\n"
+        "- Put only supported explanatory intermediate concepts in `mechanisms`. Do "
+        "not put another measured property in `mechanisms`.\n"
+        "- Put fixed material, process, sample, and test scope in `constraints`. Use "
+        "exact document_id values for seed/excluded ids. Do not append scope wording "
+        "to a variable or outcome label in `question`.\n\n"
+        "ROLE ALIGNMENT EXAMPLE\n"
+        "Valid: question='How does factor alpha affect response beta?', "
+        "variables=['factor alpha'], outcomes=['response beta'].\n"
+        "Invalid: that same question with variables=['factor alpha value'] or "
+        "outcomes=['response']; those labels are not verbatim in their roles.\n"
+        "If the variable label is 'factor alpha value', the question must contain "
+        "that full label rather than shortening it to 'factor alpha'. If the outcome "
+        "label is 'response beta', do not replace it with a broader phrase such as "
+        "'response behavior'.\n\n"
+        "OUTPUT\n"
+        "Return compact JSON without indentation. Omit optional fields whose value "
+        "would be null, empty, or the schema default. Do not output reasoning, "
+        "commentary, or field-assignment explanations."
     )
     system_prompt = (
-        "Build concise research-objective questions for literature comparison. "
-        "Use only the supplied skims. Return one JSON object, no commentary."
+        "Build concise research-objective questions for literature comparison using "
+        "only the supplied skims. Return one compact JSON object immediately. Do not "
+        "output reasoning or commentary."
     )
     return system_prompt, user_prompt
 
@@ -692,6 +751,8 @@ def build_research_objective_merge_prompt(
         "- Keep composition/background/literature-comparison objectives separate "
         "from current-work performance objectives.\n"
         "- If uncertain, keep objectives separate.\n"
+        "- Every output question must preserve its variables on the source side and "
+        "its outcomes on the result side of a supported active question form.\n"
         "For each output group, preserve the complete scientific-intent fields, "
         "write a question-shaped `question`, and explain why the sources were "
         "merged or kept separate. `requested_comparator` remains optional.\n"
@@ -764,86 +825,49 @@ def build_objective_evidence_route_prompt(
 def build_objective_evidence_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
+    objective = (
+        payload.get("objective")
+        if isinstance(payload.get("objective"), dict)
+        else {}
+    )
+    route = (
+        payload.get("evidence_route")
+        if isinstance(payload.get("evidence_route"), dict)
+        else {}
+    )
+    source = (
+        payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    )
+    source_text = str(source.get("text") or source.get("caption_text") or "").strip()
+    if not source_text:
+        source_text = json.dumps(
+            {
+                key: source[key]
+                for key in (
+                    "source_kind",
+                    "page",
+                    "heading_path",
+                    "column_headers",
+                    "table_matrix",
+                    "table_cells",
+                )
+                if source.get(key) not in (None, "", [], {})
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
     user_prompt = (
-        "Extract objective-scoped evidence from this one selected source.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only schema-valid structured data with an `extractions` array.\n"
-        "Return at most one high-confidence extraction. If the source "
-        "contains many possible facts, choose the ones most directly tied to "
-        "the active objective and route role.\n"
-        "The backend binds the exact source excerpt and Source locators from the "
-        "active route. Do not output "
-        "`source_refs`, `evidence_anchor_ids`, backend ids, copied source text, "
-        "or copied input JSON.\n"
-        "Treat `document_state` only as a map of prior coverage and Source positions. "
-        "Do not extract or copy scientific values from it; every output field must be "
-        "supported by the active `source`.\n"
-        "Set `evidence_role` from this source's actual content: direct_result, "
-        "contradictory_result, mechanism_context, condition_context, baseline_context, "
-        "comparison_context, background_context, or irrelevant.\n"
-        "For direct_result or contradictory_result, populate exactly one "
-        "`reported_result` whose outcome answers `objective.outcomes`. Preserve its "
-        "reported value and unit. Set `result_text` to one short verbatim substring "
-        "from the active source, not a paraphrase. The direction must describe that "
-        "outcome, never an intermediate mechanism; use `mixed` for a qualitative "
-        "morphology change with no ordered increase, decrease, improvement, or "
-        "worsening.\n"
-        "A qualitative observation that directly compares the objective outcome "
-        "between source groups is still a direct_result when no scalar is reported: "
-        "set reported_result.value and unit to null and preserve the observed outcome "
-        "difference in result_text. Do not demote an observed outcome to "
-        "mechanism_context.\n"
-        "Populate `changed_variables` with every factor that differs between baseline "
-        "and target, including each factor's reported baseline/target values and unit. "
-        "For a categorical factor without numeric endpoints, copy the exact baseline "
-        "and target group labels from source as the variable values. "
-        "Do not infer a missing factor from the objective or paper frame.\n"
-        "Populate `comparison` only when the source identifies baseline and target "
-        "groups. Its axis_names must contain every changed-variable name. Mark "
-        "as-SLM/HIP-SLM, different materials, or different test regimes incomparable "
-        "when those differences prevent direct attribution, and state why. When "
-        "`comparable` is true, `incomparability_reasons` must be empty. Set "
-        "`comparable` false only when the active source explicitly reports a "
-        "confounding difference between the current baseline and target groups; "
-        "conditions from cited literature and unreported fixed conditions are not "
-        "incomparability reasons for the current groups.\n"
-        "Set attribution_scope to isolated_effect only for one comparable changed "
-        "variable; joint_effect for multiple comparable changed variables; "
-        "association_only for non-isolating associations; descriptive_only when no "
-        "effect comparison is reported; not_attributable for incomparable/context evidence.\n"
-        "Store only fixed material, sample, process, and test conditions in "
-        "scientific_context as name/value/unit entries.\n"
-        "For a table route with role `current_experimental_evidence`, return "
-        "only the single strongest target result cell if model extraction is "
-        "needed; deterministic table parsing handles broad row extraction.\n"
-        "For tables, keep result, baseline, target, changed-variable values, and fixed "
-        "context aligned to the same row/column binding. For text, use only statements "
-        "supported by the provided source text.\n"
-        "For text routes, return at most one extraction: the strongest "
-        "objective-relevant result, condition, mechanism, comparison, or background "
-        "record. Do not enumerate every possible number "
-        "or secondary observation in the paragraph.\n"
-        "When one paragraph mixes the authors' current result with cited literature, "
-        "extract only the current result and ignore the cited comparison claims.\n"
-        "Good text example: `1.43x10^6 C/s for P150, and 1.65x10^6 C/s for NP` "
-        "should produce only the most objective-relevant one of those bindings "
-        "for this route, not two separate extractions.\n"
-        "Bad text example: returning separate extractions for every numeric "
-        "value in one paragraph or copying the whole paragraph into "
-        "`result_text`.\n"
-        "Qualitative result example: a source comparing cellular microstructure in "
-        "P150 with NP is direct_result for a microstructure outcome, with categorical "
-        "endpoints P150 and NP and a null scalar value; it is not mechanism_context.\n"
-        "When `source.table_cells` is present, use each cell's `row_index`, "
-        "`col_index`, `header_path`, and `cell_text` as the authoritative table "
-        "structure. Use nearby cells and rows to repair parser-split row labels "
-        "or dangling fragments, but do not use outside knowledge.\n"
-        "Do not extract composition-only, literature-summary, or unrelated facts "
-        "unless the active route role explicitly requires them.\n"
-        "Do not emit an extraction when reported_result and scientific_context are both empty.\n"
-        "`resolution_status` should be resolved only when source, sample/process "
-        "context, and value or condition are sufficiently bound; otherwise use "
-        "partial or unresolved."
+        f"OBJECTIVE QUESTION: {str(objective.get('question') or '').strip()}\n"
+        "OBJECTIVE VARIABLES: "
+        f"{json.dumps(objective.get('variables') or [], ensure_ascii=False, separators=(',', ':'))}\n"
+        "OBJECTIVE OUTCOMES: "
+        f"{json.dumps(objective.get('outcomes') or [], ensure_ascii=False, separators=(',', ':'))}\n"
+        "ROUTE HINT ONLY (DO NOT COPY AS EVIDENCE ROLE): "
+        f"{str(route.get('role') or '').strip()}\n"
+        "SOURCE KIND: "
+        f"{str(source.get('source_kind') or route.get('source_kind') or '').strip()}\n"
+        f"SOURCE:\n{source_text}\n"
+        "OUTPUT JSON:"
     )
     return _OBJECTIVE_EVIDENCE_SYSTEM_PROMPT, user_prompt
 

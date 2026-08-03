@@ -1372,7 +1372,7 @@ class _ObjectiveExtractor:
         return StructuredResearchObjectives(
             objectives=[
                 StructuredResearchObjective(
-                    question="How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?",
+                    question="How does heat treatment affect corrosion?",
                     material_scope=["316L stainless steel"],
                     variables=["heat treatment"],
                     outcomes=["corrosion"],
@@ -1757,8 +1757,8 @@ class _BroadObjectiveExtractor(_ObjectiveExtractor):
             objectives=[
                 StructuredResearchObjective(
                     question=(
-                        "What is the relationship between SLM processing parameters "
-                        "and mechanical properties of 316L stainless steel?"
+                        "What is the relationship between processing parameters "
+                        "and mechanical properties?"
                     ),
                     material_scope=["316L stainless steel"],
                     variables=["processing parameters"],
@@ -1785,9 +1785,7 @@ class _DuplicateMechanicalObjectiveExtractor(_BroadObjectiveExtractor):
                 StructuredResearchObjective(
                     question=(
                         "How do energy density, scanning strategy, and scanning "
-                        "speed affect the densification and microstructure of "
-                        "316L stainless steel processed via Selective Laser "
-                        "Melting?"
+                        "speed affect densification and microstructure?"
                     ),
                     material_scope=["316L stainless steel"],
                     variables=[
@@ -1808,10 +1806,9 @@ class _DuplicateMechanicalObjectiveExtractor(_BroadObjectiveExtractor):
                 ),
                 StructuredResearchObjective(
                     question=(
-                        "What are the effects of varying energy density and "
+                        "What are the effects of energy density and "
                         "scanning speed on yield strength, ultimate tensile "
-                        "strength, elongation, and microhardness of 316L "
-                        "stainless steel?"
+                        "strength, elongation, and microhardness?"
                     ),
                     material_scope=["316L stainless steel"],
                     variables=[
@@ -1836,9 +1833,8 @@ class _DuplicateMechanicalObjectiveExtractor(_BroadObjectiveExtractor):
                 ),
                 StructuredResearchObjective(
                     question=(
-                        "How does the scanning strategy influence the mechanical "
-                        "properties, including yield strength and microhardness, "
-                        "of 316L stainless steel in Selective Laser Melting?"
+                        "How does scanning strategy influence yield strength and "
+                        "microhardness?"
                     ),
                     material_scope=["316L stainless steel"],
                     variables=["scanning strategy"],
@@ -1894,8 +1890,8 @@ class _DuplicateMechanicalObjectiveExtractor(_BroadObjectiveExtractor):
                     ],
                     question=(
                         "How do energy density, scanning speed, and scanning "
-                        "strategy affect the mechanical properties of 316L "
-                        "stainless steel?"
+                        "strategy affect yield strength, ultimate tensile strength, "
+                        "elongation, and microhardness?"
                     ),
                     material_scope=["316L stainless steel"],
                     variables=_merge_candidate_values(
@@ -2123,11 +2119,10 @@ class _CrossObjectiveAxisMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
                 StructuredResearchObjective(
                     question=(
                         "How do laser power and scanning speed affect yield "
-                        "strength and elongation of SLM 316L stainless steel?"
+                        "strength and elongation?"
                     ),
                     material_scope=["316L stainless steel"],
                     variables=[
-                        "Selective Laser Melting",
                         "laser power",
                         "scanning speed",
                     ],
@@ -2144,7 +2139,7 @@ class _CrossObjectiveAxisMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
                 StructuredResearchObjective(
                     question=(
                         "How does porosity influence corrosion potential and "
-                        "pitting potential of SLM 316L stainless steel?"
+                        "pitting potential?"
                     ),
                     material_scope=["316L stainless steel"],
                     variables=["porosity"],
@@ -2186,6 +2181,52 @@ class _CrossObjectiveAxisMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
         return StructuredObjectiveMergePlan(merged_objectives=groups)
 
 
+class _OppositeDirectionMergeExtractor(_DuplicateMechanicalObjectiveExtractor):
+    def discover_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchObjectives:
+        self.discovery_payloads.append(payload)
+        return StructuredResearchObjectives(
+            objectives=[
+                StructuredResearchObjective(
+                    question="How does porosity affect density and roughness?",
+                    variables=["porosity"],
+                    outcomes=["density", "roughness"],
+                    seed_document_ids=["paper-1"],
+                    reason="porosity objective",
+                ),
+                StructuredResearchObjective(
+                    question="How does density affect porosity and roughness?",
+                    variables=["density"],
+                    outcomes=["porosity", "roughness"],
+                    seed_document_ids=["paper-1"],
+                    reason="density objective",
+                ),
+            ]
+        )
+
+    def merge_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredObjectiveMergePlan:
+        self.merge_payloads.append(payload)
+        return StructuredObjectiveMergePlan(
+            merged_objectives=[
+                StructuredObjectiveMergeGroup(
+                    source_objective_ids=[
+                        candidate["objective_id"]
+                        for candidate in payload["candidate_objectives"]
+                    ],
+                    question="How does density affect porosity?",
+                    variables=["density"],
+                    outcomes=["porosity"],
+                    reason="invalid opposite-direction merge",
+                )
+            ]
+        )
+
+
 class _UnmatchedSeedObjectiveExtractor(_DuplicateMechanicalObjectiveExtractor):
     def discover_research_objectives(
         self,
@@ -2196,8 +2237,7 @@ class _UnmatchedSeedObjectiveExtractor(_DuplicateMechanicalObjectiveExtractor):
             objectives=[
                 StructuredResearchObjective(
                     question=(
-                        "How does heat treatment affect yield strength of "
-                        "SLM 316L stainless steel?"
+                        "How does heat treatment affect mechanical properties?"
                     ),
                     material_scope=["316L stainless steel"],
                     variables=["heat treatment"],
@@ -2224,12 +2264,10 @@ class _OverbroadPersistedObjectiveExtractor(_DuplicateMechanicalObjectiveExtract
                 StructuredResearchObjective(
                     question=(
                         "How do energy density, scanning speed, porosity, heat "
-                        "treatment, and scan strategy affect yield strength of "
-                        "SLM 316L stainless steel?"
+                        "treatment, and scan strategy affect yield strength?"
                     ),
                     material_scope=["316L stainless steel"],
                     variables=[
-                        "Selective Laser Melting",
                         "energy density",
                         "scanning speed",
                         "porosity",
@@ -2425,13 +2463,12 @@ class _SingleMixedObjectiveExtractor(_DuplicateMechanicalObjectiveExtractor):
             objectives=[
                 StructuredResearchObjective(
                     question=(
-                        "How do SLM processing parameters affect densification, "
-                        "microstructure, and mechanical properties of 316L "
-                        "stainless steel?"
+                        "How do energy density, scanning strategy, and scanning "
+                        "speed affect densification, microstructure, yield strength, "
+                        "ultimate tensile strength, elongation, and microhardness?"
                     ),
                     material_scope=["316L stainless steel"],
                     variables=[
-                        "Selective Laser Melting",
                         "energy density",
                         "scanning strategy",
                         "scanning speed",
@@ -2464,7 +2501,7 @@ class _DuplicateObjectiveIdExtractor(_ObjectiveExtractor):
     ) -> StructuredResearchObjectives:
         self.discovery_payloads.append(payload)
         objective = StructuredResearchObjective(
-            question="How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?",
+            question="How does heat treatment affect corrosion?",
             material_scope=["316L stainless steel"],
             variables=["heat treatment"],
             outcomes=["corrosion"],
@@ -6234,10 +6271,13 @@ def test_research_objective_service_builds_and_persists_objective_records(
         "doc_role",
         "candidate_materials",
         "candidate_processes",
-        "changed_variables",
-        "candidate_properties",
         "possible_objectives",
     }
+    assert "changed_variables" not in discovery_skim
+    assert "candidate_properties" not in discovery_skim
+    assert discovery_skim["possible_objectives"] == [
+        "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?"
+    ]
     assert "text_preview" not in discovery_skim
     assert "document_profile" not in discovery_skim
     assert any(
@@ -6609,6 +6649,25 @@ def test_research_objective_service_rejects_merge_plan_with_cross_objective_axis
     )
     assert "porosity" not in mechanical_objective.variables
     assert "porosity" in corrosion_objective.variables
+
+
+def test_research_objective_service_rejects_completed_opposite_direction_merge(
+    tmp_path,
+):
+    objectives = _build_duplicate_paper_objectives(
+        tmp_path,
+        _OppositeDirectionMergeExtractor(),
+    )
+
+    assert len(objectives) == 2
+    assert {objective.variables for objective in objectives} == {
+        ("porosity",),
+        ("density",),
+    }
+    assert {objective.outcomes for objective in objectives} == {
+        ("density", "roughness"),
+        ("porosity", "roughness"),
+    }
 
 
 def test_research_objective_service_does_not_global_fill_unmatched_seed_axes(

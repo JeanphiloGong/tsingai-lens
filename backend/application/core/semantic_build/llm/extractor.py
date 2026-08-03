@@ -49,9 +49,9 @@ _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
 _TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 4096
 _DOCUMENT_PROFILE_MAX_COMPLETION_TOKENS = 1024
 _PAPER_SKIM_MAX_COMPLETION_TOKENS = 256
-_RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS = 1400
+_RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS = 2400
 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS = 512
-_OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS = 1024
+_OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS = 2048
 _FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS = 1024
 _TRACE_TEXT_LIMIT = 8000
 _TRACE_JSON_LIMIT = 12000
@@ -272,6 +272,8 @@ class CoreLLMStructuredExtractor:
                 self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE
                 and response_model is not StructuredDocumentProfile
                 and response_model is not StructuredEvidenceSelections
+                and response_model is not StructuredEvidenceExtractions
+                and response_model is not StructuredResearchObjectives
             )
             if use_provider_parse:
                 try:
@@ -302,12 +304,13 @@ class CoreLLMStructuredExtractor:
                     )
             else:
                 if self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE:
-                    messages = self._build_messages(
-                        system_prompt=system_prompt,
-                        user_prompt=user_prompt,
-                        response_model=response_model,
-                        include_schema=True,
-                    )
+                    if response_model is not StructuredEvidenceExtractions:
+                        messages = self._build_messages(
+                            system_prompt=system_prompt,
+                            user_prompt=user_prompt,
+                            response_model=response_model,
+                            include_schema=True,
+                        )
                     trace_extraction_mode = _EXTRACTION_MODE_JSON_TEXT
                 parsed, raw_content = self._parse_json_text_response(
                     messages=messages,
@@ -433,18 +436,46 @@ class CoreLLMStructuredExtractor:
                     )
                 else:
                     repair_detail = str(last_error or "invalid structured output")
+                if response_model is StructuredEvidenceExtractions:
+                    retry_instruction = (
+                        "Previous evidence extraction output failed validation: "
+                        f"{repair_detail[:1000]}. Return at most one schema-valid "
+                        "extraction or {\"extractions\":[]}. Context evidence must "
+                        "use reported_result null, no changed variables, no comparison, "
+                        "and not_attributable. isolated_effect requires exactly one "
+                        "changed variable and a comparable comparison; joint_effect "
+                        "requires at least two. Return only compact JSON."
+                    )
+                elif response_model is StructuredResearchObjectives:
+                    retry_instruction = (
+                        "Correct every research-objective role error. Each error below "
+                        "names field labels missing from the question. If that variables "
+                        "or outcomes list has another label already present in the correct "
+                        "question role, delete the missing label from the list. If deleting "
+                        "it would leave that role empty, put the full missing label verbatim "
+                        "in the question. Then use the canonical form 'How does <full "
+                        "variables labels joined with and> affect <full outcomes labels "
+                        "joined with and>?'. Keep material and process scope only in "
+                        "material_scope or constraints. Drop any objective that still "
+                        "cannot satisfy this form. Return only compact JSON. Errors: "
+                        f"{repair_detail[:1000]}"
+                    )
+                elif response_model is StructuredFindingSynthesis:
+                    retry_instruction = (
+                        "Previous finding synthesis output failed validation: "
+                        f"{repair_detail[:1000]}. Return at most one schema-valid "
+                        "finding or {\"findings\":[]}. Return only compact JSON."
+                    )
+                else:
+                    retry_instruction = (
+                        "Previous output was invalid. Return only the smallest valid "
+                        "JSON object matching the schema. Do not explain, repeat the "
+                        "prompt, or include markdown. Correct these validation errors: "
+                        f"{repair_detail[:1000]}"
+                    )
                 attempt_messages = [
                     *messages,
-                    {
-                        "role": "user",
-                        "content": (
-                            "Previous output was invalid. Return only the smallest valid "
-                            "JSON object matching the schema. Do not explain, repeat the "
-                            "prompt, or include markdown. For finding synthesis, return "
-                            "at most one finding. Correct these validation errors: "
-                            f"{repair_detail[:1000]}"
-                        ),
-                    },
+                    {"role": "user", "content": retry_instruction},
                 ]
                 attempt_kwargs["messages"] = attempt_messages
                 logger.warning(

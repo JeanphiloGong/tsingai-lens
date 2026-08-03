@@ -1693,6 +1693,40 @@ def test_research_objective_text_source_payload_uses_document_tree(tmp_path):
     }
 
 
+def test_research_objective_text_source_payload_rejects_reference_block(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "obj-heat",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "reference-1",
+            "role": "process_or_treatment",
+            "extractable": True,
+        }
+    )
+    block = SimpleNamespace(
+        block_id="reference-1",
+        page=10,
+        block_type="list_item",
+        heading_path="References",
+        text=(
+            "W. Li et al., Effect of substrate preheating on nanohardness, "
+            "Scr. Mater. 118 (2016) 13-18. doi:10.1016/example."
+        ),
+    )
+
+    payload = service._build_objective_route_source_payload(
+        route=route,
+        blocks=[block],
+        tables=[],
+    )
+
+    assert payload == {}
+
+
 def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
@@ -4017,6 +4051,58 @@ def test_research_objective_service_builds_method_conditions_and_binds_measureme
         resolved_measurements[1].resolved_condition["test_condition_unit_id"]
         == method_units[1].evidence_id
     )
+
+
+def test_research_objective_service_method_conditions_skip_reference_blocks(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective_context = ObjectiveAnalysisLens.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "target_property_axes": ["yield strength"],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": "obj-mechanical",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id="reference-entry",
+            page=10,
+            heading_path="References",
+            text=(
+                "Tensile stress-strain and yield strength testing using ASTM E8 "
+                "and an INSTRON machine at a controlled strain rate."
+            ),
+        ),
+        SimpleNamespace(
+            block_id="tensile-method",
+            page=5,
+            heading_path="2.2. Mechanical Testing",
+            text=(
+                "Tensile tests were performed with an INSTRON machine using "
+                "ASTM E8M specimens."
+            ),
+        ),
+    ]
+
+    method_units = service._build_objective_method_family_test_condition_units(
+        objective_contexts=(objective_context,),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={"paper-1": blocks},
+    )
+
+    assert len(method_units) == 1
+    assert method_units[0].source_refs[0]["source_ref"] == "tensile-method"
+    assert method_units[0].test_condition["standard"] == "ASTM E8M"
 
 
 def test_research_objective_service_derives_table_characterization_units(

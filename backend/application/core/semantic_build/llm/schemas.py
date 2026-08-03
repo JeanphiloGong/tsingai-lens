@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from functools import lru_cache
@@ -304,6 +305,30 @@ def _axis_role_spans(
     return tuple(sorted(spans))
 
 
+def _scope_role_spans(
+    scope: str,
+    question_role: str,
+    role_tokens: tuple[str, ...],
+) -> tuple[tuple[int, int], ...]:
+    spans = set(_axis_role_spans(scope, question_role, role_tokens))
+    normalized_scope = unicodedata.normalize("NFKC", scope)
+    explicit_acronyms = {
+        token.casefold()
+        for token in re.findall(r"[^\W_]+", normalized_scope, flags=re.UNICODE)
+        if 2 <= len(token) <= 8
+        and token.isupper()
+        and any(character.isalpha() for character in token)
+    }
+    if explicit_acronyms:
+        long_form_tokens = tuple(
+            token
+            for token in _normalize_objective_axis_tokens(scope)
+            if token not in explicit_acronyms
+        )
+        spans.update(_token_sequence_spans(role_tokens, long_form_tokens))
+    return tuple(sorted(spans))
+
+
 def _role_matches_declared_axes(
     question_role: str,
     axes: list[str],
@@ -320,7 +345,7 @@ def _role_matches_declared_axes(
     scope_indexes = frozenset(
         index
         for scope in declared_scope or []
-        for start, end in _axis_role_spans(scope, question_role, role_tokens)
+        for start, end in _scope_role_spans(scope, question_role, role_tokens)
         for index in range(start, end)
     )
 
@@ -1342,8 +1367,62 @@ class StructuredEvidenceContext(_StrictModel):
 
     @field_validator("material", "sample", "process", "test", mode="before")
     @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list_container(value)
+    def _normalize_lists(cls, value: object, info: ValidationInfo) -> object:
+        items = _normalize_list_container(value)
+        if not isinstance(items, list):
+            return items
+        normalized_items: list[object] = []
+        for item in items:
+            if isinstance(item, StructuredEvidenceAttribute):
+                normalized_items.append(item)
+                continue
+            if isinstance(item, (str, int, float, bool)):
+                normalized_items.append(
+                    {"name": info.field_name, "value": item, "unit": None}
+                )
+                continue
+            if not isinstance(item, dict):
+                normalized_items.append(item)
+                continue
+
+            name = str(item.get("name") or info.field_name).strip()
+            unit = item.get("unit")
+            if "value" in item:
+                attribute_value = item["value"]
+                if isinstance(attribute_value, (dict, list)):
+                    attribute_value = json.dumps(
+                        attribute_value,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                normalized_items.append(
+                    {"name": name, "value": attribute_value, "unit": unit}
+                )
+                continue
+
+            details = {
+                key: detail
+                for key, detail in item.items()
+                if key not in {"name", "unit"}
+            }
+            normalized_items.append(
+                {
+                    "name": name if details else info.field_name,
+                    "value": (
+                        json.dumps(
+                            details,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        )
+                        if details
+                        else name
+                    ),
+                    "unit": unit,
+                }
+            )
+        return normalized_items
 
 
 class StructuredEvidenceExtraction(_StrictModel):
@@ -1381,6 +1460,40 @@ class StructuredEvidenceExtraction(_StrictModel):
         "unknown",
     ] = "partial"
     confidence: float = 0.0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_attribution_cardinality(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        attribution_scope = _normalize_underscored_choice(
+            value.get("attribution_scope"),
+            allowed=_OBJECTIVE_EVIDENCE_ATTRIBUTION_SCOPES,
+            default="not_attributable",
+        )
+        changed_variables = value.get("changed_variables")
+        if (
+            attribution_scope == "joint_effect"
+            and isinstance(changed_variables, list)
+            and len(changed_variables) == 1
+        ):
+            attribution_scope = "isolated_effect"
+        if (
+            attribution_scope in {"isolated_effect", "joint_effect"}
+            and isinstance(changed_variables, list)
+            and any(
+                (
+                    item.get("baseline_value") is None
+                    or item.get("target_value") is None
+                )
+                for item in changed_variables
+                if isinstance(item, dict)
+            )
+        ):
+            attribution_scope = "association_only"
+        if attribution_scope != value.get("attribution_scope"):
+            return {**value, "attribution_scope": attribution_scope}
+        return value
 
     @field_validator("evidence_role", mode="before")
     @classmethod

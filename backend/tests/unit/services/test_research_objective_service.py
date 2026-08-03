@@ -2390,6 +2390,28 @@ class _UnmatchedSeedObjectiveExtractor(_DuplicateMechanicalObjectiveExtractor):
         )
 
 
+class _MissingSeedObjectiveExtractor(_ObjectiveExtractor):
+    def discover_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchObjectives:
+        self.discovery_payloads.append(payload)
+        return StructuredResearchObjectives(
+            objectives=[
+                StructuredResearchObjective(
+                    question="How does heat treatment affect corrosion resistance?",
+                    material_scope=["316L stainless steel"],
+                    variables=["heat treatment"],
+                    outcomes=["corrosion resistance"],
+                    constraints=["LPBF"],
+                    seed_document_ids=[],
+                    confidence=0.88,
+                    reason="model omitted the source document binding",
+                )
+            ]
+        )
+
+
 class _OverbroadPersistedObjectiveExtractor(_DuplicateMechanicalObjectiveExtractor):
     def discover_research_objectives(
         self,
@@ -2701,6 +2723,55 @@ def test_research_objective_service_canonicalizes_model_document_references(
 
     assert normalized.seed_document_ids == ("canonical-1",)
     assert normalized.excluded_document_ids == ("canonical-2",)
+
+
+def test_research_objective_service_repairs_one_character_truncated_document_id(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    canonical_id = "a" * 127 + "0"
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "seed_document_ids": [canonical_id[:-1]],
+        }
+    )
+
+    normalized = service._canonicalize_objective_document_ids(
+        objective,
+        documents=[SimpleNamespace(document_id=canonical_id, metadata={})],
+    )
+
+    assert normalized.seed_document_ids == (canonical_id,)
+
+
+def test_research_objective_service_rejects_ambiguous_or_overtruncated_document_id(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    common_prefix = "a" * 127
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "seed_document_ids": [common_prefix, common_prefix[:-1]],
+        }
+    )
+
+    normalized = service._canonicalize_objective_document_ids(
+        objective,
+        documents=[
+            SimpleNamespace(document_id=common_prefix + "0", metadata={}),
+            SimpleNamespace(document_id=common_prefix + "1", metadata={}),
+        ],
+    )
+
+    assert normalized.seed_document_ids == ()
 
 
 def test_research_objective_service_forces_extractable_objective_route_roles(
@@ -6248,6 +6319,59 @@ def test_research_objective_tree_routing_keeps_direct_result_among_scope_text(
     }
 
 
+def test_research_objective_tree_routing_excludes_non_block_caption_refs(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "changed_variables": ["energy density"],
+            "measured_property_scope": ["relative density"],
+        }
+    )
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes={
+            "root": SourceDocumentNode(
+                node_id="root",
+                document_id="paper-1",
+                parent_id=None,
+                child_ids=("figure-caption",),
+                node_type="document",
+                order=0,
+            ),
+            "figure-caption": SourceDocumentNode(
+                node_id="figure-caption",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=(),
+                node_type="caption",
+                order=100,
+                text=(
+                    "Relative density increased when energy density changed from "
+                    "70 to 150 J/mm3."
+                ),
+                source_ref_kind="figure",
+                source_ref_id="figure-1",
+            ),
+        },
+    )
+
+    candidates = service._build_tree_route_text_candidates(
+        frame=frame,
+        blocks=[],
+        document_tree=document_tree,
+    )
+
+    assert candidates == []
+
+
 def test_research_objective_tree_routing_keeps_multiple_comparative_results(
     tmp_path,
 ):
@@ -6964,6 +7088,63 @@ def test_research_objective_service_does_not_global_fill_unmatched_seed_axes(
     objectives = _build_duplicate_paper_objectives(
         tmp_path,
         _UnmatchedSeedObjectiveExtractor(),
+    )
+
+    assert objectives == ()
+
+
+def test_research_objective_service_recovers_unique_missing_seed_document_id(
+    tmp_path,
+):
+    objectives = _build_duplicate_paper_objectives(
+        tmp_path,
+        _MissingSeedObjectiveExtractor(),
+    )
+
+    assert len(objectives) == 1
+    assert objectives[0].seed_document_ids == ("paper-1",)
+
+
+def test_research_objective_service_rejects_ambiguous_missing_seed_document_id(
+    tmp_path,
+):
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    collection_id = collection_service.create_collection("Ambiguous seeds")[
+        "collection_id"
+    ]
+    service = _build_research_objective_service(
+        collection_service=collection_service,
+        structured_extractor=_MissingSeedObjectiveExtractor(),
+    )
+    service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        "build_test",
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": document_id,
+                    "title": "LPBF 316L corrosion experiment",
+                    "text": "Heat treatment changed corrosion resistance.",
+                }
+                for document_id in ("paper-1", "paper-2")
+            ],
+            blocks=[
+                {
+                    "block_id": f"{document_id}-abstract",
+                    "document_id": document_id,
+                    "block_type": "paragraph",
+                    "text": "Heat treatment changed corrosion resistance.",
+                    "block_order": 1,
+                }
+                for document_id in ("paper-1", "paper-2")
+            ],
+        ),
+    )
+    _seed_document_profiles(service, collection_id)
+
+    objectives = service.build_objective_candidates(
+        collection_id,
+        build_id="build_test",
     )
 
     assert objectives == ()

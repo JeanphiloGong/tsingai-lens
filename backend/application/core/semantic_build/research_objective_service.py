@@ -1175,6 +1175,18 @@ class ResearchObjectiveService:
                     matching_document_ids.add(document_id)
                     break
             seed_document_ids = set(objective.seed_document_ids)
+            if not seed_document_ids and len(matching_document_ids) == 1:
+                payload = objective.to_record()
+                payload["seed_document_ids"] = sorted(matching_document_ids)
+                objective = ResearchObjective.from_mapping(payload)
+                seed_document_ids = set(objective.seed_document_ids)
+                logger.info(
+                    "Research objective recovered one missing seed document "
+                    "collection_id=%s question=%s seed_document_id=%s",
+                    collection_id,
+                    objective.question,
+                    next(iter(seed_document_ids)),
+                )
             if not seed_document_ids or not seed_document_ids.issubset(
                 matching_document_ids
             ):
@@ -1294,6 +1306,22 @@ class ResearchObjectiveService:
                     else aliases.get(normalized)
                     or aliases.get(normalized.rsplit("/", 1)[-1])
                 )
+                if (
+                    not document_id
+                    and len(normalized) >= 32
+                    and all(
+                        character in "0123456789abcdefABCDEF"
+                        for character in normalized
+                    )
+                ):
+                    truncated_matches = [
+                        candidate
+                        for candidate in canonical_ids
+                        if len(candidate) == len(normalized) + 1
+                        and candidate.startswith(normalized)
+                    ]
+                    if len(truncated_matches) == 1:
+                        document_id = truncated_matches[0]
                 if document_id and document_id not in seen:
                     seen.add(document_id)
                     result.append(document_id)
@@ -6190,6 +6218,8 @@ class ResearchObjectiveService:
         scored_candidates: list[tuple[int, int, dict[str, Any]]] = []
         for node in self._document_tree_nodes_in_order(document_tree):
             if self._tree_node_in_reference_branch(document_tree, node):
+                continue
+            if str(getattr(node, "source_ref_kind", "") or "").strip() != "block":
                 continue
             block_type = self._route_text_node_block_type(node)
             if block_type not in {"paragraph", "list_item", "figure_caption"}:

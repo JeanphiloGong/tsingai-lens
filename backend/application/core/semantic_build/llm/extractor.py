@@ -586,6 +586,7 @@ class CoreLLMStructuredExtractor:
                         if container_extra_keys - allowed_echo_keys:
                             raise validation_error
                         valid_objectives: list[StructuredResearchObjective] = []
+                        invalid_objective_payloads: list[dict[str, Any]] = []
                         for objective_payload in objective_payloads:
                             try:
                                 valid_objectives.append(
@@ -594,7 +595,8 @@ class CoreLLMStructuredExtractor:
                                     )
                                 )
                             except ValidationError:
-                                continue
+                                if isinstance(objective_payload, dict):
+                                    invalid_objective_payloads.append(objective_payload)
                         if attempt == 0:
                             preserved_objectives = valid_objectives
                         else:
@@ -607,6 +609,16 @@ class CoreLLMStructuredExtractor:
                                 for objective in valid_objectives
                                 if objective.model_dump_json() not in preserved_keys
                             ]
+                            corrected_objectives.extend(
+                                objective
+                                for objective_payload in invalid_objective_payloads
+                                if (
+                                    objective := self._repair_trailing_scope_objective(
+                                        objective_payload
+                                    )
+                                )
+                                is not None
+                            )
                             if corrected_objectives:
                                 combined: list[StructuredResearchObjective] = []
                                 seen: set[str] = set()
@@ -623,6 +635,44 @@ class CoreLLMStructuredExtractor:
                                     StructuredResearchObjectives(objectives=combined),
                                     raw_content,
                                 )
+                    if (
+                        response_model is StructuredEvidenceExtractions
+                        and isinstance(payload, dict)
+                        and isinstance(payload.get("extractions"), list)
+                    ):
+                        allowed_echo_keys = {
+                            "OBJECTIVE",
+                            "OBJECTIVE VARIABLES",
+                            "OBJECTIVE OUTCOMES",
+                            "ROUTE HINT ONLY (DO NOT COPY AS EVIDENCE ROLE)",
+                            "SOURCE KIND",
+                            "SOURCE",
+                        }
+                        filtered_payload = {"extractions": payload["extractions"]}
+                        extra_keys = set(payload) - {"extractions"}
+                        if extra_keys and extra_keys <= allowed_echo_keys:
+                            return (
+                                StructuredEvidenceExtractions.model_validate(
+                                    filtered_payload
+                                ),
+                                raw_content,
+                            )
+                    if (
+                        response_model is StructuredEvidenceExtractions
+                        and isinstance(payload, dict)
+                        and "extractions" not in payload
+                        and bool(payload)
+                        and set(payload)
+                        <= {
+                            "OBJECTIVE",
+                            "OBJECTIVE VARIABLES",
+                            "OBJECTIVE OUTCOMES",
+                            "ROUTE HINT ONLY (DO NOT COPY AS EVIDENCE ROLE)",
+                            "SOURCE KIND",
+                            "SOURCE",
+                        }
+                    ):
+                        return StructuredEvidenceExtractions(), raw_content
                     if isinstance(payload, dict):
                         extra_keys = set(payload) - set(response_model.model_fields)
                         if extra_keys - {"confidence"}:
@@ -649,6 +699,49 @@ class CoreLLMStructuredExtractor:
                     continue
                 raise
         raise RuntimeError("structured extraction failed after retry") from last_error
+
+    @staticmethod
+    def _repair_trailing_scope_objective(
+        payload: dict[str, Any],
+    ) -> StructuredResearchObjective | None:
+        filtered = {
+            key: value
+            for key, value in payload.items()
+            if key in StructuredResearchObjective.model_fields
+        }
+        variables = [
+            str(value).strip()
+            for value in filtered.get("variables", [])
+            if str(value).strip()
+        ]
+        outcomes = [
+            str(value).strip()
+            for value in filtered.get("outcomes", [])
+            if str(value).strip()
+        ]
+        question = str(filtered.get("question") or "").strip()
+        if not question or not variables or not outcomes:
+            return None
+
+        probe = dict(filtered)
+        probe["constraints"] = [
+            *list(filtered.get("constraints") or []),
+            *re.findall(r"[^\W_]+", question, flags=re.UNICODE),
+        ]
+        try:
+            StructuredResearchObjective.model_validate(probe)
+        except ValidationError:
+            return None
+
+        subject = " and ".join(variables)
+        result = " and ".join(outcomes)
+        auxiliary = "does" if len(variables) == 1 else "do"
+        repaired = dict(filtered)
+        repaired["question"] = f"How {auxiliary} {subject} affect {result}?"
+        try:
+            return StructuredResearchObjective.model_validate(repaired)
+        except ValidationError:
+            return None
 
     def _parse_provider_structured_response(
         self,

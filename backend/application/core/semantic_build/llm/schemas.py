@@ -721,17 +721,17 @@ class StructuredPaperSkim(_StrictModel):
 
 
 class StructuredResearchObjective(_StrictModel):
-    question: str
+    question: str = Field(max_length=180)
     material_scope: list[str] = Field(default_factory=list)
     variables: list[str] = Field(min_length=1)
     outcomes: list[str] = Field(min_length=1)
     mechanisms: list[str] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
-    requested_comparator: str | None = None
+    requested_comparator: str | None = Field(default=None, max_length=160)
     seed_document_ids: list[str] = Field(default_factory=list)
     excluded_document_ids: list[str] = Field(default_factory=list)
     confidence: float = 0.0
-    reason: str | None = None
+    reason: str | None = Field(default=None, max_length=120)
 
     @field_validator(
         "material_scope",
@@ -749,7 +749,10 @@ class StructuredResearchObjective(_StrictModel):
 
 
 class StructuredResearchObjectives(_StrictModel):
-    objectives: list[StructuredResearchObjective] = Field(default_factory=list)
+    objectives: list[StructuredResearchObjective] = Field(
+        default_factory=list,
+        max_length=6,
+    )
 
     @field_validator("objectives", mode="before")
     @classmethod
@@ -913,12 +916,6 @@ class StructuredEvidenceVariable(_StrictModel):
     baseline_value: ScientificScalar | None = None
     target_value: ScientificScalar | None = None
     unit: str | None = None
-
-    @model_validator(mode="after")
-    def _require_reported_value(self) -> "StructuredEvidenceVariable":
-        if self.baseline_value is None and self.target_value is None:
-            raise ValueError("changed variable requires a baseline or target value")
-        return self
 
 
 class StructuredEvidenceComparison(_StrictModel):
@@ -1147,8 +1144,6 @@ class StructuredFindingSynthesisItem(_StrictModel):
     assertion_strength: Literal["causal", "associative", "descriptive"] = (
         "descriptive"
     )
-    supporting_evidence_ids: list[str] = Field(min_length=1)
-    contradicting_evidence_ids: list[str] = Field(default_factory=list)
     condition_boundary_evidence_ids: list[str] = Field(
         default_factory=list, max_length=24
     )
@@ -1177,8 +1172,6 @@ class StructuredFindingSynthesisItem(_StrictModel):
         )
 
     @field_validator(
-        "supporting_evidence_ids",
-        "contradicting_evidence_ids",
         "condition_boundary_evidence_ids",
         "context_evidence_ids",
     )
@@ -1187,25 +1180,6 @@ class StructuredFindingSynthesisItem(_StrictModel):
         if len(value) != len(set(value)):
             raise ValueError("finding evidence ids must be unique within each role")
         return value
-
-    @model_validator(mode="after")
-    def _validate_evidence_assignments(self) -> "StructuredFindingSynthesisItem":
-        supporting = set(self.supporting_evidence_ids)
-        contradicting = set(self.contradicting_evidence_ids)
-        context = set(self.context_evidence_ids)
-        if supporting & contradicting:
-            raise ValueError("supporting and contradicting evidence must be disjoint")
-        linked = supporting | contradicting | context
-        if not set(self.condition_boundary_evidence_ids) <= linked:
-            raise ValueError("condition-boundary evidence must already be linked")
-        mechanism_ids = {
-            evidence_id
-            for mechanism in self.mechanisms
-            for evidence_id in mechanism.supporting_evidence_ids
-        }
-        if not mechanism_ids <= context:
-            raise ValueError("mechanism evidence must also be context evidence")
-        return self
 
 
 class StructuredFindingSynthesis(_StrictModel):

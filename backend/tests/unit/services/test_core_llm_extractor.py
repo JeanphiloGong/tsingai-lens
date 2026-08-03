@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
 from application.core.semantic_build.llm.prompts import (
     build_objective_evidence_prompt,
+    build_research_objective_discovery_prompt,
     build_finding_synthesis_prompt,
 )
 from application.core.semantic_build.llm.schemas import (
@@ -41,6 +42,37 @@ def test_structured_research_objective_requires_primary_scientific_axes(field):
 
     with pytest.raises(ValidationError):
         StructuredResearchObjective.model_validate(payload)
+
+
+def test_research_objective_discovery_contract_bounds_model_output():
+    objective = {
+        "question": "How does heat treatment affect yield strength?",
+        "variables": ["heat treatment"],
+        "outcomes": ["yield strength"],
+    }
+
+    with pytest.raises(ValidationError):
+        StructuredResearchObjectives.model_validate(
+            {"objectives": [objective for _ in range(7)]}
+        )
+
+    schema = StructuredResearchObjectives.model_json_schema()
+    objective_schema = schema["$defs"]["StructuredResearchObjective"]["properties"]
+    assert schema["properties"]["objectives"]["maxItems"] == 6
+    assert objective_schema["question"]["maxLength"] == 180
+    assert objective_schema["requested_comparator"]["anyOf"][0]["maxLength"] == 160
+    assert objective_schema["reason"]["anyOf"][0]["maxLength"] == 120
+
+
+def test_research_objective_discovery_prompt_requires_focused_concise_objectives():
+    _, user_prompt = build_research_objective_discovery_prompt(
+        {"collection_id": "col-1", "paper_skims": []}
+    )
+
+    assert "at most six objectives" in user_prompt
+    assert "only tightly related outcomes" in user_prompt
+    assert "Do not put another measured property in `mechanisms`" in user_prompt
+    assert "Set `reason` to null" in user_prompt
 
 
 class _FakeCompletions:
@@ -141,6 +173,9 @@ def test_core_llm_extractor_validates_json_text_response():
     assert len(client.chat.completions.calls) == 1
     assert client.beta.chat.completions.calls == []
     assert "JSON schema:" in client.chat.completions.calls[0]["messages"][1]["content"]
+    assert client.chat.completions.calls[0]["response_format"] == {
+        "type": "json_object"
+    }
     assert client.chat.completions.calls[0]["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
     }
@@ -239,11 +274,11 @@ def test_core_llm_extractor_synthesizes_goal_findings_with_distinct_trace():
     assert result == parsed
     parse_call = client.beta.chat.completions.calls[0]
     assert parse_call["response_format"] is StructuredFindingSynthesis
-    assert parse_call["max_completion_tokens"] == 2048
+    assert parse_call["max_completion_tokens"] == 1024
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v2"
+    assert trace["prompt_version"] == "finding_synthesis.v4"
     assert trace["parsed_output"] == {"findings": []}
 
 
@@ -259,10 +294,10 @@ def test_core_llm_extractor_bounds_json_text_finding_synthesis_output():
     )
 
     assert result == StructuredFindingSynthesis(findings=[])
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
+    assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
 
 
-def test_finding_synthesis_schema_rejects_duplicate_evidence_assignment():
+def test_finding_synthesis_schema_rejects_model_owned_result_assignment():
     payload = {
         "result_set_id": "result-set-1",
         "statement": "Energy density increases relative density.",
@@ -271,7 +306,7 @@ def test_finding_synthesis_schema_rejects_duplicate_evidence_assignment():
         "supporting_evidence_ids": ["evidence-1", "evidence-1"],
     }
 
-    with pytest.raises(ValidationError, match="must be unique"):
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         StructuredFindingSynthesis.model_validate({"findings": [payload]})
 
 
@@ -280,9 +315,14 @@ def test_finding_synthesis_prompt_uses_atomic_evidence_contract():
         "objective": {"question": "How does energy density affect density?"},
         "result_set": {
             "result_set_id": "result-set-1",
-            "factors": ["energy density"],
-            "outcome": "density",
-            "result_evidence": [],
+            "factors": ["laser power", "scan speed", "energy density"],
+            "outcome": "maximum defect length",
+            "result_evidence": [
+                {
+                    "evidence_id": "evidence-1",
+                    "attribution_scope": "joint_effect",
+                }
+            ],
         },
         "paper_contributions": [],
         "context_evidence": [],
@@ -300,14 +340,71 @@ def test_finding_synthesis_prompt_uses_atomic_evidence_contract():
     assert "result_evidence" in normalized_system_prompt
     assert "context_evidence" in normalized_system_prompt
     assert "exactly one reported outcome" in normalized_system_prompt
-    assert "cover every `result_evidence` id exactly once" in normalized_system_prompt
+    assert "do not output support or contradiction ids" in normalized_system_prompt
     assert "Do not output factors, outcome, paper count" in normalized_system_prompt
     assert "Joint factors must remain the complete factor set" in normalized_system_prompt
     assert "Mechanisms explain the main Finding" in normalized_system_prompt
-    assert "Assign every result Evidence id exactly once" in user_prompt
+    assert "Choose one direction that accounts for every" in user_prompt
+    assert "`laser power`" in user_prompt
+    assert "`scan speed`" in user_prompt
+    assert "`energy density`" in user_prompt
+    assert "`maximum defect length`" in user_prompt
+    assert "assertion_strength` must be `associative`" in user_prompt
+    assert "Joint changes in laser power, scan speed, and energy density" in user_prompt
     mechanism_schema = StructuredFindingMechanism.model_json_schema()
     assert "supporting_evidence_ids" in mechanism_schema["properties"]
     assert json.dumps(payload, ensure_ascii=False, separators=(",", ":")) in user_prompt
+
+
+def test_finding_synthesis_prompt_requires_specific_single_factor_result():
+    payload = {
+        "objective": {
+            "question": "How does build platform preheating affect microstructure?"
+        },
+        "result_set": {
+            "result_set_id": "result-set-preheating",
+            "factors": ["preheating build platform temperature"],
+            "outcome": "microstructure",
+            "result_evidence": [
+                {
+                    "evidence_id": "evidence-preheating",
+                    "changed_variables": [
+                        {
+                            "name": "preheating build platform temperature",
+                            "baseline_value": "P150",
+                            "target_value": "NP",
+                            "unit": None,
+                        }
+                    ],
+                    "reported_result": {
+                        "outcome": "microstructure",
+                        "value": "cellular structure",
+                        "unit": None,
+                        "direction": "mixed",
+                        "result_text": (
+                            "Comparing P150 with NP, cellular structure was seen "
+                            "in P150."
+                        ),
+                    },
+                    "attribution_scope": "isolated_effect",
+                }
+            ],
+        },
+        "paper_contributions": [],
+        "context_evidence": [],
+    }
+
+    _system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
+
+    assert (
+        "`preheating build platform temperature: P150 -> NP`" in user_prompt
+    )
+    assert "source-reported result detail `cellular structure`" in user_prompt
+    assert (
+        "For preheating build platform temperature, P150 versus NP showed a "
+        "difference in microstructure:" in user_prompt
+    )
+    assert "Never return a generic restatement" in user_prompt
 
 
 
@@ -406,7 +503,9 @@ def test_core_llm_extractor_validates_research_objective_response():
 
     assert isinstance(objectives, StructuredResearchObjectives)
     assert objectives.objectives[0].question.startswith("How does heat treatment")
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 1400
+    text_call = client.chat.completions.calls[0]
+    assert text_call["max_completion_tokens"] == 1400
+    assert text_call["response_format"] == {"type": "json_object"}
 
 
 def test_core_llm_extractor_validates_axis_canonicalization_response():
@@ -726,8 +825,43 @@ def test_structured_objective_evidence_rejects_effect_without_variable_change():
         )
 
 
+def test_structured_objective_evidence_allows_unbound_variable_draft():
+    extraction = StructuredEvidenceExtraction.model_validate(
+        {
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "preheating build platform temperature",
+                    "baseline_value": None,
+                    "target_value": None,
+                }
+            ],
+            "comparison": {
+                "baseline_label": "NP",
+                "target_label": "P150",
+                "axis_names": ["preheating build platform temperature"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "microstructure",
+                "value": None,
+                "unit": None,
+                "direction": "mixed",
+                "result_text": "P150 had a coarser cellular structure than NP.",
+            },
+            "attribution_scope": "association_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.8,
+        }
+    )
+
+    assert extraction.changed_variables[0].baseline_value is None
+    assert extraction.changed_variables[0].target_value is None
+
+
 def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
-    _, prompt = build_objective_evidence_prompt(
+    system_prompt, prompt = build_objective_evidence_prompt(
         {
             "collection_id": "col-1",
             "objective": {"question": "How does preheating affect 316L?"},
@@ -755,6 +889,12 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     assert "1.43x10^6 C/s for P150" in prompt
     assert "1.65x10^6 C/s for NP" in prompt
     assert "Bad text example" in prompt
+    assert "Every changed variable should include" in system_prompt
+    assert "exact source group labels as endpoints" in system_prompt
+    assert "Context roles must return `reported_result: null`" in system_prompt
+    assert "numeric `confidence` after `resolution_status`" in system_prompt
+    assert "qualitative observation" in prompt
+    assert "it is not mechanism_context" in prompt
 
 
 def test_core_llm_extractor_rejects_backend_bound_objective_evidence_fields():
@@ -963,6 +1103,7 @@ def test_core_llm_extractor_routes_document_profiles_directly_to_bounded_json_te
     assert client.beta.chat.completions.calls == []
     text_call = client.chat.completions.calls[0]
     assert text_call["max_completion_tokens"] == 1024
+    assert text_call["response_format"] == {"type": "json_object"}
     assert "JSON schema:" in text_call["messages"][1]["content"]
     assert text_call["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
@@ -1008,6 +1149,7 @@ def test_core_llm_extractor_routes_objective_selections_directly_to_bounded_json
     assert client.beta.chat.completions.calls == []
     text_call = client.chat.completions.calls[0]
     assert text_call["max_completion_tokens"] == 512
+    assert text_call["response_format"] == {"type": "json_object"}
     assert "JSON schema:" in text_call["messages"][1]["content"]
     assert text_call["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
@@ -1015,11 +1157,14 @@ def test_core_llm_extractor_routes_objective_selections_directly_to_bounded_json
     assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
 
 
-def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_objective_units(
+def test_core_llm_extractor_routes_objective_units_through_bounded_provider_parse(
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
-    client = _FakeOpenAIClient('{"extractions": []}')
+    client = _FakeOpenAIClient(
+        "unused",
+        parsed=StructuredEvidenceExtractions(),
+    )
     extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
 
     units = extractor.extract_objective_evidence(
@@ -1032,11 +1177,131 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_objective_
     )
 
     assert units == StructuredEvidenceExtractions()
-    assert client.beta.chat.completions.calls == []
-    text_call = client.chat.completions.calls[0]
-    assert text_call["max_completion_tokens"] == 1024
-    assert "JSON schema:" in text_call["messages"][1]["content"]
-    assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
+    assert client.chat.completions.calls == []
+    parse_call = client.beta.chat.completions.calls[0]
+    assert parse_call["max_completion_tokens"] == 1024
+    assert parse_call["response_format"] is StructuredEvidenceExtractions
+    assert "JSON schema:" not in parse_call["messages"][1]["content"]
+    assert extractor.consume_last_trace()["extraction_mode"] == "provider_parse"
+
+
+def test_objective_evidence_prompt_requires_verbatim_outcome_bound_result_text() -> None:
+    _system_prompt, user_prompt = build_objective_evidence_prompt(
+        {
+            "objective": {"outcomes": ["microstructure"]},
+            "source": {"text": "P150 formed an equiaxed cellular structure."},
+        }
+    )
+
+    assert "one short verbatim substring" in user_prompt
+    assert "direction must describe that outcome" in user_prompt
+    assert "use `mixed` for a qualitative morphology change" in user_prompt
+    assert "mixes the authors' current result with cited literature" in user_prompt
+    assert "`incomparability_reasons` must be empty" in user_prompt
+    assert "conditions from cited literature" in user_prompt
+
+
+def test_core_llm_extractor_retries_with_structured_validation_error(monkeypatch):
+    monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
+    invalid = json.dumps(
+        {
+            "extractions": [
+                {
+                    "evidence_role": "direct_result",
+                    "changed_variables": [
+                        {
+                            "name": "preheating build platform temperature",
+                            "baseline_value": "NP",
+                            "target_value": "P150",
+                        }
+                    ],
+                    "comparison": None,
+                    "reported_result": {
+                        "outcome": "microstructure",
+                        "value": None,
+                        "unit": None,
+                        "direction": "mixed",
+                        "result_text": "P150 formed an equiaxed cellular structure.",
+                    },
+                    "attribution_scope": "isolated_effect",
+                    "scientific_context": {},
+                    "resolution_status": "partial",
+                    "confidence": 0.8,
+                }
+            ]
+        }
+    )
+    valid = json.dumps(
+        {
+            "extractions": [
+                {
+                    "evidence_role": "direct_result",
+                    "changed_variables": [
+                        {
+                            "name": "preheating build platform temperature",
+                            "baseline_value": "NP",
+                            "target_value": "P150",
+                        }
+                    ],
+                    "comparison": {
+                        "baseline_label": "NP",
+                        "target_label": "P150",
+                        "axis_names": ["preheating build platform temperature"],
+                        "comparable": True,
+                    },
+                    "reported_result": {
+                        "outcome": "microstructure",
+                        "value": None,
+                        "unit": None,
+                        "direction": "mixed",
+                        "result_text": "P150 formed an equiaxed cellular structure.",
+                    },
+                    "attribution_scope": "isolated_effect",
+                    "scientific_context": {},
+                    "resolution_status": "resolved",
+                    "confidence": 0.8,
+                }
+            ]
+        }
+    )
+    client = _FakeOpenAIClient(invalid)
+    responses = iter((invalid, valid))
+
+    def create(**kwargs):  # noqa: ANN003
+        client.chat.completions.calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=next(responses)),
+                )
+            ]
+        )
+
+    client.chat.completions.create = create
+    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+
+    parsed = extractor.extract_objective_evidence(
+        {
+            "objective": {
+                "question": "How does preheating affect microstructure?"
+            },
+            "evidence_route": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+            },
+            "source": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "text": "P150 formed an equiaxed cellular structure compared with NP.",
+            },
+        }
+    )
+
+    assert parsed.extractions[0].comparison is not None
+    assert len(client.chat.completions.calls) == 2
+    repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "experimental attribution requires comparison" in repair_prompt
+
 
 
 def test_core_llm_extractor_validates_lightweight_table_batch_mentions():

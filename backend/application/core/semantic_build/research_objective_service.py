@@ -447,9 +447,24 @@ _BROAD_PROPERTY_AXIS_EXPANSIONS = {
         "passivation behavior",
     ),
     "defect structure": (
+        "defect complexity",
+        "defect density",
+        "defect diameter",
+        "defect distribution",
         "max defect length",
+        "max defect diameter",
+        "max defect size",
         "defect length",
+        "defect shape",
+        "defect size",
         "porosity",
+    ),
+    "microstructure": (
+        "cellular structure",
+        "cellular-dendritic microstructure",
+        "crystallographic texture",
+        "grain morphology",
+        "grain structure",
     ),
     "fatigue strength": (
         "fatigue strength",
@@ -502,6 +517,9 @@ _OBJECTIVE_PROPERTY_ALIASES = {
     "max. defect length": "max defect length",
     "max defect length": "max defect length",
     "max defect length lcsm": "max defect length",
+    "max. defect diameter": "max defect diameter",
+    "maximum defect diameter": "max defect diameter",
+    "maximum defect size": "max defect size",
     "maximum defect length": "max defect length",
     "sigma y": "yield strength",
     "\u0131 y": "yield strength",
@@ -519,13 +537,13 @@ _OBJECTIVE_PAIRWISE_ELONGATION_MIN_DELTA = 3.4
 _OBJECTIVE_PAIRWISE_LARGE_SCOPE_LIMIT = 48
 _OBJECTIVE_PAIRWISE_GROUP_LIMIT = 3
 _OBJECTIVE_SYMBOL_AXIS_ALIASES = {
-    "alpha": ("scan strategy rotation angle",),
-    "α": ("scan strategy rotation angle",),
-    "beta": ("scan strategy rotation angle",),
-    "β": ("scan strategy rotation angle",),
-    "theta": ("scan strategy rotation angle", "build orientation angle"),
-    "θ": ("scan strategy rotation angle", "build orientation angle"),
-    "ɵ": ("scan strategy rotation angle", "build orientation angle"),
+    "alpha": ("build orientation alpha angle",),
+    "α": ("build orientation alpha angle",),
+    "beta": ("build orientation beta angle",),
+    "β": ("build orientation beta angle",),
+    "theta": ("scan strategy rotation angle",),
+    "θ": ("scan strategy rotation angle",),
+    "ɵ": ("scan strategy rotation angle",),
     "ved": ("volumetric energy density", "energy density"),
 }
 _OBJECTIVE_AXIS_SYNONYMS = {
@@ -2157,6 +2175,24 @@ class ResearchObjectiveService:
             priority -= 3
         text = str(candidate.get("text") or "").casefold()
         if any(
+            phrase in text
+            for phrase in (
+                "compared with",
+                "comparing",
+                "decreased",
+                "exhibited",
+                "formation of",
+                "formed",
+                "higher than",
+                "increased",
+                "lower than",
+                "observed",
+                "resulted in",
+                "resulted into",
+            )
+        ):
+            priority += 8
+        if any(
             token in text
             for token in (
                 "microstructure",
@@ -2168,6 +2204,15 @@ class ResearchObjectiveService:
             )
         ):
             priority += 2
+        if any(
+            phrase in text
+            for phrase in (
+                "aims to",
+                "following conclusions can be drawn",
+                "was investigated",
+            )
+        ):
+            priority -= 8
         return priority
 
     def _text_hint_route_role(
@@ -2541,8 +2586,9 @@ class ResearchObjectiveService:
             collection_id,
             len(units),
         )
+        bound_units = self._bind_objective_result_process_context(tuple(units))
         comparison_units = self._build_objective_pairwise_comparison_units(
-            tuple(units),
+            bound_units,
             objectives=objectives,
         )
         if comparison_units:
@@ -2551,7 +2597,7 @@ class ResearchObjectiveService:
                 collection_id,
                 len(comparison_units),
             )
-        return (*units, *comparison_units)
+        return (*bound_units, *comparison_units)
 
     def _objective_table_route_should_skip_llm_fallback(
         self,
@@ -3300,6 +3346,242 @@ class ResearchObjectiveService:
             re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).split()
         )
 
+    def _bind_objective_result_process_context(
+        self,
+        units: tuple[ExtractedEvidenceDraft, ...],
+    ) -> tuple[ExtractedEvidenceDraft, ...]:
+        process_context_by_sample: dict[
+            tuple[str, str, str], ExtractedEvidenceDraft
+        ] = {}
+        process_context_scopes: set[tuple[str, str]] = set()
+        conflicting_samples: set[tuple[str, str, str]] = set()
+        for unit in units:
+            if (
+                unit.evidence_role != "condition_context"
+                or not unit.scientific_context.process
+            ):
+                continue
+            sample_identity = self._objective_explicit_sample_identity(unit)
+            if not sample_identity:
+                continue
+            key = (unit.objective_id, unit.document_id, sample_identity)
+            process_context_scopes.add((unit.objective_id, unit.document_id))
+            existing = process_context_by_sample.get(key)
+            if existing is None:
+                process_context_by_sample[key] = unit
+                continue
+            if self._objective_process_context_signature(
+                existing
+            ) != self._objective_process_context_signature(unit):
+                conflicting_samples.add(key)
+
+        bound: list[ExtractedEvidenceDraft] = []
+        for unit in units:
+            comparison = unit.comparison
+            scope = (unit.objective_id, unit.document_id)
+            if (
+                unit.source_kind == "text_window"
+                and unit.reported_result is not None
+                and comparison is not None
+                and unit.attribution_scope in {"isolated_effect", "joint_effect"}
+                and scope in process_context_scopes
+            ):
+                baseline_key = (
+                    unit.objective_id,
+                    unit.document_id,
+                    comparison.baseline_label.casefold(),
+                )
+                target_key = (
+                    unit.objective_id,
+                    unit.document_id,
+                    comparison.target_label.casefold(),
+                )
+                baseline_context = process_context_by_sample.get(baseline_key)
+                target_context = process_context_by_sample.get(target_key)
+                groups_are_grounded = bool(
+                    baseline_context is not None
+                    and target_context is not None
+                    and baseline_key not in conflicting_samples
+                    and target_key not in conflicting_samples
+                )
+                if not groups_are_grounded:
+                    payload = unit.to_record()
+                    payload["changed_variables"] = []
+                    comparison_payload = comparison.to_record()
+                    comparison_payload.update(
+                        {
+                            "comparable": False,
+                            "incomparability_reasons": [
+                                "comparison groups do not bind to source process conditions"
+                            ],
+                        }
+                    )
+                    payload["comparison"] = comparison_payload
+                    payload["attribution_scope"] = "not_attributable"
+                    payload["resolution_status"] = "partial"
+                    bound.append(ExtractedEvidenceDraft.from_mapping(payload))
+                    continue
+
+                baseline_process = {
+                    self._normalize_property_label(item.name)
+                    or self._objective_column_key(item.name): item
+                    for item in baseline_context.scientific_context.process
+                }
+                target_process = {
+                    self._normalize_property_label(item.name)
+                    or self._objective_column_key(item.name): item
+                    for item in target_context.scientific_context.process
+                }
+                changed_variables: list[dict[str, Any]] = []
+                incomparability_reasons: list[str] = []
+                for key in sorted(set(baseline_process) | set(target_process)):
+                    baseline_attribute = baseline_process.get(key)
+                    target_attribute = target_process.get(key)
+                    if baseline_attribute is None or target_attribute is None:
+                        name = (
+                            target_attribute.name
+                            if target_attribute is not None
+                            else baseline_attribute.name
+                        )
+                        incomparability_reasons.append(
+                            "process comparison is missing one group value for "
+                            f"{name}"
+                        )
+                    else:
+                        name = target_attribute.name
+                        if (
+                            baseline_attribute is not None
+                            and target_attribute is not None
+                            and baseline_attribute.value == target_attribute.value
+                            and baseline_attribute.unit == target_attribute.unit
+                        ):
+                            continue
+                    changed_variables.append(
+                        {
+                            "name": name,
+                            "baseline_value": (
+                                baseline_attribute.value
+                                if baseline_attribute is not None
+                                else None
+                            ),
+                            "target_value": (
+                                target_attribute.value
+                                if target_attribute is not None
+                                else None
+                            ),
+                            "unit": (
+                                target_attribute.unit
+                                if target_attribute is not None
+                                else baseline_attribute.unit
+                            ),
+                        }
+                    )
+                if not changed_variables:
+                    incomparability_reasons.append(
+                        "bound process conditions do not contain a changed variable"
+                    )
+                comparable = not incomparability_reasons
+                payload = unit.to_record()
+                payload["changed_variables"] = changed_variables
+                payload["comparison"] = {
+                    "baseline_label": comparison.baseline_label,
+                    "target_label": comparison.target_label,
+                    "axis_names": [
+                        item["name"] for item in changed_variables
+                    ] or list(comparison.axis_names),
+                    "comparable": comparable,
+                    "incomparability_reasons": incomparability_reasons,
+                }
+                payload["attribution_scope"] = (
+                    "not_attributable"
+                    if not comparable
+                    else (
+                        "isolated_effect"
+                        if len(changed_variables) == 1
+                        else "joint_effect"
+                    )
+                )
+                scientific_context = unit.scientific_context.to_record()
+                scientific_context["process"] = self._objective_common_pairwise_context(
+                    baseline_context,
+                    target_context,
+                )["process"]
+                payload["scientific_context"] = scientific_context
+                payload["source_refs"] = list(
+                    self._dedupe_objective_source_refs(
+                        (
+                            unit.source_refs,
+                            baseline_context.source_refs,
+                            target_context.source_refs,
+                        )
+                    )
+                )
+                payload["confidence"] = min(
+                    unit.confidence,
+                    baseline_context.confidence,
+                    target_context.confidence,
+                )
+                bound.append(ExtractedEvidenceDraft.from_mapping(payload))
+                continue
+            if (
+                unit.reported_result is None
+                or unit.attribution_scope != "descriptive_only"
+                or unit.scientific_context.process
+            ):
+                bound.append(unit)
+                continue
+            sample_identity = self._objective_explicit_sample_identity(unit)
+            key = (unit.objective_id, unit.document_id, sample_identity)
+            process_context = process_context_by_sample.get(key)
+            if (
+                not sample_identity
+                or key in conflicting_samples
+                or process_context is None
+            ):
+                bound.append(unit)
+                continue
+            payload = unit.to_record()
+            scientific_context = unit.scientific_context.to_record()
+            scientific_context["process"] = [
+                item.to_record()
+                for item in process_context.scientific_context.process
+            ]
+            payload["scientific_context"] = scientific_context
+            payload["source_refs"] = list(
+                self._dedupe_objective_source_refs(
+                    (unit.source_refs, process_context.source_refs)
+                )
+            )
+            payload["confidence"] = min(unit.confidence, process_context.confidence)
+            bound.append(ExtractedEvidenceDraft.from_mapping(payload))
+        return tuple(bound)
+
+    def _objective_explicit_sample_identity(
+        self,
+        unit: ExtractedEvidenceDraft,
+    ) -> str | None:
+        sample_values = {
+            item.name: item.value
+            for item in unit.scientific_context.sample
+            if item.name != "sample_number"
+        }
+        return self._objective_sample_identity_key(sample_values) or None
+
+    def _objective_process_context_signature(
+        self,
+        unit: ExtractedEvidenceDraft,
+    ) -> tuple[tuple[str, str, str], ...]:
+        return tuple(
+            sorted(
+                (
+                    item.name.casefold(),
+                    str(item.value).casefold(),
+                    str(item.unit or "").casefold(),
+                )
+                for item in unit.scientific_context.process
+            )
+        )
+
     def _build_objective_pairwise_comparison_units(
         self,
         units: tuple[ExtractedEvidenceDraft, ...],
@@ -3426,16 +3708,19 @@ class ResearchObjectiveService:
                         for item in target.scientific_context.sample
                     }
                     for key in sorted(set(baseline_sample) | set(target_sample)):
-                        if self._objective_table_column_is_sample_key(
-                            self._objective_column_key(key)
-                        ):
-                            continue
                         baseline_attribute = baseline_sample.get(key)
                         target_attribute = target_sample.get(key)
                         baseline_value = (
                             baseline_attribute.value if baseline_attribute else None
                         )
                         target_value = target_attribute.value if target_attribute else None
+                        if self._objective_table_column_is_sample_key(
+                            self._objective_column_key(key)
+                        ) and self._objective_sample_values_are_opaque_identifiers(
+                            baseline_value,
+                            target_value,
+                        ):
+                            continue
                         if baseline_value == target_value:
                             continue
                         name = (
@@ -3557,7 +3842,10 @@ class ResearchObjectiveService:
                                 },
                                 "attribution_scope": attribution_scope,
                                 "scientific_context": (
-                                    target.scientific_context.to_record()
+                                    self._objective_common_pairwise_context(
+                                        baseline,
+                                        target,
+                                    )
                                 ),
                                 "source_refs": source_refs,
                                 "evidence_anchor_ids": list(
@@ -3579,6 +3867,42 @@ class ResearchObjectiveService:
                         generated_by_scope.get(scope_key, 0) + 1
                     )
         return tuple(generated)
+
+
+    def _objective_common_pairwise_context(
+        self,
+        baseline: ExtractedEvidenceDraft,
+        target: ExtractedEvidenceDraft,
+    ) -> dict[str, list[dict[str, Any]]]:
+        context: dict[str, list[dict[str, Any]]] = {}
+        for context_name in ("material", "sample", "process", "test"):
+            baseline_attributes = {
+                item.name.casefold(): item
+                for item in getattr(baseline.scientific_context, context_name)
+            }
+            target_attributes = {
+                item.name.casefold(): item
+                for item in getattr(target.scientific_context, context_name)
+            }
+            common: list[dict[str, Any]] = []
+            for key in sorted(set(baseline_attributes) & set(target_attributes)):
+                baseline_attribute = baseline_attributes[key]
+                target_attribute = target_attributes[key]
+                if (
+                    baseline_attribute.value != target_attribute.value
+                    or baseline_attribute.unit != target_attribute.unit
+                ):
+                    continue
+                if context_name == "sample" and self._objective_table_column_is_sample_key(
+                    self._objective_column_key(target_attribute.name)
+                ) and self._objective_sample_values_are_opaque_identifiers(
+                    baseline_attribute.value,
+                    target_attribute.value,
+                ):
+                    continue
+                common.append(target_attribute.to_record())
+            context[context_name] = common
+        return context
 
 
     def _objective_sample_identity_key(
@@ -4109,7 +4433,25 @@ class ResearchObjectiveService:
         for column, value in row_values.items():
             role = str(route.column_roles.get(column) or "").lower()
             column_key = self._objective_column_key(column)
-            if (
+            is_objective_symbol_axis = bool(
+                objective_context is not None
+                and column not in result_columns
+                and not self._objective_value_column_is_non_result(column)
+                and self._objective_process_column_axis_keys(column)
+                and self._objective_label_matches_variables(
+                    column,
+                    objective_context=objective_context,
+                )
+            )
+            if is_objective_symbol_axis:
+                process_attributes[
+                    self._objective_process_attribute_label(
+                        column=column,
+                        role=role,
+                        objective_context=objective_context,
+                    )
+                ] = value
+            elif (
                 any(term in role for term in ("material", "alloy", "composition"))
                 or column_key
                 in {
@@ -4131,14 +4473,6 @@ class ResearchObjectiveService:
                 or self._objective_value_column_is_non_result(column)
             ):
                 continue
-            elif (
-                "test" in role
-                or "condition" in role
-                or column_key in {"test", "test_no", "test_number"}
-            ):
-                if route.role == "current_experimental_evidence":
-                    sample_attributes[column] = value
-                test_attributes[column] = value
             elif self._objective_table_column_is_process_attribute(
                 route=route,
                 column=column,
@@ -4152,6 +4486,14 @@ class ResearchObjectiveService:
                         objective_context=objective_context,
                     )
                 ] = value
+            elif (
+                "test" in role
+                or "condition" in role
+                or column_key in {"test", "test_no", "test_number"}
+            ):
+                if route.role == "current_experimental_evidence":
+                    sample_attributes[column] = value
+                test_attributes[column] = value
         return {
             "material": material_attributes,
             "sample": sample_attributes,
@@ -4166,6 +4508,17 @@ class ResearchObjectiveService:
         role: str,
         objective_context: ResearchObjective | None,
     ) -> str:
+        if objective_context is not None:
+            symbol_axes = {
+                axis
+                for axis in self._objective_process_column_axis_keys(column)
+                if any(
+                    self._axis_values_match(axis, objective_axis)
+                    for objective_axis in objective_context.variables
+                )
+            }
+            if len(symbol_axes) == 1:
+                return next(iter(symbol_axes))
         role_label = self._normalize_property_label(role)
         if (
             role_label
@@ -4234,7 +4587,11 @@ class ResearchObjectiveService:
             if not axis_text:
                 continue
             axis_key = self._normalize_property_label(axis_text)
-            if axis_key and axis_key in label_axis_keys:
+            if axis_key and any(
+                label_axis_key == axis_key
+                or self._axis_label_is_mentioned(label_axis_key, axis_key)
+                for label_axis_key in label_axis_keys
+            ):
                 return True
             if (
                 self._axis_values_match(label_text, axis_text)
@@ -4391,6 +4748,28 @@ class ResearchObjectiveService:
             "specimens",
         }
 
+    @staticmethod
+    def _objective_sample_values_are_opaque_identifiers(*values: Any) -> bool:
+        state_terms = (
+            "as built",
+            "as fabricated",
+            "as slm",
+            "annealed",
+            "aged",
+            "heat treated",
+            "hip slm",
+            "hot isostatic",
+            "solution treated",
+            "stress relieved",
+        )
+        normalized = [
+            " ".join(re.findall(r"[a-z0-9]+", str(value or "").casefold()))
+            for value in values
+        ]
+        return bool(normalized) and not any(
+            term in value for value in normalized for term in state_terms
+        )
+
     def _objective_matrix_unit_id(
         self,
         *,
@@ -4409,9 +4788,92 @@ class ResearchObjectiveService:
         objective_context: ResearchObjective | None,
         extracted_record: dict[str, Any],
     ) -> tuple[dict[str, Any], ...]:
-        record = dict(extracted_record)
+        record = self._objective_complete_extracted_variable_endpoints(
+            extracted_record,
+            source=source,
+        )
+        record = self._objective_retain_source_grounded_context(
+            record,
+            source=source,
+        )
         reported_result = record.get("reported_result")
         if isinstance(reported_result, Mapping):
+            normalized_result = dict(reported_result)
+            result_value = normalized_result.get("value")
+            direction = str(normalized_result.get("direction") or "unknown")
+            result_text = (
+                f"_{self._objective_column_key(result_value)}_"
+                f"{self._objective_column_key(normalized_result.get('result_text'))}_"
+            )
+            direction_terms = {
+                "increase": (
+                    "increase",
+                    "increased",
+                    "increases",
+                    "increasing",
+                    "higher",
+                    "greater",
+                    "larger",
+                    "more",
+                ),
+                "decrease": (
+                    "decrease",
+                    "decreased",
+                    "decreases",
+                    "decreasing",
+                    "lower",
+                    "less",
+                    "reduced",
+                    "reduction",
+                    "smaller",
+                ),
+                "improve": (
+                    "improve",
+                    "improved",
+                    "improves",
+                    "improving",
+                    "better",
+                    "enhance",
+                    "enhanced",
+                ),
+                "worsen": (
+                    "worsen",
+                    "worsened",
+                    "worsens",
+                    "worsening",
+                    "worse",
+                    "degrade",
+                    "degraded",
+                    "deteriorate",
+                    "deteriorated",
+                ),
+                "no_change": (
+                    "no_change",
+                    "no_significant_difference",
+                    "similar",
+                    "unchanged",
+                    "remained_constant",
+                ),
+            }
+            if (
+                not _NUMBER_PATTERN.search(str(result_value or ""))
+                and direction in direction_terms
+                and not any(
+                    f"_{term}_" in result_text for term in direction_terms[direction]
+                )
+            ):
+                normalized_result["direction"] = "unknown"
+            record["reported_result"] = normalized_result
+            reported_result = normalized_result
+        if not isinstance(reported_result, Mapping):
+            record["changed_variables"] = []
+            record["comparison"] = None
+        if isinstance(reported_result, Mapping):
+            if not self._objective_extracted_result_is_source_grounded(
+                record,
+                source=source,
+            ):
+                return ()
             outcome = self._normalize_objective_unit_property(
                 reported_result.get("outcome"),
                 objective_context=objective_context,
@@ -4430,6 +4892,13 @@ class ResearchObjectiveService:
             normalized_result = dict(reported_result)
             normalized_result["outcome"] = outcome
             record["reported_result"] = normalized_result
+        else:
+            scientific_context = record.get("scientific_context")
+            if not isinstance(scientific_context, Mapping) or not any(
+                scientific_context.get(group)
+                for group in ("material", "sample", "process", "test")
+            ):
+                return ()
         record.update(
             {
                 "objective_id": route.objective_id,
@@ -4443,6 +4912,392 @@ class ResearchObjectiveService:
         if not record.get("confidence"):
             record["confidence"] = route.confidence
         return (record,)
+
+    def _objective_complete_extracted_variable_endpoints(
+        self,
+        record: Mapping[str, Any],
+        *,
+        source: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        completed = dict(record)
+        variables = completed.get("changed_variables")
+        comparison = completed.get("comparison")
+        if (
+            not isinstance(variables, list)
+            or len(variables) != 1
+            or not isinstance(variables[0], Mapping)
+            or not isinstance(comparison, Mapping)
+        ):
+            return completed
+        variable = dict(variables[0])
+        axis_names = comparison.get("axis_names")
+        if (
+            not isinstance(axis_names, list)
+            or len(axis_names) != 1
+            or not self._axis_values_match(
+                str(variable.get("name") or ""),
+                str(axis_names[0] or ""),
+            )
+        ):
+            return completed
+        source_text = self._objective_source_grounding_text(source)
+        if not source_text:
+            return completed
+        endpoints = (
+            ("baseline_value", comparison.get("baseline_label")),
+            ("target_value", comparison.get("target_label")),
+        )
+        comparison_labels_are_grounded = all(
+            str(label or "").strip()
+            and self._axis_label_is_mentioned(source_text, str(label).strip())
+            for _field, label in endpoints
+        )
+        variable_unit = str(variable.get("unit") or "").strip()
+        variable_values_are_grounded = all(
+            self._objective_value_is_source_grounded(variable.get(field), source_text)
+            for field, _label in endpoints
+        )
+        variable_unit_is_grounded = not variable_unit or (
+            self._objective_column_key(variable_unit)
+            in self._objective_column_key(source_text)
+        )
+        if (
+            comparison_labels_are_grounded
+            and (not variable_values_are_grounded or not variable_unit_is_grounded)
+        ):
+            for field, label in endpoints:
+                variable[field] = str(label).strip()
+            variable["unit"] = None
+            completed["changed_variables"] = [variable]
+            return completed
+        for field, label in endpoints:
+            label_text = str(label or "").strip()
+            if (
+                variable.get(field) in (None, "")
+                and label_text
+                and self._axis_label_is_mentioned(source_text, label_text)
+            ):
+                variable[field] = label_text
+        if variable.get("baseline_value") == variable.get("target_value"):
+            return completed
+        completed["changed_variables"] = [variable]
+        return completed
+
+    def _objective_extracted_result_is_source_grounded(
+        self,
+        record: Mapping[str, Any],
+        *,
+        source: Mapping[str, Any],
+    ) -> bool:
+        source_text = self._objective_source_grounding_text(source)
+        if not source_text:
+            return False
+        for variable in record.get("changed_variables") or ():
+            if not isinstance(variable, Mapping):
+                return False
+            if not self._objective_axis_is_source_grounded(
+                variable.get("name"),
+                source=source,
+                source_text=source_text,
+            ):
+                return False
+            if any(
+                not self._objective_value_is_source_grounded(
+                    variable.get(field), source_text
+                )
+                for field in ("baseline_value", "target_value")
+            ):
+                return False
+            variable_unit = str(variable.get("unit") or "").strip()
+            if variable_unit and self._objective_column_key(
+                variable_unit
+            ) not in self._objective_column_key(source_text):
+                return False
+        reported_result = record.get("reported_result")
+        if not isinstance(reported_result, Mapping):
+            return True
+        outcome = reported_result.get("outcome")
+        if not self._objective_axis_is_source_grounded(
+            outcome,
+            source=source,
+            source_text=source_text,
+        ):
+            return False
+        unit = str(reported_result.get("unit") or "").strip()
+        if unit and self._objective_column_key(unit) not in self._objective_column_key(
+            source_text
+        ):
+            return False
+        result_value = reported_result.get("value")
+        result_text = str(reported_result.get("result_text") or "").strip()
+        if result_value not in (None, "") and not self._objective_value_is_source_grounded(
+            result_value,
+            source_text,
+        ):
+            return False
+        if _NUMBER_PATTERN.search(result_text):
+            result_text_is_grounded = self._objective_value_is_source_grounded(
+                result_text,
+                source_text,
+            )
+        else:
+            result_text_is_grounded = self._axis_label_is_mentioned(
+                source_text,
+                result_text,
+            )
+        if not result_text_is_grounded:
+            return False
+        if source.get("source_kind") == "table" and source.get("table_matrix"):
+            return self._objective_extracted_table_result_is_row_grounded(
+                record,
+                source=source,
+            )
+        return True
+
+    def _objective_extracted_table_result_is_row_grounded(
+        self,
+        record: Mapping[str, Any],
+        *,
+        source: Mapping[str, Any],
+    ) -> bool:
+        headers, data_rows = self._objective_table_matrix_rows(dict(source))
+        reported_result = record.get("reported_result")
+        if not headers or not data_rows or not isinstance(reported_result, Mapping):
+            return False
+        outcome = str(reported_result.get("outcome") or "").strip()
+        result_unit = self._objective_column_key(
+            str(reported_result.get("unit") or "")
+        )
+        outcome_headers: list[str] = []
+        for header in headers:
+            property_name, header_unit = self._split_property_unit(header)
+            if not self._axis_values_match(property_name, outcome):
+                continue
+            if result_unit and header_unit and (
+                self._objective_column_key(header_unit) != result_unit
+            ):
+                continue
+            outcome_headers.append(header)
+        if not outcome_headers:
+            return False
+
+        variable_headers: dict[str, tuple[str, ...]] = {}
+        for variable in record.get("changed_variables") or ():
+            if not isinstance(variable, Mapping):
+                return False
+            name = str(variable.get("name") or "").strip()
+            matching_headers = tuple(
+                header
+                for header in headers
+                if self._axis_values_match(
+                    self._split_property_unit(header)[0],
+                    name,
+                )
+                or any(
+                    self._axis_values_match(axis, name)
+                    for axis in self._objective_process_column_axis_keys(header)
+                )
+            )
+            if not matching_headers:
+                return False
+            variable_headers[name] = matching_headers
+
+        row_values = [
+            self._objective_table_row_values(headers=headers, row=row)
+            for _row_index, row in data_rows
+        ]
+
+        def matching_rows(value_field: str) -> list[dict[str, str]]:
+            matches: list[dict[str, str]] = []
+            for values in row_values:
+                if all(
+                    any(
+                        self._objective_table_cell_matches_value(
+                            values.get(header),
+                            variable.get(value_field),
+                        )
+                        for header in variable_headers[
+                            str(variable.get("name") or "").strip()
+                        ]
+                    )
+                    for variable in record.get("changed_variables") or ()
+                    if isinstance(variable, Mapping)
+                ):
+                    matches.append(values)
+            return matches
+
+        baseline_rows = matching_rows("baseline_value")
+        target_rows = matching_rows("target_value")
+        if record.get("changed_variables") and (not baseline_rows or not target_rows):
+            return False
+        if not target_rows:
+            target_rows = row_values
+        if not baseline_rows:
+            baseline_rows = target_rows
+        for baseline in baseline_rows:
+            for target in target_rows:
+                if not any(
+                    self._objective_value_is_source_grounded(
+                        reported_result.get("value"),
+                        target.get(header, ""),
+                    )
+                    for header in outcome_headers
+                ):
+                    continue
+                bound_text = "\n".join(
+                    str(value) for value in (*baseline.values(), *target.values())
+                )
+                result_text = str(reported_result.get("result_text") or "")
+                if not _NUMBER_PATTERN.search(
+                    result_text
+                ) or self._objective_value_is_source_grounded(result_text, bound_text):
+                    return True
+        return False
+
+    def _objective_retain_source_grounded_context(
+        self,
+        record: Mapping[str, Any],
+        *,
+        source: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        grounded_record = dict(record)
+        scientific_context = record.get("scientific_context")
+        if not isinstance(scientific_context, Mapping):
+            grounded_record["scientific_context"] = {
+                "material": [],
+                "sample": [],
+                "process": [],
+                "test": [],
+            }
+            return grounded_record
+        source_text = self._objective_source_grounding_text(source)
+        grounded_context: dict[str, list[dict[str, Any]]] = {}
+        for group in ("material", "sample", "process", "test"):
+            grounded_attributes: list[dict[str, Any]] = []
+            for attribute in scientific_context.get(group) or ():
+                if not isinstance(attribute, Mapping):
+                    continue
+                if not self._objective_axis_is_source_grounded(
+                    attribute.get("name"),
+                    source=source,
+                    source_text=source_text,
+                ):
+                    continue
+                value = attribute.get("value")
+                if value not in (None, "") and not self._objective_value_is_source_grounded(
+                    value,
+                    source_text,
+                ):
+                    continue
+                unit = str(attribute.get("unit") or "").strip()
+                if unit and self._objective_column_key(
+                    unit
+                ) not in self._objective_column_key(source_text):
+                    continue
+                grounded_attributes.append(dict(attribute))
+            grounded_context[group] = grounded_attributes
+        grounded_record["scientific_context"] = grounded_context
+        return grounded_record
+
+    def _objective_table_cell_matches_value(self, cell: Any, value: Any) -> bool:
+        if value in (None, ""):
+            return True
+        cell_text = str(cell or "").strip()
+        value_text = str(value).strip()
+        if not cell_text:
+            return False
+        if _NUMBER_PATTERN.search(value_text):
+            return self._objective_value_is_source_grounded(
+                value_text,
+                cell_text,
+            )
+        cell_key = self._objective_column_key(cell_text)
+        value_key = self._objective_column_key(value_text)
+        return bool(cell_key and value_key and cell_key == value_key)
+
+    def _objective_axis_is_source_grounded(
+        self,
+        value: Any,
+        *,
+        source: Mapping[str, Any],
+        source_text: str,
+    ) -> bool:
+        axis = str(value or "").strip()
+        if not axis:
+            return False
+        if self._axis_label_is_mentioned(source_text, axis):
+            return True
+        labels = [
+            *source.get("column_headers", ()),
+            *(cell.get("header_path") for cell in source.get("table_cells", ())
+              if isinstance(cell, Mapping)),
+        ]
+        for label in labels:
+            label_text = str(label or "").strip()
+            if not label_text:
+                continue
+            symbol_axes = self._objective_process_column_axis_keys(label_text)
+            if any(self._axis_values_match(axis, item) for item in symbol_axes):
+                return True
+            if (
+                self._axis_values_match(label_text, axis)
+                or self._axis_label_is_mentioned(label_text, axis)
+                or self._axis_label_is_mentioned(axis, label_text)
+            ):
+                return True
+        return any(
+            self._axis_values_match(token, axis)
+            for token in re.findall(r"[A-Za-z\u0370-\u03ff]+", source_text)
+        )
+
+    @staticmethod
+    def _objective_source_grounding_text(source: Mapping[str, Any]) -> str:
+        values: list[str] = []
+        for field in ("text", "caption_text", "heading_path"):
+            value = str(source.get(field) or "").strip()
+            if value:
+                values.append(value)
+        values.extend(
+            str(value).strip()
+            for value in source.get("column_headers", ())
+            if str(value).strip()
+        )
+        values.extend(
+            str(cell).strip()
+            for row in source.get("table_matrix", ())
+            if isinstance(row, (list, tuple))
+            for cell in row
+            if str(cell).strip()
+        )
+        values.extend(
+            str(cell.get("cell_text") or "").strip()
+            for cell in source.get("table_cells", ())
+            if isinstance(cell, Mapping) and str(cell.get("cell_text") or "").strip()
+        )
+        return "\n".join(values)
+
+    def _objective_value_is_source_grounded(self, value: Any, source_text: str) -> bool:
+        expected = {
+            float(match.group(0))
+            for match in _NUMBER_PATTERN.finditer(
+                str("" if value is None else value)
+                .replace(",", "")
+                .replace("\u2212", "-")
+            )
+        }
+        if not expected:
+            value_key = self._objective_column_key(
+                str("" if value is None else value)
+            )
+            source_key = self._objective_column_key(source_text)
+            return bool(value_key and value_key in source_key)
+        actual = {
+            float(match.group(0))
+            for match in _NUMBER_PATTERN.finditer(
+                source_text.replace(",", "").replace("\u2212", "-")
+            )
+        }
+        return expected <= actual
 
 
     def _objective_route_result_columns(
@@ -5268,6 +6123,7 @@ class ResearchObjectiveService:
             if (
                 not block_id
                 or not text
+                or not any(char.isalpha() for char in text)
                 or block_type
                 not in {"paragraph", "list_item", "figure_caption"}
             ):
@@ -5331,7 +6187,7 @@ class ResearchObjectiveService:
             )
             if not text:
                 text = str(getattr(node, "text", "") or "").strip()
-            if not source_ref or not text:
+            if not source_ref or not text or not any(char.isalpha() for char in text):
                 continue
             section_label = self._tree_section_label_for_route_node(
                 document_tree=document_tree,
@@ -5396,6 +6252,26 @@ class ResearchObjectiveService:
         selected: dict[tuple[str, str], tuple[int, int, dict[str, Any]]] = {}
         selected_keys: set[tuple[str, str]] = set()
         section_counts: dict[str, int] = {}
+        direct_result_candidates = [
+            item
+            for item in sorted(scored_candidates)
+            if self._route_text_candidate_is_direct_result(
+                frame=frame,
+                candidate=item[2],
+            )
+        ]
+        for item in direct_result_candidates:
+            candidate = item[2]
+            source_key = (
+                str(candidate.get("source_kind") or ""),
+                str(candidate.get("source_ref") or ""),
+            )
+            selected[source_key] = item
+            selected_keys.add(source_key)
+            section_key = self._objective_column_key(candidate.get("section_label"))
+            section_counts[section_key] = section_counts.get(section_key, 0) + 1
+            if len(selected) >= _ROUTE_TEXT_CANDIDATE_LIMIT // 2:
+                break
         for item in sorted(scored_candidates):
             candidate = item[2]
             source_key = (
@@ -5447,6 +6323,48 @@ class ResearchObjectiveService:
             if len(selected) >= _ROUTE_TEXT_CANDIDATE_LIMIT:
                 break
         return list(selected.values())
+
+    def _route_text_candidate_is_direct_result(
+        self,
+        *,
+        frame: PaperAnalysisFrame,
+        candidate: Mapping[str, Any],
+    ) -> bool:
+        text = str(candidate.get("text") or "")
+        if not text:
+            return False
+        mentions_variable = any(
+            self._source_text_mentions_axis(text, axis)
+            for axis in frame.changed_variables
+        )
+        mentions_outcome = any(
+            self._source_text_mentions_axis(text, axis)
+            for axis in frame.measured_property_scope
+        )
+        if not mentions_outcome:
+            return False
+        text_haystack = text.casefold()
+        has_result_comparison = any(
+            phrase in text_haystack
+            for phrase in (
+                "compared with",
+                "compared to",
+                "comparing",
+                "decreased",
+                "exhibited",
+                "higher than",
+                "increased",
+                "lower than",
+                "observed",
+                "resulted in",
+                "resulted into",
+            )
+        )
+        return has_result_comparison and (
+            mentions_variable
+            or "compared" in text_haystack
+            or "comparing" in text_haystack
+        )
 
     def _evenly_spaced_tree_route_candidates(
         self,
@@ -6309,6 +7227,13 @@ class ResearchObjectiveService:
         if not axis_tokens or not text_tokens:
             return False
         if normalized_axis:
+            for alias, canonical_axes in _OBJECTIVE_SYMBOL_AXIS_ALIASES.items():
+                alias_tokens = self._axis_token_set(alias)
+                if alias_tokens and alias_tokens.issubset(text_tokens) and any(
+                    self._axis_values_match(normalized_axis, canonical_axis)
+                    for canonical_axis in canonical_axes
+                ):
+                    return True
             for alias, canonical in _OBJECTIVE_PROPERTY_ALIASES.items():
                 if canonical != normalized_axis:
                     continue

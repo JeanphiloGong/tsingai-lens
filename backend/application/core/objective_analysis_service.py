@@ -274,27 +274,44 @@ class ObjectiveAnalysisService:
         self,
         analysis: ObjectiveAnalysis,
     ) -> Callable[[dict[str, Any]], None]:
+        seen_document_ids: set[str] = set()
+        processed_document_count = analysis.processed_document_count
+        total_document_count = analysis.total_document_count
+
         def update(progress: dict[str, Any]) -> None:
-            current = self._safe_int(progress.get("current"))
-            total = self._safe_int(progress.get("total"))
-            processed = max(0, current or 0)
-            document_total = max(
-                analysis.total_document_count,
-                total or analysis.total_document_count,
+            nonlocal processed_document_count, total_document_count
+            active_document_id = (
+                str(progress.get("active_document_id"))
+                if progress.get("active_document_id")
+                else None
             )
-            processed = min(processed, document_total)
+            if active_document_id:
+                seen_document_ids.add(active_document_id)
+            if progress.get("unit") in {"documents", "frames"}:
+                current = self._safe_int(progress.get("current"))
+                total = self._safe_int(progress.get("total"))
+                total_document_count = max(total_document_count, total or 0)
+                processed_document_count = max(
+                    processed_document_count,
+                    current or 0,
+                )
+            else:
+                processed_document_count = max(
+                    processed_document_count,
+                    len(seen_document_ids),
+                )
+            processed_document_count = min(
+                processed_document_count,
+                total_document_count,
+            )
             self.objective_repository.update_analysis_progress(
                 analysis.collection_id,
                 analysis.objective_id,
                 analysis.analysis_version,
                 phase=str(progress.get("phase") or "running"),
-                processed_document_count=processed,
-                total_document_count=document_total,
-                current_document_id=(
-                    str(progress.get("active_document_id"))
-                    if progress.get("active_document_id")
-                    else None
-                ),
+                processed_document_count=processed_document_count,
+                total_document_count=total_document_count,
+                current_document_id=active_document_id,
                 progress_message=(
                     str(progress.get("message")) if progress.get("message") else None
                 ),

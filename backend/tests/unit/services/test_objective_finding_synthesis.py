@@ -182,8 +182,6 @@ def _candidate(**overrides) -> dict:
         ),
         "direction": "increase",
         "assertion_strength": "associative",
-        "supporting_evidence_ids": ["ev-1"],
-        "contradicting_evidence_ids": [],
         "condition_boundary_evidence_ids": [],
         "context_evidence_ids": [],
         "mechanisms": [],
@@ -218,10 +216,80 @@ def test_synthesis_builds_one_atomic_single_paper_finding() -> None:
     assert "synthesis_status" not in extractor.payloads[0]
 
 
-def test_synthesis_derives_cross_paper_agreement() -> None:
+def test_synthesis_accepts_concrete_defect_measurement_for_defect_structure() -> None:
     extractor = _Extractor(
-        [_candidate(supporting_evidence_ids=["ev-1", "ev-2"])]
+        [
+            _candidate(
+                statement=(
+                    "Volumetric energy density was associated with a decrease in "
+                    "maximum defect diameter."
+                ),
+                direction="decrease",
+            )
+        ]
     )
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            question=(
+                "How does volumetric energy density affect defect structure?"
+            ),
+            variables=["volumetric energy density"],
+            outcomes=["defect structure"],
+        ),
+        analysis=_analysis(),
+        contributions=(
+            _contribution(
+                "paper-1",
+                changed_variables=["volumetric energy density"],
+                measured_property_scope=["defect structure"],
+            ),
+        ),
+        evidence_records=(
+            _evidence(
+                "ev-defect-diameter",
+                "paper-1",
+                outcome="maximum defect diameter",
+                factors=("volumetric energy density",),
+                direction="decrease",
+                source_excerpt=(
+                    "The maximum defect diameters decreased from 76 um at low VED "
+                    "to 50 um at high VED."
+                ),
+            ),
+        ),
+    )
+
+    assert len(findings) == 1
+    assert findings[0].factors == ("volumetric energy density",)
+    assert findings[0].outcome == "maximum defect diameter"
+
+
+def test_synthesis_keeps_relative_density_out_of_defect_structure() -> None:
+    service = FindingSynthesisService(structured_extractor=_Extractor([]))
+
+    result_sets = service._result_sets(
+        _objective(
+            variables=["volumetric energy density"],
+            outcomes=["defect structure"],
+        ),
+        (
+            _evidence(
+                "ev-relative-density",
+                "paper-1",
+                outcome="relative density",
+                factors=("volumetric energy density",),
+            ),
+        ),
+    )
+
+    assert result_sets == ()
+
+
+def test_synthesis_derives_cross_paper_agreement() -> None:
+    extractor = _Extractor([_candidate()])
     service = FindingSynthesisService(structured_extractor=extractor)
 
     finding = service.synthesize(
@@ -240,6 +308,167 @@ def test_synthesis_derives_cross_paper_agreement() -> None:
     assert finding.support_scope == "cross_paper"
 
 
+def test_synthesis_keeps_comparison_intervals_in_result_set_identity() -> None:
+    service = FindingSynthesisService(structured_extractor=_Extractor([]))
+    evidence = tuple(
+        _evidence(
+            evidence_id,
+            "paper-1",
+            factors=("scan strategy rotation angle",),
+            outcome="yield strength",
+            direction=direction,
+            changed_variables=[
+                {
+                    "name": "scan strategy rotation angle",
+                    "baseline_value": baseline,
+                    "target_value": target,
+                    "unit": "degree",
+                }
+            ],
+        )
+        for evidence_id, baseline, target, direction in (
+            ("angle-0-30", 0, 30, "decrease"),
+            ("angle-0-45", 0, 45, "increase"),
+            ("angle-30-45", 30, 45, "increase"),
+        )
+    )
+
+    result_sets = service._result_sets(
+        _objective(
+            variables=["scan strategy rotation angle"],
+            outcomes=["yield strength"],
+        ),
+        evidence,
+    )
+
+    assert len(result_sets) == 3
+    assert [len(item["result_evidence"]) for item in result_sets] == [1, 1, 1]
+
+
+def test_synthesis_does_not_use_complete_context_as_a_grouping_key() -> None:
+    service = FindingSynthesisService(structured_extractor=_Extractor([]))
+    common = {"material": [], "sample": [], "test": []}
+
+    result_sets = service._result_sets(
+        _objective(
+            variables=["scan strategy rotation angle"],
+            outcomes=["yield strength"],
+        ),
+        (
+            _evidence(
+                "paper-1-result",
+                "paper-1",
+                factors=("scan strategy rotation angle",),
+                outcome="yield strength",
+                scientific_context={
+                    **common,
+                    "process": [{"name": "build orientation", "value": 0}],
+                },
+            ),
+            _evidence(
+                "paper-2-result",
+                "paper-2",
+                factors=("scan strategy rotation angle",),
+                outcome="yield strength",
+                scientific_context={
+                    **common,
+                    "process": [{"name": "build orientation", "value": 90}],
+                },
+            ),
+        ),
+    )
+
+    assert len(result_sets) == 1
+    assert len(result_sets[0]["result_evidence"]) == 2
+
+
+def test_synthesis_keeps_context_inside_one_comparison_interval() -> None:
+    extractor = _Extractor(
+        [
+            _candidate(
+                statement=(
+                    "Scan strategy rotation angle was associated with increased "
+                    "yield strength."
+                ),
+            ),
+            _candidate(
+                statement=(
+                    "Scan strategy rotation angle was associated with decreased "
+                    "yield strength."
+                ),
+                direction="decrease",
+            ),
+        ]
+    )
+    service = FindingSynthesisService(structured_extractor=extractor)
+    common = {
+        "material": [],
+        "sample": [],
+        "test": [],
+    }
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            question="How does scan strategy rotation angle affect yield strength?",
+            variables=["scan strategy rotation angle"],
+            outcomes=["yield strength"],
+        ),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(
+            _evidence(
+                "alpha-0",
+                "paper-1",
+                factors=("scan strategy rotation angle",),
+                outcome="yield strength",
+                scientific_context={
+                    **common,
+                    "process": [
+                        {
+                            "name": "build orientation alpha angle",
+                            "value": 0,
+                        },
+                        {
+                            "name": "build orientation beta angle",
+                            "value": 0,
+                        },
+                    ],
+                },
+            ),
+            _evidence(
+                "alpha-45",
+                "paper-1",
+                factors=("scan strategy rotation angle",),
+                outcome="yield strength",
+                direction="decrease",
+                scientific_context={
+                    **common,
+                    "process": [
+                        {
+                            "name": "build orientation alpha angle",
+                            "value": 45,
+                        },
+                        {
+                            "name": "build orientation beta angle",
+                            "value": 22.5,
+                        },
+                    ],
+                },
+            ),
+        ),
+    )
+
+    assert len(findings) == 1
+    assert len(extractor.payloads) == 1
+    assert findings[0].direction == "increase"
+    assert findings[0].contradicting_evidence_ids == ("alpha-45",)
+    assert findings[0].scientific_context.to_record()["process"] == [
+        {"name": "build orientation alpha angle", "value": 0, "unit": None},
+        {"name": "build orientation beta angle", "value": 0, "unit": None},
+    ]
+
+
 def test_synthesis_splits_distinct_outcomes_into_distinct_findings() -> None:
     extractor = _Extractor(
         [
@@ -249,7 +478,6 @@ def test_synthesis_splits_distinct_outcomes_into_distinct_findings() -> None:
                     "decrease in elongation."
                 ),
                 direction="decrease",
-                supporting_evidence_ids=["elongation-1"],
             ),
             _candidate(),
         ]
@@ -280,7 +508,7 @@ def test_synthesis_splits_distinct_outcomes_into_distinct_findings() -> None:
 
 
 def test_synthesis_groups_only_exact_factor_tuples() -> None:
-    extractor = _Extractor([_candidate(supporting_evidence_ids=["ev-1"])])
+    extractor = _Extractor([_candidate()])
     service = FindingSynthesisService(structured_extractor=extractor)
 
     findings = service.synthesize(
@@ -308,13 +536,70 @@ def test_synthesis_groups_only_exact_factor_tuples() -> None:
     assert findings[0].paper_contributions[1].supporting_evidence_ids == ()
 
 
-def test_synthesis_keeps_every_eligible_result_in_one_atomic_set() -> None:
+def test_synthesis_keeps_coupled_factors_outside_the_objective_axis() -> None:
     extractor = _Extractor(
         [
             _candidate(
-                supporting_evidence_ids=["comparison-1", "measurement-1"]
+                statement=(
+                    "Scan strategy rotation angle, build orientation angle, and layer "
+                    "thickness were jointly associated with increased yield strength."
+                )
             )
         ]
+    )
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            question=(
+                "How do scan strategy rotation angles and build orientation angles "
+                "affect yield strength?"
+            ),
+            variables=[
+                "scan strategy rotation angles",
+                "build orientation angles",
+            ],
+            outcomes=["yield strength"],
+        ),
+        analysis=_analysis(),
+        contributions=(
+            _contribution(
+                "paper-1",
+                changed_variables=[
+                    "scan strategy rotation angle",
+                    "build orientation angle",
+                    "layer thickness",
+                ],
+                measured_property_scope=["yield strength"],
+            ),
+        ),
+        evidence_records=(
+            _evidence(
+                "ev-1",
+                "paper-1",
+                factors=(
+                    "scan strategy rotation angle",
+                    "build orientation angle",
+                    "layer thickness",
+                ),
+                outcome="yield strength",
+            ),
+        ),
+    )
+
+    assert len(findings) == 1
+    assert findings[0].factors == (
+        "build orientation angle",
+        "layer thickness",
+        "scan strategy rotation angle",
+    )
+    assert findings[0].attribution_scope == "joint_effect"
+
+
+def test_synthesis_keeps_every_eligible_result_in_one_atomic_set() -> None:
+    extractor = _Extractor(
+        [_candidate()]
     )
     service = FindingSynthesisService(structured_extractor=extractor)
 
@@ -341,39 +626,196 @@ def test_synthesis_keeps_every_eligible_result_in_one_atomic_set() -> None:
     ] == ["comparison-1", "measurement-1"]
 
 
-def test_synthesis_rejects_omitted_result_evidence() -> None:
+def test_synthesis_rejects_statement_mixing_numeric_evidence_endpoints() -> None:
+    extractor = _Extractor(
+        [
+            _candidate(
+                statement=(
+                    "Increasing scan strategy rotation angle from 0 to 45 degrees "
+                    "increased yield strength from 334.2 to 365.6 MPa."
+                )
+            )
+        ]
+    )
+    service = FindingSynthesisService(structured_extractor=extractor)
+    evidence_records = (
+        _evidence(
+            "scan-group-1",
+            "paper-1",
+            factors=("scan strategy rotation angle",),
+            outcome="yield strength",
+            source_excerpt=(
+                "theta 0: yield strength 334.2 MPa; "
+                "theta 45: yield strength 351.9 MPa."
+            ),
+        ),
+        _evidence(
+            "scan-group-2",
+            "paper-1",
+            factors=("scan strategy rotation angle",),
+            outcome="yield strength",
+            source_excerpt=(
+                "theta 0: yield strength 363.1 MPa; "
+                "theta 45: yield strength 365.6 MPa."
+            ),
+        ),
+    )
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            question="How does scan strategy rotation angle affect yield strength?",
+            variables=["scan strategy rotation angle"],
+            outcomes=["yield strength"],
+        ),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=evidence_records,
+    )
+
+    assert findings == ()
+
+
+def test_synthesis_rejects_statement_number_absent_from_bound_evidence() -> None:
     service = FindingSynthesisService(
         structured_extractor=_Extractor(
-            [_candidate(supporting_evidence_ids=["ev-1"])]
+            [
+                _candidate(
+                    statement=(
+                        "A 45 degree scan strategy rotation angle increased yield "
+                        "strength by 1.9 MPa."
+                    )
+                )
+            ]
         )
+    )
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            question="How does scan strategy rotation angle affect yield strength?",
+            variables=["scan strategy rotation angle"],
+            outcomes=["yield strength"],
+        ),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(
+            _evidence(
+                "angle-result",
+                "paper-1",
+                factors=("scan strategy rotation angle",),
+                outcome="yield strength",
+                source_excerpt=(
+                    "At a scan strategy rotation angle of 45 degrees, the measured "
+                    "yield strength was 351.9 MPa."
+                ),
+            ),
+        ),
+    )
+
+    assert findings == ()
+
+
+def test_synthesis_rejects_statement_number_from_unrelated_source_property() -> None:
+    service = FindingSynthesisService(
+        structured_extractor=_Extractor(
+            [
+                _candidate(
+                    statement=(
+                        "Laser power and scan speed were associated with a 1.9% "
+                        "increase in relative density."
+                    )
+                )
+            ]
+        )
+    )
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(
+            _evidence(
+                "density-result",
+                "paper-1",
+                source_excerpt=(
+                    "Hardness changed by 1.9 HV while relative density reached 99.2%."
+                ),
+                reported_result={
+                    "outcome": "relative density",
+                    "value": 99.2,
+                    "unit": "%",
+                    "direction": "increase",
+                    "result_text": "Relative density reached 99.2%.",
+                },
+            ),
+        ),
+    )
+
+    assert findings == ()
+
+
+def test_synthesis_derives_all_same_direction_results_as_support() -> None:
+    service = FindingSynthesisService(
+        structured_extractor=_Extractor([_candidate()])
     )
     evidence = (
         _evidence("ev-1", "paper-1"),
-        _evidence("conflict-1", "paper-2", role="contradictory_result"),
+        _evidence("ev-2", "paper-2"),
     )
-    findings = service.synthesize(
+
+    finding = service.synthesize(
         collection_id="col-1",
         objective=_objective(),
         analysis=_analysis(),
         contributions=(_contribution("paper-1"), _contribution("paper-2")),
         evidence_records=evidence,
-    )
-    assert findings == ()
+    )[0]
+
+    assert finding.supporting_evidence_ids == ("ev-1", "ev-2")
+    assert finding.synthesis_status == "agreement"
 
 
-def test_synthesis_rejects_duplicate_result_assignment_without_silent_dedup() -> None:
+def test_synthesis_derives_opposing_result_as_contradiction() -> None:
     service = FindingSynthesisService(
-        structured_extractor=_Extractor(
-            [_candidate(supporting_evidence_ids=["ev-1", "ev-1"])]
-        )
+        structured_extractor=_Extractor([_candidate()])
+    )
+    evidence = (
+        _evidence("ev-1", "paper-1"),
+        _evidence(
+            "conflict-1",
+            "paper-2",
+            role="contradictory_result",
+            direction="decrease",
+        ),
+    )
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"), _contribution("paper-2")),
+        evidence_records=evidence,
+    )[0]
+    assert finding.supporting_evidence_ids == ("ev-1",)
+    assert finding.contradicting_evidence_ids == ("conflict-1",)
+    assert finding.synthesis_status == "conflict"
+
+
+def test_synthesis_rejects_result_direction_that_is_not_an_explicit_opposition() -> None:
+    service = FindingSynthesisService(
+        structured_extractor=_Extractor([_candidate()])
     )
 
     assert service.synthesize(
         collection_id="col-1",
         objective=_objective(),
         analysis=_analysis(),
-        contributions=(_contribution("paper-1"),),
-        evidence_records=(_evidence("ev-1", "paper-1"),),
+        contributions=(_contribution("paper-1"), _contribution("paper-2")),
+        evidence_records=(
+            _evidence("ev-1", "paper-1"),
+            _evidence("unknown-1", "paper-2", direction="unknown"),
+        ),
     ) == ()
 
 
@@ -382,8 +824,6 @@ def test_synthesis_assigns_support_and_contradiction_by_direction_not_role() -> 
         structured_extractor=_Extractor(
             [
                 _candidate(
-                    supporting_evidence_ids=["conflict-1"],
-                    contradicting_evidence_ids=["ev-1"],
                     direction="decrease",
                     statement=(
                         "Laser power and scan speed were jointly associated with a "
@@ -415,35 +855,9 @@ def test_synthesis_assigns_support_and_contradiction_by_direction_not_role() -> 
     assert finding.synthesis_status == "conflict"
 
 
-def test_synthesis_rejects_same_direction_as_contradiction() -> None:
-    service = FindingSynthesisService(
-        structured_extractor=_Extractor(
-            [
-                _candidate(
-                    supporting_evidence_ids=["ev-1"],
-                    contradicting_evidence_ids=["same-direction"],
-                )
-            ]
-        )
-    )
-
-    assert service.synthesize(
-        collection_id="col-1",
-        objective=_objective(),
-        analysis=_analysis(),
-        contributions=(_contribution("paper-1"), _contribution("paper-2")),
-        evidence_records=(
-            _evidence("ev-1", "paper-1"),
-            _evidence("same-direction", "paper-2", role="contradictory_result"),
-        ),
-    ) == ()
-
-
 def test_synthesis_does_not_drop_results_after_the_first_48() -> None:
     evidence_ids = [f"evidence-{index}" for index in range(49)]
-    extractor = _Extractor(
-        [_candidate(supporting_evidence_ids=evidence_ids)]
-    )
+    extractor = _Extractor([_candidate()])
     service = FindingSynthesisService(structured_extractor=extractor)
     contributions = tuple(
         _contribution(f"paper-{index}") for index in range(49)
@@ -465,14 +879,74 @@ def test_synthesis_does_not_drop_results_after_the_first_48() -> None:
     assert finding.direct_document_count == 49
 
 
-def test_synthesis_derives_conflict_and_preserves_both_papers() -> None:
+def test_synthesis_bounds_prompt_excerpts_and_context_without_dropping_results() -> None:
+    result_ids = [f"result-{index}" for index in range(12)]
+    context_ids = [f"context-{index}" for index in range(12)]
     extractor = _Extractor(
         [
             _candidate(
-                supporting_evidence_ids=["ev-1"],
-                contradicting_evidence_ids=["conflict-1"],
+                context_evidence_ids=[
+                    "context-0",
+                    "context-1",
+                    "context-10",
+                    "context-11",
+                    "context-2",
+                    "context-3",
+                    "context-4",
+                    "context-5",
+                ],
             )
         ]
+    )
+    service = FindingSynthesisService(structured_extractor=extractor)
+    contributions = tuple(
+        _contribution(f"paper-{index}") for index in range(12)
+    )
+    long_excerpt = "source evidence " * 200
+    results = tuple(
+        _evidence(
+            evidence_id,
+            f"paper-{index}",
+            source_excerpt=long_excerpt,
+        )
+        for index, evidence_id in enumerate(result_ids)
+    )
+    contexts = tuple(
+        _evidence(
+            evidence_id,
+            f"paper-{index}",
+            role="condition_context",
+            factors=(),
+            outcome=None,
+            source_excerpt=long_excerpt,
+        )
+        for index, evidence_id in enumerate(context_ids)
+    )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=contributions,
+        evidence_records=(*results, *contexts),
+    )[0]
+
+    payload = extractor.payloads[0]
+    assert len(payload["result_set"]["result_evidence"]) == 12
+    assert len(payload["context_evidence"]) == 8
+    assert all(
+        len(item["source_excerpt"]) <= 320
+        for item in (
+            *payload["result_set"]["result_evidence"],
+            *payload["context_evidence"],
+        )
+    )
+    assert finding.direct_document_count == 12
+
+
+def test_synthesis_derives_conflict_and_preserves_both_papers() -> None:
+    extractor = _Extractor(
+        [_candidate()]
     )
     service = FindingSynthesisService(structured_extractor=extractor)
 
@@ -497,7 +971,7 @@ def test_synthesis_derives_conflict_and_preserves_both_papers() -> None:
     assert finding.contributing_document_ids == ("paper-1", "paper-2")
 
 
-def test_synthesis_requires_cited_boundary_for_condition_dependence() -> None:
+def test_synthesis_does_not_treat_cited_context_as_a_condition_boundary() -> None:
     context = _evidence(
         "condition-2",
         "paper-2",
@@ -508,8 +982,6 @@ def test_synthesis_requires_cited_boundary_for_condition_dependence() -> None:
     extractor = _Extractor(
         [
             _candidate(
-                supporting_evidence_ids=["ev-1"],
-                contradicting_evidence_ids=["conflict-1"],
                 context_evidence_ids=["condition-2"],
                 condition_boundary_evidence_ids=["conflict-1", "condition-2"],
             )
@@ -534,11 +1006,143 @@ def test_synthesis_requires_cited_boundary_for_condition_dependence() -> None:
         ),
     )[0]
 
-    assert finding.synthesis_status == "condition_dependent"
-    assert finding.condition_boundary_evidence_ids == (
-        "conflict-1",
-        "condition-2",
+    assert finding.synthesis_status == "conflict"
+    assert finding.condition_boundary_evidence_ids == ()
+
+
+def test_synthesis_direct_result_cannot_be_a_condition_boundary() -> None:
+    service = FindingSynthesisService(
+        structured_extractor=_Extractor(
+            [_candidate(condition_boundary_evidence_ids=["conflict-1"])]
+        )
     )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"), _contribution("paper-2")),
+        evidence_records=(
+            _evidence("ev-1", "paper-1"),
+            _evidence(
+                "conflict-1",
+                "paper-2",
+                role="contradictory_result",
+                direction="decrease",
+            ),
+        ),
+    )[0]
+
+    assert finding.synthesis_status == "conflict"
+    assert finding.condition_boundary_evidence_ids == ()
+
+
+def test_synthesis_derives_condition_boundary_from_opposing_papers_with_disjoint_context(
+) -> None:
+    service = FindingSynthesisService(structured_extractor=_Extractor([_candidate()]))
+    shared = {"material": [], "sample": [], "test": []}
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"), _contribution("paper-2")),
+        evidence_records=(
+            _evidence(
+                "support-1",
+                "paper-1",
+                scientific_context={
+                    **shared,
+                    "process": [{"name": "build orientation", "value": 0}],
+                },
+            ),
+            _evidence(
+                "conflict-1",
+                "paper-2",
+                role="contradictory_result",
+                direction="decrease",
+                scientific_context={
+                    **shared,
+                    "process": [{"name": "build orientation", "value": 90}],
+                },
+            ),
+        ),
+    )[0]
+
+    assert finding.synthesis_status == "condition_dependent"
+    assert set(finding.condition_boundary_evidence_ids) == {
+        "support-1",
+        "conflict-1",
+    }
+
+
+def test_synthesis_does_not_link_model_boundary_context_implicitly() -> None:
+    context = _evidence(
+        "condition-2",
+        "paper-2",
+        role="condition_context",
+        factors=(),
+        outcome=None,
+    )
+    extractor = _Extractor(
+        [
+            _candidate(
+                condition_boundary_evidence_ids=["condition-2"],
+            )
+        ]
+    )
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"), _contribution("paper-2")),
+        evidence_records=(
+            _evidence("ev-1", "paper-1"),
+            _evidence(
+                "conflict-1",
+                "paper-2",
+                role="contradictory_result",
+                direction="decrease",
+            ),
+            context,
+        ),
+    )[0]
+
+    assert finding.synthesis_status == "conflict"
+    assert finding.context_evidence_ids == ()
+    assert finding.condition_boundary_evidence_ids == ()
+
+
+def test_synthesis_drops_boundary_labels_that_are_not_evidence_ids() -> None:
+    extractor = _Extractor(
+        [
+            _candidate(
+                condition_boundary_evidence_ids=["Fixed scan speed"],
+            )
+        ]
+    )
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"), _contribution("paper-2")),
+        evidence_records=(
+            _evidence("ev-1", "paper-1"),
+            _evidence(
+                "conflict-1",
+                "paper-2",
+                role="contradictory_result",
+                direction="decrease",
+            ),
+        ),
+    )[0]
+
+    assert finding.synthesis_status == "conflict"
+    assert finding.condition_boundary_evidence_ids == ()
 
 
 def test_synthesis_binds_mechanism_only_from_selected_context() -> None:
@@ -552,7 +1156,6 @@ def test_synthesis_binds_mechanism_only_from_selected_context() -> None:
     extractor = _Extractor(
         [
             _candidate(
-                context_evidence_ids=["mechanism-1"],
                 mechanisms=[
                     {
                         "source_term": "laser power and scan speed",
@@ -579,7 +1182,7 @@ def test_synthesis_binds_mechanism_only_from_selected_context() -> None:
     assert finding.context_evidence_ids == ("mechanism-1",)
 
 
-def test_synthesis_rejects_parse_valid_mechanism_with_wrong_evidence_role() -> None:
+def test_synthesis_drops_mechanism_with_wrong_evidence_role() -> None:
     condition = _evidence(
         "condition-1",
         "paper-1",
@@ -606,13 +1209,16 @@ def test_synthesis_rejects_parse_valid_mechanism_with_wrong_evidence_role() -> N
         )
     )
 
-    assert service.synthesize(
+    finding = service.synthesize(
         collection_id="col-1",
         objective=_objective(),
         analysis=_analysis(),
         contributions=(_contribution("paper-1"),),
         evidence_records=(_evidence("ev-1", "paper-1"), condition),
-    ) == ()
+    )[0]
+
+    assert finding.mechanisms == ()
+    assert finding.context_evidence_ids == ("condition-1",)
 
 
 def test_synthesis_keeps_every_candidate_paper_binding() -> None:
@@ -684,6 +1290,139 @@ def test_synthesis_rejects_statement_that_drops_one_joint_factor() -> None:
     )
 
 
+def test_synthesis_rejects_statement_that_adds_an_unbound_objective_factor() -> None:
+    extractor = _Extractor(
+        [
+            _candidate(
+                statement=(
+                    "Scan strategy rotation angles and build orientation angles "
+                    "were associated with yield strength."
+                ),
+            )
+        ]
+    )
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            variables=[
+                "scan strategy rotation angles",
+                "build orientation angles",
+            ],
+            outcomes=["yield strength"],
+        ),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(
+            _evidence(
+                "ev-1",
+                "paper-1",
+                factors=("Scan strategy",),
+                outcome="yield strength",
+            ),
+        ),
+    )
+
+    assert findings == ()
+
+
+def test_synthesis_rejects_statement_that_specializes_a_broad_factor() -> None:
+    extractor = _Extractor(
+        [
+            _candidate(
+                statement=(
+                    "Scan strategy rotation angles were associated with yield "
+                    "strength."
+                ),
+            )
+        ]
+    )
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            variables=["scan strategy rotation angles"],
+            outcomes=["yield strength"],
+        ),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(
+            _evidence(
+                "ev-1",
+                "paper-1",
+                factors=("Scan strategy",),
+                outcome="yield strength",
+            ),
+        ),
+    )
+
+    assert findings == ()
+
+
+def test_synthesis_accepts_experimental_outcome_without_repeating_qualifier() -> None:
+    extractor = _Extractor(
+        [
+            _candidate(
+                statement="Laser power increased yield strength.",
+            )
+        ]
+    )
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            variables=["laser power"],
+            outcomes=["yield strength"],
+        ),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(
+            _evidence(
+                "ev-1",
+                "paper-1",
+                factors=("laser power",),
+                outcome="yield strength experiment",
+            ),
+        ),
+    )[0]
+
+    assert finding.outcome == "yield strength experiment"
+
+
+def test_synthesis_requires_prediction_qualifier_in_statement() -> None:
+    extractor = _Extractor(
+        [
+            _candidate(
+                statement="Laser power increased yield strength.",
+            )
+        ]
+    )
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            variables=["laser power"],
+            outcomes=["yield strength"],
+        ),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(
+            _evidence(
+                "ev-1",
+                "paper-1",
+                factors=("laser power",),
+                outcome="yield strength prediction",
+            ),
+        ),
+    )
+
+    assert findings == ()
+
+
 def test_synthesis_rejects_causal_joint_factor_candidate() -> None:
     extractor = _Extractor([_candidate(assertion_strength="causal")])
     service = FindingSynthesisService(structured_extractor=extractor)
@@ -698,6 +1437,99 @@ def test_synthesis_rejects_causal_joint_factor_candidate() -> None:
         )
         == ()
     )
+
+
+def test_synthesis_rejects_causal_descriptive_candidate() -> None:
+    extractor = _Extractor(
+        [
+            _candidate(
+                statement="Laser power was associated with relative density.",
+                assertion_strength="causal",
+            )
+        ]
+    )
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    evidence = _evidence(
+        "ev-1",
+        "paper-1",
+        factors=("laser power",),
+        comparison=None,
+        attribution_scope="descriptive_only",
+    )
+    assert (
+        service.synthesize(
+            collection_id="col-1",
+            objective=_objective(variables=["laser power"]),
+            analysis=_analysis(),
+            contributions=(_contribution("paper-1"),),
+            evidence_records=(evidence,),
+        )
+        == ()
+    )
+
+
+def test_synthesis_downgrades_non_deterministic_isolated_result_to_associative() -> None:
+    service = FindingSynthesisService(
+        structured_extractor=_Extractor(
+            [
+                _candidate(
+                    statement="Laser power increased relative density.",
+                    assertion_strength="causal",
+                )
+            ]
+        )
+    )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(variables=["laser power"]),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(
+            _evidence("ev-1", "paper-1", factors=("laser power",)),
+        ),
+    )[0]
+
+    assert finding.attribution_scope == "isolated_effect"
+    assert finding.assertion_strength == "associative"
+
+
+def test_synthesis_keeps_causal_strength_for_deterministic_controlled_table_pair() -> None:
+    service = FindingSynthesisService(
+        structured_extractor=_Extractor(
+            [
+                _candidate(
+                    statement="Laser power increased relative density.",
+                    assertion_strength="causal",
+                )
+            ]
+        )
+    )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(variables=["laser power"]),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(
+            _evidence(
+                "ev-1",
+                "paper-1",
+                factors=("laser power",),
+                source_kind="table",
+                selection_reason=(
+                    "Deterministic comparison of rows from the same result table."
+                ),
+                related_source_refs=[
+                    {"row_index": 1, "col_index": 2},
+                    {"row_index": 2, "col_index": 2},
+                ],
+            ),
+        ),
+    )[0]
+
+    assert finding.assertion_strength == "causal"
 
 
 def test_synthesis_excludes_unattributable_and_context_only_evidence() -> None:

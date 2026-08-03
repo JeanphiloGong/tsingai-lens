@@ -48,65 +48,17 @@ _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
 _TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 4096
 _DOCUMENT_PROFILE_MAX_COMPLETION_TOKENS = 1024
-_PAPER_SKIM_MAX_COMPLETION_TOKENS = 1024
+_PAPER_SKIM_MAX_COMPLETION_TOKENS = 256
 _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS = 1400
-_RESEARCH_AXIS_CANONICALIZATION_MAX_COMPLETION_TOKENS = 2048
-_RESEARCH_OBJECTIVE_MERGE_MAX_COMPLETION_TOKENS = 2048
-_OBJECTIVE_PAPER_FRAME_MAX_COMPLETION_TOKENS = 1024
 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS = 512
-_OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS = 2048
-_FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS = 2048
+_OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS = 1024
+_FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS = 1024
 _TRACE_TEXT_LIMIT = 8000
 _TRACE_JSON_LIMIT = 12000
 _SUPPORTED_EXTRACTION_MODES = {
     _EXTRACTION_MODE_JSON_TEXT,
     _EXTRACTION_MODE_PROVIDER_PARSE,
 }
-_EVIDENCE_CONTEXT_FIELDS = (
-    "material_system",
-    "sample_context",
-    "process_context",
-    "resolved_condition",
-    "test_condition",
-    "value_payload",
-    "baseline_context",
-)
-
-
-def _filter_source_supported_mapping(
-    value: dict[str, Any],
-    *,
-    authority_text: str,
-) -> dict[str, Any]:
-    normalized_authority = re.sub(r"\s+", " ", authority_text.casefold())
-
-    def is_supported(candidate: Any) -> bool:
-        text = re.sub(r"\s+", " ", str(candidate).strip().casefold())
-        if not text:
-            return False
-        if len(text) <= 3 or re.fullmatch(r"[-+]?\d+(?:\.\d+)?", text):
-            return re.search(
-                rf"(?<![\w.]){re.escape(text)}(?![\w.])",
-                normalized_authority,
-            ) is not None
-        return text in normalized_authority
-
-    filtered: dict[str, Any] = {}
-    for key, candidate in value.items():
-        if isinstance(candidate, dict):
-            nested = _filter_source_supported_mapping(
-                candidate,
-                authority_text=authority_text,
-            )
-            if nested:
-                filtered[key] = nested
-        elif isinstance(candidate, list):
-            supported_items = [item for item in candidate if is_supported(item)]
-            if supported_items:
-                filtered[key] = supported_items
-        elif candidate is not None and is_supported(candidate):
-            filtered[key] = candidate
-    return filtered
 
 
 class CoreLLMStructuredExtractor:
@@ -279,32 +231,7 @@ class CoreLLMStructuredExtractor:
         )
         if not isinstance(response, StructuredEvidenceExtractions):
             raise TypeError("unexpected objective evidence extraction response type")
-        authority_text = json.dumps(
-            {
-                "source": payload.get("source"),
-                "retained_evidence": (
-                    payload.get("document_state", {}).get("retained_evidence")
-                    if isinstance(payload.get("document_state"), dict)
-                    else None
-                ),
-            },
-            ensure_ascii=False,
-            default=str,
-        )
-        return StructuredEvidenceExtractions(
-            extractions=[
-                extraction.model_copy(
-                    update={
-                        field: _filter_source_supported_mapping(
-                            getattr(extraction, field),
-                            authority_text=authority_text,
-                        )
-                        for field in _EVIDENCE_CONTEXT_FIELDS
-                    }
-                )
-                for extraction in response.extractions
-            ]
-        )
+        return response
 
     def synthesize_findings(
         self,
@@ -344,7 +271,7 @@ class CoreLLMStructuredExtractor:
             use_provider_parse = (
                 self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE
                 and response_model is not StructuredDocumentProfile
-                and response_model is not StructuredFindingSynthesis
+                and response_model is not StructuredEvidenceSelections
             )
             if use_provider_parse:
                 try:
@@ -465,6 +392,7 @@ class CoreLLMStructuredExtractor:
             "model": self.model,
             "temperature": 0,
             "messages": messages,
+            "response_format": {"type": "json_object"},
             **self._provider_request_options(),
         }
         if response_model is StructuredDocumentProfile:
@@ -473,112 +401,49 @@ class CoreLLMStructuredExtractor:
             )
         elif response_model is StructuredPaperSkim:
             request_kwargs["max_completion_tokens"] = _PAPER_SKIM_MAX_COMPLETION_TOKENS
-            request_kwargs["response_format"] = {"type": "json_object"}
         elif response_model is StructuredResearchObjectives:
             request_kwargs["max_completion_tokens"] = (
                 _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS
             )
-            request_kwargs["response_format"] = {"type": "json_object"}
-        elif response_model is StructuredAxisCanonicalizationPlan:
-            request_kwargs["max_completion_tokens"] = (
-                _RESEARCH_AXIS_CANONICALIZATION_MAX_COMPLETION_TOKENS
-            )
-            request_kwargs["response_format"] = {"type": "json_object"}
-        elif response_model is StructuredObjectiveMergePlan:
-            request_kwargs["max_completion_tokens"] = (
-                _RESEARCH_OBJECTIVE_MERGE_MAX_COMPLETION_TOKENS
-            )
-            request_kwargs["response_format"] = {"type": "json_object"}
-        elif response_model is StructuredPaperContributionDraft:
-            request_kwargs["max_completion_tokens"] = (
-                _OBJECTIVE_PAPER_FRAME_MAX_COMPLETION_TOKENS
-            )
-            request_kwargs["response_format"] = {"type": "json_object"}
         elif response_model is StructuredEvidenceSelections:
             request_kwargs["max_completion_tokens"] = (
                 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS
             )
-            request_kwargs["response_format"] = {"type": "json_object"}
         elif response_model is StructuredEvidenceExtractions:
             request_kwargs["max_completion_tokens"] = (
                 _OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS
             )
-            request_kwargs["response_format"] = {"type": "json_object"}
         elif response_model is StructuredFindingSynthesis:
             request_kwargs["max_completion_tokens"] = (
                 _FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS
             )
-            request_kwargs["response_format"] = {"type": "json_object"}
         last_error: Exception | None = None
         for attempt in range(2):
             attempt_kwargs = dict(request_kwargs)
             attempt_messages = messages
             if attempt:
-                if response_model is StructuredPaperSkim:
-                    retry_instruction = (
-                        "Previous PaperSkim output failed validation: "
-                        f"{_trace_text(last_error, 400)}. Return one compact JSON "
-                        "object with exactly these keys: doc_role, "
-                        "candidate_materials, candidate_processes, "
-                        "candidate_properties, changed_variables, "
-                        "possible_objectives, evidence_density, confidence, and "
-                        "warnings. Remove every other key. Do not output analysis, "
-                        "markdown, or copied input."
-                    )
-                elif response_model is StructuredResearchObjectives:
-                    retry_instruction = (
-                        "Previous ResearchObjective discovery output failed "
-                        f"validation: {_trace_text(last_error, 400)}. Return one "
-                        "compact JSON object with exactly one top-level key: "
-                        "objectives. Each item must have exactly these objective "
-                        "keys: question, material_scope, process_axes, "
-                        "property_axes, comparison_intent, seed_document_ids, "
-                        "excluded_document_ids, confidence, and reason. Use "
-                        '{"objectives":[]} when no complete candidate exists. '
-                        "Do not output analysis, markdown, copied input, or extra "
-                        "fields."
-                    )
-                elif response_model is StructuredEvidenceSelections:
-                    retry_instruction = (
-                        "Previous evidence routing output failed validation: "
-                        f"{_trace_text(last_error, 400)}. Return one compact JSON "
-                        "object with exactly one top-level key: selections. Each "
-                        "selection may contain only role, extractable, and "
-                        "confidence. Use {\"selections\":[]} when the current "
-                        "source is not useful. Do not output analysis, markdown, "
-                        "source fields, or copied input."
-                    )
-                elif response_model is StructuredEvidenceExtractions:
-                    retry_instruction = (
-                        "Previous evidence extraction output failed validation: "
-                        f"{_trace_text(last_error, 400)}. Return one compact JSON "
-                        "object with exactly one top-level key: extractions. "
-                        "Return at most one schema-valid extraction or use "
-                        "{\"extractions\":[]}. Do not output analysis, markdown, "
-                        "source refs, evidence ids, source text, or copied input."
-                    )
-                elif response_model is StructuredFindingSynthesis:
-                    retry_instruction = (
-                        "Previous Finding synthesis output failed validation: "
-                        f"{_trace_text(last_error, 400)}. Return one compact JSON "
-                        "object with exactly one top-level key: findings. Return "
-                        "at most one schema-valid Finding or use "
-                        "{\"findings\":[]}. For one directly supporting paper, "
-                        "use insufficient_confirmation and say it is directly "
-                        "supported by one paper. Do not output analysis, markdown, "
-                        "or copied input."
+                if isinstance(last_error, ValidationError):
+                    repair_detail = "; ".join(
+                        f"{'.'.join(str(part) for part in error['loc'])}: "
+                        f"{error['msg']}"
+                        for error in last_error.errors(
+                            include_input=False,
+                            include_url=False,
+                        )
                     )
                 else:
-                    retry_instruction = (
-                        "Previous output was invalid. Return only the smallest valid "
-                        "JSON object matching the schema. Do not explain, repeat the "
-                        "prompt, or include markdown."
-                    )
+                    repair_detail = str(last_error or "invalid structured output")
                 attempt_messages = [
                     *messages,
                     {
                         "role": "user",
-                        "content": retry_instruction,
+                        "content": (
+                            "Previous output was invalid. Return only the smallest valid "
+                            "JSON object matching the schema. Do not explain, repeat the "
+                            "prompt, or include markdown. For finding synthesis, return "
+                            "at most one finding. Correct these validation errors: "
+                            f"{repair_detail[:1000]}"
+                        ),
                     },
                 ]
                 attempt_kwargs["messages"] = attempt_messages
@@ -587,18 +452,10 @@ class CoreLLMStructuredExtractor:
                     self.model,
                     response_model.__name__,
                 )
-            raw_content = None
-            finish_reason = None
-            usage = None
             try:
                 completion = self.client.chat.completions.create(**attempt_kwargs)
-                choice = completion.choices[0] if completion.choices else None
-                finish_reason = getattr(choice, "finish_reason", None)
-                usage = getattr(completion, "usage", None)
-                if hasattr(usage, "model_dump"):
-                    usage = usage.model_dump()
                 raw_content = self._coerce_message_content(
-                    choice.message.content if choice is not None else None
+                    completion.choices[0].message.content if completion.choices else None
                 )
                 if not raw_content:
                     raise RuntimeError(
@@ -622,26 +479,6 @@ class CoreLLMStructuredExtractor:
                     raise
             except (RuntimeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
                 last_error = exc
-                logger.warning(
-                    "Structured JSON response invalid model=%s response_model=%s "
-                    "attempt=%s finish_reason=%s usage=%s error=%s "
-                    "raw_output_length=%s",
-                    self.model,
-                    response_model.__name__,
-                    attempt + 1,
-                    finish_reason,
-                    usage,
-                    _trace_text(exc, 500),
-                    len(raw_content or ""),
-                )
-                logger.debug(
-                    "Structured JSON invalid raw output model=%s "
-                    "response_model=%s attempt=%s raw_output=%r",
-                    self.model,
-                    response_model.__name__,
-                    attempt + 1,
-                    _trace_text(raw_content, 1000),
-                )
                 if attempt == 0:
                     continue
                 raise
@@ -673,18 +510,6 @@ class CoreLLMStructuredExtractor:
         elif response_model is StructuredResearchObjectives:
             request_kwargs["max_completion_tokens"] = (
                 _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS
-            )
-        elif response_model is StructuredAxisCanonicalizationPlan:
-            request_kwargs["max_completion_tokens"] = (
-                _RESEARCH_AXIS_CANONICALIZATION_MAX_COMPLETION_TOKENS
-            )
-        elif response_model is StructuredObjectiveMergePlan:
-            request_kwargs["max_completion_tokens"] = (
-                _RESEARCH_OBJECTIVE_MERGE_MAX_COMPLETION_TOKENS
-            )
-        elif response_model is StructuredPaperContributionDraft:
-            request_kwargs["max_completion_tokens"] = (
-                _OBJECTIVE_PAPER_FRAME_MAX_COMPLETION_TOKENS
             )
         elif response_model is StructuredEvidenceSelections:
             request_kwargs["max_completion_tokens"] = (

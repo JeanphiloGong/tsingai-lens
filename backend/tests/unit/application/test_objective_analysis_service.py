@@ -272,6 +272,39 @@ def test_objective_analysis_publishes_one_complete_version() -> None:
     assert repository.published_calls == 1
 
 
+def test_route_progress_does_not_replace_paper_counts() -> None:
+    service, repository, _analyzer = _service()
+    service.queue_analysis("collection-1", "objective-1")
+    running = repository.claim_analysis("collection-1", "objective-1", 1)
+    assert running is not None
+
+    progress = service._build_progress_callback(running)
+    progress(
+        {
+            "phase": "objective_evidence_routing_started",
+            "current": 6,
+            "total": 6,
+            "unit": "frames",
+            "active_document_id": "paper-6",
+            "message": "Routing the sixth paper.",
+        }
+    )
+    progress(
+        {
+            "phase": "objective_evidence_extraction_started",
+            "current": 26,
+            "total": 26,
+            "unit": "selections",
+            "active_document_id": "paper-6",
+            "message": "Extracting selected evidence.",
+        }
+    )
+
+    progressed = repository.read_analysis("collection-1", "objective-1", 1)
+    assert progressed.processed_document_count == 6
+    assert progressed.total_document_count == 6
+
+
 def test_empty_finding_output_fails_version_without_publication() -> None:
     artifacts = replace(_artifacts(1), findings=())
     service, repository, _analyzer = _service(

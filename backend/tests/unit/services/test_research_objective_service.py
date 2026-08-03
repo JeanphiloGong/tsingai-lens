@@ -287,9 +287,16 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped(tmp_path
     )
     blocks = {
         document_id: [
-            SimpleNamespace(
-                block_id=source_ref,
-                text=f"Source text for {source_ref}.",
+                SimpleNamespace(
+                    block_id=source_ref,
+                    text=(
+                        "Laser power was 150 W in the methods."
+                        if source_ref == "paper-1-methods"
+                        else (
+                            "Laser power increased from 150 W to 200 W, and relative "
+                            "density increased from 96.1% to 99.2%."
+                        )
+                    ),
                 page=1,
                 block_type="paragraph",
                 heading_path="Results",
@@ -390,7 +397,7 @@ def test_objective_evidence_continues_after_one_route_format_failure(tmp_path):
     blocks = [
         SimpleNamespace(
             block_id=source_ref,
-            text=f"Source text for {source_ref}.",
+            text=f"Source text for {source_ref}. Test temperature was 25 C.",
             page=1,
             block_type="paragraph",
             heading_path="Results",
@@ -412,6 +419,81 @@ def test_objective_evidence_continues_after_one_route_format_failure(tmp_path):
     assert extractor.calls == 2
     assert len(units) == 1
     assert units[0].source_ref == "block-recovered"
+
+
+def test_objective_context_drops_model_changed_variable_without_values(tmp_path):
+    class ContextExtractor:
+        def extract_objective_evidence(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredEvidenceExtractions:
+            return StructuredEvidenceExtractions(
+                extractions=[
+                    StructuredEvidenceExtraction(
+                        evidence_role="condition_context",
+                        changed_variables=[
+                            {"name": "build platform preheating temperature"}
+                        ],
+                        attribution_scope="descriptive_only",
+                        scientific_context={
+                            "process": [
+                                {
+                                    "name": "build platform preheating temperature",
+                                    "value": 150,
+                                    "unit": "C",
+                                }
+                            ]
+                        },
+                        resolution_status="resolved",
+                        confidence=0.8,
+                    )
+                ]
+            )
+
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating",
+            "variables": ["build platform preheating temperature"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-context",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    block = SimpleNamespace(
+        block_id="block-context",
+        text="The build platform preheating temperature was 150 C.",
+        page=2,
+        block_type="paragraph",
+        heading_path="Methods",
+    )
+
+    units = service._build_objective_evidence(
+        collection_id="col-test",
+        extractor=ContextExtractor(),
+        objectives=(objective,),
+        objective_paper_frames=(),
+        objective_evidence_routes=(route,),
+        blocks_by_document_id={"paper-1": [block]},
+        tables_by_document_id={},
+        document_trees_by_document_id={},
+    )
+
+    assert len(units) == 1
+    assert units[0].changed_variables == ()
+    assert units[0].comparison is None
+    assert units[0].scientific_context.process[0].value == 150
 
 
 def test_pairwise_comparison_retains_every_changed_process_axis(tmp_path):
@@ -478,6 +560,388 @@ def test_pairwise_comparison_retains_every_changed_process_axis(tmp_path):
     assert comparison.comparison.comparable
 
 
+def test_pairwise_comparison_joins_process_and_result_tables_by_sample_label(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+
+    def process_context(
+        evidence_id: str,
+        sample_label: str,
+        *,
+        ved: float,
+        laser_power: int,
+        scanning_speed: int,
+        hatch_spacing: int,
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": evidence_id,
+                "objective_id": "obj-defect",
+                "document_id": "paper-ved",
+                "source_kind": "table",
+                "source_ref": "table-process",
+                "evidence_role": "condition_context",
+                "attribution_scope": "not_attributable",
+                "scientific_context": {
+                    "sample": [{"name": "ID", "value": sample_label}],
+                    "process": [
+                        {
+                            "name": "volumetric energy density",
+                            "value": ved,
+                            "unit": "J/mm3",
+                        },
+                        {"name": "laser power", "value": laser_power, "unit": "W"},
+                        {
+                            "name": "scanning speed",
+                            "value": scanning_speed,
+                            "unit": "mm/s",
+                        },
+                        {
+                            "name": "hatch spacing",
+                            "value": hatch_spacing,
+                            "unit": "um",
+                        },
+                    ],
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-process",
+                        "source_excerpt": f"ID: {sample_label} | VED: {ved}",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    def defect_result(
+        evidence_id: str,
+        sample_label: str,
+        defect_length: int,
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": evidence_id,
+                "objective_id": "obj-defect",
+                "document_id": "paper-ved",
+                "source_kind": "table",
+                "source_ref": "table-defect",
+                "evidence_role": "direct_result",
+                "reported_result": {
+                    "outcome": "max defect length",
+                    "value": defect_length,
+                    "unit": "um",
+                    "direction": "unknown",
+                    "result_text": f"Max defect length = {defect_length} um.",
+                },
+                "attribution_scope": "descriptive_only",
+                "scientific_context": {
+                    "sample": [
+                        {"name": "Printed 316L", "value": sample_label}
+                    ]
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-defect",
+                        "source_excerpt": (
+                            f"Printed 316L: {sample_label} | Max defect length: "
+                            f"{defect_length}"
+                        ),
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    units = (
+        process_context(
+            "process-low",
+            "L-VED",
+            ved=50.8,
+            laser_power=160,
+            scanning_speed=875,
+            hatch_spacing=120,
+        ),
+        process_context(
+            "process-high",
+            "H-VED",
+            ved=84.3,
+            laser_power=220,
+            scanning_speed=725,
+            hatch_spacing=120,
+        ),
+        defect_result("defect-low", "L-VED", 394),
+        defect_result("defect-high", "H-VED", 86),
+    )
+
+    bound_units = service._bind_objective_result_process_context(units)
+    comparisons = service._build_objective_pairwise_comparison_units(
+        bound_units,
+        objectives=(),
+    )
+
+    assert {
+        item.name for item in bound_units[2].scientific_context.process
+    } == {
+        "volumetric energy density",
+        "laser power",
+        "scanning speed",
+        "hatch spacing",
+    }
+    assert {ref["source_ref"] for ref in bound_units[2].source_refs} == {
+        "table-process",
+        "table-defect",
+    }
+    assert len(comparisons) == 1
+    comparison = comparisons[0]
+    assert comparison.attribution_scope == "joint_effect"
+    assert {item.name for item in comparison.changed_variables} == {
+        "volumetric energy density",
+        "laser power",
+        "scanning speed",
+    }
+
+
+def test_text_result_process_binding_requires_exact_groups_and_expands_axes(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+
+    def process_context(
+        evidence_id: str,
+        sample_label: str,
+        *,
+        ved: float,
+        laser_power: int,
+        scanning_speed: int,
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": evidence_id,
+                "objective_id": "obj-defect",
+                "document_id": "paper-ved",
+                "source_kind": "table",
+                "source_ref": "table-process",
+                "evidence_role": "condition_context",
+                "attribution_scope": "not_attributable",
+                "scientific_context": {
+                    "sample": [{"name": "ID", "value": sample_label}],
+                    "process": [
+                        {
+                            "name": "volumetric energy density",
+                            "value": ved,
+                            "unit": "J/mm3",
+                        },
+                        {"name": "laser power", "value": laser_power, "unit": "W"},
+                        {
+                            "name": "scanning speed",
+                            "value": scanning_speed,
+                            "unit": "mm/s",
+                        },
+                        {"name": "hatch spacing", "value": 120, "unit": "um"},
+                    ],
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-process",
+                        "source_excerpt": f"ID: {sample_label} | VED: {ved}",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    def text_result(
+        evidence_id: str,
+        baseline_label: str,
+        target_label: str,
+        source_excerpt: str,
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": evidence_id,
+                "objective_id": "obj-defect",
+                "document_id": "paper-ved",
+                "source_kind": "text_window",
+                "source_ref": evidence_id,
+                "evidence_role": "direct_result",
+                "changed_variables": [
+                    {
+                        "name": "volumetric energy density",
+                        "baseline_value": baseline_label,
+                        "target_value": target_label,
+                    }
+                ],
+                "comparison": {
+                    "baseline_label": baseline_label,
+                    "target_label": target_label,
+                    "axis_names": ["volumetric energy density"],
+                    "comparable": True,
+                },
+                "reported_result": {
+                    "outcome": "defect structure",
+                    "value": None,
+                    "unit": None,
+                    "direction": "decrease",
+                    "result_text": "Maximum defect sizes decrease with increasing VED.",
+                },
+                "attribution_scope": "isolated_effect",
+                "source_refs": [
+                    {
+                        "source_kind": "text_window",
+                        "source_ref": evidence_id,
+                        "source_excerpt": source_excerpt,
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.95,
+            }
+        )
+
+    units = service._bind_objective_result_process_context(
+        (
+            process_context(
+                "process-low",
+                "L-VED",
+                ved=50.8,
+                laser_power=160,
+                scanning_speed=875,
+            ),
+            process_context(
+                "process-high",
+                "H-VED",
+                ved=84.3,
+                laser_power=220,
+                scanning_speed=725,
+            ),
+            text_result(
+                "block-defects",
+                "L-VED",
+                "H-VED",
+                "Maximum defect sizes decrease from L-VED to H-VED.",
+            ),
+            text_result(
+                "block-fatigue",
+                "high",
+                "low",
+                (
+                    "The high VED structure had the largest defect. All structures "
+                    "exhibited a low fatigue limit."
+                ),
+            ),
+        )
+    )
+
+    grounded = units[2]
+    assert grounded.attribution_scope == "joint_effect"
+    assert {
+        item.name for item in grounded.changed_variables
+    } == {
+        "volumetric energy density",
+        "laser power",
+        "scanning speed",
+    }
+    assert grounded.comparison is not None
+    assert set(grounded.comparison.axis_names) == {
+        "volumetric energy density",
+        "laser power",
+        "scanning speed",
+    }
+    assert {
+        item.name for item in grounded.scientific_context.process
+    } == {"hatch spacing"}
+    assert {ref["source_ref"] for ref in grounded.source_refs} == {
+        "block-defects",
+        "table-process",
+    }
+
+    ungrounded = units[3]
+    assert ungrounded.attribution_scope == "not_attributable"
+    assert ungrounded.changed_variables == ()
+    assert ungrounded.comparison is not None
+    assert not ungrounded.comparison.comparable
+    assert ungrounded.comparison.incomparability_reasons == (
+        "comparison groups do not bind to source process conditions",
+    )
+
+
+def test_process_result_table_join_rejects_conflicting_sample_context(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    context_payload = {
+        "objective_id": "obj-defect",
+        "document_id": "paper-ved",
+        "source_kind": "table",
+        "evidence_role": "condition_context",
+        "attribution_scope": "not_attributable",
+        "scientific_context": {
+            "sample": [{"name": "ID", "value": "L-VED"}],
+        },
+        "source_refs": [{"source_kind": "table", "source_ref": "table-process"}],
+        "resolution_status": "resolved",
+    }
+    first_context = ExtractedEvidenceDraft.from_mapping(
+        {
+            **context_payload,
+            "evidence_id": "process-low-a",
+            "scientific_context": {
+                **context_payload["scientific_context"],
+                "process": [{"name": "laser power", "value": 160, "unit": "W"}],
+            },
+        }
+    )
+    conflicting_context = ExtractedEvidenceDraft.from_mapping(
+        {
+            **context_payload,
+            "evidence_id": "process-low-b",
+            "scientific_context": {
+                **context_payload["scientific_context"],
+                "process": [{"name": "laser power", "value": 190, "unit": "W"}],
+            },
+        }
+    )
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "defect-low",
+            "objective_id": "obj-defect",
+            "document_id": "paper-ved",
+            "source_kind": "table",
+            "source_ref": "table-defect",
+            "evidence_role": "direct_result",
+            "reported_result": {
+                "outcome": "max defect length",
+                "value": 394,
+                "unit": "um",
+                "direction": "unknown",
+                "result_text": "Max defect length = 394 um.",
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {
+                "sample": [{"name": "Printed 316L", "value": "L-VED"}]
+            },
+            "source_refs": [{"source_kind": "table", "source_ref": "table-defect"}],
+            "resolution_status": "resolved",
+        }
+    )
+
+    bound = service._bind_objective_result_process_context(
+        (first_context, conflicting_context, result)
+    )
+
+    assert bound[2] == result
+
+
 def test_pairwise_comparison_isolated_effect_requires_one_changed_axis(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
@@ -523,6 +987,12 @@ def test_pairwise_comparison_isolated_effect_requires_one_changed_axis(tmp_path)
     assert [item.name for item in comparison.changed_variables] == ["scan speed"]
     assert comparison.comparison is not None
     assert comparison.comparison.axis_names == ("scan speed",)
+    assert comparison.scientific_context.to_record() == {
+        "material": [],
+        "sample": [],
+        "process": [{"name": "laser power", "value": 200, "unit": "W"}],
+        "test": [],
+    }
 
 
 def test_pairwise_comparison_marks_sample_state_change_incomparable(tmp_path):
@@ -594,6 +1064,64 @@ def test_pairwise_comparison_marks_sample_state_change_incomparable(tmp_path):
     assert not comparison.comparison.comparable
     assert any(
         "sample condition differs for sample state" in reason
+        for reason in comparison.comparison.incomparability_reasons
+    )
+
+
+def test_pairwise_comparison_keeps_semantic_values_from_generic_sample_column(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+
+    def result(evidence_id: str, sample: str, energy_density: int, strength: float):
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": evidence_id,
+                "objective_id": "obj-strength",
+                "document_id": "paper-1",
+                "source_kind": "table",
+                "source_ref": "table-strength",
+                "evidence_role": "direct_result",
+                "reported_result": {
+                    "outcome": "yield strength",
+                    "value": strength,
+                    "unit": "MPa",
+                    "direction": "unknown",
+                    "result_text": f"Yield strength = {strength} MPa.",
+                },
+                "attribution_scope": "descriptive_only",
+                "scientific_context": {
+                    "sample": [{"name": "Sample", "value": sample}],
+                    "process": [
+                        {
+                            "name": "energy density",
+                            "value": energy_density,
+                            "unit": "J/mm3",
+                        }
+                    ],
+                },
+                "source_refs": [
+                    {"source_kind": "table", "source_ref": "table-strength"}
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    comparison = service._build_objective_pairwise_comparison_units(
+        (
+            result("as-slm", "as-SLM", 194, 426.7),
+            result("hip-slm", "HIP-SLM", 167, 265.1),
+        ),
+        objectives=(),
+    )[0]
+
+    assert comparison.attribution_scope == "not_attributable"
+    assert comparison.comparison is not None
+    assert any(
+        "sample condition differs for Sample" in reason
         for reason in comparison.comparison.incomparability_reasons
     )
 
@@ -2376,6 +2904,830 @@ def test_objective_paper_frame_payload_filters_unscored_tables(tmp_path):
     assert "tbl-density" not in table_ids
 
 
+def test_objective_symbol_axes_distinguish_scan_and_build_angles(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-angle-effects",
+            "question": (
+                "How do scan strategy rotation angle and build orientation angle "
+                "affect yield strength?"
+            ),
+            "material_scope": ["316L stainless steel"],
+            "variables": [
+                "scan strategy rotation angle",
+                "build orientation angles",
+            ],
+            "outcomes": ["yield strength"],
+            "confidence": 0.9,
+        }
+    )
+
+    assert service._objective_process_column_axis_keys("θ") == {
+        "scan strategy rotation angle"
+    }
+    assert service._objective_process_column_axis_keys("ɵ") == {
+        "scan strategy rotation angle"
+    }
+    assert service._objective_process_column_axis_keys("α") == {
+        "build orientation alpha angle"
+    }
+    assert service._objective_process_column_axis_keys("β") == {
+        "build orientation beta angle"
+    }
+    assert service._objective_process_attribute_label(
+        column="θ",
+        role="process variable",
+        objective_context=objective,
+    ) == "scan strategy rotation angle"
+    assert service._objective_process_attribute_label(
+        column="α",
+        role="process variable",
+        objective_context=objective,
+    ) == "build orientation alpha angle"
+
+
+def test_objective_angle_table_comparison_retains_all_changed_axes(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-angle-effects",
+            "question": (
+                "How do scan strategy rotation angle and build orientation angle "
+                "affect yield strength?"
+            ),
+            "variables": [
+                "scan strategy rotation angle",
+                "build orientation angle",
+            ],
+            "outcomes": ["yield strength"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-angle",
+            "source_kind": "table",
+            "source_ref": "table-angle",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "α ( ◦ )": "sample condition",
+                "β ( ◦ )": "sample condition",
+                "θ ( ◦ )": "process_variable",
+                "Yield Strength Experiment (MPa)": "result_property",
+            },
+            "confidence": 0.95,
+        }
+    )
+    measurements = tuple(
+        ExtractedEvidenceDraft.from_mapping(record)
+        for record in service._objective_table_matrix_evidence_records(
+            route=route,
+            objective_context=objective,
+            source={
+                "page": 8,
+                "column_headers": [
+                    "α ( ◦ )",
+                    "β ( ◦ )",
+                    "θ ( ◦ )",
+                    "Yield Strength Experiment (MPa)",
+                ],
+                "table_matrix": [
+                    [
+                        "α ( ◦ )",
+                        "β ( ◦ )",
+                        "θ ( ◦ )",
+                        "Yield Strength Experiment (MPa)",
+                    ],
+                    ["0", "0", "0", "334.2"],
+                    ["45", "22.5", "45", "365.6"],
+                ],
+            },
+        )
+    )
+
+    comparison = service._build_objective_pairwise_comparison_units(
+        measurements,
+        objectives=(objective,),
+    )[0]
+
+    assert [item.name for item in comparison.changed_variables] == [
+        "build orientation alpha angle",
+        "build orientation beta angle",
+        "scan strategy rotation angle",
+    ]
+    assert comparison.attribution_scope == "joint_effect"
+    assert comparison.comparison is not None
+    assert comparison.comparison.axis_names == (
+        "build orientation alpha angle",
+        "build orientation beta angle",
+        "scan strategy rotation angle",
+    )
+
+
+def test_llm_objective_evidence_rejects_values_and_axis_absent_from_source(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-angle-effects",
+            "question": "How do scan and build angles affect yield strength?",
+            "variables": [
+                "scan strategy rotation angle",
+                "build orientation angle",
+            ],
+            "outcomes": ["yield strength"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-angle",
+            "source_kind": "text_window",
+            "source_ref": "block-strategies",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+
+    records = service._objective_evidence_records_from_extracted(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": "block-strategies",
+            "text": (
+                "Scanning strategies A, B, and C were evaluated at an energy "
+                "density of 100 J/mm3 and a scanning speed of 700 mm/s."
+            ),
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "scan strategy rotation angle",
+                    "baseline_value": 0,
+                    "target_value": 67,
+                    "unit": "degree",
+                },
+                {
+                    "name": "build orientation angle",
+                    "baseline_value": 0,
+                    "target_value": 67,
+                    "unit": "degree",
+                },
+            ],
+            "comparison": {
+                "baseline_label": "0 degree",
+                "target_label": "67 degree",
+                "axis_names": [
+                    "scan strategy rotation angle",
+                    "build orientation angle",
+                ],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "yield strength",
+                "value": 480,
+                "unit": "MPa",
+                "direction": "increase",
+                "result_text": "Yield strength increased from 450 to 480 MPa.",
+            },
+            "attribution_scope": "joint_effect",
+            "scientific_context": {},
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+    )
+
+    assert records == ()
+
+
+def test_llm_objective_evidence_accepts_source_grounded_axis_and_values(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-angle-effects",
+            "question": "How does scan rotation affect yield strength?",
+            "variables": ["scan strategy rotation angle"],
+            "outcomes": ["yield strength"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-angle",
+            "source_kind": "table",
+            "source_ref": "table-angle",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+
+    records = service._objective_evidence_records_from_extracted(
+        route=route,
+        source={
+            "source_kind": "table",
+            "source_ref": "table-angle",
+            "column_headers": ["theta (degree)", "Yield strength (MPa)"],
+            "table_matrix": [
+                ["theta (degree)", "Yield strength (MPa)"],
+                ["0", "334.2"],
+                ["45", "351.9"],
+            ],
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "scan strategy rotation angle",
+                    "baseline_value": 0,
+                    "target_value": 45,
+                    "unit": "degree",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "theta 0",
+                "target_label": "theta 45",
+                "axis_names": ["scan strategy rotation angle"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "yield strength",
+                "value": 351.9,
+                "unit": "MPa",
+                "direction": "increase",
+                "result_text": "Yield strength increased from 334.2 to 351.9 MPa.",
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {
+                "material": [{"name": "material", "value": "316L"}],
+                "process": [
+                    {"name": "process", "value": "laser powder bed fusion"}
+                ],
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+    )
+
+    assert len(records) == 1
+
+
+def test_llm_objective_evidence_completes_grounded_categorical_endpoints(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating",
+            "question": "How does build platform preheating affect microstructure?",
+            "variables": ["preheating build platform temperature"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "source_kind": "text_window",
+            "source_ref": "block-preheating",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+
+    records = service._objective_evidence_records_from_extracted(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": "block-preheating",
+            "text": (
+                "The build platform preheating temperature conditions were "
+                "non-preheated NP and 150 C preheated P150. P150 had a coarser "
+                "cellular microstructure than NP."
+            ),
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "preheating build platform temperature",
+                    "baseline_value": None,
+                    "target_value": None,
+                    "unit": None,
+                }
+            ],
+            "comparison": {
+                "baseline_label": "NP",
+                "target_label": "P150",
+                "axis_names": ["preheating build platform temperature"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "microstructure",
+                "value": None,
+                "unit": None,
+                "direction": "mixed",
+                "result_text": "P150 had a coarser cellular microstructure than NP.",
+            },
+            "attribution_scope": "association_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert len(records) == 1
+    assert records[0]["changed_variables"] == [
+        {
+            "name": "preheating build platform temperature",
+            "baseline_value": "NP",
+            "target_value": "P150",
+            "unit": None,
+        }
+    ]
+    assert records[0]["scientific_context"] == {
+        "material": [],
+        "sample": [],
+        "process": [],
+        "test": [],
+    }
+
+
+def test_llm_objective_evidence_drops_unsupported_qualitative_direction(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating",
+            "question": "How does build platform preheating affect microstructure?",
+            "variables": ["preheating build platform temperature"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "source_kind": "text_window",
+            "source_ref": "block-preheating",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+
+    records = service._objective_evidence_records_from_extracted(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": "block-preheating",
+            "text": (
+                "The build platform preheating temperature conditions were NP "
+                "and P150. A cellular structure was observed in the P150 "
+                "microstructure."
+            ),
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "preheating build platform temperature",
+                    "baseline_value": "NP",
+                    "target_value": "P150",
+                    "unit": None,
+                }
+            ],
+            "comparison": {
+                "baseline_label": "NP",
+                "target_label": "P150",
+                "axis_names": ["preheating build platform temperature"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "microstructure",
+                "value": "cellular structure",
+                "unit": None,
+                "direction": "increase",
+                "result_text": "cellular structure",
+            },
+            "attribution_scope": "association_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert len(records) == 1
+    assert records[0]["reported_result"]["direction"] == "unknown"
+
+
+def test_llm_objective_evidence_keeps_grounded_qualitative_direction(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating",
+            "question": "How does build platform preheating affect grain size?",
+            "variables": ["preheating build platform temperature"],
+            "outcomes": ["grain size"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "source_kind": "text_window",
+            "source_ref": "block-preheating",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+
+    records = service._objective_evidence_records_from_extracted(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": "block-preheating",
+            "text": (
+                "The build platform preheating temperature changed from NP to "
+                "P150, and grain size increased."
+            ),
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "preheating build platform temperature",
+                    "baseline_value": "NP",
+                    "target_value": "P150",
+                    "unit": None,
+                }
+            ],
+            "comparison": {
+                "baseline_label": "NP",
+                "target_label": "P150",
+                "axis_names": ["preheating build platform temperature"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "grain size",
+                "value": None,
+                "unit": None,
+                "direction": "increase",
+                "result_text": "grain size increased",
+            },
+            "attribution_scope": "association_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert len(records) == 1
+    assert records[0]["reported_result"]["direction"] == "increase"
+
+
+def test_llm_objective_evidence_repairs_endpoints_to_grounded_group_labels(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating",
+            "question": "How does build platform preheating affect microstructure?",
+            "variables": ["preheating build platform temperature"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "source_kind": "text_window",
+            "source_ref": "block-preheating",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+
+    records = service._objective_evidence_records_from_extracted(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": "block-preheating",
+            "text": (
+                "Comparing the microstructure obtained for P150 with NP condition, "
+                "the cellular structure is seen in the former condition. The "
+                "decrease in the cooling rate by preheating the build platform is "
+                "due to the lower temperature gradient."
+            ),
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "preheating build platform temperature",
+                    "baseline_value": "150 C",
+                    "target_value": "room temperature",
+                    "unit": "C",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "P150",
+                "target_label": "NP",
+                "axis_names": ["preheating build platform temperature"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "microstructure",
+                "value": "cellular structure",
+                "unit": None,
+                "direction": "mixed",
+                "result_text": (
+                    "Comparing the microstructure obtained for P150 with NP "
+                    "condition, the cellular structure is seen in the former "
+                    "condition."
+                ),
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {},
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+    )
+
+    assert len(records) == 1
+    assert records[0]["changed_variables"] == [
+        {
+            "name": "preheating build platform temperature",
+            "baseline_value": "P150",
+            "target_value": "NP",
+            "unit": None,
+        }
+    ]
+
+
+def test_llm_objective_evidence_does_not_complete_labels_absent_from_source(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating",
+            "question": "How does build platform preheating affect microstructure?",
+            "variables": ["preheating build platform temperature"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "source_kind": "text_window",
+            "source_ref": "block-preheating",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+
+    records = service._objective_evidence_records_from_extracted(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": "block-preheating",
+            "text": "Preheating changed the cellular microstructure.",
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "preheating build platform temperature",
+                    "baseline_value": None,
+                    "target_value": None,
+                    "unit": None,
+                }
+            ],
+            "comparison": {
+                "baseline_label": "NP",
+                "target_label": "P150",
+                "axis_names": ["preheating build platform temperature"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "microstructure",
+                "value": None,
+                "unit": None,
+                "direction": "mixed",
+                "result_text": "Preheating changed the cellular microstructure.",
+            },
+            "attribution_scope": "association_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert records == ()
+
+
+def test_llm_table_result_rejects_outcome_and_unit_from_another_column(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    record = {
+        "changed_variables": [
+            {
+                "name": "scan strategy rotation angle",
+                "baseline_value": 0,
+                "target_value": 45,
+                "unit": "degree",
+            }
+        ],
+        "comparison": {
+            "baseline_label": "theta 0",
+            "target_label": "theta 45",
+        },
+        "reported_result": {
+            "outcome": "yield strength",
+            "value": 351.9,
+            "unit": "MPa",
+            "result_text": "Yield strength increased from 334.2 to 351.9 MPa.",
+        },
+    }
+
+    assert not service._objective_extracted_result_is_source_grounded(
+        record,
+        source={
+            "source_kind": "table",
+            "column_headers": ["theta (degree)", "Hardness (HV)"],
+            "table_matrix": [
+                ["theta (degree)", "Hardness (HV)"],
+                ["0", "334.2"],
+                ["45", "351.9"],
+            ],
+        },
+    )
+
+
+def test_llm_table_result_rejects_value_from_a_different_experiment_row(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    record = {
+        "changed_variables": [
+            {
+                "name": "scan strategy rotation angle",
+                "baseline_value": 0,
+                "target_value": 45,
+                "unit": "degree",
+            }
+        ],
+        "comparison": {
+            "baseline_label": "theta 0",
+            "target_label": "theta 45",
+        },
+        "reported_result": {
+            "outcome": "yield strength",
+            "value": 365.6,
+            "unit": "MPa",
+            "result_text": "Yield strength increased from 334.2 to 365.6 MPa.",
+        },
+    }
+
+    assert not service._objective_extracted_result_is_source_grounded(
+        record,
+        source={
+            "source_kind": "table",
+            "column_headers": ["theta (degree)", "Yield strength (MPa)"],
+            "table_matrix": [
+                ["theta (degree)", "Yield strength (MPa)"],
+                ["0", "334.2"],
+                ["45", "351.9"],
+                ["67", "365.6"],
+            ],
+        },
+    )
+
+
+def test_llm_context_drops_values_absent_from_source(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+
+    record = service._objective_retain_source_grounded_context(
+        {
+            "scientific_context": {
+                "material": [],
+                "sample": [],
+                "process": [
+                    {
+                        "name": "heat treatment temperature",
+                        "value": "500",
+                        "unit": "C",
+                    }
+                ],
+                "test": [],
+            }
+        },
+        source={
+            "source_kind": "text_window",
+            "text": "The samples were heat treated at 650 C for four hours.",
+        },
+    )
+
+    assert record["scientific_context"]["process"] == []
+
+
+def test_llm_result_rejects_ungrounded_categorical_variable_endpoint(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+
+    assert not service._objective_extracted_result_is_source_grounded(
+        {
+            "changed_variables": [
+                {
+                    "name": "sample state",
+                    "baseline_value": "as-SLM",
+                    "target_value": "solution-treated",
+                    "unit": None,
+                }
+            ],
+            "reported_result": {
+                "outcome": "yield strength",
+                "value": 265.1,
+                "unit": "MPa",
+                "result_text": "Yield strength changed from 426.7 to 265.1 MPa.",
+            },
+        },
+        source={
+            "source_kind": "text_window",
+            "text": (
+                "Sample state changed from as-SLM to HIP-SLM; the samples had "
+                "yield strengths of 426.7 and 265.1 MPa, respectively."
+            ),
+        },
+    )
+
+
+def test_llm_context_drops_attribute_not_bound_to_name_value_and_unit(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+
+    record = service._objective_retain_source_grounded_context(
+        {
+            "scientific_context": {
+                "material": [],
+                "sample": [],
+                "process": [
+                    {"name": "laser power", "value": 650, "unit": "W"}
+                ],
+                "test": [],
+            }
+        },
+        source={
+            "source_kind": "text_window",
+            "text": "The samples were heat treated at 650 C for four hours.",
+        },
+    )
+
+    assert record["scientific_context"]["process"] == []
+
+
 def test_deterministic_frame_requires_variable_and_property_axis(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
@@ -2888,6 +4240,155 @@ def test_research_objective_service_routes_matching_tables_beyond_seed_documents
     }
 
 
+def test_real_ved_process_and_defect_tables_form_joint_comparison(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-defect",
+            "question": "How does volumetric energy density affect defect structure?",
+            "variables": ["volumetric energy density"],
+            "outcomes": ["defect structure"],
+        }
+    )
+    process_table = SimpleNamespace(
+        table_id="table-2",
+        document_id="paper-ved",
+        caption_text="Table 2 Fabrication parameters for 316L samples with varying VED.",
+        heading_path="Materials and methods",
+        page=4,
+        column_headers=(
+            "ID",
+            "VED [J/mm 3 ]",
+            "Laser power [W]",
+            "Scanning speed [mm/s]",
+            "Hatch spacing [ μ m]",
+            "Layer thickness [ μ m]",
+        ),
+        table_matrix=(
+            (
+                "ID",
+                "VED [J/mm 3 ]",
+                "Laser power [W]",
+                "Scanning speed [mm/s]",
+                "Hatch spacing [ μ m]",
+                "Layer thickness [ μ m]",
+            ),
+            ("L-VED", "50.8", "160", "875", "120", "30"),
+            ("M-VED", "79.4", "190", "800", "100", "30"),
+            ("H-VED", "84.3", "220", "725", "120", "30"),
+        ),
+        row_count=4,
+        col_count=6,
+    )
+    result_table = SimpleNamespace(
+        table_id="table-5",
+        document_id="paper-ved",
+        caption_text=(
+            "Table 5 Fatigue and maximum defect measurements for 316L "
+            "structures printed at different VEDs."
+        ),
+        heading_path="Results",
+        page=10,
+        column_headers=(
+            "Printed 316L",
+            "UTS [MPa]",
+            "FAT50 % [MPa]",
+            "FAT/ UTS -",
+            "FAT at 10 4 cycles [MPa]",
+            "Max. Defect length (LCSM) [ μ m]",
+        ),
+        table_matrix=(
+            (
+                "Printed 316L",
+                "UTS [MPa]",
+                "FAT50 % [MPa]",
+                "FAT/ UTS -",
+                "FAT at 10 4 cycles [MPa]",
+                "Max. Defect length (LCSM) [ μ m]",
+            ),
+            ("L-VED", "610 ± 6", "93", "0.15", "340", "394"),
+            ("M-VED", "595 ± 13", "82", "0.14", "450", "179"),
+            ("H-VED", "560 ± 4", "97", "0.17", "470", "86"),
+        ),
+        row_count=4,
+        col_count=6,
+    )
+    tables = (process_table, result_table)
+
+    hints = service._build_objective_table_routing_hints(objective, tables=tables)
+
+    assert {(hint.table_id, hint.role) for hint in hints} == {
+        ("table-2", "condition_context"),
+        ("table-5", "result_table"),
+    }
+
+    routes: list[EvidenceCandidate] = []
+    service._append_objective_context_hint_routes(
+        routes=routes,
+        seen=set(),
+        frame=PaperAnalysisFrame.from_mapping(
+            {
+                "objective_id": objective.objective_id,
+                "document_id": "paper-ved",
+                "relevance": "high",
+                "paper_role": "primary_experiment",
+                "relevant_tables": ["table-2", "table-5"],
+            }
+        ),
+        objective_context=objective,
+        routing_hints=hints,
+        candidate_by_key={
+            ("table", table.table_id): {
+                "source_kind": "table",
+                "source_ref": table.table_id,
+                "frame_status": "relevant",
+                "table_schema": service._build_route_table_schema(table),
+            }
+            for table in tables
+        },
+    )
+    units = tuple(
+        ExtractedEvidenceDraft.from_mapping(record)
+        for route in routes
+        for record in service._objective_table_matrix_evidence_records(
+            route=route,
+            source=service._build_objective_route_source_payload(
+                route=route,
+                blocks=[],
+                tables=list(tables),
+            ),
+            objective_context=objective,
+        )
+    )
+    comparisons = service._build_objective_pairwise_comparison_units(
+        service._bind_objective_result_process_context(units),
+        objectives=(objective,),
+    )
+    low_to_high = next(
+        comparison
+        for comparison in comparisons
+        if comparison.comparison is not None
+        and comparison.comparison.baseline_label == "l-ved"
+        and comparison.comparison.target_label == "h-ved"
+    )
+
+    assert low_to_high.attribution_scope == "joint_effect"
+    assert {
+        service._normalize_property_label(item.name)
+        for item in low_to_high.changed_variables
+    } == {
+        "volumetric energy density",
+        "laser power",
+        "scanning speed",
+    }
+    assert {ref["source_ref"] for ref in low_to_high.source_refs} == {
+        "table-2",
+        "table-5",
+    }
+
+
 def test_research_objective_service_does_not_route_single_letter_acronym_tables(
     tmp_path,
 ):
@@ -3236,6 +4737,15 @@ def test_research_objective_service_keeps_density_out_of_defect_structure_result
     )
 
     assert all(hint.role != "result_table" for hint in hints)
+    target_axes = service._objective_outcomes(objective)
+    assert service._objective_property_matches_target_axes(
+        "maximum defect diameter",
+        target_axes=target_axes,
+    )
+    assert not service._objective_property_matches_target_axes(
+        "relative density",
+        target_axes=target_axes,
+    )
 
 
 def test_research_objective_service_route_payload_uses_objective_contract(
@@ -3443,6 +4953,13 @@ def test_research_objective_service_ranks_result_text_candidates(
             ),
         ),
         SimpleNamespace(
+            block_id="page-number",
+            block_order=101,
+            block_type="paragraph",
+            heading_path="3.3. Thermal Simulation and Microstructure",
+            text="418",
+        ),
+        SimpleNamespace(
             block_id="conclusion",
             block_order=120,
             block_type="list_item",
@@ -3463,6 +4980,7 @@ def test_research_objective_service_ranks_result_text_candidates(
     candidate_refs = [candidate["source_ref"] for candidate in candidates]
     assert set(candidate_refs[:2]) == {"microstructure-results", "conclusion"}
     assert "intro" not in candidate_refs
+    assert "page-number" not in candidate_refs
 
     routes: list[EvidenceCandidate] = []
     service._append_ranked_text_hint_routes(
@@ -3481,6 +4999,85 @@ def test_research_objective_service_ranks_result_text_candidates(
     assert {route.join_plan["evidence_role"] for route in routes} == {
         "direct_support"
     }
+
+
+def test_research_objective_text_hints_prefer_observed_result_over_scope_summary(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": "obj-preheat",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "changed_variables": ["preheating build platform temperature"],
+            "measured_property_scope": ["microstructure"],
+        }
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheat",
+            "variables": ["preheating build platform temperature"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    candidates = [
+        {
+            "source_kind": "text_window",
+            "source_ref": "scope-summary",
+            "section_label": "Conclusions",
+            "block_type": "paragraph",
+            "text": (
+                "The effect of preheating on microstructure was investigated. "
+                "The following conclusions can be drawn."
+            ),
+        },
+        {
+            "source_kind": "text_window",
+            "source_ref": "direct-result",
+            "section_label": "Conclusions",
+            "block_type": "list_item",
+            "text": (
+                "The cooling rate of P150 decreased compared with NP and "
+                "resulted in formation of equiaxed cellular microstructure."
+            ),
+        },
+        {
+            "source_kind": "text_window",
+            "source_ref": "detailed-result",
+            "section_label": "Results and microstructure",
+            "block_type": "paragraph",
+            "text": (
+                "Comparing P150 with NP, an equiaxed cellular microstructure "
+                "was observed in P150."
+            ),
+        },
+        {
+            "source_kind": "text_window",
+            "source_ref": "background",
+            "section_label": "Abstract",
+            "block_type": "paragraph",
+            "text": "The study aims to analyze preheating and microstructure.",
+        },
+    ]
+    routes: list[EvidenceCandidate] = []
+
+    service._append_ranked_text_hint_routes(
+        routes=routes,
+        seen=set(),
+        frame=frame,
+        objective_context=objective,
+        source_candidates=candidates,
+    )
+
+    assert [route.source_ref for route in routes[:2]] == [
+        "direct-result",
+        "detailed-result",
+    ]
+    assert routes[-1].source_ref == "scope-summary"
 
 
 def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_support(
@@ -4277,6 +5874,147 @@ def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
         routed_refs,
         key=lambda ref: int(ref.replace("block-", "")),
     )
+
+
+def test_research_objective_tree_routing_keeps_direct_result_among_scope_text(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": "obj-preheat",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "material_match": ["316L stainless steel"],
+            "changed_variables": ["preheating build platform temperature"],
+            "measured_property_scope": ["microstructure"],
+        }
+    )
+    child_ids = tuple(f"node-{index}" for index in range(17))
+    nodes: dict[str, SourceDocumentNode] = {
+        "root": SourceDocumentNode(
+            node_id="root",
+            document_id="paper-1",
+            parent_id=None,
+            child_ids=child_ids,
+            node_type="document",
+            order=0,
+        )
+    }
+    for index, node_id in enumerate(child_ids):
+        text = (
+            "The 316L stainless steel study investigated preheating build "
+            "platform temperature and microstructure in fabricated and "
+            "processed specimens."
+        )
+        if index == 7:
+            text = (
+                "Comparing the microstructure obtained for P150 with NP, the "
+                "cellular structure was observed after preheating the build "
+                "platform because of the lower temperature gradient."
+            )
+        nodes[node_id] = SourceDocumentNode(
+            node_id=node_id,
+            document_id="paper-1",
+            parent_id="root",
+            child_ids=(),
+            node_type="paragraph",
+            order=100 + index,
+            text=text,
+            heading_path=(f"Section {index}",),
+            source_ref_kind="block",
+            source_ref_id=("direct-result" if index == 7 else f"scope-{index}"),
+        )
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes=nodes,
+    )
+
+    candidates = service._build_tree_route_text_candidates(
+        frame=frame,
+        blocks=[],
+        document_tree=document_tree,
+    )
+
+    assert len(candidates) == 8
+    assert "direct-result" in {
+        candidate["source_ref"] for candidate in candidates
+    }
+
+
+def test_research_objective_tree_routing_keeps_multiple_comparative_results(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": "obj-preheat",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "changed_variables": ["preheating build platform temperature"],
+            "measured_property_scope": ["microstructure"],
+        }
+    )
+    generic_candidates = [
+        (
+            -20,
+            index,
+            {
+                "source_kind": "text_window",
+                "source_ref": f"scope-{index}",
+                "section_label": "Conclusions and future study",
+                "text": (
+                    "The study investigated preheating build platform temperature "
+                    "and microstructure in 316L stainless steel."
+                ),
+            },
+        )
+        for index in range(20)
+    ]
+    comparative_candidates = [
+        (
+            -8,
+            10,
+            {
+                "source_kind": "text_window",
+                "source_ref": "detailed-result",
+                "section_label": "Thermal Simulation and Microstructure",
+                "text": (
+                    "Comparing the microstructure obtained for P150 with NP, "
+                    "cellular structure was observed in P150."
+                ),
+            },
+        ),
+        (
+            -7,
+            11,
+            {
+                "source_kind": "text_window",
+                "source_ref": "conclusion-result",
+                "section_label": "Conclusions and future study",
+                "text": (
+                    "The cooling rate of P150 decreased compared to NP and "
+                    "resulted in formation of equiaxed cellular structure."
+                ),
+            },
+        ),
+    ]
+
+    selected = service._bounded_tree_route_text_candidates(
+        frame=frame,
+        scored_candidates=[*generic_candidates, *comparative_candidates],
+    )
+
+    selected_refs = {item[2]["source_ref"] for item in selected}
+    assert {"detailed-result", "conclusion-result"} <= selected_refs
 
 
 def test_research_objective_service_keeps_numeric_mechanism_text_candidates(

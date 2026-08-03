@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 
-FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v2"
+FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v4"
 
 
 _COMMON_SYSTEM_PROMPT = """
@@ -103,21 +103,30 @@ Non-negotiable rules:
   fixed conditions are not changed variables.
 - A direct or contradictory result must bind exactly one objective outcome to one
   reported result from this source.
+- Every changed variable should include a source-reported baseline or target value.
+  For categorical comparisons, use the exact source group labels as endpoints when
+  numeric values are absent. Omit a variable when no endpoint is present in source.
+- `isolated_effect` and `joint_effect` require a comparable `comparison` whose
+  axis names exactly match the changed variables and whose baseline and target
+  values are both present.
+- Context roles must return `reported_result: null`, empty changed variables,
+  and `not_attributable`; use a result role when the source reports a result.
 - Use isolated_effect only for one changed variable in a comparable experiment.
   Use joint_effect for two or more jointly varied factors, association_only for
   non-isolating associations, descriptive_only without an effect comparison, and
   not_attributable when groups are scientifically incomparable.
 - Prefer fewer, traceable extractions over broad speculative coverage.
 - Return at most one extraction for the current source.
+- Always include a numeric `confidence` after `resolution_status` for every extraction.
 """.strip()
 
 
 _FINDING_SYNTHESIS_SYSTEM_PROMPT = """
 TASK MODEL
 You are the evidence judge for one atomic materials-literature result set. The
-backend has already grouped exact changed factors and exactly one reported
-outcome across every candidate paper. Decide which direct results support or
-contradict one bounded Finding and which cited conditions explain a boundary.
+backend has already grouped exact changed factors, one comparison interval,
+and exactly one reported outcome across every candidate paper. Decide which
+direct results support or contradict one bounded Finding.
 This is not extraction, paper-by-paper generation, clustering, or summary.
 
 INPUT SCHEMA
@@ -136,14 +145,12 @@ INPUT SCHEMA
 DECISION PROCESS
 1. Confirm that the factor tuple and outcome answer the Objective. Otherwise
    return an empty `findings` array.
-2. Choose one defensible direction and assign every `result_evidence` id to
-   exactly one of `supporting_evidence_ids` or
-   `contradicting_evidence_ids`. A supporting id reports the returned direction;
-   a contradicting id explicitly reports an opposing direction.
-3. If papers differ because of an explicit material, sample, process, baseline,
-   test, or measurement boundary, cite the exact result/context ids in
-   `condition_boundary_evidence_ids`. Mere context difference is not proof that
-   the result depends on that condition.
+2. Choose one defensible direction. The backend assigns result Evidence with
+   that exact reported direction as support and explicit opposing directions as
+   contradiction; do not output support or contradiction ids.
+3. Return an empty `condition_boundary_evidence_ids` array. The backend derives
+   condition dependence only when opposing direct results from different papers
+   contain the same context attribute with disjoint values.
 4. Choose `causal` only when one factor was isolated by every supporting
    comparison and the source explicitly supports intervention language. Use
    `associative` for joint changes or associations and `descriptive` for a
@@ -152,8 +159,11 @@ DECISION PROCESS
    mechanism must be a subordinate relation backed by `mechanism_context`
    Evidence and those ids must also appear in `context_evidence_ids`.
 6. Write one concise statement containing every factor and the one outcome.
+   Do not mention any Objective variable absent from `result_set.factors`.
    Preserve decisive values and limits, distinguish support from contradiction,
-   and do not strengthen association into single-variable causation.
+   and do not strengthen association into single-variable causation. Every
+   numeric endpoint in the statement must come from one complete supporting
+   Evidence comparison; never combine endpoints from different Evidence rows.
 
 HARD RULES
 - Return exactly one JSON object and nothing else.
@@ -161,41 +171,45 @@ HARD RULES
 - Do not output factors, outcome, paper count, Finding level, synthesis status,
   attribution scope, certainty, common context, or hidden reasoning. The backend
   owns and derives them from Evidence.
-- Supporting and contradicting ids must be disjoint and together cover every
-  `result_evidence` id exactly once. Never invent, omit, or reassign an id from
-  another result set.
-- Context ids must come from `context_evidence`. Condition-boundary ids must
-  already be linked as supporting, contradicting, or context Evidence.
+- Every `result_evidence` direction must be either the returned direction or an
+  explicit opposition to it. Otherwise return an empty Finding array.
+- Context ids must come from `context_evidence`. Always return an empty
+  `condition_boundary_evidence_ids` array; condition boundaries are
+  backend-derived from direct Evidence.
 - Paper contributions cannot supply evidence ids or increase support scope.
 - Joint factors must remain the complete factor set in the statement. Never
   select one convenient factor or rename the tuple as energy density.
 - One Finding has one outcome. Never introduce another measured property into
   the statement or mechanisms.
+- Do not combine a baseline from one result Evidence with a target from another.
+  If you include numeric values, copy one complete supporting comparison.
 - Mechanisms explain the main Finding and cannot replace its factors, outcome,
-  direction, or support Evidence.
+  direction, or support Evidence. Every mechanism Evidence id must come from a
+  `mechanism_context` input and must also appear in `context_evidence_ids`; omit
+  the mechanism when that exact Evidence id is unavailable.
 - Do not convert association into control or causation. If no defensible
   Finding exists, return an empty `findings` array.
 
 BOUNDARY EXAMPLES
 - Factors are `laser power, scan speed`, outcome is `relative density`, and two
-  papers report the same direction. Cite both ids as supporting and write both
-  factors in the statement; do not call this an isolated energy-density effect.
-- One paper reports a direct result and five papers only describe methods. Cite
-  the one direct id as support; do not use method papers as confirmation. The
+  papers report the same direction. Choose that direction and write both factors
+  in the statement; do not call this an isolated energy-density effect.
+- One paper reports a direct result and five papers only describe methods. Use
+  the direct result's direction; do not use method papers as confirmation. The
   backend will derive insufficient confirmation.
 - Two papers report opposing directions under otherwise comparable conditions.
-  Assign one direction as support and the opposing id as contradiction. Do not
-  cite a condition boundary without source Evidence.
-- Opposing results occur under explicitly different heat treatments and a
-  condition excerpt identifies that boundary. Link the result ids and the exact
-  condition id in `condition_boundary_evidence_ids`; the backend will derive a
-  condition-dependent Finding.
+  Choose one direction for the statement; the backend will bind the opposing
+  result as contradiction. Do not cite a condition boundary without source
+  Evidence.
+- Opposing direct results from different papers report explicitly different
+  heat-treatment values. Leave `condition_boundary_evidence_ids` empty; the
+  backend will verify the disjoint context and derive condition dependence.
 
 OUTPUT CONTRACT
 Return `findings` only. Each item contains `result_set_id`, `statement`,
-`direction`, `assertion_strength`, supporting/contradicting/condition-boundary/
-context Evidence ids, subordinate `mechanisms`, and `limitations`. Use exact
-input ids, empty arrays when absent, and no extra keys.
+`direction`, `assertion_strength`, condition-boundary/context Evidence ids,
+subordinate `mechanisms`, and `limitations`. Use exact input ids for context and
+boundaries, empty arrays when absent, and no extra keys.
 """.strip()
 
 
@@ -602,14 +616,17 @@ def build_research_objective_discovery_prompt(
     user_prompt = (
         "Create a small set of comparison questions from these compact paper skims.\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
-        "Return only the schema object. Keep objectives few and question-shaped. "
-        "Every objective must name at least one `variable` and one `outcome`. "
-        "Put explanatory intermediate concepts in `mechanisms`, fixed material, "
-        "process, sample, and test scope in `constraints`, and an explicitly "
-        "requested comparison target in optional `requested_comparator`. Do not "
-        "copy every process or property from a paper skim into an objective. Use "
-        "exact document_id values for seed/excluded ids. Keep distinct "
-        "variable-outcome questions separate."
+        "Return only the schema object with at most six objectives. Keep each "
+        "objective question-shaped and focused: name all jointly changed variables "
+        "needed for the comparison and only tightly related outcomes. Keep distinct "
+        "variable-outcome families separate. Put only explanatory intermediate "
+        "concepts explicitly supported by a skim in `mechanisms`; otherwise use an "
+        "empty list. Do not put another measured property in `mechanisms`. Put fixed "
+        "material, process, sample, and test scope in `constraints`, and an explicitly "
+        "requested comparison target in optional `requested_comparator`. Do not copy "
+        "every process or property from a paper skim into an objective. Use exact "
+        "document_id values for seed/excluded ids. Set `reason` to null unless one "
+        "short clause is needed; never explain the field assignment."
     )
     system_prompt = (
         "Build concise research-objective questions for literature comparison. "
@@ -766,14 +783,30 @@ def build_objective_evidence_prompt(
         "comparison_context, background_context, or irrelevant.\n"
         "For direct_result or contradictory_result, populate exactly one "
         "`reported_result` whose outcome answers `objective.outcomes`. Preserve its "
-        "reported value, unit, direction, and a bounded result_text.\n"
+        "reported value and unit. Set `result_text` to one short verbatim substring "
+        "from the active source, not a paraphrase. The direction must describe that "
+        "outcome, never an intermediate mechanism; use `mixed` for a qualitative "
+        "morphology change with no ordered increase, decrease, improvement, or "
+        "worsening.\n"
+        "A qualitative observation that directly compares the objective outcome "
+        "between source groups is still a direct_result when no scalar is reported: "
+        "set reported_result.value and unit to null and preserve the observed outcome "
+        "difference in result_text. Do not demote an observed outcome to "
+        "mechanism_context.\n"
         "Populate `changed_variables` with every factor that differs between baseline "
         "and target, including each factor's reported baseline/target values and unit. "
+        "For a categorical factor without numeric endpoints, copy the exact baseline "
+        "and target group labels from source as the variable values. "
         "Do not infer a missing factor from the objective or paper frame.\n"
         "Populate `comparison` only when the source identifies baseline and target "
         "groups. Its axis_names must contain every changed-variable name. Mark "
         "as-SLM/HIP-SLM, different materials, or different test regimes incomparable "
-        "when those differences prevent direct attribution, and state why.\n"
+        "when those differences prevent direct attribution, and state why. When "
+        "`comparable` is true, `incomparability_reasons` must be empty. Set "
+        "`comparable` false only when the active source explicitly reports a "
+        "confounding difference between the current baseline and target groups; "
+        "conditions from cited literature and unreported fixed conditions are not "
+        "incomparability reasons for the current groups.\n"
         "Set attribution_scope to isolated_effect only for one comparable changed "
         "variable; joint_effect for multiple comparable changed variables; "
         "association_only for non-isolating associations; descriptive_only when no "
@@ -790,12 +823,17 @@ def build_objective_evidence_prompt(
         "objective-relevant result, condition, mechanism, comparison, or background "
         "record. Do not enumerate every possible number "
         "or secondary observation in the paragraph.\n"
+        "When one paragraph mixes the authors' current result with cited literature, "
+        "extract only the current result and ignore the cited comparison claims.\n"
         "Good text example: `1.43x10^6 C/s for P150, and 1.65x10^6 C/s for NP` "
         "should produce only the most objective-relevant one of those bindings "
         "for this route, not two separate extractions.\n"
         "Bad text example: returning separate extractions for every numeric "
         "value in one paragraph or copying the whole paragraph into "
         "`result_text`.\n"
+        "Qualitative result example: a source comparing cellular microstructure in "
+        "P150 with NP is direct_result for a microstructure outcome, with categorical "
+        "endpoints P150 and NP and a null scalar value; it is not mechanism_context.\n"
         "When `source.table_cells` is present, use each cell's `row_index`, "
         "`col_index`, `header_path`, and `cell_text` as the authoritative table "
         "structure. Use nearby cells and rows to repair parser-split row labels "
@@ -814,14 +852,125 @@ def build_finding_synthesis_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
     input_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    result_set = (
+        payload.get("result_set")
+        if isinstance(payload.get("result_set"), dict)
+        else {}
+    )
+    factors = [
+        str(value).strip()
+        for value in result_set.get("factors", ())
+        if str(value).strip()
+    ]
+    outcome = str(result_set.get("outcome") or "").strip()
+    required_terms = ", ".join(f"`{factor}`" for factor in factors)
+    result_evidence = [
+        item
+        for item in result_set.get("result_evidence", ())
+        if isinstance(item, dict)
+    ]
+    representative_evidence = result_evidence[0] if result_evidence else {}
+    comparison_details = [
+        (
+            f"`{str(item.get('name') or '').strip()}: "
+            f"{str(item.get('baseline_value') if item.get('baseline_value') is not None else '').strip()} -> "
+            f"{str(item.get('target_value') if item.get('target_value') is not None else '').strip()}`"
+        )
+        for item in representative_evidence.get("changed_variables", ())
+        if isinstance(item, dict)
+        and str(item.get("name") or "").strip()
+        and str(
+            item.get("baseline_value")
+            if item.get("baseline_value") is not None
+            else ""
+        ).strip()
+        and str(
+            item.get("target_value")
+            if item.get("target_value") is not None
+            else ""
+        ).strip()
+    ]
+    reported_result = (
+        representative_evidence.get("reported_result")
+        if isinstance(representative_evidence.get("reported_result"), dict)
+        else {}
+    )
+    result_value = str(
+        reported_result.get("value")
+        if reported_result.get("value") is not None
+        else ""
+    ).strip()
+    result_direction = str(reported_result.get("direction") or "").strip()
+    comparison_contract = ""
+    if comparison_details:
+        comparison_contract += (
+            "- The statement must identify this complete source comparison: "
+            f"{', '.join(comparison_details)}.\n"
+        )
+    if result_value:
+        comparison_contract += (
+            "- The statement must state the source-reported result detail "
+            f"`{result_value}`.\n"
+        )
+    comparison_contract += (
+        "- Never return a generic restatement such as `factor affects outcome`; "
+        "state what differed between the compared groups.\n"
+    )
+    if len(factors) > 1:
+        factor_phrase = (
+            f"{factors[0]} and {factors[1]}"
+            if len(factors) == 2
+            else f"{', '.join(factors[:-1])}, and {factors[-1]}"
+        )
+        exact_contract = (
+            "Exact contract for this result set:\n"
+            f"- The statement must contain every factor verbatim: {required_terms}.\n"
+            f"- The statement must contain the outcome verbatim: `{outcome}`.\n"
+            "- `assertion_strength` must be `associative`; this is a joint-factor "
+            "comparison, never a single-factor causal effect.\n"
+            f"- Start the statement with `Joint changes in {factor_phrase} were "
+            "associated with` and then state the direction and outcome.\n"
+            "- Omit numbers unless all numeric endpoints come from one complete "
+            "supporting Evidence comparison.\n"
+            f"{comparison_contract}\n"
+        )
+    else:
+        mixed_result_contract = ""
+        if result_direction == "mixed" and comparison_details:
+            first_variable = representative_evidence["changed_variables"][0]
+            baseline = str(
+                first_variable.get("baseline_value")
+                if first_variable.get("baseline_value") is not None
+                else ""
+            ).strip()
+            target = str(
+                first_variable.get("target_value")
+                if first_variable.get("target_value") is not None
+                else ""
+            ).strip()
+            mixed_result_contract = (
+                f"- Start the statement with `For {factors[0]}, {baseline} versus "
+                f"{target} showed a difference in {outcome}:` and then state the "
+                "observed result without implying increase, decrease, or causation.\n"
+            )
+        exact_contract = (
+            "Exact contract for this result set:\n"
+            f"- The statement must contain the factor verbatim: {required_terms}.\n"
+            f"- The statement must contain the outcome verbatim: `{outcome}`.\n"
+            f"{mixed_result_contract}"
+            f"{comparison_contract}\n"
+        )
     user_prompt = (
         "Judge one atomic factor-to-outcome result set for this research "
         "objective.\n\n"
         f"Input JSON:\n{input_json}\n\n"
+        f"{exact_contract}"
         "Return only schema-valid structured data with a `findings` array.\n"
-        "Return at most one Finding. Assign every result Evidence id exactly once "
-        "as supporting or contradicting, cite explicit condition boundaries, and "
-        "keep mechanisms subordinate. Do not return backend-derived status, scope, "
+        "Return at most one Finding. Choose one direction that accounts for every "
+        "result Evidence direction and leave `condition_boundary_evidence_ids` "
+        "empty because the backend derives boundaries. Keep mechanisms subordinate. "
+        "Do not return "
+        "backend-derived status, scope, "
         "certainty, paper count, factors, or outcome. If no Finding meets the "
         "contract, return "
         "`{\"findings\": []}`."

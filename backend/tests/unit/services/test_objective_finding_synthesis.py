@@ -185,7 +185,8 @@ def test_synthesis_keeps_single_paper_finding_at_paper_level() -> None:
     assert finding.direction == "changes"
     assert finding.statement == (
         "In the reported comparison, the coupled condition defined by laser power, "
-        "scan speed was associated with changes in relative density."
+        "scan speed was associated with changes in relative density. This "
+        "relationship is directly supported by one paper."
     )
     assert finding.derivation.supporting_evidence_ids == ("ev-1",)
     assert finding.relations[0].assertion_strength == "associative"
@@ -218,6 +219,222 @@ def test_synthesis_builds_cross_paper_finding_from_two_direct_papers() -> None:
     assert finding.generalization_status == "cross_paper_agreement"
     assert finding.paper_count == 2
     assert finding.derivation.contributing_document_ids == ("paper-1", "paper-2")
+
+
+def test_synthesis_excludes_unsourced_and_non_result_direct_evidence() -> None:
+    extractor = _Extractor([_candidate()])
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(
+            _evidence(
+                "valid-table-result",
+                "paper-1",
+                source_excerpt=(
+                    "Laser power and scan speed changed together; relative "
+                    "density increased from 96.1% to 99.2%."
+                ),
+                value_payload={"baseline_value": 96.1, "current_value": 99.2},
+            ),
+            _evidence(
+                "unsourced-value",
+                "paper-1",
+                source_excerpt="420",
+                value_payload={"value": "1.43x10^6 C/s"},
+                confidence=0.99,
+            ),
+            _evidence(
+                "study-aim",
+                "paper-1",
+                source_excerpt=(
+                    "This study aims to understand the effect of processing on "
+                    "relative density."
+                ),
+                value_payload={
+                    "value": "processing",
+                    "value_role": "control_value",
+                },
+                confidence=0.98,
+            ),
+            _evidence(
+                "study-goal",
+                "paper-1",
+                source_excerpt=(
+                    "The goal of this study is to determine whether preheating "
+                    "changes relative density."
+                ),
+                value_payload={"value": "relative density"},
+                confidence=0.98,
+            ),
+            _evidence(
+                "future-work",
+                "paper-1",
+                source_excerpt=(
+                    "Fatigue performance is assumed to improve and will be "
+                    "investigated in the next step."
+                ),
+                value_payload={"value": "improve"},
+                confidence=0.97,
+            ),
+        ),
+    )
+
+    assert len(findings) == 1
+    assert findings[0].derivation.supporting_evidence_ids == (
+        "valid-table-result",
+    )
+    assert [
+        item["evidence_id"]
+        for item in extractor.payloads[0]["result_sets"][0]["direct_evidence"]
+    ] == ["valid-table-result"]
+
+
+def test_synthesis_excludes_prior_literature_from_direct_evidence() -> None:
+    extractor = _Extractor([_candidate()])
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(
+            _evidence(
+                "measured-result",
+                "paper-1",
+                source_excerpt=(
+                    "Elongation increased from 72% without preheating to 82% "
+                    "with build-platform preheating."
+                ),
+                value_payload={"baseline_value": 72, "current_value": 82},
+            ),
+            _evidence(
+                "prior-literature",
+                "paper-1",
+                source_excerpt=(
+                    "Thermal history is controlled by the employed process "
+                    "parameters. These have been reported as the controlling "
+                    "parameters for microstructure development."
+                ),
+                value_payload={"value": "microstructure development"},
+                confidence=0.99,
+            ),
+        ),
+    )
+
+    assert len(findings) == 1
+    assert findings[0].derivation.supporting_evidence_ids == ("measured-result",)
+    assert [
+        item["evidence_id"]
+        for item in extractor.payloads[0]["result_sets"][0]["direct_evidence"]
+    ] == ["measured-result"]
+
+
+def test_synthesis_omits_mechanism_without_valid_mechanism_evidence() -> None:
+    extractor = _Extractor(
+        [
+            _candidate(
+                source_concept="laser power",
+                outcomes=[
+                    {
+                        "concept": "relative density",
+                        "direction": "increases",
+                        "statement": "Relative density increased from 96.1% to 99.2%.",
+                        "conflicting_evidence_ids": [],
+                    }
+                ],
+                mediator_concepts=["melt-pool stabilization"],
+                statement=(
+                    "Laser power increased relative density through melt-pool "
+                    "stabilization."
+                ),
+                mechanism_evidence_ids=["condition-1"],
+            )
+        ]
+    )
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(process_axes=["laser power"]),
+        analysis=_analysis(),
+        contributions=(
+            _contribution("paper-1", changed_variables=["laser power"]),
+        ),
+        evidence_records=(
+            _evidence(
+                "ev-1",
+                "paper-1",
+                join_keys={"variable_process_axes": ["laser power"]},
+            ),
+            _evidence(
+                "condition-1",
+                "paper-1",
+                role="condition_context",
+                property_name=None,
+                evidence_kind="process_context",
+            ),
+        ),
+    )
+
+    assert len(findings) == 1
+    assert findings[0].mediators == ()
+    assert findings[0].statement == (
+        "Relative density increased from 96.1% to 99.2%. This relationship is "
+        "directly supported by one paper."
+    )
+    assert "melt-pool stabilization" not in findings[0].statement
+
+
+def test_synthesis_replaces_unsupported_significance_with_measured_values() -> None:
+    extractor = _Extractor(
+        [
+            _candidate(
+                source_concept="laser power",
+                outcomes=[
+                    {
+                        "concept": "relative density",
+                        "direction": "changes",
+                        "statement": (
+                            "Laser power had no significant effect on relative "
+                            "density."
+                        ),
+                        "conflicting_evidence_ids": [],
+                    }
+                ],
+                statement=(
+                    "Laser power had no significant effect on relative density."
+                ),
+            )
+        ]
+    )
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(process_axes=["laser power"]),
+        analysis=_analysis(),
+        contributions=(
+            _contribution("paper-1", changed_variables=["laser power"]),
+        ),
+        evidence_records=(
+            _evidence(
+                "ev-1",
+                "paper-1",
+                join_keys={"variable_process_axes": ["laser power"]},
+            ),
+        ),
+    )
+
+    assert findings[0].statement == (
+        "The reported laser power comparison measured relative density values of "
+        "96.1 and 99.2%. This relationship is directly supported by one paper."
+    )
+    assert "significant" not in findings[0].statement
 
 
 def test_synthesis_prefers_comparison_evidence_over_component_measurements() -> None:

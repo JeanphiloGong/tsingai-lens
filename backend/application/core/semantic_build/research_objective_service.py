@@ -3278,6 +3278,14 @@ class ResearchObjectiveService:
     ) -> tuple[Any, str, dict[str, Any]] | None:
         best: tuple[int, int, Any, str, dict[str, Any]] | None = None
         for position, block in enumerate(blocks):
+            heading_key = self._objective_column_key(
+                getattr(block, "heading_path", "")
+            )
+            if any(
+                section in {"references", "bibliography"}
+                for section in heading_key.split("_")
+            ):
+                continue
             text = str(getattr(block, "text", "") or "").strip()
             if not text:
                 continue
@@ -5955,6 +5963,22 @@ class ResearchObjectiveService:
                     route=route,
                     document_tree=document_tree,
                 )
+            node = (
+                self._tree_node_for_route_source(
+                    document_tree=document_tree,
+                    source_ref_kind="block",
+                    source_ref_id=source_block_id,
+                )
+                if document_tree is not None
+                else None
+            )
+            if (
+                node is not None
+                and self._tree_node_in_reference_branch(document_tree, node)
+            ) or "references" in self._objective_column_key(
+                getattr(block, "heading_path", "")
+            ):
+                return {}
             text = str(getattr(block, "text", "") or "").strip()
             return {
                 "source_kind": "text_window",

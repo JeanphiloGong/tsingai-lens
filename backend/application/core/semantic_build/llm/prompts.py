@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 
-FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v4"
+FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v5"
 
 
 _COMMON_SYSTEM_PROMPT = """
@@ -164,6 +164,9 @@ INPUT SCHEMA
 - `context_evidence`: bounded condition, comparison, mechanism, and baseline
   excerpts from papers in this result set. Context cannot create factors,
   outcomes, directions, or supporting papers.
+- `candidate_rejection`: present only for one bounded repair attempt. It contains
+  the backend's concrete semantic rejection reason and the previous candidate.
+  It is correction guidance, not Evidence and not a source of scientific facts.
 
 DECISION PROCESS
 1. Confirm that the factor tuple and outcome answer the Objective. Otherwise
@@ -187,10 +190,15 @@ DECISION PROCESS
    and do not strengthen association into single-variable causation. Every
    numeric endpoint in the statement must come from one complete supporting
    Evidence comparison; never combine endpoints from different Evidence rows.
+7. When `candidate_rejection` is present, correct that exact failure and then
+   re-check every rule against the original result Evidence. Do not repeat the
+   rejected candidate or weaken its scientific claim to evade validation.
 
 HARD RULES
 - Return exactly one JSON object and nothing else.
 - Return at most one Finding and copy `result_set_id` exactly.
+- Treat `result_set_id` as backend-owned identity. Never derive or alter it from
+  `candidate_rejection.previous_candidate`.
 - Do not output factors, outcome, paper count, Finding level, synthesis status,
   attribution scope, certainty, common context, or hidden reasoning. The backend
   owns and derives them from Evidence.
@@ -925,6 +933,22 @@ def build_finding_synthesis_prompt(
         else ""
     ).strip()
     result_direction = str(reported_result.get("direction") or "").strip()
+    candidate_rejection = (
+        payload.get("candidate_rejection")
+        if isinstance(payload.get("candidate_rejection"), dict)
+        else {}
+    )
+    rejection_reason = str(candidate_rejection.get("reason") or "").strip()
+    repair_contract = ""
+    if rejection_reason:
+        repair_contract = (
+            "Semantic repair required:\n"
+            f"- The previous candidate was rejected because: {rejection_reason}\n"
+            "- Return one corrected replacement only if it satisfies every original "
+            "Evidence and Finding rule; otherwise return an empty findings array.\n"
+            "- Re-read result_evidence for its exact direction, complete factor "
+            "tuple, one outcome, comparison values, and attribution scope.\n\n"
+        )
     comparison_contract = ""
     if comparison_details:
         comparison_contract += (
@@ -988,6 +1012,7 @@ def build_finding_synthesis_prompt(
         "Judge one atomic factor-to-outcome result set for this research "
         "objective.\n\n"
         f"Input JSON:\n{input_json}\n\n"
+        f"{repair_contract}"
         f"{exact_contract}"
         "Return only schema-valid structured data with a `findings` array.\n"
         "Return at most one Finding. Choose one direction that accounts for every "

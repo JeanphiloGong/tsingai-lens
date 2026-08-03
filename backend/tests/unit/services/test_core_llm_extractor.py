@@ -685,7 +685,7 @@ def test_core_llm_extractor_synthesizes_goal_findings_with_distinct_trace():
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v4"
+    assert trace["prompt_version"] == "finding_synthesis.v5"
     assert trace["parsed_output"] == {"findings": []}
 
 
@@ -812,6 +812,34 @@ def test_finding_synthesis_prompt_requires_specific_single_factor_result():
         "difference in microstructure:" in user_prompt
     )
     assert "Never return a generic restatement" in user_prompt
+
+
+def test_finding_synthesis_prompt_carries_backend_semantic_rejection():
+    payload = {
+        "objective": {"question": "How does energy density affect density?"},
+        "result_set": {
+            "result_set_id": "result-set-1",
+            "factors": ["energy density"],
+            "outcome": "density",
+            "result_evidence": [],
+        },
+        "candidate_rejection": {
+            "reason": "candidate direction decrease has no supporting result Evidence",
+            "previous_candidate": {
+                "result_set_id": "result-set-1",
+                "statement": "Energy density decreased density.",
+                "direction": "decrease",
+            },
+        },
+    }
+
+    system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
+
+    assert "present only for one bounded repair attempt" in system_prompt
+    assert "correction guidance, not Evidence" in system_prompt
+    assert "Semantic repair required:" in user_prompt
+    assert payload["candidate_rejection"]["reason"] in user_prompt
+    assert "Re-read result_evidence for its exact direction" in user_prompt
 
 
 def test_core_llm_extractor_allows_explicit_json_text_mode(monkeypatch):

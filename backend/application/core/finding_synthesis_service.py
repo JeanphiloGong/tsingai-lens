@@ -85,57 +85,71 @@ class FindingSynthesisService:
                 evidence_records,
                 result_documents,
             )
-            try:
-                parsed = self.structured_extractor.synthesize_findings(
-                    {
-                        "objective": objective_payload,
-                        "paper_contributions": contribution_payloads,
-                        "result_set": result_set,
-                        "context_evidence": [
-                            self._evidence_payload(evidence)
-                            for evidence in context_evidence
-                        ],
-                    }
-                )
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "Finding synthesis failed result_set_id=%s",
-                    result_set["result_set_id"],
-                )
-                continue
-            parsed_record = (
-                parsed.model_dump() if hasattr(parsed, "model_dump") else dict(parsed)
-            )
             expected_result_set_id = str(result_set["result_set_id"])
-            candidates = _mapping_list(parsed_record.get("findings"))
-            if not candidates:
-                logger.warning(
-                    "Finding synthesis returned no candidate result_set_id=%s "
-                    "factors=%s outcome=%s result_evidence=%s",
-                    expected_result_set_id,
-                    _strings(result_set.get("factors")),
-                    _text(result_set.get("outcome")),
-                    [
-                        {
-                            "evidence_id": _text(item.get("evidence_id")),
-                            "document_id": _text(item.get("document_id")),
-                            "direction": _text(
-                                (
-                                    item.get("reported_result")
-                                    if isinstance(
-                                        item.get("reported_result"), Mapping
-                                    )
-                                    else {}
-                                ).get("direction")
-                            ),
-                            "attribution_scope": _text(
-                                item.get("attribution_scope")
-                            ),
-                        }
-                        for item in _mapping_list(result_set.get("result_evidence"))
-                    ],
+            synthesis_payload = {
+                "objective": objective_payload,
+                "paper_contributions": contribution_payloads,
+                "result_set": result_set,
+                "context_evidence": [
+                    self._evidence_payload(evidence) for evidence in context_evidence
+                ],
+            }
+            candidate_rejection: dict[str, Any] | None = None
+            for semantic_attempt in range(2):
+                request_payload = dict(synthesis_payload)
+                if candidate_rejection is not None:
+                    request_payload["candidate_rejection"] = candidate_rejection
+                try:
+                    parsed = self.structured_extractor.synthesize_findings(
+                        request_payload
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "Finding synthesis failed result_set_id=%s semantic_attempt=%s",
+                        expected_result_set_id,
+                        semantic_attempt + 1,
+                    )
+                    break
+                parsed_record = (
+                    parsed.model_dump()
+                    if hasattr(parsed, "model_dump")
+                    else dict(parsed)
                 )
-            for candidate in candidates:
+                candidates = _mapping_list(parsed_record.get("findings"))
+                if not candidates:
+                    logger.warning(
+                        "Finding synthesis returned no candidate result_set_id=%s "
+                        "factors=%s outcome=%s result_evidence=%s",
+                        expected_result_set_id,
+                        _strings(result_set.get("factors")),
+                        _text(result_set.get("outcome")),
+                        [
+                            {
+                                "evidence_id": _text(item.get("evidence_id")),
+                                "document_id": _text(item.get("document_id")),
+                                "direction": _text(
+                                    (
+                                        item.get("reported_result")
+                                        if isinstance(
+                                            item.get("reported_result"), Mapping
+                                        )
+                                        else {}
+                                    ).get("direction")
+                                ),
+                                "attribution_scope": _text(
+                                    item.get("attribution_scope")
+                                ),
+                            }
+                            for item in _mapping_list(
+                                result_set.get("result_evidence")
+                            )
+                        ],
+                    )
+                    break
+                candidate = {
+                    **candidates[0],
+                    "result_set_id": expected_result_set_id,
+                }
                 logger.debug(
                     "Inspecting Finding synthesis candidate result_set_id=%s "
                     "result_evidence_count=%s direction=%s assertion_strength=%s "
@@ -148,22 +162,36 @@ class FindingSynthesisService:
                     _text(result_set.get("outcome")),
                     _text(candidate.get("statement")),
                 )
-                if _text(candidate.get("result_set_id")) != expected_result_set_id:
-                    continue
-                finding = self._finding_from_candidate(
-                    collection_id=collection_id,
-                    objective=objective,
-                    analysis=analysis,
-                    candidate=candidate,
-                    result_set=result_set,
-                    context_evidence=context_evidence,
-                    contributions=contributions,
-                    evidence_by_id=evidence_by_id,
-                    display_rank=len(findings),
-                )
-                if finding is not None:
-                    findings.append(finding)
+                try:
+                    finding = self._finding_from_candidate(
+                        collection_id=collection_id,
+                        objective=objective,
+                        analysis=analysis,
+                        candidate=candidate,
+                        result_set=result_set,
+                        context_evidence=context_evidence,
+                        contributions=contributions,
+                        evidence_by_id=evidence_by_id,
+                        display_rank=len(findings),
+                    )
+                except ValueError as exc:
+                    rejection_reason = str(exc)
+                    logger.warning(
+                        "Rejected Finding candidate result_set_id=%s reason=%s "
+                        "semantic_repair_attempted=%s",
+                        expected_result_set_id,
+                        rejection_reason,
+                        semantic_attempt > 0,
+                    )
+                    if semantic_attempt == 0:
+                        candidate_rejection = {
+                            "reason": rejection_reason,
+                            "previous_candidate": candidate,
+                        }
+                        continue
                     break
+                findings.append(finding)
+                break
         return tuple(findings)
 
     @staticmethod
@@ -353,7 +381,7 @@ class FindingSynthesisService:
         contributions: tuple[PaperContribution, ...],
         evidence_by_id: Mapping[str, ObjectiveEvidence],
         display_rank: int,
-    ) -> Finding | None:
+    ) -> Finding:
         result_ids = tuple(
             evidence_id
             for item in _mapping_list(result_set.get("result_evidence"))
@@ -364,7 +392,7 @@ class FindingSynthesisService:
             evidence_by_id[evidence_id].reported_result is None
             for evidence_id in result_ids
         ):
-            return None
+            raise ValueError("result set lacks complete reported-result Evidence")
         supporting_ids = tuple(
             evidence_id
             for evidence_id in result_ids
@@ -376,20 +404,22 @@ class FindingSynthesisService:
             if evidence_by_id[evidence_id].reported_result.direction != direction
         )
         if not supporting_ids:
-            return None
+            raise ValueError(
+                f"candidate direction {direction} has no supporting result Evidence"
+            )
         if any(
             evidence_by_id[evidence_id].evidence_role
             not in {"direct_result", "contradictory_result"}
             for evidence_id in (*supporting_ids, *contradicting_ids)
         ):
-            return None
+            raise ValueError("candidate references non-result Evidence as direct support")
 
         allowed_context_ids = {item.evidence_id for item in context_evidence}
         context_ids = self._candidate_evidence_ids(candidate, "context_evidence_ids")
         if context_ids is None:
-            return None
+            raise ValueError("candidate context_evidence_ids are malformed")
         if not set(context_ids) <= allowed_context_ids:
-            return None
+            raise ValueError("candidate references unavailable context Evidence")
         mechanisms: list[dict[str, Any]] = []
         mechanism_ids: list[str] = []
         for mechanism in _mapping_list(candidate.get("mechanisms")):
@@ -413,15 +443,21 @@ class FindingSynthesisService:
         outcome = _text(result_set.get("outcome"))
         statement = _text(candidate.get("statement"))
         if not factors or not outcome or not statement:
-            return None
+            raise ValueError("candidate lacks factors, outcome, or statement")
         if not self._statement_covers_atomic_result(statement, factors, outcome):
-            return None
+            raise ValueError(
+                "candidate statement does not contain the complete factor tuple "
+                "and outcome"
+            )
         if self._statement_mentions_unbound_objective_factor(
             statement,
             factors,
             objective.variables,
         ):
-            return None
+            raise ValueError(
+                "candidate statement introduces an Objective factor absent from "
+                "the result set"
+            )
         supporting_evidence = tuple(
             evidence_by_id[evidence_id] for evidence_id in supporting_ids
         )
@@ -429,7 +465,10 @@ class FindingSynthesisService:
             statement,
             supporting_evidence,
         ):
-            return None
+            raise ValueError(
+                "candidate statement combines numeric values not bound to one "
+                "supporting Evidence record"
+            )
         contradicting_evidence = tuple(
             evidence_by_id[evidence_id] for evidence_id in contradicting_ids
         )
@@ -439,7 +478,10 @@ class FindingSynthesisService:
         )
         expected_direction = self._direction_for(supporting_evidence)
         if expected_direction is None or direction != expected_direction:
-            return None
+            raise ValueError(
+                "candidate direction does not match one consistent supporting "
+                "Evidence direction"
+            )
 
         paper_bindings = self._paper_bindings(
             contributions=contributions,
@@ -457,7 +499,9 @@ class FindingSynthesisService:
             "descriptive"
         )
         if assertion_strength == "causal" and attribution_scope != "isolated_effect":
-            return None
+            raise ValueError(
+                "candidate causal assertion lacks isolated-effect attribution"
+            )
         if assertion_strength == "causal" and any(
             evidence.source_kind != "table"
             or evidence.selection_reason
@@ -479,7 +523,9 @@ class FindingSynthesisService:
         if attribution_scope == "descriptive_only" and assertion_strength != (
             "descriptive"
         ):
-            return None
+            raise ValueError(
+                "candidate assertion strength exceeds descriptive-only attribution"
+            )
         direct_evidence = supporting_evidence + contradicting_evidence
         certainty = Finding.certainty_for(synthesis_status, direct_evidence)
         limitations = self._limitations(
@@ -523,13 +569,8 @@ class FindingSynthesisService:
                 }
             )
             finding.validate_sources(tuple(evidence_by_id.values()), contributions)
-        except ValueError:
-            logger.warning(
-                "Rejected invalid Finding candidate result_set_id=%s",
-                result_set["result_set_id"],
-                exc_info=True,
-            )
-            return None
+        except ValueError as exc:
+            raise ValueError(f"candidate violates the Finding contract: {exc}") from exc
         return finding
 
     @staticmethod

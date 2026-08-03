@@ -62,10 +62,17 @@ are bounded per Objective/document.
 
 Finding synthesis groups Evidence only by an exact normalized changed-factor
 tuple and one exact outcome. Each group can produce at most one Finding. The
-provider assigns every direct result as supporting or contradicting and may
-identify condition boundaries and subordinate mechanisms. The backend derives
-the attribution scope, synthesis status, certainty, common scientific context,
-and one Finding-local binding for every PaperContribution in the analysis.
+backend binds the result-set identity, assigns every direct result as supporting
+or contradicting, and derives condition boundaries, attribution scope, synthesis
+status, certainty, common scientific context, and one Finding-local binding for
+every PaperContribution in the analysis. The provider may identify only
+subordinate mechanisms backed by supplied context Evidence.
+
+When a schema-valid candidate fails a backend semantic guard, synthesis records
+the concrete rejection reason and permits one bounded provider repair against
+the same Evidence. The repaired candidate must pass every original guard; a
+second rejection is terminal for that result set and no invalid Finding is
+published.
 
 `agreement`, `conflict`, `condition_dependent`, and
 `insufficient_confirmation` therefore describe validated Evidence coverage,

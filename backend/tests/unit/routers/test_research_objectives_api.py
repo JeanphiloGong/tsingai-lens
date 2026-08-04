@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from controllers.core import research_objectives
 from controllers.core.research_objectives import router
 from domain.core import Finding, ObjectiveAnalysis, ObjectiveEvidence, ResearchObjective
 
@@ -25,21 +26,18 @@ def _objective() -> ResearchObjective:
     )
 
 
-def _analysis() -> ObjectiveAnalysis:
-    return (
-        ObjectiveAnalysis(
-            collection_id="col-1",
-            objective_id="obj-1",
-            analysis_version=1,
-            source_build_id="build-1",
-            pipeline_version="test.v1",
-            model_name="model-1",
-            prompt_versions={},
-            total_document_count=1,
-        )
-        .start()
-        .succeed()
+def _analysis(*, queued: bool = False) -> ObjectiveAnalysis:
+    analysis = ObjectiveAnalysis(
+        collection_id="col-1",
+        objective_id="obj-1",
+        analysis_version=1,
+        source_build_id="build-1",
+        pipeline_version="test.v1",
+        model_name="model-1",
+        prompt_versions={},
+        total_document_count=1,
     )
+    return analysis if queued else analysis.start().succeed()
 
 
 def _finding() -> Finding:
@@ -131,20 +129,23 @@ class _Repository:
 
 
 class _Service:
+    def __init__(self, *, queued: bool = False) -> None:
+        self.queued = queued
+
     def confirm_objective(self, collection_id, objective_id):
-        return self.get_analysis(collection_id, objective_id)
+        return self.get_analysis_state(collection_id, objective_id)
 
     def queue_analysis(self, collection_id, objective_id):
-        return self.get_analysis(collection_id, objective_id)
+        return self.get_analysis_state(collection_id, objective_id)
 
-    def run_analysis(self, collection_id, objective_id):
-        return self.get_analysis(collection_id, objective_id)
+    def execute_queued_analysis(self, collection_id, objective_id):
+        return self.get_analysis_state(collection_id, objective_id)
 
-    def get_analysis(self, collection_id, objective_id):
+    def get_analysis_state(self, collection_id, objective_id):
         return {
             "collection_id": collection_id,
             "objective": _objective(),
-            "analysis": _analysis(),
+            "analysis": _analysis(queued=self.queued),
             "published_analysis": _analysis(),
             "warnings": [],
         }
@@ -181,12 +182,45 @@ class _Service:
         }
 
 
-def _client() -> TestClient:
+def _client(service: _Service | None = None) -> TestClient:
     app = FastAPI()
     app.state.objective_repository = _Repository()
-    app.state.objective_analysis_service = _Service()
+    app.state.objective_analysis_service = service or _Service()
     app.include_router(router)
     return TestClient(app)
+
+
+def test_start_analysis_dispatches_the_queued_worker(monkeypatch) -> None:
+    service = _Service(queued=True)
+    submitted: dict[str, object] = {}
+
+    class _SubmittedFuture:
+        def add_done_callback(self, callback) -> None:
+            submitted["callback"] = callback
+
+    def submit(function, *args):
+        submitted["function"] = function
+        submitted["args"] = args
+        return _SubmittedFuture()
+
+    monkeypatch.setattr(
+        research_objectives._objective_analysis_executor,
+        "submit",
+        submit,
+    )
+
+    response = _client(service).post(
+        "/collections/col-1/objectives/obj-1/analysis"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["active_analysis"]["status"] == "queued"
+    assert submitted["function"] == service.execute_queued_analysis
+    assert submitted["args"] == ("col-1", "obj-1")
+    assert (
+        submitted["callback"]
+        == research_objectives._log_unexpected_analysis_failure
+    )
 
 
 def test_objective_api_exposes_definition_and_separate_analysis_state() -> None:

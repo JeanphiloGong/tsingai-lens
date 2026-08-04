@@ -265,7 +265,7 @@ def _service(*, repository=None, analyzer=None):
 def test_objective_analysis_publishes_one_complete_version() -> None:
     service, repository, _analyzer = _service()
     queued = service.queue_analysis("collection-1", "objective-1")
-    result = service.run_analysis("collection-1", "objective-1")
+    result = service.execute_queued_analysis("collection-1", "objective-1")
 
     assert queued["analysis"].status == "queued"
     assert result["analysis"].status == "succeeded"
@@ -313,7 +313,7 @@ def test_empty_finding_output_fails_version_without_publication() -> None:
         analyzer=FakeResearchObjectiveService(artifacts=artifacts)
     )
     service.queue_analysis("collection-1", "objective-1")
-    result = service.run_analysis("collection-1", "objective-1")
+    result = service.execute_queued_analysis("collection-1", "objective-1")
 
     assert result["analysis"].status == "failed"
     assert result["objective"].published_analysis_version is None
@@ -324,7 +324,7 @@ def test_analysis_exception_is_diagnostic_and_retry_allocates_new_version() -> N
     analyzer = FakeResearchObjectiveService(error=RuntimeError("model unavailable"))
     service, repository, _analyzer = _service(analyzer=analyzer)
     service.queue_analysis("collection-1", "objective-1")
-    failed = service.run_analysis("collection-1", "objective-1")
+    failed = service.execute_queued_analysis("collection-1", "objective-1")
     retry = service.queue_analysis("collection-1", "objective-1")
 
     assert failed["analysis"].status == "failed"
@@ -340,7 +340,7 @@ def test_losing_worker_does_not_run_duplicate_analysis() -> None:
         repository=repository, analyzer=analyzer
     )
     service.queue_analysis("collection-1", "objective-1")
-    result = service.run_analysis("collection-1", "objective-1")
+    result = service.execute_queued_analysis("collection-1", "objective-1")
 
     assert result["analysis"].status == "queued"
     assert analyzer.calls == 0
@@ -353,7 +353,7 @@ def test_failed_retry_keeps_previous_published_findings_readable() -> None:
         repository=repository, analyzer=analyzer
     )
     queued = service.queue_analysis("collection-1", "objective-1")
-    result = service.run_analysis("collection-1", "objective-1")
+    result = service.execute_queued_analysis("collection-1", "objective-1")
 
     assert queued["analysis"].analysis_version == 2
     assert result["analysis"].status == "failed"

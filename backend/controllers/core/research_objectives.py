@@ -55,7 +55,9 @@ async def get_collection_objective(
     objective_id: str,
     request: Request,
 ) -> ObjectiveAnalysisResponse:
-    return await _get_analysis_response(collection_id, objective_id, request)
+    return await _read_objective_analysis_response(
+        collection_id, objective_id, request
+    )
 
 
 @router.post(
@@ -78,15 +80,16 @@ async def confirm_collection_objective(
         raise _objective_not_found(collection_id, objective_id, exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _analysis_response(payload)
+    return _to_objective_analysis_response(payload)
 
 
 @router.post(
     "/{collection_id}/objectives/{objective_id}/analysis",
     response_model=ObjectiveAnalysisResponse,
-    summary="Queue a research objective analysis",
+    summary="Start a research objective analysis",
+    name="run_collection_objective_analysis",  # Preserve the OpenAPI operation ID.
 )
-def run_collection_objective_analysis(
+def start_collection_objective_analysis(
     collection_id: str,
     objective_id: str,
     request: Request,
@@ -101,25 +104,28 @@ def run_collection_objective_analysis(
     analysis = payload.get("analysis")
     if analysis is not None and analysis.status == "queued":
         future = _objective_analysis_executor.submit(
-            service.run_analysis,
+            service.execute_queued_analysis,
             collection_id,
             objective_id,
         )
         future.add_done_callback(_log_unexpected_analysis_failure)
-    return _analysis_response(payload)
+    return _to_objective_analysis_response(payload)
 
 
 @router.get(
     "/{collection_id}/objectives/{objective_id}/analysis",
     response_model=ObjectiveAnalysisResponse,
-    summary="Read research objective analysis status",
+    summary="Read research objective analysis state",
+    name="get_collection_objective_analysis",  # Preserve the OpenAPI operation ID.
 )
-async def get_collection_objective_analysis(
+async def get_collection_objective_analysis_state(
     collection_id: str,
     objective_id: str,
     request: Request,
 ) -> ObjectiveAnalysisResponse:
-    return await _get_analysis_response(collection_id, objective_id, request)
+    return await _read_objective_analysis_response(
+        collection_id, objective_id, request
+    )
 
 
 @router.get(
@@ -209,23 +215,23 @@ async def list_objective_evidence(
     return ObjectiveEvidenceListResponse(**payload)
 
 
-async def _get_analysis_response(
+async def _read_objective_analysis_response(
     collection_id: str,
     objective_id: str,
     request: Request,
 ) -> ObjectiveAnalysisResponse:
     try:
         payload = await run_in_threadpool(
-            request.app.state.objective_analysis_service.get_analysis,
+            request.app.state.objective_analysis_service.get_analysis_state,
             collection_id,
             objective_id,
         )
     except FileNotFoundError as exc:
         raise _objective_not_found(collection_id, objective_id, exc) from exc
-    return _analysis_response(payload)
+    return _to_objective_analysis_response(payload)
 
 
-def _analysis_response(payload: dict) -> ObjectiveAnalysisResponse:
+def _to_objective_analysis_response(payload: dict) -> ObjectiveAnalysisResponse:
     objective = payload["objective"]
     active = payload.get("analysis")
     published = payload.get("published_analysis")

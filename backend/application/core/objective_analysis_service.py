@@ -48,7 +48,11 @@ class ObjectiveAnalysisService:
         )
         return self._result(collection_id, objective, analysis=analysis)
 
-    def get_analysis(self, collection_id: str, objective_id: str) -> dict[str, Any]:
+    def get_analysis_state(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> dict[str, Any]:
         objective = self._require_objective(collection_id, objective_id)
         return self._result(collection_id, objective)
 
@@ -147,7 +151,11 @@ class ObjectiveAnalysisService:
             "total": total,
         }
 
-    def run_analysis(self, collection_id: str, objective_id: str) -> dict[str, Any]:
+    def execute_queued_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> dict[str, Any]:
         objective = self._require_objective(collection_id, objective_id)
         analysis_version = objective.active_analysis_version
         if analysis_version is None:

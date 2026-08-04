@@ -15,10 +15,10 @@ from application.core.comparison_service import ComparisonService
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
 )
-from application.core.semantic_build.document_profile_service import (
+from application.core.document_profiles.service import (
     DocumentProfileService,
 )
-from application.core.semantic_build.paper_facts_service import PaperFactsService
+from application.core.paper_facts.service import PaperFactsService
 from application.core.workspace_overview_service import WorkspaceService
 from application.source.task_service import TaskService
 from tests.support.collection_service import build_test_collection_service

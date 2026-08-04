@@ -22,4 +22,4 @@ semantic build steps.
 
 - [`../api-surface-migration/current-state.md`](../api-surface-migration/current-state.md)
 - [`../goal-source-core-layering/proposal.md`](../goal-source-core-layering/proposal.md)
-- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
+- [`../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md`](../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md)

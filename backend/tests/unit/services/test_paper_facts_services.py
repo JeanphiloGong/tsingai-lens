@@ -9,17 +9,17 @@ from domain.core.comparison_assembly import (
 )
 from domain.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import ComparisonService
-from application.core.semantic_build.llm.prompts import (
+from application.core.structured_extraction.prompts import (
     build_table_batch_mentions_prompt,
     build_text_window_extraction_prompt,
 )
-from application.core.semantic_build.paper_facts_service import (
+from application.core.paper_facts.service import (
     PaperFactsService as _PaperFactsService,
 )
-from application.core.semantic_build.document_profile_service import (
+from application.core.document_profiles.service import (
     DocumentProfileService,
 )
-from application.core.semantic_build.llm.schemas import (
+from application.core.structured_extraction.schemas import (
     ExtractedTestConditionPayload,
     MeasurementResultPayload,
     MethodFactPayload,
@@ -1215,7 +1215,7 @@ def test_table_row_binding_repairs_split_lpbf_variant_labels(tmp_path):
 
 
 def test_evidence_service_normalizes_array_backed_condition_contexts(tmp_path):
-    from application.core.semantic_build.document_profile_service import (
+    from application.core.document_profiles.service import (
         DocumentProfileService,
     )
 

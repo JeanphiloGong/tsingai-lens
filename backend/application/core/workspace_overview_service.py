@@ -6,7 +6,7 @@ from domain.shared.enums import (
     DOC_TYPE_UNCERTAIN,
 )
 from application.source.collection_service import CollectionService
-from application.core.semantic_build.document_profile_service import (
+from application.core.document_profiles.service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )

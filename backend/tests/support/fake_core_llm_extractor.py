@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from application.core.semantic_build.llm.schemas import (
+from application.core.structured_extraction.schemas import (
     MeasurementValuePayload,
     StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,

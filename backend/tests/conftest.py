@@ -13,11 +13,11 @@ if str(ROOT) not in sys.path:
 @pytest.fixture(autouse=True)
 def _patch_core_llm_extractor(monkeypatch):
     from application.core import comparison_service
-    from application.core.semantic_build import (
-        document_profile_service,
-        paper_facts_service,
-        research_objective_service,
+    from application.core.document_profiles import (
+        service as document_profile_service,
     )
+    from application.core.objectives import research_objective_service
+    from application.core.paper_facts import service as paper_facts_service
     from tests.support.fake_core_llm_extractor import FakeCoreLLMStructuredExtractor
 
     fake = FakeCoreLLMStructuredExtractor()

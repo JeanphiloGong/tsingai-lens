@@ -72,9 +72,9 @@ enough to support one stable evidence chain.
 
 Backend Core extraction and persistence:
 
-- `backend/application/core/semantic_build/llm/schemas.py`
-- `backend/application/core/semantic_build/llm/prompts.py`
-- `backend/application/core/semantic_build/paper_facts_service.py`
+- `backend/application/core/structured_extraction/schemas.py`
+- `backend/application/core/structured_extraction/prompts.py`
+- `backend/application/core/paper_facts/service.py`
 - `backend/domain/core/evidence_backbone.py`
 
 Backend extraction test support:
@@ -280,9 +280,9 @@ python3 scripts/check_docs_governance.py
 
 The recommended backend implementation order is:
 
-1. `backend/application/core/semantic_build/llm/schemas.py`
-2. `backend/application/core/semantic_build/llm/prompts.py`
-3. `backend/application/core/semantic_build/paper_facts_service.py`
+1. `backend/application/core/structured_extraction/schemas.py`
+2. `backend/application/core/structured_extraction/prompts.py`
+3. `backend/application/core/paper_facts/service.py`
 4. `backend/domain/core/evidence_backbone.py`
 5. `backend/domain/core/comparison.py`
 6. `backend/application/core/comparison_assembly.py`

@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha1
 from typing import Any, Mapping
 
-from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
+from application.core.structured_extraction.extractor import CoreLLMStructuredExtractor
 from domain.core import (
     Finding,
     FindingPaperContribution,

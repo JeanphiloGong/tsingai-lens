@@ -11,11 +11,15 @@ from typing import Any, Mapping
 from urllib.parse import urlencode
 from uuid import uuid4
 
-from .document_profile_service import (
+from application.core.document_profiles.service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
-from .llm.schemas import (
+from application.core.structured_extraction.extractor import (
+    CoreLLMStructuredExtractor,
+    build_default_core_llm_structured_extractor,
+)
+from application.core.structured_extraction.schemas import (
     BaselineReferencePayload,
     ConditionContextPayload,
     EvidenceAnchorPayload,
@@ -30,10 +34,6 @@ from .llm.schemas import (
     StructuredTextWindowMentions,
     TestConditionPayloadModel,
     TestContextPayload,
-)
-from .llm.extractor import (
-    CoreLLMStructuredExtractor,
-    build_default_core_llm_structured_extractor,
 )
 from application.source.artifact_input_service import (
     build_document_records,

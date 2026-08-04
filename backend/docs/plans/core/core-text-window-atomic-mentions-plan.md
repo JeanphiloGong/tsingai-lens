@@ -10,9 +10,10 @@ with a narrower two-step design:
 - deterministic backend code binds those mentions into the existing Core
   backbone artifacts
 
-The immediate target is the text-window extraction slice in
-`application/core/semantic_build/`. This is not a table-row redesign, not a
-new compatibility layer, and not a second model-binding stage.
+The immediate target is the text-window extraction contract in
+`application/core/structured_extraction/` and its paper-fact assembly owner in
+`application/core/paper_facts/`. This is not a table-row redesign, not a new
+compatibility layer, and not a second model-binding stage.
 
 The narrow goal is to improve extraction precision where the current bundle
 shape is still coupling too many jobs into one model response:
@@ -30,8 +31,8 @@ shape is still coupling too many jobs into one model response:
 This plan works under the existing Core extraction wave and should be read
 with:
 
-- [`../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
-- [`../../../application/core/semantic_build/llm/docs/structured-extraction/id-boundary.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/id-boundary.md)
+- [`../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md`](../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md)
+- [`../../../application/core/structured_extraction/docs/structured-extraction/id-boundary.md`](../../../application/core/structured_extraction/docs/structured-extraction/id-boundary.md)
 - [`pbf-metal-extraction-and-comparison-validation/README.md`](pbf-metal-extraction-and-comparison-validation/README.md)
 
 ## Why This Child Plan Exists
@@ -107,13 +108,13 @@ This plan explicitly rejects:
 This plan covers:
 
 - text-window LLM schema changes under
-  `application/core/semantic_build/llm/schemas.py`
+  `application/core/structured_extraction/schemas.py`
 - text-window prompt changes under
-  `application/core/semantic_build/llm/prompts.py`
+  `application/core/structured_extraction/prompts.py`
 - text-window parse entry changes under
-  `application/core/semantic_build/llm/extractor.py`
+  `application/core/structured_extraction/extractor.py`
 - deterministic binding from atomic mentions into the existing Core artifact
-  bundle inside `application/core/semantic_build/paper_facts_service.py`
+  bundle inside `application/core/paper_facts/service.py`
 - propagation of `claim_scope` into Core measurement-result materialization
 - targeted fake-extractor and unit-test updates for the new text-window path
 
@@ -224,9 +225,9 @@ Primary changes:
 
 Expected file areas:
 
-- `application/core/semantic_build/llm/schemas.py`
-- `application/core/semantic_build/llm/prompts.py`
-- `application/core/semantic_build/paper_facts_service.py`
+- `application/core/structured_extraction/schemas.py`
+- `application/core/structured_extraction/prompts.py`
+- `application/core/paper_facts/service.py`
 - `tests/unit/services/test_paper_facts_services.py`
 - `tests/support/fake_core_llm_extractor.py`
 
@@ -252,9 +253,9 @@ Primary changes:
 
 Expected file areas:
 
-- `application/core/semantic_build/llm/schemas.py`
-- `application/core/semantic_build/llm/prompts.py`
-- `application/core/semantic_build/llm/extractor.py`
+- `application/core/structured_extraction/schemas.py`
+- `application/core/structured_extraction/prompts.py`
+- `application/core/structured_extraction/extractor.py`
 - `tests/support/fake_core_llm_extractor.py`
 
 Acceptance:
@@ -293,7 +294,7 @@ Binding rules:
 
 Expected file areas:
 
-- `application/core/semantic_build/paper_facts_service.py`
+- `application/core/paper_facts/service.py`
 - `tests/unit/services/test_paper_facts_services.py`
 
 Acceptance:
@@ -318,7 +319,7 @@ Primary changes:
 Expected file areas:
 
 - `domain/core/evidence_backbone.py`
-- `application/core/semantic_build/paper_facts_service.py`
+- `application/core/paper_facts/service.py`
 - `application/core/comparison_assembly.py`
 - `tests/unit/services/test_paper_facts_services.py`
 
@@ -372,10 +373,10 @@ comparison test slice as well.
 
 The first implementation wave should stay tightly scoped to:
 
-- `backend/application/core/semantic_build/llm/schemas.py`
-- `backend/application/core/semantic_build/llm/prompts.py`
-- `backend/application/core/semantic_build/llm/extractor.py`
-- `backend/application/core/semantic_build/paper_facts_service.py`
+- `backend/application/core/structured_extraction/schemas.py`
+- `backend/application/core/structured_extraction/prompts.py`
+- `backend/application/core/structured_extraction/extractor.py`
+- `backend/application/core/paper_facts/service.py`
 - `backend/domain/core/evidence_backbone.py`
 - `backend/application/core/comparison_assembly.py` only if the
   `claim_scope` gate lands immediately
@@ -386,9 +387,9 @@ The first implementation wave should stay tightly scoped to:
 
 - [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md)
   Parent Core quality wave
-- [`../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
+- [`../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md`](../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md)
   Earlier Core extraction cutover plan
-- [`../../../application/core/semantic_build/llm/docs/structured-extraction/id-boundary.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/id-boundary.md)
+- [`../../../application/core/structured_extraction/docs/structured-extraction/id-boundary.md`](../../../application/core/structured_extraction/docs/structured-extraction/id-boundary.md)
   Prompt and schema boundary cleanup that this plan extends
 - [`pbf-metal-extraction-and-comparison-validation/proposal.md`](pbf-metal-extraction-and-comparison-validation/proposal.md)
   Proposal page for the narrow PBF-metal validation wave that exposed the

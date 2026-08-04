@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from application.core.objective_analysis_service import ObjectiveAnalysisService
-from application.core.semantic_build.research_objective_service import (
+from application.core.objectives.analysis_service import ObjectiveAnalysisService
+from application.core.objectives.research_objective_service import (
     ObjectiveAnalysisArtifacts,
 )
 from domain.core import (

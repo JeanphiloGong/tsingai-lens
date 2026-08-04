@@ -23,8 +23,8 @@ deterministic row and cell binding
 ```
 
 This is a Core LLM structured-extraction plan for
-`application/core/semantic_build/llm/` and
-`application/core/semantic_build/paper_facts_service.py`. It does not change
+`application/core/structured_extraction/` and
+`application/core/paper_facts/service.py`. It does not change
 public API routes, frontend contracts, parser selection, or Source ownership of
 observable table structure.
 
@@ -32,8 +32,8 @@ Read this with:
 
 - [`semantic-routing-targeted-extraction-plan.md`](semantic-routing-targeted-extraction-plan.md)
 - [`prompt-hardening-and-extraction-mode.md`](prompt-hardening-and-extraction-mode.md)
-- [`../../../../../../docs/plans/source/source-table-artifact-plan.md`](../../../../../../docs/plans/source/source-table-artifact-plan.md)
-- [`../../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md`](../../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md)
+- [`../../../../../docs/plans/source/source-table-artifact-plan.md`](../../../../../docs/plans/source/source-table-artifact-plan.md)
+- [`../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md`](../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md)
 
 ## Current Behavior
 

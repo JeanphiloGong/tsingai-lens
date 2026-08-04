@@ -12,11 +12,23 @@ from typing import Any, Callable, Iterable, Mapping
 from openai import OpenAIError
 from pydantic import ValidationError
 
-from application.core.semantic_build.document_profile_service import (
+from application.core.document_profiles.service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
-from application.core.finding_synthesis_service import FindingSynthesisService
+from application.core.objectives.finding_synthesis_service import (
+    FindingSynthesisService,
+)
+from application.core.structured_extraction.extractor import (
+    CoreLLMStructuredExtractor,
+    build_default_core_llm_structured_extractor,
+)
+from application.core.structured_extraction.schemas import (
+    StructuredAxisCanonicalizationPlan,
+    StructuredObjectiveMergePlan,
+    StructuredResearchObjective,
+)
+from application.source.artifact_input_service import load_document_tree
 from application.source.collection_service import CollectionService
 from domain.core import (
     Finding,
@@ -41,16 +53,6 @@ from domain.ports import (
     SourceArtifactRepository,
 )
 from domain.source import SourceArtifactSet, SourceDocumentTree
-from application.source.artifact_input_service import load_document_tree
-from .llm.extractor import (
-    CoreLLMStructuredExtractor,
-    build_default_core_llm_structured_extractor,
-)
-from .llm.schemas import (
-    StructuredAxisCanonicalizationPlan,
-    StructuredObjectiveMergePlan,
-    StructuredResearchObjective,
-)
 
 logger = logging.getLogger(__name__)
 

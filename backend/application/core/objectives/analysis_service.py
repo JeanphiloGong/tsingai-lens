@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-from application.core.semantic_build.research_objective_service import (
+from application.core.objectives.research_objective_service import (
     ObjectiveAnalysisArtifacts,
     ResearchObjectiveService,
 )

@@ -11,13 +11,13 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 from application.source.artifact_registry_service import ArtifactRegistryService
-from application.core.semantic_build.document_profile_service import (
+from application.core.document_profiles.service import (
     DocumentProfileService,
 )
-from application.core.semantic_build.research_objective_service import (
+from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
 )
-from application.core.finding_synthesis_service import FindingSynthesisService
+from application.core.objectives.finding_synthesis_service import FindingSynthesisService
 from tests.support.collection_service import build_test_collection_service
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
 from application.source.task_service import TaskService

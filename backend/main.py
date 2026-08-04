@@ -6,16 +6,16 @@ from time import perf_counter
 from config import DATA_DIR
 from application.auth import AuthSessionService, SessionNotFoundError
 from application.core.comparison_service import ComparisonService
-from application.core.objective_analysis_service import ObjectiveAnalysisService
-from application.core.finding_synthesis_service import FindingSynthesisService
+from application.core.objectives.analysis_service import ObjectiveAnalysisService
+from application.core.objectives.finding_synthesis_service import FindingSynthesisService
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
 )
-from application.core.semantic_build.document_profile_service import (
+from application.core.document_profiles.service import (
     DocumentProfileService,
 )
-from application.core.semantic_build.paper_facts_service import PaperFactsService
-from application.core.semantic_build.research_objective_service import (
+from application.core.paper_facts.service import PaperFactsService
+from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
 )
 from application.core.workspace_overview_service import WorkspaceService

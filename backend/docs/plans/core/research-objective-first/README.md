@@ -19,7 +19,7 @@ persistence assumptions no longer matched the runtime contract.
 
 - [`../../../../application/core/README.md`](../../../../application/core/README.md)
   Current Core application ownership and runtime flow
-- [`../../../../application/core/semantic_build/README.md`](../../../../application/core/semantic_build/README.md)
+- [`../../../../application/core/objectives/README.md`](../../../../application/core/objectives/README.md)
   Objective-scoped evidence extraction and Finding synthesis
 - [`../../../architecture/persistence-model.md`](../../../architecture/persistence-model.md)
   PostgreSQL aggregate identity, versioning, and publication rules

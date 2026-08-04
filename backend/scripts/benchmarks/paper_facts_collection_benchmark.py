@@ -23,7 +23,7 @@ from _common import (
 )
 
 
-_PAPER_FACTS_LOGGER_NAME = "application.core.semantic_build.paper_facts_service"
+_PAPER_FACTS_LOGGER_NAME = "application.core.paper_facts.service"
 
 
 class _DocumentWallClockHandler(logging.Handler):
@@ -186,9 +186,9 @@ def build_services(
     collections_root: Path,
     session_factory: Any,
 ) -> tuple[Any, Any, Any, Any, Any, Any]:
-    from application.core.semantic_build.document_profile_service import DocumentProfileService
-    from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
-    from application.core.semantic_build.paper_facts_service import PaperFactsService
+    from application.core.document_profiles.service import DocumentProfileService
+    from application.core.structured_extraction.extractor import CoreLLMStructuredExtractor
+    from application.core.paper_facts.service import PaperFactsService
     from application.source.collection_service import CollectionService
     from infra.persistence.file import FileCollectionWorkspace
     from infra.persistence.postgres.collection_repository import PostgresCollectionRepository
@@ -233,7 +233,7 @@ def load_collection_inputs_for_benchmark(
         load_table_cells_artifact,
         load_table_rows_artifact,
     )
-    from application.core.semantic_build.document_profile_service import DocumentProfilesNotReadyError
+    from application.core.document_profiles.service import DocumentProfilesNotReadyError
     output_dir = collection_service.get_paths(collection_id).output_dir
     document_records, text_unit_records = load_collection_inputs(
         collection_id,

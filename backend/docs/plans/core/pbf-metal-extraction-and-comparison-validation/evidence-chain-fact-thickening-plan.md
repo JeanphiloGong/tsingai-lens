@@ -161,8 +161,8 @@ evidence-chain projection.
 
 Owned file areas:
 
-- `application/core/semantic_build/llm/schemas.py`
-- `application/core/semantic_build/paper_facts_service.py`
+- `application/core/structured_extraction/schemas.py`
+- `application/core/paper_facts/service.py`
 - `tests/unit/services/test_paper_facts_services.py`
 
 Implementation notes:
@@ -197,8 +197,8 @@ ungrounded numeric extraction.
 
 Owned file areas:
 
-- `application/core/semantic_build/llm/prompts.py`
-- `application/core/semantic_build/llm/schemas.py`
+- `application/core/structured_extraction/prompts.py`
+- `application/core/structured_extraction/schemas.py`
 - `tests/unit/services/test_core_llm_extractor.py`
 - `tests/unit/services/test_paper_facts_services.py`
 

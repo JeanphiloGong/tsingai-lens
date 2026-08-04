@@ -18,11 +18,11 @@ This plan sits under the existing Core structured-extraction cutover wave and
 works with the new semantic-build package boundary:
 
 - [`hard-cutover.md`](hard-cutover.md)
-- [`../../../../../../docs/plans/core/core-semantic-build-packaging-alignment-plan.md`](../../../../../../docs/plans/core/core-semantic-build-packaging-alignment-plan.md)
+- [`../../../../../docs/plans/core/core-semantic-build-packaging-alignment-plan.md`](../../../../../docs/plans/core/core-semantic-build-packaging-alignment-plan.md)
 
 ## Why This Child Plan Exists
 
-The new `application/core/semantic_build/llm/` package made the Core-owned LLM
+The new `application/core/structured_extraction/` package made the Core-owned LLM
 contract easier to read, but it also made one remaining boundary problem more
 obvious:
 
@@ -280,10 +280,10 @@ This cleanup should be a direct contract replacement:
 
 Primary runtime files:
 
-- `backend/application/core/semantic_build/paper_facts_service.py`
-- `backend/application/core/semantic_build/llm/schemas.py`
-- `backend/application/core/semantic_build/llm/prompts.py`
-- `backend/application/core/semantic_build/llm/extractor.py`
+- `backend/application/core/paper_facts/service.py`
+- `backend/application/core/structured_extraction/schemas.py`
+- `backend/application/core/structured_extraction/prompts.py`
+- `backend/application/core/structured_extraction/extractor.py`
 
 Primary verification files:
 
@@ -324,5 +324,5 @@ Suggested verification commands:
 ## Related Docs
 
 - [`hard-cutover.md`](hard-cutover.md)
-- [`../../../../../../docs/plans/core/core-semantic-build-packaging-alignment-plan.md`](../../../../../../docs/plans/core/core-semantic-build-packaging-alignment-plan.md)
-- [`../../../../../../docs/architecture/goal-core-source-layering.md`](../../../../../../docs/architecture/goal-core-source-layering.md)
+- [`../../../../../docs/plans/core/core-semantic-build-packaging-alignment-plan.md`](../../../../../docs/plans/core/core-semantic-build-packaging-alignment-plan.md)
+- [`../../../../../docs/architecture/goal-core-source-layering.md`](../../../../../docs/architecture/goal-core-source-layering.md)

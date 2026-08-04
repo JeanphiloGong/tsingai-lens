@@ -1,6 +1,6 @@
 # Core Application Layer
 
-This package owns the evidence-first semantic model built from normalized
+This package owns the evidence-first research model built from normalized
 Source artifacts.
 
 ## Primary Flow
@@ -20,13 +20,16 @@ reviewable result uses the complete Finding identity
 
 ## Owners
 
-- `objective_analysis_service.py`
-  Queues, runs, fails, and atomically publishes one analysis version.
-- `finding_synthesis_service.py`
-  Builds evidence-calibrated paper and cross-paper Findings.
-- `semantic_build/`
-  Discovers candidate Objectives, traverses selected Source content, extracts
-  Objective Evidence, and produces typed analysis artifacts.
+- `document_profiles/`
+  Classifies Source documents and owns bounded collection profile summaries.
+- `paper_facts/`
+  Extracts reusable document-scoped facts for comparison and research views.
+- `objectives/`
+  Discovers candidate Objectives and owns confirmed, versioned analysis through
+  atomic Finding publication.
+- `structured_extraction/`
+  Owns shared prompts, response schemas, provider calls, and validation for
+  structured model output.
 - `comparison_service.py`
   Builds deterministic comparable-result and comparison projections.
 - `research_view_aggregation_service.py`

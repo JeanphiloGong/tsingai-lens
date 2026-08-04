@@ -1,12 +1,10 @@
-# Core Semantic Build
+# Research Objectives
 
-This package consumes normalized Source artifacts and produces typed Core
-semantic records.
+This package owns candidate Objective discovery and confirmed, versioned
+Objective analysis.
 
-## Responsibilities
+## Owners
 
-- `document_profile_service.py`
-  Classifies each document and produces a bounded collection summary.
 - `research_objective_service.py`
   Discovers Objective candidates and runs confirmed Objective analysis. It
   traverses Source document trees with bounded transient state, emits one
@@ -15,13 +13,15 @@ semantic records.
   framing, routing, and extraction consume the persisted ResearchObjective
   variables, outcomes, mechanisms, constraints, and requested comparator
   directly. Table-selection hints remain transient service values.
-- `paper_facts_service.py`
-  Extracts reusable evidence anchors, methods, sample variants, test
-  conditions, baselines, measurements, and characterization observations.
-- `core_semantic_version.py`
-  Owns semantic-version invalidation for rebuildable Core artifacts.
-- [`llm/README.md`](llm/README.md)
-  Owns prompt, schema, provider-call, and structured-response contracts.
+- `analysis_service.py`
+  Queues, claims, fails, and atomically publishes one Objective analysis
+  version.
+- `finding_synthesis_service.py`
+  Produces evidence-calibrated paper and cross-paper Findings from validated
+  Objective Evidence.
+
+Shared model prompts, response schemas, and provider-call orchestration belong
+to [`../structured_extraction/README.md`](../structured_extraction/README.md).
 
 ## Objective Boundary
 
@@ -76,8 +76,9 @@ the model-facing view retains every Evidence and paper id, factor endpoint,
 structured result, and attribution scope while omitting repeated excerpts and
 context; its Finding statement cannot publish numeric endpoints because they
 belong to individual comparisons. The backend keeps the complete persisted
-Evidence for validation and traceback. Each group can produce at most one Finding. The backend binds the
-result-set identity, assigns every direct result as supporting or
+Evidence for validation and traceback. Each group can produce at most one
+Finding. The backend binds the result-set identity, assigns every direct result
+as supporting or
 contradicting, requires the statement to foreground heterogeneous responses
 when directions oppose, and derives condition boundaries, attribution scope,
 synthesis status, certainty, common scientific context, and one Finding-local

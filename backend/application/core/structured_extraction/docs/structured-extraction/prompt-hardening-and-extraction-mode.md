@@ -19,11 +19,11 @@ introduce a new runtime layer and it does not justify two parallel extractor
 implementations.
 
 For the parent quality wave, read
-[`../../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md`](../../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md).
+[`../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md`](../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md).
 For the earlier structured-extraction cutover direction, read
 [`hard-cutover.md`](hard-cutover.md).
 For the canonical benchmark surface used to justify this wave, read
-[`../../../../../../docs/plans/core/core-benchmark-script-consolidation-plan.md`](../../../../../../docs/plans/core/core-benchmark-script-consolidation-plan.md).
+[`../../../../../docs/plans/core/core-benchmark-script-consolidation-plan.md`](../../../../../docs/plans/core/core-benchmark-script-consolidation-plan.md).
 
 ## Why This Child Plan Exists
 
@@ -114,7 +114,7 @@ This child plan does not cover:
 ### Shared Prompt Hardening
 
 Move the benchmark-proven JSON compliance guidance into
-`application/core/semantic_build/llm/prompts.py` for:
+`application/core/structured_extraction/prompts.py` for:
 
 - `build_text_window_extraction_prompt(...)`
 - `build_table_batch_mentions_prompt(...)`
@@ -141,7 +141,7 @@ The production prompt should also include:
 ### One Extractor, Two Temporary Modes
 
 Keep `CoreLLMStructuredExtractor` as the single production extractor in
-`application/core/semantic_build/llm/extractor.py`.
+`application/core/structured_extraction/extractor.py`.
 
 Add one environment variable:
 
@@ -205,8 +205,8 @@ multiple callers.
 
 ### Primary Code Areas
 
-- `application/core/semantic_build/llm/prompts.py`
-- `application/core/semantic_build/llm/extractor.py`
+- `application/core/structured_extraction/prompts.py`
+- `application/core/structured_extraction/extractor.py`
 
 ### Primary Test Areas
 
@@ -228,7 +228,7 @@ Run at least:
 
 ```bash
 cd backend
-python3 -m py_compile application/core/semantic_build/llm/prompts.py application/core/semantic_build/llm/extractor.py
+python3 -m py_compile application/core/structured_extraction/prompts.py application/core/structured_extraction/extractor.py
 uv run pytest tests/unit/services/test_core_llm_extractor.py
 python3 scripts/benchmarks/text_window_probe.py --mode raw_text_plus_validate --repeat 3
 python3 scripts/benchmarks/text_window_probe.py --mode provider_structured_parse --repeat 3

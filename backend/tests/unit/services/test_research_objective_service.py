@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from application.core.semantic_build.llm.schemas import (
+from application.core.structured_extraction.schemas import (
     StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
@@ -23,17 +23,17 @@ from application.core.semantic_build.llm.schemas import (
     StructuredResearchObjectives,
     StructuredTableMatrixRepair,
 )
-from application.core.semantic_build.research_objective_service import (
+from application.core.objectives.research_objective_service import (
     EvidenceCandidate,
     ExtractedEvidenceDraft,
     PaperAnalysisFrame,
     ResearchObjectiveService as _ResearchObjectiveService,
     SourceSelectionHint,
 )
-from application.core.semantic_build.document_profile_service import (
+from application.core.document_profiles.service import (
     DocumentProfileService,
 )
-from application.core.finding_synthesis_service import FindingSynthesisService
+from application.core.objectives.finding_synthesis_service import FindingSynthesisService
 from tests.support.collection_service import build_test_collection_service
 from domain.core import (
     DocumentProfile,

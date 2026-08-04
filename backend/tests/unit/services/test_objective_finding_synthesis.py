@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from application.core.finding_synthesis_service import FindingSynthesisService
+from application.core.objectives.finding_synthesis_service import FindingSynthesisService
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,

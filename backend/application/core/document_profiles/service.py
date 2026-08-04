@@ -7,6 +7,10 @@ import math
 from pathlib import Path
 from typing import Any, Mapping
 
+from application.core.structured_extraction.extractor import (
+    CoreLLMStructuredExtractor,
+    build_default_core_llm_structured_extractor,
+)
 from application.source.collection_service import CollectionService
 from domain.core.document_profile import (
     DocumentProfile,
@@ -18,10 +22,6 @@ from domain.shared.enums import (
     DOC_TYPE_UNCERTAIN,
 )
 from domain.shared.record_normalization import normalize_record_value
-from .llm.extractor import (
-    CoreLLMStructuredExtractor,
-    build_default_core_llm_structured_extractor,
-)
 
 logger = logging.getLogger(__name__)
 

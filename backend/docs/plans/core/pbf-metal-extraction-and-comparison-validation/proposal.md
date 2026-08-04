@@ -33,7 +33,7 @@ Read this plan after:
 - [`parameter-registry-and-variant-report-scope.md`](parameter-registry-and-variant-report-scope.md)
 - [`implementation-plan.md`](implementation-plan.md)
 - [`../core-parsing-quality-hardening-plan.md`](../core-parsing-quality-hardening-plan.md)
-- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
+- [`../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md`](../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md)
 - [`../../../architecture/core-comparison/current-state.md`](../../../architecture/core-comparison/current-state.md)
 - [`../../backend-wide/materials-comparison-v2/implementation-plan.md`](../../backend-wide/materials-comparison-v2/implementation-plan.md)
 
@@ -223,7 +223,7 @@ The current extraction loop sends one LLM request per text window and one per
 table row, then materializes each returned bundle:
 
 - text-window extraction loop in
-  `application/core/semantic_build/paper_facts_service.py`
+  `application/core/paper_facts/service.py`
 - table-row extraction loop in the same module
 - extraction payloads built from `_build_text_window_extraction_payload()` and
   `_build_table_row_extraction_payload()`
@@ -243,10 +243,10 @@ table row, then materializes each returned bundle:
 
 ### Expected file areas
 
-- `application/core/semantic_build/llm/extractor.py`
-- `application/core/semantic_build/llm/prompts.py`
-- `application/core/semantic_build/llm/schemas.py`
-- `application/core/semantic_build/paper_facts_service.py`
+- `application/core/structured_extraction/extractor.py`
+- `application/core/structured_extraction/prompts.py`
+- `application/core/structured_extraction/schemas.py`
+- `application/core/paper_facts/service.py`
 - `tests/support/fake_core_llm_extractor.py`
 - `tests/unit/services/test_paper_facts_services.py`
 
@@ -309,10 +309,10 @@ for:
 
 ### Expected file areas
 
-- `application/core/semantic_build/llm/schemas.py`
-- `application/core/semantic_build/llm/prompts.py`
+- `application/core/structured_extraction/schemas.py`
+- `application/core/structured_extraction/prompts.py`
 - `domain/core/evidence_backbone.py`
-- `application/core/semantic_build/paper_facts_service.py`
+- `application/core/paper_facts/service.py`
 
 ### Exit criteria
 
@@ -365,10 +365,10 @@ distinguish:
 
 ### Expected file areas
 
-- `application/core/semantic_build/llm/schemas.py`
-- `application/core/semantic_build/llm/prompts.py`
+- `application/core/structured_extraction/schemas.py`
+- `application/core/structured_extraction/prompts.py`
 - `domain/core/evidence_backbone.py`
-- `application/core/semantic_build/paper_facts_service.py`
+- `application/core/paper_facts/service.py`
 - `application/core/comparison_assembly.py`
 - `domain/core/comparison.py`
 
@@ -525,7 +525,7 @@ pass.
 - [`README.md`](README.md)
 - [`implementation-plan.md`](implementation-plan.md)
 - [`../core-parsing-quality-hardening-plan.md`](../core-parsing-quality-hardening-plan.md)
-- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
+- [`../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md`](../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md)
 - [`../document-profile-lightweight-triage-plan.md`](../document-profile-lightweight-triage-plan.md)
 - [`../../../architecture/core-comparison/current-state.md`](../../../architecture/core-comparison/current-state.md)
 - [`../../backend-wide/materials-comparison-v2/implementation-plan.md`](../../backend-wide/materials-comparison-v2/implementation-plan.md)

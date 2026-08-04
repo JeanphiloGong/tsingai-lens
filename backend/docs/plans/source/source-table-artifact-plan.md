@@ -42,7 +42,7 @@ Read this plan with:
 - [`source-parser-evaluation-plan.md`](source-parser-evaluation-plan.md)
 - [`rag-anything-source-reference-plan.md`](rag-anything-source-reference-plan.md)
 - [`source-figure-asset-extraction-plan.md`](source-figure-asset-extraction-plan.md)
-- [`../../../application/core/semantic_build/llm/docs/structured-extraction/table-first-extraction-plan.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/table-first-extraction-plan.md)
+- [`../../../application/core/structured_extraction/docs/structured-extraction/table-first-extraction-plan.md`](../../../application/core/structured_extraction/docs/structured-extraction/table-first-extraction-plan.md)
 - [`../../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 
 ## Current Table Flow
@@ -276,7 +276,7 @@ Update `backend/application/source/artifact_input_service.py`:
 - keep missing-artifact failures explicit for consumers that require complete
   table structure
 
-Update `backend/application/core/semantic_build/paper_facts_service.py`:
+Update `backend/application/core/paper_facts/service.py`:
 
 - load `tables.parquet`
 - group table records by `table_id`
@@ -286,7 +286,7 @@ Update `backend/application/core/semantic_build/paper_facts_service.py`:
   chunks
 - bind extracted mentions back to rows and cells after extraction
 
-Update `backend/application/core/semantic_build/llm/prompts.py`:
+Update `backend/application/core/structured_extraction/prompts.py`:
 
 - allow complete small-table context in table prompts
 - state that non-target rows remain context unless the prompt declares them as

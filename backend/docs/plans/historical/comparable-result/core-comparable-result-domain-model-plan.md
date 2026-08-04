@@ -424,9 +424,9 @@ Guardrails:
 
 ### Companion Docs
 
-- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
+- [`../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md`](../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md)
   remains the extraction-contract and semantic-build companion plan.
-- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/id-boundary.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/id-boundary.md)
+- [`../../../../application/core/structured_extraction/docs/structured-extraction/id-boundary.md`](../../../../application/core/structured_extraction/docs/structured-extraction/id-boundary.md)
   remains the boundary-cleanup companion plan that keeps backend ids out of the
   LLM contract.
 
@@ -437,7 +437,7 @@ Guardrails:
 - [`core-comparable-result-phase1-persistence-split-plan.md`](core-comparable-result-phase1-persistence-split-plan.md)
 - [`core-comparable-result-phase1-read-path-cutover-plan.md`](core-comparable-result-phase1-read-path-cutover-plan.md)
 - [`core-comparable-result-phase1-service-boundary-plan.md`](core-comparable-result-phase1-service-boundary-plan.md)
-- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
-- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/id-boundary.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/id-boundary.md)
+- [`../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md`](../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md)
+- [`../../../../application/core/structured_extraction/docs/structured-extraction/id-boundary.md`](../../../../application/core/structured_extraction/docs/structured-extraction/id-boundary.md)
 - [`../../../architecture/domain-architecture.md`](../../../architecture/domain-architecture.md)
 - [`../../../architecture/goal-core-source-layering.md`](../../../architecture/goal-core-source-layering.md)

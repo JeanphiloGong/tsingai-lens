@@ -21,7 +21,7 @@ Read this plan with:
 - [`parameter-registry-and-variant-report-scope.md`](parameter-registry-and-variant-report-scope.md)
 - [`variant-dossier-and-result-chain-backend-plan.md`](variant-dossier-and-result-chain-backend-plan.md)
 - [`../core-parsing-quality-hardening-plan.md`](../core-parsing-quality-hardening-plan.md)
-- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
+- [`../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md`](../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md)
 
 ## Delivery Shape
 
@@ -97,23 +97,23 @@ schema detail.
 ### Changes
 
 - add deterministic candidate pruning in
-  `application/core/semantic_build/paper_facts_service.py`
+  `application/core/paper_facts/service.py`
 - skip clearly low-value blocks such as references, acknowledgements, and
   most introduction-only history windows
 - make table rows the default parameter-first extraction unit for PBF-metal
   papers
 - reduce text windows to supporting context for method or result enrichment
 - replace provider-native strict structured output with JSON text plus local
-  Pydantic validation in `application/core/semantic_build/llm/extractor.py`
+  Pydantic validation in `application/core/structured_extraction/extractor.py`
 - add bounded concurrency for extraction calls while keeping
   `_materialize_bundle()` ordered and deterministic
 
 ### Owned file areas
 
-- `application/core/semantic_build/llm/extractor.py`
-- `application/core/semantic_build/llm/prompts.py`
-- `application/core/semantic_build/llm/schemas.py`
-- `application/core/semantic_build/paper_facts_service.py`
+- `application/core/structured_extraction/extractor.py`
+- `application/core/structured_extraction/prompts.py`
+- `application/core/structured_extraction/schemas.py`
+- `application/core/paper_facts/service.py`
 - `tests/support/fake_core_llm_extractor.py`
 - `tests/unit/services/test_paper_facts_services.py`
 
@@ -183,10 +183,10 @@ The first-version field boundary for this slice is defined in
 
 ### Owned file areas
 
-- `application/core/semantic_build/llm/schemas.py`
-- `application/core/semantic_build/llm/prompts.py`
+- `application/core/structured_extraction/schemas.py`
+- `application/core/structured_extraction/prompts.py`
 - `domain/core/evidence_backbone.py`
-- `application/core/semantic_build/paper_facts_service.py`
+- `application/core/paper_facts/service.py`
 - `tests/support/fake_core_llm_extractor.py`
 - `tests/unit/services/test_paper_facts_services.py`
 
@@ -390,4 +390,4 @@ This wave is done only when all of the following are true:
 - [`README.md`](README.md)
 - [`proposal.md`](proposal.md)
 - [`../core-parsing-quality-hardening-plan.md`](../core-parsing-quality-hardening-plan.md)
-- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
+- [`../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md`](../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md)

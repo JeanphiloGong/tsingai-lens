@@ -277,7 +277,7 @@ family row with explicit missing fields, not an unresolved property row.
 ## Implemented First Slice
 
 The first implementation slice now lands in
-`application/core/semantic_build/paper_facts_service.py`.
+`application/core/paper_facts/service.py`.
 
 Implemented behavior:
 

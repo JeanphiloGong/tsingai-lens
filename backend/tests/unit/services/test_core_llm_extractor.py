@@ -6,13 +6,13 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from application.core.semantic_build.llm.extractor import CoreLLMStructuredExtractor
-from application.core.semantic_build.llm.prompts import (
+from application.core.structured_extraction.extractor import CoreLLMStructuredExtractor
+from application.core.structured_extraction.prompts import (
     build_objective_evidence_prompt,
     build_research_objective_discovery_prompt,
     build_finding_synthesis_prompt,
 )
-from application.core.semantic_build.llm.schemas import (
+from application.core.structured_extraction.schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
     StructuredExtractionBundle,

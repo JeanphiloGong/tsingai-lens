@@ -4,11 +4,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from application.core.semantic_build.document_profile_service import (
+from application.core.document_profiles.service import (
     DocumentContentNotReadyError,
     DocumentNotFoundError,
 )
-from application.core.semantic_build.paper_facts_service import (
+from application.core.paper_facts.service import (
     EvidenceCardNotFoundError,
     PaperFactsNotReadyError,
 )

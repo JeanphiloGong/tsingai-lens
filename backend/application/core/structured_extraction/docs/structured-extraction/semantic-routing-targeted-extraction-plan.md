@@ -13,7 +13,7 @@ semantic routing -> targeted extraction -> deterministic binding
 ```
 
 This plan is a Core-internal extraction redesign for the
-`application/core/semantic_build/llm/` prompt, schema, and extractor boundary.
+`application/core/structured_extraction/` prompt, schema, and extractor boundary.
 It does not change Source artifacts, public API routes, parser selection, or
 frontend contracts.
 

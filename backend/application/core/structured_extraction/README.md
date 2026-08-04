@@ -1,7 +1,7 @@
-# Core Semantic Build LLM
+# Structured Extraction
 
-This package owns Core prompt text, response schemas, and provider-call
-orchestration.
+This package owns shared Core prompt text, response schemas, and model
+provider-call orchestration.
 
 ## Local Components
 
@@ -43,5 +43,7 @@ variable as isolated.
 
 ## Boundary
 
-This package does not own Source parsing, persistence, HTTP schemas, feedback,
-curation, dataset export, or frontend presentation.
+This is a technical mechanism shared by the `document_profiles`,
+`paper_facts`, and `objectives` domains. It does not own their application
+workflows, Source parsing, persistence, HTTP schemas, feedback, curation,
+dataset export, or frontend presentation.

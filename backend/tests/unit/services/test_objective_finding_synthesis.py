@@ -20,7 +20,7 @@ class _Extractor:
 
     def synthesize_findings(self, payload: dict) -> SimpleNamespace:
         self.payloads.append(payload)
-        response = self.responses.pop(0)
+        response = self.responses.pop(0) if self.responses else None
         if isinstance(response, Exception):
             raise response
         if response is None:
@@ -1592,6 +1592,89 @@ def test_synthesis_continues_after_one_result_set_provider_failure() -> None:
 
     assert len(extractor.payloads) == 2
     assert [finding.outcome for finding in findings] == ["relative density"]
+
+
+def test_synthesis_repairs_semantically_rejected_production_candidate_once() -> None:
+    extractor = _Extractor(
+        [
+            _candidate(
+                result_set_id="model-invented-result-set",
+                statement=(
+                    "energy density: low -> high results in low densification "
+                    "levels, higher porosity"
+                ),
+                direction="decrease",
+                assertion_strength="descriptive",
+            ),
+            _candidate(
+                statement=(
+                    "Energy density showed an increase in densification under "
+                    "the reported comparison."
+                ),
+                direction="increase",
+                assertion_strength="descriptive",
+            ),
+        ]
+    )
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            question="How does energy density affect densification?",
+            variables=["energy density"],
+            outcomes=["densification"],
+        ),
+        analysis=_analysis(),
+        contributions=(
+            _contribution(
+                "paper-1",
+                changed_variables=["energy density"],
+                measured_property_scope=["densification"],
+            ),
+        ),
+        evidence_records=(
+            _evidence(
+                "ev-density",
+                "paper-1",
+                factors=("energy density",),
+                outcome="densification",
+                direction="increase",
+            ),
+        ),
+    )
+
+    assert len(findings) == 1
+    assert findings[0].direction == "increase"
+    assert len(extractor.payloads) == 2
+    repair = extractor.payloads[1]["candidate_rejection"]
+    assert repair["reason"] == (
+        "candidate direction decrease has no supporting result Evidence"
+    )
+    assert repair["previous_candidate"]["result_set_id"].startswith("result_set_")
+    assert repair["previous_candidate"]["result_set_id"] != (
+        "model-invented-result-set"
+    )
+
+
+def test_synthesis_stops_after_one_semantic_repair(caplog) -> None:
+    rejected = _candidate(
+        statement="Laser power was associated with relative density.",
+    )
+    extractor = _Extractor([rejected, rejected])
+    service = FindingSynthesisService(structured_extractor=extractor)
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(_evidence("ev-1", "paper-1"),),
+    )
+
+    assert findings == ()
+    assert len(extractor.payloads) == 2
+    assert "semantic_repair_attempted=True" in caplog.text
 
 
 def test_synthesis_rejects_cross_version_children_and_orphan_evidence() -> None:

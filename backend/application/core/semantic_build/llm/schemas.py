@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
+from functools import lru_cache
 from typing import Any, Literal
 
 from pydantic import (
@@ -45,12 +47,32 @@ _OBJECTIVE_CLAUSE_BOUNDARY_PATTERN = re.compile(
 )
 _OBJECTIVE_ACRONYM_STOP_WORDS = {"a", "an", "and", "for", "of", "the", "to"}
 _OBJECTIVE_ROLE_FILLER_WORDS = {"a", "an", "and", "for", "of", "the", "to"}
-_OBJECTIVE_SCOPE_FILLER_WORDS = {"in", "processed"}
+_OBJECTIVE_SCOPE_CONNECTOR_WORDS = {
+    "after",
+    "at",
+    "by",
+    "during",
+    "for",
+    "in",
+    "of",
+    "through",
+    "under",
+    "using",
+    "via",
+    "with",
+}
+_OBJECTIVE_SCOPE_FILLER_WORDS = {
+    "fabricated",
+    "manufactured",
+    "processed",
+    "produced",
+}
 _OBJECTIVE_TOKEN_NORMALIZATIONS = {
     "analyses": "analysis",
     "axes": "axis",
     "gases": "gas",
 }
+_OBJECTIVE_ROLE_SEARCH_STATE_LIMIT = 4096
 
 _METHOD_FACT_METHOD_ROLES = {"process", "characterization", "test"}
 _TEXT_WINDOW_METHOD_ROLES = _METHOD_FACT_METHOD_ROLES | {"other"}
@@ -283,6 +305,30 @@ def _axis_role_spans(
     return tuple(sorted(spans))
 
 
+def _scope_role_spans(
+    scope: str,
+    question_role: str,
+    role_tokens: tuple[str, ...],
+) -> tuple[tuple[int, int], ...]:
+    spans = set(_axis_role_spans(scope, question_role, role_tokens))
+    normalized_scope = unicodedata.normalize("NFKC", scope)
+    explicit_acronyms = {
+        token.casefold()
+        for token in re.findall(r"[^\W_]+", normalized_scope, flags=re.UNICODE)
+        if 2 <= len(token) <= 8
+        and token.isupper()
+        and any(character.isalpha() for character in token)
+    }
+    if explicit_acronyms:
+        long_form_tokens = tuple(
+            token
+            for token in _normalize_objective_axis_tokens(scope)
+            if token not in explicit_acronyms
+        )
+        spans.update(_token_sequence_spans(role_tokens, long_form_tokens))
+    return tuple(sorted(spans))
+
+
 def _role_matches_declared_axes(
     question_role: str,
     axes: list[str],
@@ -290,34 +336,67 @@ def _role_matches_declared_axes(
     declared_scope: list[str] | None = None,
 ) -> bool:
     role_tokens = _normalize_objective_axis_tokens(question_role)
-    spans_by_axis = [
-        _axis_role_spans(axis, question_role, role_tokens) for axis in axes
-    ]
+    spans_by_axis = sorted(
+        [_axis_role_spans(axis, question_role, role_tokens) for axis in axes],
+        key=len,
+    )
     if not role_tokens or any(not spans for spans in spans_by_axis):
         return False
     scope_indexes = frozenset(
         index
         for scope in declared_scope or []
-        for start, end in _axis_role_spans(scope, question_role, role_tokens)
+        for start, end in _scope_role_spans(scope, question_role, role_tokens)
         for index in range(start, end)
     )
-    scope_filler_indexes = frozenset(
-        index
-        for index, token in enumerate(role_tokens)
-        if token in _OBJECTIVE_SCOPE_FILLER_WORDS
-        and (index - 1 in scope_indexes or index + 1 in scope_indexes)
-    )
 
+    search_state_count = 0
+
+    @lru_cache(maxsize=None)
     def covers_role(axis_index: int, covered_indexes: frozenset[int]) -> bool:
+        nonlocal search_state_count
+        if search_state_count >= _OBJECTIVE_ROLE_SEARCH_STATE_LIMIT:
+            return False
+        search_state_count += 1
         if axis_index == len(spans_by_axis):
-            return all(
-                index in covered_indexes
-                or index in scope_indexes
-                or index in scope_filler_indexes
-                or token in _OBJECTIVE_ROLE_FILLER_WORDS
+            uncovered = tuple(
+                index
                 for index, token in enumerate(role_tokens)
+                if index not in covered_indexes
+                and token not in _OBJECTIVE_ROLE_FILLER_WORDS
+            )
+            if not uncovered:
+                return True
+            if not declared_scope or not covered_indexes:
+                return False
+            last_axis_index = max(covered_indexes)
+            if any(index <= last_axis_index for index in uncovered):
+                return False
+            trailing_scope_indexes = tuple(
+                index for index in scope_indexes if index > last_axis_index
+            )
+            if not trailing_scope_indexes:
+                return False
+            first_scope_index = min(trailing_scope_indexes)
+            connector_indexes = tuple(
+                index
+                for index in range(last_axis_index + 1, first_scope_index + 1)
+                if role_tokens[index] in _OBJECTIVE_SCOPE_CONNECTOR_WORDS
+            )
+            if not connector_indexes:
+                return False
+            return all(
+                index in scope_indexes
+                or token in _OBJECTIVE_ROLE_FILLER_WORDS
+                or token in _OBJECTIVE_SCOPE_CONNECTOR_WORDS
+                or token in _OBJECTIVE_SCOPE_FILLER_WORDS
+                for index, token in enumerate(
+                    role_tokens[last_axis_index + 1 :],
+                    start=last_axis_index + 1,
+                )
             )
         for start, end in spans_by_axis[axis_index]:
+            if search_state_count >= _OBJECTIVE_ROLE_SEARCH_STATE_LIMIT:
+                return False
             span_indexes = frozenset(range(start, end))
             if covered_indexes.isdisjoint(span_indexes) and covers_role(
                 axis_index + 1,
@@ -385,6 +464,24 @@ def _validate_objective_question_roles(
     outcomes: list[str],
     declared_scope: list[str],
 ) -> None:
+    role_keys: dict[str, set[tuple[str, ...]]] = {}
+    for role_name, role_axes in (("variables", variables), ("outcomes", outcomes)):
+        seen_keys: set[tuple[str, ...]] = set()
+        for axis in role_axes:
+            axis_key = _normalize_objective_axis_tokens(axis)
+            if axis_key in seen_keys:
+                raise ValueError(
+                    "question roles do not align; duplicate axis in "
+                    f"{role_name}: {axis}"
+                )
+            seen_keys.add(axis_key)
+        role_keys[role_name] = seen_keys
+    if role_keys["variables"] & role_keys["outcomes"]:
+        raise ValueError(
+            "question roles do not align; the same axis cannot appear in both "
+            "variables and outcomes"
+        )
+
     role_candidates = _objective_question_roles(question)
     if not role_candidates:
         raise ValueError("question roles must use a supported active variable-to-outcome form")
@@ -1270,8 +1367,62 @@ class StructuredEvidenceContext(_StrictModel):
 
     @field_validator("material", "sample", "process", "test", mode="before")
     @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list_container(value)
+    def _normalize_lists(cls, value: object, info: ValidationInfo) -> object:
+        items = _normalize_list_container(value)
+        if not isinstance(items, list):
+            return items
+        normalized_items: list[object] = []
+        for item in items:
+            if isinstance(item, StructuredEvidenceAttribute):
+                normalized_items.append(item)
+                continue
+            if isinstance(item, (str, int, float, bool)):
+                normalized_items.append(
+                    {"name": info.field_name, "value": item, "unit": None}
+                )
+                continue
+            if not isinstance(item, dict):
+                normalized_items.append(item)
+                continue
+
+            name = str(item.get("name") or info.field_name).strip()
+            unit = item.get("unit")
+            if "value" in item:
+                attribute_value = item["value"]
+                if isinstance(attribute_value, (dict, list)):
+                    attribute_value = json.dumps(
+                        attribute_value,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                normalized_items.append(
+                    {"name": name, "value": attribute_value, "unit": unit}
+                )
+                continue
+
+            details = {
+                key: detail
+                for key, detail in item.items()
+                if key not in {"name", "unit"}
+            }
+            normalized_items.append(
+                {
+                    "name": name if details else info.field_name,
+                    "value": (
+                        json.dumps(
+                            details,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        )
+                        if details
+                        else name
+                    ),
+                    "unit": unit,
+                }
+            )
+        return normalized_items
 
 
 class StructuredEvidenceExtraction(_StrictModel):
@@ -1309,6 +1460,40 @@ class StructuredEvidenceExtraction(_StrictModel):
         "unknown",
     ] = "partial"
     confidence: float = 0.0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_attribution_cardinality(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        attribution_scope = _normalize_underscored_choice(
+            value.get("attribution_scope"),
+            allowed=_OBJECTIVE_EVIDENCE_ATTRIBUTION_SCOPES,
+            default="not_attributable",
+        )
+        changed_variables = value.get("changed_variables")
+        if (
+            attribution_scope == "joint_effect"
+            and isinstance(changed_variables, list)
+            and len(changed_variables) == 1
+        ):
+            attribution_scope = "isolated_effect"
+        if (
+            attribution_scope in {"isolated_effect", "joint_effect"}
+            and isinstance(changed_variables, list)
+            and any(
+                (
+                    item.get("baseline_value") is None
+                    or item.get("target_value") is None
+                )
+                for item in changed_variables
+                if isinstance(item, dict)
+            )
+        ):
+            attribution_scope = "association_only"
+        if attribution_scope != value.get("attribution_scope"):
+            return {**value, "attribution_scope": attribution_scope}
+        return value
 
     @field_validator("evidence_role", mode="before")
     @classmethod

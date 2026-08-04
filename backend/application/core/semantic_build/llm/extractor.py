@@ -19,6 +19,7 @@ from .schemas import (
     StructuredPaperContributionDraft,
     StructuredPaperSkim,
     StructuredFindingSynthesis,
+    StructuredResearchObjective,
     StructuredResearchObjectives,
     StructuredTableBatchMentions,
     StructuredTableMatrixRepair,
@@ -421,21 +422,30 @@ class CoreLLMStructuredExtractor:
                 _FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS
             )
         last_error: Exception | None = None
+        last_raw_content: str | None = None
+        preserved_objectives: list[StructuredResearchObjective] = []
         for attempt in range(2):
             attempt_kwargs = dict(request_kwargs)
-            attempt_messages = messages
+            attempt_messages = [*messages]
+            attempt_kwargs["messages"] = attempt_messages
             if attempt:
                 if isinstance(last_error, ValidationError):
+                    validation_errors = last_error.errors(
+                        include_input=False,
+                        include_url=False,
+                    )
                     repair_detail = "; ".join(
                         f"{'.'.join(str(part) for part in error['loc'])}: "
                         f"{error['msg']}"
-                        for error in last_error.errors(
-                            include_input=False,
-                            include_url=False,
-                        )
+                        for error in validation_errors
                     )
                 else:
+                    validation_errors = []
                     repair_detail = str(last_error or "invalid structured output")
+                objective_role_errors = bool(validation_errors) and all(
+                    "question roles" in str(error["msg"])
+                    for error in validation_errors
+                )
                 if response_model is StructuredEvidenceExtractions:
                     retry_instruction = (
                         "Previous evidence extraction output failed validation: "
@@ -446,19 +456,45 @@ class CoreLLMStructuredExtractor:
                         "changed variable and a comparable comparison; joint_effect "
                         "requires at least two. Return only compact JSON."
                     )
-                elif response_model is StructuredResearchObjectives:
+                elif (
+                    response_model is StructuredResearchObjectives
+                    and objective_role_errors
+                ):
+                    retry_scope = (
+                        "Return corrections only for invalid objectives; do not repeat "
+                        "or rewrite objectives that were already valid. "
+                        if preserved_objectives
+                        else "Return one corrected `objectives` JSON array. "
+                    )
                     retry_instruction = (
-                        "Correct every research-objective role error. Each error below "
-                        "names field labels missing from the question. If that variables "
-                        "or outcomes list has another label already present in the correct "
-                        "question role, delete the missing label from the list. If deleting "
-                        "it would leave that role empty, put the full missing label verbatim "
-                        "in the question. Then use the canonical form 'How does <full "
-                        "variables labels joined with and> affect <full outcomes labels "
-                        "joined with and>?'. Keep material and process scope only in "
-                        "material_scope or constraints. Drop any objective that still "
-                        "cannot satisfy this form. Return only compact JSON. Errors: "
-                        f"{repair_detail[:1000]}"
+                        f"{retry_scope}"
+                        "Correct every research-objective role error. Keep atomic, "
+                        "non-duplicate axes and preserve their variable-to-outcome "
+                        "direction. If an error names a field label missing from the "
+                        "question and another label already occupies that variables or "
+                        "outcomes role, delete the missing label from the list. If "
+                        "deleting it would leave that role empty, put the full missing "
+                        "label verbatim in the question. Then use the canonical form "
+                        "'How does <full variables labels joined with and> affect <full "
+                        "outcomes labels joined with and>?'. Keep material and process "
+                        "scope only in material_scope or constraints. Drop any objective "
+                        "that still cannot satisfy this form. Return only compact JSON. "
+                        f"Errors: {repair_detail[:1000]}"
+                    )
+                elif response_model is StructuredResearchObjectives:
+                    retry_scope = (
+                        "Return corrections only for invalid objectives; do not repeat "
+                        "or rewrite objectives that were already valid. "
+                        if preserved_objectives
+                        else "Return one corrected `objectives` JSON array. "
+                    )
+                    retry_instruction = (
+                        "Previous output was invalid. "
+                        f"{retry_scope}"
+                        "Correct the JSON or schema errors exactly. Keep the top-level "
+                        "object to the single `objectives` field, use only schema fields, "
+                        "and return no more than six objectives. Return only compact JSON "
+                        f"without commentary. Errors: {repair_detail[:1000]}"
                     )
                 elif response_model is StructuredFindingSynthesis:
                     retry_instruction = (
@@ -473,11 +509,18 @@ class CoreLLMStructuredExtractor:
                         "prompt, or include markdown. Correct these validation errors: "
                         f"{repair_detail[:1000]}"
                     )
-                attempt_messages = [
-                    *messages,
-                    {"role": "user", "content": retry_instruction},
-                ]
-                attempt_kwargs["messages"] = attempt_messages
+                if (
+                    response_model is StructuredResearchObjectives
+                    and last_raw_content
+                ):
+                    attempt_messages.append(
+                        {"role": "assistant", "content": last_raw_content}
+                    )
+                attempt_messages.append(
+                    {"role": "user", "content": retry_instruction}
+                )
+                if response_model is StructuredResearchObjectives:
+                    messages[:] = attempt_messages
                 logger.warning(
                     "Retrying structured JSON response model=%s response_model=%s",
                     self.model,
@@ -488,14 +531,148 @@ class CoreLLMStructuredExtractor:
                 raw_content = self._coerce_message_content(
                     completion.choices[0].message.content if completion.choices else None
                 )
+                last_raw_content = raw_content
+                if (
+                    response_model is StructuredResearchObjectives
+                    and attempt
+                    and raw_content
+                ):
+                    messages.append({"role": "assistant", "content": raw_content})
                 if not raw_content:
                     raise RuntimeError(
                         "structured extraction returned empty response content"
                     )
                 payload = self._load_json_payload(self._extract_json_object(raw_content))
                 try:
-                    return response_model.model_validate(payload), raw_content
-                except ValidationError:
+                    parsed = response_model.model_validate(payload)
+                    if (
+                        response_model is StructuredResearchObjectives
+                        and attempt
+                        and preserved_objectives
+                        and isinstance(parsed, StructuredResearchObjectives)
+                    ):
+                        combined: list[StructuredResearchObjective] = []
+                        seen: set[str] = set()
+                        for objective in [*preserved_objectives, *parsed.objectives]:
+                            key = objective.model_dump_json()
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            combined.append(objective)
+                        parsed = StructuredResearchObjectives(objectives=combined)
+                    return parsed, raw_content
+                except ValidationError as validation_error:
+                    if (
+                        response_model is StructuredResearchObjectives
+                        and isinstance(payload, dict)
+                        and isinstance(payload.get("objectives"), list)
+                    ):
+                        objective_payloads = payload["objectives"]
+                        if len(objective_payloads) > 6:
+                            raise validation_error
+                        validation_paths = {
+                            ".".join(str(part) for part in error["loc"])
+                            for candidate_error in (last_error, validation_error)
+                            if isinstance(candidate_error, ValidationError)
+                            for error in candidate_error.errors(
+                                include_input=False,
+                                include_url=False,
+                            )
+                        }
+                        allowed_echo_keys = {
+                            f"`{path}`" for path in validation_paths if path
+                        }
+                        container_extra_keys = set(payload) - {"objectives"}
+                        if container_extra_keys - allowed_echo_keys:
+                            raise validation_error
+                        valid_objectives: list[StructuredResearchObjective] = []
+                        invalid_objective_payloads: list[dict[str, Any]] = []
+                        for objective_payload in objective_payloads:
+                            try:
+                                valid_objectives.append(
+                                    StructuredResearchObjective.model_validate(
+                                        objective_payload
+                                    )
+                                )
+                            except ValidationError:
+                                if isinstance(objective_payload, dict):
+                                    invalid_objective_payloads.append(objective_payload)
+                        if attempt == 0:
+                            preserved_objectives = valid_objectives
+                        else:
+                            preserved_keys = {
+                                objective.model_dump_json()
+                                for objective in preserved_objectives
+                            }
+                            corrected_objectives = [
+                                objective
+                                for objective in valid_objectives
+                                if objective.model_dump_json() not in preserved_keys
+                            ]
+                            corrected_objectives.extend(
+                                objective
+                                for objective_payload in invalid_objective_payloads
+                                if (
+                                    objective := self._repair_trailing_scope_objective(
+                                        objective_payload
+                                    )
+                                )
+                                is not None
+                            )
+                            if corrected_objectives:
+                                combined: list[StructuredResearchObjective] = []
+                                seen: set[str] = set()
+                                for objective in [
+                                    *preserved_objectives,
+                                    *corrected_objectives,
+                                ]:
+                                    key = objective.model_dump_json()
+                                    if key in seen:
+                                        continue
+                                    seen.add(key)
+                                    combined.append(objective)
+                                return (
+                                    StructuredResearchObjectives(objectives=combined),
+                                    raw_content,
+                                )
+                    if (
+                        response_model is StructuredEvidenceExtractions
+                        and isinstance(payload, dict)
+                        and isinstance(payload.get("extractions"), list)
+                    ):
+                        allowed_echo_keys = {
+                            "OBJECTIVE",
+                            "OBJECTIVE VARIABLES",
+                            "OBJECTIVE OUTCOMES",
+                            "ROUTE HINT ONLY (DO NOT COPY AS EVIDENCE ROLE)",
+                            "SOURCE KIND",
+                            "SOURCE",
+                        }
+                        filtered_payload = {"extractions": payload["extractions"]}
+                        extra_keys = set(payload) - {"extractions"}
+                        if extra_keys and extra_keys <= allowed_echo_keys:
+                            return (
+                                StructuredEvidenceExtractions.model_validate(
+                                    filtered_payload
+                                ),
+                                raw_content,
+                            )
+                    if (
+                        response_model is StructuredEvidenceExtractions
+                        and isinstance(payload, dict)
+                        and "extractions" not in payload
+                        and bool(payload)
+                        and set(payload)
+                        <= {
+                            "OBJECTIVE",
+                            "OBJECTIVE VARIABLES",
+                            "OBJECTIVE OUTCOMES",
+                            "ROUTE HINT ONLY (DO NOT COPY AS EVIDENCE ROLE)",
+                            "SOURCE KIND",
+                            "SOURCE",
+                        }
+                    ):
+                        return StructuredEvidenceExtractions(), raw_content
                     if isinstance(payload, dict):
                         extra_keys = set(payload) - set(response_model.model_fields)
                         if extra_keys - {"confidence"}:
@@ -506,14 +683,65 @@ class CoreLLMStructuredExtractor:
                             if key in response_model.model_fields
                         }
                         if filtered_payload != payload:
-                            return response_model.model_validate(filtered_payload), raw_content
+                            return (
+                                response_model.model_validate(filtered_payload),
+                                raw_content,
+                            )
                     raise
-            except (RuntimeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
+            except (
+                RuntimeError,
+                ValueError,
+                ValidationError,
+                json.JSONDecodeError,
+            ) as exc:
                 last_error = exc
                 if attempt == 0:
                     continue
                 raise
         raise RuntimeError("structured extraction failed after retry") from last_error
+
+    @staticmethod
+    def _repair_trailing_scope_objective(
+        payload: dict[str, Any],
+    ) -> StructuredResearchObjective | None:
+        filtered = {
+            key: value
+            for key, value in payload.items()
+            if key in StructuredResearchObjective.model_fields
+        }
+        variables = [
+            str(value).strip()
+            for value in filtered.get("variables", [])
+            if str(value).strip()
+        ]
+        outcomes = [
+            str(value).strip()
+            for value in filtered.get("outcomes", [])
+            if str(value).strip()
+        ]
+        question = str(filtered.get("question") or "").strip()
+        if not question or not variables or not outcomes:
+            return None
+
+        probe = dict(filtered)
+        probe["constraints"] = [
+            *list(filtered.get("constraints") or []),
+            *re.findall(r"[^\W_]+", question, flags=re.UNICODE),
+        ]
+        try:
+            StructuredResearchObjective.model_validate(probe)
+        except ValidationError:
+            return None
+
+        subject = " and ".join(variables)
+        result = " and ".join(outcomes)
+        auxiliary = "does" if len(variables) == 1 else "do"
+        repaired = dict(filtered)
+        repaired["question"] = f"How {auxiliary} {subject} affect {result}?"
+        try:
+            return StructuredResearchObjective.model_validate(repaired)
+        except ValidationError:
+            return None
 
     def _parse_provider_structured_response(
         self,

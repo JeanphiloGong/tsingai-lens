@@ -16,6 +16,7 @@ from application.core.semantic_build.llm.schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredDocumentProfile,
     StructuredExtractionBundle,
+    StructuredEvidenceContext,
     StructuredEvidenceExtraction,
     StructuredEvidenceSelections,
     StructuredEvidenceExtractions,
@@ -270,6 +271,14 @@ def test_structured_research_objective_accepts_aligned_question_roles(
             ["microstructure"],
             ["Selective laser melting (SLM)"],
         ),
+        (
+            "How does energy density affect relative density in 316L stainless "
+            "steel processed via selective laser melting?",
+            ["316L stainless steel"],
+            ["energy density"],
+            ["relative density"],
+            ["Selective laser melting (SLM)"],
+        ),
     ],
 )
 def test_structured_research_objective_allows_declared_result_scope(
@@ -301,6 +310,106 @@ def test_structured_research_objective_does_not_hide_source_axis_as_scope():
                 "variables": ["laser power"],
                 "outcomes": ["density"],
                 "constraints": ["scan speed"],
+            }
+        )
+
+
+def test_structured_research_objective_does_not_hide_result_axis_as_scope():
+    with pytest.raises(ValidationError, match="result side"):
+        StructuredResearchObjective.model_validate(
+            {
+                "question": (
+                    "How does heat treatment affect yield strength and elongation?"
+                ),
+                "variables": ["heat treatment"],
+                "outcomes": ["yield strength"],
+                "constraints": ["elongation"],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("question", "constraint"),
+    [
+        (
+            "How does aging affect yield strength at room temperature?",
+            "room temperature",
+        ),
+        (
+            "How does aging affect yield strength under tensile testing?",
+            "tensile testing",
+        ),
+        (
+            "How does aging affect yield strength after solution treatment?",
+            "solution treatment",
+        ),
+        (
+            "How does aging affect yield strength during tensile testing?",
+            "tensile testing",
+        ),
+        (
+            "How does aging affect yield strength with argon shielding?",
+            "argon shielding",
+        ),
+        (
+            "How does aging affect yield strength using ASTM E8 testing?",
+            "ASTM E8 testing",
+        ),
+        (
+            "How does aging affect yield strength for room temperature testing?",
+            "room temperature testing",
+        ),
+        (
+            "How does aging affect yield strength via tensile testing?",
+            "tensile testing",
+        ),
+        (
+            "How does aging affect yield strength by tensile testing?",
+            "tensile testing",
+        ),
+        (
+            "How does aging affect yield strength through tensile testing?",
+            "tensile testing",
+        ),
+    ],
+)
+def test_structured_research_objective_allows_trailing_declared_test_scope(
+    question,
+    constraint,
+):
+    objective = StructuredResearchObjective.model_validate(
+        {
+            "question": question,
+            "variables": ["aging"],
+            "outcomes": ["yield strength"],
+            "constraints": [constraint],
+        }
+    )
+
+    assert objective.constraints == [constraint]
+
+
+def test_structured_research_objective_rejects_axis_in_both_roles():
+    with pytest.raises(ValidationError, match="both variables and outcomes"):
+        StructuredResearchObjective.model_validate(
+            {
+                "question": (
+                    "How do porosity and density affect density and roughness "
+                    "and porosity?"
+                ),
+                "variables": ["porosity", "density"],
+                "outcomes": ["density", "roughness", "porosity"],
+            }
+        )
+
+
+def test_structured_research_objective_rejects_duplicate_axes_before_assignment():
+    with pytest.raises(ValidationError, match="duplicate axis"):
+        StructuredResearchObjective.model_validate(
+            {
+                "question": "How do porosity and porosity affect density?",
+                "variables": ["porosity", "porosity"],
+                "outcomes": ["density"],
             }
         )
 
@@ -585,7 +694,7 @@ def test_core_llm_extractor_synthesizes_goal_findings_with_distinct_trace():
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v4"
+    assert trace["prompt_version"] == "finding_synthesis.v5"
     assert trace["parsed_output"] == {"findings": []}
 
 
@@ -713,6 +822,33 @@ def test_finding_synthesis_prompt_requires_specific_single_factor_result():
     )
     assert "Never return a generic restatement" in user_prompt
 
+
+def test_finding_synthesis_prompt_carries_backend_semantic_rejection():
+    payload = {
+        "objective": {"question": "How does energy density affect density?"},
+        "result_set": {
+            "result_set_id": "result-set-1",
+            "factors": ["energy density"],
+            "outcome": "density",
+            "result_evidence": [],
+        },
+        "candidate_rejection": {
+            "reason": "candidate direction decrease has no supporting result Evidence",
+            "previous_candidate": {
+                "result_set_id": "result-set-1",
+                "statement": "Energy density decreased density.",
+                "direction": "decrease",
+            },
+        },
+    }
+
+    system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
+
+    assert "present only for one bounded repair attempt" in system_prompt
+    assert "correction guidance, not Evidence" in system_prompt
+    assert "Semantic repair required:" in user_prompt
+    assert payload["candidate_rejection"]["reason"] in user_prompt
+    assert "Re-read result_evidence for its exact direction" in user_prompt
 
 
 def test_core_llm_extractor_allows_explicit_json_text_mode(monkeypatch):
@@ -865,6 +1001,98 @@ def test_core_llm_extractor_retries_reversed_research_objective_roles():
     assert "question roles" in repair_prompt
     assert "delete the missing label from the list" in repair_prompt
     assert "put the full missing label verbatim" in repair_prompt
+
+
+def test_core_llm_extractor_preserves_valid_objectives_during_role_repair():
+    valid_objective = {
+        "question": "How does heat treatment affect yield strength?",
+        "variables": ["heat treatment"],
+        "outcomes": ["yield strength"],
+    }
+    invalid_objective = {
+        "question": "How does porosity affect mechanical properties?",
+        "variables": ["laser power"],
+        "outcomes": ["porosity"],
+    }
+    repaired_objective = {
+        "question": "How does porosity affect mechanical properties?",
+        "variables": ["porosity"],
+        "outcomes": ["mechanical properties"],
+    }
+    first_response = json.dumps(
+        {"objectives": [valid_objective, invalid_objective]}
+    )
+    second_response = json.dumps(
+        {
+            "objectives": [
+                valid_objective,
+                invalid_objective,
+                repaired_objective,
+            ],
+            "`objectives.1`": "still invalid",
+        }
+    )
+    client = _FakeOpenAIClient(first_response)
+    responses = iter((first_response, second_response))
+
+    def create(**kwargs):  # noqa: ANN003
+        client.chat.completions.calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content=next(responses)))
+            ]
+        )
+
+    client.chat.completions.create = create
+    extractor = _json_text_extractor(client)
+
+    objectives = extractor.discover_research_objectives(
+        {"collection_id": "col-1", "paper_skims": []}
+    )
+
+    assert [objective.model_dump() for objective in objectives.objectives] == [
+        StructuredResearchObjective.model_validate(valid_objective).model_dump(),
+        StructuredResearchObjective.model_validate(repaired_objective).model_dump(),
+    ]
+    retry_messages = client.chat.completions.calls[1]["messages"]
+    assert retry_messages[-2] == {"role": "assistant", "content": first_response}
+    assert "Return corrections only for invalid objectives" in retry_messages[-1][
+        "content"
+    ]
+
+
+def test_core_llm_extractor_repairs_repeated_trailing_scope_role_errors():
+    invalid = json.dumps(
+        {
+            "objectives": [
+                {
+                    "question": (
+                        "How does energy density affect the relative density of "
+                        "316L stainless steel processed via selective laser melting?"
+                    ),
+                    "variables": ["energy density"],
+                    "outcomes": ["relative density"],
+                    "material_scope": ["316L stainless steel"],
+                    "process_scope": ["Selective laser melting (SLM)"],
+                    "constraints": ["document_id: paper-1"],
+                    "seed_document_ids": ["paper-1"],
+                }
+            ]
+        }
+    )
+    client = _FakeOpenAIClient(invalid)
+    extractor = _json_text_extractor(client)
+
+    objectives = extractor.discover_research_objectives(
+        {"collection_id": "col-1", "paper_skims": []}
+    )
+
+    assert len(client.chat.completions.calls) == 2
+    assert len(objectives.objectives) == 1
+    repaired = objectives.objectives[0]
+    assert repaired.question == "How does energy density affect relative density?"
+    assert repaired.variables == ["energy density"]
+    assert repaired.outcomes == ["relative density"]
 
 
 def test_core_llm_extractor_rejects_repeated_reversed_research_objective_roles():
@@ -1263,6 +1491,231 @@ def test_core_llm_extractor_validates_objective_evidence_response():
     assert extraction.attribution_scope == "association_only"
     assert extractions.extractions[0].resolution_status == "resolved"
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
+
+
+def test_structured_objective_evidence_normalizes_compact_context_attributes():
+    context = StructuredEvidenceContext.model_validate(
+        {
+            "material": ["316L stainless steel"],
+            "sample": [
+                {
+                    "name": "cylindrical specimen",
+                    "shape": "cylindrical",
+                    "size": "10 mm diameter x 10 mm height",
+                }
+            ],
+            "process": [
+                {
+                    "name": "hatch spacing",
+                    "value": [0.12, 0.111],
+                    "unit": "mm",
+                }
+            ],
+            "test": [
+                {
+                    "name": "density measurement",
+                    "method": "Archimedes",
+                }
+            ],
+        }
+    )
+
+    assert context.material[0].model_dump() == {
+        "name": "material",
+        "value": "316L stainless steel",
+        "unit": None,
+    }
+    assert json.loads(str(context.sample[0].value)) == {
+        "shape": "cylindrical",
+        "size": "10 mm diameter x 10 mm height",
+    }
+    assert json.loads(str(context.process[0].value)) == [0.12, 0.111]
+    assert json.loads(str(context.test[0].value)) == {"method": "Archimedes"}
+
+
+def test_structured_objective_evidence_repairs_single_variable_joint_effect():
+    extraction = StructuredEvidenceExtraction.model_validate(
+        {
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "energy density",
+                    "baseline_value": 70,
+                    "target_value": 150,
+                    "unit": "J/mm3",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "70 J/mm3",
+                "target_label": "150 J/mm3",
+                "axis_names": ["energy density"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "relative density",
+                "value": 99.5,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": "Relative density increased to 99.5%.",
+            },
+            "attribution_scope": "joint_effect",
+            "scientific_context": {},
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+    assert extraction.attribution_scope == "isolated_effect"
+
+
+def test_structured_objective_evidence_downgrades_unbound_experimental_attribution():
+    extraction = StructuredEvidenceExtraction.model_validate(
+        {
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "energy density",
+                    "baseline_value": None,
+                    "target_value": 150,
+                    "unit": "J/mm3",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "lower energy density",
+                "target_label": "150 J/mm3",
+                "axis_names": ["energy density"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "relative density",
+                "value": 99.5,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": "Relative density increased to 99.5%.",
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.8,
+        }
+    )
+
+    assert extraction.attribution_scope == "association_only"
+
+
+def test_core_llm_extractor_ignores_top_level_prompt_echo_for_evidence():
+    response = json.dumps(
+        {
+            "extractions": [
+                {
+                    "evidence_role": "direct_result",
+                    "changed_variables": [],
+                    "comparison": None,
+                    "reported_result": {
+                        "outcome": "relative density",
+                        "value": 99.5,
+                        "unit": "%",
+                        "direction": "unknown",
+                        "result_text": "Relative density reached 99.5%.",
+                    },
+                    "attribution_scope": "descriptive_only",
+                    "scientific_context": {},
+                    "resolution_status": "resolved",
+                    "confidence": 0.9,
+                }
+            ],
+            "OBJECTIVE": "How does energy density affect relative density?",
+            "SOURCE KIND": "text_window",
+            "SOURCE": "Relative density reached 99.5%.",
+        }
+    )
+    extractor = _json_text_extractor(_FakeOpenAIClient(response))
+
+    parsed = extractor.extract_objective_evidence(
+        {
+            "objective": {
+                "question": "How does energy density affect relative density?"
+            },
+            "evidence_route": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+            },
+            "source": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "text": "Relative density reached 99.5%.",
+            },
+        }
+    )
+
+    assert len(parsed.extractions) == 1
+    assert parsed.extractions[0].reported_result is not None
+
+
+def test_core_llm_extractor_rejects_unknown_top_level_evidence_fields():
+    response = json.dumps(
+        {
+            "extractions": [],
+            "unexpected_model_field": "must not be silently discarded",
+        }
+    )
+    client = _FakeOpenAIClient(response)
+    extractor = _json_text_extractor(client)
+
+    with pytest.raises(ValidationError):
+        extractor.extract_objective_evidence(
+            {
+                "objective": {
+                    "question": "How does energy density affect relative density?"
+                },
+                "evidence_route": {
+                    "source_kind": "text_window",
+                    "source_ref": "block-1",
+                },
+                "source": {
+                    "source_kind": "text_window",
+                    "source_ref": "block-1",
+                    "text": "Relative density reached 99.5%.",
+                },
+            }
+        )
+
+    assert len(client.chat.completions.calls) == 2
+
+
+def test_core_llm_extractor_treats_prompt_only_evidence_echo_as_empty():
+    response = json.dumps(
+        {
+            "OBJECTIVE": "How does energy density affect relative density?",
+            "OBJECTIVE VARIABLES": ["energy density"],
+            "OBJECTIVE OUTCOMES": ["relative density"],
+            "ROUTE HINT ONLY (DO NOT COPY AS EVIDENCE ROLE)": (
+                "process_or_treatment"
+            ),
+            "SOURCE KIND": "text_window",
+            "SOURCE": "Relative density reached 99.5%.",
+        }
+    )
+    extractor = _json_text_extractor(_FakeOpenAIClient(response))
+
+    parsed = extractor.extract_objective_evidence(
+        {
+            "objective": {
+                "question": "How does energy density affect relative density?"
+            },
+            "evidence_route": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+            },
+            "source": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "text": "Relative density reached 99.5%.",
+            },
+        }
+    )
+
+    assert parsed.extractions == []
 
 
 def test_structured_objective_evidence_rejects_effect_without_variable_change():

@@ -53,10 +53,10 @@ scientific attribution contract:
 When an extracted Evidence record omits material or process context, the
 service may fill the missing material category or missing process-identity
 attribute from already persisted scope data. It uses the same document's
-`PaperSkim.candidate_materials` and `PaperSkim.candidate_processes`; Objective
-`material_scope` is the material fallback when the document skim has no
-candidate material. It preserves extracted process attributes, does not replace
-extracted context, and does not infer new scientific attributes.
+`PaperSkim.candidate_materials` and `PaperSkim.candidate_processes`. Objective
+scope alone never supplies document Evidence context. The service preserves
+extracted process attributes, does not replace extracted context, and does not
+infer new scientific attributes.
 
 Transient extraction state is scoped to one Objective, analysis version, and
 document. It carries only prior role/outcome coverage and Source positions

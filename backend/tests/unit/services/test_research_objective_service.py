@@ -4515,7 +4515,6 @@ def test_research_objective_service_enriches_missing_source_backed_scope_context
 
     enriched = service._enrich_objective_scope_context(
         (evidence,),
-        objectives=(objective,),
         paper_skims=(paper_skim,),
     )[0]
 
@@ -4534,6 +4533,42 @@ def test_research_objective_service_enriches_missing_source_backed_scope_context
         ],
         "test": [],
     }
+
+
+def test_research_objective_service_does_not_invent_material_without_document_skim(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    evidence = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "density-result",
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {"name": "energy density", "target_value": 150}
+            ],
+            "reported_result": {
+                "outcome": "relative density",
+                "direction": "increase",
+                "result_text": "Relative density increased.",
+            },
+            "attribution_scope": "association_only",
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+    enriched = service._enrich_objective_scope_context(
+        (evidence,),
+        paper_skims=(),
+    )[0]
+
+    assert enriched.scientific_context.material == ()
 
 
 def test_research_objective_service_routes_matching_tables_beyond_seed_documents(

@@ -2661,7 +2661,6 @@ class ResearchObjectiveService:
         )
         enriched_units = self._enrich_objective_scope_context(
             tuple(units),
-            objectives=objectives,
             paper_skims=paper_skims,
         )
         bound_units = self._bind_objective_result_process_context(enriched_units)
@@ -2681,22 +2680,17 @@ class ResearchObjectiveService:
     def _enrich_objective_scope_context(
         units: tuple[ExtractedEvidenceDraft, ...],
         *,
-        objectives: tuple[ResearchObjective, ...],
         paper_skims: tuple[PaperSkim, ...],
     ) -> tuple[ExtractedEvidenceDraft, ...]:
-        objective_by_id = {item.objective_id: item for item in objectives}
         skim_by_document_id = {item.document_id: item for item in paper_skims}
         enriched: list[ExtractedEvidenceDraft] = []
         for unit in units:
-            objective = objective_by_id.get(unit.objective_id)
             paper_skim = skim_by_document_id.get(unit.document_id)
             context = unit.scientific_context.to_record()
             if not context["material"]:
                 material_values = (
                     paper_skim.candidate_materials
                     if paper_skim and paper_skim.candidate_materials
-                    else objective.material_scope
-                    if objective
                     else ()
                 )
                 context["material"] = [

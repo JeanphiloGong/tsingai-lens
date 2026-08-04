@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 
-FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v5"
+FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v7"
 
 
 _COMMON_SYSTEM_PROMPT = """
@@ -155,9 +155,13 @@ This is not extraction, paper-by-paper generation, clustering, or summary.
 INPUT SCHEMA
 - `objective`: the user question and requested scientific scope.
 - `result_set`: one backend-owned `result_set_id`, complete `factors`, one
-  `outcome`, and `result_evidence`. Every result Evidence has the exact source
+  `outcome`, and `result_evidence`. A single comparison carries its source
   excerpt, explicit changed variables, comparison, reported result,
-  attribution scope, scientific context, and paper id.
+  attribution scope, scientific context, and paper id. A multi-interval
+  condition series carries every Evidence id and paper id, every factor
+  endpoint, structured result value/direction, and attribution scope while
+  omitting repeated excerpts and context. The backend retains the complete
+  persisted Evidence for final validation and traceback.
 - `paper_contributions`: every paper considered in this Objective analysis,
   including analyzed papers without a direct result and excluded or failed
   papers. Paper metadata can qualify judgment but cannot become Evidence.
@@ -190,6 +194,9 @@ DECISION PROCESS
    and do not strengthen association into single-variable causation. Every
    numeric endpoint in the statement must come from one complete supporting
    Evidence comparison; never combine endpoints from different Evidence rows.
+   When result Evidence contains opposing directions, explicitly foreground
+   heterogeneous or opposing responses across the reported conditions instead
+   of presenting the selected direction as uniform.
 7. When `candidate_rejection` is present, correct that exact failure and then
    re-check every rule against the original result Evidence. Do not repeat the
    rejected candidate or weaken its scientific claim to evade validation.
@@ -902,6 +909,46 @@ def build_finding_synthesis_prompt(
         if isinstance(item, dict)
     ]
     representative_evidence = result_evidence[0] if result_evidence else {}
+    interval_signatures = {
+        tuple(
+            sorted(
+                (
+                    str(variable.get("name") or "").strip().casefold(),
+                    str(
+                        variable.get("baseline_value")
+                        if variable.get("baseline_value") is not None
+                        else ""
+                    ).strip(),
+                    str(
+                        variable.get("target_value")
+                        if variable.get("target_value") is not None
+                        else ""
+                    ).strip(),
+                    str(variable.get("unit") or "").strip().casefold(),
+                )
+                for variable in item.get("changed_variables", ())
+                if isinstance(variable, dict)
+            )
+        )
+        for item in result_evidence
+    }
+    is_condition_series = len(interval_signatures) > 1
+    reported_directions = {
+        str(reported_result.get("direction") or "").strip()
+        for item in result_evidence
+        if isinstance(item.get("reported_result"), dict)
+        and (reported_result := item["reported_result"])
+    }
+    has_opposing_directions = len(reported_directions) > 1
+    factor_phrase = (
+        ""
+        if not factors
+        else factors[0]
+        if len(factors) == 1
+        else f"{factors[0]} and {factors[1]}"
+        if len(factors) == 2
+        else f"{', '.join(factors[:-1])}, and {factors[-1]}"
+    )
     comparison_details = [
         (
             f"`{str(item.get('name') or '').strip()}: "
@@ -950,25 +997,42 @@ def build_finding_synthesis_prompt(
             "tuple, one outcome, comparison values, and attribution scope.\n\n"
         )
     comparison_contract = ""
-    if comparison_details:
+    if is_condition_series:
         comparison_contract += (
-            "- The statement must identify this complete source comparison: "
-            f"{', '.join(comparison_details)}.\n"
+            "- Treat the supplied comparisons as one reported condition series, "
+            "not as independent Findings.\n"
+            "- Start the statement with `Across the reported condition series, "
+            f"{factor_phrase} showed heterogeneous or opposing responses in "
+            f"{outcome}` and then summarize the response pattern.\n"
+            "- Do not include numeric values in the statement; keep every endpoint "
+            "bound to its individual Evidence record.\n"
         )
-    if result_value:
+    else:
+        if comparison_details:
+            comparison_contract += (
+                "- The statement must identify this complete source comparison: "
+                f"{', '.join(comparison_details)}.\n"
+            )
+        if result_value:
+            comparison_contract += (
+                "- The statement must state the source-reported result detail "
+                f"`{result_value}`.\n"
+            )
         comparison_contract += (
-            "- The statement must state the source-reported result detail "
-            f"`{result_value}`.\n"
+            "- Never return a generic restatement such as `factor affects outcome`; "
+            "state what differed between the compared groups.\n"
         )
-    comparison_contract += (
-        "- Never return a generic restatement such as `factor affects outcome`; "
-        "state what differed between the compared groups.\n"
-    )
+    if has_opposing_directions:
+        comparison_contract += (
+            "- The statement must explicitly describe the responses as heterogeneous "
+            "or opposing across conditions; the selected direction is not uniform.\n"
+        )
     if len(factors) > 1:
-        factor_phrase = (
-            f"{factors[0]} and {factors[1]}"
-            if len(factors) == 2
-            else f"{', '.join(factors[:-1])}, and {factors[-1]}"
+        joint_statement_contract = (
+            ""
+            if is_condition_series
+            else f"- Start the statement with `Joint changes in {factor_phrase} "
+            "were associated with` and then state the direction and outcome.\n"
         )
         exact_contract = (
             "Exact contract for this result set:\n"
@@ -976,8 +1040,7 @@ def build_finding_synthesis_prompt(
             f"- The statement must contain the outcome verbatim: `{outcome}`.\n"
             "- `assertion_strength` must be `associative`; this is a joint-factor "
             "comparison, never a single-factor causal effect.\n"
-            f"- Start the statement with `Joint changes in {factor_phrase} were "
-            "associated with` and then state the direction and outcome.\n"
+            f"{joint_statement_contract}"
             "- Omit numbers unless all numeric endpoints come from one complete "
             "supporting Evidence comparison.\n"
             f"{comparison_contract}\n"

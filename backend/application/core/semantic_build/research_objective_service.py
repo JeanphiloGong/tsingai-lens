@@ -404,6 +404,7 @@ _OBJECTIVE_EXTRACTABLE_ROUTE_ROLES = {
 }
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _BROAD_PROPERTY_AXIS_EXPANSIONS = {
+    "densification": ("relative density",),
     "mechanical properties": (
         "yield strength",
         "ultimate tensile strength",
@@ -752,6 +753,7 @@ class ResearchObjectiveService:
             collection_id=collection_id,
             extractor=objective_inputs["extractor"],
             objectives=(objective,),
+            paper_skims=objective_inputs["paper_skims"],
             objective_paper_frames=paper_frames,
             objective_evidence_routes=evidence_candidates,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
@@ -2438,6 +2440,7 @@ class ResearchObjectiveService:
         collection_id: str,
         extractor: CoreLLMStructuredExtractor,
         objectives: tuple[ResearchObjective, ...],
+        paper_skims: tuple[PaperSkim, ...],
         objective_paper_frames: tuple[PaperAnalysisFrame, ...],
         objective_evidence_routes: tuple[EvidenceCandidate, ...],
         blocks_by_document_id: dict[str, list[Any]],
@@ -2656,7 +2659,11 @@ class ResearchObjectiveService:
             collection_id,
             len(units),
         )
-        bound_units = self._bind_objective_result_process_context(tuple(units))
+        enriched_units = self._enrich_objective_scope_context(
+            tuple(units),
+            paper_skims=paper_skims,
+        )
+        bound_units = self._bind_objective_result_process_context(enriched_units)
         comparison_units = self._build_objective_pairwise_comparison_units(
             bound_units,
             objectives=objectives,
@@ -2668,6 +2675,65 @@ class ResearchObjectiveService:
                 len(comparison_units),
             )
         return (*bound_units, *comparison_units)
+
+    @staticmethod
+    def _enrich_objective_scope_context(
+        units: tuple[ExtractedEvidenceDraft, ...],
+        *,
+        paper_skims: tuple[PaperSkim, ...],
+    ) -> tuple[ExtractedEvidenceDraft, ...]:
+        skim_by_document_id = {item.document_id: item for item in paper_skims}
+        enriched: list[ExtractedEvidenceDraft] = []
+        for unit in units:
+            paper_skim = skim_by_document_id.get(unit.document_id)
+            context = unit.scientific_context.to_record()
+            if not context["material"]:
+                material_values = (
+                    paper_skim.candidate_materials
+                    if paper_skim and paper_skim.candidate_materials
+                    else ()
+                )
+                context["material"] = [
+                    {"name": "material", "value": value, "unit": None}
+                    for value in material_values
+                ]
+            if paper_skim and paper_skim.candidate_processes:
+                process_identity_names = {
+                    "fabrication process",
+                    "manufacturing process",
+                    "process",
+                    "processing method",
+                    "production process",
+                }
+                has_process_identity = any(
+                    " ".join(
+                        str(item.get("name") or "")
+                        .casefold()
+                        .replace("_", " ")
+                        .split()
+                    )
+                    in process_identity_names
+                    for item in context["process"]
+                )
+                if not has_process_identity:
+                    context["process"] = [
+                        *context["process"],
+                        *(
+                            {
+                                "name": "process",
+                                "value": value,
+                                "unit": None,
+                            }
+                            for value in paper_skim.candidate_processes
+                        ),
+                    ]
+            if context == unit.scientific_context.to_record():
+                enriched.append(unit)
+                continue
+            record = unit.to_record()
+            record["scientific_context"] = context
+            enriched.append(ExtractedEvidenceDraft.from_mapping(record))
+        return tuple(enriched)
 
     def _objective_table_route_should_skip_llm_fallback(
         self,

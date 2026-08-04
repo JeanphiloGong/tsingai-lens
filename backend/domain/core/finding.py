@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha1
 import math
+import re
 from typing import Any, Final, Mapping
 
 from domain.core.research_objective import (
@@ -37,6 +38,10 @@ _CONTRADICTING_DIRECTIONS: Final[dict[str, frozenset[str]]] = {
     "worsen": frozenset({"improve", "no_change"}),
     "no_change": frozenset({"increase", "decrease", "improve", "worsen"}),
 }
+_J_PER_CUBIC_MM_RE = re.compile(
+    r"\bj\s*/\s*mm\s*(?:\^\s*)?(?:3|\u00b3)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -688,10 +693,11 @@ def _strings(value: Any) -> tuple[str, ...]:
 
 
 def _normalize_term(value: Any) -> str:
+    text = _J_PER_CUBIC_MM_RE.sub("J/mm3", _text(value) or "")
     return " ".join(
         part
         for part in "".join(
             character.lower() if character.isalnum() else " "
-            for character in (_text(value) or "")
+            for character in text
         ).split()
     )

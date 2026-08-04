@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 _NUMBER_RE = re.compile(
     r"(?<![\w.])[-+]?(?:\d+(?:[.,]\d*)?|\.\d+)(?:[eE][-+]?\d+)?(?![\w.])"
 )
+_J_PER_CUBIC_MM_RE = re.compile(
+    r"\bj\s*/\s*mm\s*(?:\^\s*)?(?:3|\u00b3)\b",
+    re.IGNORECASE,
+)
 
 
 class FindingSynthesisService:
@@ -57,6 +61,32 @@ class FindingSynthesisService:
         )
         result_sets = self._result_sets(objective, evidence_records)
         if not result_sets:
+            eligible_evidence = tuple(
+                evidence
+                for evidence in evidence_records
+                if self._eligible_result_evidence(evidence)
+            )
+            logger.warning(
+                "Finding synthesis found no in-scope result sets "
+                "objective_variables=%s objective_outcomes=%s "
+                "eligible_result_count=%s eligible_axes=%s",
+                objective.variables,
+                objective.outcomes,
+                len(eligible_evidence),
+                sorted(
+                    {
+                        (
+                            tuple(
+                                variable.name
+                                for variable in evidence.changed_variables
+                            ),
+                            evidence.reported_result.outcome,
+                        )
+                        for evidence in eligible_evidence
+                        if evidence.reported_result is not None
+                    }
+                )[:12],
+            )
             return ()
         evidence_by_id = {
             evidence.evidence_id: evidence for evidence in evidence_records
@@ -89,7 +119,7 @@ class FindingSynthesisService:
             synthesis_payload = {
                 "objective": objective_payload,
                 "paper_contributions": contribution_payloads,
-                "result_set": result_set,
+                "result_set": self._result_set_prompt_payload(result_set),
                 "context_evidence": [
                     self._evidence_payload(evidence) for evidence in context_evidence
                 ],
@@ -230,10 +260,9 @@ class FindingSynthesisService:
         objective: ResearchObjective,
         evidence_records: tuple[ObjectiveEvidence, ...],
     ) -> tuple[dict[str, Any], ...]:
-        grouped: dict[
-            tuple[tuple[str, ...], str, tuple[Any, ...]],
-            list[ObjectiveEvidence],
-        ] = defaultdict(list)
+        grouped: dict[tuple[tuple[str, ...], str], list[ObjectiveEvidence]] = (
+            defaultdict(list)
+        )
         factor_labels: dict[tuple[str, ...], tuple[str, ...]] = {}
         outcome_labels: dict[str, str] = {}
         for evidence in evidence_records:
@@ -254,16 +283,18 @@ class FindingSynthesisService:
                 objective=objective,
             ):
                 continue
-            interval_key = self._comparison_interval_key(evidence)
-            grouped[(factor_key, outcome_key, interval_key)].append(evidence)
-            factor_labels.setdefault(factor_key, factors)
+            grouped[(factor_key, outcome_key)].append(evidence)
+            factor_labels.setdefault(
+                factor_key,
+                tuple(_normalize_scientific_typography(value) for value in factors),
+            )
             outcome_labels.setdefault(outcome_key, outcome)
 
         result_sets: list[dict[str, Any]] = []
-        for factor_key, outcome_key, interval_key in sorted(grouped):
+        for factor_key, outcome_key in sorted(grouped):
             evidence_items = tuple(
                 sorted(
-                    grouped[(factor_key, outcome_key, interval_key)],
+                    grouped[(factor_key, outcome_key)],
                     key=lambda item: (
                         -item.confidence,
                         item.document_id,
@@ -275,9 +306,7 @@ class FindingSynthesisService:
             outcome = outcome_labels[outcome_key]
             result_sets.append(
                 {
-                    "result_set_id": self._result_set_id(
-                        factors, outcome, interval_key
-                    ),
+                    "result_set_id": self._result_set_id(factors, outcome),
                     "factors": list(factors),
                     "outcome": outcome,
                     "result_evidence": [
@@ -288,20 +317,58 @@ class FindingSynthesisService:
         return tuple(result_sets)
 
     @staticmethod
-    def _comparison_interval_key(
-        evidence: ObjectiveEvidence,
-    ) -> tuple[tuple[str, str, str, str], ...]:
-        return tuple(
-            sorted(
-                (
-                    _normalize_term(variable.name),
-                    _scalar_key(variable.baseline_value),
-                    _scalar_key(variable.target_value),
-                    _normalize_term(variable.unit),
-                )
-                for variable in evidence.changed_variables
+    def _result_set_prompt_payload(
+        result_set: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        result_evidence = _mapping_list(result_set.get("result_evidence"))
+        if not FindingSynthesisService._result_set_is_condition_series(result_set):
+            return dict(result_set)
+
+        compact_evidence: list[dict[str, Any]] = []
+        for item in result_evidence:
+            reported_result = (
+                item.get("reported_result")
+                if isinstance(item.get("reported_result"), Mapping)
+                else {}
             )
-        )
+            compact_evidence.append(
+                {
+                    "evidence_id": item.get("evidence_id"),
+                    "document_id": item.get("document_id"),
+                    "changed_variables": item.get("changed_variables") or [],
+                    "reported_result": {
+                        "outcome": reported_result.get("outcome"),
+                        "value": reported_result.get("value"),
+                        "unit": reported_result.get("unit"),
+                        "direction": reported_result.get("direction"),
+                    },
+                    "attribution_scope": item.get("attribution_scope"),
+                }
+            )
+        return {
+            "result_set_id": result_set.get("result_set_id"),
+            "factors": result_set.get("factors") or [],
+            "outcome": result_set.get("outcome"),
+            "result_evidence": compact_evidence,
+        }
+
+    @staticmethod
+    def _result_set_is_condition_series(result_set: Mapping[str, Any]) -> bool:
+        interval_signatures = {
+            tuple(
+                sorted(
+                    (
+                        _normalize_term(variable.get("name")),
+                        _scalar_key(variable.get("baseline_value")),
+                        _scalar_key(variable.get("target_value")),
+                        _normalize_term(variable.get("unit")),
+                    )
+                    for variable in _mapping_list(item.get("changed_variables"))
+                )
+            )
+            for item in _mapping_list(result_set.get("result_evidence"))
+        }
+        return len(interval_signatures) > 1
 
     @staticmethod
     def _eligible_result_evidence(evidence: ObjectiveEvidence) -> bool:
@@ -449,6 +516,12 @@ class FindingSynthesisService:
                 "candidate statement does not contain the complete factor tuple "
                 "and outcome"
             )
+        if self._result_set_is_condition_series(
+            result_set
+        ) and _statement_contains_numeric_endpoint(statement, factors, outcome):
+            raise ValueError(
+                "condition-series statement contains a numeric endpoint"
+            )
         if self._statement_mentions_unbound_objective_factor(
             statement,
             factors,
@@ -472,6 +545,13 @@ class FindingSynthesisService:
         contradicting_evidence = tuple(
             evidence_by_id[evidence_id] for evidence_id in contradicting_ids
         )
+        if contradicting_evidence and not _statement_acknowledges_heterogeneity(
+            statement
+        ):
+            raise ValueError(
+                "candidate statement does not foreground opposing directions "
+                "across the reported conditions"
+            )
         boundary_ids = self._condition_boundary_evidence_ids(
             supporting_evidence,
             contradicting_evidence,
@@ -533,6 +613,8 @@ class FindingSynthesisService:
             factors=factors,
             synthesis_status=synthesis_status,
             attribution_scope=attribution_scope,
+            supporting_evidence=supporting_evidence,
+            contradicting_evidence=contradicting_evidence,
         )
         finding_id = self._finding_id(
             objective_id=objective.objective_id,
@@ -753,6 +835,8 @@ class FindingSynthesisService:
         factors: tuple[str, ...],
         synthesis_status: str,
         attribution_scope: str,
+        supporting_evidence: tuple[ObjectiveEvidence, ...],
+        contradicting_evidence: tuple[ObjectiveEvidence, ...],
     ) -> tuple[str, ...]:
         deterministic: list[str] = []
         if len(factors) > 1:
@@ -771,6 +855,13 @@ class FindingSynthesisService:
         if synthesis_status == "condition_dependent":
             deterministic.append(
                 "The reported relationship changes across an explicit condition boundary."
+            )
+        if contradicting_evidence and (
+            {item.document_id for item in supporting_evidence}
+            & {item.document_id for item in contradicting_evidence}
+        ):
+            deterministic.append(
+                "Within-paper condition comparisons report opposing directions."
             )
         if attribution_scope == "association_only":
             deterministic.append(
@@ -795,14 +886,19 @@ class FindingSynthesisService:
 
     @staticmethod
     def _evidence_payload(evidence: ObjectiveEvidence) -> dict[str, Any]:
+        changed_variables = []
+        for variable in evidence.changed_variables:
+            record = variable.to_record()
+            record["name"] = _normalize_scientific_typography(record["name"])
+            if record["unit"]:
+                record["unit"] = _normalize_scientific_typography(record["unit"])
+            changed_variables.append(record)
         return {
             "evidence_id": evidence.evidence_id,
             "document_id": evidence.document_id,
             "evidence_role": evidence.evidence_role,
             "source_excerpt": evidence.source_excerpt[:_MAX_EXCERPT_CHARS],
-            "changed_variables": [
-                variable.to_record() for variable in evidence.changed_variables
-            ],
+            "changed_variables": changed_variables,
             "comparison": (
                 evidence.comparison.to_record() if evidence.comparison else None
             ),
@@ -820,10 +916,9 @@ class FindingSynthesisService:
     def _result_set_id(
         factors: tuple[str, ...],
         outcome: str,
-        interval_key: tuple[Any, ...],
     ) -> str:
         identity = json.dumps(
-            [factors, outcome, interval_key],
+            [factors, outcome],
             ensure_ascii=True,
             separators=(",", ":"),
         )
@@ -884,12 +979,52 @@ def _mapping_list(value: Any) -> list[dict[str, Any]]:
 
 
 def _normalize_term(value: Any) -> str:
+    value = _normalize_scientific_typography(value)
     return " ".join(
         part
         for part in "".join(
             character.lower() if character.isalnum() else " "
             for character in (_text(value) or "")
         ).split()
+    )
+
+
+def _normalize_scientific_typography(value: Any) -> str:
+    text = _text(value) or ""
+    text = _J_PER_CUBIC_MM_RE.sub("J/mm3", text)
+    return re.sub(r"\s+([)\]])", r"\1", text)
+
+
+def _statement_acknowledges_heterogeneity(statement: str) -> bool:
+    normalized = _normalize_term(statement)
+    return any(
+        marker in normalized
+        for marker in (
+            "heterogeneous",
+            "opposing",
+            "mixed",
+            "varied by condition",
+            "varies by condition",
+            "not uniform",
+            "inconsistent",
+            "condition dependent",
+        )
+    )
+
+
+def _statement_contains_numeric_endpoint(
+    statement: str,
+    factors: tuple[str, ...],
+    outcome: str,
+) -> bool:
+    label_numbers = {
+        number
+        for label in (*factors, outcome)
+        for number in _numbers(_normalize_scientific_typography(label))
+    }
+    return any(
+        number not in label_numbers
+        for number in _numbers(_normalize_scientific_typography(statement))
     )
 
 
@@ -932,6 +1067,8 @@ def _axis_matches(left: Any, right: Any) -> bool:
     if not left_term or not right_term:
         return False
     if left_term == right_term:
+        return True
+    if {left_term, right_term} == {"densification", "relative density"}:
         return True
     if _axis_acronym(left_term) == right_term or _axis_acronym(right_term) == left_term:
         return True

@@ -315,6 +315,7 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped(tmp_path
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
+        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
         blocks_by_document_id=blocks,
@@ -409,6 +410,7 @@ def test_objective_evidence_continues_after_one_route_format_failure(tmp_path):
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
+        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
         blocks_by_document_id={"paper-1": blocks},
@@ -483,6 +485,7 @@ def test_objective_context_drops_model_changed_variable_without_values(tmp_path)
         collection_id="col-test",
         extractor=ContextExtractor(),
         objectives=(objective,),
+        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=(route,),
         blocks_by_document_id={"paper-1": [block]},
@@ -4206,6 +4209,7 @@ def test_research_objective_evidence_prompt_compacts_long_text_source(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
+        paper_skims=(),
         objective_paper_frames=(frame,),
         objective_evidence_routes=(route,),
         blocks_by_document_id={"paper-1": [block]},
@@ -4435,6 +4439,138 @@ def test_research_objective_service_uses_objective_scientific_intent_directly(
     }
 
 
+def test_research_objective_service_enriches_missing_source_backed_scope_context(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does energy density affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["energy density"],
+            "outcomes": ["relative density"],
+        }
+    )
+    paper_skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "doc_role": "experimental",
+            "candidate_materials": ["316L stainless steel"],
+            "candidate_processes": ["selective laser melting"],
+            "candidate_properties": ["relative density"],
+            "changed_variables": ["energy density"],
+            "possible_objectives": [objective.question],
+            "evidence_density": "high",
+            "confidence": 0.9,
+        }
+    )
+    evidence = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "density-result",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "energy density",
+                    "baseline_value": 70,
+                    "target_value": 150,
+                    "unit": "J/mm3",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "condition 1",
+                "target_label": "condition 2",
+                "axis_names": ["energy density"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "relative density",
+                "value": 99.2,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": "Relative density increased to 99.2%.",
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {
+                "material": [],
+                "sample": [],
+                "process": [
+                    {"name": "hatch space", "value": 0.1, "unit": "mm"}
+                ],
+                "test": [],
+            },
+            "source_refs": [
+                {"source_kind": "table", "source_ref": "table-1"}
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+    enriched = service._enrich_objective_scope_context(
+        (evidence,),
+        paper_skims=(paper_skim,),
+    )[0]
+
+    assert enriched.scientific_context.to_record() == {
+        "material": [
+            {"name": "material", "value": "316L stainless steel", "unit": None}
+        ],
+        "sample": [],
+        "process": [
+            {"name": "hatch space", "value": 0.1, "unit": "mm"},
+            {
+                "name": "process",
+                "value": "selective laser melting",
+                "unit": None,
+            }
+        ],
+        "test": [],
+    }
+
+
+def test_research_objective_service_does_not_invent_material_without_document_skim(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    evidence = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "density-result",
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {"name": "energy density", "target_value": 150}
+            ],
+            "reported_result": {
+                "outcome": "relative density",
+                "direction": "increase",
+                "result_text": "Relative density increased.",
+            },
+            "attribution_scope": "association_only",
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+    enriched = service._enrich_objective_scope_context(
+        (evidence,),
+        paper_skims=(),
+    )[0]
+
+    assert enriched.scientific_context.material == ()
+
+
 def test_research_objective_service_routes_matching_tables_beyond_seed_documents(
     tmp_path,
 ):
@@ -4632,6 +4768,30 @@ def test_real_ved_process_and_defect_tables_form_joint_comparison(tmp_path):
         "table-2",
         "table-5",
     }
+
+
+def test_objective_densification_outcome_includes_relative_density_evidence(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does energy density affect densification?",
+            "variables": ["energy density"],
+            "outcomes": ["densification"],
+        }
+    )
+
+    target_axes = service._objective_outcomes(objective)
+
+    assert target_axes == ("densification", "relative density")
+    assert service._objective_property_matches_target_axes(
+        "relative density",
+        target_axes=target_axes,
+    )
 
 
 def test_real_p001_density_table_retains_complete_changed_factor_tuple(tmp_path):

@@ -644,7 +644,7 @@ class ResearchObjectiveNotFoundError(FileNotFoundError):
 
 
 class ResearchObjectiveService:
-    """Build and serve Core research-objective records."""
+    """Discover objective candidates and generate analysis artifacts."""
 
     def __init__(
         self,
@@ -664,18 +664,7 @@ class ResearchObjectiveService:
         self.document_profile_service = document_profile_service
         self.finding_synthesis_service = finding_synthesis_service
 
-    def read_paper_skims(self, collection_id: str) -> tuple[PaperSkim, ...]:
-        self.collection_service.get_collection(collection_id)
-        return self.objective_repository.read(collection_id).paper_skims
-
-    def read_research_objectives(
-        self,
-        collection_id: str,
-    ) -> tuple[ResearchObjective, ...]:
-        self.collection_service.get_collection(collection_id)
-        return self.objective_repository.read(collection_id).research_objectives
-
-    def build_objective_candidates(
+    def discover_and_replace_objective_candidates(
         self,
         collection_id: str,
         progress_callback: ProgressCallback | None = None,
@@ -704,7 +693,7 @@ class ResearchObjectiveService:
         )
         return objective_inputs["research_objectives"]
 
-    def analyze_objective(
+    def generate_objective_analysis_artifacts(
         self,
         collection_id: str,
         analysis: ObjectiveAnalysis,

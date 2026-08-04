@@ -232,7 +232,9 @@ class FakeResearchObjectiveService:
         self.error = error
         self.calls = 0
 
-    def analyze_objective(self, collection_id, analysis, progress_callback=None):
+    def generate_objective_analysis_artifacts(
+        self, collection_id, analysis, progress_callback=None
+    ):
         self.calls += 1
         if self.error is not None:
             raise self.error

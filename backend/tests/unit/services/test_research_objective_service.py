@@ -157,23 +157,6 @@ def _queue_running_analysis(
     return claimed
 
 
-def test_research_objective_reads_do_not_trigger_generation(tmp_path):
-    collection_service = build_test_collection_service(tmp_path / "collections")
-    collection_id = collection_service.create_collection("Empty objectives")[
-        "collection_id"
-    ]
-    extractor = _ObjectiveExtractor()
-    service = _build_research_objective_service(
-        collection_service=collection_service,
-        structured_extractor=extractor,
-    )
-
-    assert service.read_paper_skims(collection_id) == ()
-    assert service.read_research_objectives(collection_id) == ()
-    assert extractor.skim_payloads == []
-    assert extractor.discovery_payloads == []
-
-
 def test_memory_objective_repository_requires_explicit_activation():
     repository = MemoryObjectiveRepository()
     active = ObjectiveFactSet(research_objectives_ready=True)
@@ -6788,7 +6771,7 @@ def test_research_objective_service_builds_and_persists_objective_records(
     _seed_document_profiles(service, collection_id)
 
     with caplog.at_level("INFO"):
-        objectives = service.build_objective_candidates(
+        objectives = service.discover_and_replace_objective_candidates(
             collection_id,
             build_id="build_test",
         )
@@ -6838,9 +6821,6 @@ def test_research_objective_service_builds_and_persists_objective_records(
         and "accepted_objective_count=1" in record.message
         for record in caplog.records
     )
-    skim_call_count = len(extractor.skim_payloads)
-    assert service.read_research_objectives(collection_id) == objectives
-    assert len(extractor.skim_payloads) == skim_call_count
     output_dir = collection_service.get_paths(collection_id).output_dir
     assert not list(output_dir.glob("*objective*"))
 
@@ -6884,7 +6864,7 @@ def test_research_objective_service_preserves_discovered_scientific_intent(tmp_p
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_objective_candidates(
+    objectives = service.discover_and_replace_objective_candidates(
         collection_id,
         build_id="build_test",
     )
@@ -6939,7 +6919,7 @@ def test_research_objective_service_merges_overlapping_mechanical_objectives(
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_objective_candidates(
+    objectives = service.discover_and_replace_objective_candidates(
         collection_id,
         build_id="build_test",
     )
@@ -7061,7 +7041,7 @@ def test_research_objective_service_persists_definitions_without_analysis_artifa
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_objective_candidates(
+    objectives = service.discover_and_replace_objective_candidates(
         collection_id,
         build_id="build_test",
     )
@@ -7302,7 +7282,7 @@ def test_research_objective_service_rejects_ambiguous_missing_seed_document_id(
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_objective_candidates(
+    objectives = service.discover_and_replace_objective_candidates(
         collection_id,
         build_id="build_test",
     )
@@ -7349,7 +7329,7 @@ def test_research_objective_service_rejects_overbroad_candidate_definition(
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_objective_candidates(
+    objectives = service.discover_and_replace_objective_candidates(
         collection_id,
         build_id="build_test",
     )
@@ -7436,7 +7416,7 @@ def test_research_objective_service_dedupes_repeated_objective_ids_before_persis
     )
     _seed_document_profiles(service, collection_id)
 
-    objectives = service.build_objective_candidates(
+    objectives = service.discover_and_replace_objective_candidates(
         collection_id,
         build_id="build_test",
     )
@@ -7526,7 +7506,9 @@ def test_objective_analysis_uses_deterministic_frame_when_frame_model_fails(
     )
     analysis = _queue_running_analysis(service, collection_id, objective.objective_id)
 
-    artifacts = service.analyze_objective(collection_id, analysis)
+    artifacts = service.generate_objective_analysis_artifacts(
+        collection_id, analysis
+    )
 
     assert extractor.frame_payloads
     assert artifacts.contributions[0].document_id == "paper-1"
@@ -7627,7 +7609,9 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
     failing_extractor = _FailingRouteExtractor()
     service._structured_extractor = failing_extractor
     service.finding_synthesis_service.structured_extractor = failing_extractor
-    artifacts = service.analyze_objective(collection_id, analysis)
+    artifacts = service.generate_objective_analysis_artifacts(
+        collection_id, analysis
+    )
 
     assert failing_extractor.route_payloads
     assert artifacts.contributions[0].document_id == "paper-1"
@@ -7727,7 +7711,9 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
     active_facts = service.objective_repository.read(collection_id)
     analysis = _queue_running_analysis(service, collection_id, objective.objective_id)
 
-    artifacts = service.analyze_objective(collection_id, analysis)
+    artifacts = service.generate_objective_analysis_artifacts(
+        collection_id, analysis
+    )
 
     facts = service.objective_repository.read(collection_id)
     assert extractor.frame_payloads
@@ -7777,7 +7763,7 @@ def _build_duplicate_paper_objectives(
         ),
     )
     _seed_document_profiles(service, collection_id)
-    return service.build_objective_candidates(
+    return service.discover_and_replace_objective_candidates(
         collection_id,
         build_id="build_test",
     )

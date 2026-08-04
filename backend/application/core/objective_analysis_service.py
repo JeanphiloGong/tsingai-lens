@@ -161,10 +161,12 @@ class ObjectiveAnalysisService:
             return self._result(collection_id, objective)
 
         try:
-            artifacts = self.research_objective_service.analyze_objective(
-                collection_id,
-                claimed,
-                progress_callback=self._build_progress_callback(claimed),
+            artifacts = (
+                self.research_objective_service.generate_objective_analysis_artifacts(
+                    collection_id,
+                    claimed,
+                    progress_callback=self._build_progress_callback(claimed),
+                )
             )
             self._validate_artifacts(artifacts)
             objective, completed = self.objective_repository.publish_analysis(

@@ -694,7 +694,7 @@ def test_core_llm_extractor_synthesizes_goal_findings_with_distinct_trace():
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v5"
+    assert trace["prompt_version"] == "finding_synthesis.v7"
     assert trace["parsed_output"] == {"findings": []}
 
 
@@ -821,6 +821,68 @@ def test_finding_synthesis_prompt_requires_specific_single_factor_result():
         "difference in microstructure:" in user_prompt
     )
     assert "Never return a generic restatement" in user_prompt
+
+
+def test_finding_synthesis_prompt_treats_multiple_intervals_as_condition_series():
+    payload = {
+        "objective": {
+            "question": "How does scan rotation affect yield strength?"
+        },
+        "result_set": {
+            "result_set_id": "result-set-rotation",
+            "factors": ["scan rotation"],
+            "outcome": "yield strength",
+            "result_evidence": [
+                {
+                    "evidence_id": "rotation-0-30",
+                    "changed_variables": [
+                        {
+                            "name": "scan rotation",
+                            "baseline_value": 0,
+                            "target_value": 30,
+                            "unit": "degree",
+                        }
+                    ],
+                    "reported_result": {
+                        "outcome": "yield strength",
+                        "value": 515,
+                        "unit": "MPa",
+                        "direction": "decrease",
+                    },
+                },
+                {
+                    "evidence_id": "rotation-30-45",
+                    "changed_variables": [
+                        {
+                            "name": "scan rotation",
+                            "baseline_value": 30,
+                            "target_value": 45,
+                            "unit": "degree",
+                        }
+                    ],
+                    "reported_result": {
+                        "outcome": "yield strength",
+                        "value": 545,
+                        "unit": "MPa",
+                        "direction": "increase",
+                    },
+                },
+            ],
+        },
+        "paper_contributions": [],
+        "context_evidence": [],
+    }
+
+    _system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
+
+    assert "one reported condition series" in user_prompt
+    assert (
+        "Across the reported condition series, scan rotation showed "
+        "heterogeneous or opposing responses in yield strength"
+    ) in user_prompt
+    assert "Do not include numeric values in the statement" in user_prompt
+    assert "heterogeneous or opposing across conditions" in user_prompt
+    assert "source-reported result detail `515`" not in user_prompt
 
 
 def test_finding_synthesis_prompt_carries_backend_semantic_rejection():

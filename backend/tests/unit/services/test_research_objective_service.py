@@ -1728,8 +1728,8 @@ class _BroadObjectiveExtractor(_ObjectiveExtractor):
                 "scanning speed",
             ],
             possible_objectives=[
-                "What is the relationship between processing parameters "
-                "and mechanical properties?"
+                "How do energy density, scanning strategy, and scanning speed "
+                "affect mechanical properties?"
             ],
             evidence_density="high",
             confidence=0.91,
@@ -1745,11 +1745,15 @@ class _BroadObjectiveExtractor(_ObjectiveExtractor):
             objectives=[
                 StructuredResearchObjective(
                     question=(
-                        "What is the relationship between processing parameters "
-                        "and mechanical properties?"
+                        "How do energy density, scanning strategy, and scanning speed "
+                        "affect mechanical properties?"
                     ),
                     material_scope=["316L stainless steel"],
-                    variables=["processing parameters"],
+                    variables=[
+                        "energy density",
+                        "scanning strategy",
+                        "scanning speed",
+                    ],
                     outcomes=["mechanical properties"],
                     constraints=["Selective Laser Melting"],
                     requested_comparator=None,
@@ -4944,6 +4948,113 @@ def test_objective_discovery_skim_keeps_three_complete_candidate_questions():
     )
 
 
+def test_objective_discovery_skim_preserves_structured_research_map():
+    skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "doc_role": "experimental",
+            "candidate_materials": ["316L stainless steel"],
+            "candidate_processes": ["laser powder bed fusion"],
+            "candidate_properties": ["relative density", "porosity"],
+            "changed_variables": ["laser power", "scan speed"],
+            "possible_objectives": [
+                "How do laser power and scan speed affect relative density?"
+            ],
+            "evidence_density": "high",
+            "confidence": 0.91,
+            "warnings": ["one table caption is truncated"],
+        }
+    )
+
+    discovery_skim = _ResearchObjectiveService._build_objective_discovery_skim(skim)
+
+    assert discovery_skim == {
+        "document_id": "paper-1",
+        "doc_role": "experimental",
+        "candidate_materials": ["316L stainless steel"],
+        "candidate_processes": ["laser powder bed fusion"],
+        "candidate_properties": ["relative density", "porosity"],
+        "changed_variables": ["laser power", "scan speed"],
+        "possible_objectives": [
+            "How do laser power and scan speed affect relative density?"
+        ],
+        "evidence_density": "high",
+        "confidence": 0.91,
+        "warnings": ["one table caption is truncated"],
+    }
+
+
+def test_structured_skim_axes_can_support_objective_without_question_hint():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How do laser power and scan speed affect relative density?",
+            "variables": ["laser power", "scan speed"],
+            "outcomes": ["relative density"],
+        }
+    )
+    discovery_skim = {
+        "changed_variables": ["laser power", "scan speed"],
+        "candidate_properties": ["relative density"],
+        "possible_objectives": [],
+    }
+
+    assert _ResearchObjectiveService._discovery_skim_supports_objective(
+        discovery_skim,
+        objective,
+    )
+
+
+def test_question_hint_cannot_override_conflicting_structured_skim_axes():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    discovery_skim = {
+        "changed_variables": ["heat treatment"],
+        "candidate_properties": ["yield strength"],
+        "possible_objectives": ["How does laser power affect relative density?"],
+    }
+
+    assert not _ResearchObjectiveService._discovery_skim_supports_objective(
+        discovery_skim,
+        objective,
+    )
+
+
+def test_paper_skim_payload_keeps_full_bounded_text_preview(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    source_text = "A" * 1200
+
+    payload = service._build_paper_skim_payload(
+        collection_id="collection-test",
+        document=SimpleNamespace(
+            document_id="paper-1",
+            title="Density study",
+            text=source_text,
+        ),
+        profile=None,
+        blocks=[
+            SimpleNamespace(
+                text=source_text,
+                block_type="paragraph",
+                block_order=1,
+                heading_path="Abstract",
+            )
+        ],
+        tables=[],
+        figures=[],
+    )
+
+    assert payload["text_preview"] == source_text
+
+
 def test_research_objective_service_treats_energy_density_only_table_as_condition(
     tmp_path,
 ):
@@ -6803,10 +6914,15 @@ def test_research_objective_service_builds_and_persists_objective_records(
         "doc_role",
         "candidate_materials",
         "candidate_processes",
+        "candidate_properties",
+        "changed_variables",
         "possible_objectives",
+        "evidence_density",
+        "confidence",
+        "warnings",
     }
-    assert "changed_variables" not in discovery_skim
-    assert "candidate_properties" not in discovery_skim
+    assert discovery_skim["changed_variables"] == ["heat treatment temperature"]
+    assert discovery_skim["candidate_properties"] == ["corrosion"]
     assert discovery_skim["possible_objectives"] == [
         "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?"
     ]
@@ -6872,7 +6988,11 @@ def test_research_objective_service_preserves_discovered_scientific_intent(tmp_p
 
     assert len(objectives) == 1
     objective = objectives[0]
-    assert objective.variables == ("processing parameters",)
+    assert objective.variables == (
+        "energy density",
+        "scanning strategy",
+        "scanning speed",
+    )
     assert objective.outcomes == ("mechanical properties",)
     assert objective.constraints == ("Selective Laser Melting",)
     assert objective.mechanisms == ()

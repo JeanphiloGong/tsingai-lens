@@ -169,10 +169,11 @@ def _transient_optional_text(value: Any) -> str | None:
 
 
 _SKIM_TEXT_PREVIEW_CHARS = 4000
-_SKIM_MODEL_TEXT_PREVIEW_CHARS = 400
 _SKIM_HEADING_LIMIT = 16
-_DISCOVERY_AXIS_VALUE_LIMIT = 2
+_DISCOVERY_SCOPE_VALUE_LIMIT = 2
+_DISCOVERY_AXIS_VALUE_LIMIT = 6
 _DISCOVERY_OBJECTIVE_LIMIT = 3
+_DISCOVERY_WARNING_LIMIT = 2
 _DISCOVERY_TEXT_VALUE_CHARS = 80
 _DISCOVERY_OBJECTIVE_TEXT_CHARS = 180
 _FRAME_SECTION_SNIPPET_LIMIT = 12
@@ -711,7 +712,7 @@ class ResearchObjectiveService:
         )
         parsed_objectives = extractor.discover_research_objectives(objective_payload)
         discovered_objective_count = len(parsed_objectives.objectives)
-        discovery_skims = {
+        discovery_skims: dict[str, dict[str, Any]] = {
             str(skim["document_id"]): skim for skim in objective_payload["paper_skims"]
         }
         accepted_objectives: list[ResearchObjective] = []
@@ -727,29 +728,11 @@ class ResearchObjectiveService:
             )
             if not is_question_shaped_objective(objective):
                 continue
-            matching_document_ids: set[str] = set()
-            for document_id, skim in discovery_skims.items():
-                for candidate_question in skim["possible_objectives"]:
-                    try:
-                        StructuredResearchObjective.model_validate(
-                            {
-                                "question": candidate_question,
-                                "material_scope": [
-                                    *objective.material_scope,
-                                    *skim["candidate_materials"],
-                                ],
-                                "variables": objective.variables,
-                                "outcomes": objective.outcomes,
-                                "constraints": [
-                                    *objective.constraints,
-                                    *skim["candidate_processes"],
-                                ],
-                            }
-                        )
-                    except ValidationError:
-                        continue
-                    matching_document_ids.add(document_id)
-                    break
+            matching_document_ids = {
+                document_id
+                for document_id, skim in discovery_skims.items()
+                if self._discovery_skim_supports_objective(skim, objective)
+            }
             seed_document_ids = set(objective.seed_document_ids)
             if not seed_document_ids and len(matching_document_ids) == 1:
                 payload = objective.to_record()
@@ -836,14 +819,75 @@ class ResearchObjectiveService:
             "doc_role": skim.doc_role,
             "candidate_materials": values(
                 skim.candidate_materials,
-                _DISCOVERY_AXIS_VALUE_LIMIT,
+                _DISCOVERY_SCOPE_VALUE_LIMIT,
             ),
             "candidate_processes": values(
                 skim.candidate_processes,
+                _DISCOVERY_SCOPE_VALUE_LIMIT,
+            ),
+            "candidate_properties": values(
+                skim.candidate_properties,
+                _DISCOVERY_AXIS_VALUE_LIMIT,
+            ),
+            "changed_variables": values(
+                skim.changed_variables,
                 _DISCOVERY_AXIS_VALUE_LIMIT,
             ),
             "possible_objectives": possible_objectives,
+            "evidence_density": skim.evidence_density,
+            "confidence": skim.confidence,
+            "warnings": values(skim.warnings, _DISCOVERY_WARNING_LIMIT),
         }
+
+    @staticmethod
+    def _discovery_skim_supports_objective(
+        skim: Mapping[str, Any],
+        objective: ResearchObjective,
+    ) -> bool:
+        question_hints = tuple(
+            str(value).strip()
+            for value in skim.get("possible_objectives", ())
+            if str(value).strip()
+        )
+
+        def supports(axis: str, field: str) -> bool:
+            structured_values = tuple(
+                str(value).strip()
+                for value in skim.get(field, ())
+                if str(value).strip()
+            )
+            return any(
+                property_matching.axis_values_match(axis, value)
+                or property_matching.source_text_mentions_axis(value, axis)
+                or property_matching.source_text_mentions_axis(axis, value)
+                for value in structured_values
+            )
+
+        variables_supported = all(
+            supports(variable, "changed_variables")
+            for variable in objective.variables
+        )
+        outcomes_supported = all(
+            supports(outcome, "candidate_properties")
+            for outcome in objective.outcomes
+        )
+        if not question_hints:
+            return variables_supported and outcomes_supported
+
+        question_supports_axes = any(
+            all(
+                property_matching.source_text_mentions_axis(question, axis)
+                for axis in (*objective.variables, *objective.outcomes)
+            )
+            for question in question_hints
+        )
+        structured_variables = skim.get("changed_variables") or ()
+        structured_outcomes = skim.get("candidate_properties") or ()
+        return bool(
+            question_supports_axes
+            and (not structured_variables or variables_supported)
+            and (not structured_outcomes or outcomes_supported)
+        )
 
     def _canonicalize_objective_document_ids(
         self,
@@ -6781,7 +6825,7 @@ class ResearchObjectiveService:
                 if profile
                 else {}
             ),
-            "text_preview": text_preview[:_SKIM_MODEL_TEXT_PREVIEW_CHARS],
+            "text_preview": text_preview[:_SKIM_TEXT_PREVIEW_CHARS],
             "headings": headings[:4],
             "table_captions": [
                 {

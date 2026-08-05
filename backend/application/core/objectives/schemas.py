@@ -4,7 +4,7 @@ import json
 import re
 import unicodedata
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -497,14 +497,26 @@ class StructuredPaperSkim(_StrictModel):
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
         "uncertain"
     )
-    candidate_materials: list[str] = Field(default_factory=list)
-    candidate_processes: list[str] = Field(default_factory=list)
-    candidate_properties: list[str] = Field(default_factory=list)
-    changed_variables: list[str] = Field(default_factory=list)
-    possible_objectives: list[str] = Field(default_factory=list)
+    candidate_materials: list[Annotated[str, Field(max_length=80)]] = Field(
+        default_factory=list, max_length=2
+    )
+    candidate_processes: list[Annotated[str, Field(max_length=80)]] = Field(
+        default_factory=list, max_length=2
+    )
+    candidate_properties: list[Annotated[str, Field(max_length=80)]] = Field(
+        default_factory=list, max_length=8
+    )
+    changed_variables: list[Annotated[str, Field(max_length=80)]] = Field(
+        default_factory=list, max_length=8
+    )
+    possible_objectives: list[Annotated[str, Field(max_length=180)]] = Field(
+        default_factory=list, max_length=3
+    )
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
     confidence: float = 0.0
-    warnings: list[str] = Field(default_factory=list)
+    warnings: list[Annotated[str, Field(max_length=80)]] = Field(
+        default_factory=list, max_length=2
+    )
 
     @field_validator(
         "candidate_materials",

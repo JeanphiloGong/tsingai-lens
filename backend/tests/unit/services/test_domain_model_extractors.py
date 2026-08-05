@@ -11,6 +11,7 @@ from application.core.objectives.extraction import ObjectiveExtractor
 from application.core.paper_facts.extraction import PaperFactsExtractor
 from application.core.objectives.prompts import (
     build_objective_evidence_prompt,
+    build_paper_skim_prompt,
     build_research_objective_discovery_prompt,
     build_finding_synthesis_prompt,
 )
@@ -438,6 +439,65 @@ def test_research_objective_discovery_contract_bounds_model_output():
     assert objective_schema["reason"]["anyOf"][0]["maxLength"] == 120
 
 
+def test_paper_skim_contract_bounds_model_output():
+    schema = StructuredPaperSkim.model_json_schema()["properties"]
+
+    expected_limits = {
+        "candidate_materials": 2,
+        "candidate_processes": 2,
+        "candidate_properties": 8,
+        "changed_variables": 8,
+        "possible_objectives": 3,
+        "warnings": 2,
+    }
+    for field, max_items in expected_limits.items():
+        assert schema[field]["maxItems"] == max_items
+
+    for field in (
+        "candidate_materials",
+        "candidate_processes",
+        "candidate_properties",
+        "changed_variables",
+        "warnings",
+    ):
+        assert schema[field]["items"]["maxLength"] == 80
+    assert schema["possible_objectives"]["items"]["maxLength"] == 180
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("candidate_materials", ["material-1", "material-2", "material-3"]),
+        ("candidate_processes", ["process-1", "process-2", "process-3"]),
+        ("candidate_properties", [f"property-{index}" for index in range(9)]),
+        ("changed_variables", [f"variable-{index}" for index in range(9)]),
+        ("possible_objectives", [f"objective-{index}" for index in range(4)]),
+        ("warnings", ["warning-1", "warning-2", "warning-3"]),
+        ("candidate_properties", ["p" * 81]),
+        ("possible_objectives", ["o" * 181]),
+    ],
+)
+def test_paper_skim_contract_rejects_oversized_values(field, value):
+    with pytest.raises(ValidationError):
+        StructuredPaperSkim.model_validate({field: value})
+
+
+def test_paper_skim_prompt_defines_structured_research_map_contract():
+    _, user_prompt = build_paper_skim_prompt(
+        {
+            "document_id": "paper-1",
+            "title": "Density study",
+            "text_preview": "Laser power was varied and relative density was measured.",
+        }
+    )
+
+    assert "TASK MODEL" in user_prompt
+    assert "`changed_variables` contains factors explicitly varied or compared" in user_prompt
+    assert "`candidate_properties` contains measured outcomes" in user_prompt
+    assert "Create a `possible_objectives` question only when" in user_prompt
+    assert "Return empty arrays rather than guessing" in user_prompt
+
+
 def test_research_objective_discovery_prompt_requires_focused_concise_objectives():
     _, user_prompt = build_research_objective_discovery_prompt(
         {"collection_id": "col-1", "paper_skims": []}
@@ -451,11 +511,15 @@ def test_research_objective_discovery_prompt_requires_focused_concise_objectives
     assert "only tightly related outcomes" in user_prompt
     assert "variable-to-outcome" in user_prompt
     assert "separate exact role regions" in user_prompt
-    assert "choose exactly one skim `possible_objectives` entry" in user_prompt
-    assert "phrases verbatim from that same candidate" in user_prompt
-    assert "every skim `possible_objectives` entry as an independent candidate" in user_prompt
-    assert "Never combine variables or outcomes" in user_prompt
-    assert "invent an axis absent from the selected candidate" in user_prompt
+    assert "`changed_variables` are candidate comparison factors" in user_prompt
+    assert "`candidate_properties` are candidate measured outcomes" in user_prompt
+    assert "Treat `possible_objectives` as a noisy hint" in user_prompt
+    assert "Group compatible skims by aligned variable and outcome axes" in user_prompt
+    assert "Prefer candidates supported by at least two experimental skims" in user_prompt
+    assert "Every `seed_document_ids` value must identify a skim" in user_prompt
+    assert "`paper_skims` is the list of bounded per-paper research maps" in user_prompt
+    assert '"seed_document_ids":["paper-a","paper-b"]' in user_prompt
+    assert 'return exactly `{"objectives":[]}`' in user_prompt
     assert "variables precede the active relation" in user_prompt
     assert "variables occur between `of` and `on`" in user_prompt
     assert "use one separating `and`" in user_prompt
@@ -996,6 +1060,7 @@ def test_domain_model_extractors_validates_paper_skim_response():
     assert isinstance(skim, StructuredPaperSkim)
     assert skim.doc_role == "experimental"
     assert skim.candidate_materials == ["316L stainless steel"]
+    assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
 
 
 def test_domain_model_extractors_validates_research_objective_response():

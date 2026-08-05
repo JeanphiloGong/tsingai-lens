@@ -19,6 +19,11 @@ Objective analysis.
 - `evidence_extraction.py`
   Owns structured Evidence drafts before the service binds exact Source text
   and publishes durable `ObjectiveEvidence` records.
+- `property_matching.py`
+  Owns application-layer matching from noisy Source labels to Objective axes,
+  including observed OCR aliases, materials-specific broad outcome hints,
+  contextual process-symbol hints, and deterministic method-family selection.
+  These rules guide extraction and do not define universal domain equivalence.
 - `analysis_service.py`
   Queues, claims, fails, and atomically publishes one Objective analysis
   version.

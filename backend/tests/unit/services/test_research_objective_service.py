@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.objectives import property_matching
 from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
 from application.core.objectives.evidence_routing import EvidenceCandidate
 from application.core.objectives.research_objective_service import (
@@ -3156,16 +3157,16 @@ def test_objective_symbol_axes_distinguish_scan_and_build_angles(tmp_path):
         }
     )
 
-    assert service._objective_process_column_axis_keys("θ") == {
+    assert property_matching.process_column_axis_keys("θ") == {
         "scan strategy rotation angle"
     }
-    assert service._objective_process_column_axis_keys("ɵ") == {
+    assert property_matching.process_column_axis_keys("ɵ") == {
         "scan strategy rotation angle"
     }
-    assert service._objective_process_column_axis_keys("α") == {
+    assert property_matching.process_column_axis_keys("α") == {
         "build orientation alpha angle"
     }
-    assert service._objective_process_column_axis_keys("β") == {
+    assert property_matching.process_column_axis_keys("β") == {
         "build orientation beta angle"
     }
     assert service._objective_process_attribute_label(
@@ -4740,7 +4741,7 @@ def test_real_ved_process_and_defect_tables_form_joint_comparison(tmp_path):
 
     assert low_to_high.attribution_scope == "joint_effect"
     assert {
-        service._normalize_property_label(item.name)
+        property_matching.normalize_property_label(item.name)
         for item in low_to_high.changed_variables
     } == {
         "volumetric energy density",
@@ -4768,10 +4769,10 @@ def test_objective_densification_outcome_includes_relative_density_evidence(
         }
     )
 
-    target_axes = service._objective_outcomes(objective)
+    target_axes = property_matching.objective_outcomes(objective)
 
     assert target_axes == ("densification", "relative density")
-    assert service._objective_property_matches_target_axes(
+    assert property_matching.property_matches_target_axes(
         "relative density",
         target_axes=target_axes,
     )
@@ -4870,7 +4871,7 @@ def test_real_p001_density_table_retains_complete_changed_factor_tuple(tmp_path)
     comparison = comparisons[0]
     assert comparison.attribution_scope == "joint_effect"
     assert {
-        service._normalize_property_label(item.name)
+        property_matching.normalize_property_label(item.name)
         for item in comparison.changed_variables
     } == {
         "hatch space",
@@ -4995,7 +4996,7 @@ def test_research_objective_service_normalizes_archimedes_density_column(
         }
     )
 
-    normalized = service._normalize_objective_unit_property(
+    normalized = property_matching.normalize_objective_unit_property(
         "Density [%] > Archimedes ' method",
         objective_context=objective_context,
     )
@@ -5252,12 +5253,12 @@ def test_research_objective_service_keeps_density_out_of_defect_structure_result
     )
 
     assert all(hint.role != "result_table" for hint in hints)
-    target_axes = service._objective_outcomes(objective)
-    assert service._objective_property_matches_target_axes(
+    target_axes = property_matching.objective_outcomes(objective)
+    assert property_matching.property_matches_target_axes(
         "maximum defect diameter",
         target_axes=target_axes,
     )
-    assert not service._objective_property_matches_target_axes(
+    assert not property_matching.property_matches_target_axes(
         "relative density",
         target_axes=target_axes,
     )

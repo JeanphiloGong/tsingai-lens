@@ -75,7 +75,6 @@ _BROAD_OUTCOME_EXPANSIONS = {
         "grain structure",
     ),
     "fatigue strength": (
-        "fatigue strength",
         "fatigue limit",
         "fatigue strength at 10 4 cycles",
     ),
@@ -114,7 +113,6 @@ _PROPERTY_LABEL_ALIASES = {
     "i y": "yield strength",
     "iy": "yield strength",
     "max. defect length": "max defect length",
-    "max defect length": "max defect length",
     "max defect length lcsm": "max defect length",
     "max. defect diameter": "max defect diameter",
     "maximum defect diameter": "max defect diameter",

@@ -84,7 +84,6 @@ _OBJECTIVE_FRAME_PAPER_ROLES = {
     "mixed",
     "uncertain",
 }
-_OBJECTIVE_SOURCE_KINDS = {"text_window", "table", "figure"}
 _OBJECTIVE_EVIDENCE_ROUTE_ROLES = {
     "current_experimental_evidence",
     "process_or_treatment",
@@ -140,36 +139,13 @@ _FINDING_DIRECTIONS = {
 _FINDING_ASSERTION_STRENGTHS = {"causal", "associative", "descriptive"}
 
 
-def _normalize_literal_choice(value: object, *, allowed: set[str], default: str) -> str:
-    lowered = str(value or "").strip().lower()
-    return lowered if lowered in allowed else default
-
-
-def _normalize_hyphenated_choice(value: object, *, allowed: set[str], default: str) -> str:
-    lowered = str(value or "").strip().lower().replace("_", "-").replace(" ", "-")
-    return lowered if lowered in allowed else default
-
-
 def _normalize_underscored_choice(value: object, *, allowed: set[str], default: str) -> str:
     lowered = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
     return lowered if lowered in allowed else default
 
 
-def _normalize_optional_underscored_choice(
-    value: object,
-    *,
-    allowed: set[str],
-) -> str | None:
-    lowered = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
-    return lowered if lowered in allowed else None
-
-
 def _normalize_list_container(value: object) -> object:
     return [] if value is None else value
-
-
-def _normalize_object_container(value: object) -> object:
-    return {} if value is None else value
 
 
 def _normalize_objective_axis_tokens(value: str) -> tuple[str, ...]:

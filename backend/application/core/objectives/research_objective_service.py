@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from hashlib import sha1
 import json
 import logging
-import math
 import re
 from typing import Any, Callable, Iterable, Mapping
 
@@ -40,7 +39,6 @@ from domain.core import (
     PaperContribution,
     PaperSkim,
     ResearchObjective,
-    build_research_objective_id,
     is_question_shaped_objective,
     normalize_objective_terms,
 )
@@ -173,14 +171,12 @@ def _transient_optional_text(value: Any) -> str | None:
 _SKIM_TEXT_PREVIEW_CHARS = 4000
 _SKIM_MODEL_TEXT_PREVIEW_CHARS = 400
 _SKIM_HEADING_LIMIT = 16
-_SKIM_CAPTION_LIMIT = 12
 _DISCOVERY_AXIS_VALUE_LIMIT = 2
 _DISCOVERY_OBJECTIVE_LIMIT = 3
 _DISCOVERY_TEXT_VALUE_CHARS = 80
 _DISCOVERY_OBJECTIVE_TEXT_CHARS = 180
 _FRAME_SECTION_SNIPPET_LIMIT = 12
 _FRAME_SECTION_TEXT_CHARS = 420
-_FRAME_SECTION_OVERVIEW_LIMIT = 4
 _FRAME_TABLE_LIMIT = 10
 _FRAME_TABLE_ROW_LIMIT = 3
 _ROUTE_TEXT_CHARS = 900
@@ -2996,11 +2992,6 @@ class ResearchObjectiveService:
             else:
                 tokens.append(("%f" % number).rstrip("0").rstrip("."))
         return tuple(tokens)
-
-    def _objective_match_text(self, value: Any) -> str:
-        return " ".join(
-            re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).split()
-        )
 
     def _bind_objective_result_process_context(
         self,

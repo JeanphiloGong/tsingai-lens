@@ -48,6 +48,25 @@ class ObjectiveAnalysisService:
         )
         return self._result(collection_id, objective, analysis=analysis)
 
+    def fail_analysis_dispatch(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> dict[str, Any]:
+        objective = self._require_objective(collection_id, objective_id)
+        analysis = self.objective_repository.fail_analysis(
+            collection_id,
+            objective_id,
+            analysis_version,
+            error_code="analysis_dispatch_failed",
+            error_message=(
+                "Objective analysis could not be scheduled. Retry the analysis."
+            ),
+            expected_status="queued",
+        )
+        return self._result(collection_id, objective, analysis=analysis)
+
     def get_analysis_state(
         self,
         collection_id: str,
@@ -155,20 +174,17 @@ class ObjectiveAnalysisService:
         self,
         collection_id: str,
         objective_id: str,
+        analysis_version: int,
     ) -> dict[str, Any]:
-        objective = self._require_objective(collection_id, objective_id)
-        analysis_version = objective.active_analysis_version
-        if analysis_version is None:
-            raise ValueError("objective has no queued analysis")
-        claimed = self.objective_repository.claim_analysis(
-            collection_id,
-            objective_id,
-            analysis_version,
-        )
-        if claimed is None:
-            return self._result(collection_id, objective)
-
         try:
+            objective = self._require_objective(collection_id, objective_id)
+            claimed = self.objective_repository.claim_analysis(
+                collection_id,
+                objective_id,
+                analysis_version,
+            )
+            if claimed is None:
+                return self._result(collection_id, objective)
             artifacts = (
                 self.research_objective_service.generate_objective_analysis_artifacts(
                     collection_id,
@@ -199,7 +215,7 @@ class ObjectiveAnalysisService:
                 analysis_version,
             )
             if current is not None and current.status in {"queued", "running"}:
-                self.objective_repository.fail_analysis(
+                current = self.objective_repository.fail_analysis(
                     collection_id,
                     objective_id,
                     analysis_version,
@@ -207,7 +223,7 @@ class ObjectiveAnalysisService:
                     error_message=str(exc) or exc.__class__.__name__,
                 )
             objective = self._require_objective(collection_id, objective_id)
-            return self._result(collection_id, objective)
+            return self._result(collection_id, objective, analysis=current)
 
     @staticmethod
     def _validate_artifacts(artifacts: ObjectiveAnalysisArtifacts) -> None:

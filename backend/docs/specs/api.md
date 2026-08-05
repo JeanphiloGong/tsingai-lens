@@ -85,7 +85,10 @@ current document, terminal error, and timestamps.
 Confirmation does not start analysis. `POST .../analysis` queues the next
 version and returns immediately. The frontend polls `GET .../analysis`. Retry
 allocates a new version. A failed active version leaves the prior published
-version readable. Only a complete succeeded version can become published.
+version readable. If the backend cannot dispatch a queued version to its local
+analysis worker, it records that version as failed and returns `503`, allowing
+the client to retry without leaving a permanently queued version. Only a
+complete succeeded version can become published.
 
 ### Published Findings And Evidence
 

@@ -156,13 +156,22 @@ def _artifacts(version: int) -> ObjectiveAnalysisArtifacts:
 
 
 class FakeObjectiveRepository:
-    def __init__(self, *, published: bool = False, claimable: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        published: bool = False,
+        claimable: bool = True,
+        claim_error: Exception | None = None,
+        claim_before_fail: bool = False,
+    ) -> None:
         self.objective = _objective(published=1 if published else None)
         self.analyses: dict[int, ObjectiveAnalysis] = (
             {1: _analysis(1, "succeeded")} if published else {}
         )
         self.findings = {1: (_finding(1),)} if published else {}
         self.claimable = claimable
+        self.claim_error = claim_error
+        self.claim_before_fail = claim_before_fail
         self.published_calls = 0
 
     def read_objective(self, collection_id, objective_id):
@@ -188,6 +197,8 @@ class FakeObjectiveRepository:
         return self.objective, analysis
 
     def claim_analysis(self, collection_id, objective_id, analysis_version):
+        if self.claim_error is not None:
+            raise self.claim_error
         analysis = self.analyses[analysis_version]
         if not self.claimable or analysis.status != "queued":
             return None
@@ -200,7 +211,14 @@ class FakeObjectiveRepository:
         return analysis
 
     def fail_analysis(self, collection_id, objective_id, analysis_version, **kwargs):
-        analysis = self.analyses[analysis_version].fail(**kwargs)
+        analysis = self.analyses[analysis_version]
+        if self.claim_before_fail and analysis.status == "queued":
+            analysis = analysis.start()
+            self.analyses[analysis_version] = analysis
+        expected_status = kwargs.pop("expected_status", None)
+        if expected_status is not None and analysis.status != expected_status:
+            return analysis
+        analysis = analysis.fail(**kwargs)
         self.analyses[analysis_version] = analysis
         return analysis
 
@@ -265,7 +283,7 @@ def _service(*, repository=None, analyzer=None):
 def test_objective_analysis_publishes_one_complete_version() -> None:
     service, repository, _analyzer = _service()
     queued = service.queue_analysis("collection-1", "objective-1")
-    result = service.execute_queued_analysis("collection-1", "objective-1")
+    result = service.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert queued["analysis"].status == "queued"
     assert result["analysis"].status == "succeeded"
@@ -313,7 +331,7 @@ def test_empty_finding_output_fails_version_without_publication() -> None:
         analyzer=FakeResearchObjectiveService(artifacts=artifacts)
     )
     service.queue_analysis("collection-1", "objective-1")
-    result = service.execute_queued_analysis("collection-1", "objective-1")
+    result = service.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "failed"
     assert result["objective"].published_analysis_version is None
@@ -324,7 +342,7 @@ def test_analysis_exception_is_diagnostic_and_retry_allocates_new_version() -> N
     analyzer = FakeResearchObjectiveService(error=RuntimeError("model unavailable"))
     service, repository, _analyzer = _service(analyzer=analyzer)
     service.queue_analysis("collection-1", "objective-1")
-    failed = service.execute_queued_analysis("collection-1", "objective-1")
+    failed = service.execute_queued_analysis("collection-1", "objective-1", 1)
     retry = service.queue_analysis("collection-1", "objective-1")
 
     assert failed["analysis"].status == "failed"
@@ -340,7 +358,7 @@ def test_losing_worker_does_not_run_duplicate_analysis() -> None:
         repository=repository, analyzer=analyzer
     )
     service.queue_analysis("collection-1", "objective-1")
-    result = service.execute_queued_analysis("collection-1", "objective-1")
+    result = service.execute_queued_analysis("collection-1", "objective-1", 1)
 
     assert result["analysis"].status == "queued"
     assert analyzer.calls == 0
@@ -353,9 +371,65 @@ def test_failed_retry_keeps_previous_published_findings_readable() -> None:
         repository=repository, analyzer=analyzer
     )
     queued = service.queue_analysis("collection-1", "objective-1")
-    result = service.execute_queued_analysis("collection-1", "objective-1")
+    result = service.execute_queued_analysis("collection-1", "objective-1", 2)
 
     assert queued["analysis"].analysis_version == 2
     assert result["analysis"].status == "failed"
     assert result["published_analysis"].analysis_version == 1
     assert result["findings"] == (_finding(1),)
+
+
+def test_dispatch_failure_marks_the_queued_version_failed() -> None:
+    service, repository, _analyzer = _service()
+    service.queue_analysis("collection-1", "objective-1")
+
+    result = service.fail_analysis_dispatch("collection-1", "objective-1", 1)
+
+    assert result["analysis"].status == "failed"
+    assert result["analysis"].error_code == "analysis_dispatch_failed"
+    assert result["analysis"].error_message == (
+        "Objective analysis could not be scheduled. Retry the analysis."
+    )
+    assert repository.read_analysis("collection-1", "objective-1", 1).status == (
+        "failed"
+    )
+
+
+def test_dispatch_failure_does_not_fail_a_version_claimed_concurrently() -> None:
+    repository = FakeObjectiveRepository(claim_before_fail=True)
+    service, _repository, _analyzer = _service(repository=repository)
+    service.queue_analysis("collection-1", "objective-1")
+
+    result = service.fail_analysis_dispatch("collection-1", "objective-1", 1)
+
+    assert result["analysis"].status == "running"
+
+
+def test_claim_failure_marks_the_queued_version_failed() -> None:
+    repository = FakeObjectiveRepository(
+        claim_error=RuntimeError("database unavailable")
+    )
+    service, _repository, analyzer = _service(repository=repository)
+    service.queue_analysis("collection-1", "objective-1")
+
+    result = service.execute_queued_analysis("collection-1", "objective-1", 1)
+
+    assert result["analysis"].status == "failed"
+    assert result["analysis"].error_message == "database unavailable"
+    assert analyzer.calls == 0
+
+
+def test_delayed_worker_does_not_claim_a_newer_retry_version() -> None:
+    service, repository, analyzer = _service()
+    service.queue_analysis("collection-1", "objective-1")
+    repository.analyses[1] = repository.analyses[1].fail(
+        error_code="failed",
+        error_message="first attempt failed",
+    )
+    service.queue_analysis("collection-1", "objective-1")
+
+    result = service.execute_queued_analysis("collection-1", "objective-1", 1)
+
+    assert result["analysis"].analysis_version == 2
+    assert result["analysis"].status == "queued"
+    assert analyzer.calls == 0

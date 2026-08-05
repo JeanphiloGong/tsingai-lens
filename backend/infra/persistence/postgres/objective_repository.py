@@ -371,12 +371,16 @@ class PostgresObjectiveRepository:
         *,
         error_code: str,
         error_message: str,
+        expected_status: str | None = None,
     ) -> ObjectiveAnalysis:
         with self.session_factory.begin() as session:
             row = self._locked_analysis(
                 session, collection_id, objective_id, analysis_version
             )
-            failed = self._analysis_record(row).fail(
+            analysis = self._analysis_record(row)
+            if expected_status is not None and analysis.status != expected_status:
+                return analysis
+            failed = analysis.fail(
                 error_code=error_code,
                 error_message=error_message,
                 completed_at=datetime.now(timezone.utc),

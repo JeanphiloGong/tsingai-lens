@@ -381,6 +381,16 @@ def test_analysis_version_claim_progress_and_retry_are_explicit(source_repositor
     )
     assert progressed.phase == "evidence"
 
+    still_running = repository.fail_analysis(
+        "col_source",
+        "objective-1",
+        1,
+        error_code="analysis_dispatch_failed",
+        error_message="Worker submission failed.",
+        expected_status="queued",
+    )
+    assert still_running.status == "running"
+
     failed = repository.fail_analysis(
         "col_source",
         "objective-1",

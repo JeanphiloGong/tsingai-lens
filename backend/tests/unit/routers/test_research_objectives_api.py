@@ -26,7 +26,7 @@ def _objective() -> ResearchObjective:
     )
 
 
-def _analysis(*, queued: bool = False) -> ObjectiveAnalysis:
+def _analysis(*, status: str = "succeeded") -> ObjectiveAnalysis:
     analysis = ObjectiveAnalysis(
         collection_id="col-1",
         objective_id="obj-1",
@@ -37,7 +37,16 @@ def _analysis(*, queued: bool = False) -> ObjectiveAnalysis:
         prompt_versions={},
         total_document_count=1,
     )
-    return analysis if queued else analysis.start().succeed()
+    if status == "queued":
+        return analysis
+    if status == "failed":
+        return analysis.fail(
+            error_code="analysis_dispatch_failed",
+            error_message=(
+                "Objective analysis could not be scheduled. Retry the analysis."
+            ),
+        )
+    return analysis.start().succeed()
 
 
 def _finding() -> Finding:
@@ -130,7 +139,8 @@ class _Repository:
 
 class _Service:
     def __init__(self, *, queued: bool = False) -> None:
-        self.queued = queued
+        self.analysis_status = "queued" if queued else "succeeded"
+        self.dispatch_failure_version: int | None = None
 
     def confirm_objective(self, collection_id, objective_id):
         return self.get_analysis_state(collection_id, objective_id)
@@ -138,14 +148,19 @@ class _Service:
     def queue_analysis(self, collection_id, objective_id):
         return self.get_analysis_state(collection_id, objective_id)
 
-    def execute_queued_analysis(self, collection_id, objective_id):
+    def execute_queued_analysis(self, collection_id, objective_id, analysis_version):
+        return self.get_analysis_state(collection_id, objective_id)
+
+    def fail_analysis_dispatch(self, collection_id, objective_id, analysis_version):
+        self.analysis_status = "failed"
+        self.dispatch_failure_version = analysis_version
         return self.get_analysis_state(collection_id, objective_id)
 
     def get_analysis_state(self, collection_id, objective_id):
         return {
             "collection_id": collection_id,
             "objective": _objective(),
-            "analysis": _analysis(queued=self.queued),
+            "analysis": _analysis(status=self.analysis_status),
             "published_analysis": _analysis(),
             "warnings": [],
         }
@@ -182,12 +197,16 @@ class _Service:
         }
 
 
-def _client(service: _Service | None = None) -> TestClient:
+def _client(
+    service: _Service | None = None,
+    *,
+    raise_server_exceptions: bool = True,
+) -> TestClient:
     app = FastAPI()
     app.state.objective_repository = _Repository()
     app.state.objective_analysis_service = service or _Service()
     app.include_router(router)
-    return TestClient(app)
+    return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
 
 def test_start_analysis_dispatches_the_queued_worker(monkeypatch) -> None:
@@ -216,11 +235,35 @@ def test_start_analysis_dispatches_the_queued_worker(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["active_analysis"]["status"] == "queued"
     assert submitted["function"] == service.execute_queued_analysis
-    assert submitted["args"] == ("col-1", "obj-1")
+    assert submitted["args"] == ("col-1", "obj-1", 1)
     assert (
         submitted["callback"]
         == research_objectives._log_unexpected_analysis_failure
     )
+
+
+def test_start_analysis_fails_queued_version_when_worker_submission_fails(
+    monkeypatch,
+) -> None:
+    service = _Service(queued=True)
+
+    def submit(*_args):
+        raise RuntimeError("executor unavailable")
+
+    monkeypatch.setattr(
+        research_objectives._objective_analysis_executor,
+        "submit",
+        submit,
+    )
+
+    response = _client(service, raise_server_exceptions=False).post(
+        "/collections/col-1/objectives/obj-1/analysis"
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "objective_analysis_dispatch_failed"
+    assert service.analysis_status == "failed"
+    assert service.dispatch_failure_version == 1
 
 
 def test_objective_api_exposes_definition_and_separate_analysis_state() -> None:

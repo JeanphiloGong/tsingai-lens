@@ -103,11 +103,39 @@ def start_collection_objective_analysis(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     analysis = payload.get("analysis")
     if analysis is not None and analysis.status == "queued":
-        future = _objective_analysis_executor.submit(
-            service.execute_queued_analysis,
-            collection_id,
-            objective_id,
-        )
+        try:
+            future = _objective_analysis_executor.submit(
+                service.execute_queued_analysis,
+                collection_id,
+                objective_id,
+                analysis.analysis_version,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "Objective analysis dispatch failed collection_id=%s "
+                "objective_id=%s analysis_version=%s",
+                collection_id,
+                objective_id,
+                analysis.analysis_version,
+            )
+            service.fail_analysis_dispatch(
+                collection_id,
+                objective_id,
+                analysis.analysis_version,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "objective_analysis_dispatch_failed",
+                    "message": (
+                        "Objective analysis could not be scheduled. "
+                        "Retry the analysis."
+                    ),
+                    "collection_id": collection_id,
+                    "objective_id": objective_id,
+                    "analysis_version": analysis.analysis_version,
+                },
+            ) from exc
         future.add_done_callback(_log_unexpected_analysis_failure)
     return _to_objective_analysis_response(payload)
 

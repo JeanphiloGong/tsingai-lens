@@ -8,6 +8,10 @@ from application.auth import AuthSessionService, SessionNotFoundError
 from application.core.comparison_service import ComparisonService
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
 from application.core.objectives.finding_synthesis_service import FindingSynthesisService
+from application.core.objectives.objective_candidate_service import (
+    ObjectiveCandidateService,
+)
+from application.core.objectives.paper_skim_service import PaperSkimService
 from application.core.research_view_aggregation_service import (
     ResearchViewAggregationService,
 )
@@ -228,6 +232,8 @@ def create_app(
                 objective_repository=active_objective_repository,
                 document_profile_service=document_profile_service,
                 finding_synthesis_service=finding_synthesis_service,
+                paper_skim_service=PaperSkimService(),
+                objective_candidate_service=ObjectiveCandidateService(),
             )
             workspace_service = WorkspaceService(
                 collection_service=active_collection_service,

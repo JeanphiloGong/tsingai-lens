@@ -6,13 +6,24 @@ Objective analysis.
 ## Owners
 
 - `research_objective_service.py`
-  Discovers Objective candidates and runs confirmed Objective analysis. It
-  traverses Source document trees with bounded transient state, emits one
-  `PaperContribution` per included document, and emits `ObjectiveEvidence`
-  records containing exact excerpts and typed Source locators. Discovery,
-  framing, routing, and extraction consume the persisted ResearchObjective
-  variables, outcomes, mechanisms, constraints, and requested comparator
-  directly. Table-selection hints remain transient service values.
+  Orchestrates candidate discovery persistence and runs confirmed Objective
+  analysis. It loads the immutable Source build, delegates candidate discovery
+  to the two direct owners below, and atomically replaces the candidate fact
+  set. Confirmed analysis traverses Source document trees with bounded
+  transient state, emits one `PaperContribution` per included document, and
+  emits `ObjectiveEvidence` records containing exact excerpts and typed Source
+  locators. Framing, routing, and extraction consume the persisted
+  ResearchObjective variables, outcomes, mechanisms, constraints, and
+  requested comparator directly. Table-selection hints remain transient
+  service values.
+- `paper_skim_service.py`
+  Owns the per-document discovery stage. It builds bounded model input from
+  Source documents, profiles, text blocks, tables, figures, and document trees,
+  then emits one `PaperSkim` research map per document.
+- `objective_candidate_service.py`
+  Owns collection-level candidate discovery from `PaperSkim` records. It
+  validates seed-paper support, canonicalizes model-produced document ids and
+  research axes, validates merge decisions, and removes exact duplicates.
 - `evidence_routing.py`
   Owns the transient Source-selection decisions created while routing one
   confirmed Objective across its documents.

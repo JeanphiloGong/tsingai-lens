@@ -4,30 +4,16 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable
 from time import perf_counter
 from typing import Any
 
 from openai import OpenAI
 from pydantic import BaseModel, ValidationError
 
-from .schemas import (
-    StructuredAxisCanonicalizationPlan,
-    StructuredDocumentProfile,
-    StructuredEvidenceSelections,
-    StructuredEvidenceExtractions,
-    StructuredObjectiveMergePlan,
-    StructuredPaperContributionDraft,
-    StructuredPaperSkim,
-    StructuredFindingSynthesis,
-    StructuredResearchObjective,
-    StructuredResearchObjectives,
-    StructuredTableBatchMentions,
-    StructuredTableMatrixRepair,
-    StructuredTextWindowMentions,
-)
-from .prompts import (
+from application.core.objectives.prompts import (
     FINDING_SYNTHESIS_PROMPT_VERSION,
-    build_document_profile_prompt,
+    build_finding_synthesis_prompt,
     build_objective_evidence_prompt,
     build_objective_evidence_route_prompt,
     build_objective_paper_frame_prompt,
@@ -35,20 +21,31 @@ from .prompts import (
     build_research_axis_canonicalization_prompt,
     build_research_objective_discovery_prompt,
     build_research_objective_merge_prompt,
-    build_finding_synthesis_prompt,
-    build_table_batch_mentions_prompt,
-    build_table_matrix_repair_prompt,
-    build_text_window_extraction_prompt,
+)
+from application.core.objectives.schemas import (
+    StructuredAxisCanonicalizationPlan,
+    StructuredEvidenceExtractions,
+    StructuredEvidenceSelections,
+    StructuredFindingSynthesis,
+    StructuredObjectiveMergePlan,
+    StructuredPaperContributionDraft,
+    StructuredPaperSkim,
+    StructuredResearchObjective,
+    StructuredResearchObjectives,
+)
+from application.core.structured_extraction.json_support import (
+    coerce_message_content,
+    extract_json_object,
+    load_json_payload,
+    trace_json,
+    trace_text,
 )
 
 logger = logging.getLogger(__name__)
 
-_JSON_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
-_TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS = 4096
-_DOCUMENT_PROFILE_MAX_COMPLETION_TOKENS = 1024
 _PAPER_SKIM_MAX_COMPLETION_TOKENS = 256
 _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS = 2400
 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS = 512
@@ -62,8 +59,8 @@ _SUPPORTED_EXTRACTION_MODES = {
 }
 
 
-class CoreLLMStructuredExtractor:
-    """Core-owned LLM structured extraction entrypoint."""
+class ObjectiveExtractor:
+    """Objective-owned model extraction entrypoint."""
 
     def __init__(
         self,
@@ -74,7 +71,9 @@ class CoreLLMStructuredExtractor:
         base_url: str | None = None,
         extraction_mode: str | None = None,
     ) -> None:
-        self.model = (model or os.getenv("LLM_MODEL", "gpt-4o-mini")).strip() or "gpt-4o-mini"
+        self.model = (
+            model or os.getenv("LLM_MODEL", "gpt-4o-mini")
+        ).strip() or "gpt-4o-mini"
         self.extraction_mode = self._resolve_extraction_mode(extraction_mode)
         self.enable_thinking = os.getenv("LLM_ENABLE_THINKING", "").strip().lower() in {
             "1",
@@ -88,59 +87,13 @@ class CoreLLMStructuredExtractor:
             base_url=(base_url or os.getenv("LLM_BASE_URL", "").strip() or None),
         )
 
-    def extract_document_profile(self, payload: dict[str, Any]) -> StructuredDocumentProfile:
-        system_prompt, user_prompt = build_document_profile_prompt(payload)
-        response = self._parse_structured_response(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredDocumentProfile,
-        )
-        if not isinstance(response, StructuredDocumentProfile):
-            raise TypeError("unexpected document profile response type")
-        return response
-
-    def extract_text_window_mentions(self, payload: dict[str, Any]) -> StructuredTextWindowMentions:
-        system_prompt, user_prompt = build_text_window_extraction_prompt(payload)
-        response = self._parse_structured_response(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredTextWindowMentions,
-        )
-        if not isinstance(response, StructuredTextWindowMentions):
-            raise TypeError("unexpected text window extraction response type")
-        return response
-
-    def extract_table_batch_mentions(self, payload: dict[str, Any]) -> StructuredTableBatchMentions:
-        system_prompt, user_prompt = build_table_batch_mentions_prompt(payload)
-        response = self._parse_structured_response(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredTableBatchMentions,
-        )
-        if not isinstance(response, StructuredTableBatchMentions):
-            raise TypeError("unexpected table batch extraction response type")
-        return response
-
-    def repair_table_matrix(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredTableMatrixRepair:
-        system_prompt, user_prompt = build_table_matrix_repair_prompt(payload)
-        response = self._parse_structured_response(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredTableMatrixRepair,
-        )
-        if not isinstance(response, StructuredTableMatrixRepair):
-            raise TypeError("unexpected table matrix repair response type")
-        return response
-
     def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         system_prompt, user_prompt = build_paper_skim_prompt(payload)
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredPaperSkim,
+            max_completion_tokens=_PAPER_SKIM_MAX_COMPLETION_TOKENS,
         )
         if not isinstance(response, StructuredPaperSkim):
             raise TypeError("unexpected paper skim response type")
@@ -155,6 +108,11 @@ class CoreLLMStructuredExtractor:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredResearchObjectives,
+            max_completion_tokens=(
+                _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS
+            ),
+            force_json_text=True,
+            json_text_parser=self._parse_research_objectives_json_response,
         )
         if not isinstance(response, StructuredResearchObjectives):
             raise TypeError("unexpected research objective response type")
@@ -215,6 +173,10 @@ class CoreLLMStructuredExtractor:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredEvidenceSelections,
+            max_completion_tokens=(
+                _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS
+            ),
+            force_json_text=True,
         )
         if not isinstance(response, StructuredEvidenceSelections):
             raise TypeError("unexpected objective evidence route response type")
@@ -229,6 +191,10 @@ class CoreLLMStructuredExtractor:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredEvidenceExtractions,
+            max_completion_tokens=_OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS,
+            force_json_text=True,
+            include_schema_for_forced_json=False,
+            json_text_parser=self._parse_objective_evidence_json_response,
         )
         if not isinstance(response, StructuredEvidenceExtractions):
             raise TypeError("unexpected objective evidence extraction response type")
@@ -243,6 +209,8 @@ class CoreLLMStructuredExtractor:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredFindingSynthesis,
+            max_completion_tokens=_FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS,
+            json_text_parser=self._parse_finding_synthesis_json_response,
             task_type="finding_synthesis",
             prompt_version=FINDING_SYNTHESIS_PROMPT_VERSION,
         )
@@ -256,9 +224,14 @@ class CoreLLMStructuredExtractor:
         system_prompt: str,
         user_prompt: str,
         response_model: type[BaseModel],
+        max_completion_tokens: int | None = None,
+        force_json_text: bool = False,
+        include_schema_for_forced_json: bool = True,
+        json_text_parser: Callable[..., tuple[BaseModel, str | None]] | None = None,
         task_type: str | None = None,
         prompt_version: str | None = None,
     ) -> BaseModel:
+        parse_json_text = json_text_parser or self._parse_json_text_response
         messages = self._build_messages(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -271,20 +244,18 @@ class CoreLLMStructuredExtractor:
         try:
             use_provider_parse = (
                 self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE
-                and response_model is not StructuredDocumentProfile
-                and response_model is not StructuredEvidenceSelections
-                and response_model is not StructuredEvidenceExtractions
-                and response_model is not StructuredResearchObjectives
+                and not force_json_text
             )
             if use_provider_parse:
                 try:
                     parsed, raw_content = self._parse_provider_structured_response(
                         messages=messages,
                         response_model=response_model,
+                        max_completion_tokens=max_completion_tokens,
                     )
                 except Exception:
                     logger.warning(
-                        "Core LLM provider parse failed; retrying with json_text "
+                        "Objective provider parse failed; retrying with json_text "
                         "model=%s response_model=%s",
                         self.model,
                         response_model.__name__,
@@ -296,16 +267,17 @@ class CoreLLMStructuredExtractor:
                         response_model=response_model,
                         include_schema=True,
                     )
-                    parsed, raw_content = self._parse_json_text_response(
+                    parsed, raw_content = parse_json_text(
                         messages=messages,
                         response_model=response_model,
+                        max_completion_tokens=max_completion_tokens,
                     )
                     trace_extraction_mode = (
                         f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
                     )
             else:
                 if self.extraction_mode == _EXTRACTION_MODE_PROVIDER_PARSE:
-                    if response_model is not StructuredEvidenceExtractions:
+                    if include_schema_for_forced_json:
                         messages = self._build_messages(
                             system_prompt=system_prompt,
                             user_prompt=user_prompt,
@@ -313,9 +285,10 @@ class CoreLLMStructuredExtractor:
                             include_schema=True,
                         )
                     trace_extraction_mode = _EXTRACTION_MODE_JSON_TEXT
-                parsed, raw_content = self._parse_json_text_response(
+                parsed, raw_content = parse_json_text(
                     messages=messages,
                     response_model=response_model,
+                    max_completion_tokens=max_completion_tokens,
                 )
         except Exception:
             elapsed_s = perf_counter() - started_at
@@ -330,7 +303,7 @@ class CoreLLMStructuredExtractor:
                 error="structured extraction failed",
             )
             logger.exception(
-                "Core LLM extraction failed mode=%s model=%s "
+                "Objective extraction failed mode=%s model=%s "
                 "response_model=%s elapsed_s=%.3f validated=false",
                 self.extraction_mode,
                 self.model,
@@ -351,7 +324,7 @@ class CoreLLMStructuredExtractor:
             parsed_output=parsed,
         )
         logger.debug(
-            "Core LLM extraction finished mode=%s model=%s "
+            "Objective extraction finished mode=%s model=%s "
             "response_model=%s elapsed_s=%.3f validated=true",
             self.extraction_mode,
             self.model,
@@ -391,6 +364,8 @@ class CoreLLMStructuredExtractor:
         *,
         messages: list[dict[str, str]],
         response_model: type[BaseModel],
+        max_completion_tokens: int | None,
+        repair_instruction_builder: Callable[[str], str] | None = None,
     ) -> tuple[BaseModel, str | None]:
         request_kwargs = {
             "model": self.model,
@@ -399,28 +374,119 @@ class CoreLLMStructuredExtractor:
             "response_format": {"type": "json_object"},
             **self._provider_request_options(),
         }
-        if response_model is StructuredDocumentProfile:
-            request_kwargs["max_completion_tokens"] = (
-                _DOCUMENT_PROFILE_MAX_COMPLETION_TOKENS
+        if max_completion_tokens is not None:
+            request_kwargs["max_completion_tokens"] = max_completion_tokens
+        last_error: Exception | None = None
+        for attempt in range(2):
+            attempt_kwargs = dict(request_kwargs)
+            attempt_messages = [*messages]
+            attempt_kwargs["messages"] = attempt_messages
+            if attempt:
+                if isinstance(last_error, ValidationError):
+                    repair_detail = "; ".join(
+                        f"{'.'.join(str(part) for part in error['loc'])}: "
+                        f"{error['msg']}"
+                        for error in last_error.errors(
+                            include_input=False,
+                            include_url=False,
+                        )
+                    )
+                else:
+                    repair_detail = str(last_error or "invalid structured output")
+                if repair_instruction_builder is not None:
+                    retry_instruction = repair_instruction_builder(repair_detail[:1000])
+                else:
+                    retry_instruction = (
+                        "Previous output was invalid. Return only the smallest valid "
+                        "JSON object matching the schema. Do not explain, repeat the "
+                        "prompt, or include markdown. Correct these validation errors: "
+                        f"{repair_detail[:1000]}"
+                    )
+                attempt_messages.append(
+                    {"role": "user", "content": retry_instruction}
+                )
+                logger.warning(
+                    "Retrying structured JSON response model=%s response_model=%s",
+                    self.model,
+                    response_model.__name__,
+                )
+            try:
+                completion = self.client.chat.completions.create(**attempt_kwargs)
+                raw_content = coerce_message_content(
+                    completion.choices[0].message.content if completion.choices else None
+                )
+                if not raw_content:
+                    raise RuntimeError(
+                        "structured extraction returned empty response content"
+                    )
+                payload = load_json_payload(extract_json_object(raw_content))
+                try:
+                    return response_model.model_validate(payload), raw_content
+                except ValidationError:
+                    if isinstance(payload, dict):
+                        extra_keys = set(payload) - set(response_model.model_fields)
+                        if extra_keys - {"confidence"}:
+                            raise
+                        filtered_payload = {
+                            key: value
+                            for key, value in payload.items()
+                            if key in response_model.model_fields
+                        }
+                        if filtered_payload != payload:
+                            return (
+                                response_model.model_validate(filtered_payload),
+                                raw_content,
+                            )
+                    raise
+            except (
+                RuntimeError,
+                ValueError,
+                ValidationError,
+                json.JSONDecodeError,
+            ) as exc:
+                last_error = exc
+                if attempt == 0:
+                    continue
+                raise
+        raise RuntimeError("structured extraction failed after retry") from last_error
+
+    def _parse_finding_synthesis_json_response(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        response_model: type[BaseModel],
+        max_completion_tokens: int | None,
+    ) -> tuple[BaseModel, str | None]:
+        def build_repair_instruction(repair_detail: str) -> str:
+            return (
+                "Previous finding synthesis output failed validation: "
+                f"{repair_detail}. Return at most one schema-valid finding or "
+                '{"findings":[]}. Return only compact JSON.'
             )
-        elif response_model is StructuredPaperSkim:
-            request_kwargs["max_completion_tokens"] = _PAPER_SKIM_MAX_COMPLETION_TOKENS
-        elif response_model is StructuredResearchObjectives:
-            request_kwargs["max_completion_tokens"] = (
-                _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS
-            )
-        elif response_model is StructuredEvidenceSelections:
-            request_kwargs["max_completion_tokens"] = (
-                _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS
-            )
-        elif response_model is StructuredEvidenceExtractions:
-            request_kwargs["max_completion_tokens"] = (
-                _OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS
-            )
-        elif response_model is StructuredFindingSynthesis:
-            request_kwargs["max_completion_tokens"] = (
-                _FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS
-            )
+
+        return self._parse_json_text_response(
+            messages=messages,
+            response_model=response_model,
+            max_completion_tokens=max_completion_tokens,
+            repair_instruction_builder=build_repair_instruction,
+        )
+
+    def _parse_research_objectives_json_response(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        response_model: type[BaseModel],
+        max_completion_tokens: int | None,
+    ) -> tuple[BaseModel, str | None]:
+        request_kwargs = {
+            "model": self.model,
+            "temperature": 0,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            **self._provider_request_options(),
+        }
+        if max_completion_tokens is not None:
+            request_kwargs["max_completion_tokens"] = max_completion_tokens
         last_error: Exception | None = None
         last_raw_content: str | None = None
         preserved_objectives: list[StructuredResearchObjective] = []
@@ -442,30 +508,16 @@ class CoreLLMStructuredExtractor:
                 else:
                     validation_errors = []
                     repair_detail = str(last_error or "invalid structured output")
-                objective_role_errors = bool(validation_errors) and all(
+                retry_scope = (
+                    "Return corrections only for invalid objectives; do not repeat "
+                    "or rewrite objectives that were already valid. "
+                    if preserved_objectives
+                    else "Return one corrected `objectives` JSON array. "
+                )
+                if validation_errors and all(
                     "question roles" in str(error["msg"])
                     for error in validation_errors
-                )
-                if response_model is StructuredEvidenceExtractions:
-                    retry_instruction = (
-                        "Previous evidence extraction output failed validation: "
-                        f"{repair_detail[:1000]}. Return at most one schema-valid "
-                        "extraction or {\"extractions\":[]}. Context evidence must "
-                        "use reported_result null, no changed variables, no comparison, "
-                        "and not_attributable. isolated_effect requires exactly one "
-                        "changed variable and a comparable comparison; joint_effect "
-                        "requires at least two. Return only compact JSON."
-                    )
-                elif (
-                    response_model is StructuredResearchObjectives
-                    and objective_role_errors
                 ):
-                    retry_scope = (
-                        "Return corrections only for invalid objectives; do not repeat "
-                        "or rewrite objectives that were already valid. "
-                        if preserved_objectives
-                        else "Return one corrected `objectives` JSON array. "
-                    )
                     retry_instruction = (
                         f"{retry_scope}"
                         "Correct every research-objective role error. Keep atomic, "
@@ -481,13 +533,7 @@ class CoreLLMStructuredExtractor:
                         "that still cannot satisfy this form. Return only compact JSON. "
                         f"Errors: {repair_detail[:1000]}"
                     )
-                elif response_model is StructuredResearchObjectives:
-                    retry_scope = (
-                        "Return corrections only for invalid objectives; do not repeat "
-                        "or rewrite objectives that were already valid. "
-                        if preserved_objectives
-                        else "Return one corrected `objectives` JSON array. "
-                    )
+                else:
                     retry_instruction = (
                         "Previous output was invalid. "
                         f"{retry_scope}"
@@ -496,75 +542,43 @@ class CoreLLMStructuredExtractor:
                         "and return no more than six objectives. Return only compact JSON "
                         f"without commentary. Errors: {repair_detail[:1000]}"
                     )
-                elif response_model is StructuredFindingSynthesis:
-                    retry_instruction = (
-                        "Previous finding synthesis output failed validation: "
-                        f"{repair_detail[:1000]}. Return at most one schema-valid "
-                        "finding or {\"findings\":[]}. Return only compact JSON."
-                    )
-                else:
-                    retry_instruction = (
-                        "Previous output was invalid. Return only the smallest valid "
-                        "JSON object matching the schema. Do not explain, repeat the "
-                        "prompt, or include markdown. Correct these validation errors: "
-                        f"{repair_detail[:1000]}"
-                    )
-                if (
-                    response_model is StructuredResearchObjectives
-                    and last_raw_content
-                ):
+                if last_raw_content:
                     attempt_messages.append(
                         {"role": "assistant", "content": last_raw_content}
                     )
                 attempt_messages.append(
                     {"role": "user", "content": retry_instruction}
                 )
-                if response_model is StructuredResearchObjectives:
-                    messages[:] = attempt_messages
+                messages[:] = attempt_messages
                 logger.warning(
-                    "Retrying structured JSON response model=%s response_model=%s",
+                    "Retrying research objective discovery JSON response model=%s",
                     self.model,
-                    response_model.__name__,
                 )
             try:
                 completion = self.client.chat.completions.create(**attempt_kwargs)
-                raw_content = self._coerce_message_content(
+                raw_content = coerce_message_content(
                     completion.choices[0].message.content if completion.choices else None
                 )
                 last_raw_content = raw_content
-                if (
-                    response_model is StructuredResearchObjectives
-                    and attempt
-                    and raw_content
-                ):
+                if attempt and raw_content:
                     messages.append({"role": "assistant", "content": raw_content})
                 if not raw_content:
                     raise RuntimeError(
                         "structured extraction returned empty response content"
                     )
-                payload = self._load_json_payload(self._extract_json_object(raw_content))
+                payload = load_json_payload(extract_json_object(raw_content))
                 try:
-                    parsed = response_model.model_validate(payload)
-                    if (
-                        response_model is StructuredResearchObjectives
-                        and attempt
-                        and preserved_objectives
-                        and isinstance(parsed, StructuredResearchObjectives)
-                    ):
-                        combined: list[StructuredResearchObjective] = []
-                        seen: set[str] = set()
-                        for objective in [*preserved_objectives, *parsed.objectives]:
-                            key = objective.model_dump_json()
-                            if key in seen:
-                                continue
-                            seen.add(key)
-                            combined.append(objective)
-                        parsed = StructuredResearchObjectives(objectives=combined)
+                    parsed = StructuredResearchObjectives.model_validate(payload)
+                    if attempt and preserved_objectives:
+                        parsed = StructuredResearchObjectives(
+                            objectives=self._deduplicate_objectives(
+                                [*preserved_objectives, *parsed.objectives]
+                            )
+                        )
                     return parsed, raw_content
                 except ValidationError as validation_error:
                     if (
-                        response_model is StructuredResearchObjectives
-                        and isinstance(payload, dict)
+                        isinstance(payload, dict)
                         and isinstance(payload.get("objectives"), list)
                     ):
                         objective_payloads = payload["objectives"]
@@ -582,8 +596,7 @@ class CoreLLMStructuredExtractor:
                         allowed_echo_keys = {
                             f"`{path}`" for path in validation_paths if path
                         }
-                        container_extra_keys = set(payload) - {"objectives"}
-                        if container_extra_keys - allowed_echo_keys:
+                        if set(payload) - {"objectives"} - allowed_echo_keys:
                             raise validation_error
                         valid_objectives: list[StructuredResearchObjective] = []
                         invalid_objective_payloads: list[dict[str, Any]] = []
@@ -620,59 +633,17 @@ class CoreLLMStructuredExtractor:
                                 is not None
                             )
                             if corrected_objectives:
-                                combined: list[StructuredResearchObjective] = []
-                                seen: set[str] = set()
-                                for objective in [
-                                    *preserved_objectives,
-                                    *corrected_objectives,
-                                ]:
-                                    key = objective.model_dump_json()
-                                    if key in seen:
-                                        continue
-                                    seen.add(key)
-                                    combined.append(objective)
                                 return (
-                                    StructuredResearchObjectives(objectives=combined),
+                                    StructuredResearchObjectives(
+                                        objectives=self._deduplicate_objectives(
+                                            [
+                                                *preserved_objectives,
+                                                *corrected_objectives,
+                                            ]
+                                        )
+                                    ),
                                     raw_content,
                                 )
-                    if (
-                        response_model is StructuredEvidenceExtractions
-                        and isinstance(payload, dict)
-                        and isinstance(payload.get("extractions"), list)
-                    ):
-                        allowed_echo_keys = {
-                            "OBJECTIVE",
-                            "OBJECTIVE VARIABLES",
-                            "OBJECTIVE OUTCOMES",
-                            "ROUTE HINT ONLY (DO NOT COPY AS EVIDENCE ROLE)",
-                            "SOURCE KIND",
-                            "SOURCE",
-                        }
-                        filtered_payload = {"extractions": payload["extractions"]}
-                        extra_keys = set(payload) - {"extractions"}
-                        if extra_keys and extra_keys <= allowed_echo_keys:
-                            return (
-                                StructuredEvidenceExtractions.model_validate(
-                                    filtered_payload
-                                ),
-                                raw_content,
-                            )
-                    if (
-                        response_model is StructuredEvidenceExtractions
-                        and isinstance(payload, dict)
-                        and "extractions" not in payload
-                        and bool(payload)
-                        and set(payload)
-                        <= {
-                            "OBJECTIVE",
-                            "OBJECTIVE VARIABLES",
-                            "OBJECTIVE OUTCOMES",
-                            "ROUTE HINT ONLY (DO NOT COPY AS EVIDENCE ROLE)",
-                            "SOURCE KIND",
-                            "SOURCE",
-                        }
-                    ):
-                        return StructuredEvidenceExtractions(), raw_content
                     if isinstance(payload, dict):
                         extra_keys = set(payload) - set(response_model.model_fields)
                         if extra_keys - {"confidence"}:
@@ -684,7 +655,9 @@ class CoreLLMStructuredExtractor:
                         }
                         if filtered_payload != payload:
                             return (
-                                response_model.model_validate(filtered_payload),
+                                StructuredResearchObjectives.model_validate(
+                                    filtered_payload
+                                ),
                                 raw_content,
                             )
                     raise
@@ -699,6 +672,143 @@ class CoreLLMStructuredExtractor:
                     continue
                 raise
         raise RuntimeError("structured extraction failed after retry") from last_error
+
+    def _parse_objective_evidence_json_response(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        response_model: type[BaseModel],
+        max_completion_tokens: int | None,
+    ) -> tuple[BaseModel, str | None]:
+        request_kwargs = {
+            "model": self.model,
+            "temperature": 0,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            **self._provider_request_options(),
+        }
+        if max_completion_tokens is not None:
+            request_kwargs["max_completion_tokens"] = max_completion_tokens
+        echoed_prompt_keys = {
+            "OBJECTIVE",
+            "OBJECTIVE VARIABLES",
+            "OBJECTIVE OUTCOMES",
+            "ROUTE HINT ONLY (DO NOT COPY AS EVIDENCE ROLE)",
+            "SOURCE KIND",
+            "SOURCE",
+        }
+        last_error: Exception | None = None
+        for attempt in range(2):
+            attempt_kwargs = dict(request_kwargs)
+            attempt_messages = [*messages]
+            attempt_kwargs["messages"] = attempt_messages
+            if attempt:
+                if isinstance(last_error, ValidationError):
+                    repair_detail = "; ".join(
+                        f"{'.'.join(str(part) for part in error['loc'])}: "
+                        f"{error['msg']}"
+                        for error in last_error.errors(
+                            include_input=False,
+                            include_url=False,
+                        )
+                    )
+                else:
+                    repair_detail = str(last_error or "invalid structured output")
+                attempt_messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Previous evidence extraction output failed validation: "
+                            f"{repair_detail[:1000]}. Return at most one schema-valid "
+                            "extraction or {\"extractions\":[]}. Context evidence must "
+                            "use reported_result null, no changed variables, no "
+                            "comparison, and not_attributable. isolated_effect requires "
+                            "exactly one changed variable and a comparable comparison; "
+                            "joint_effect requires at least two. Return only compact JSON."
+                        ),
+                    }
+                )
+                logger.warning(
+                    "Retrying objective evidence JSON response model=%s",
+                    self.model,
+                )
+            try:
+                completion = self.client.chat.completions.create(**attempt_kwargs)
+                raw_content = coerce_message_content(
+                    completion.choices[0].message.content if completion.choices else None
+                )
+                if not raw_content:
+                    raise RuntimeError(
+                        "structured extraction returned empty response content"
+                    )
+                payload = load_json_payload(extract_json_object(raw_content))
+                try:
+                    return (
+                        StructuredEvidenceExtractions.model_validate(payload),
+                        raw_content,
+                    )
+                except ValidationError:
+                    if (
+                        isinstance(payload, dict)
+                        and isinstance(payload.get("extractions"), list)
+                    ):
+                        extra_keys = set(payload) - {"extractions"}
+                        if extra_keys and extra_keys <= echoed_prompt_keys:
+                            return (
+                                StructuredEvidenceExtractions.model_validate(
+                                    {"extractions": payload["extractions"]}
+                                ),
+                                raw_content,
+                            )
+                    if (
+                        isinstance(payload, dict)
+                        and "extractions" not in payload
+                        and bool(payload)
+                        and set(payload) <= echoed_prompt_keys
+                    ):
+                        return StructuredEvidenceExtractions(), raw_content
+                    if isinstance(payload, dict):
+                        extra_keys = set(payload) - set(response_model.model_fields)
+                        if extra_keys - {"confidence"}:
+                            raise
+                        filtered_payload = {
+                            key: value
+                            for key, value in payload.items()
+                            if key in response_model.model_fields
+                        }
+                        if filtered_payload != payload:
+                            return (
+                                StructuredEvidenceExtractions.model_validate(
+                                    filtered_payload
+                                ),
+                                raw_content,
+                            )
+                    raise
+            except (
+                RuntimeError,
+                ValueError,
+                ValidationError,
+                json.JSONDecodeError,
+            ) as exc:
+                last_error = exc
+                if attempt == 0:
+                    continue
+                raise
+        raise RuntimeError("structured extraction failed after retry") from last_error
+
+    @staticmethod
+    def _deduplicate_objectives(
+        objectives: list[StructuredResearchObjective],
+    ) -> list[StructuredResearchObjective]:
+        deduplicated: list[StructuredResearchObjective] = []
+        seen: set[str] = set()
+        for objective in objectives:
+            key = objective.model_dump_json()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduplicated.append(objective)
+        return deduplicated
 
     @staticmethod
     def _repair_trailing_scope_objective(
@@ -748,6 +858,7 @@ class CoreLLMStructuredExtractor:
         *,
         messages: list[dict[str, str]],
         response_model: type[BaseModel],
+        max_completion_tokens: int | None,
     ) -> tuple[BaseModel, str | None]:
         request_kwargs: dict[str, Any] = {
             "model": self.model,
@@ -756,44 +867,20 @@ class CoreLLMStructuredExtractor:
             "response_format": response_model,
             **self._provider_request_options(),
         }
-        if response_model is StructuredTableBatchMentions:
-            request_kwargs["max_completion_tokens"] = (
-                _TABLE_BATCH_PROVIDER_PARSE_MAX_COMPLETION_TOKENS
-            )
-        elif response_model is StructuredDocumentProfile:
-            request_kwargs["max_completion_tokens"] = (
-                _DOCUMENT_PROFILE_MAX_COMPLETION_TOKENS
-            )
-        elif response_model is StructuredPaperSkim:
-            request_kwargs["max_completion_tokens"] = _PAPER_SKIM_MAX_COMPLETION_TOKENS
-        elif response_model is StructuredResearchObjectives:
-            request_kwargs["max_completion_tokens"] = (
-                _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS
-            )
-        elif response_model is StructuredEvidenceSelections:
-            request_kwargs["max_completion_tokens"] = (
-                _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS
-            )
-        elif response_model is StructuredEvidenceExtractions:
-            request_kwargs["max_completion_tokens"] = (
-                _OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS
-            )
-        elif response_model is StructuredFindingSynthesis:
-            request_kwargs["max_completion_tokens"] = (
-                _FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS
-            )
+        if max_completion_tokens is not None:
+            request_kwargs["max_completion_tokens"] = max_completion_tokens
         completion = self.client.beta.chat.completions.parse(**request_kwargs)
         if not completion.choices:
             raise RuntimeError("structured extraction returned no completion choices")
         message = completion.choices[0].message
         parsed = getattr(message, "parsed", None)
         if parsed is None:
-            raw_content = self._coerce_message_content(getattr(message, "content", None))
+            raw_content = coerce_message_content(getattr(message, "content", None))
             raise RuntimeError(
                 "structured extraction returned no parsed response content"
                 + (f": {raw_content[:500]}" if raw_content else "")
             )
-        raw_content = self._coerce_message_content(getattr(message, "content", None))
+        raw_content = coerce_message_content(getattr(message, "content", None))
         if isinstance(parsed, response_model):
             return parsed, raw_content
         return response_model.model_validate(parsed), raw_content
@@ -838,16 +925,16 @@ class CoreLLMStructuredExtractor:
             "elapsed_s": round(elapsed_s, 6),
             "messages": [
                 {
-                    "role": _trace_text(message.get("role")),
-                    "content": _trace_text(message.get("content"), _TRACE_TEXT_LIMIT),
+                    "role": trace_text(message.get("role")),
+                    "content": trace_text(message.get("content"), _TRACE_TEXT_LIMIT),
                 }
                 for message in messages
             ],
-            "raw_output": _trace_text(raw_content, _TRACE_TEXT_LIMIT),
-            "parsed_output": _trace_json(
+            "raw_output": trace_text(raw_content, _TRACE_TEXT_LIMIT),
+            "parsed_output": trace_json(
                 parsed_output.model_dump(mode="json") if parsed_output else None
             ),
-            "error": _trace_text(error, 1000),
+            "error": trace_text(error, 1000),
         }
 
     def _resolve_extraction_mode(self, extraction_mode: str | None) -> str:
@@ -865,135 +952,6 @@ class CoreLLMStructuredExtractor:
         )
         return _DEFAULT_EXTRACTION_MODE
 
-    def _coerce_message_content(self, content: Any) -> str:
-        if isinstance(content, str):
-            return content.strip()
-        if not isinstance(content, list):
-            return str(content or "").strip()
 
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                text = item
-            else:
-                text = getattr(item, "text", None)
-                if text is None and isinstance(item, dict):
-                    text = item.get("text")
-            if isinstance(text, str) and text.strip():
-                parts.append(text.strip())
-        return "\n".join(parts).strip()
-
-    def _extract_json_object(self, response_text: str) -> str:
-        text = str(response_text or "").strip()
-        if not text:
-            raise RuntimeError("structured extraction returned empty JSON text")
-
-        fenced_match = _JSON_FENCE_PATTERN.search(text)
-        if fenced_match is not None:
-            return fenced_match.group(1).strip()
-
-        candidates: list[str] = []
-        start: int | None = None
-        depth = 0
-        in_string = False
-        escape = False
-        for index, char in enumerate(text):
-            if in_string:
-                if escape:
-                    escape = False
-                elif char == "\\":
-                    escape = True
-                elif char == '"':
-                    in_string = False
-                continue
-            if char == '"':
-                in_string = True
-                continue
-            if char == "{" and depth == 0:
-                start = index
-            if char == "{":
-                depth += 1
-            elif char == "}" and depth:
-                depth -= 1
-                if depth == 0 and start is not None:
-                    candidates.append(text[start : index + 1])
-                    start = None
-
-        if not candidates:
-            raise RuntimeError("structured extraction returned no JSON object")
-        # Reasoning models may include malformed JSON-like examples before the
-        # final answer. The last complete object is the model's answer.
-        return candidates[-1].strip()
-
-    def _load_json_payload(self, response_text: str) -> Any:
-        try:
-            return json.loads(response_text)
-        except json.JSONDecodeError as error:
-            sanitized = self._strip_trailing_commas(response_text)
-            if sanitized == response_text:
-                raise
-            try:
-                return json.loads(sanitized)
-            except json.JSONDecodeError:
-                raise error
-
-    def _strip_trailing_commas(self, response_text: str) -> str:
-        result: list[str] = []
-        in_string = False
-        escape = False
-
-        for char in response_text:
-            if in_string:
-                result.append(char)
-                if escape:
-                    escape = False
-                elif char == "\\":
-                    escape = True
-                elif char == '"':
-                    in_string = False
-                continue
-
-            if char == '"':
-                in_string = True
-                result.append(char)
-                continue
-
-            if char in "}]":
-                last_non_whitespace = len(result) - 1
-                while last_non_whitespace >= 0 and result[last_non_whitespace].isspace():
-                    last_non_whitespace -= 1
-                if last_non_whitespace >= 0 and result[last_non_whitespace] == ",":
-                    del result[last_non_whitespace]
-                result.append(char)
-                continue
-
-            result.append(char)
-
-        return "".join(result)
-
-
-def build_default_core_llm_structured_extractor() -> CoreLLMStructuredExtractor:
-    return CoreLLMStructuredExtractor()
-
-
-def _trace_text(value: Any, limit: int = _TRACE_TEXT_LIMIT) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "...[truncated]"
-
-
-def _trace_json(
-    value: Any,
-    limit: int = _TRACE_JSON_LIMIT,
-) -> dict[str, Any] | list[Any] | str | None:
-    if value is None:
-        return None
-    text = json.dumps(value, ensure_ascii=False, sort_keys=True)
-    if len(text) <= limit:
-        return value
-    return text[:limit] + "...[truncated]"
+def build_default_objective_extractor() -> ObjectiveExtractor:
+    return ObjectiveExtractor()

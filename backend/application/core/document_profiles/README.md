@@ -8,6 +8,11 @@ summaries derived from normalized Source artifacts.
 - `service.py`
   Builds and reads `DocumentProfile` records and the collection profile
   summary used by downstream Core workflows.
+- `extraction.py`
+  Calls the configured model provider and owns document-profile completion
+  limits, retry behavior, and extraction traces.
+- `prompts.py` and `schemas.py`
+  Define the document-triage prompt and its validated response contract.
 
 ## Boundary
 

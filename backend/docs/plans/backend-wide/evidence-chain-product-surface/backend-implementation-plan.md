@@ -72,15 +72,15 @@ enough to support one stable evidence chain.
 
 Backend Core extraction and persistence:
 
-- `backend/application/core/structured_extraction/schemas.py`
-- `backend/application/core/structured_extraction/prompts.py`
+- `backend/application/core/paper_facts/schemas.py`
+- `backend/application/core/paper_facts/prompts.py`
 - `backend/application/core/paper_facts/service.py`
 - `backend/domain/core/evidence_backbone.py`
 
 Backend extraction test support:
 
-- `backend/tests/support/fake_core_llm_extractor.py`
-- `backend/tests/unit/services/test_core_llm_extractor.py`
+- `backend/tests/support/fake_domain_model_extractor.py`
+- `backend/tests/unit/services/test_domain_model_extractors.py`
 - `backend/tests/unit/services/test_paper_facts_services.py`
 
 ### Expected Changes
@@ -151,7 +151,7 @@ Value provenance:
 
 ```bash
 cd backend
-uv run pytest tests/unit/services/test_core_llm_extractor.py
+uv run pytest tests/unit/services/test_domain_model_extractors.py
 uv run pytest tests/unit/services/test_paper_facts_services.py
 ```
 
@@ -280,8 +280,8 @@ python3 scripts/check_docs_governance.py
 
 The recommended backend implementation order is:
 
-1. `backend/application/core/structured_extraction/schemas.py`
-2. `backend/application/core/structured_extraction/prompts.py`
+1. `backend/application/core/paper_facts/schemas.py`
+2. `backend/application/core/paper_facts/prompts.py`
 3. `backend/application/core/paper_facts/service.py`
 4. `backend/domain/core/evidence_backbone.py`
 5. `backend/domain/core/comparison.py`

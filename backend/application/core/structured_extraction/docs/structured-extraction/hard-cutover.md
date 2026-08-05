@@ -351,7 +351,7 @@ quietly trusting them.
 - `backend/application/source/index_task_runner.py`
 - `backend/infra/`
   new minimal OpenAI structured-calling seam
-- `backend/tests/support/fake_core_llm_extractor.py`
+- `backend/tests/support/fake_domain_model_extractor.py`
 
 ### Suggested New Backend Files
 

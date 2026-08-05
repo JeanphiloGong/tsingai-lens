@@ -9,7 +9,7 @@ from domain.core.comparison_assembly import (
 )
 from domain.core.comparison_projection import ComparisonRowProjector
 from application.core.comparison_service import ComparisonService
-from application.core.structured_extraction.prompts import (
+from application.core.paper_facts.prompts import (
     build_table_batch_mentions_prompt,
     build_text_window_extraction_prompt,
 )
@@ -19,12 +19,12 @@ from application.core.paper_facts.service import (
 from application.core.document_profiles.service import (
     DocumentProfileService,
 )
-from application.core.structured_extraction.schemas import (
+from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.paper_facts.schemas import (
     ExtractedTestConditionPayload,
     MeasurementResultPayload,
     MethodFactPayload,
     SampleVariantPayload,
-    StructuredDocumentProfile,
     StructuredExtractionBundle,
     StructuredTableBatchMentions,
     StructuredTableBatchRowMentions,

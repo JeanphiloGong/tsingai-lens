@@ -161,7 +161,7 @@ evidence-chain projection.
 
 Owned file areas:
 
-- `application/core/structured_extraction/schemas.py`
+- `application/core/paper_facts/schemas.py`
 - `application/core/paper_facts/service.py`
 - `tests/unit/services/test_paper_facts_services.py`
 
@@ -197,9 +197,9 @@ ungrounded numeric extraction.
 
 Owned file areas:
 
-- `application/core/structured_extraction/prompts.py`
-- `application/core/structured_extraction/schemas.py`
-- `tests/unit/services/test_core_llm_extractor.py`
+- `application/core/paper_facts/prompts.py`
+- `application/core/paper_facts/schemas.py`
+- `tests/unit/services/test_domain_model_extractors.py`
 - `tests/unit/services/test_paper_facts_services.py`
 
 Implementation notes:
@@ -219,7 +219,7 @@ Verification:
 
 ```bash
 cd backend
-uv run pytest tests/unit/services/test_core_llm_extractor.py
+uv run pytest tests/unit/services/test_domain_model_extractors.py
 uv run pytest tests/unit/services/test_paper_facts_services.py
 ```
 
@@ -452,7 +452,7 @@ For the full wave, run:
 
 ```bash
 cd backend
-uv run pytest tests/unit/services/test_core_llm_extractor.py
+uv run pytest tests/unit/services/test_domain_model_extractors.py
 uv run pytest tests/unit/services/test_paper_facts_services.py
 uv run pytest tests/unit/domains/test_comparison_domain.py
 uv run pytest tests/unit/routers/test_documents_api.py

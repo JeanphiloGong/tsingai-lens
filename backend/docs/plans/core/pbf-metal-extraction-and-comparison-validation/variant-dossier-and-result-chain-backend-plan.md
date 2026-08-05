@@ -328,8 +328,8 @@ Goal:
 
 Owned file areas:
 
-- `application/core/structured_extraction/schemas.py`
-- `application/core/structured_extraction/prompts.py`
+- `application/core/paper_facts/schemas.py`
+- `application/core/paper_facts/prompts.py`
 - `domain/core/evidence_backbone.py`
 - `application/core/paper_facts/service.py`
 - `tests/unit/services/test_paper_facts_services.py`

@@ -15,11 +15,11 @@ from application.core.document_profiles.service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
-from application.core.structured_extraction.extractor import (
-    CoreLLMStructuredExtractor,
-    build_default_core_llm_structured_extractor,
+from application.core.paper_facts.extraction import (
+    PaperFactsExtractor,
+    build_default_paper_facts_extractor,
 )
-from application.core.structured_extraction.schemas import (
+from application.core.paper_facts.schemas import (
     BaselineReferencePayload,
     ConditionContextPayload,
     EvidenceAnchorPayload,
@@ -429,18 +429,18 @@ class PaperFactsService:
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
         document_profile_service: DocumentProfileService,
-        structured_extractor: CoreLLMStructuredExtractor | None = None,
+        paper_facts_extractor: PaperFactsExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
         self.document_profile_service = document_profile_service
-        self._structured_extractor = structured_extractor
+        self._paper_facts_extractor = paper_facts_extractor
         self.paper_fact_repository = paper_fact_repository
         self.source_artifact_repository = source_artifact_repository
 
-    def _get_structured_extractor(self) -> CoreLLMStructuredExtractor:
-        if self._structured_extractor is None:
-            self._structured_extractor = build_default_core_llm_structured_extractor()
-        return self._structured_extractor
+    def _get_paper_facts_extractor(self) -> PaperFactsExtractor:
+        if self._paper_facts_extractor is None:
+            self._paper_facts_extractor = build_default_paper_facts_extractor()
+        return self._paper_facts_extractor
 
     def _get_max_extraction_concurrency(self) -> int:
         raw_value = os.getenv("CORE_EXTRACTION_MAX_CONCURRENCY", "").strip()
@@ -685,7 +685,7 @@ class PaperFactsService:
         baseline_rows: list[dict[str, Any]] = []
         measurement_rows: list[dict[str, Any]] = []
 
-        extractor = self._get_structured_extractor()
+        extractor = self._get_paper_facts_extractor()
         max_extraction_concurrency = self._get_max_extraction_concurrency()
         logger.info(
             "Paper facts extraction concurrency collection_id=%s max_extraction_concurrency=%s",
@@ -4344,7 +4344,7 @@ class PaperFactsService:
     def _execute_extraction_jobs(
         self,
         *,
-        extractor: CoreLLMStructuredExtractor,
+        extractor: PaperFactsExtractor,
         jobs: list[dict[str, Any]],
         kind: str,
         max_extraction_concurrency: int,
@@ -4371,7 +4371,7 @@ class PaperFactsService:
     def _execute_extraction_job(
         self,
         *,
-        extractor: CoreLLMStructuredExtractor,
+        extractor: PaperFactsExtractor,
         job: dict[str, Any],
         kind: str,
     ) -> dict[str, Any]:

@@ -1,49 +1,17 @@
-# Structured Extraction
+# Structured Extraction Support
 
-This package owns shared Core prompt text, response schemas, and model
-provider-call orchestration.
+This package owns only pure normalization used at the untrusted model-output
+boundary.
 
-## Local Components
+## Local Component
 
-- `prompts.py`
-  Builds document-profile, Objective candidate, paper-contribution, Evidence
-  extraction, paper-fact, and Finding synthesis prompts.
-- `schemas.py`
-  Defines strict Pydantic response models for each model call.
-- `extractor.py`
-  Executes provider structured parsing or the explicitly selected JSON-text
-  path, validates responses, records traces, and applies bounded completion
-  budgets.
-
-## Objective Calls
-
-The Objective path performs three model-owned decisions:
-
-1. classify one paper's contribution to the confirmed Objective;
-2. extract structured Evidence from bounded Source windows, tables, or figures;
-3. synthesize Findings from eligible direct results and bounded context.
-
-The model never assigns database ownership. Backend code binds collection,
-Objective, analysis version, document, Source locator, and deterministic IDs.
-Prompts return `extractions` for Evidence extraction and Findings for final
-synthesis; they do not return persisted route, unit, logic-chain, Claim, or
-workspace identities.
-
-The Finding response must preserve:
-
-- variables, mediators, outcomes, and direction;
-- paper or cross-paper level;
-- applicability context and limitations;
-- supporting and contradicting Evidence references;
-- agreement, conflict, condition dependence, or insufficient confirmation.
-
-Model output is always validated against the version-local Evidence set.
-Causal relations additionally require direct Evidence that marks the asserted
-variable as isolated.
+- `json_support.py`
+  Coerces provider message content, selects the last complete JSON object,
+  tolerates trailing commas, and bounds trace values.
 
 ## Boundary
 
-This is a technical mechanism shared by the `document_profiles`,
-`paper_facts`, and `objectives` domains. It does not own their application
-workflows, Source parsing, persistence, HTTP schemas, feedback, curation,
-dataset export, or frontend presentation.
+This package does not call providers and does not own prompts, response
+schemas, completion limits, retries, repair policy, or domain validation.
+Those responsibilities belong directly to `document_profiles/`,
+`paper_facts/`, and `objectives/`.

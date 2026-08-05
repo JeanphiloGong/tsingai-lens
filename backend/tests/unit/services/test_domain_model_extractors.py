@@ -6,16 +6,17 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from application.core.structured_extraction.extractor import CoreLLMStructuredExtractor
-from application.core.structured_extraction.prompts import (
+from application.core.document_profiles.extraction import DocumentProfileExtractor
+from application.core.objectives.extraction import ObjectiveExtractor
+from application.core.paper_facts.extraction import PaperFactsExtractor
+from application.core.objectives.prompts import (
     build_objective_evidence_prompt,
     build_research_objective_discovery_prompt,
     build_finding_synthesis_prompt,
 )
-from application.core.structured_extraction.schemas import (
+from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.objectives.schemas import (
     StructuredAxisCanonicalizationPlan,
-    StructuredDocumentProfile,
-    StructuredExtractionBundle,
     StructuredEvidenceContext,
     StructuredEvidenceExtraction,
     StructuredEvidenceSelections,
@@ -28,6 +29,9 @@ from application.core.structured_extraction.schemas import (
     StructuredResearchObjectives,
     StructuredFindingMechanism,
     StructuredFindingSynthesis,
+)
+from application.core.paper_facts.schemas import (
+    StructuredExtractionBundle,
     StructuredTableBatchMentions,
     StructuredTextWindowMentions,
 )
@@ -524,15 +528,33 @@ class _FakeOpenAIClient:
         self.beta = _FakeBeta(parsed, error=parse_error)
 
 
-def _json_text_extractor(client: _FakeOpenAIClient) -> CoreLLMStructuredExtractor:
-    return CoreLLMStructuredExtractor(
+def _objective_extractor(client: _FakeOpenAIClient) -> ObjectiveExtractor:
+    return ObjectiveExtractor(
         client=client,
         model="fake-model",
         extraction_mode="json_text",
     )
 
 
-def test_core_llm_extractor_validates_json_text_response():
+def _document_profile_extractor(
+    client: _FakeOpenAIClient,
+) -> DocumentProfileExtractor:
+    return DocumentProfileExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="json_text",
+    )
+
+
+def _paper_facts_extractor(client: _FakeOpenAIClient) -> PaperFactsExtractor:
+    return PaperFactsExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="json_text",
+    )
+
+
+def test_domain_model_extractors_validate_json_text_response():
     client = _FakeOpenAIClient(
         """```json
         {
@@ -545,7 +567,7 @@ def test_core_llm_extractor_validates_json_text_response():
         }
         ```"""
     )
-    extractor = _json_text_extractor(client)
+    extractor = _paper_facts_extractor(client)
 
     mentions = extractor.extract_text_window_mentions(
         {
@@ -568,12 +590,12 @@ def test_core_llm_extractor_validates_json_text_response():
     }
 
 
-def test_core_llm_extractor_uses_last_complete_json_after_model_reasoning():
+def test_domain_model_extractors_uses_last_complete_json_after_model_reasoning():
     client = _FakeOpenAIClient(
         'The draft was {"doc_type": experimental,}\n'
         'Final answer:\n{"doc_type":"experimental","confidence":0.9,"parsing_warnings":[]}'
     )
-    extractor = _json_text_extractor(client)
+    extractor = _document_profile_extractor(client)
 
     result = extractor.extract_document_profile(
         {
@@ -588,7 +610,7 @@ def test_core_llm_extractor_uses_last_complete_json_after_model_reasoning():
     assert result.confidence == 0.9
 
 
-def test_core_llm_extractor_ignores_top_level_extra_json_text_fields():
+def test_domain_model_extractors_ignores_top_level_extra_json_text_fields():
     client = _FakeOpenAIClient(
         """
         {
@@ -602,7 +624,7 @@ def test_core_llm_extractor_ignores_top_level_extra_json_text_fields():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _paper_facts_extractor(client)
 
     mentions = extractor.extract_text_window_mentions(
         {
@@ -616,11 +638,11 @@ def test_core_llm_extractor_ignores_top_level_extra_json_text_fields():
     assert mentions.result_claims == []
 
 
-def test_core_llm_extractor_defaults_to_provider_parse_mode(monkeypatch):
+def test_domain_model_extractors_defaults_to_provider_parse_mode(monkeypatch):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
     parsed_mentions = StructuredTextWindowMentions()
     client = _FakeOpenAIClient("unused", parsed=parsed_mentions)
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = PaperFactsExtractor(client=client, model="fake-model")
 
     mentions = extractor.extract_text_window_mentions(
         {
@@ -641,7 +663,7 @@ def test_core_llm_extractor_defaults_to_provider_parse_mode(monkeypatch):
     }
 
 
-def test_core_llm_extractor_routes_research_objectives_to_bounded_json_text(
+def test_domain_model_extractors_routes_research_objectives_to_bounded_json_text(
     monkeypatch,
 ):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
@@ -655,7 +677,7 @@ def test_core_llm_extractor_routes_research_objectives_to_bounded_json_text(
         ]
     )
     client = _FakeOpenAIClient(parsed_objectives.model_dump_json())
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
 
     objectives = extractor.discover_research_objectives(
         {"collection_id": "col-1", "paper_skims": []}
@@ -671,10 +693,10 @@ def test_core_llm_extractor_routes_research_objectives_to_bounded_json_text(
 
 
 
-def test_core_llm_extractor_synthesizes_goal_findings_with_distinct_trace():
+def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace():
     parsed = StructuredFindingSynthesis(findings=[])
     client = _FakeOpenAIClient("unused", parsed=parsed)
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
     payload = {
         "objective": {"question": "How does energy density affect density?"},
         "result_set": {
@@ -698,9 +720,9 @@ def test_core_llm_extractor_synthesizes_goal_findings_with_distinct_trace():
     assert trace["parsed_output"] == {"findings": []}
 
 
-def test_core_llm_extractor_bounds_json_text_finding_synthesis_output():
+def test_domain_model_extractors_bounds_json_text_finding_synthesis_output():
     client = _FakeOpenAIClient('{"findings": []}')
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     result = extractor.synthesize_findings(
         {
@@ -913,7 +935,7 @@ def test_finding_synthesis_prompt_carries_backend_semantic_rejection():
     assert "Re-read result_evidence for its exact direction" in user_prompt
 
 
-def test_core_llm_extractor_allows_explicit_json_text_mode(monkeypatch):
+def test_domain_model_extractors_allows_explicit_json_text_mode(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "json_text")
     client = _FakeOpenAIClient(
         """
@@ -927,7 +949,7 @@ def test_core_llm_extractor_allows_explicit_json_text_mode(monkeypatch):
         }
         """
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = PaperFactsExtractor(client=client, model="fake-model")
 
     mentions = extractor.extract_text_window_mentions(
         {
@@ -942,7 +964,7 @@ def test_core_llm_extractor_allows_explicit_json_text_mode(monkeypatch):
     assert client.beta.chat.completions.calls == []
 
 
-def test_core_llm_extractor_validates_paper_skim_response():
+def test_domain_model_extractors_validates_paper_skim_response():
     client = _FakeOpenAIClient(
         """
         {
@@ -960,7 +982,7 @@ def test_core_llm_extractor_validates_paper_skim_response():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     skim = extractor.extract_paper_skim(
         {
@@ -976,7 +998,7 @@ def test_core_llm_extractor_validates_paper_skim_response():
     assert skim.candidate_materials == ["316L stainless steel"]
 
 
-def test_core_llm_extractor_validates_research_objective_response():
+def test_domain_model_extractors_validates_research_objective_response():
     client = _FakeOpenAIClient(
         """
         {
@@ -997,7 +1019,7 @@ def test_core_llm_extractor_validates_research_objective_response():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     objectives = extractor.discover_research_objectives(
         {
@@ -1013,7 +1035,7 @@ def test_core_llm_extractor_validates_research_objective_response():
     assert text_call["response_format"] == {"type": "json_object"}
 
 
-def test_core_llm_extractor_retries_reversed_research_objective_roles():
+def test_domain_model_extractors_retries_reversed_research_objective_roles():
     invalid = json.dumps(
         {
             "objectives": [
@@ -1050,7 +1072,7 @@ def test_core_llm_extractor_retries_reversed_research_objective_roles():
         )
 
     client.chat.completions.create = create
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     objectives = extractor.discover_research_objectives(
         {"collection_id": "col-1", "paper_skims": []}
@@ -1065,7 +1087,7 @@ def test_core_llm_extractor_retries_reversed_research_objective_roles():
     assert "put the full missing label verbatim" in repair_prompt
 
 
-def test_core_llm_extractor_preserves_valid_objectives_during_role_repair():
+def test_domain_model_extractors_preserves_valid_objectives_during_role_repair():
     valid_objective = {
         "question": "How does heat treatment affect yield strength?",
         "variables": ["heat treatment"],
@@ -1106,7 +1128,7 @@ def test_core_llm_extractor_preserves_valid_objectives_during_role_repair():
         )
 
     client.chat.completions.create = create
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     objectives = extractor.discover_research_objectives(
         {"collection_id": "col-1", "paper_skims": []}
@@ -1123,7 +1145,7 @@ def test_core_llm_extractor_preserves_valid_objectives_during_role_repair():
     ]
 
 
-def test_core_llm_extractor_repairs_repeated_trailing_scope_role_errors():
+def test_domain_model_extractors_repairs_repeated_trailing_scope_role_errors():
     invalid = json.dumps(
         {
             "objectives": [
@@ -1143,7 +1165,7 @@ def test_core_llm_extractor_repairs_repeated_trailing_scope_role_errors():
         }
     )
     client = _FakeOpenAIClient(invalid)
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     objectives = extractor.discover_research_objectives(
         {"collection_id": "col-1", "paper_skims": []}
@@ -1157,7 +1179,7 @@ def test_core_llm_extractor_repairs_repeated_trailing_scope_role_errors():
     assert repaired.outcomes == ["relative density"]
 
 
-def test_core_llm_extractor_rejects_repeated_reversed_research_objective_roles():
+def test_domain_model_extractors_rejects_repeated_reversed_research_objective_roles():
     invalid = json.dumps(
         {
             "objectives": [
@@ -1170,7 +1192,7 @@ def test_core_llm_extractor_rejects_repeated_reversed_research_objective_roles()
         }
     )
     client = _FakeOpenAIClient(invalid)
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     with pytest.raises(ValidationError, match="question roles"):
         extractor.discover_research_objectives(
@@ -1180,7 +1202,7 @@ def test_core_llm_extractor_rejects_repeated_reversed_research_objective_roles()
     assert len(client.chat.completions.calls) == 2
 
 
-def test_core_llm_extractor_validates_axis_canonicalization_response():
+def test_domain_model_extractors_validates_axis_canonicalization_response():
     client = _FakeOpenAIClient(
         """
         {
@@ -1196,7 +1218,7 @@ def test_core_llm_extractor_validates_axis_canonicalization_response():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     canonicalization_plan = extractor.canonicalize_research_objective_axes(
         {
@@ -1214,7 +1236,7 @@ def test_core_llm_extractor_validates_axis_canonicalization_response():
     assert canonicalization_plan.axis_groups[0].canonical == "scanning strategy"
 
 
-def test_core_llm_extractor_validates_research_objective_merge_response():
+def test_domain_model_extractors_validates_research_objective_merge_response():
     client = _FakeOpenAIClient(
         """
         {
@@ -1234,7 +1256,7 @@ def test_core_llm_extractor_validates_research_objective_merge_response():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     merge_plan = extractor.merge_research_objectives(
         {
@@ -1261,7 +1283,7 @@ def test_structured_objective_merge_group_rejects_reversed_question_roles():
         )
 
 
-def test_core_llm_extractor_retries_reversed_objective_merge_roles():
+def test_domain_model_extractors_retries_reversed_objective_merge_roles():
     invalid = json.dumps(
         {
             "merged_objectives": [
@@ -1298,7 +1320,7 @@ def test_core_llm_extractor_retries_reversed_objective_merge_roles():
         )
 
     client.chat.completions.create = create
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     merge_plan = extractor.merge_research_objectives(
         {"collection_id": "col-1", "paper_skims": [], "candidate_objectives": []}
@@ -1310,7 +1332,7 @@ def test_core_llm_extractor_retries_reversed_objective_merge_roles():
     assert "question roles" in repair_prompt
 
 
-def test_core_llm_extractor_rejects_repeated_reversed_objective_merge_roles():
+def test_domain_model_extractors_rejects_repeated_reversed_objective_merge_roles():
     invalid = json.dumps(
         {
             "merged_objectives": [
@@ -1325,7 +1347,7 @@ def test_core_llm_extractor_rejects_repeated_reversed_objective_merge_roles():
         }
     )
     client = _FakeOpenAIClient(invalid)
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     with pytest.raises(ValidationError, match="question roles"):
         extractor.merge_research_objectives(
@@ -1339,7 +1361,7 @@ def test_core_llm_extractor_rejects_repeated_reversed_objective_merge_roles():
     assert len(client.chat.completions.calls) == 2
 
 
-def test_core_llm_extractor_validates_objective_paper_frame_response():
+def test_domain_model_extractors_validates_objective_paper_frame_response():
     client = _FakeOpenAIClient(
         """
         {
@@ -1356,7 +1378,7 @@ def test_core_llm_extractor_validates_objective_paper_frame_response():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     frame = extractor.assess_objective_paper(
         {
@@ -1373,7 +1395,7 @@ def test_core_llm_extractor_validates_objective_paper_frame_response():
     assert frame.relevant_tables == ["table-1"]
 
 
-def test_core_llm_extractor_validates_objective_evidence_routes_response():
+def test_domain_model_extractors_validates_objective_evidence_routes_response():
     client = _FakeOpenAIClient(
         """
             {
@@ -1387,7 +1409,7 @@ def test_core_llm_extractor_validates_objective_evidence_routes_response():
             }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     routes = extractor.select_objective_evidence(
         {
@@ -1403,9 +1425,9 @@ def test_core_llm_extractor_validates_objective_evidence_routes_response():
     assert "reason" not in routes.selections[0].model_dump()
 
 
-def test_core_llm_extractor_rejects_legacy_objective_route_batches():
+def test_domain_model_extractors_rejects_legacy_objective_route_batches():
     client = _FakeOpenAIClient('{"selections": []}')
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     with pytest.raises(ValueError):
         extractor.select_objective_evidence(
@@ -1420,7 +1442,7 @@ def test_core_llm_extractor_rejects_legacy_objective_route_batches():
         )
 
 
-def test_core_llm_extractor_rejects_verbose_objective_route_objects():
+def test_domain_model_extractors_rejects_verbose_objective_route_objects():
     client = _FakeOpenAIClient(
         """
         {
@@ -1438,7 +1460,7 @@ def test_core_llm_extractor_rejects_verbose_objective_route_objects():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     with pytest.raises(ValidationError):
         extractor.select_objective_evidence(
@@ -1451,7 +1473,7 @@ def test_core_llm_extractor_rejects_verbose_objective_route_objects():
         )
 
 
-def test_core_llm_extractor_rejects_source_ids_in_objective_routes():
+def test_domain_model_extractors_rejects_source_ids_in_objective_routes():
     client = _FakeOpenAIClient(
         """
         {
@@ -1468,7 +1490,7 @@ def test_core_llm_extractor_rejects_source_ids_in_objective_routes():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     with pytest.raises(ValidationError):
         extractor.select_objective_evidence(
@@ -1481,7 +1503,7 @@ def test_core_llm_extractor_rejects_source_ids_in_objective_routes():
         )
 
 
-def test_core_llm_extractor_validates_objective_evidence_response():
+def test_domain_model_extractors_validates_objective_evidence_response():
     client = _FakeOpenAIClient(
         """
         {
@@ -1526,7 +1548,7 @@ def test_core_llm_extractor_validates_objective_evidence_response():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     extractions = extractor.extract_objective_evidence(
         {
@@ -1665,7 +1687,7 @@ def test_structured_objective_evidence_downgrades_unbound_experimental_attributi
     assert extraction.attribution_scope == "association_only"
 
 
-def test_core_llm_extractor_ignores_top_level_prompt_echo_for_evidence():
+def test_domain_model_extractors_ignores_top_level_prompt_echo_for_evidence():
     response = json.dumps(
         {
             "extractions": [
@@ -1691,7 +1713,7 @@ def test_core_llm_extractor_ignores_top_level_prompt_echo_for_evidence():
             "SOURCE": "Relative density reached 99.5%.",
         }
     )
-    extractor = _json_text_extractor(_FakeOpenAIClient(response))
+    extractor = _objective_extractor(_FakeOpenAIClient(response))
 
     parsed = extractor.extract_objective_evidence(
         {
@@ -1714,7 +1736,7 @@ def test_core_llm_extractor_ignores_top_level_prompt_echo_for_evidence():
     assert parsed.extractions[0].reported_result is not None
 
 
-def test_core_llm_extractor_rejects_unknown_top_level_evidence_fields():
+def test_domain_model_extractors_rejects_unknown_top_level_evidence_fields():
     response = json.dumps(
         {
             "extractions": [],
@@ -1722,7 +1744,7 @@ def test_core_llm_extractor_rejects_unknown_top_level_evidence_fields():
         }
     )
     client = _FakeOpenAIClient(response)
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     with pytest.raises(ValidationError):
         extractor.extract_objective_evidence(
@@ -1745,7 +1767,7 @@ def test_core_llm_extractor_rejects_unknown_top_level_evidence_fields():
     assert len(client.chat.completions.calls) == 2
 
 
-def test_core_llm_extractor_treats_prompt_only_evidence_echo_as_empty():
+def test_domain_model_extractors_treats_prompt_only_evidence_echo_as_empty():
     response = json.dumps(
         {
             "OBJECTIVE": "How does energy density affect relative density?",
@@ -1758,7 +1780,7 @@ def test_core_llm_extractor_treats_prompt_only_evidence_echo_as_empty():
             "SOURCE": "Relative density reached 99.5%.",
         }
     )
-    extractor = _json_text_extractor(_FakeOpenAIClient(response))
+    extractor = _objective_extractor(_FakeOpenAIClient(response))
 
     parsed = extractor.extract_objective_evidence(
         {
@@ -1890,7 +1912,7 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     assert "Unrelated composition example" in system_prompt
 
 
-def test_core_llm_extractor_rejects_backend_bound_objective_evidence_fields():
+def test_domain_model_extractors_rejects_backend_bound_objective_evidence_fields():
     client = _FakeOpenAIClient(
         """
         {
@@ -1918,7 +1940,7 @@ def test_core_llm_extractor_rejects_backend_bound_objective_evidence_fields():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _objective_extractor(client)
 
     with pytest.raises(ValidationError):
         extractor.extract_objective_evidence(
@@ -1938,7 +1960,7 @@ def test_core_llm_extractor_rejects_backend_bound_objective_evidence_fields():
         )
 
 
-def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():
+def test_domain_model_extractors_sanitizes_json_text_and_coerces_text_window_enums():
     client = _FakeOpenAIClient(
         """
         {
@@ -1987,7 +2009,7 @@ def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _paper_facts_extractor(client)
 
     mentions = extractor.extract_text_window_mentions(
         {
@@ -2006,7 +2028,7 @@ def test_core_llm_extractor_sanitizes_json_text_and_coerces_text_window_enums():
     assert mentions.result_claims[0].claim_scope == "prior_work"
 
 
-def test_core_llm_extractor_accepts_null_result_property_names():
+def test_domain_model_extractors_accepts_null_result_property_names():
     client = _FakeOpenAIClient(
         """
         {
@@ -2031,7 +2053,7 @@ def test_core_llm_extractor_accepts_null_result_property_names():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _paper_facts_extractor(client)
 
     mentions = extractor.extract_text_window_mentions(
         {
@@ -2047,12 +2069,12 @@ def test_core_llm_extractor_accepts_null_result_property_names():
     assert mentions.result_claims[0].property_normalized == ""
 
 
-def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_batches(
+def test_domain_model_extractors_caps_provider_parse_completion_tokens_for_table_batches(
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     client = _FakeOpenAIClient("unused", parsed=StructuredTableBatchMentions())
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = PaperFactsExtractor(client=client, model="fake-model")
 
     mentions = extractor.extract_table_batch_mentions(
         {
@@ -2072,14 +2094,14 @@ def test_core_llm_extractor_caps_provider_parse_completion_tokens_for_table_batc
     }
 
 
-def test_core_llm_extractor_routes_document_profiles_directly_to_bounded_json_text(
+def test_domain_model_extractors_routes_document_profiles_directly_to_bounded_json_text(
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     client = _FakeOpenAIClient(
         '{"doc_type":"experimental","parsing_warnings":[],"confidence":0.91}'
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = DocumentProfileExtractor(client=client, model="fake-model")
 
     profile = extractor.extract_document_profile(
         {
@@ -2104,11 +2126,11 @@ def test_core_llm_extractor_routes_document_profiles_directly_to_bounded_json_te
     assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
 
 
-def test_core_llm_extractor_can_opt_in_to_provider_thinking(monkeypatch):
+def test_domain_model_extractors_can_opt_in_to_provider_thinking(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     monkeypatch.setenv("LLM_ENABLE_THINKING", "true")
     client = _FakeOpenAIClient("unused", parsed=StructuredTableBatchMentions())
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = PaperFactsExtractor(client=client, model="fake-model")
 
     extractor.extract_table_batch_mentions(
         {
@@ -2122,12 +2144,12 @@ def test_core_llm_extractor_can_opt_in_to_provider_thinking(monkeypatch):
     assert "extra_body" not in client.beta.chat.completions.calls[0]
 
 
-def test_core_llm_extractor_routes_objective_selections_directly_to_bounded_json_text(
+def test_domain_model_extractors_routes_objective_selections_directly_to_bounded_json_text(
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     client = _FakeOpenAIClient('{"selections":[]}')
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
 
     routes = extractor.select_objective_evidence(
         {
@@ -2150,7 +2172,7 @@ def test_core_llm_extractor_routes_objective_selections_directly_to_bounded_json
     assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
 
 
-def test_core_llm_extractor_routes_objective_units_through_bounded_json_text(
+def test_domain_model_extractors_routes_objective_units_through_bounded_json_text(
     monkeypatch,
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
@@ -2158,7 +2180,7 @@ def test_core_llm_extractor_routes_objective_units_through_bounded_json_text(
         '{"extractions":[]}',
         parsed=StructuredEvidenceExtractions(),
     )
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
 
     units = extractor.extract_objective_evidence(
         {
@@ -2203,7 +2225,7 @@ def test_objective_evidence_prompt_requires_verbatim_outcome_bound_result_text()
     assert "Do not output source excerpts" not in system_prompt
 
 
-def test_core_llm_extractor_retries_with_structured_validation_error(monkeypatch):
+def test_domain_model_extractors_retries_with_structured_validation_error(monkeypatch):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     invalid = json.dumps(
         {
@@ -2280,7 +2302,7 @@ def test_core_llm_extractor_retries_with_structured_validation_error(monkeypatch
         )
 
     client.chat.completions.create = create
-    extractor = CoreLLMStructuredExtractor(client=client, model="fake-model")
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
 
     parsed = extractor.extract_objective_evidence(
         {
@@ -2308,7 +2330,7 @@ def test_core_llm_extractor_retries_with_structured_validation_error(monkeypatch
 
 
 
-def test_core_llm_extractor_validates_lightweight_table_batch_mentions():
+def test_domain_model_extractors_validates_lightweight_table_batch_mentions():
     client = _FakeOpenAIClient(
         """
         {
@@ -2353,7 +2375,7 @@ def test_core_llm_extractor_validates_lightweight_table_batch_mentions():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _paper_facts_extractor(client)
 
     mentions = extractor.extract_table_batch_mentions(
         {
@@ -2398,7 +2420,7 @@ def test_structured_bundle_defaults_null_backend_metadata():
     assert bundle.measurement_results[0].confidence == 0.85
 
 
-def test_core_llm_extractor_accepts_empty_table_batch_mentions():
+def test_domain_model_extractors_accepts_empty_table_batch_mentions():
     client = _FakeOpenAIClient(
         """
         {
@@ -2406,7 +2428,7 @@ def test_core_llm_extractor_accepts_empty_table_batch_mentions():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _paper_facts_extractor(client)
 
     mentions = extractor.extract_table_batch_mentions(
         {
@@ -2420,7 +2442,7 @@ def test_core_llm_extractor_accepts_empty_table_batch_mentions():
     assert mentions == StructuredTableBatchMentions()
 
 
-def test_core_llm_extractor_still_rejects_unknown_table_batch_extra_keys():
+def test_domain_model_extractors_still_rejects_unknown_table_batch_extra_keys():
     client = _FakeOpenAIClient(
         """
         {
@@ -2429,7 +2451,7 @@ def test_core_llm_extractor_still_rejects_unknown_table_batch_extra_keys():
         }
         """
     )
-    extractor = _json_text_extractor(client)
+    extractor = _paper_facts_extractor(client)
 
     with pytest.raises(ValidationError) as exc_info:
         extractor.extract_table_batch_mentions(
@@ -2444,11 +2466,11 @@ def test_core_llm_extractor_still_rejects_unknown_table_batch_extra_keys():
     assert "keywords" in str(exc_info.value)
 
 
-def test_core_llm_extractor_falls_back_to_default_for_invalid_mode(monkeypatch, caplog):
+def test_domain_model_extractors_falls_back_to_default_for_invalid_mode(monkeypatch, caplog):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "not-a-mode")
 
     with caplog.at_level("WARNING"):
-        extractor = CoreLLMStructuredExtractor(client=_FakeOpenAIClient("{}"), model="fake-model")
+        extractor = ObjectiveExtractor(client=_FakeOpenAIClient("{}"), model="fake-model")
 
     assert extractor.extraction_mode == "provider_parse"
     assert "Invalid CORE_LLM_EXTRACTION_MODE=not-a-mode" in caplog.text

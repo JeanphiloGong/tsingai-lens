@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha1
 from typing import Any, Mapping
 
-from application.core.structured_extraction.extractor import CoreLLMStructuredExtractor
+from application.core.objectives.extraction import ObjectiveExtractor
 from domain.core import (
     Finding,
     FindingPaperContribution,
@@ -40,8 +40,8 @@ _J_PER_CUBIC_MM_RE = re.compile(
 class FindingSynthesisService:
     """Synthesize one-outcome, source-backed Findings for an analysis version."""
 
-    def __init__(self, structured_extractor: Any | None = None) -> None:
-        self.structured_extractor = structured_extractor or CoreLLMStructuredExtractor()
+    def __init__(self, finding_extractor: Any | None = None) -> None:
+        self.finding_extractor = finding_extractor or ObjectiveExtractor()
 
     def synthesize(
         self,
@@ -130,7 +130,7 @@ class FindingSynthesisService:
                 if candidate_rejection is not None:
                     request_payload["candidate_rejection"] = candidate_rejection
                 try:
-                    parsed = self.structured_extractor.synthesize_findings(
+                    parsed = self.finding_extractor.synthesize_findings(
                         request_payload
                     )
                 except Exception:  # noqa: BLE001

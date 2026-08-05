@@ -8,6 +8,11 @@ Source artifacts.
 - `service.py`
   Builds and reads evidence anchors, methods, sample variants, test
   conditions, baselines, measurements, and characterization observations.
+- `extraction.py`
+  Calls the configured model provider for text windows and table batches and
+  owns paper-fact completion limits, retry behavior, and extraction traces.
+- `prompts.py` and `schemas.py`
+  Define paper-fact prompts and their validated response contracts.
 
 ## Boundary
 

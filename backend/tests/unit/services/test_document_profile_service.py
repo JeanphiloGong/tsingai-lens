@@ -182,7 +182,7 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
         collection_service,
         source_artifact_repository=MemorySourceArtifactRepository(),
         paper_fact_repository=MemoryPaperFactRepository(),
-        structured_extractor=ExplodingExtractor(),
+        document_profile_extractor=ExplodingExtractor(),
     )
     collection = collection_service.create_collection("Sparse Profiles")
     collection_id = collection["collection_id"]

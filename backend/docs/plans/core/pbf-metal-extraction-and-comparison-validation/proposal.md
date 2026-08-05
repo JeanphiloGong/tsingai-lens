@@ -243,11 +243,11 @@ table row, then materializes each returned bundle:
 
 ### Expected file areas
 
-- `application/core/structured_extraction/extractor.py`
-- `application/core/structured_extraction/prompts.py`
-- `application/core/structured_extraction/schemas.py`
+- `application/core/paper_facts/extraction.py`
+- `application/core/paper_facts/prompts.py`
+- `application/core/paper_facts/schemas.py`
 - `application/core/paper_facts/service.py`
-- `tests/support/fake_core_llm_extractor.py`
+- `tests/support/fake_domain_model_extractor.py`
 - `tests/unit/services/test_paper_facts_services.py`
 
 ### Exit criteria
@@ -309,8 +309,8 @@ for:
 
 ### Expected file areas
 
-- `application/core/structured_extraction/schemas.py`
-- `application/core/structured_extraction/prompts.py`
+- `application/core/paper_facts/schemas.py`
+- `application/core/paper_facts/prompts.py`
 - `domain/core/evidence_backbone.py`
 - `application/core/paper_facts/service.py`
 
@@ -365,8 +365,8 @@ distinguish:
 
 ### Expected file areas
 
-- `application/core/structured_extraction/schemas.py`
-- `application/core/structured_extraction/prompts.py`
+- `application/core/paper_facts/schemas.py`
+- `application/core/paper_facts/prompts.py`
 - `domain/core/evidence_backbone.py`
 - `application/core/paper_facts/service.py`
 - `application/core/comparison_assembly.py`

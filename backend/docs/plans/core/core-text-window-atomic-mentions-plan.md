@@ -108,11 +108,11 @@ This plan explicitly rejects:
 This plan covers:
 
 - text-window LLM schema changes under
-  `application/core/structured_extraction/schemas.py`
+  `application/core/paper_facts/schemas.py`
 - text-window prompt changes under
-  `application/core/structured_extraction/prompts.py`
+  `application/core/paper_facts/prompts.py`
 - text-window parse entry changes under
-  `application/core/structured_extraction/extractor.py`
+  `application/core/paper_facts/extraction.py`
 - deterministic binding from atomic mentions into the existing Core artifact
   bundle inside `application/core/paper_facts/service.py`
 - propagation of `claim_scope` into Core measurement-result materialization
@@ -225,11 +225,11 @@ Primary changes:
 
 Expected file areas:
 
-- `application/core/structured_extraction/schemas.py`
-- `application/core/structured_extraction/prompts.py`
+- `application/core/paper_facts/schemas.py`
+- `application/core/paper_facts/prompts.py`
 - `application/core/paper_facts/service.py`
 - `tests/unit/services/test_paper_facts_services.py`
-- `tests/support/fake_core_llm_extractor.py`
+- `tests/support/fake_domain_model_extractor.py`
 
 Acceptance:
 
@@ -253,10 +253,10 @@ Primary changes:
 
 Expected file areas:
 
-- `application/core/structured_extraction/schemas.py`
-- `application/core/structured_extraction/prompts.py`
-- `application/core/structured_extraction/extractor.py`
-- `tests/support/fake_core_llm_extractor.py`
+- `application/core/paper_facts/schemas.py`
+- `application/core/paper_facts/prompts.py`
+- `application/core/paper_facts/extraction.py`
+- `tests/support/fake_domain_model_extractor.py`
 
 Acceptance:
 
@@ -373,14 +373,14 @@ comparison test slice as well.
 
 The first implementation wave should stay tightly scoped to:
 
-- `backend/application/core/structured_extraction/schemas.py`
-- `backend/application/core/structured_extraction/prompts.py`
-- `backend/application/core/structured_extraction/extractor.py`
+- `backend/application/core/paper_facts/schemas.py`
+- `backend/application/core/paper_facts/prompts.py`
+- `backend/application/core/paper_facts/extraction.py`
 - `backend/application/core/paper_facts/service.py`
 - `backend/domain/core/evidence_backbone.py`
 - `backend/application/core/comparison_assembly.py` only if the
   `claim_scope` gate lands immediately
-- `backend/tests/support/fake_core_llm_extractor.py`
+- `backend/tests/support/fake_domain_model_extractor.py`
 - `backend/tests/unit/services/test_paper_facts_services.py`
 
 ## Related Docs

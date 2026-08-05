@@ -5,10 +5,10 @@ from typing import Any
 
 import pytest
 
-from application.core.structured_extraction.schemas import (
+from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.objectives.schemas import (
     StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,
-    StructuredDocumentProfile,
     StructuredEvidenceSelection,
     StructuredEvidenceSelections,
     StructuredEvidenceExtraction,
@@ -21,8 +21,8 @@ from application.core.structured_extraction.schemas import (
     StructuredPaperSkim,
     StructuredResearchObjective,
     StructuredResearchObjectives,
-    StructuredTableMatrixRepair,
 )
+from application.core.paper_facts.schemas import StructuredTableMatrixRepair
 from application.core.objectives.research_objective_service import (
     EvidenceCandidate,
     ExtractedEvidenceDraft,
@@ -90,7 +90,7 @@ def _build_research_objective_service(
     finding_synthesis_service = kwargs.pop(
         "finding_synthesis_service",
         FindingSynthesisService(
-            structured_extractor=kwargs.get("structured_extractor"),
+            finding_extractor=kwargs.get("objective_extractor"),
         ),
     )
     return _ResearchObjectiveService(
@@ -6668,9 +6668,9 @@ def test_research_objective_service_builds_and_persists_objective_records(
     extractor = _ObjectiveExtractor()
     service = _build_research_objective_service(
         collection_service=collection_service,
-        structured_extractor=extractor,
+        objective_extractor=extractor,
     )
-    service.finding_synthesis_service.structured_extractor = extractor
+    service.finding_synthesis_service.finding_extractor = extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         "build_test",
@@ -6831,7 +6831,7 @@ def test_research_objective_service_preserves_discovered_scientific_intent(tmp_p
     collection_id = collection["collection_id"]
     service = _build_research_objective_service(
         collection_service=collection_service,
-        structured_extractor=_BroadObjectiveExtractor(),
+        objective_extractor=_BroadObjectiveExtractor(),
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
@@ -6886,7 +6886,7 @@ def test_research_objective_service_merges_overlapping_mechanical_objectives(
     collection_id = collection["collection_id"]
     service = _build_research_objective_service(
         collection_service=collection_service,
-        structured_extractor=_DuplicateMechanicalObjectiveExtractor(),
+        objective_extractor=_DuplicateMechanicalObjectiveExtractor(),
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
@@ -6956,7 +6956,7 @@ def test_research_objective_service_persists_definitions_without_analysis_artifa
     collection_id = collection["collection_id"]
     service = _build_research_objective_service(
         collection_service=collection_service,
-        structured_extractor=_DuplicateMechanicalObjectiveExtractor(),
+        objective_extractor=_DuplicateMechanicalObjectiveExtractor(),
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
@@ -7065,9 +7065,9 @@ def test_research_objective_service_persists_definitions_without_analysis_artifa
         "microhardness",
     )
     assert facts.research_objectives == objectives
-    assert service._structured_extractor.frame_payloads == []
-    assert service._structured_extractor.route_payloads == []
-    assert service._structured_extractor.unit_payloads == []
+    assert service._objective_extractor.frame_payloads == []
+    assert service._objective_extractor.route_payloads == []
+    assert service._objective_extractor.unit_payloads == []
 
 
 def test_research_objective_service_canonicalizes_axis_aliases_with_llm(
@@ -7254,7 +7254,7 @@ def test_research_objective_service_rejects_ambiguous_missing_seed_document_id(
     ]
     service = _build_research_objective_service(
         collection_service=collection_service,
-        structured_extractor=_MissingSeedObjectiveExtractor(),
+        objective_extractor=_MissingSeedObjectiveExtractor(),
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
@@ -7298,7 +7298,7 @@ def test_research_objective_service_rejects_overbroad_candidate_definition(
     collection_id = collection["collection_id"]
     service = _build_research_objective_service(
         collection_service=collection_service,
-        structured_extractor=_OverbroadPersistedObjectiveExtractor(),
+        objective_extractor=_OverbroadPersistedObjectiveExtractor(),
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
@@ -7389,7 +7389,7 @@ def test_research_objective_service_dedupes_repeated_objective_ids_before_persis
     collection_id = collection["collection_id"]
     service = _build_research_objective_service(
         collection_service=collection_service,
-        structured_extractor=_DuplicateObjectiveIdExtractor(),
+        objective_extractor=_DuplicateObjectiveIdExtractor(),
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
@@ -7435,9 +7435,9 @@ def test_objective_analysis_uses_deterministic_frame_when_frame_model_fails(
     extractor = _FailingFrameExtractor()
     service = _build_research_objective_service(
         collection_service=collection_service,
-        structured_extractor=extractor,
+        objective_extractor=extractor,
     )
-    service.finding_synthesis_service.structured_extractor = extractor
+    service.finding_synthesis_service.finding_extractor = extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         "build_test",
@@ -7527,9 +7527,9 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
     collection_id = collection["collection_id"]
     service = _build_research_objective_service(
         collection_service=collection_service,
-        structured_extractor=_ObjectiveExtractor(),
+        objective_extractor=_ObjectiveExtractor(),
     )
-    service.finding_synthesis_service.structured_extractor = service._structured_extractor
+    service.finding_synthesis_service.finding_extractor = service._objective_extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         "build_test",
@@ -7607,8 +7607,8 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
     analysis = _queue_running_analysis(service, collection_id, objective.objective_id)
 
     failing_extractor = _FailingRouteExtractor()
-    service._structured_extractor = failing_extractor
-    service.finding_synthesis_service.structured_extractor = failing_extractor
+    service._objective_extractor = failing_extractor
+    service.finding_synthesis_service.finding_extractor = failing_extractor
     artifacts = service.generate_objective_analysis_artifacts(
         collection_id, analysis
     )
@@ -7630,9 +7630,9 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
     extractor = _ObjectiveExtractor()
     service = _build_research_objective_service(
         collection_service=collection_service,
-        structured_extractor=extractor,
+        objective_extractor=extractor,
     )
-    service.finding_synthesis_service.structured_extractor = extractor
+    service.finding_synthesis_service.finding_extractor = extractor
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,
         "build_test",
@@ -7731,7 +7731,7 @@ def _build_duplicate_paper_objectives(
     collection_id = collection["collection_id"]
     service = _build_research_objective_service(
         collection_service=collection_service,
-        structured_extractor=extractor,
+        objective_extractor=extractor,
     )
     service.source_artifact_repository.replace_collection_artifacts(
         collection_id,

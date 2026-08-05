@@ -28,8 +28,9 @@ reviewable result uses the complete Finding identity
   Discovers candidate Objectives and owns confirmed, versioned analysis through
   atomic Finding publication.
 - `structured_extraction/`
-  Owns shared prompts, response schemas, provider calls, and validation for
-  structured model output.
+  Owns only domain-neutral message-content and JSON normalization. Domain
+  packages own their prompts, response schemas, provider calls, retries, and
+  model-specific validation.
 - `comparison_service.py`
   Builds deterministic comparable-result and comparison projections.
 - `research_view_aggregation_service.py`

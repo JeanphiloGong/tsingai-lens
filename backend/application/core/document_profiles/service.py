@@ -7,9 +7,9 @@ import math
 from pathlib import Path
 from typing import Any, Mapping
 
-from application.core.structured_extraction.extractor import (
-    CoreLLMStructuredExtractor,
-    build_default_core_llm_structured_extractor,
+from application.core.document_profiles.extraction import (
+    DocumentProfileExtractor,
+    build_default_document_profile_extractor,
 )
 from application.source.collection_service import CollectionService
 from domain.core.document_profile import (
@@ -93,10 +93,10 @@ class DocumentProfileService:
         collection_service: CollectionService,
         source_artifact_repository: SourceArtifactRepository,
         paper_fact_repository: PaperFactRepository,
-        structured_extractor: CoreLLMStructuredExtractor | None = None,
+        document_profile_extractor: DocumentProfileExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
-        self._structured_extractor = structured_extractor
+        self._document_profile_extractor = document_profile_extractor
         self.paper_fact_repository = paper_fact_repository
         self.source_artifact_repository = source_artifact_repository
 
@@ -268,10 +268,10 @@ class DocumentProfileService:
         )
         return normalized_profiles
 
-    def _get_structured_extractor(self) -> CoreLLMStructuredExtractor:
-        if self._structured_extractor is None:
-            self._structured_extractor = build_default_core_llm_structured_extractor()
-        return self._structured_extractor
+    def _get_document_profile_extractor(self) -> DocumentProfileExtractor:
+        if self._document_profile_extractor is None:
+            self._document_profile_extractor = build_default_document_profile_extractor()
+        return self._document_profile_extractor
 
     def _load_source_artifacts(
         self,
@@ -364,7 +364,7 @@ class DocumentProfileService:
                 }
             ).to_record()
 
-        extracted = self._get_structured_extractor().extract_document_profile(
+        extracted = self._get_document_profile_extractor().extract_document_profile(
             profile_payload
         )
         parsing_warnings = list(extracted.parsing_warnings)

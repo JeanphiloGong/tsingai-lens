@@ -281,13 +281,13 @@ This cleanup should be a direct contract replacement:
 Primary runtime files:
 
 - `backend/application/core/paper_facts/service.py`
-- `backend/application/core/structured_extraction/schemas.py`
-- `backend/application/core/structured_extraction/prompts.py`
-- `backend/application/core/structured_extraction/extractor.py`
+- `backend/application/core/paper_facts/schemas.py`
+- `backend/application/core/paper_facts/prompts.py`
+- `backend/application/core/paper_facts/extraction.py`
 
 Primary verification files:
 
-- `backend/tests/support/fake_core_llm_extractor.py`
+- `backend/tests/support/fake_domain_model_extractor.py`
 - `backend/tests/unit/services/test_paper_facts_services.py`
 - any focused integration coverage that asserts prompt shape or traceback
   stability

@@ -19,9 +19,12 @@ Objective analysis.
 - `finding_synthesis_service.py`
   Produces evidence-calibrated paper and cross-paper Findings from validated
   Objective Evidence.
-
-Shared model prompts, response schemas, and provider-call orchestration belong
-to [`../structured_extraction/README.md`](../structured_extraction/README.md).
+- `extraction.py`
+  Calls the configured model provider for Objective discovery, framing,
+  Evidence extraction, and Finding synthesis and owns their bounded retry and
+  repair behavior.
+- `prompts.py` and `schemas.py`
+  Define Objective prompts and their validated response contracts.
 
 ## Objective Boundary
 

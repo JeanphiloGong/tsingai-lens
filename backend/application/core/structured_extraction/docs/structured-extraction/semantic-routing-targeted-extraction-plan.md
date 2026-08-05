@@ -336,7 +336,7 @@ The implementation should prove:
 Targeted checks should cover:
 
 ```text
-tests/unit/services/test_core_llm_extractor.py
+tests/unit/services/test_domain_model_extractors.py
 tests/unit/services/test_paper_facts_services.py
 tests/integration/services/test_task_runner.py
 python3 scripts/check_docs_governance.py

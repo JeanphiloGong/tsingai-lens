@@ -19,11 +19,11 @@ from application.core.document_profiles.service import (
 from application.core.objectives.finding_synthesis_service import (
     FindingSynthesisService,
 )
-from application.core.structured_extraction.extractor import (
-    CoreLLMStructuredExtractor,
-    build_default_core_llm_structured_extractor,
+from application.core.objectives.extraction import (
+    ObjectiveExtractor,
+    build_default_objective_extractor,
 )
-from application.core.structured_extraction.schemas import (
+from application.core.objectives.schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredObjectiveMergePlan,
     StructuredResearchObjective,
@@ -656,10 +656,10 @@ class ResearchObjectiveService:
         objective_repository: ObjectiveRepository,
         document_profile_service: DocumentProfileService,
         finding_synthesis_service: FindingSynthesisService,
-        structured_extractor: CoreLLMStructuredExtractor | None = None,
+        objective_extractor: ObjectiveExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
-        self._structured_extractor = structured_extractor
+        self._objective_extractor = objective_extractor
         self.paper_fact_repository = paper_fact_repository
         self.objective_repository = objective_repository
         self.source_artifact_repository = source_artifact_repository
@@ -1383,7 +1383,7 @@ class ResearchObjectiveService:
                 )
                 for document in artifacts.documents
             },
-            "extractor": self._get_structured_extractor(),
+            "extractor": self._get_objective_extractor(),
         }
 
     def _notify_progress(
@@ -1492,7 +1492,7 @@ class ResearchObjectiveService:
         self,
         *,
         collection_id: str,
-        extractor: CoreLLMStructuredExtractor,
+        extractor: ObjectiveExtractor,
         objectives: tuple[ResearchObjective, ...],
         paper_skims: tuple[PaperSkim, ...],
         documents: tuple[Any, ...],
@@ -1641,7 +1641,7 @@ class ResearchObjectiveService:
         self,
         *,
         collection_id: str,
-        extractor: CoreLLMStructuredExtractor,
+        extractor: ObjectiveExtractor,
         objectives: tuple[ResearchObjective, ...],
         objective_paper_frames: tuple[PaperAnalysisFrame, ...],
         blocks_by_document_id: dict[str, list[Any]],
@@ -2429,7 +2429,7 @@ class ResearchObjectiveService:
         self,
         *,
         collection_id: str,
-        extractor: CoreLLMStructuredExtractor,
+        extractor: ObjectiveExtractor,
         objectives: tuple[ResearchObjective, ...],
         paper_skims: tuple[PaperSkim, ...],
         objective_paper_frames: tuple[PaperAnalysisFrame, ...],
@@ -2736,7 +2736,7 @@ class ResearchObjectiveService:
         self,
         *,
         collection_id: str,
-        extractor: CoreLLMStructuredExtractor,
+        extractor: ObjectiveExtractor,
         route: EvidenceCandidate,
         source: dict[str, Any],
         llm_unavailable: bool = False,
@@ -7379,10 +7379,10 @@ class ResearchObjectiveService:
             return "Table contains target property columns."
         return "Table contains variable process columns and can provide condition context."
 
-    def _get_structured_extractor(self) -> CoreLLMStructuredExtractor:
-        if self._structured_extractor is None:
-            self._structured_extractor = build_default_core_llm_structured_extractor()
-        return self._structured_extractor
+    def _get_objective_extractor(self) -> ObjectiveExtractor:
+        if self._objective_extractor is None:
+            self._objective_extractor = build_default_objective_extractor()
+        return self._objective_extractor
 
     def _load_source_artifacts(
         self,
@@ -7577,7 +7577,7 @@ class ResearchObjectiveService:
         self,
         *,
         collection_id: str,
-        extractor: CoreLLMStructuredExtractor,
+        extractor: ObjectiveExtractor,
         paper_skims: tuple[PaperSkim, ...],
         objectives: tuple[ResearchObjective, ...],
     ) -> tuple[ResearchObjective, ...]:
@@ -7769,7 +7769,7 @@ class ResearchObjectiveService:
         self,
         *,
         collection_id: str,
-        extractor: CoreLLMStructuredExtractor,
+        extractor: ObjectiveExtractor,
         paper_skims: tuple[PaperSkim, ...],
         objectives: tuple[ResearchObjective, ...],
     ) -> tuple[ResearchObjective, ...]:

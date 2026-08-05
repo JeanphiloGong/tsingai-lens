@@ -3,11 +3,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from application.core.structured_extraction.schemas import (
-    MeasurementValuePayload,
+from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.objectives.schemas import (
     StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,
-    StructuredDocumentProfile,
     StructuredEvidenceSelection,
     StructuredEvidenceSelections,
     StructuredEvidenceExtraction,
@@ -16,6 +15,9 @@ from application.core.structured_extraction.schemas import (
     StructuredPaperSkim,
     StructuredResearchObjective,
     StructuredResearchObjectives,
+)
+from application.core.paper_facts.schemas import (
+    MeasurementValuePayload,
     StructuredTableBatchMentions,
     StructuredTableBatchRowMentions,
     StructuredTableRowMentions,
@@ -56,7 +58,9 @@ _ATM_PATTERN = re.compile(r"\b(?:under|in)\s+(air|argon|ar|nitrogen|n2|vacuum)\b
 _METHODS = ("XRD", "SEM", "TEM", "XPS", "Raman", "FTIR", "DSC", "TGA", "DMA")
 
 
-class FakeCoreLLMStructuredExtractor:
+class FakeDomainModelExtractor:
+    """Deterministic test double for the three domain extraction contracts."""
+
     def extract_document_profile(self, payload: dict[str, Any]) -> StructuredDocumentProfile:
         title = str(payload.get("title") or "").strip()
         source_filename = str(payload.get("source_filename") or "").strip()

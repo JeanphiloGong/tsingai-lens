@@ -104,17 +104,17 @@ schema detail.
   papers
 - reduce text windows to supporting context for method or result enrichment
 - replace provider-native strict structured output with JSON text plus local
-  Pydantic validation in `application/core/structured_extraction/extractor.py`
+  Pydantic validation in `application/core/paper_facts/extraction.py`
 - add bounded concurrency for extraction calls while keeping
   `_materialize_bundle()` ordered and deterministic
 
 ### Owned file areas
 
-- `application/core/structured_extraction/extractor.py`
-- `application/core/structured_extraction/prompts.py`
-- `application/core/structured_extraction/schemas.py`
+- `application/core/paper_facts/extraction.py`
+- `application/core/paper_facts/prompts.py`
+- `application/core/paper_facts/schemas.py`
 - `application/core/paper_facts/service.py`
-- `tests/support/fake_core_llm_extractor.py`
+- `tests/support/fake_domain_model_extractor.py`
 - `tests/unit/services/test_paper_facts_services.py`
 
 ### Verification
@@ -183,11 +183,11 @@ The first-version field boundary for this slice is defined in
 
 ### Owned file areas
 
-- `application/core/structured_extraction/schemas.py`
-- `application/core/structured_extraction/prompts.py`
+- `application/core/paper_facts/schemas.py`
+- `application/core/paper_facts/prompts.py`
 - `domain/core/evidence_backbone.py`
 - `application/core/paper_facts/service.py`
-- `tests/support/fake_core_llm_extractor.py`
+- `tests/support/fake_domain_model_extractor.py`
 - `tests/unit/services/test_paper_facts_services.py`
 
 ### Verification

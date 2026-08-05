@@ -286,7 +286,7 @@ Update `backend/application/core/paper_facts/service.py`:
   chunks
 - bind extracted mentions back to rows and cells after extraction
 
-Update `backend/application/core/structured_extraction/prompts.py`:
+Update `backend/application/core/paper_facts/prompts.py`:
 
 - allow complete small-table context in table prompts
 - state that non-target rows remain context unless the prompt declares them as

@@ -185,7 +185,7 @@ The Pydantic response model should enforce:
 - `backend/application/core/llm_extraction_models.py`
 - `backend/application/core/llm_extraction_prompts.py`
 - `backend/domain/core/document_profile.py`
-- `backend/tests/support/fake_core_llm_extractor.py`
+- `backend/tests/support/fake_domain_model_extractor.py`
 - `backend/tests/unit/services/test_document_profile_service.py`
 
 ### Planned Changes

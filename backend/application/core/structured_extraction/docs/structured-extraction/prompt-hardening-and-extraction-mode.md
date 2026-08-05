@@ -1,15 +1,21 @@
 # Core LLM Prompt Hardening And Extraction Mode Plan
 
+> Status: implemented and superseded. The mode experiment remains relevant,
+> but provider calls, prompts, response schemas, limits, retries, and tracing
+> now belong to the domain extractors in `document_profiles/`, `paper_facts/`,
+> and `objectives/`. `structured_extraction/` retains only pure JSON/content
+> normalization.
+
 ## Summary
 
 This document records a focused Core child implementation plan for stabilizing
 production LLM extraction after the benchmark-script cutover.
 
-The immediate target is narrow:
+The original target was narrow:
 
 - move the benchmark-proven JSON compliance guidance into the production Core
   extraction prompts
-- keep one Core extractor while allowing one temporary provider-mode switch
+- keep one paper-fact extractor while allowing one temporary provider-mode switch
   between text JSON validation and provider-native structured parsing
 - measure both modes through the same prompt, payload, and schema path before
   making a permanent cutover decision
@@ -60,17 +66,17 @@ measuring the production tradeoff.
 
 ## Decision
 
-Production Core extraction should keep one extractor implementation and one
-shared prompt path, but allow one temporary extraction-mode switch through an
-environment variable.
+Production paper-fact extraction keeps one domain-owned extractor and prompt
+path while allowing one extraction-mode switch through an environment
+variable. Other domains own their corresponding extraction decisions directly.
 
 The mode switch should be narrow:
 
-- one extractor class
+- one extractor class per owning domain
 - one prompt builder family
 - one payload shape
 - one response schema
-- one branch point inside the Core extractor response path
+- one branch point inside each owning extractor response path
 
 The temporary mode values should be:
 
@@ -86,7 +92,7 @@ This plan explicitly rejects:
 
 - a second extractor service or client layer
 - separate prompt families for different modes
-- compatibility wrappers around the current Core extractor
+- compatibility wrappers around the domain extractors
 - silently relaxing the production schema just to accept bad shapes
 
 ## Scope
@@ -114,7 +120,7 @@ This child plan does not cover:
 ### Shared Prompt Hardening
 
 Move the benchmark-proven JSON compliance guidance into
-`application/core/structured_extraction/prompts.py` for:
+`application/core/paper_facts/prompts.py` for:
 
 - `build_text_window_extraction_prompt(...)`
 - `build_table_batch_mentions_prompt(...)`
@@ -138,10 +144,10 @@ The production prompt should also include:
 - two or three short invalid counterexamples that mirror the real observed
   failure patterns
 
-### One Extractor, Two Temporary Modes
+### One Paper-Fact Extractor, Two Temporary Modes
 
-Keep `CoreLLMStructuredExtractor` as the single production extractor in
-`application/core/structured_extraction/extractor.py`.
+Keep `PaperFactsExtractor` as the paper-fact production extractor in
+`application/core/paper_facts/extraction.py`.
 
 Add one environment variable:
 
@@ -187,13 +193,13 @@ collections:
 - elapsed seconds
 - validation failure marker
 
-That logging should stay at the extractor seam rather than being duplicated in
-multiple callers.
+That logging stays in each owning domain extractor rather than being duplicated
+in service callers.
 
 ## Execution Order
 
 1. Move the JSON compliance guidance into production prompt builders.
-2. Add the mode switch to the Core extractor with `provider_parse` as the default.
+2. Add the mode switch to the paper-fact extractor with `provider_parse` as the default.
 3. Add targeted unit coverage for the prompt content and extractor mode
    selection.
 4. Rerun the canonical text-window benchmarks against both modes.
@@ -205,12 +211,12 @@ multiple callers.
 
 ### Primary Code Areas
 
-- `application/core/structured_extraction/prompts.py`
-- `application/core/structured_extraction/extractor.py`
+- `application/core/paper_facts/prompts.py`
+- `application/core/paper_facts/extraction.py`
 
 ### Primary Test Areas
 
-- `tests/unit/services/test_core_llm_extractor.py`
+- `tests/unit/services/test_domain_model_extractors.py`
 - one new prompt-focused test file if that keeps prompt assertions clearer than
   extending the extractor test file
 
@@ -228,8 +234,8 @@ Run at least:
 
 ```bash
 cd backend
-python3 -m py_compile application/core/structured_extraction/prompts.py application/core/structured_extraction/extractor.py
-uv run pytest tests/unit/services/test_core_llm_extractor.py
+python3 -m py_compile application/core/paper_facts/prompts.py application/core/paper_facts/extraction.py
+uv run pytest tests/unit/services/test_domain_model_extractors.py
 python3 scripts/benchmarks/text_window_probe.py --mode raw_text_plus_validate --repeat 3
 python3 scripts/benchmarks/text_window_probe.py --mode provider_structured_parse --repeat 3
 ```

@@ -187,7 +187,7 @@ def build_services(
     session_factory: Any,
 ) -> tuple[Any, Any, Any, Any, Any, Any]:
     from application.core.document_profiles.service import DocumentProfileService
-    from application.core.structured_extraction.extractor import CoreLLMStructuredExtractor
+    from application.core.paper_facts.extraction import PaperFactsExtractor
     from application.core.paper_facts.service import PaperFactsService
     from application.source.collection_service import CollectionService
     from infra.persistence.file import FileCollectionWorkspace
@@ -215,7 +215,7 @@ def build_services(
         paper_fact_repository,
         document_profile_service,
         PaperFactsService,
-        CoreLLMStructuredExtractor,
+        PaperFactsExtractor,
     )
 
 
@@ -525,7 +525,7 @@ def main() -> int:
         source_artifact_repository=source_artifact_repository,
         paper_fact_repository=paper_fact_repository,
         document_profile_service=document_profile_service,
-        structured_extractor=inner_extractor,
+        paper_facts_extractor=inner_extractor,
     )
     planned_documents, payload_catalog = build_selection_plan(
         collection_id=args.collection_id,
@@ -547,7 +547,7 @@ def main() -> int:
         source_artifact_repository=source_artifact_repository,
         paper_fact_repository=paper_fact_repository,
         document_profile_service=document_profile_service,
-        structured_extractor=timing_extractor,
+        paper_facts_extractor=timing_extractor,
     )
 
     log_handler = _DocumentWallClockHandler()

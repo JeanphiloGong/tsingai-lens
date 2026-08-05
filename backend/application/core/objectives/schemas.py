@@ -992,10 +992,17 @@ class StructuredEvidenceExtraction(_StrictModel):
         if self.comparison is not None and not self.comparison.comparable:
             if self.attribution_scope != "not_attributable":
                 raise ValueError("incomparable evidence cannot be attributed")
+        variable_names = [
+            item.name.casefold() for item in self.changed_variables
+        ]
+        if len(variable_names) != len(set(variable_names)):
+            raise ValueError(
+                "changed variable names must be unique per extraction"
+            )
         if self.attribution_scope in {"isolated_effect", "joint_effect"}:
             if self.comparison is None or not self.comparison.comparable:
                 raise ValueError("experimental attribution requires comparison")
-            variables = {item.name.casefold() for item in self.changed_variables}
+            variables = set(variable_names)
             axes = {item.casefold() for item in self.comparison.axis_names}
             if variables != axes:
                 raise ValueError("comparison axes must match changed variables")

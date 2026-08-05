@@ -65,10 +65,13 @@ DECISION PROCESS
    context, return `{"extractions":[]}`.
 2. Context source: choose its context role and return no changed variables, no
    comparison, no reported result, and `not_attributable`.
-3. Result source: include exactly one `reported_result`. Identify every changed
-   factor and use exact source group labels or values as endpoints.
-4. Use `isolated_effect` only for one changed factor with a complete comparable
-   baseline/target comparison. Use `joint_effect` for two or more. Otherwise use
+3. Result source: include exactly one `reported_result`. One extraction represents
+   one baseline-to-target comparison interval. Identify every changed factor and
+   use exact source group labels or values as endpoints. If SOURCE reports a
+   condition series, choose one complete source-supported pair.
+4. Never repeat a changed-variable name. Use `isolated_effect` only for one
+   distinct changed factor with a complete comparable baseline/target comparison.
+   Use `joint_effect` for two or more distinct changed factors. Otherwise use
    `association_only`, `descriptive_only`, or `not_attributable`.
 5. Return empty output rather than inventing a missing binding.
 
@@ -137,8 +140,8 @@ INPUT SCHEMA
   excerpts from papers in this result set. Context cannot create factors,
   outcomes, directions, or supporting papers.
 - `candidate_rejection`: present only for one bounded repair attempt. It contains
-  the backend's concrete semantic rejection reason and the previous candidate.
-  It is correction guidance, not Evidence and not a source of scientific facts.
+  one backend semantic rejection reason: correction guidance, not Evidence and
+  not a source of scientific facts.
 
 DECISION PROCESS
 1. Confirm that the factor tuple and outcome answer the Objective. Otherwise
@@ -162,6 +165,9 @@ DECISION PROCESS
    and do not strengthen association into single-variable causation. Every
    numeric endpoint in the statement must come from one complete supporting
    Evidence comparison; never combine endpoints from different Evidence rows.
+   Numeric values may come only from `changed_variables` baseline/target values
+   and `reported_result.value` or `reported_result.result_text` within that one
+   Evidence record. Numbers present only in `source_excerpt` are not allowed.
    When result Evidence contains opposing directions, explicitly foreground
    heterogeneous or opposing responses across the reported conditions instead
    of presenting the selected direction as uniform.
@@ -172,8 +178,8 @@ DECISION PROCESS
 HARD RULES
 - Return exactly one JSON object and nothing else.
 - Return at most one Finding and copy `result_set_id` exactly.
-- Treat `result_set_id` as backend-owned identity. Never derive or alter it from
-  `candidate_rejection.previous_candidate`.
+- Treat `result_set_id` as backend-owned identity and copy it exactly from
+  `result_set`.
 - Do not output factors, outcome, paper count, Finding level, synthesis status,
   attribution scope, certainty, common context, or hidden reasoning. The backend
   owns and derives them from Evidence.
@@ -531,7 +537,6 @@ def build_objective_evidence_prompt(
 def build_finding_synthesis_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
-    input_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     result_set = (
         payload.get("result_set")
         if isinstance(payload.get("result_set"), dict)
@@ -627,6 +632,29 @@ def build_finding_synthesis_prompt(
         else {}
     )
     rejection_reason = str(candidate_rejection.get("reason") or "").strip()
+    prompt_payload = dict(payload)
+    if rejection_reason:
+        prompt_payload["candidate_rejection"] = {"reason": rejection_reason}
+    if rejection_reason == (
+        "candidate statement combines numeric values not bound to one "
+        "supporting Evidence record"
+    ):
+        prompt_payload["result_set"] = {
+            **result_set,
+            "result_evidence": [
+                {
+                    key: value
+                    for key, value in evidence.items()
+                    if key != "source_excerpt"
+                }
+                for evidence in result_evidence
+            ],
+        }
+    input_json = json.dumps(
+        prompt_payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
     repair_contract = ""
     if rejection_reason:
         repair_contract = (
@@ -636,6 +664,10 @@ def build_finding_synthesis_prompt(
             "Evidence and Finding rule; otherwise return an empty findings array.\n"
             "- Re-read result_evidence for its exact direction, complete factor "
             "tuple, one outcome, comparison values, and attribution scope.\n\n"
+            "- When correcting numeric binding, remove every number available "
+            "only in `source_excerpt`; keep numbers only from one Evidence "
+            "record's `changed_variables` endpoints and "
+            "`reported_result.value` or `reported_result.result_text`.\n\n"
         )
     comparison_contract = ""
     if is_condition_series:

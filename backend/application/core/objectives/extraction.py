@@ -110,7 +110,6 @@ class ObjectiveExtractor:
             max_completion_tokens=(
                 _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS
             ),
-            force_json_text=True,
             json_text_parser=self._parse_research_objectives_json_response,
         )
         if not isinstance(response, StructuredResearchObjectives):
@@ -721,9 +720,13 @@ class ObjectiveExtractor:
                             f"{repair_detail[:1000]}. Return at most one schema-valid "
                             "extraction or {\"extractions\":[]}. Context evidence must "
                             "use reported_result null, no changed variables, no "
-                            "comparison, and not_attributable. isolated_effect requires "
-                            "exactly one changed variable and a comparable comparison; "
-                            "joint_effect requires at least two. Return only compact JSON."
+                            "comparison, and not_attributable. One extraction represents "
+                            "one comparison interval. isolated_effect requires exactly one "
+                            "distinct changed-variable name and a comparable comparison; "
+                            "joint_effect requires at least two distinct changed-variable "
+                            "names. Never repeat a changed-variable name; for a condition "
+                            "series choose one complete source-supported pair. Return only "
+                            "compact JSON."
                         ),
                     }
                 )

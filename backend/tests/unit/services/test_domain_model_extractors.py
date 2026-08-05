@@ -727,7 +727,7 @@ def test_domain_model_extractors_defaults_to_provider_parse_mode(monkeypatch):
     }
 
 
-def test_domain_model_extractors_routes_research_objectives_to_bounded_json_text(
+def test_domain_model_extractors_uses_provider_parse_for_research_objectives(
     monkeypatch,
 ):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
@@ -740,7 +740,7 @@ def test_domain_model_extractors_routes_research_objectives_to_bounded_json_text
             )
         ]
     )
-    client = _FakeOpenAIClient(parsed_objectives.model_dump_json())
+    client = _FakeOpenAIClient("unused", parsed=parsed_objectives)
     extractor = ObjectiveExtractor(client=client, model="fake-model")
 
     objectives = extractor.discover_research_objectives(
@@ -748,13 +748,49 @@ def test_domain_model_extractors_routes_research_objectives_to_bounded_json_text
     )
 
     assert objectives == parsed_objectives
-    assert client.beta.chat.completions.calls == []
+    assert client.chat.completions.calls == []
+    assert len(client.beta.chat.completions.calls) == 1
+    parse_call = client.beta.chat.completions.calls[0]
+    assert parse_call["response_format"] is StructuredResearchObjectives
+    assert parse_call["max_completion_tokens"] == 2400
+    assert "JSON schema:" not in parse_call["messages"][1]["content"]
+    assert extractor.consume_last_trace()["extraction_mode"] == "provider_parse"
+
+
+def test_domain_model_extractors_falls_back_to_json_text_for_research_objectives(
+    monkeypatch,
+):
+    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
+    parsed_objectives = StructuredResearchObjectives(
+        objectives=[
+            StructuredResearchObjective(
+                question="How does heat treatment affect yield strength?",
+                variables=["heat treatment"],
+                outcomes=["yield strength"],
+            )
+        ]
+    )
+    client = _FakeOpenAIClient(
+        parsed_objectives.model_dump_json(),
+        parse_error=RuntimeError("provider parse unavailable"),
+    )
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
+
+    objectives = extractor.discover_research_objectives(
+        {"collection_id": "col-1", "paper_skims": []}
+    )
+
+    assert objectives == parsed_objectives
+    assert len(client.beta.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 1
     text_call = client.chat.completions.calls[0]
     assert text_call["response_format"] == {"type": "json_object"}
     assert text_call["max_completion_tokens"] == 2400
     assert "JSON schema:" in text_call["messages"][1]["content"]
-    assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
-
+    assert (
+        extractor.consume_last_trace()["extraction_mode"]
+        == "provider_parse->json_text"
+    )
 
 
 def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace():
@@ -907,6 +943,71 @@ def test_finding_synthesis_prompt_requires_specific_single_factor_result():
         "difference in microstructure:" in user_prompt
     )
     assert "Never return a generic restatement" in user_prompt
+
+
+def test_finding_synthesis_prompt_excludes_excerpt_only_numbers_during_repair():
+    payload = {
+        "objective": {
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        },
+        "result_set": {
+            "result_set_id": "result-set-density",
+            "factors": ["laser power"],
+            "outcome": "relative density",
+            "result_evidence": [
+                {
+                    "evidence_id": "density-160-200",
+                    "source_excerpt": (
+                        "At 160 W relative density was 96.1%, while at 200 W "
+                        "it reached 98.7%."
+                    ),
+                    "changed_variables": [
+                        {
+                            "name": "laser power",
+                            "baseline_value": 160,
+                            "target_value": 200,
+                            "unit": "W",
+                        }
+                    ],
+                    "reported_result": {
+                        "outcome": "relative density",
+                        "value": 98.7,
+                        "unit": "%",
+                        "direction": "increase",
+                        "result_text": "it reached 98.7%",
+                    },
+                    "attribution_scope": "isolated_effect",
+                }
+            ],
+        },
+        "paper_contributions": [],
+        "context_evidence": [],
+        "candidate_rejection": {
+            "reason": (
+                "candidate statement combines numeric values not bound to one "
+                "supporting Evidence record"
+            ),
+            "previous_candidate": {
+                "statement": (
+                    "Increasing laser power from 160 W to 200 W increased "
+                    "relative density from 96.1% to 98.7%."
+                )
+            },
+        },
+    }
+
+    system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
+    contract = f"{system_prompt}\n{user_prompt}"
+
+    assert "Numbers present only in `source_excerpt` are not allowed" in contract
+    assert "remove every number available only in `source_excerpt`" in user_prompt
+    assert "`changed_variables` endpoints" in user_prompt
+    assert "`reported_result.value` or `reported_result.result_text`" in user_prompt
+    assert "96.1" not in user_prompt
+    assert "previous_candidate" not in user_prompt
+    assert "98.7" in user_prompt
 
 
 def test_finding_synthesis_prompt_treats_multiple_intervals_as_condition_series():
@@ -1717,6 +1818,49 @@ def test_structured_objective_evidence_repairs_single_variable_joint_effect():
     assert extraction.attribution_scope == "isolated_effect"
 
 
+def test_structured_objective_evidence_rejects_repeated_variable_intervals():
+    with pytest.raises(
+        ValidationError,
+        match="changed variable names must be unique per extraction",
+    ):
+        StructuredEvidenceExtraction.model_validate(
+            {
+                "evidence_role": "direct_result",
+                "changed_variables": [
+                    {
+                        "name": "laser power",
+                        "baseline_value": 160,
+                        "target_value": 200,
+                        "unit": "W",
+                    },
+                    {
+                        "name": "laser power",
+                        "baseline_value": 160,
+                        "target_value": 240,
+                        "unit": "W",
+                    },
+                ],
+                "comparison": {
+                    "baseline_label": "160 W",
+                    "target_label": "200 W and 240 W",
+                    "axis_names": ["laser power"],
+                    "comparable": True,
+                },
+                "reported_result": {
+                    "outcome": "relative density",
+                    "value": 99.1,
+                    "unit": "%",
+                    "direction": "increase",
+                    "result_text": "Relative density increased to 99.1%.",
+                },
+                "attribution_scope": "joint_effect",
+                "scientific_context": {},
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+
 def test_structured_objective_evidence_downgrades_unbound_experimental_attribution():
     extraction = StructuredEvidenceExtraction.model_validate(
         {
@@ -1971,6 +2115,9 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     assert "must not be copied" not in prompt
     assert "Identify every changed" in system_prompt
     assert "exact source group labels" in system_prompt
+    assert "one baseline-to-target comparison interval" in system_prompt
+    assert "Never repeat a changed-variable name" in system_prompt
+    assert "choose one complete source-supported pair" in system_prompt
     assert "Context source" in system_prompt
     assert "numeric `confidence` for every extraction" in system_prompt
     assert "Generic composition or background" in system_prompt
@@ -2391,6 +2538,9 @@ def test_domain_model_extractors_retries_with_structured_validation_error(monkey
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
     assert "experimental attribution requires comparison" in repair_prompt
     assert "Return at most one schema-valid extraction" in repair_prompt
+    assert "distinct changed-variable name" in repair_prompt
+    assert "Never repeat a changed-variable name" in repair_prompt
+    assert "one complete source-supported pair" in repair_prompt
     assert "For finding synthesis" not in repair_prompt
 
 

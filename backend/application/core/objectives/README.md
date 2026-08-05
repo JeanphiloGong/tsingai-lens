@@ -65,6 +65,8 @@ may be transient, but only `ObjectiveEvidence` is durable.
 Each extracted Evidence record binds one exact Source excerpt to an explicit
 scientific attribution contract:
 
+- one Evidence extraction represents one baseline-to-target comparison
+  interval, and each changed-factor name appears at most once;
 - `changed_variables` retains every changed factor with baseline and target
   values;
 - `comparison` records both groups, all comparison axes, and whether the

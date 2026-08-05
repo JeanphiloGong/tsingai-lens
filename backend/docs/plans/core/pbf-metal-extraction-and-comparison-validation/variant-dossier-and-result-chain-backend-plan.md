@@ -328,10 +328,10 @@ Goal:
 
 Owned file areas:
 
-- `application/core/semantic_build/llm/schemas.py`
-- `application/core/semantic_build/llm/prompts.py`
+- `application/core/paper_facts/schemas.py`
+- `application/core/paper_facts/prompts.py`
 - `domain/core/evidence_backbone.py`
-- `application/core/semantic_build/paper_facts_service.py`
+- `application/core/paper_facts/service.py`
 - `tests/unit/services/test_paper_facts_services.py`
 
 Verification:

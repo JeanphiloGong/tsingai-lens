@@ -25,7 +25,7 @@ For the shared domain-model correction, read
 For the parent Core quality wave, read
 [`core-parsing-quality-hardening-plan.md`](core-parsing-quality-hardening-plan.md).
 For the broader Core LLM cutover plan, read
-[`../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md).
+[`../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md`](../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md).
 
 ## Why This Child Plan Exists
 
@@ -185,7 +185,7 @@ The Pydantic response model should enforce:
 - `backend/application/core/llm_extraction_models.py`
 - `backend/application/core/llm_extraction_prompts.py`
 - `backend/domain/core/document_profile.py`
-- `backend/tests/support/fake_core_llm_extractor.py`
+- `backend/tests/support/fake_domain_model_extractor.py`
 - `backend/tests/unit/services/test_document_profile_service.py`
 
 ### Planned Changes

@@ -49,9 +49,9 @@ Today the `domain/` package is very small:
 Meanwhile, stable Core semantics currently live elsewhere:
 
 - document-profile classification and suitability heuristics live in
-  [`../../application/core/semantic_build/document_profile_service.py`](../../../application/core/semantic_build/document_profile_service.py)
+  [`../../application/core/document_profiles/service.py`](../../../application/core/document_profiles/service.py)
 - sample/result/test-condition/baseline semantics live in
-  [`../../application/core/semantic_build/paper_facts_service.py`](../../../application/core/semantic_build/paper_facts_service.py)
+  [`../../application/core/paper_facts/service.py`](../../../application/core/paper_facts/service.py)
 - comparison-row semantics and comparability judgments live in
   [`../../application/core/comparison_service.py`](../../../application/core/comparison_service.py)
 - collection and handoff state normalization lives in
@@ -217,11 +217,11 @@ blocks into:
 Candidates include:
 
 - epistemic statuses now defined inside
-  [`../../application/core/semantic_build/paper_facts_service.py`](../../../application/core/semantic_build/paper_facts_service.py)
+  [`../../application/core/paper_facts/service.py`](../../../application/core/paper_facts/service.py)
 - comparability and review status literals now defined inside
   [`../../application/core/comparison_service.py`](../../../application/core/comparison_service.py)
 - document-kind and suitability classifications now inferred inside
-  [`../../application/core/semantic_build/document_profile_service.py`](../../../application/core/semantic_build/document_profile_service.py)
+  [`../../application/core/document_profiles/service.py`](../../../application/core/document_profiles/service.py)
 
 ### Core Domain Objects
 
@@ -290,7 +290,7 @@ Actions:
 - add `domain/core/document_profile.py`
 - define a `DocumentProfile` object and supporting classifications
 - move review/protocol-suitability rules out of
-  `application/core/semantic_build/document_profile_service.py`
+  `application/core/document_profiles/service.py`
 - keep the service responsible for artifact IO and collection-scoped assembly
 
 Acceptance:
@@ -320,7 +320,7 @@ Actions:
 
 Acceptance:
 
-- `application/core/semantic_build/paper_facts_service.py` no longer acts as the only
+- `application/core/paper_facts/service.py` no longer acts as the only
   canonical home of these object definitions
 - artifact writers build domain objects before storage normalization
 
@@ -392,8 +392,8 @@ The expected implementation slices are:
      - `backend/domain/source/artifact_status.py`
 
 2. Rewrite application callers:
-   - `backend/application/core/semantic_build/document_profile_service.py`
-   - `backend/application/core/semantic_build/paper_facts_service.py`
+   - `backend/application/core/document_profiles/service.py`
+   - `backend/application/core/paper_facts/service.py`
    - `backend/application/core/comparison_service.py`
    - later:
      - `backend/application/source/collection_service.py`

@@ -1,5 +1,10 @@
 # Core Semantic Build Packaging Alignment Plan
 
+> Status: superseded. This document records the earlier consolidation into
+> `semantic_build/`. Current ownership is defined by the node-local READMEs in
+> `application/core/document_profiles/`, `paper_facts/`, `objectives/`, and
+> `structured_extraction/`.
+
 ## Summary
 
 This document records a focused Core child plan for packaging and ownership
@@ -12,7 +17,7 @@ semantic-extraction concern across unrelated `application/core/*` files.
 
 This plan sits under the existing Core structured-extraction cutover wave:
 
-- [`../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
+- [`../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md`](../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md)
 
 It is intentionally narrower than that parent wave. The parent wave decides
 that Core semantic extraction should hard-cut to schema-bound LLM parsing.
@@ -147,16 +152,16 @@ collection-facing aggregators such as:
 - business-owned extraction contracts, prompt design, and response schema
 - infra-owned transport details
 
-The extraction contract belongs to Core semantic build, not to infra and not
-to a generic application client bag. The current transport implementation now
-lives directly in the owning Core extractor path:
+The extraction contracts belong to their Core domains, not to infra and not to
+a generic application client bag. The current transport implementations live
+directly in the owning domain paths:
 
-- [`../../../application/core/semantic_build/llm/extractor.py`](../../../application/core/semantic_build/llm/extractor.py)
+- [`../../../application/core/document_profiles/extraction.py`](../../../application/core/document_profiles/extraction.py)
+- [`../../../application/core/paper_facts/extraction.py`](../../../application/core/paper_facts/extraction.py)
+- [`../../../application/core/objectives/extraction.py`](../../../application/core/objectives/extraction.py)
 
-Therefore:
-
-- Core keeps `llm/prompts.py`, `llm/schemas.py`, and `llm/extractor.py`
-- Core currently also owns the concrete OpenAI-compatible transport call path
+Each domain keeps its own `prompts.py`, `schemas.py`, extraction policy, and
+concrete OpenAI-compatible transport call path.
 
 ## Ownership Boundary After Refactor
 
@@ -254,7 +259,7 @@ must not absorb:
 
 ## Related Docs
 
-- [`../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
+- [`../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md`](../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md)
 - [`../../architecture/goal-core-source-layering.md`](../../architecture/goal-core-source-layering.md)
 - [`../../architecture/overview.md`](../../architecture/overview.md)
 - [`../../../application/core/README.md`](../../../application/core/README.md)

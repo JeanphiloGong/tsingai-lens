@@ -63,7 +63,7 @@ The family keeps multiple live pages because this local subject now needs:
   Backend-wide implementation companion for the evidence-chain product surface
 - [`../core-parsing-quality-hardening-plan.md`](../core-parsing-quality-hardening-plan.md)
   Parent Core quality wave
-- [`../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
+- [`../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md`](../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md)
   Earlier structured-extraction cutover plan that this wave narrows and
   hardens
 - [`../../../architecture/core-comparison/current-state.md`](../../../architecture/core-comparison/current-state.md)

@@ -22,7 +22,7 @@ Use the current backend seams directly:
 
 | Concern | Candidate owning seam |
 | --- | --- |
-| Paper facts loading and evidence anchors | `backend/application/core/semantic_build/paper_facts_service.py` |
+| Paper facts loading and evidence anchors | `backend/application/core/paper_facts/service.py` |
 | Comparison inputs and rows | `backend/application/core/comparison_service.py` and `backend/application/core/comparison_*.py` |
 | Workspace readiness and artifact links | `backend/application/core/workspace_overview_service.py` |
 | Core read endpoints | `backend/controllers/core/` |
@@ -109,9 +109,9 @@ Use these existing functions as inputs rather than duplicating artifact reads:
 
 | File | Function | Use |
 | --- | --- | --- |
-| `backend/application/core/semantic_build/paper_facts_service.py` | `PaperFactsService.read_paper_fact_frames` | Load `sample_variants`, `measurement_results`, `test_conditions`, evidence anchors, and related paper facts. |
-| `backend/application/core/semantic_build/paper_facts_service.py` | `PaperFactsService.read_evidence_cards` | Load evidence-card projections when evidence refs need display context. |
-| `backend/application/core/semantic_build/paper_facts_service.py` | `PaperFactsService.get_evidence_traceback` | Keep detail traceback available from evidence drawer links. |
+| `backend/application/core/paper_facts/service.py` | `PaperFactsService.read_paper_fact_frames` | Load `sample_variants`, `measurement_results`, `test_conditions`, evidence anchors, and related paper facts. |
+| `backend/application/core/paper_facts/service.py` | `PaperFactsService.read_evidence_cards` | Load evidence-card projections when evidence refs need display context. |
+| `backend/application/core/paper_facts/service.py` | `PaperFactsService.get_evidence_traceback` | Keep detail traceback available from evidence drawer links. |
 | `backend/application/core/comparison_service.py` | `ComparisonService.read_comparison_projection` | Load semantic comparison artifacts without requiring stale row caches. |
 | `backend/application/core/comparison_service.py` | `ComparisonService.read_comparison_rows` | Reuse current row cache when available for collection matrix grouping. |
 | `backend/application/core/comparison_service.py` | `ComparisonService.read_comparable_results` | Load normalized comparable-result records for group assembly. |
@@ -127,10 +127,10 @@ Extend these existing functions only where they own the contract surface:
 | `backend/application/core/workspace_overview_service.py` | `WorkspaceService._build_links` | Add `research_view`, `research_materials`, and `research_documents` links when the new endpoints are available. |
 | `backend/application/core/workspace_overview_service.py` | `WorkspaceService._build_capabilities` | Add capability flags such as `can_view_research_view` only if the frontend needs capability-gated UI. |
 | `backend/application/core/workspace_overview_service.py` | `WorkspaceService.get_workspace_overview` | Return the new links/capabilities through the existing overview payload after schemas are updated. |
-| `backend/application/core/semantic_build/paper_facts_service.py` | `PaperFactsService._deduplicate_measurement_results_table` | Tighten fact-level dedupe only if aggregation exposes remaining duplicate cells that should be fixed upstream. |
-| `backend/application/core/semantic_build/paper_facts_service.py` | `PaperFactsService._measurement_result_dedupe_key` | Include unit-normalized and evidence-aware fields only if needed to prevent obvious duplicate facts. |
-| `backend/application/core/semantic_build/paper_facts_service.py` | `PaperFactsService._filter_generic_text_sample_variants` | Tighten generic sample filtering only if generic material/process concepts still become matrix rows. |
-| `backend/application/core/semantic_build/paper_facts_service.py` | `PaperFactsService._build_table_row_process_context_from_cells` | Fix table column binding if the sample matrix still shows wrong process values such as speed/energy swaps. |
+| `backend/application/core/paper_facts/service.py` | `PaperFactsService._deduplicate_measurement_results_table` | Tighten fact-level dedupe only if aggregation exposes remaining duplicate cells that should be fixed upstream. |
+| `backend/application/core/paper_facts/service.py` | `PaperFactsService._measurement_result_dedupe_key` | Include unit-normalized and evidence-aware fields only if needed to prevent obvious duplicate facts. |
+| `backend/application/core/paper_facts/service.py` | `PaperFactsService._filter_generic_text_sample_variants` | Tighten generic sample filtering only if generic material/process concepts still become matrix rows. |
+| `backend/application/core/paper_facts/service.py` | `PaperFactsService._build_table_row_process_context_from_cells` | Fix table column binding if the sample matrix still shows wrong process values such as speed/energy swaps. |
 
 Aggregation should first collapse duplicate display cells without hiding the
 raw duplicate count. Upstream extraction fixes should be limited to clear fact

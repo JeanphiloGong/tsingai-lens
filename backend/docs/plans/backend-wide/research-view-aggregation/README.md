@@ -59,7 +59,8 @@ Backend implementation should stay under the existing Core application and
 controller seams:
 
 - `backend/application/core/`
-- `backend/application/core/semantic_build/`
+- `backend/application/core/document_profiles/`
+- `backend/application/core/paper_facts/`
 - `backend/controllers/core/`
 - `backend/controllers/schemas/core/`
 - `backend/tests/unit/services/`

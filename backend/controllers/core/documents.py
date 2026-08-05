@@ -10,7 +10,7 @@ from fastapi.responses import Response
 from application.core.comparison_service import (
     ComparisonRowsNotReadyError,
 )
-from application.core.semantic_build.document_profile_service import (
+from application.core.document_profiles.service import (
     DocumentContentNotReadyError,
     DocumentNotFoundError,
     DocumentProfilesNotReadyError,

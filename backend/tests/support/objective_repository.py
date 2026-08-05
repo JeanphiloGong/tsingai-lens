@@ -186,9 +186,13 @@ class MemoryObjectiveRepository:
         *,
         error_code: str,
         error_message: str,
+        expected_status: str | None = None,
     ) -> ObjectiveAnalysis:
         key = (collection_id, objective_id, analysis_version)
-        analysis = self._require_analysis(*key).fail(
+        analysis = self._require_analysis(*key)
+        if expected_status is not None and analysis.status != expected_status:
+            return analysis
+        analysis = analysis.fail(
             error_code=error_code,
             error_message=error_message,
             completed_at=datetime.now(timezone.utc),

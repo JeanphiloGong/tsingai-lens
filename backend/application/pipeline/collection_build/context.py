@@ -4,10 +4,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from application.core.semantic_build.document_profile_service import (
+from application.core.document_profiles.service import (
     DocumentProfileService,
 )
-from application.core.semantic_build.research_objective_service import (
+from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
 )
 from application.source.artifact_registry_service import ArtifactRegistryService

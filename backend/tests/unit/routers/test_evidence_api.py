@@ -11,8 +11,8 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from tests.support.collection_service import build_test_collection_service
-from application.core.semantic_build.document_profile_service import DocumentProfileService
-from application.core.semantic_build.paper_facts_service import PaperFactsService
+from application.core.document_profiles.service import DocumentProfileService
+from application.core.paper_facts.service import PaperFactsService
 from controllers.core import evidence as evidence_controller
 from domain.core import EvidenceAnchor, MeasurementResult, SampleVariant
 from domain.core.paper_fact import PaperFactSet

@@ -323,5 +323,5 @@ This wave is complete when all of the following are true:
 
 - [`current-api-surface-migration-checklist.md`](../api-surface-migration/current-state.md)
 - [`goal-source-core-business-layer-alignment-plan.md`](../goal-source-core-layering/proposal.md)
-- [`../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md`](../../../../application/core/semantic_build/llm/docs/structured-extraction/hard-cutover.md)
+- [`../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md`](../../../../application/core/structured_extraction/docs/structured-extraction/hard-cutover.md)
 - [`../../specs/api.md`](../../../specs/api.md)

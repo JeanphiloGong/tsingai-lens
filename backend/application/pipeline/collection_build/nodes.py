@@ -120,10 +120,12 @@ def build_objective_candidates(
     context: CollectionBuildContext,
     _config: CollectionBuildPipelineConfig,
 ) -> dict:
-    objectives = context.research_objective_service.build_objective_candidates(
-        context.collection_id,
-        progress_callback=context.objective_progress_callback,
-        build_id=context.build_id,
+    objectives = (
+        context.research_objective_service.discover_and_replace_objective_candidates(
+            context.collection_id,
+            progress_callback=context.objective_progress_callback,
+            build_id=context.build_id,
+        )
     )
     return {"objective_candidate_count": len(objectives)}
 

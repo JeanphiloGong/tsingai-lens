@@ -14,10 +14,10 @@ from infra.source.config.source_runtime_config import (
     StorageConfig,
 )
 
-from application.core.semantic_build.document_profile_service import (
+from application.core.document_profiles.service import (
     DocumentProfileService,
 )
-from application.core.semantic_build.research_objective_service import (
+from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
 )
 from application.pipeline.collection_build.config import CollectionBuildPipelineConfig

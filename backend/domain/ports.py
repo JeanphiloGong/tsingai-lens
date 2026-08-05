@@ -389,6 +389,7 @@ class ObjectiveRepository(Protocol):
         *,
         error_code: str,
         error_message: str,
+        expected_status: str | None = None,
     ) -> ObjectiveAnalysis: ...
 
     def publish_analysis(

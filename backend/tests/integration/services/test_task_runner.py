@@ -11,13 +11,17 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 from application.source.artifact_registry_service import ArtifactRegistryService
-from application.core.semantic_build.document_profile_service import (
+from application.core.document_profiles.service import (
     DocumentProfileService,
 )
-from application.core.semantic_build.research_objective_service import (
+from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
 )
-from application.core.finding_synthesis_service import FindingSynthesisService
+from application.core.objectives.finding_synthesis_service import FindingSynthesisService
+from application.core.objectives.objective_candidate_service import (
+    ObjectiveCandidateService,
+)
+from application.core.objectives.paper_skim_service import PaperSkimService
 from tests.support.collection_service import build_test_collection_service
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
 from application.source.task_service import TaskService
@@ -217,6 +221,8 @@ def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN0
         objective_repository=objective_repository,
         document_profile_service=document_profile_service,
         finding_synthesis_service=FindingSynthesisService(),
+        paper_skim_service=PaperSkimService(),
+        objective_candidate_service=ObjectiveCandidateService(),
     )
     artifact_registry = ArtifactRegistryService(
         build_repository,

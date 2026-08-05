@@ -6,6 +6,13 @@ from typing import Any
 import pytest
 
 from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
+from application.core.objectives.evidence_routing import EvidenceCandidate
+from application.core.objectives.research_objective_service import (
+    PaperAnalysisFrame,
+    ResearchObjectiveService as _ResearchObjectiveService,
+    SourceSelectionHint,
+)
 from application.core.objectives.schemas import (
     StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,
@@ -23,13 +30,6 @@ from application.core.objectives.schemas import (
     StructuredResearchObjectives,
 )
 from application.core.paper_facts.schemas import StructuredTableMatrixRepair
-from application.core.objectives.research_objective_service import (
-    EvidenceCandidate,
-    ExtractedEvidenceDraft,
-    PaperAnalysisFrame,
-    ResearchObjectiveService as _ResearchObjectiveService,
-    SourceSelectionHint,
-)
 from application.core.document_profiles.service import (
     DocumentProfileService,
 )

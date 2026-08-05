@@ -13,6 +13,12 @@ Objective analysis.
   framing, routing, and extraction consume the persisted ResearchObjective
   variables, outcomes, mechanisms, constraints, and requested comparator
   directly. Table-selection hints remain transient service values.
+- `evidence_routing.py`
+  Owns the transient Source-selection decisions created while routing one
+  confirmed Objective across its documents.
+- `evidence_extraction.py`
+  Owns structured Evidence drafts before the service binds exact Source text
+  and publishes durable `ObjectiveEvidence` records.
 - `analysis_service.py`
   Queues, claims, fails, and atomically publishes one Objective analysis
   version.

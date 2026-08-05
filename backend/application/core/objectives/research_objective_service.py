@@ -16,12 +16,14 @@ from application.core.document_profiles.service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
 )
-from application.core.objectives.finding_synthesis_service import (
-    FindingSynthesisService,
-)
+from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
+from application.core.objectives.evidence_routing import EvidenceCandidate
 from application.core.objectives.extraction import (
     ObjectiveExtractor,
     build_default_objective_extractor,
+)
+from application.core.objectives.finding_synthesis_service import (
+    FindingSynthesisService,
 )
 from application.core.objectives.schemas import (
     StructuredAxisCanonicalizationPlan,
@@ -34,17 +36,12 @@ from domain.core import (
     Finding,
     ObjectiveAnalysis,
     ObjectiveEvidence,
-    ObjectiveEvidenceComparison,
-    ObjectiveEvidenceContext,
-    ObjectiveEvidenceResult,
-    ObjectiveEvidenceVariable,
     ObjectiveFactSet,
     PaperContribution,
     PaperSkim,
     ResearchObjective,
     build_research_objective_id,
     is_question_shaped_objective,
-    normalize_objective_confidence,
     normalize_objective_terms,
 )
 from domain.ports import (
@@ -126,9 +123,7 @@ class PaperAnalysisFrame:
     def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperAnalysisFrame":
         return cls(
             objective_id=_transient_text(payload.get("objective_id")),
-            document_id=_transient_text(
-                payload.get("document_id") or payload.get("paper_id")
-            ),
+            document_id=_transient_text(payload.get("document_id")),
             relevance=_transient_text(payload.get("relevance")) or "uncertain",
             paper_role=_transient_text(payload.get("paper_role")) or "uncertain",
             background=_transient_optional_text(payload.get("background")),
@@ -166,184 +161,6 @@ class PaperAnalysisFrame:
         }
 
 
-@dataclass(frozen=True)
-class EvidenceCandidate:
-    """Transient source-selection decision keyed by its stable Source locator."""
-
-    objective_id: str
-    document_id: str
-    source_kind: str
-    source_ref: str
-    role: str
-    extractable: bool
-    reason: str | None
-    table_schema: dict[str, Any]
-    column_roles: dict[str, Any]
-    join_plan: dict[str, Any]
-    confidence: float
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "EvidenceCandidate":
-        return cls(
-            objective_id=_transient_text(payload.get("objective_id")),
-            document_id=_transient_text(
-                payload.get("document_id") or payload.get("paper_id")
-            ),
-            source_kind=_transient_text(payload.get("source_kind")) or "text_window",
-            source_ref=_transient_text(payload.get("source_ref")),
-            role=_transient_text(payload.get("role")) or "low_value_or_irrelevant",
-            extractable=bool(payload.get("extractable")),
-            reason=_transient_optional_text(payload.get("reason")),
-            table_schema=_transient_mapping(payload.get("table_schema")),
-            column_roles=_transient_mapping(payload.get("column_roles")),
-            join_plan=_transient_mapping(payload.get("join_plan")),
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "objective_id": self.objective_id,
-            "document_id": self.document_id,
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "role": self.role,
-            "extractable": self.extractable,
-            "reason": self.reason,
-            "table_schema": dict(self.table_schema),
-            "column_roles": dict(self.column_roles),
-            "join_plan": dict(self.join_plan),
-            "confidence": self.confidence,
-        }
-
-
-@dataclass(frozen=True)
-class ExtractedEvidenceDraft:
-    """Transient structured extraction before Source text is attached."""
-
-    evidence_id: str
-    objective_id: str
-    document_id: str
-    source_kind: str | None
-    source_ref: str | None
-    evidence_role: str | None
-    selection_reason: str | None
-    selection_status: str
-    changed_variables: tuple[ObjectiveEvidenceVariable, ...]
-    comparison: ObjectiveEvidenceComparison | None
-    reported_result: ObjectiveEvidenceResult | None
-    attribution_scope: str
-    scientific_context: ObjectiveEvidenceContext
-    source_refs: tuple[dict[str, Any], ...]
-    evidence_anchor_ids: tuple[str, ...]
-    resolution_status: str
-    confidence: float
-
-    @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "ExtractedEvidenceDraft":
-        source_refs = _transient_mapping_tuple(payload.get("source_refs"))
-        first_source_ref = source_refs[0] if source_refs else {}
-        objective_id = _transient_text(payload.get("objective_id"))
-        document_id = _transient_text(
-            payload.get("document_id") or payload.get("paper_id")
-        )
-        source_kind = _transient_optional_text(
-            payload.get("source_kind") or first_source_ref.get("source_kind")
-        )
-        source_ref = _transient_optional_text(
-            payload.get("source_ref") or first_source_ref.get("source_ref")
-        )
-        evidence_role = _transient_optional_text(
-            payload.get("evidence_role") or first_source_ref.get("evidence_role")
-        )
-        reported_result_payload = payload.get("reported_result")
-        reported_result = (
-            ObjectiveEvidenceResult.from_mapping(reported_result_payload)
-            if isinstance(reported_result_payload, Mapping)
-            else None
-        )
-        evidence_id = _transient_optional_text(payload.get("evidence_id"))
-        if evidence_id is None:
-            identity = json.dumps(
-                [
-                    objective_id,
-                    document_id,
-                    evidence_role,
-                    source_refs,
-                    payload.get("changed_variables"),
-                    payload.get("comparison"),
-                    payload.get("reported_result"),
-                ],
-                ensure_ascii=True,
-                sort_keys=True,
-                default=str,
-            )
-            evidence_id = f"evd_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
-        return cls(
-            evidence_id=evidence_id,
-            objective_id=objective_id,
-            document_id=document_id,
-            source_kind=source_kind,
-            source_ref=source_ref,
-            evidence_role=evidence_role,
-            selection_reason=_transient_optional_text(
-                payload.get("selection_reason")
-                or first_source_ref.get("selection_reason")
-            ),
-            selection_status=_transient_text(payload.get("selection_status"))
-            or "extracted",
-            changed_variables=tuple(
-                ObjectiveEvidenceVariable.from_mapping(item)
-                for item in payload.get("changed_variables", ())
-                if isinstance(item, Mapping)
-            ),
-            comparison=(
-                ObjectiveEvidenceComparison.from_mapping(payload["comparison"])
-                if isinstance(payload.get("comparison"), Mapping)
-                else None
-            ),
-            reported_result=reported_result,
-            attribution_scope=_transient_text(payload.get("attribution_scope"))
-            or "not_attributable",
-            scientific_context=(
-                ObjectiveEvidenceContext.from_mapping(payload["scientific_context"])
-                if isinstance(payload.get("scientific_context"), Mapping)
-                else ObjectiveEvidenceContext()
-            ),
-            source_refs=source_refs,
-            evidence_anchor_ids=normalize_objective_terms(
-                payload.get("evidence_anchor_ids") or payload.get("anchor_ids")
-            ),
-            resolution_status=_transient_text(payload.get("resolution_status"))
-            or "unknown",
-            confidence=normalize_objective_confidence(payload.get("confidence")),
-        )
-
-    def to_record(self) -> dict[str, Any]:
-        return {
-            "evidence_id": self.evidence_id,
-            "objective_id": self.objective_id,
-            "document_id": self.document_id,
-            "source_kind": self.source_kind,
-            "source_ref": self.source_ref,
-            "evidence_role": self.evidence_role,
-            "selection_reason": self.selection_reason,
-            "selection_status": self.selection_status,
-            "changed_variables": [
-                item.to_record() for item in self.changed_variables
-            ],
-            "comparison": self.comparison.to_record() if self.comparison else None,
-            "reported_result": (
-                self.reported_result.to_record() if self.reported_result else None
-            ),
-            "attribution_scope": self.attribution_scope,
-            "scientific_context": self.scientific_context.to_record(),
-            "source_refs": [dict(item) for item in self.source_refs],
-            "evidence_anchor_ids": list(self.evidence_anchor_ids),
-            "resolution_status": self.resolution_status,
-            "confidence": self.confidence,
-        }
-
-
 def _transient_text(value: Any) -> str:
     return str(value or "").strip()
 
@@ -352,15 +169,6 @@ def _transient_optional_text(value: Any) -> str | None:
     text = _transient_text(value)
     return text or None
 
-
-def _transient_mapping(value: Any) -> dict[str, Any]:
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _transient_mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
-    if not isinstance(value, (list, tuple)):
-        return ()
-    return tuple(dict(item) for item in value if isinstance(item, Mapping))
 
 _SKIM_TEXT_PREVIEW_CHARS = 4000
 _SKIM_MODEL_TEXT_PREVIEW_CHARS = 400

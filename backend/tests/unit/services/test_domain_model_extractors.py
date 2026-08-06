@@ -443,8 +443,8 @@ def test_paper_skim_contract_bounds_model_output():
     schema = StructuredPaperSkim.model_json_schema()["properties"]
 
     expected_limits = {
-        "candidate_materials": 2,
-        "candidate_processes": 2,
+        "candidate_materials": 8,
+        "candidate_processes": 4,
         "candidate_properties": 8,
         "changed_variables": 8,
         "possible_objectives": 3,
@@ -458,23 +458,24 @@ def test_paper_skim_contract_bounds_model_output():
         "candidate_processes",
         "candidate_properties",
         "changed_variables",
-        "warnings",
     ):
         assert schema[field]["items"]["maxLength"] == 80
-    assert schema["possible_objectives"]["items"]["maxLength"] == 180
+    assert schema["possible_objectives"]["items"]["maxLength"] == 320
+    assert schema["warnings"]["items"]["maxLength"] == 240
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("candidate_materials", ["material-1", "material-2", "material-3"]),
-        ("candidate_processes", ["process-1", "process-2", "process-3"]),
+        ("candidate_materials", [f"material-{index}" for index in range(9)]),
+        ("candidate_processes", [f"process-{index}" for index in range(5)]),
         ("candidate_properties", [f"property-{index}" for index in range(9)]),
         ("changed_variables", [f"variable-{index}" for index in range(9)]),
         ("possible_objectives", [f"objective-{index}" for index in range(4)]),
         ("warnings", ["warning-1", "warning-2", "warning-3"]),
         ("candidate_properties", ["p" * 81]),
-        ("possible_objectives", ["o" * 181]),
+        ("possible_objectives", ["o" * 321]),
+        ("warnings", ["w" * 241]),
     ],
 )
 def test_paper_skim_contract_rejects_oversized_values(field, value):
@@ -496,6 +497,9 @@ def test_paper_skim_prompt_defines_structured_research_map_contract():
     assert "`candidate_properties` contains measured outcomes" in user_prompt
     assert "Create a `possible_objectives` question only when" in user_prompt
     assert "Return empty arrays rather than guessing" in user_prompt
+    assert "up to 8 `candidate_materials`" in user_prompt
+    assert "up to 3 `possible_objectives`, each at most 320 characters" in user_prompt
+    assert "up to 2 `warnings`, each at most 240 characters" in user_prompt
 
 
 def test_research_objective_discovery_prompt_requires_focused_concise_objectives():
@@ -1162,6 +1166,98 @@ def test_domain_model_extractors_validates_paper_skim_response():
     assert skim.doc_role == "experimental"
     assert skim.candidate_materials == ["316L stainless steel"]
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
+
+
+def test_paper_skim_preserves_real_multi_material_scope():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "doc_role": "experimental",
+                "candidate_materials": [
+                    "Al7075",
+                    "Hastelloy X",
+                    "H13 tool steel",
+                    "CoCr",
+                ],
+                "candidate_processes": ["selective laser melting"],
+                "candidate_properties": [
+                    "part density",
+                    "crack formation",
+                    "internal stresses",
+                    "microstructure",
+                    "mechanical properties",
+                ],
+                "changed_variables": ["base plate preheating temperature"],
+                "possible_objectives": [
+                    "How does base plate preheating temperature affect part density, "
+                    "crack formation, internal stresses, microstructure, and mechanical "
+                    "properties across Al7075, Hastelloy X, H13 tool steel, and CoCr?"
+                ],
+                "evidence_density": "high",
+                "confidence": 0.92,
+                "warnings": [
+                    "Material names are taken from the study overview and should be "
+                    "verified against the material-specific experiment sections."
+                ],
+            }
+        )
+    )
+    extractor = _objective_extractor(client)
+
+    skim = extractor.extract_paper_skim(
+        {
+            "document_id": "paper-1",
+            "title": "Application of base plate preheating during selective laser melting",
+            "text_preview": "Base plate preheating was applied to four materials.",
+        }
+    )
+
+    assert skim.candidate_materials == [
+        "Al7075",
+        "Hastelloy X",
+        "H13 tool steel",
+        "CoCr",
+    ]
+    assert len(skim.possible_objectives[0]) <= 320
+    assert len(skim.warnings[0]) <= 240
+
+
+def test_paper_skim_bounds_recoverable_model_verbosity_before_validation():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "doc_role": "experimental",
+                "candidate_materials": [f"material-{index}" for index in range(10)],
+                "candidate_processes": ["selective laser melting"],
+                "candidate_properties": ["density"],
+                "changed_variables": ["preheating temperature"],
+                "possible_objectives": [
+                    "How does preheating temperature affect density under the reported "
+                    + "material and process conditions " * 20
+                    + "?"
+                ],
+                "evidence_density": "medium",
+                "confidence": 0.8,
+                "warnings": ["bounded warning " * 30],
+            }
+        )
+    )
+    extractor = _objective_extractor(client)
+
+    skim = extractor.extract_paper_skim(
+        {
+            "document_id": "paper-1",
+            "title": "Multi-material preheating study",
+            "text_preview": "Preheating was evaluated across several materials.",
+        }
+    )
+
+    assert skim.candidate_materials == [f"material-{index}" for index in range(8)]
+    assert len(skim.possible_objectives) == 1
+    assert len(skim.possible_objectives[0]) <= 320
+    assert skim.possible_objectives[0].endswith("?")
+    assert len(skim.warnings[0]) <= 240
+    assert len(client.chat.completions.calls) == 1
 
 
 def test_domain_model_extractors_validates_research_objective_response():
@@ -1976,7 +2072,7 @@ def test_domain_model_extractors_rejects_unknown_top_level_evidence_fields():
     assert len(client.chat.completions.calls) == 2
 
 
-def test_domain_model_extractors_treats_prompt_only_evidence_echo_as_empty():
+def test_domain_model_extractors_rejects_prompt_only_evidence_echo():
     response = json.dumps(
         {
             "OBJECTIVE": "How does energy density affect relative density?",
@@ -1989,26 +2085,31 @@ def test_domain_model_extractors_treats_prompt_only_evidence_echo_as_empty():
             "SOURCE": "Relative density reached 99.5%.",
         }
     )
-    extractor = _objective_extractor(_FakeOpenAIClient(response))
+    client = _FakeOpenAIClient(response)
+    extractor = _objective_extractor(client)
 
-    parsed = extractor.extract_objective_evidence(
-        {
-            "objective": {
-                "question": "How does energy density affect relative density?"
-            },
-            "evidence_route": {
-                "source_kind": "text_window",
-                "source_ref": "block-1",
-            },
-            "source": {
-                "source_kind": "text_window",
-                "source_ref": "block-1",
-                "text": "Relative density reached 99.5%.",
-            },
-        }
-    )
+    with pytest.raises(ValueError, match="echoed input fields"):
+        extractor.extract_objective_evidence(
+            {
+                "objective": {
+                    "question": "How does energy density affect relative density?"
+                },
+                "evidence_route": {
+                    "source_kind": "text_window",
+                    "source_ref": "block-1",
+                },
+                "source": {
+                    "source_kind": "text_window",
+                    "source_ref": "block-1",
+                    "text": "Relative density reached 99.5%.",
+                },
+            }
+        )
 
-    assert parsed.extractions == []
+    assert len(client.chat.completions.calls) == 2
+    assert "only echoed the input fields" in client.chat.completions.calls[1][
+        "messages"
+    ][-1]["content"]
 
 
 def test_structured_objective_evidence_rejects_effect_without_variable_change():
@@ -2115,6 +2216,7 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     assert "must not be copied" not in prompt
     assert "Identify every changed" in system_prompt
     assert "exact source group labels" in system_prompt
+    assert "absent, off, or without condition to numeric 0" in system_prompt
     assert "one baseline-to-target comparison interval" in system_prompt
     assert "Never repeat a changed-variable name" in system_prompt
     assert "choose one complete source-supported pair" in system_prompt
@@ -2407,7 +2509,14 @@ def test_domain_model_extractors_routes_objective_units_through_bounded_json_tex
     assert client.beta.chat.completions.calls == []
     text_call = client.chat.completions.calls[0]
     assert text_call["max_completion_tokens"] == 2048
-    assert text_call["response_format"] == {"type": "json_object"}
+    assert text_call["response_format"]["type"] == "json_schema"
+    assert text_call["response_format"]["json_schema"]["name"] == (
+        "structured_evidence_extractions"
+    )
+    assert text_call["response_format"]["json_schema"]["strict"] is True
+    assert text_call["response_format"]["json_schema"]["schema"] == (
+        StructuredEvidenceExtractions.model_json_schema()
+    )
     assert "JSON schema:" not in text_call["messages"][1]["content"]
     assert extractor.consume_last_trace()["extraction_mode"] == "json_text"
 

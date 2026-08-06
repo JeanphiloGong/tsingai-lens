@@ -73,6 +73,14 @@ _PAPER_SKIM_DOC_ROLES = {
     "uncertain",
 }
 _PAPER_SKIM_EVIDENCE_DENSITIES = {"high", "medium", "low", "unknown"}
+PAPER_SKIM_OUTPUT_LIMITS = {
+    "candidate_materials": (8, 80),
+    "candidate_processes": (4, 80),
+    "candidate_properties": (8, 80),
+    "changed_variables": (8, 80),
+    "possible_objectives": (3, 320),
+    "warnings": (2, 240),
+}
 _OBJECTIVE_FRAME_RELEVANCE = {"high", "medium", "low", "irrelevant", "uncertain"}
 _OBJECTIVE_FRAME_PAPER_ROLES = {
     "primary_experiment",
@@ -497,25 +505,58 @@ class StructuredPaperSkim(_StrictModel):
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
         "uncertain"
     )
-    candidate_materials: list[Annotated[str, Field(max_length=80)]] = Field(
-        default_factory=list, max_length=2
+    candidate_materials: list[
+        Annotated[
+            str,
+            Field(max_length=PAPER_SKIM_OUTPUT_LIMITS["candidate_materials"][1]),
+        ]
+    ] = Field(
+        default_factory=list,
+        max_length=PAPER_SKIM_OUTPUT_LIMITS["candidate_materials"][0],
     )
-    candidate_processes: list[Annotated[str, Field(max_length=80)]] = Field(
-        default_factory=list, max_length=2
+    candidate_processes: list[
+        Annotated[
+            str,
+            Field(max_length=PAPER_SKIM_OUTPUT_LIMITS["candidate_processes"][1]),
+        ]
+    ] = Field(
+        default_factory=list,
+        max_length=PAPER_SKIM_OUTPUT_LIMITS["candidate_processes"][0],
     )
-    candidate_properties: list[Annotated[str, Field(max_length=80)]] = Field(
-        default_factory=list, max_length=8
+    candidate_properties: list[
+        Annotated[
+            str,
+            Field(max_length=PAPER_SKIM_OUTPUT_LIMITS["candidate_properties"][1]),
+        ]
+    ] = Field(
+        default_factory=list,
+        max_length=PAPER_SKIM_OUTPUT_LIMITS["candidate_properties"][0],
     )
-    changed_variables: list[Annotated[str, Field(max_length=80)]] = Field(
-        default_factory=list, max_length=8
+    changed_variables: list[
+        Annotated[
+            str,
+            Field(max_length=PAPER_SKIM_OUTPUT_LIMITS["changed_variables"][1]),
+        ]
+    ] = Field(
+        default_factory=list,
+        max_length=PAPER_SKIM_OUTPUT_LIMITS["changed_variables"][0],
     )
-    possible_objectives: list[Annotated[str, Field(max_length=180)]] = Field(
-        default_factory=list, max_length=3
+    possible_objectives: list[
+        Annotated[
+            str,
+            Field(max_length=PAPER_SKIM_OUTPUT_LIMITS["possible_objectives"][1]),
+        ]
+    ] = Field(
+        default_factory=list,
+        max_length=PAPER_SKIM_OUTPUT_LIMITS["possible_objectives"][0],
     )
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
     confidence: float = 0.0
-    warnings: list[Annotated[str, Field(max_length=80)]] = Field(
-        default_factory=list, max_length=2
+    warnings: list[
+        Annotated[str, Field(max_length=PAPER_SKIM_OUTPUT_LIMITS["warnings"][1])]
+    ] = Field(
+        default_factory=list,
+        max_length=PAPER_SKIM_OUTPUT_LIMITS["warnings"][0],
     )
 
     @field_validator(

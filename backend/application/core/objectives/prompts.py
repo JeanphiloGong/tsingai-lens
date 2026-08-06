@@ -68,7 +68,13 @@ DECISION PROCESS
 3. Result source: include exactly one `reported_result`. One extraction represents
    one baseline-to-target comparison interval. Identify every changed factor and
    use exact source group labels or values as endpoints. If SOURCE reports a
-   condition series, choose one complete source-supported pair.
+   condition series, choose one complete source-supported pair. Never convert an
+   absent, off, or without condition to numeric 0; retain the exact source phrase
+   as a categorical endpoint with a null unit. The canonical OBJECTIVE outcome may
+   appear under inflected, narrower, or synonymous SOURCE wording; keep the
+   canonical name in `reported_result.outcome` but copy the exact source-local
+   result clause into `result_text`. A complete comparison may bind endpoint
+   phrases stated in separate sentences of the same SOURCE unit.
 4. Never repeat a changed-variable name. Use `isolated_effect` only for one
    distinct changed factor with a complete comparable baseline/target comparison.
    Use `joint_effect` for two or more distinct changed factors. Otherwise use
@@ -80,7 +86,8 @@ HARD RULES
 - Return at most one extraction. Never repeat the input or output reasoning,
   markdown, source ids, or backend ids.
 - `result_text` is the only source text allowed in output and must be a short
-  verbatim substring.
+  verbatim substring: one contiguous span copied from SOURCE. Never synthesize it
+  from separate clauses or copy wording from a boundary example.
 - A result direction describes the objective outcome, never an intermediate
   mechanism. Use `mixed` for an unordered qualitative change.
 - When SOURCE mixes current work with cited literature, extract current work only.
@@ -94,6 +101,11 @@ HARD RULES
 BOUNDARY EXAMPLES
 Context source:
 {"extractions":[{"evidence_role":"condition_context","changed_variables":[],"comparison":null,"reported_result":null,"attribution_scope":"not_attributable","scientific_context":{"material":[],"sample":[],"process":[{"name":"build platform temperature","value":100,"unit":"C"}],"test":[]},"resolution_status":"resolved","confidence":0.9}]}
+
+Categorical endpoint and source-local outcome wording:
+OBJECTIVE OUTCOME: crack formation
+SOURCE: Cracks were abundant without preheating. Application of preheating largely reduces this cracking behavior, though cracks remain after preheating at 400 C.
+OUTPUT: {"extractions":[{"evidence_role":"direct_result","changed_variables":[{"name":"preheating","baseline_value":"without preheating","target_value":"preheating at 400 C","unit":null}],"comparison":{"baseline_label":"without preheating","target_label":"preheating at 400 C","axis_names":["preheating"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"crack formation","value":null,"unit":null,"direction":"decrease","result_text":"Application of preheating largely reduces this cracking behavior"},"attribution_scope":"isolated_effect","scientific_context":{"material":[],"sample":[],"process":[],"test":[]},"resolution_status":"resolved","confidence":0.9}]}
 
 Joint result source:
 {"extractions":[{"evidence_role":"direct_result","changed_variables":[{"name":"laser power","baseline_value":100,"target_value":200,"unit":"W"},{"name":"scan speed","baseline_value":500,"target_value":900,"unit":"mm/s"}],"comparison":{"baseline_label":"A","target_label":"B","axis_names":["laser power","scan speed"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"relative density","value":98.0,"unit":"%","direction":"increase","result_text":"relative density increased to 98.0%"},"attribution_scope":"joint_effect","scientific_context":{"material":[],"sample":[],"process":[],"test":[]},"resolution_status":"resolved","confidence":0.9}]}
@@ -247,10 +259,20 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "6. Use evidence density, confidence, and warnings to expose incomplete or "
         "ambiguous input rather than filling gaps.\n\n"
         "HARD RULES\n"
-        "- Return only the schema object and use at most a few high-signal values.\n"
+        "- Return only the schema object. Rank every list from most central and "
+        "explicitly supported to least central so bounded consumers retain the "
+        "strongest values.\n"
         "- Do not extract final measurements, sample-level results, or source ids.\n"
         "- Do not infer scientific content from filenames or generic section names.\n"
-        "- Return empty arrays rather than guessing unsupported axes or objectives."
+        "- Return empty arrays rather than guessing unsupported axes or objectives.\n\n"
+        "OUTPUT CONTRACT\n"
+        "- Return up to 8 `candidate_materials`, each at most 80 characters.\n"
+        "- Return up to 4 `candidate_processes`, each at most 80 characters.\n"
+        "- Return up to 8 `candidate_properties`, each at most 80 characters.\n"
+        "- Return up to 8 `changed_variables`, each at most 80 characters.\n"
+        "- Return up to 3 `possible_objectives`, each at most 320 characters.\n"
+        "- Return up to 2 `warnings`, each at most 240 characters.\n"
+        "- Keep each value concise; do not combine distinct list values into one item."
     )
     return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
 

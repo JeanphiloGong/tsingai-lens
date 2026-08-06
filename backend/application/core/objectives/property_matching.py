@@ -138,6 +138,19 @@ _PROCESS_SYMBOL_AXIS_HINTS = {
 }
 
 _EXPLICIT_AXIS_SYNONYMS = {
+    "base plate preheating temperature": (
+        "base plate preheating",
+        "baseplate preheating",
+        "baseplate preheating temperature",
+        "build platform preheating temperature",
+        "preheating",
+        "preheating temperature",
+    ),
+    "crack formation": (
+        "cracking",
+        "cracking behavior",
+        "microcrack formation",
+    ),
     "scan strategy": ("scanning strategy",),
     "scanning strategy": ("scan strategy",),
 }

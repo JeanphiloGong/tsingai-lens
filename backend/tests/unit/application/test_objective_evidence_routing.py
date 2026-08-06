@@ -40,6 +40,24 @@ def test_research_objective_service_forces_extractable_objective_route_roles(
     )
 
 
+def test_research_objective_service_forces_direct_support_route_role(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+
+    record = service._apply_route_evidence_role(
+        record={
+            "role": "low_value_or_irrelevant",
+            "extractable": False,
+        },
+        evidence_role="direct_support",
+    )
+
+    assert record["role"] == "current_experimental_evidence"
+    assert record["extractable"] is True
+    assert record["join_plan"] == {"evidence_role": "direct_support"}
+
+
 def test_research_objective_service_treats_energy_density_only_table_as_condition(
     tmp_path,
 ):
@@ -585,6 +603,7 @@ def test_research_objective_service_ranks_result_text_candidates(
 
     candidates = service._build_route_source_candidates(
         frame=frame,
+        objective_context=objective_context,
         blocks=blocks,
         tables=[],
     )
@@ -1488,6 +1507,91 @@ def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
     )
 
 
+def test_research_objective_tree_routing_uses_confirmed_objective_axes(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheat-cracking",
+            "question": (
+                "How does base plate preheating temperature affect crack formation?"
+            ),
+            "variables": ["base plate preheating temperature"],
+            "outcomes": ["crack formation"],
+            "confirmation_status": "confirmed",
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": "obj-preheat-cracking",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "changed_variables": ["laser power"],
+            "measured_property_scope": ["porosity"],
+        }
+    )
+    child_ids = tuple(f"node-{index}" for index in range(30))
+    nodes: dict[str, SourceDocumentNode] = {
+        "root": SourceDocumentNode(
+            node_id="root",
+            document_id="paper-1",
+            parent_id=None,
+            child_ids=child_ids,
+            node_type="document",
+            order=0,
+        )
+    }
+    for index, node_id in enumerate(child_ids):
+        source_ref = f"noise-{index}"
+        text = (
+            "Laser power affected porosity and showed a measured result for "
+            f"condition {index}."
+        )
+        if index == 7:
+            source_ref = "preheating-crack-result"
+            text = (
+                "Although the application of preheating largely reduces this "
+                "cracking behavior, it fails to completely prevent microcrack "
+                "formation after preheating at 400 C."
+            )
+        nodes[node_id] = SourceDocumentNode(
+            node_id=node_id,
+            document_id="paper-1",
+            parent_id="root",
+            child_ids=(),
+            node_type="paragraph",
+            order=100 + index,
+            text=text,
+            heading_path=("Results",),
+            source_ref_kind="block",
+            source_ref_id=source_ref,
+        )
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes=nodes,
+    )
+    extractor = _ObjectiveExtractor()
+
+    service._build_objective_evidence_routes(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={"paper-1": []},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={"paper-1": document_tree},
+    )
+
+    assert "preheating-crack-result" in {
+        payload["current_source"]["source_ref"]
+        for payload in extractor.route_payloads
+    }
+
+
 def test_research_objective_tree_routing_keeps_direct_result_among_scope_text(
     tmp_path,
 ):
@@ -1503,6 +1607,14 @@ def test_research_objective_tree_routing_keeps_direct_result_among_scope_text(
             "material_match": ["316L stainless steel"],
             "changed_variables": ["preheating build platform temperature"],
             "measured_property_scope": ["microstructure"],
+        }
+    )
+    objective_context = _research_objective(
+        {
+            "objective_id": "obj-preheat",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["preheating build platform temperature"],
+            "outcomes": ["microstructure"],
         }
     )
     child_ids = tuple(f"node-{index}" for index in range(17))
@@ -1549,6 +1661,7 @@ def test_research_objective_tree_routing_keeps_direct_result_among_scope_text(
 
     candidates = service._build_tree_route_text_candidates(
         frame=frame,
+        objective_context=objective_context,
         blocks=[],
         document_tree=document_tree,
     )
@@ -1557,6 +1670,60 @@ def test_research_objective_tree_routing_keeps_direct_result_among_scope_text(
     assert "direct-result" in {
         candidate["source_ref"] for candidate in candidates
     }
+
+
+def test_research_objective_tree_routing_recognizes_preheating_crack_results(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": "obj-preheat-cracking",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "changed_variables": ["base plate preheating temperature"],
+            "measured_property_scope": ["crack formation"],
+        }
+    )
+    objective_context = _research_objective(
+        {
+            "objective_id": "obj-preheat-cracking",
+            "variables": ["base plate preheating temperature"],
+            "outcomes": ["crack formation"],
+        }
+    )
+
+    direct_results = (
+        (
+            "Although the application of preheating largely reduces this cracking "
+            "behavior, it fails to completely prevent microcrack formation after "
+            "preheating at 400 C."
+        ),
+        (
+            "Preheating up to 400 C does not have a significant effect on "
+            "Hastelloy X crack formation."
+        ),
+    )
+
+    assert all(
+        service._route_text_candidate_is_direct_result(
+            objective_context=objective_context,
+            candidate={"text": text},
+        )
+        for text in direct_results
+    )
+    assert not service._route_text_candidate_is_direct_result(
+        objective_context=objective_context,
+        candidate={
+            "text": (
+                "Crack formation was characterized for all four materials in "
+                "the experimental program."
+            )
+        },
+    )
 
 
 def test_research_objective_tree_routing_excludes_non_block_caption_refs(tmp_path):
@@ -1571,6 +1738,13 @@ def test_research_objective_tree_routing_excludes_non_block_caption_refs(tmp_pat
             "paper_role": "primary_experiment",
             "changed_variables": ["energy density"],
             "measured_property_scope": ["relative density"],
+        }
+    )
+    objective_context = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["energy density"],
+            "outcomes": ["relative density"],
         }
     )
     document_tree = SourceDocumentTree(
@@ -1605,6 +1779,7 @@ def test_research_objective_tree_routing_excludes_non_block_caption_refs(tmp_pat
 
     candidates = service._build_tree_route_text_candidates(
         frame=frame,
+        objective_context=objective_context,
         blocks=[],
         document_tree=document_tree,
     )
@@ -1626,6 +1801,13 @@ def test_research_objective_tree_routing_keeps_multiple_comparative_results(
             "paper_role": "primary_experiment",
             "changed_variables": ["preheating build platform temperature"],
             "measured_property_scope": ["microstructure"],
+        }
+    )
+    objective_context = _research_objective(
+        {
+            "objective_id": "obj-preheat",
+            "variables": ["preheating build platform temperature"],
+            "outcomes": ["microstructure"],
         }
     )
     generic_candidates = [
@@ -1675,6 +1857,7 @@ def test_research_objective_tree_routing_keeps_multiple_comparative_results(
 
     selected = service._bounded_tree_route_text_candidates(
         frame=frame,
+        objective_context=objective_context,
         scored_candidates=[*generic_candidates, *comparative_candidates],
     )
 
@@ -1704,6 +1887,19 @@ def test_research_objective_service_keeps_numeric_mechanism_text_candidates(
             ],
             "test_environment_scope": ["preheating"],
             "relevant_sections": ["Abstract"],
+        }
+    )
+    objective_context = _research_objective(
+        {
+            "objective_id": "obj-preheating",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["build platform temperature"],
+            "outcomes": [
+                "yield strength",
+                "ultimate tensile strength",
+                "elongation",
+                "porosity",
+            ],
         }
     )
     blocks = [
@@ -1744,6 +1940,7 @@ def test_research_objective_service_keeps_numeric_mechanism_text_candidates(
 
     candidates = service._build_route_source_candidates(
         frame=frame,
+        objective_context=objective_context,
         blocks=blocks,
         tables=[],
     )

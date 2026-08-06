@@ -23,6 +23,7 @@ from application.core.objectives.prompts import (
     build_research_objective_merge_prompt,
 )
 from application.core.objectives.schemas import (
+    PAPER_SKIM_OUTPUT_LIMITS,
     StructuredAxisCanonicalizationPlan,
     StructuredEvidenceExtractions,
     StructuredEvidenceSelections,
@@ -93,6 +94,7 @@ class ObjectiveExtractor:
             user_prompt=user_prompt,
             response_model=StructuredPaperSkim,
             max_completion_tokens=_PAPER_SKIM_MAX_COMPLETION_TOKENS,
+            json_text_parser=self._parse_paper_skim_json_response,
         )
         if not isinstance(response, StructuredPaperSkim):
             raise TypeError("unexpected paper skim response type")
@@ -364,6 +366,7 @@ class ObjectiveExtractor:
         response_model: type[BaseModel],
         max_completion_tokens: int | None,
         repair_instruction_builder: Callable[[str], str] | None = None,
+        payload_normalizer: Callable[[Any], Any] | None = None,
     ) -> tuple[BaseModel, str | None]:
         request_kwargs = {
             "model": self.model,
@@ -418,6 +421,8 @@ class ObjectiveExtractor:
                         "structured extraction returned empty response content"
                     )
                 payload = load_json_payload(extract_json_object(raw_content))
+                if payload_normalizer is not None:
+                    payload = payload_normalizer(payload)
                 try:
                     return response_model.model_validate(payload), raw_content
                 except ValidationError:
@@ -447,6 +452,68 @@ class ObjectiveExtractor:
                     continue
                 raise
         raise RuntimeError("structured extraction failed after retry") from last_error
+
+    def _parse_paper_skim_json_response(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        response_model: type[BaseModel],
+        max_completion_tokens: int | None,
+    ) -> tuple[BaseModel, str | None]:
+        return self._parse_json_text_response(
+            messages=messages,
+            response_model=response_model,
+            max_completion_tokens=max_completion_tokens,
+            payload_normalizer=self._normalize_paper_skim_payload,
+        )
+
+    @staticmethod
+    def _normalize_paper_skim_payload(payload: Any) -> Any:
+        if not isinstance(payload, dict):
+            return payload
+        normalized = dict(payload)
+        normalized_fields: list[str] = []
+        for field_name, (max_items, max_characters) in PAPER_SKIM_OUTPUT_LIMITS.items():
+            values = payload.get(field_name)
+            if not isinstance(values, list):
+                continue
+            bounded_values = [
+                ObjectiveExtractor._bound_paper_skim_text(
+                    value,
+                    max_characters=max_characters,
+                    preserve_question_mark=field_name == "possible_objectives",
+                )
+                if isinstance(value, str)
+                else value
+                for value in values[:max_items]
+            ]
+            if bounded_values != values:
+                normalized[field_name] = bounded_values
+                normalized_fields.append(field_name)
+        if normalized_fields:
+            logger.warning(
+                "Normalized PaperSkim model output to schema bounds fields=%s",
+                ",".join(normalized_fields),
+            )
+        return normalized
+
+    @staticmethod
+    def _bound_paper_skim_text(
+        value: str,
+        *,
+        max_characters: int,
+        preserve_question_mark: bool,
+    ) -> str:
+        compact = " ".join(value.split())
+        if len(compact) <= max_characters:
+            return compact
+        suffix = "?" if preserve_question_mark and compact.endswith("?") else ""
+        prefix_limit = max_characters - len(suffix)
+        prefix = compact[:prefix_limit].rstrip()
+        if " " in prefix:
+            prefix = prefix.rsplit(" ", 1)[0]
+        prefix = prefix.rstrip(" ,;:")
+        return f"{prefix}{suffix}"
 
     def _parse_finding_synthesis_json_response(
         self,
@@ -682,7 +749,14 @@ class ObjectiveExtractor:
             "model": self.model,
             "temperature": 0,
             "messages": messages,
-            "response_format": {"type": "json_object"},
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "structured_evidence_extractions",
+                    "schema": StructuredEvidenceExtractions.model_json_schema(),
+                    "strict": True,
+                },
+            },
             **self._provider_request_options(),
         }
         if max_completion_tokens is not None:
@@ -712,23 +786,32 @@ class ObjectiveExtractor:
                     )
                 else:
                     repair_detail = str(last_error or "invalid structured output")
+                if "echoed input fields" in repair_detail:
+                    retry_instruction = (
+                        "Your previous response only echoed the input fields and did "
+                        "not perform evidence extraction. Do not repeat OBJECTIVE, "
+                        "OBJECTIVE VARIABLES, OBJECTIVE OUTCOMES, ROUTE HINT, SOURCE "
+                        "KIND, or SOURCE. Re-read SOURCE and return exactly one compact "
+                        "JSON object with the single top-level key `extractions`. Use "
+                        "{\"extractions\":[]} only when SOURCE contains no comparison "
+                        "that answers the objective."
+                    )
+                else:
+                    retry_instruction = (
+                        "Previous evidence extraction output failed validation: "
+                        f"{repair_detail[:1000]}. Return at most one schema-valid "
+                        "extraction or {\"extractions\":[]}. Context evidence must "
+                        "use reported_result null, no changed variables, no "
+                        "comparison, and not_attributable. One extraction represents "
+                        "one comparison interval. isolated_effect requires exactly one "
+                        "distinct changed-variable name and a comparable comparison; "
+                        "joint_effect requires at least two distinct changed-variable "
+                        "names. Never repeat a changed-variable name; for a condition "
+                        "series choose one complete source-supported pair. Return only "
+                        "compact JSON."
+                    )
                 attempt_messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "Previous evidence extraction output failed validation: "
-                            f"{repair_detail[:1000]}. Return at most one schema-valid "
-                            "extraction or {\"extractions\":[]}. Context evidence must "
-                            "use reported_result null, no changed variables, no "
-                            "comparison, and not_attributable. One extraction represents "
-                            "one comparison interval. isolated_effect requires exactly one "
-                            "distinct changed-variable name and a comparable comparison; "
-                            "joint_effect requires at least two distinct changed-variable "
-                            "names. Never repeat a changed-variable name; for a condition "
-                            "series choose one complete source-supported pair. Return only "
-                            "compact JSON."
-                        ),
-                    }
+                    {"role": "user", "content": retry_instruction}
                 )
                 logger.warning(
                     "Retrying objective evidence JSON response model=%s",
@@ -768,7 +851,10 @@ class ObjectiveExtractor:
                         and bool(payload)
                         and set(payload) <= echoed_prompt_keys
                     ):
-                        return StructuredEvidenceExtractions(), raw_content
+                        raise ValueError(
+                            "objective evidence response echoed input fields instead "
+                            "of returning extractions"
+                        )
                     if isinstance(payload, dict):
                         extra_keys = set(payload) - set(response_model.model_fields)
                         if extra_keys - {"confidence"}:

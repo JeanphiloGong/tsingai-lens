@@ -999,8 +999,10 @@ class ResearchObjectiveService:
                     max(frame_count - frame_position, 0),
                 )
                 continue
+            objective_context = objective
             source_candidates = self._build_route_source_candidates(
                 frame=frame,
+                objective_context=objective_context,
                 blocks=blocks_by_document_id.get(frame.document_id, []),
                 tables=tables_by_document_id.get(frame.document_id, []),
                 document_tree=document_trees_by_document_id.get(frame.document_id),
@@ -1023,7 +1025,6 @@ class ResearchObjectiveService:
                 (candidate["source_kind"], candidate["source_ref"]): candidate
                 for candidate in source_candidates
             }
-            objective_context = objective_by_id.get(frame.objective_id)
             for candidate in source_candidates:
                 if candidate.get("frame_status") == "excluded":
                     route_key = (
@@ -1619,7 +1620,10 @@ class ResearchObjectiveService:
         join_plan = dict(updated.get("join_plan") or {})
         join_plan["evidence_role"] = evidence_role
         updated["join_plan"] = join_plan
-        if evidence_role == "irrelevant":
+        if evidence_role == "direct_support":
+            updated["role"] = "current_experimental_evidence"
+            updated["extractable"] = True
+        elif evidence_role == "irrelevant":
             updated["role"] = "low_value_or_irrelevant"
             updated["extractable"] = False
         elif evidence_role == "mediator_context":
@@ -4151,7 +4155,10 @@ class ResearchObjectiveService:
                     "decreasing",
                     "lower",
                     "less",
+                    "reduce",
                     "reduced",
+                    "reduces",
+                    "reducing",
                     "reduction",
                     "smaller",
                 ),
@@ -4886,6 +4893,7 @@ class ResearchObjectiveService:
         self,
         *,
         frame: PaperAnalysisFrame,
+        objective_context: ResearchObjective,
         blocks: list[Any],
         tables: list[Any],
         document_tree: SourceDocumentTree | None = None,
@@ -4921,6 +4929,7 @@ class ResearchObjectiveService:
         if document_tree is not None:
             text_candidates = self._build_tree_route_text_candidates(
                 frame=frame,
+                objective_context=objective_context,
                 blocks=blocks,
                 document_tree=document_tree,
             )
@@ -4931,6 +4940,7 @@ class ResearchObjectiveService:
             )
             text_candidates = self._build_ranked_route_text_candidates(
                 frame=frame,
+                objective_context=objective_context,
                 blocks=blocks,
                 limit=text_candidate_limit,
             )
@@ -5309,6 +5319,7 @@ class ResearchObjectiveService:
         self,
         *,
         frame: PaperAnalysisFrame,
+        objective_context: ResearchObjective,
         blocks: list[Any],
         limit: int,
     ) -> list[dict[str, Any]]:
@@ -5333,6 +5344,7 @@ class ResearchObjectiveService:
                 continue
             score = self._route_text_candidate_score(
                 frame=frame,
+                objective_context=objective_context,
                 block_type=block_type,
                 section_label=section_label,
                 text=text,
@@ -5363,6 +5375,7 @@ class ResearchObjectiveService:
         self,
         *,
         frame: PaperAnalysisFrame,
+        objective_context: ResearchObjective,
         blocks: list[Any],
         document_tree: SourceDocumentTree,
     ) -> list[dict[str, Any]]:
@@ -5406,6 +5419,7 @@ class ResearchObjectiveService:
                 continue
             score = self._route_text_candidate_score(
                 frame=frame,
+                objective_context=objective_context,
                 block_type=block_type,
                 section_label=section_label,
                 text=text,
@@ -5428,6 +5442,7 @@ class ResearchObjectiveService:
             )
         scored_candidates = self._bounded_tree_route_text_candidates(
             frame=frame,
+            objective_context=objective_context,
             scored_candidates=scored_candidates,
         )
         return [
@@ -5445,6 +5460,7 @@ class ResearchObjectiveService:
         self,
         *,
         frame: PaperAnalysisFrame,
+        objective_context: ResearchObjective,
         scored_candidates: list[tuple[int, int, dict[str, Any]]],
     ) -> list[tuple[int, int, dict[str, Any]]]:
         if len(scored_candidates) <= _ROUTE_TEXT_CANDIDATE_LIMIT:
@@ -5461,7 +5477,7 @@ class ResearchObjectiveService:
             item
             for item in sorted(scored_candidates)
             if self._route_text_candidate_is_direct_result(
-                frame=frame,
+                objective_context=objective_context,
                 candidate=item[2],
             )
         ]
@@ -5532,7 +5548,7 @@ class ResearchObjectiveService:
     def _route_text_candidate_is_direct_result(
         self,
         *,
-        frame: PaperAnalysisFrame,
+        objective_context: ResearchObjective,
         candidate: Mapping[str, Any],
     ) -> bool:
         text = str(candidate.get("text") or "")
@@ -5540,15 +5556,37 @@ class ResearchObjectiveService:
             return False
         mentions_variable = any(
             property_matching.source_text_mentions_axis(text, axis)
-            for axis in frame.changed_variables
+            for axis in objective_context.variables
         )
         mentions_outcome = any(
             property_matching.source_text_mentions_axis(text, axis)
-            for axis in frame.measured_property_scope
+            for axis in objective_context.outcomes
         )
         if not mentions_outcome:
             return False
         text_haystack = text.casefold()
+        if not mentions_variable:
+            text_tokens = property_matching.axis_tokens(text_haystack)
+            outcome_tokens = set().union(
+                *(
+                    property_matching.axis_tokens(
+                        property_matching.axis_key(axis)
+                    )
+                    for axis in objective_context.outcomes
+                )
+            )
+            mentions_variable = any(
+                any(
+                    len(token) >= 4
+                    and token not in {"base", "plate"}
+                    and token not in outcome_tokens
+                    and token in text_tokens
+                    for token in property_matching.axis_tokens(
+                        property_matching.axis_key(axis)
+                    )
+                )
+                for axis in objective_context.variables
+            )
         has_result_comparison = any(
             phrase in text_haystack
             for phrase in (
@@ -5556,13 +5594,20 @@ class ResearchObjectiveService:
                 "compared to",
                 "comparing",
                 "decreased",
+                "diminish",
                 "exhibited",
                 "higher than",
                 "increased",
                 "lower than",
+                "not significantly influence",
                 "observed",
+                "prevent",
+                "prohibit",
+                "reduc",
                 "resulted in",
                 "resulted into",
+                "significant effect",
+                "unchanged",
             )
         )
         return has_result_comparison and (
@@ -5653,6 +5698,7 @@ class ResearchObjectiveService:
         self,
         *,
         frame: PaperAnalysisFrame,
+        objective_context: ResearchObjective,
         block_type: str,
         section_label: str,
         text: str,
@@ -5661,14 +5707,23 @@ class ResearchObjectiveService:
         if "references" in self._objective_column_key(section_label):
             return 0
         score = 0
-        for term in frame.material_match:
+        for term in (*objective_context.material_scope, *frame.material_match):
             term_text = str(term or "").strip().casefold()
             if term_text and term_text in text_haystack:
                 score += 1
-        for term in (*frame.changed_variables, *frame.measured_property_scope):
-            term_text = str(term or "").strip().casefold()
-            if term_text and term_text in text_haystack:
+        objective_axis_keys = {
+            property_matching.axis_key(term)
+            for term in (*objective_context.variables, *objective_context.outcomes)
+        }
+        for term in (*objective_context.variables, *objective_context.outcomes):
+            if property_matching.source_text_mentions_axis(text, term):
                 score += 4
+        for term in (*frame.changed_variables, *frame.measured_property_scope):
+            if (
+                property_matching.axis_key(term) not in objective_axis_keys
+                and property_matching.source_text_mentions_axis(text, term)
+            ):
+                score += 1
         for term in frame.test_environment_scope:
             term_text = str(term or "").strip().casefold()
             if term_text and term_text in text_haystack:

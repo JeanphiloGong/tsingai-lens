@@ -738,6 +738,94 @@ def test_llm_objective_evidence_completes_grounded_categorical_endpoints(tmp_pat
     }
 
 
+def test_llm_objective_evidence_accepts_verbatim_preheating_crack_comparison(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-preheating-cracks",
+            "question": (
+                "How does base plate preheating temperature affect crack formation?"
+            ),
+            "variables": ["base plate preheating temperature"],
+            "outcomes": ["crack formation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-preheating",
+            "source_kind": "text_window",
+            "source_ref": "block-crack-result",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+
+    records = service._objective_evidence_records_from_extracted(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": "block-crack-result",
+            "text": (
+                "Al7075 microcracks can abundantly form after SLM processing "
+                "without preheating. Although the application of preheating "
+                "largely reduces this cracking behavior, it fails to completely "
+                "prevent microcrack formation after preheating at 400 C."
+            ),
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "base plate preheating temperature",
+                    "baseline_value": "without preheating",
+                    "target_value": "preheating at 400 C",
+                    "unit": None,
+                }
+            ],
+            "comparison": {
+                "baseline_label": "without preheating",
+                "target_label": "preheating at 400 C",
+                "axis_names": ["base plate preheating temperature"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "crack formation",
+                "value": None,
+                "unit": None,
+                "direction": "decrease",
+                "result_text": (
+                    "application of preheating largely reduces this cracking behavior"
+                ),
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {
+                "material": [{"name": "material", "value": "Al7075"}],
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+    )
+
+    assert len(records) == 1
+    assert records[0]["changed_variables"] == [
+        {
+            "name": "base plate preheating temperature",
+            "baseline_value": "without preheating",
+            "target_value": "preheating at 400 C",
+            "unit": None,
+        }
+    ]
+    assert records[0]["reported_result"]["direction"] == "decrease"
+
+
 def test_llm_objective_evidence_drops_unsupported_qualitative_direction(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),

@@ -53,6 +53,14 @@ def test_axis_matching_preserves_explicit_synonyms_and_source_aliases() -> None:
         "scan strategy",
         "scanning strategy",
     )
+    assert property_matching.axis_values_match(
+        "preheating",
+        "base plate preheating temperature",
+    )
+    assert property_matching.axis_values_match(
+        "cracking",
+        "crack formation",
+    )
     assert property_matching.source_text_mentions_axis("E p", "pitting potential")
 
 

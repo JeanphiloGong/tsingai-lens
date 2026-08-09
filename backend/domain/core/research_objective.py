@@ -115,6 +115,7 @@ _SLUG_NON_WORD_PATTERN = re.compile(r"[^a-z0-9]+")
 
 @dataclass(frozen=True)
 class PaperSkim:
+    # stable link to the source document
     document_id: str
     title: str | None
     source_filename: str | None

@@ -105,6 +105,10 @@ class ObjectiveCandidateService:
                     sorted(seed_document_ids),
                 )
                 continue
+            objective = self._recover_shared_seed_material_scope(
+                objective,
+                discovery_skims=discovery_skims,
+            )
             accepted_objectives.append(objective)
 
         research_objectives = tuple(accepted_objectives)
@@ -233,6 +237,55 @@ class ObjectiveCandidateService:
             and (not structured_variables or variables_supported)
             and (not structured_outcomes or outcomes_supported)
         )
+
+    def _recover_shared_seed_material_scope(
+        self,
+        objective: ResearchObjective,
+        *,
+        discovery_skims: Mapping[str, Mapping[str, Any]],
+    ) -> ResearchObjective:
+        if objective.material_scope:
+            return objective
+
+        materials_by_seed: list[tuple[str, ...]] = []
+        for document_id in objective.seed_document_ids:
+            skim = discovery_skims.get(document_id)
+            materials = tuple(
+                str(value).strip()
+                for value in (skim or {}).get("candidate_materials", ())
+                if str(value).strip()
+            )
+            if not materials:
+                return objective
+            materials_by_seed.append(materials)
+
+        if not materials_by_seed:
+            return objective
+        shared_materials = self._unique_axis_values(
+            material
+            for material in materials_by_seed[0]
+            if all(
+                any(
+                    property_matching.axis_values_match(material, candidate)
+                    for candidate in seed_materials
+                )
+                for seed_materials in materials_by_seed[1:]
+            )
+        )
+        if not shared_materials:
+            return objective
+
+        payload = objective.to_record()
+        payload["material_scope"] = shared_materials
+        recovered = ResearchObjective.from_mapping(payload)
+        logger.info(
+            "Research objective recovered shared seed material scope "
+            "collection_id=%s objective_id=%s material_scope=%s",
+            objective.collection_id,
+            objective.objective_id,
+            shared_materials,
+        )
+        return recovered
 
     @staticmethod
     def _canonicalize_objective_document_ids(

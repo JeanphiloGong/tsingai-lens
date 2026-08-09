@@ -521,6 +521,10 @@ def test_research_objective_discovery_prompt_requires_focused_concise_objectives
     assert "Group compatible skims by aligned variable and outcome axes" in user_prompt
     assert "Prefer candidates supported by at least two experimental skims" in user_prompt
     assert "Every `seed_document_ids` value must identify a skim" in user_prompt
+    assert "Put common material identities in `material_scope`" in user_prompt
+    assert "Every seed must support every returned material" in user_prompt
+    assert '"material_scope":["316L stainless steel"]' in user_prompt
+    assert "fixed process, sample, and test scope in `constraints`" in user_prompt
     assert "`paper_skims` is the list of bounded per-paper research maps" in user_prompt
     assert '"seed_document_ids":["paper-a","paper-b"]' in user_prompt
     assert 'return exactly `{"objectives":[]}`' in user_prompt

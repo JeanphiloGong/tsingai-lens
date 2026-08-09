@@ -21,6 +21,7 @@ from tests.support.objective_candidate_extractors import (
     InvalidAxisCanonicalizationExtractor as _InvalidAxisCanonicalizationExtractor,
     InventedAxisMergeExtractor as _InventedAxisMergeExtractor,
     MissingSeedObjectiveExtractor as _MissingSeedObjectiveExtractor,
+    OmittedMaterialScopeExtractor as _OmittedMaterialScopeExtractor,
     OppositeDirectionMergeExtractor as _OppositeDirectionMergeExtractor,
     OverbroadAxisCanonicalizationExtractor as _OverbroadAxisCanonicalizationExtractor,
     OverbroadPersistedObjectiveExtractor as _OverbroadPersistedObjectiveExtractor,
@@ -212,6 +213,47 @@ def test_question_hint_cannot_override_conflicting_structured_skim_axes():
         discovery_skim,
         objective,
     )
+
+
+def test_objective_candidate_service_recovers_material_shared_by_every_seed():
+    service = ObjectiveCandidateService()
+    paper_skims = (
+        _paper_skim("paper-1", materials=["316L stainless steel"]),
+        _paper_skim("paper-2", materials=["316L stainless steel (316L)"]),
+    )
+
+    objectives = service.discover_candidates(
+        "collection-test",
+        paper_skims=paper_skims,
+        documents=_documents_for_skims(paper_skims),
+        extractor=_OmittedMaterialScopeExtractor(),
+    )
+
+    assert len(objectives) == 1
+    assert objectives[0].material_scope == ("316L stainless steel",)
+
+
+def test_objective_candidate_service_does_not_guess_unshared_material():
+    service = ObjectiveCandidateService()
+
+    for materials in (
+        (["316L stainless steel"], ["Ti-6Al-4V"]),
+        (["316L stainless steel"], []),
+    ):
+        paper_skims = (
+            _paper_skim("paper-1", materials=materials[0]),
+            _paper_skim("paper-2", materials=materials[1]),
+        )
+
+        objectives = service.discover_candidates(
+            "collection-test",
+            paper_skims=paper_skims,
+            documents=_documents_for_skims(paper_skims),
+            extractor=_OmittedMaterialScopeExtractor(),
+        )
+
+        assert len(objectives) == 1
+        assert objectives[0].material_scope == ()
 
 
 def test_research_objective_service_builds_and_persists_objective_records(
@@ -1036,3 +1078,29 @@ def _build_duplicate_paper_objectives(
         collection_id,
         build_id="build_test",
     )
+
+
+def _paper_skim(document_id: str, *, materials: list[str]) -> PaperSkim:
+    return PaperSkim.from_mapping(
+        {
+            "document_id": document_id,
+            "doc_role": "experimental",
+            "candidate_materials": materials,
+            "candidate_properties": ["relative density"],
+            "changed_variables": ["laser power"],
+            "possible_objectives": [
+                "How does laser power affect relative density?"
+            ],
+            "evidence_density": "high",
+            "confidence": 0.9,
+        }
+    )
+
+
+def _documents_for_skims(
+    paper_skims: tuple[PaperSkim, ...],
+) -> list[SimpleNamespace]:
+    return [
+        SimpleNamespace(document_id=skim.document_id, metadata={})
+        for skim in paper_skims
+    ]

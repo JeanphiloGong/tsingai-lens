@@ -27,6 +27,10 @@ from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
 from application.core.objectives.paper_skim_service import PaperSkimService
+from application.core.paper_facts.extraction import (
+    PaperFactsExtractor,
+    build_default_paper_facts_extractor,
+)
 from application.source.artifact_input_service import load_document_tree
 from application.source.collection_service import CollectionService
 from domain.core import (
@@ -232,9 +236,11 @@ class ResearchObjectiveService:
         paper_skim_service: PaperSkimService,
         objective_candidate_service: ObjectiveCandidateService,
         objective_extractor: ObjectiveExtractor | None = None,
+        paper_facts_extractor: PaperFactsExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
         self._objective_extractor = objective_extractor
+        self._paper_facts_extractor = paper_facts_extractor
         self.paper_fact_repository = paper_fact_repository
         self.objective_repository = objective_repository
         self.source_artifact_repository = source_artifact_repository
@@ -1823,7 +1829,6 @@ class ResearchObjectiveService:
             }
             source, table_repair_failed = self._repair_objective_table_source_if_needed(
                 collection_id=collection_id,
-                extractor=extractor,
                 route=route,
                 source=source,
                 llm_unavailable=llm_table_repair_unavailable,
@@ -2016,7 +2021,6 @@ class ResearchObjectiveService:
         self,
         *,
         collection_id: str,
-        extractor: ObjectiveExtractor,
         route: EvidenceCandidate,
         source: dict[str, Any],
         llm_unavailable: bool = False,
@@ -2033,7 +2037,9 @@ class ResearchObjectiveService:
             source=source,
         )
         try:
-            parsed = extractor.repair_table_matrix(repair_payload)
+            parsed = self._get_paper_facts_extractor().repair_table_matrix(
+                repair_payload
+            )
         except Exception:
             logger.exception(
                 "Research objective table matrix repair failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_ref=%s",
@@ -6485,6 +6491,11 @@ class ResearchObjectiveService:
         if self._objective_extractor is None:
             self._objective_extractor = build_default_objective_extractor()
         return self._objective_extractor
+
+    def _get_paper_facts_extractor(self) -> PaperFactsExtractor:
+        if self._paper_facts_extractor is None:
+            self._paper_facts_extractor = build_default_paper_facts_extractor()
+        return self._paper_facts_extractor
 
     def _load_source_artifacts(
         self,

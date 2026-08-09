@@ -23,7 +23,9 @@ Objective analysis.
 - `objective_candidate_service.py`
   Owns collection-level candidate discovery from `PaperSkim` records. It
   validates seed-paper support, canonicalizes model-produced document ids and
-  research axes, validates merge decisions, and removes exact duplicates.
+  research axes, restores a model-omitted material scope only when every seed
+  skim supports the same material, validates merge decisions, and removes exact
+  duplicates.
 - `evidence_routing.py`
   Owns the transient Source-selection decisions created while routing one
   confirmed Objective across its documents.

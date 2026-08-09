@@ -711,6 +711,27 @@ class MissingSeedObjectiveExtractor(FakeObjectiveExtractor):
         )
 
 
+class OmittedMaterialScopeExtractor(FakeObjectiveExtractor):
+    def discover_research_objectives(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredResearchObjectives:
+        self.discovery_payloads.append(payload)
+        return StructuredResearchObjectives(
+            objectives=[
+                StructuredResearchObjective(
+                    question="How does laser power affect relative density?",
+                    material_scope=[],
+                    variables=["laser power"],
+                    outcomes=["relative density"],
+                    seed_document_ids=["paper-1", "paper-2"],
+                    confidence=0.88,
+                    reason="model omitted the shared material scope",
+                )
+            ]
+        )
+
+
 class OverbroadPersistedObjectiveExtractor(DuplicateMechanicalObjectiveExtractor):
     def discover_research_objectives(
         self,
@@ -1003,6 +1024,7 @@ __all__ = [
     "InvalidAxisCanonicalizationExtractor",
     "InventedAxisMergeExtractor",
     "MissingSeedObjectiveExtractor",
+    "OmittedMaterialScopeExtractor",
     "OppositeDirectionMergeExtractor",
     "OverbroadAxisCanonicalizationExtractor",
     "OverbroadPersistedObjectiveExtractor",

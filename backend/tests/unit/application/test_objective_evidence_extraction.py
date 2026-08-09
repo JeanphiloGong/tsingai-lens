@@ -8,6 +8,7 @@ from application.core.objectives.evidence_extraction import ExtractedEvidenceDra
 from application.core.objectives.evidence_routing import EvidenceCandidate
 from application.core.objectives.research_objective_service import PaperAnalysisFrame
 from application.core.objectives.schemas import StructuredEvidenceExtractions
+from application.core.paper_facts.schemas import StructuredTableMatrixRepair
 from domain.core import PaperSkim
 from domain.source import SourceDocumentNode, SourceDocumentTree
 from tests.support.collection_service import build_test_collection_service
@@ -1558,6 +1559,70 @@ def test_research_objective_fragmented_table_matrix_triggers_structural_repair(
             "table_cells": [],
         },
     )
+
+
+def test_research_objective_repairs_fragmented_table_with_paper_facts_extractor(
+    tmp_path,
+):
+    class RepairingPaperFactsExtractor:
+        def __init__(self) -> None:
+            self.payloads: list[dict[str, Any]] = []
+
+        def repair_table_matrix(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredTableMatrixRepair:
+            self.payloads.append(payload)
+            return StructuredTableMatrixRepair(
+                repaired_table_matrix=[
+                    ["Specimens", "Density (%)"],
+                    ["100) HIP-SLM (100/100)", "98.15"],
+                ],
+                confidence=0.9,
+            )
+
+    extractor = RepairingPaperFactsExtractor()
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+        paper_facts_extractor=extractor,
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+        }
+    )
+    source = {
+        "source_kind": "table",
+        "source_ref": "table-1",
+        "document_id": "paper-1",
+        "column_headers": ["Specimens", "Density (%)"],
+        "table_matrix": [
+            ["Specimens", "Density (%)"],
+            ["100) HIP-SLM (100/", "98.15"],
+        ],
+    }
+
+    repaired_source, repair_failed = (
+        service._repair_objective_table_source_if_needed(
+            collection_id="col-test",
+            route=route,
+            source=source,
+        )
+    )
+
+    assert repair_failed is False
+    assert len(extractor.payloads) == 1
+    assert repaired_source["raw_table_matrix"] == source["table_matrix"]
+    assert repaired_source["table_matrix"] == [
+        ["Specimens", "Density (%)"],
+        ["HIP-SLM (100/100)", "98.15"],
+    ]
+    assert repaired_source["table_matrix_structural_repair_applied"] is True
 
 
 def test_research_objective_service_skips_matrix_test_condition_table_fallback(

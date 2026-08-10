@@ -32,7 +32,8 @@ Research Objective
   -> Findings list
   -> selected Finding
      -> factors, outcome, direction, and synthesis status
-     -> mechanisms and typed scientific context
+     -> baseline / target / reported-result comparison
+     -> typed scientific context, deterministic analysis boundaries, and mechanisms
      -> PaperContribution bindings
      -> exact Evidence excerpts and Source links
      -> feedback action
@@ -45,17 +46,23 @@ page handles these states explicitly:
 - confirmed without analysis: start analysis;
 - queued/running: poll and show current phase/document progress;
 - failed without a published result: retry;
-- failed with a published result: keep the prior Findings visible and offer
-  retry;
+- failed with a published result: identify both the displayed published version
+  and failed retry version, keep the prior Findings visible, and offer retry;
 - succeeded: show Findings from the published analysis version.
 
-Finding detail and Evidence requests always include the published
-`analysis_version` and are loaded together for the selected Finding. Stale
-rapid-selection responses are discarded.
+The Finding list returns the complete display shape. Selection reuses that item
+and loads only its paginated Evidence with the published `analysis_version`;
+stale rapid-selection responses are discarded.
 The UI keeps internal IDs out of presentation while retaining them for API
 identity and source navigation. Evidence displays the exact returned
-`source_excerpt`, paper/page metadata, and a document link carrying the stable
-Source locator.
+`source_excerpt` once, shows baseline/target/result fields structurally, uses
+document profile titles for paper labels, and links to the stable Source
+locator. Only papers with matched Evidence receive full source groups; papers
+without Evidence are reduced to one aggregate status line, and an entirely
+empty result uses one collection-level empty state. Jointly changed variables
+remain one Evidence row, direct rows identify support or contradiction and
+direction, empty context categories are omitted, and mechanisms link to their
+exact supporting Evidence.
 
 ## Product Boundary
 

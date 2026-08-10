@@ -33,10 +33,14 @@ const { pageStore, setPage, goto, fetchMock } = vi.hoisted(() => {
 vi.mock('$app/stores', () => ({ page: pageStore }));
 vi.mock('$app/navigation', () => ({ goto }));
 vi.mock('$app/paths', () => ({
-	resolve: (route: string, params: Record<string, string>) =>
-		route.includes('/documents/')
-			? `/collections/${params.id}/documents/${params.document_id}`
-			: `/collections/${params.id}/objectives/${params.objective_id}`
+	resolve: (route: string, params?: Record<string, string>) =>
+		!route.includes('[')
+			? route
+			: route.includes('/documents/')
+				? `/collections/${params!.id}/documents/${params!.document_id}`
+				: route.endsWith('/objectives')
+					? `/collections/${params!.id}/objectives`
+					: `/collections/${params!.id}/objectives/${params!.objective_id}`
 }));
 vi.stubGlobal('fetch', fetchMock);
 
@@ -140,7 +144,7 @@ const finding = {
 			target_term: 'tensile strength',
 			direction: 'increase',
 			assertion_strength: 'associative',
-			supporting_evidence_ids: ['evidence-1']
+			supporting_evidence_ids: ['evidence-mechanism']
 		}
 	],
 	scientific_context: {
@@ -156,7 +160,7 @@ const finding = {
 			analysis_status: 'analyzed',
 			supporting_evidence_ids: ['evidence-1'],
 			contradicting_evidence_ids: [],
-			context_evidence_ids: [],
+			context_evidence_ids: ['evidence-mechanism'],
 			condition_boundary_evidence_ids: []
 		}
 	]
@@ -211,6 +215,20 @@ const evidence = {
 	confidence: 0.92
 };
 
+const mechanismEvidence = {
+	...evidence,
+	evidence_id: 'evidence-mechanism',
+	source_ref: 'block-8',
+	source_excerpt: 'Precipitate evolution was associated with increased tensile strength.',
+	page_numbers: [8],
+	evidence_role: 'mechanism_context',
+	selection_reason: 'Mechanism context.',
+	changed_variables: [],
+	comparison: null,
+	reported_result: null,
+	attribution_scope: 'not_attributable'
+};
+
 function deferredResponse() {
 	let resolve!: (response: Response) => void;
 	const promise = new Promise<Response>((done) => {
@@ -222,6 +240,25 @@ function deferredResponse() {
 function installPublishedResponses(response = objectiveResponse()) {
 	fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 		const current = request(input, init);
+		if (current.path.endsWith('/documents/profiles')) {
+			return jsonResponse({
+				collection_id: 'col_123',
+				items: [
+					{
+						document_id: 'paper-1',
+						collection_id: 'col_123',
+						title: 'Annealing response of LPBF 316L',
+						source_filename: 'annealing-316l.pdf',
+						doc_type: 'experimental',
+						parsing_warnings: [],
+						confidence: 0.95
+					}
+				],
+				total: 1,
+				count: 1,
+				summary: { total_documents: 1, doc_type_counts: {}, warnings: [] }
+			});
+		}
 		if (current.path.endsWith('/objectives/obj_1') && current.method === 'GET') {
 			return jsonResponse(response);
 		}
@@ -236,24 +273,16 @@ function installPublishedResponses(response = objectiveResponse()) {
 				total: 1
 			});
 		}
-		if (current.path.endsWith('/objectives/obj_1/findings/finding-1')) {
-			return jsonResponse({
-				collection_id: 'col_123',
-				objective_id: 'obj_1',
-				analysis_version: 1,
-				finding
-			});
-		}
 		if (current.path.endsWith('/objectives/obj_1/evidence')) {
 			return jsonResponse({
 				collection_id: 'col_123',
 				objective_id: 'obj_1',
 				analysis_version: 1,
 				finding_id: 'finding-1',
-				items: [evidence],
+				items: [evidence, mechanismEvidence],
 				offset: 0,
 				limit: 100,
-				total: 1
+				total: 2
 			});
 		}
 		throw new Error(`unexpected request: ${current.method} ${current.path}${current.search}`);
@@ -341,10 +370,13 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		render(Page);
 
 		await expect.element(browserPage.getByText('本次分析失败')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('正在显示已发布的 v1；重试 v2 失败。'))
+			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Evidence extraction failed.')).toBeInTheDocument();
 		await expect.element(browserPage.getByText(finding.statement).first()).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('blockquote'))
+			.element(browserPage.getByRole('blockquote').filter({ hasText: evidence.source_excerpt }))
 			.toHaveTextContent(evidence.source_excerpt);
 		await expect.element(browserPage.getByRole('button', { name: '重试分析' })).toBeInTheDocument();
 	});
@@ -357,17 +389,36 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Findings' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('associated_with')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('相关联', { exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('associated_with')).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('complementary', { name: 'Finding 列表' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('region', { name: 'Finding 详情' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Annealing response of LPBF 316L · p.7' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Annealing response of LPBF 316L · p.8' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('as-built', { exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('annealed', { exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('tensile strength: 620 MPa')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Single paper only.')).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('blockquote'))
+			.element(browserPage.getByRole('blockquote').filter({ hasText: evidence.source_excerpt }))
 			.toHaveTextContent(evidence.source_excerpt);
 		await expect
-			.element(browserPage.getByRole('link', { name: '打开原文' }))
+			.element(browserPage.getByRole('link', { name: '打开原文' }).first())
 			.toHaveAttribute(
 				'href',
 				'/collections/col_123/documents/paper-1?view=parsed-paper&evidence_id=evidence-1&source_ref=block-7&quote=After+annealing%2C+tensile+strength+increased+to+620+MPa.&return_to=%2Fcollections%2Fcol_123%2Fobjectives%2Fobj_1%3Ffinding_id%3Dfinding-1&page=7'
 			);
+		expect(
+			fetchMock.mock.calls.some(([input]) => String(input).includes('/findings/finding-1'))
+		).toBe(false);
 	});
 
 	it('loads every Finding and selected Evidence page', async () => {
@@ -405,9 +456,6 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 					total: 2
 				});
 			}
-			if (current.path.endsWith('/findings/finding-1')) {
-				return jsonResponse({ finding: pagedFinding });
-			}
 			if (current.path.endsWith('/objectives/obj_1/evidence')) {
 				const offset = Number(params.get('offset'));
 				return jsonResponse({
@@ -438,7 +486,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		).toBe(true);
 	});
 
-	it('discards stale detail and Evidence responses after rapid selection', async () => {
+	it('discards stale Evidence responses after rapid selection', async () => {
 		const slowFinding = {
 			...finding,
 			finding_id: 'finding-2',
@@ -473,7 +521,6 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			evidence_id: 'evidence-3',
 			source_excerpt: 'This Evidence belongs to the latest selected Finding.'
 		};
-		const slowDetailResponse = deferredResponse();
 		const slowEvidenceResponse = deferredResponse();
 
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
@@ -491,13 +538,6 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 					limit: 50,
 					total: 3
 				});
-			}
-			if (current.path.endsWith('/findings/finding-1')) {
-				return jsonResponse({ finding });
-			}
-			if (current.path.endsWith('/findings/finding-2')) return slowDetailResponse.promise;
-			if (current.path.endsWith('/findings/finding-3')) {
-				return jsonResponse({ finding: latestFinding });
 			}
 			if (current.path.endsWith('/objectives/obj_1/evidence')) {
 				const findingId = new URLSearchParams(current.search).get('finding_id');
@@ -518,14 +558,13 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('blockquote'))
 			.toHaveTextContent(latestEvidence.source_excerpt);
 
-		slowDetailResponse.resolve(jsonResponse({ finding: slowFinding }));
 		slowEvidenceResponse.resolve(jsonResponse({ items: [slowEvidence], total: 1 }));
 		await expect
 			.element(browserPage.getByRole('blockquote'))
 			.not.toHaveTextContent(slowEvidence.source_excerpt);
 	});
 
-	it('discards stale Finding and Evidence responses after a new analysis version is published', async () => {
+	it('discards stale Evidence responses after a new analysis version is published', async () => {
 		const slowFinding = {
 			...finding,
 			finding_id: 'finding-v1-slow',
@@ -560,7 +599,6 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			evidence_id: 'evidence-v2',
 			source_excerpt: 'Current version 2 source excerpt.'
 		};
-		const slowDetailResponse = deferredResponse();
 		const slowEvidenceResponse = deferredResponse();
 
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
@@ -597,15 +635,6 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 					total: version === 2 ? 1 : 2
 				});
 			}
-			if (current.path.endsWith('/findings/finding-1')) {
-				return jsonResponse({ finding });
-			}
-			if (current.path.endsWith('/findings/finding-v1-slow')) {
-				return slowDetailResponse.promise;
-			}
-			if (current.path.endsWith('/findings/finding-v2')) {
-				return jsonResponse({ finding: publishedFinding });
-			}
 			if (current.path.endsWith('/objectives/obj_1/evidence')) {
 				const findingId = params.get('finding_id');
 				if (findingId === 'finding-v1-slow') return slowEvidenceResponse.promise;
@@ -631,7 +660,6 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('blockquote'))
 			.toHaveTextContent(publishedEvidence.source_excerpt);
 
-		slowDetailResponse.resolve(jsonResponse({ finding: slowFinding }));
 		slowEvidenceResponse.resolve(jsonResponse({ items: [slowEvidence], total: 1 }));
 		await expect
 			.element(browserPage.getByRole('blockquote'))

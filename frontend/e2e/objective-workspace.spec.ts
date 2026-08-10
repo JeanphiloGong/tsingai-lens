@@ -74,7 +74,7 @@ const finding = {
 			target_term: 'tensile strength',
 			direction: 'increase',
 			assertion_strength: 'associative',
-			supporting_evidence_ids: ['evidence-1']
+			supporting_evidence_ids: ['evidence-mechanism']
 		}
 	],
 	scientific_context: {
@@ -89,6 +89,14 @@ const finding = {
 			document_id: documentId,
 			analysis_status: 'analyzed',
 			supporting_evidence_ids: ['evidence-1'],
+			contradicting_evidence_ids: [],
+			context_evidence_ids: ['evidence-mechanism'],
+			condition_boundary_evidence_ids: []
+		},
+		{
+			document_id: 'doc_without_evidence',
+			analysis_status: 'failed',
+			supporting_evidence_ids: [],
 			contradicting_evidence_ids: [],
 			context_evidence_ids: [],
 			condition_boundary_evidence_ids: []
@@ -143,6 +151,21 @@ const evidence = {
 	resolution_status: 'resolved',
 	failure_reason: null,
 	confidence: 0.92
+};
+
+const mechanismEvidence = {
+	...evidence,
+	evidence_id: 'evidence-mechanism',
+	source_kind: 'text_window',
+	source_ref: 'block-8',
+	source_excerpt: 'Precipitate evolution was associated with increased tensile strength.',
+	page_numbers: [8],
+	evidence_role: 'mechanism_context',
+	selection_reason: 'Mechanism context.',
+	changed_variables: [],
+	comparison: null,
+	reported_result: null,
+	attribution_scope: 'not_attributable'
 };
 
 function documentContent() {
@@ -281,6 +304,31 @@ async function mockApis(page: Page) {
 				})
 			);
 		}
+		if (path === `/api/v1/collections/${collectionId}/documents/profiles`) {
+			return route.fulfill(
+				json({
+					collection_id: collectionId,
+					items: [
+						{
+							document_id: documentId,
+							collection_id: collectionId,
+							title: 'LPBF 316L tensile study',
+							source_filename: 'paper-1.pdf',
+							doc_type: 'experimental',
+							parsing_warnings: [],
+							confidence: 0.95
+						}
+					],
+					total: 1,
+					count: 1,
+					summary: {
+						total_documents: 1,
+						doc_type_counts: { experimental: 1 },
+						warnings: []
+					}
+				})
+			);
+		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}`) {
 			return route.fulfill(
 				json({
@@ -305,18 +353,6 @@ async function mockApis(page: Page) {
 				})
 			);
 		}
-		if (
-			path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/findings/finding-1`
-		) {
-			return route.fulfill(
-				json({
-					collection_id: collectionId,
-					objective_id: objectiveId,
-					analysis_version: 1,
-					finding
-				})
-			);
-		}
 		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence`) {
 			return route.fulfill(
 				json({
@@ -324,10 +360,10 @@ async function mockApis(page: Page) {
 					objective_id: objectiveId,
 					analysis_version: 1,
 					finding_id: 'finding-1',
-					items: [evidence],
+					items: [evidence, mechanismEvidence],
 					offset: 0,
 					limit: 100,
-					total: 1
+					total: 2
 				})
 			);
 		}
@@ -356,11 +392,55 @@ for (const viewport of [
 		await page.goto(`/collections/${collectionId}/objectives/${objectiveId}`);
 
 		await expect(page.getByText('Evidence extraction failed.')).toBeVisible();
+		await expect(page.getByText('正在显示已发布的 v1；重试 v2 失败。')).toBeVisible();
 		await expect(page.getByText(finding.statement).first()).toBeVisible();
-		await expect(page.getByRole('blockquote')).toHaveText(evidence.source_excerpt);
-		await expect(page.getByText('associated_with')).toBeVisible();
+		await expect(
+			page.getByRole('blockquote').filter({ hasText: evidence.source_excerpt })
+		).toHaveText(evidence.source_excerpt);
+		await expect(page.getByText('相关联', { exact: true })).toBeVisible();
+		await expect(page.getByRole('heading', { name: '证据对比' })).toBeVisible();
+		await expect(page.getByRole('cell', { name: 'tensile strength: 620 MPa' })).toBeVisible();
+		await expect(page.getByRole('link', { name: 'LPBF 316L tensile study · p.7' })).toBeVisible();
+		await expect(page.getByRole('link', { name: 'LPBF 316L tensile study · p.8' })).toBeVisible();
+		await expect(
+			page.getByText('另有 1 篇文献未形成可审计 Evidence：分析失败 1 篇。')
+		).toBeVisible();
+		await expect(page.getByText('文献 2', { exact: true })).toHaveCount(0);
+		await expect(page.getByText('tensile strength', { exact: true }).first()).toBeVisible();
+		await expect(page.getByRole('button', { name: '反馈' })).toBeVisible();
 		await expect(page.getByText('Single paper only.')).toBeVisible();
-		const sourceLink = page.getByRole('link', { name: /打开原文|Open source/ });
+		const layout = await page.evaluate(() => {
+			const list = document
+				.querySelector<HTMLElement>('.findings-sidebar')
+				?.getBoundingClientRect();
+			const detailElement = document.querySelector<HTMLElement>('.finding-workspace');
+			const findingElement = document.querySelector<HTMLElement>('.finding-detail');
+			const detail = detailElement?.getBoundingClientRect();
+			return {
+				viewportWidth: window.innerWidth,
+				pageFitsViewport: document.documentElement.scrollWidth <= window.innerWidth + 1,
+				detailContentFits:
+					!!detailElement &&
+					!!findingElement &&
+					findingElement.scrollWidth <= detailElement.clientWidth + 1,
+				list: list && { x: list.x, y: list.y, width: list.width, height: list.height },
+				detail: detail && { x: detail.x, y: detail.y, width: detail.width, height: detail.height }
+			};
+		});
+		expect(layout.pageFitsViewport).toBe(true);
+		expect(layout.detailContentFits).toBe(true);
+		expect(layout.list).toBeTruthy();
+		expect(layout.detail).toBeTruthy();
+		expect(layout.detail!.x + layout.detail!.width).toBeLessThanOrEqual(layout.viewportWidth + 1);
+		if (viewport.name === 'desktop') {
+			expect(layout.list!.x + layout.list!.width).toBeLessThanOrEqual(layout.detail!.x);
+		} else {
+			expect(layout.list!.y + layout.list!.height).toBeLessThanOrEqual(layout.detail!.y);
+		}
+		const sourceLink = page
+			.locator('.evidence-item')
+			.filter({ hasText: evidence.source_excerpt })
+			.getByRole('link', { name: /打开原文|Open source/ });
 		await expect(sourceLink).toHaveAttribute(
 			'href',
 			`/collections/${collectionId}/documents/${documentId}?view=parsed-paper&evidence_id=evidence-1&source_ref=${tableSourceRef}&quote=After+annealing%2C+tensile+strength+increased+to+620+MPa.&return_to=%2Fcollections%2F${collectionId}%2Fobjectives%2F${objectiveId}%3Ffinding_id%3Dfinding-1&page=7`

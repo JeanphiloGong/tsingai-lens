@@ -109,8 +109,8 @@ A Finding contains:
   display rank;
 - subordinate mechanisms and typed material/sample/process/test scientific
   context;
-- explicit limitations and one PaperContribution binding for every analyzed,
-  excluded, or failed paper.
+- deterministic analysis limitations and one PaperContribution binding for
+  every analyzed, excluded, or failed paper.
 
 An Evidence record contains:
 

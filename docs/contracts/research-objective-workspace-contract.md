@@ -126,7 +126,7 @@ Finding is the only conclusion identity. It owns:
 - statement, direction, assertion strength, and attribution scope;
 - evidence-derived synthesis status and certainty;
 - display rank, subordinate mechanisms, common scientific context, and
-  explicit limitations;
+  deterministic analysis limitations;
 - one FindingPaperContribution binding for every PaperContribution in the
   Objective analysis.
 
@@ -146,6 +146,9 @@ The backend derives synthesis status from validated direct Evidence:
 Certainty is the minimum confidence of linked direct Evidence and is capped at
 `0.5` for insufficient confirmation. Paper count and paper/cross-paper scope
 are computed from bindings rather than persisted as independent declarations.
+System-produced limitations are derived from validated factor coupling,
+direct-Evidence coverage, contradiction, condition boundaries, and attribution
+scope. Provider-authored free text is not published as an analysis limitation.
 
 ### FindingMechanismRelation
 

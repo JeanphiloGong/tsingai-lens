@@ -112,7 +112,10 @@ contradicting, requires the statement to foreground heterogeneous responses
 when directions oppose, and derives condition boundaries, attribution scope,
 synthesis status, certainty, common scientific context, and one Finding-local
 binding for every PaperContribution in the analysis. The provider may identify
-only subordinate mechanisms backed by supplied context Evidence.
+only subordinate mechanisms backed by supplied context Evidence. Published
+analysis limitations are derived deterministically from validated factor
+coupling, direct-Evidence coverage, contradiction, condition boundaries, and
+attribution scope; provider-authored free-text limitations are not published.
 
 When a schema-valid candidate fails a backend semantic guard, synthesis records
 the concrete rejection reason and permits one bounded provider repair against

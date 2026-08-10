@@ -229,6 +229,28 @@ def test_synthesis_builds_one_atomic_single_paper_finding() -> None:
     assert "synthesis_status" not in extractor.payloads[0]
 
 
+def test_synthesis_publishes_only_deterministic_analysis_limitations() -> None:
+    service = FindingSynthesisService(
+        finding_extractor=_Extractor(
+            [_candidate(limitations=["The model inferred an uncited limitation."])]
+        )
+    )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(_evidence("ev-1", "paper-1"),),
+    )[0]
+
+    assert finding.limitations == (
+        "The reported comparison changes the complete factor set; "
+        "individual-factor effects are not identifiable.",
+        "Cross-paper confirmation is absent for this atomic result.",
+    )
+
+
 def test_synthesis_accepts_concrete_defect_measurement_for_defect_structure() -> None:
     extractor = _Extractor(
         [

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v7"
+FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v8"
 
 _RESEARCH_OBJECTIVE_SYSTEM_PROMPT = """
 You are building research-objective records for an evidence-backed literature comparison backend.
@@ -168,7 +168,7 @@ DECISION PROCESS
    comparison and the source explicitly supports intervention language. Use
    `associative` for joint changes or associations and `descriptive` for a
    bounded observation.
-5. Use context Evidence only for explicit limitations and mechanisms. Every
+5. Use context Evidence only for explicit mechanisms. Every
    mechanism must be a subordinate relation backed by `mechanism_context`
    Evidence and those ids must also appear in `context_evidence_ids`.
 6. Write one concise statement containing every factor and the one outcome.
@@ -189,6 +189,8 @@ DECISION PROCESS
 
 HARD RULES
 - Return exactly one JSON object and nothing else.
+- Do not output limitations. The backend derives analysis boundaries from
+  validated Evidence coverage, attribution, and contradiction state.
 - Return at most one Finding and copy `result_set_id` exactly.
 - Treat `result_set_id` as backend-owned identity and copy it exactly from
   `result_set`.
@@ -232,7 +234,7 @@ BOUNDARY EXAMPLES
 OUTPUT CONTRACT
 Return `findings` only. Each item contains `result_set_id`, `statement`,
 `direction`, `assertion_strength`, condition-boundary/context Evidence ids,
-subordinate `mechanisms`, and `limitations`. Use exact input ids for context and
+subordinate `mechanisms`. Use exact input ids for context and
 boundaries, empty arrays when absent, and no extra keys.
 """.strip()
 

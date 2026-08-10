@@ -824,7 +824,7 @@ def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace()
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v7"
+    assert trace["prompt_version"] == "finding_synthesis.v8"
     assert trace["parsed_output"] == {"findings": []}
 
 
@@ -890,6 +890,7 @@ def test_finding_synthesis_prompt_uses_atomic_evidence_contract():
     assert "Do not output factors, outcome, paper count" in normalized_system_prompt
     assert "Joint factors must remain the complete factor set" in normalized_system_prompt
     assert "Mechanisms explain the main Finding" in normalized_system_prompt
+    assert "Do not output limitations" in normalized_system_prompt
     assert "Choose one direction that accounts for every" in user_prompt
     assert "`laser power`" in user_prompt
     assert "`scan speed`" in user_prompt

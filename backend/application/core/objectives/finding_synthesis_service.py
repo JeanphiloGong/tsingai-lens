@@ -609,7 +609,6 @@ class FindingSynthesisService:
         direct_evidence = supporting_evidence + contradicting_evidence
         certainty = Finding.certainty_for(synthesis_status, direct_evidence)
         limitations = self._limitations(
-            candidate=candidate,
             factors=factors,
             synthesis_status=synthesis_status,
             attribution_scope=attribution_scope,
@@ -831,7 +830,6 @@ class FindingSynthesisService:
     @staticmethod
     def _limitations(
         *,
-        candidate: Mapping[str, Any],
         factors: tuple[str, ...],
         synthesis_status: str,
         attribution_scope: str,
@@ -867,7 +865,7 @@ class FindingSynthesisService:
             deterministic.append(
                 "The available evidence supports association, not isolated causation."
             )
-        return _strings([*_strings(candidate.get("limitations")), *deterministic])
+        return _strings(deterministic)
 
     @staticmethod
     def _contribution_payload(contribution: PaperContribution) -> dict[str, Any]:

@@ -31,9 +31,29 @@ _DISCOVERY_TEXT_VALUE_CHARS = 80
 _DISCOVERY_OBJECTIVE_TEXT_CHARS = 180
 
 
+def _non_empty_text_values(values: Iterable[Any]) -> tuple[str, ...]:
+    return tuple(text for value in values if (text := str(value).strip()))
+
+
+def _values_support_all_axes(
+    values: tuple[str, ...],
+    axes: Iterable[str],
+) -> bool:
+    return all(
+        any(
+            property_matching.axis_values_match(axis, value)
+            or property_matching.source_text_mentions_axis(value, axis)
+            or property_matching.source_text_mentions_axis(axis, value)
+            for value in values
+        )
+        for axis in axes
+    )
+
+
 class ObjectiveCandidateService:
     """Discover and validate collection-level Objectives from PaperSkims."""
 
+    # define a method that converts all per-paper PaperSkim records into a small, validated set of collection-level research objectives
     def discover_candidates(
         self,
         collection_id: str,
@@ -43,12 +63,12 @@ class ObjectiveCandidateService:
         extractor: ObjectiveExtractor,
         progress_callback: ProgressCallback | None = None,
     ) -> tuple[ResearchObjective, ...]:
+        discovery_skims = [
+            self._build_objective_discovery_skim(skim) for skim in paper_skims
+        ]
         objective_payload = {
             "collection_id": collection_id,
-            "paper_skims": [
-                self._build_objective_discovery_skim(skim)
-                for skim in paper_skims
-            ],
+            "paper_skims": discovery_skims,
         }
         self._notify_progress(
             progress_callback,
@@ -60,8 +80,8 @@ class ObjectiveCandidateService:
         )
         parsed_objectives = extractor.discover_research_objectives(objective_payload)
         discovered_objective_count = len(parsed_objectives.objectives)
-        discovery_skims: dict[str, dict[str, Any]] = {
-            str(skim["document_id"]): skim for skim in objective_payload["paper_skims"]
+        discovery_skims_by_document_id = {
+            str(skim["document_id"]): skim for skim in discovery_skims
         }
         accepted_objectives: list[ResearchObjective] = []
         for item in parsed_objectives.objectives:
@@ -78,7 +98,7 @@ class ObjectiveCandidateService:
                 continue
             matching_document_ids = {
                 document_id
-                for document_id, skim in discovery_skims.items()
+                for document_id, skim in discovery_skims_by_document_id.items()
                 if self._discovery_skim_supports_objective(skim, objective)
             }
             seed_document_ids = set(objective.seed_document_ids)
@@ -107,7 +127,7 @@ class ObjectiveCandidateService:
                 continue
             objective = self._recover_shared_seed_material_scope(
                 objective,
-                discovery_skims=discovery_skims,
+                discovery_skims_by_document_id=discovery_skims_by_document_id,
             )
             accepted_objectives.append(objective)
 
@@ -146,7 +166,7 @@ class ObjectiveCandidateService:
     def _build_objective_discovery_skim(skim: PaperSkim) -> dict[str, Any]:
         """Keep collection-level discovery input within the model context budget."""
 
-        def values(
+        def bounded_values(
             items: tuple[str, ...],
             limit: int,
         ) -> list[str]:
@@ -166,26 +186,26 @@ class ObjectiveCandidateService:
         return {
             "document_id": skim.document_id,
             "doc_role": skim.doc_role,
-            "candidate_materials": values(
+            "candidate_materials": bounded_values(
                 skim.candidate_materials,
                 _DISCOVERY_SCOPE_VALUE_LIMIT,
             ),
-            "candidate_processes": values(
+            "candidate_processes": bounded_values(
                 skim.candidate_processes,
                 _DISCOVERY_SCOPE_VALUE_LIMIT,
             ),
-            "candidate_properties": values(
+            "candidate_properties": bounded_values(
                 skim.candidate_properties,
                 _DISCOVERY_AXIS_VALUE_LIMIT,
             ),
-            "changed_variables": values(
+            "changed_variables": bounded_values(
                 skim.changed_variables,
                 _DISCOVERY_AXIS_VALUE_LIMIT,
             ),
             "possible_objectives": possible_objectives,
             "evidence_density": skim.evidence_density,
             "confidence": skim.confidence,
-            "warnings": values(skim.warnings, _DISCOVERY_WARNING_LIMIT),
+            "warnings": bounded_values(skim.warnings, _DISCOVERY_WARNING_LIMIT),
         }
 
     @staticmethod
@@ -193,32 +213,22 @@ class ObjectiveCandidateService:
         skim: Mapping[str, Any],
         objective: ResearchObjective,
     ) -> bool:
-        question_hints = tuple(
-            str(value).strip()
-            for value in skim.get("possible_objectives", ())
-            if str(value).strip()
+        question_hints = _non_empty_text_values(
+            skim.get("possible_objectives", ())
         )
-
-        def supports(axis: str, field: str) -> bool:
-            structured_values = tuple(
-                str(value).strip()
-                for value in skim.get(field, ())
-                if str(value).strip()
-            )
-            return any(
-                property_matching.axis_values_match(axis, value)
-                or property_matching.source_text_mentions_axis(value, axis)
-                or property_matching.source_text_mentions_axis(axis, value)
-                for value in structured_values
-            )
-
-        variables_supported = all(
-            supports(variable, "changed_variables")
-            for variable in objective.variables
+        changed_variables = _non_empty_text_values(
+            skim.get("changed_variables", ())
         )
-        outcomes_supported = all(
-            supports(outcome, "candidate_properties")
-            for outcome in objective.outcomes
+        candidate_properties = _non_empty_text_values(
+            skim.get("candidate_properties", ())
+        )
+        variables_supported = _values_support_all_axes(
+            changed_variables,
+            objective.variables,
+        )
+        outcomes_supported = _values_support_all_axes(
+            candidate_properties,
+            objective.outcomes,
         )
         if not question_hints:
             return variables_supported and outcomes_supported
@@ -230,47 +240,26 @@ class ObjectiveCandidateService:
             )
             for question in question_hints
         )
-        structured_variables = skim.get("changed_variables") or ()
-        structured_outcomes = skim.get("candidate_properties") or ()
-        return bool(
+        has_structured_variables = bool(skim.get("changed_variables"))
+        has_structured_outcomes = bool(skim.get("candidate_properties"))
+        return (
             question_supports_axes
-            and (not structured_variables or variables_supported)
-            and (not structured_outcomes or outcomes_supported)
+            and (not has_structured_variables or variables_supported)
+            and (not has_structured_outcomes or outcomes_supported)
         )
 
     def _recover_shared_seed_material_scope(
         self,
         objective: ResearchObjective,
         *,
-        discovery_skims: Mapping[str, Mapping[str, Any]],
+        discovery_skims_by_document_id: Mapping[str, Mapping[str, Any]],
     ) -> ResearchObjective:
         if objective.material_scope:
             return objective
 
-        materials_by_seed: list[tuple[str, ...]] = []
-        for document_id in objective.seed_document_ids:
-            skim = discovery_skims.get(document_id)
-            materials = tuple(
-                str(value).strip()
-                for value in (skim or {}).get("candidate_materials", ())
-                if str(value).strip()
-            )
-            if not materials:
-                return objective
-            materials_by_seed.append(materials)
-
-        if not materials_by_seed:
-            return objective
-        shared_materials = self._unique_axis_values(
-            material
-            for material in materials_by_seed[0]
-            if all(
-                any(
-                    property_matching.axis_values_match(material, candidate)
-                    for candidate in seed_materials
-                )
-                for seed_materials in materials_by_seed[1:]
-            )
+        shared_materials = self._shared_seed_materials(
+            objective.seed_document_ids,
+            discovery_skims_by_document_id=discovery_skims_by_document_id,
         )
         if not shared_materials:
             return objective
@@ -286,6 +275,39 @@ class ObjectiveCandidateService:
             shared_materials,
         )
         return recovered
+
+    def _shared_seed_materials(
+        self,
+        seed_document_ids: Iterable[str],
+        *,
+        discovery_skims_by_document_id: Mapping[str, Mapping[str, Any]],
+    ) -> list[str]:
+        materials_by_seed = [
+            _non_empty_text_values(
+                (discovery_skims_by_document_id.get(document_id) or {}).get(
+                    "candidate_materials",
+                    (),
+                )
+            )
+            for document_id in seed_document_ids
+        ]
+        if not materials_by_seed or any(
+            not materials for materials in materials_by_seed
+        ):
+            return []
+
+        first_seed_materials, *remaining_seed_materials = materials_by_seed
+        return self._unique_axis_values(
+            material
+            for material in first_seed_materials
+            if all(
+                any(
+                    property_matching.axis_values_match(material, candidate)
+                    for candidate in seed_materials
+                )
+                for seed_materials in remaining_seed_materials
+            )
+        )
 
     @staticmethod
     def _canonicalize_objective_document_ids(

@@ -241,7 +241,7 @@ class CollectionBuildPipelineService:
                 SOURCE_ARTIFACTS: nodes.build_source_artifacts,
                 ARTIFACT_REGISTRY: nodes.register_artifacts,
                 DOCUMENT_PROFILES: nodes.build_document_profiles,
-                OBJECTIVE_CANDIDATES: nodes.build_objective_candidates,
+                OBJECTIVE_CANDIDATES: nodes.discover_and_replace_objective_candidates,
                 FINALIZE: nodes.finalize,
             }
         )

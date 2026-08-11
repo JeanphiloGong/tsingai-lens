@@ -117,8 +117,6 @@ _SLUG_NON_WORD_PATTERN = re.compile(r"[^a-z0-9]+")
 class PaperSkim:
     # stable link to the source document
     document_id: str
-    title: str | None
-    source_filename: str | None
     doc_role: str
     candidate_materials: tuple[str, ...]
     candidate_processes: tuple[str, ...]
@@ -134,8 +132,6 @@ class PaperSkim:
         return cls(
             document_id=_text(payload.get("document_id") or payload.get("paper_id"))
             or "",
-            title=_text(payload.get("title")),
-            source_filename=_text(payload.get("source_filename")),
             doc_role=_text(payload.get("doc_role")) or "uncertain",
             candidate_materials=normalize_objective_terms(
                 payload.get("candidate_materials")
@@ -160,8 +156,6 @@ class PaperSkim:
     def to_record(self) -> dict[str, Any]:
         return {
             "document_id": self.document_id,
-            "title": self.title,
-            "source_filename": self.source_filename,
             "doc_role": self.doc_role,
             "candidate_materials": list(self.candidate_materials),
             "candidate_processes": list(self.candidate_processes),

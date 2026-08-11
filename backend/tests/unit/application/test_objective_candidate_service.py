@@ -379,7 +379,12 @@ def test_research_objective_service_builds_and_persists_objective_records(
     facts = service.objective_repository.read(collection_id)
     assert facts.research_objectives_ready is True
     assert len(facts.paper_skims) == 2
-    assert facts.paper_skims[0].source_filename == "paper-1.pdf"
+    assert facts.paper_skims[0].document_id == "paper-1"
+    source_artifacts = service.source_artifact_repository.read_collection_artifacts(
+        collection_id,
+        build_id="build_test",
+    )
+    assert source_artifacts.documents[0].metadata["source_filename"] == "paper-1.pdf"
     assert facts.research_objectives[0].excluded_document_ids == ("paper-2",)
     assert facts.research_objectives == objectives
     assert service.objective_repository.list_objectives(collection_id) == objectives

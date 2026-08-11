@@ -19,7 +19,8 @@ Objective analysis.
 - `paper_skim_service.py`
   Owns the per-document discovery stage. It builds bounded model input from
   Source documents, profiles, text blocks, tables, figures, and document trees,
-  then emits one `PaperSkim` research map per document.
+  then emits one `PaperSkim` research map per document. A skim retains only the
+  stable Source `document_id`; title and filename metadata remain Source-owned.
 - `objective_candidate_service.py`
   Owns collection-level candidate discovery from `PaperSkim` records. It
   validates seed-paper support, canonicalizes model-produced document ids and

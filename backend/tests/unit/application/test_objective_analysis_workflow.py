@@ -113,7 +113,6 @@ def test_objective_analysis_uses_deterministic_frame_when_frame_model_fails(
         {
             "document_id": "paper-1",
             "collection_id": collection_id,
-            "source_filename": "paper-1.pdf",
             "doc_role": "experimental",
             "candidate_materials": ["316L stainless steel"],
             "candidate_processes": ["LPBF"],
@@ -213,7 +212,6 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
         {
             "document_id": "paper-1",
             "collection_id": collection_id,
-            "source_filename": "paper-1.pdf",
             "doc_role": "experimental",
             "candidate_materials": ["316L stainless steel"],
             "candidate_processes": ["LPBF", "heat treatment"],
@@ -317,7 +315,6 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
         {
             "document_id": "paper-1",
             "collection_id": collection_id,
-            "source_filename": "paper-1.pdf",
             "doc_role": "experimental",
             "candidate_materials": ["316L stainless steel"],
             "candidate_processes": ["LPBF", "heat treatment"],

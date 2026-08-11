@@ -22,7 +22,7 @@ from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260802_0023"
+HEAD_REVISION = "20260806_0024"
 EXPECTED_TABLES = {
     "alembic_version",
     "artifact_versions",
@@ -138,10 +138,72 @@ def test_empty_database_upgrades_and_rejects_irreversible_downgrade(
                 == HEAD_REVISION
             )
             assert inspect(connection).get_table_names() == sorted(EXPECTED_TABLES)
+            skim_columns = {
+                column["name"]
+                for column in inspect(connection).get_columns("objective_paper_skims")
+            }
+            assert "title" not in skim_columns
+            assert "source_filename" not in skim_columns
             command.check(config)
 
             with pytest.raises(NotImplementedError, match="irreversible"):
                 command.downgrade(config, "20260722_0018")
+    finally:
+        engine.dispose()
+
+
+def test_paper_skim_source_metadata_migration_preserves_research_map(tmp_path) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "paper-skim-source-metadata.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    try:
+        with engine.begin() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "20260802_0023")
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO objective_paper_skims (
+                        build_id, source_document_id, collection_id, skim_order,
+                        title, source_filename, doc_role, candidate_materials,
+                        candidate_processes, candidate_properties,
+                        changed_variables, possible_objectives, evidence_density,
+                        confidence, warnings
+                    ) VALUES (
+                        'build-skim', 'paper-1', 'collection-skim', 0,
+                        'Duplicated title', 'duplicated.pdf', 'experimental',
+                        '["316L"]', '["LPBF"]', '["relative density"]',
+                        '["laser power"]',
+                        '["How does laser power affect relative density?"]',
+                        'high', 0.9, '[]'
+                    )
+                    """
+                )
+            )
+
+            command.upgrade(config, "head")
+
+            columns = {
+                column["name"]
+                for column in inspect(connection).get_columns("objective_paper_skims")
+            }
+            assert "title" not in columns
+            assert "source_filename" not in columns
+            assert connection.execute(
+                text(
+                    "SELECT source_document_id, doc_role, changed_variables, "
+                    "candidate_properties FROM objective_paper_skims"
+                )
+            ).one() == (
+                "paper-1",
+                "experimental",
+                '["laser power"]',
+                '["relative density"]',
+            )
     finally:
         engine.dispose()
 

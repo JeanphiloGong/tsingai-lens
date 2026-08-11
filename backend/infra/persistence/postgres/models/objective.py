@@ -76,8 +76,6 @@ class ObjectivePaperSkim(Base):
     source_document_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     skim_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    source_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
     doc_role: Mapped[str] = mapped_column(String(64), nullable=False)
     candidate_materials: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     candidate_processes: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)

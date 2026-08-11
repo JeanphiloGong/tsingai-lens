@@ -83,8 +83,6 @@ class PaperSkimService:
                 {
                     **parsed.model_dump(),
                     "document_id": document.document_id,
-                    "title": document.title,
-                    "source_filename": source_filename,
                 }
             )
             paper_skims.append(paper_skim)

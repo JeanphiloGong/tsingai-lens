@@ -46,8 +46,6 @@ def _candidate_facts(objective: ResearchObjective | None = None) -> ObjectiveFac
             PaperSkim.from_mapping(
                 {
                     "document_id": "srcdoc_runtime",
-                    "title": "Paper",
-                    "source_filename": "paper.pdf",
                     "doc_role": "primary_experiment",
                     "candidate_materials": ["Alloy A"],
                     "candidate_processes": ["temperature"],

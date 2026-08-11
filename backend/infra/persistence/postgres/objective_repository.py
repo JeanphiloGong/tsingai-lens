@@ -1123,8 +1123,6 @@ class PostgresObjectiveRepository:
     def _skim_record(row: ObjectivePaperSkim) -> PaperSkim:
         return PaperSkim(
             document_id=row.source_document_id,
-            title=row.title,
-            source_filename=row.source_filename,
             doc_role=row.doc_role,
             candidate_materials=tuple(row.candidate_materials),
             candidate_processes=tuple(row.candidate_processes),
@@ -1153,8 +1151,6 @@ class PostgresObjectiveRepository:
             source_document_id=skim.document_id,
             collection_id=collection_id,
             skim_order=position,
-            title=skim.title,
-            source_filename=skim.source_filename,
             doc_role=skim.doc_role,
             candidate_materials=list(skim.candidate_materials),
             candidate_processes=list(skim.candidate_processes),

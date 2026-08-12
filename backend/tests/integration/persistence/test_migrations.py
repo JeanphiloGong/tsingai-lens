@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 
 from alembic import command
@@ -22,7 +23,7 @@ from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260806_0024"
+HEAD_REVISION = "20260811_0025"
 EXPECTED_TABLES = {
     "alembic_version",
     "artifact_versions",
@@ -204,6 +205,126 @@ def test_paper_skim_source_metadata_migration_preserves_research_map(tmp_path) -
                 '["laser power"]',
                 '["relative density"]',
             )
+    finally:
+        engine.dispose()
+
+
+def test_pipeline_run_migration_preserves_existing_build_stage(tmp_path) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "pipeline-run.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    created_at = "2026-08-11 01:00:00+00:00"
+    try:
+        with engine.begin() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "20260806_0024")
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO auth_users (
+                        user_id, email, display_name, password_hash, created_at
+                    ) VALUES (
+                        'user-pipeline', 'pipeline@example.com', NULL,
+                        'synthetic-password-hash', :created_at
+                    )
+                    """
+                ),
+                {"created_at": created_at},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO collections (
+                        collection_id, owner_user_id, name, description, status,
+                        paper_count, created_at, updated_at
+                    ) VALUES (
+                        'col-pipeline', 'user-pipeline', 'Pipeline migration',
+                        NULL, 'running', 1, :created_at, :created_at
+                    )
+                    """
+                ),
+                {"created_at": created_at},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO tasks (
+                        task_id, collection_id, task_type, status, current_stage,
+                        progress_percent, progress_detail, output_path, errors,
+                        warnings, details, created_at, updated_at, started_at,
+                        finished_at
+                    ) VALUES (
+                        'task-pipeline', 'col-pipeline', 'build', 'running',
+                        'source_artifacts_completed', 60, NULL, NULL, '[]', '[]',
+                        '{}', :created_at, :created_at, :created_at, NULL
+                    )
+                    """
+                ),
+                {"created_at": created_at},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO collection_builds (
+                        build_id, task_id, collection_id, build_number, status,
+                        created_at, started_at, finished_at
+                    ) VALUES (
+                        'build-pipeline', 'task-pipeline', 'col-pipeline', 1,
+                        'building', :created_at, :created_at, NULL
+                    )
+                    """
+                ),
+                {"created_at": created_at},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO build_stages (
+                        stage_id, build_id, stage_kind, stage_version,
+                        stage_order, status, started_at, finished_at, errors,
+                        warnings, skip_reason
+                    ) VALUES (
+                        'stage-source', 'build-pipeline', 'source_artifacts', 1,
+                        0, 'succeeded', :created_at, :created_at, '[]',
+                        '["legacy warning"]', NULL
+                    )
+                    """
+                ),
+                {"created_at": created_at},
+            )
+
+            command.upgrade(config, "head")
+
+            columns = {
+                column["name"]
+                for column in inspect(connection).get_columns("build_stages")
+            }
+            assert "stage_version" not in columns
+            assert "skip_reason" not in columns
+            assert {"dependencies", "stats", "output_summary"} <= columns
+            build_row = connection.execute(
+                text(
+                    "SELECT mode FROM collection_builds "
+                    "WHERE build_id='build-pipeline'"
+                )
+            ).mappings().one()
+            assert build_row["mode"] == "standard"
+            row = connection.execute(
+                text(
+                    "SELECT stage_kind, status, warnings, dependencies, stats, "
+                    "output_summary FROM build_stages WHERE stage_id='stage-source'"
+                )
+            ).mappings().one()
+            assert row["stage_kind"] == "source_artifacts"
+            assert row["status"] == "succeeded"
+            assert json.loads(row["warnings"]) == ["legacy warning"]
+            assert json.loads(row["dependencies"]) == []
+            assert json.loads(row["stats"]) == {}
+            assert json.loads(row["output_summary"]) == {}
     finally:
         engine.dispose()
 

@@ -5,7 +5,6 @@ from typing import Any
 
 from application.pipeline.collection_build.config import CollectionBuildPipelineConfig
 from application.pipeline.collection_build.context import CollectionBuildContext
-from application.pipeline.collection_build.definitions import SOURCE_ARTIFACTS
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
@@ -23,7 +22,7 @@ async def build_source_artifacts(
 
     outputs = await context.build_source_artifacts(
         config=config.source,
-        method=config.method,
+        method=config.mode,
         additional_context=config.source_additional_context,
         verbose=config.verbose,
     )
@@ -125,24 +124,3 @@ def discover_and_replace_objective_candidates(
         progress_callback=context.objective_progress_callback,
         build_id=context.build_id,
     )
-
-
-def finalize(
-    context: CollectionBuildContext,
-    _config: CollectionBuildPipelineConfig,
-) -> dict:
-    task = context.task_service.get_task(context.task_id)
-    node_states = task.get("pipeline_nodes", {})
-    source_status = node_states.get(SOURCE_ARTIFACTS, {}).get("status")
-    if source_status != "succeeded":
-        status = "failed"
-    elif any(state.get("status") == "failed" for state in node_states.values()):
-        status = "partial_success"
-    else:
-        status = "completed"
-    output_path = None
-    artifacts = context.state.get("artifacts")
-    if isinstance(artifacts, dict):
-        output_path = artifacts.get("output_path")
-    context.state["final_status"] = status
-    return {"status": status, "output_path": output_path}

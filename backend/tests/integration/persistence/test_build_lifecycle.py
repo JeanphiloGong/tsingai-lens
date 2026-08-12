@@ -14,6 +14,7 @@ from sqlalchemy import URL, create_engine, event
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
+from domain.pipeline import ExecutionTimestamps, PipelineNodeRun
 from domain.source import (
     ArtifactVersionRecord,
     BuildStageRecord,
@@ -55,15 +56,18 @@ def _stage(build_id: str, stage_kind: str, stage_order: int) -> BuildStageRecord
     return BuildStageRecord(
         stage_id=f"stage_{stage_order}",
         build_id=build_id,
-        stage_kind=stage_kind,
-        stage_version=1,
         stage_order=stage_order,
-        status="succeeded",
-        started_at="2026-07-19T10:01:00+00:00",
-        finished_at="2026-07-19T10:02:00+00:00",
-        errors=(),
-        warnings=(),
-        skip_reason=None,
+        node=PipelineNodeRun(
+            name=stage_kind,
+            dependencies=("source_artifacts",)
+            if stage_kind == "artifact_registry"
+            else (),
+            status="succeeded",
+            timestamps=ExecutionTimestamps(
+                started_at="2026-07-19T10:01:00+00:00",
+                finished_at="2026-07-19T10:02:00+00:00",
+            ),
+        ),
     )
 
 

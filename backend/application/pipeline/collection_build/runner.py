@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import logging
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Any
 
 from application.pipeline.collection_build.config import CollectionBuildPipelineConfig
@@ -14,16 +15,18 @@ from application.pipeline.collection_build.definitions import (
 )
 from application.pipeline.collection_build.progress import (
     build_progress_detail,
-    collect_node_errors,
-    collect_node_warnings,
 )
-from application.pipeline.collection_build.state import build_initial_node_states, now_iso
+from domain.pipeline import PipelineNodeStatus, PipelineRun, PipelineRunStatus
 
 logger = logging.getLogger(__name__)
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 class CollectionBuildPipelineRunner:
-    """Run collection build nodes from explicit dependency definitions."""
+    """Execute the dependency graph carried by a collection pipeline run."""
 
     def __init__(
         self,
@@ -37,80 +40,99 @@ class CollectionBuildPipelineRunner:
         self,
         context: CollectionBuildContext,
         config: CollectionBuildPipelineConfig,
-    ) -> dict[str, Any]:
-        node_states = build_initial_node_states(
-            tuple(definition.node_id for definition in self.definitions)
-        )
-        self._persist_node_states(context, node_states)
-
-        for definition in self.definitions:
-            self._ensure_wait_for_terminal(definition, node_states)
-            if self._dependency_failed(definition, node_states):
-                self._mark_skipped(context, definition, node_states)
-                continue
-            self._mark_running(context, definition, node_states)
-            try:
-                result = self.node_functions[definition.node_id](context, config)
-                if inspect.isawaitable(result):
-                    result = await result
-            except Exception as exc:  # noqa: BLE001
-                self._mark_failed(context, definition, node_states, exc)
-                logger.exception(
-                    "Collection build pipeline node failed task_id=%s collection_id=%s node=%s",
-                    context.task_id,
-                    context.collection_id,
-                    definition.node_id,
-                )
-                continue
-            self._mark_succeeded(context, definition, node_states, result)
-
-        return {
-            "pipeline_nodes": node_states,
-            "errors": collect_node_errors(node_states),
-            "warnings": collect_node_warnings(node_states),
+        pipeline_run: PipelineRun,
+    ) -> PipelineRun:
+        definitions_by_name = {
+            definition.node_id: definition for definition in self.definitions
         }
+        missing_definitions = {
+            node.name for node in pipeline_run.nodes if node.name not in definitions_by_name
+        }
+        missing_functions = {
+            node.name for node in pipeline_run.nodes if node.name not in self.node_functions
+        }
+        if missing_definitions or missing_functions:
+            missing = sorted(missing_definitions | missing_functions)
+            raise ValueError("pipeline nodes are not executable: " + ", ".join(missing))
+        self._persist_run(context, pipeline_run)
 
-    def _dependency_failed(
-        self,
-        definition: CollectionBuildNodeDefinition,
-        node_states: dict[str, dict[str, Any]],
-    ) -> bool:
-        return any(
-            node_states[dependency]["status"] in {"failed", "skipped"}
-            for dependency in definition.depends_on
-        )
+        while any(node.status is PipelineNodeStatus.QUEUED for node in pipeline_run.nodes):
+            progressed = False
+            for node in pipeline_run.nodes:
+                if node.status is not PipelineNodeStatus.QUEUED:
+                    continue
+                dependencies = tuple(
+                    pipeline_run.node(name) for name in node.dependencies
+                )
+                if any(
+                    dependency.status
+                    in {PipelineNodeStatus.FAILED, PipelineNodeStatus.SKIPPED}
+                    for dependency in dependencies
+                ):
+                    pipeline_run = self._mark_skipped(context, node.name, pipeline_run)
+                    progressed = True
+                    continue
+                if not all(
+                    dependency.status is PipelineNodeStatus.SUCCEEDED
+                    for dependency in dependencies
+                ):
+                    continue
 
-    def _ensure_wait_for_terminal(
-        self,
-        definition: CollectionBuildNodeDefinition,
-        node_states: dict[str, dict[str, Any]],
-    ) -> None:
-        non_terminal = [
-            node_id
-            for node_id in definition.wait_for
-            if node_states[node_id]["status"] in {"queued", "pending", "running"}
-        ]
-        if non_terminal:
-            raise RuntimeError(
-                f"node {definition.node_id} wait_for is not terminal: "
-                f"{', '.join(non_terminal)}"
-            )
+                definition = definitions_by_name[node.name]
+                pipeline_run = self._mark_running(context, definition, pipeline_run)
+                try:
+                    result = self.node_functions[node.name](context, config)
+                    if inspect.isawaitable(result):
+                        result = await result
+                except Exception as exc:  # noqa: BLE001
+                    pipeline_run = self._mark_failed(
+                        context,
+                        definition,
+                        pipeline_run,
+                        exc,
+                    )
+                    logger.exception(
+                        "Collection build pipeline node failed task_id=%s collection_id=%s node=%s",
+                        context.task_id,
+                        context.collection_id,
+                        node.name,
+                    )
+                else:
+                    pipeline_run = self._mark_succeeded(
+                        context,
+                        definition,
+                        pipeline_run,
+                        result,
+                    )
+                progressed = True
 
-    def _persist_node_states(
+            if not progressed:
+                queued = sorted(
+                    node.name
+                    for node in pipeline_run.nodes
+                    if node.status is PipelineNodeStatus.QUEUED
+                )
+                raise RuntimeError(
+                    "pipeline has no executable nodes: " + ", ".join(queued)
+                )
+
+        return pipeline_run
+
+    def _persist_run(
         self,
         context: CollectionBuildContext,
-        node_states: dict[str, dict[str, Any]],
+        pipeline_run: PipelineRun,
     ) -> None:
         context.task_service.update_task(
             context.task_id,
-            pipeline_nodes=node_states,
+            pipeline_run=pipeline_run,
         )
 
     def _update_task_for_node(
         self,
         context: CollectionBuildContext,
         definition: CollectionBuildNodeDefinition,
-        node_states: dict[str, dict[str, Any]],
+        pipeline_run: PipelineRun,
         **fields: Any,
     ) -> None:
         record = context.task_service.update_task(
@@ -118,7 +140,7 @@ class CollectionBuildPipelineRunner:
             current_stage=fields.pop("current_stage", definition.node_id),
             progress_percent=fields.pop("progress_percent", definition.progress_percent),
             progress_detail=fields.pop("progress_detail", build_progress_detail(definition)),
-            pipeline_nodes=node_states,
+            pipeline_run=pipeline_run,
             **fields,
         )
         logger.info(
@@ -134,15 +156,18 @@ class CollectionBuildPipelineRunner:
         self,
         context: CollectionBuildContext,
         definition: CollectionBuildNodeDefinition,
-        node_states: dict[str, dict[str, Any]],
-    ) -> None:
-        state = node_states[definition.node_id]
-        state["status"] = "running"
-        state["started_at"] = now_iso()
+        pipeline_run: PipelineRun,
+    ) -> PipelineRun:
+        started_at = _now_iso()
+        if pipeline_run.status is PipelineRunStatus.QUEUED:
+            pipeline_run = pipeline_run.start(started_at)
+        pipeline_run = pipeline_run.with_node(
+            pipeline_run.node(definition.node_id).start(started_at)
+        )
         self._update_task_for_node(
             context,
             definition,
-            node_states,
+            pipeline_run,
             status="running",
             current_stage=definition.running_stage,
             progress_percent=(
@@ -155,68 +180,75 @@ class CollectionBuildPipelineRunner:
                 phase=definition.running_stage,
             ),
         )
+        return pipeline_run
 
     def _mark_succeeded(
         self,
         context: CollectionBuildContext,
         definition: CollectionBuildNodeDefinition,
-        node_states: dict[str, dict[str, Any]],
+        pipeline_run: PipelineRun,
         result: Any,
-    ) -> None:
-        state = node_states[definition.node_id]
-        state["status"] = "succeeded"
-        state["finished_at"] = now_iso()
-        if isinstance(result, dict):
-            state["warnings"] = list(result.get("warnings", []))
-            context.state[definition.node_id] = result
+    ) -> PipelineRun:
+        output_summary: dict[str, Any] = {}
+        warnings: tuple[str, ...] = ()
+        if isinstance(result, Mapping):
+            warnings = tuple(str(item) for item in result.get("warnings") or ())
+            output_summary = {
+                str(key): value
+                for key, value in result.items()
+                if key != "warnings"
+            }
+        pipeline_run = pipeline_run.with_node(
+            pipeline_run.node(definition.node_id).succeed(
+                _now_iso(),
+                output_summary=output_summary,
+                warnings=warnings,
+            )
+        )
         self._update_task_for_node(
             context,
             definition,
-            node_states,
+            pipeline_run,
             current_stage=definition.completed_stage,
             progress_detail=build_progress_detail(definition),
-            errors=collect_node_errors(node_states),
-            warnings=collect_node_warnings(node_states),
+            errors=list(pipeline_run.errors),
+            warnings=list(pipeline_run.warnings),
         )
+        return pipeline_run
 
     def _mark_failed(
         self,
         context: CollectionBuildContext,
         definition: CollectionBuildNodeDefinition,
-        node_states: dict[str, dict[str, Any]],
+        pipeline_run: PipelineRun,
         exc: Exception,
-    ) -> None:
-        state = node_states[definition.node_id]
-        state["status"] = "failed"
-        state["finished_at"] = now_iso()
-        state["errors"] = [str(exc)]
+    ) -> PipelineRun:
+        pipeline_run = pipeline_run.with_node(
+            pipeline_run.node(definition.node_id).fail(str(exc), _now_iso())
+        )
         self._update_task_for_node(
             context,
             definition,
-            node_states,
+            pipeline_run,
             current_stage="failed",
             progress_detail=build_progress_detail(
                 definition,
                 phase="failed",
                 message=str(exc),
             ),
-            errors=collect_node_errors(node_states),
-            warnings=collect_node_warnings(node_states),
+            errors=list(pipeline_run.errors),
+            warnings=list(pipeline_run.warnings),
         )
+        return pipeline_run
 
     def _mark_skipped(
         self,
         context: CollectionBuildContext,
-        definition: CollectionBuildNodeDefinition,
-        node_states: dict[str, dict[str, Any]],
-    ) -> None:
-        failed_dependency = next(
-            dependency
-            for dependency in definition.depends_on
-            if node_states[dependency]["status"] in {"failed", "skipped"}
+        node_name: str,
+        pipeline_run: PipelineRun,
+    ) -> PipelineRun:
+        pipeline_run = pipeline_run.with_node(
+            pipeline_run.node(node_name).skip(finished_at=_now_iso())
         )
-        state = node_states[definition.node_id]
-        state["status"] = "skipped"
-        state["finished_at"] = now_iso()
-        state["skip_reason"] = f"dependency_failed: {failed_dependency}"
-        self._persist_node_states(context, node_states)
+        self._persist_run(context, pipeline_run)
+        return pipeline_run

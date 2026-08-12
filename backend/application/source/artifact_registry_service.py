@@ -214,7 +214,7 @@ class ArtifactRegistryService:
             (
                 item
                 for item in self.repository.list_stages(task_id)
-                if item.stage_kind == "artifact_registry"
+                if item.node.name == "artifact_registry"
             ),
             None,
         )

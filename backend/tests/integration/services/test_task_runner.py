@@ -263,7 +263,7 @@ def test_build_pipeline_service_builds_runtime_config_without_config_file(
     assert config.source.input.encoding == "utf-8"
     assert config.source.input.file_pattern == r".*\.(txt|pdf)$"
     assert config.source.cache.base_dir == "../cache"
-    assert config.method == IndexingMethod.Standard
+    assert config.mode == IndexingMethod.Standard
 
 
 def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_path):
@@ -306,6 +306,14 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
     assert result["progress_detail"]["phase"] == "artifacts_ready"
     assert captured["method"] == task_runner_module.IndexingMethod.Standard
     assert "is_update_run" not in captured
+    pipeline_run = task_service.read_pipeline_run(task["task_id"])
+    assert pipeline_run.status == "completed"
+    assert pipeline_run.run_id == task["task_id"]
+    assert pipeline_run.output_build_id == build_repository.read_build(
+        task["task_id"]
+    ).build_id
+    assert pipeline_run.node("source_artifacts").output_summary["document_count"] == 1
+    assert pipeline_run.stats.duration_ms is not None
     artifacts = artifact_registry.get_for_task(task["task_id"])
     assert artifacts["documents_generated"] is True
     assert artifacts["documents_ready"] is True
@@ -412,6 +420,11 @@ def test_build_pipeline_service_marks_source_artifact_errors_failed(
     assert result["pipeline_nodes"]["source_artifacts"]["status"] == "failed"
     assert result["pipeline_nodes"]["artifact_registry"]["status"] == "skipped"
     assert result["errors"] == ["source_artifacts: docling import failed"]
+    pipeline_run = task_service.read_pipeline_run(task["task_id"])
+    assert pipeline_run.status == "failed"
+    assert pipeline_run.node("artifact_registry").dependencies == (
+        "source_artifacts",
+    )
 
 
 def test_build_pipeline_service_logs_stage_progress(monkeypatch, tmp_path, caplog):

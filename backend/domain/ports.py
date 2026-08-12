@@ -115,6 +115,7 @@ class BuildRepository(Protocol):
         record: TaskRecord,
         *,
         build_id: str,
+        mode: str = "standard",
     ) -> CollectionBuildRecord: ...
 
     def read_task(self, task_id: str) -> TaskRecord | None: ...

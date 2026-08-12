@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from domain.pipeline import ExecutionTimestamps, PipelineNodeRun
 from domain.source.build import (
     ArtifactVersionRecord,
     BuildStageRecord,
@@ -39,24 +40,35 @@ def test_build_stage_record_projects_pipeline_node_state() -> None:
     record = BuildStageRecord(
         stage_id="stage_demo",
         build_id="build_demo",
-        stage_kind="source_artifacts",
-        stage_version=1,
         stage_order=2,
-        status="failed",
-        started_at="2026-07-19T10:01:00+00:00",
-        finished_at="2026-07-19T10:02:00+00:00",
-        errors=("parser failed",),
-        warnings=("partial output",),
-        skip_reason=None,
+        node=PipelineNodeRun(
+            name="source_artifacts",
+            status="failed",
+            timestamps=ExecutionTimestamps(
+                started_at="2026-07-19T10:01:00+00:00",
+                finished_at="2026-07-19T10:02:00+00:00",
+            ),
+            errors=("parser failed",),
+            warnings=("partial output",),
+        ),
     )
 
     assert record.to_pipeline_state() == {
+        "name": "source_artifacts",
+        "dependencies": [],
         "status": "failed",
-        "started_at": "2026-07-19T10:01:00+00:00",
-        "finished_at": "2026-07-19T10:02:00+00:00",
         "errors": ["parser failed"],
         "warnings": ["partial output"],
-        "skip_reason": None,
+        "stats": {
+            "duration_ms": None,
+            "token_usage": None,
+            "model_usage": [],
+        },
+        "timestamps": {
+            "started_at": "2026-07-19T10:01:00+00:00",
+            "finished_at": "2026-07-19T10:02:00+00:00",
+        },
+        "output_summary": {},
     }
 
 
@@ -65,6 +77,7 @@ def test_build_and_artifact_records_keep_lineage_fields_typed() -> None:
         build_id="build_demo",
         task_id="task_demo",
         collection_id="col_demo",
+        mode="standard",
         build_number=3,
         status="building",
         created_at="2026-07-19T10:00:00+00:00",

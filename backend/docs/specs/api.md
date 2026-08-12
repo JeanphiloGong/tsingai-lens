@@ -45,6 +45,9 @@ Collection build parses Source, creates document profiles and reusable paper
 facts, and discovers Objective candidates. It does not run confirmed Objective
 deep analysis. Task responses expose current stage, progress, terminal error,
 and retry-appropriate status; a failed task is never presented as a new task.
+The build request accepts `mode: standard | fast` and defaults to `standard`.
+The selected mode is persisted before dispatch and determines the runtime
+dependency graph for that task.
 
 ### Goal Intake And Assistant Sessions
 

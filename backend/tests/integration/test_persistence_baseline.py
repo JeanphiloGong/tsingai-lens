@@ -28,6 +28,7 @@ from domain.evaluation import (
     FindingFeedback,
 )
 from domain.goal import ExperimentPlanRecord
+from domain.pipeline import ExecutionTimestamps, PipelineNodeRun
 from domain.source import (
     ArtifactVersionRecord,
     BuildStageRecord,
@@ -183,15 +184,16 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     artifact_stage = BuildStageRecord(
         stage_id="stage_artifact_registry_baseline",
         build_id="build_baseline",
-        stage_kind="artifact_registry",
-        stage_version=1,
         stage_order=0,
-        status="succeeded",
-        started_at=task_record.created_at,
-        finished_at=task_record.updated_at,
-        errors=(),
-        warnings=(),
-        skip_reason=None,
+        node=PipelineNodeRun(
+            name="artifact_registry",
+            dependencies=("source_artifacts",),
+            status="succeeded",
+            timestamps=ExecutionTimestamps(
+                started_at=task_record.created_at,
+                finished_at=task_record.updated_at,
+            ),
+        ),
     )
     build_repository.update_task(task_record, stages=(artifact_stage,))
     build_repository.add_artifact_versions(

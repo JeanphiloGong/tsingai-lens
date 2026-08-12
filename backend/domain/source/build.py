@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from domain.pipeline import PipelineNodeRun
+
 
 _TASK_FIELDS = {
     "task_id",
@@ -110,6 +112,7 @@ class CollectionBuildRecord:
     build_id: str
     task_id: str
     collection_id: str
+    mode: str
     build_number: int
     status: str
     created_at: str
@@ -121,25 +124,11 @@ class CollectionBuildRecord:
 class BuildStageRecord:
     stage_id: str
     build_id: str
-    stage_kind: str
-    stage_version: int
     stage_order: int
-    status: str
-    started_at: str | None
-    finished_at: str | None
-    errors: tuple[str, ...]
-    warnings: tuple[str, ...]
-    skip_reason: str | None
+    node: PipelineNodeRun
 
     def to_pipeline_state(self) -> dict[str, Any]:
-        return {
-            "status": self.status,
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-            "errors": list(self.errors),
-            "warnings": list(self.warnings),
-            "skip_reason": self.skip_reason,
-        }
+        return self.node.to_record()
 
 
 @dataclass(frozen=True)

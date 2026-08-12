@@ -280,9 +280,14 @@ Source artifacts, sessions, and messages are not invalidated.
 
 Build output is immutable. Activation is the only mutable selection step.
 
-1. A task creates a collection build and named stages in `building` state.
-2. Each stage writes records under its own build identity. Existing active rows
-   are not deleted or replaced.
+1. A task creates a pipeline run and a separate versioned collection build. The
+   task id is the execution `run_id`; the build id is the run's
+   `output_build_id`. The build also stores the selected pipeline mode.
+2. Each runtime node is projected to one ordered `build_stages` row under the
+   output build. Starting the selected mode copies its configured graph into
+   these runtime nodes. Each row stores dependencies, status, diagnostics,
+   timestamps, statistics, and a bounded output summary. The persisted run
+   graph, not configuration order, is the execution source of truth.
 3. Validation marks the build `succeeded` only when required stages and
    evidence links are complete.
 4. One transaction changes the collection's active-build pointer from the old

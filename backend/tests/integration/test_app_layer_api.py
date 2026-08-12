@@ -1465,6 +1465,7 @@ def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     task_resp = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build",
         json={
+            "mode": "fast",
             "method": "fast",
             "is_update_run": True,
             "verbose": True,
@@ -1478,7 +1479,29 @@ def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     assert task_status["task_type"] == "build"
     assert task_status["status"] == "completed"
 
-    assert captured["method"] == task_runner_module.IndexingMethod.Standard
+    assert captured["method"] == task_runner_module.IndexingMethod.Fast
+    build = app_client.app.state.task_service.repository.read_build(task_id)
+    assert build is not None
+    assert build.mode == "fast"
     assert "is_update_run" not in captured
     assert captured["verbose"] is True
     assert captured["additional_context"] == {"caller": "legacy-frontend"}
+
+
+def test_build_task_contract_rejects_unknown_pipeline_mode(app_client):
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Invalid Pipeline Mode"},
+    )
+    collection_id = create_resp.json()["collection_id"]
+    app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        files={"file": ("paper.txt", b"Paper", "text/plain")},
+    )
+
+    response = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build",
+        json={"mode": "unknown"},
+    )
+
+    assert response.status_code == 422

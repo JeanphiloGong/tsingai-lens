@@ -72,7 +72,10 @@ Objective analysis.
 - `extraction.py`
   Calls the configured model provider for PaperSkim extraction, relationship
   axis canonicalization, framing, Evidence extraction, and Finding synthesis
-  and owns their bounded retry and repair behavior.
+  and owns their bounded retry and repair behavior. PaperSkim study identities
+  are checked against stable Source locators before extractor results leave this
+  boundary; duplicate identities enter the same bounded structured repair path
+  as other schema violations.
 - `prompts.py` and `schemas.py`
   Define Objective prompts and their validated response contracts.
 

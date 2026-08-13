@@ -90,11 +90,38 @@ class ObjectiveExtractor:
 
     def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         system_prompt, user_prompt = build_paper_skim_prompt(payload)
+
+        def validate_study_identities(response: BaseModel) -> None:
+            if not isinstance(response, StructuredPaperSkim):
+                raise TypeError("unexpected paper skim response type")
+            source_keys = {
+                str(source_unit.get("source_unit_id") or "").strip(): (
+                    str(source_unit.get("source_kind") or "").strip(),
+                    str(source_unit.get("source_ref") or "").strip(),
+                )
+                for source_unit in payload.get("source_units") or ()
+                if isinstance(source_unit, Mapping)
+                and str(source_unit.get("source_unit_id") or "").strip()
+            }
+            study_identities = [
+                study.identity_key(source_keys) for study in response.studies
+            ]
+            if len(study_identities) != len(set(study_identities)):
+                raise ValueError("studies contain duplicate study identities")
+
+        def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
+            return self._parse_json_text_response(
+                **kwargs,
+                parsed_validator=validate_study_identities,
+            )
+
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredPaperSkim,
             max_completion_tokens=_PAPER_SKIM_MAX_COMPLETION_TOKENS,
+            json_text_parser=parse_json_text,
+            parsed_validator=validate_study_identities,
         )
         if not isinstance(response, StructuredPaperSkim):
             raise TypeError("unexpected paper skim response type")

@@ -1442,6 +1442,213 @@ def test_paper_skim_normalizes_reason_from_emitted_source_unit_coverage():
     assert skim.source_unit_coverage[0].reason is None
 
 
+def test_structured_paper_skim_rejects_duplicate_study_identities():
+    study = {
+        "experiment_label": "LPBF parameter study",
+        "design_type": "experimental",
+        "claim_scope": "current_work",
+        "material_scope": ["316L stainless steel"],
+        "process_context": ["LPBF"],
+        "relationships": [
+            {
+                "varied_factors": ["laser power"],
+                "outcome": "porosity",
+                "source_unit_ids": ["window-source-1"],
+            }
+        ],
+    }
+
+    with pytest.raises(ValidationError, match="duplicate study identities"):
+        StructuredPaperSkim.model_validate(
+            {
+                "studies": [study, study],
+                "source_unit_coverage": [
+                    {
+                        "source_unit_id": "window-source-1",
+                        "status": "relationship_emitted",
+                    }
+                ],
+            }
+        )
+
+
+def test_paper_skim_retries_duplicate_study_identities_before_returning():
+    first_study = {
+        "experiment_label": "LPBF parameter study",
+        "design_type": "experimental",
+        "claim_scope": "current_work",
+        "material_scope": ["316L stainless steel"],
+        "process_context": ["LPBF"],
+        "relationships": [
+            {
+                "varied_factors": ["laser power"],
+                "outcome": "porosity",
+                "source_unit_ids": ["window-source-1"],
+            }
+        ],
+    }
+    second_study = {
+        **first_study,
+        "relationships": [
+            {
+                **first_study["relationships"][0],
+                "source_unit_ids": ["window-source-2"],
+            }
+        ],
+    }
+    invalid = {
+        "doc_role": "experimental",
+        "studies": [first_study, second_study],
+        "unresolved_signals": [],
+        "source_unit_coverage": [
+            {
+                "source_unit_id": "window-source-1",
+                "status": "relationship_emitted",
+            },
+            {
+                "source_unit_id": "window-source-2",
+                "status": "relationship_emitted",
+            },
+        ],
+        "evidence_density": "high",
+        "confidence": 0.9,
+        "warnings": [],
+    }
+    valid = {
+        **invalid,
+        "studies": [
+            {
+                **first_study,
+                "relationships": [
+                    {
+                        **first_study["relationships"][0],
+                        "source_unit_ids": [
+                            "window-source-1",
+                            "window-source-2",
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
+    extractor = _objective_extractor(client)
+
+    skim = extractor.extract_paper_skim(
+        {
+            "document_id": "paper-1",
+            "title": "LPBF parameter study",
+            "source_units": [
+                {
+                    "source_unit_id": "window-source-1",
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "content": "Laser power was varied and porosity was measured.",
+                },
+                {
+                    "source_unit_id": "window-source-2",
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "content": "Porosity results for the laser-power series.",
+                },
+            ],
+        }
+    )
+
+    assert len(skim.studies) == 1
+    assert len(client.chat.completions.calls) == 2
+    assert "duplicate study identities" in client.chat.completions.calls[1][
+        "messages"
+    ][-1]["content"]
+
+
+def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypatch):
+    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
+    first_study = {
+        "experiment_label": "LPBF parameter study",
+        "design_type": "experimental",
+        "claim_scope": "current_work",
+        "material_scope": ["316L stainless steel"],
+        "process_context": ["LPBF"],
+        "relationships": [
+            {
+                "varied_factors": ["laser power"],
+                "outcome": "porosity",
+                "source_unit_ids": ["window-source-1"],
+            }
+        ],
+    }
+    second_study = {
+        **first_study,
+        "relationships": [
+            {
+                **first_study["relationships"][0],
+                "source_unit_ids": ["window-source-2"],
+            }
+        ],
+    }
+    invalid = {
+        "doc_role": "experimental",
+        "studies": [first_study, second_study],
+        "source_unit_coverage": [
+            {
+                "source_unit_id": source_unit_id,
+                "status": "relationship_emitted",
+            }
+            for source_unit_id in ("window-source-1", "window-source-2")
+        ],
+    }
+    valid = {
+        **invalid,
+        "studies": [
+            {
+                **first_study,
+                "relationships": [
+                    {
+                        **first_study["relationships"][0],
+                        "source_unit_ids": [
+                            "window-source-1",
+                            "window-source-2",
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    client = _FakeOpenAIClient(
+        json.dumps(valid),
+        parsed=StructuredPaperSkim.model_validate(invalid),
+    )
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
+
+    skim = extractor.extract_paper_skim(
+        {
+            "document_id": "paper-1",
+            "title": "LPBF parameter study",
+            "source_units": [
+                {
+                    "source_unit_id": source_unit_id,
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "content": content,
+                }
+                for source_unit_id, content in (
+                    ("window-source-1", "Laser power was varied."),
+                    ("window-source-2", "Porosity was measured."),
+                )
+            ],
+        }
+    )
+
+    assert len(skim.studies) == 1
+    assert len(client.beta.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 1
+    assert (
+        extractor.consume_last_trace()["extraction_mode"]
+        == "provider_parse->json_text"
+    )
+
+
 def test_paper_skim_retries_when_coverage_disagrees_with_emitted_relationship():
     invalid = {
         "doc_role": "experimental",

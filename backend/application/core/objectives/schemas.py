@@ -4,7 +4,7 @@ import json
 import re
 import unicodedata
 from functools import lru_cache
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Mapping
 
 from pydantic import (
     BaseModel,
@@ -564,6 +564,60 @@ class StructuredPaperStudy(_StrictModel):
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list_container(value)
 
+    def identity_key(
+        self,
+        source_keys: Mapping[str, tuple[str, str]] | None = None,
+    ) -> tuple[object, ...]:
+        def normalized_values(values: list[str]) -> tuple[str, ...]:
+            return tuple(
+                sorted(
+                    {
+                        str(value).strip().casefold()
+                        for value in values
+                        if str(value).strip()
+                    }
+                )
+            )
+
+        relationships = tuple(
+            sorted(
+                (
+                    normalized_values(relationship.varied_factors),
+                    relationship.outcome.strip().casefold(),
+                    tuple(
+                        sorted(
+                            {
+                                source_keys.get(
+                                    source_unit_id.strip(),
+                                    ("source_unit", source_unit_id.strip()),
+                                )
+                                if source_keys is not None
+                                else ("source_unit", source_unit_id.strip())
+                                for source_unit_id in relationship.source_unit_ids
+                                if source_unit_id.strip()
+                            }
+                        )
+                    ),
+                )
+                for relationship in self.relationships
+            )
+        )
+        return (
+            self.design_type,
+            self.claim_scope,
+            self.experiment_label.strip().casefold()
+            if self.experiment_label
+            else None,
+            normalized_values(self.material_scope),
+            normalized_values(self.process_context),
+            normalized_values(self.sample_context),
+            normalized_values(self.test_context),
+            self.comparator.strip().casefold() if self.comparator else None,
+            normalized_values(self.fixed_conditions),
+            relationships,
+        )
+
+
 class StructuredPaperStudySignal(_StrictModel):
     signal_type: Literal["variable", "outcome"]
     label: Annotated[str, Field(min_length=1, max_length=80)]
@@ -687,6 +741,10 @@ class StructuredPaperSkim(_StrictModel):
 
     @model_validator(mode="after")
     def _validate_source_unit_coverage(self) -> "StructuredPaperSkim":
+        study_identities = [study.identity_key() for study in self.studies]
+        if len(study_identities) != len(set(study_identities)):
+            raise ValueError("studies contain duplicate study identities")
+
         coverage_by_id = {
             item.source_unit_id: item for item in self.source_unit_coverage
         }

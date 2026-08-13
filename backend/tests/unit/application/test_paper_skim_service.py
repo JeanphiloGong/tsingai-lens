@@ -462,6 +462,37 @@ def test_invalid_model_coverage_marks_the_whole_window_failed(
     assert skim.coverage_complete is False
 
 
+def test_unrepaired_duplicate_study_identity_marks_the_whole_window_failed():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("results", "Results", 1),
+            _paragraph("duplicate-window", "RESULT_CANDIDATE", 2, "Results"),
+        ]
+    )
+
+    class DuplicateStudyExtractor(_WindowExtractor):
+        def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            parsed = super().extract_paper_skim(payload)
+            return StructuredPaperSkim.model_construct(
+                doc_role=parsed.doc_role,
+                studies=[*parsed.studies, *parsed.studies],
+                unresolved_signals=parsed.unresolved_signals,
+                source_unit_coverage=parsed.source_unit_coverage,
+                evidence_density=parsed.evidence_density,
+                confidence=parsed.confidence,
+                warnings=parsed.warnings,
+            )
+
+    skim = _build_skims(artifacts, tree, DuplicateStudyExtractor())[0]
+
+    assert skim.studies == ()
+    assert [item.status.value for item in skim.source_unit_coverage] == [
+        "extraction_failed"
+    ]
+    assert skim.source_unit_coverage[0].reason
+    assert skim.coverage_complete is False
+
+
 def test_failed_window_preserves_valid_results_from_other_windows():
     artifacts, tree = _artifacts(
         blocks=[

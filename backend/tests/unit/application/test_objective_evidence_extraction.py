@@ -1304,11 +1304,30 @@ def test_deterministic_frame_requires_variable_and_property_axis(tmp_path):
     paper_skim = PaperSkim.from_mapping(
         {
             "document_id": "paper-ved",
-            "collection_id": "col-test",
             "doc_role": "experimental",
-            "candidate_processes": ["LPBF", "VED"],
-            "candidate_properties": ["density"],
-            "changed_variables": ["laser power", "scan speed"],
+            "studies": [
+                {
+                    "study_id": "study-paper-ved",
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "process_context": ["LPBF", "VED"],
+                    "relationships": [
+                        {
+                            "relationship_id": "relationship-paper-ved-density",
+                            "varied_factors": ["laser power", "scan speed"],
+                            "outcome": "density",
+                            "source_refs": [
+                                {
+                                    "source_kind": "block",
+                                    "source_ref": "block-ved",
+                                }
+                            ],
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "confidence": 0.9,
+                }
+            ],
             "evidence_density": "low",
         }
     )
@@ -1830,11 +1849,30 @@ def test_research_objective_service_enriches_missing_source_backed_scope_context
         {
             "document_id": "paper-1",
             "doc_role": "experimental",
-            "candidate_materials": ["316L stainless steel"],
-            "candidate_processes": ["selective laser melting"],
-            "candidate_properties": ["relative density"],
-            "changed_variables": ["energy density"],
-            "possible_objectives": [objective.question],
+            "studies": [
+                {
+                    "study_id": "study-paper-1-density",
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": ["selective laser melting"],
+                    "relationships": [
+                        {
+                            "relationship_id": "relationship-paper-1-density",
+                            "varied_factors": ["energy density"],
+                            "outcome": "relative density",
+                            "source_refs": [
+                                {
+                                    "source_kind": "table",
+                                    "source_ref": "table-1",
+                                }
+                            ],
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "confidence": 0.9,
+                }
+            ],
             "evidence_density": "high",
             "confidence": 0.9,
         }

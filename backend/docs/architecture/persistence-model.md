@@ -117,6 +117,51 @@ Every document, Source locator, and optional paper-fact anchor is validated
 against the same collection and build before commit. SQLite Core owns none of
 these records and provides no fallback path.
 
+Each `objective_paper_skims` row owns ordered `objective_paper_studies`. A study
+stores its experiment design and material/process/sample/test context, while
+`objective_paper_study_relationships` stores each complete jointly varied factor
+set, one outcome, exact Source locators, and confidence. A parsed table row is
+linked by `table_row + row_id`; a table caption or header is linked by
+`table + table_id`. Source-backed variables or outcomes that cannot yet form a
+defensible relationship remain complete typed records in
+`objective_paper_study_signals`; they are not discarded.
+`objective_paper_source_unit_coverage` stores the ordered first-stage extraction
+outcome for every eligible Source unit. Each row retains its transient window
+identity and exact Source kind/reference, with one of
+`relationship_emitted`, `unresolved_signal_emitted`, `no_study_signal`, or
+backend-derived `extraction_failed`. Source locators use unbounded text because
+the owning Source block, table, and table-row identities are not length-bounded.
+
+Before persistence, the application screens one paper through bounded,
+section-aware Source windows. Oversized text and structured Source content are
+split without truncating scientific content; the first-stage model can still
+miss a source-supported study or relationship, so this transport guarantee is
+not a scientific completeness guarantee. Every valid model response must
+account for the exact Source-unit IDs supplied to its window. A missing,
+duplicate, unknown, or status-inconsistent result makes the whole window
+`extraction_failed`; the backend never converts an omission into
+`no_study_signal`, and valid neighboring windows remain persisted. Consequently,
+coverage completeness measures extraction execution and contract validity, not
+scientific recall or systematic-review completeness. The application reconciles
+duplicate observations only within compatible experiment context. Section paths
+remain transient; window identity persists only on Source-unit coverage as
+first-stage execution provenance. `objective_paper_study_dispositions` accounts
+for every
+relationship as `pending`, `promoted`, or `rejected`. The backend derives these
+dispositions: directly eligible relationships are promoted through a labeled or
+standalone fallback Objective, while background/synthesis relationships and
+relationships that cannot form a schema-valid Objective receive an explicit
+rejection reason. The model does not reject relationships.
+`objective_build_relationship_links` provides foreign-key-backed lineage from
+each ranked Objective to the exact relationships that support it. Final Objective
+pagination, whose HTTP default page size is six, does not remove
+rank-seven-and-later Objectives or the study inventory. A relationship that
+exceeds the model-labeling request budget bypasses that request and is retained
+as a backend-built standalone Objective. The contract migration marks existing
+Objective builds not ready;
+their derived study inventory must be regenerated from Source artifacts because
+the former independent axis lists cannot reconstruct experiment identities.
+
 Comparison semantics now follow the same direct build boundary.
 `PostgresComparisonRepository` stores comparable results, collection-scoped
 assessments, pairwise relations, and ordered evidence lineage under one
@@ -250,7 +295,8 @@ Concrete migration names may differ, but these identity rules may not.
 | Source records | Existing domain IDs per record family | Every structure, figure, and reference row references one collection build and valid Source document ownership; reference links use declared foreign keys. Figure metadata records object key, SHA-256, MIME type, dimensions, and byte size, never image bytes. |
 | Evidence anchor | `anchor_id` | References document version and build stage plus exactly one supported Source locator, such as a text unit, block, table cell, or figure. |
 | Reusable Core facts | Existing domain IDs per fact family | Every fact references document version and Core build stage; many-to-many evidence uses link tables. |
-| Research Objective | `(collection_id, objective_id)` | Stores immutable confirmed scope plus candidate/confirmed state and active/published version pointers. |
+| Research Objective | `(collection_id, objective_id)` | Stores immutable confirmed scientific definition plus candidate/confirmed state; document scope and current analysis projection are selected by build. |
+| Objective build scope | `(build_id, collection_id, objective_id, scope_kind, source_document_id)` | Stores ordered seed and excluded Source documents for exactly one Objective build snapshot. |
 | Objective analysis | `(collection_id, objective_id, analysis_version)` | References one Objective and one immutable Source build; status is `queued`, `running`, `succeeded`, or `failed`. |
 | Paper contribution | Analysis identity plus `document_id` | References one included Source document and cannot cross the analysis version. |
 | Objective Evidence | Analysis identity plus `evidence_id` | References one paper contribution and one exact Source locator/excerpt. Stores all changed variables, one explicit comparison, at most one reported result, one attribution scope, and typed material/sample/process/test context. |
@@ -300,7 +346,11 @@ moves the root from `candidate` to `confirmed`. Queueing allocates a monotonical
 increasing analysis version; PostgreSQL claims `queued -> running` atomically.
 The repository validates and writes all version children, marks the analysis
 `succeeded`, and advances `published_analysis_version` in one transaction.
-Failure marks only that version `failed`; retry allocates a new version.
+Failure marks only that version `failed`; retry allocates a new version. Current
+active and published versions are projected only from analysis rows whose
+`source_build_id` matches the selected Objective build. Historical analysis
+rows remain explicitly readable after a rebuild but cannot appear current for
+changed relationship support or exclusions.
 
 ## JSONB Policy
 

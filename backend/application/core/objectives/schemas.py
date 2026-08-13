@@ -73,14 +73,13 @@ _PAPER_SKIM_DOC_ROLES = {
     "uncertain",
 }
 _PAPER_SKIM_EVIDENCE_DENSITIES = {"high", "medium", "low", "unknown"}
-PAPER_SKIM_OUTPUT_LIMITS = {
-    "candidate_materials": (8, 80),
-    "candidate_processes": (4, 80),
-    "candidate_properties": (8, 80),
-    "changed_variables": (8, 80),
-    "possible_objectives": (3, 320),
-    "warnings": (2, 240),
+PAPER_OBJECTIVE_CANDIDATE_OUTPUT_LIMITS = {
+    "material_scope": (8, 80),
+    "process_context": (4, 80),
+    "variables": (4, 80),
+    "outcomes": (8, 80),
 }
+PAPER_SKIM_WARNING_LIMIT = (2, 240)
 _OBJECTIVE_FRAME_RELEVANCE = {"high", "medium", "low", "irrelevant", "uncertain"}
 _OBJECTIVE_FRAME_PAPER_ROLES = {
     "primary_experiment",
@@ -501,70 +500,166 @@ class _StrictModel(BaseModel):
         )
 
 
+class StructuredPaperStudyRelationship(_StrictModel):
+    varied_factors: list[
+        Annotated[str, Field(max_length=80)]
+    ] = Field(min_length=1, max_length=8)
+    outcome: Annotated[str, Field(min_length=1, max_length=80)]
+    source_unit_ids: list[Annotated[str, Field(max_length=160)]] = Field(
+        min_length=1,
+        max_length=12,
+    )
+    confidence: float = 0.0
+
+    @field_validator("varied_factors", "source_unit_ids", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredPaperStudy(_StrictModel):
+    experiment_label: str | None = Field(default=None, max_length=120)
+    design_type: Literal[
+        "experimental",
+        "observational",
+        "modeling",
+        "mixed",
+        "uncertain",
+    ] = "uncertain"
+    claim_scope: Literal[
+        "current_work",
+        "synthesis",
+        "background",
+        "uncertain",
+    ] = "uncertain"
+    material_scope: list[
+        Annotated[str, Field(max_length=80)]
+    ] = Field(default_factory=list, max_length=8)
+    process_context: list[
+        Annotated[str, Field(max_length=80)]
+    ] = Field(default_factory=list, max_length=4)
+    sample_context: list[
+        Annotated[str, Field(max_length=80)]
+    ] = Field(default_factory=list, max_length=4)
+    test_context: list[
+        Annotated[str, Field(max_length=80)]
+    ] = Field(default_factory=list, max_length=4)
+    comparator: str | None = Field(default=None, max_length=160)
+    fixed_conditions: list[
+        Annotated[str, Field(max_length=120)]
+    ] = Field(default_factory=list, max_length=12)
+    relationships: list[StructuredPaperStudyRelationship] = Field(min_length=1)
+    confidence: float = 0.0
+
+    @field_validator(
+        "material_scope",
+        "process_context",
+        "sample_context",
+        "test_context",
+        "fixed_conditions",
+        "relationships",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+class StructuredPaperStudySignal(_StrictModel):
+    signal_type: Literal["variable", "outcome"]
+    label: Annotated[str, Field(min_length=1, max_length=80)]
+    experiment_label: str | None = Field(default=None, max_length=120)
+    design_type: Literal[
+        "experimental",
+        "observational",
+        "modeling",
+        "mixed",
+        "uncertain",
+    ] = "uncertain"
+    claim_scope: Literal[
+        "current_work",
+        "synthesis",
+        "background",
+        "uncertain",
+    ] = "uncertain"
+    material_scope: list[
+        Annotated[str, Field(max_length=80)]
+    ] = Field(default_factory=list, max_length=8)
+    process_context: list[
+        Annotated[str, Field(max_length=80)]
+    ] = Field(default_factory=list, max_length=4)
+    sample_context: list[
+        Annotated[str, Field(max_length=80)]
+    ] = Field(default_factory=list, max_length=4)
+    test_context: list[
+        Annotated[str, Field(max_length=80)]
+    ] = Field(default_factory=list, max_length=4)
+    comparator: str | None = Field(default=None, max_length=160)
+    fixed_conditions: list[
+        Annotated[str, Field(max_length=120)]
+    ] = Field(default_factory=list, max_length=12)
+    source_unit_ids: list[Annotated[str, Field(max_length=160)]] = Field(
+        min_length=1,
+        max_length=4,
+    )
+    confidence: float = 0.0
+
+    @field_validator(
+        "material_scope",
+        "process_context",
+        "sample_context",
+        "test_context",
+        "fixed_conditions",
+        "source_unit_ids",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredPaperSourceUnitCoverage(_StrictModel):
+    source_unit_id: Annotated[str, Field(min_length=1, max_length=160)]
+    status: Literal[
+        "relationship_emitted",
+        "unresolved_signal_emitted",
+        "no_study_signal",
+    ]
+    reason: str | None = Field(default=None, max_length=240)
+
+    @model_validator(mode="after")
+    def _validate_reason(self) -> "StructuredPaperSourceUnitCoverage":
+        reason = str(self.reason or "").strip()
+        if self.status == "no_study_signal":
+            if not reason:
+                raise ValueError("no_study_signal coverage requires a reason")
+            self.reason = reason
+        else:
+            self.reason = None
+        return self
+
+
 class StructuredPaperSkim(_StrictModel):
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
         "uncertain"
     )
-    candidate_materials: list[
-        Annotated[
-            str,
-            Field(max_length=PAPER_SKIM_OUTPUT_LIMITS["candidate_materials"][1]),
-        ]
-    ] = Field(
-        default_factory=list,
-        max_length=PAPER_SKIM_OUTPUT_LIMITS["candidate_materials"][0],
-    )
-    candidate_processes: list[
-        Annotated[
-            str,
-            Field(max_length=PAPER_SKIM_OUTPUT_LIMITS["candidate_processes"][1]),
-        ]
-    ] = Field(
-        default_factory=list,
-        max_length=PAPER_SKIM_OUTPUT_LIMITS["candidate_processes"][0],
-    )
-    candidate_properties: list[
-        Annotated[
-            str,
-            Field(max_length=PAPER_SKIM_OUTPUT_LIMITS["candidate_properties"][1]),
-        ]
-    ] = Field(
-        default_factory=list,
-        max_length=PAPER_SKIM_OUTPUT_LIMITS["candidate_properties"][0],
-    )
-    changed_variables: list[
-        Annotated[
-            str,
-            Field(max_length=PAPER_SKIM_OUTPUT_LIMITS["changed_variables"][1]),
-        ]
-    ] = Field(
-        default_factory=list,
-        max_length=PAPER_SKIM_OUTPUT_LIMITS["changed_variables"][0],
-    )
-    possible_objectives: list[
-        Annotated[
-            str,
-            Field(max_length=PAPER_SKIM_OUTPUT_LIMITS["possible_objectives"][1]),
-        ]
-    ] = Field(
-        default_factory=list,
-        max_length=PAPER_SKIM_OUTPUT_LIMITS["possible_objectives"][0],
+    studies: list[StructuredPaperStudy] = Field(default_factory=list)
+    unresolved_signals: list[StructuredPaperStudySignal] = Field(default_factory=list)
+    source_unit_coverage: list[StructuredPaperSourceUnitCoverage] = Field(
+        max_length=12,
     )
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
     confidence: float = 0.0
     warnings: list[
-        Annotated[str, Field(max_length=PAPER_SKIM_OUTPUT_LIMITS["warnings"][1])]
+        Annotated[str, Field(max_length=PAPER_SKIM_WARNING_LIMIT[1])]
     ] = Field(
         default_factory=list,
-        max_length=PAPER_SKIM_OUTPUT_LIMITS["warnings"][0],
+        max_length=PAPER_SKIM_WARNING_LIMIT[0],
     )
 
     @field_validator(
-        "candidate_materials",
-        "candidate_processes",
-        "candidate_properties",
-        "changed_variables",
-        "possible_objectives",
+        "studies",
+        "unresolved_signals",
+        "source_unit_coverage",
         "warnings",
         mode="before",
     )
@@ -590,6 +685,91 @@ class StructuredPaperSkim(_StrictModel):
             default="unknown",
         )
 
+    @model_validator(mode="after")
+    def _validate_source_unit_coverage(self) -> "StructuredPaperSkim":
+        coverage_by_id = {
+            item.source_unit_id: item for item in self.source_unit_coverage
+        }
+        if len(coverage_by_id) != len(self.source_unit_coverage):
+            raise ValueError("source_unit_coverage contains duplicate ids")
+
+        relationship_ids = {
+            source_unit_id
+            for study in self.studies
+            for relationship in study.relationships
+            for source_unit_id in relationship.source_unit_ids
+        }
+        signal_ids = {
+            source_unit_id
+            for signal in self.unresolved_signals
+            for source_unit_id in signal.source_unit_ids
+        }
+        missing_ids = (relationship_ids | signal_ids) - set(coverage_by_id)
+        if missing_ids:
+            raise ValueError(
+                "source_unit_coverage omits ids used by emitted facts: "
+                + ", ".join(sorted(missing_ids))
+            )
+
+        for source_unit_id, coverage in coverage_by_id.items():
+            expected_status = (
+                "relationship_emitted"
+                if source_unit_id in relationship_ids
+                else (
+                    "unresolved_signal_emitted"
+                    if source_unit_id in signal_ids
+                    else "no_study_signal"
+                )
+            )
+            if coverage.status != expected_status:
+                raise ValueError(
+                    "source_unit_coverage status does not agree with emitted facts "
+                    f"for {source_unit_id}: expected {expected_status}, "
+                    f"received {coverage.status}"
+                )
+        return self
+
+
+class StructuredPaperSignalRelationship(_StrictModel):
+    signal_ids: list[Annotated[str, Field(max_length=80)]] = Field(
+        min_length=2,
+        max_length=12,
+    )
+    confidence: float = 0.0
+
+    @field_validator("signal_ids", mode="before")
+    @classmethod
+    def _normalize_signal_ids(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredUnresolvedPaperSignal(_StrictModel):
+    signal_id: Annotated[str, Field(min_length=1, max_length=80)]
+    reason: Annotated[str, Field(min_length=1, max_length=240)]
+
+
+class StructuredPaperSignalStudy(_StrictModel):
+    relationships: list[StructuredPaperSignalRelationship] = Field(
+        min_length=1
+    )
+
+    @field_validator("relationships", mode="before")
+    @classmethod
+    def _normalize_relationships(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+class StructuredPaperSignalReconciliation(_StrictModel):
+    studies: list[StructuredPaperSignalStudy] = Field(default_factory=list)
+    unresolved_signals: list[StructuredUnresolvedPaperSignal] = Field(
+        default_factory=list
+    )
+
+    @field_validator("studies", "unresolved_signals", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
 
 class StructuredResearchObjective(_StrictModel):
     question: str = Field(max_length=180)
@@ -603,6 +783,9 @@ class StructuredResearchObjective(_StrictModel):
     excluded_document_ids: list[str] = Field(default_factory=list)
     confidence: float = 0.0
     reason: str | None = Field(default=None, max_length=120)
+    source_relationship_ids: list[
+        Annotated[str, Field(min_length=1, max_length=80)]
+    ] = Field(default_factory=list)
 
     @field_validator(
         "material_scope",
@@ -612,6 +795,7 @@ class StructuredResearchObjective(_StrictModel):
         "constraints",
         "seed_document_ids",
         "excluded_document_ids",
+        "source_relationship_ids",
         mode="before",
     )
     @classmethod
@@ -630,10 +814,7 @@ class StructuredResearchObjective(_StrictModel):
 
 
 class StructuredResearchObjectives(_StrictModel):
-    objectives: list[StructuredResearchObjective] = Field(
-        default_factory=list,
-        max_length=6,
-    )
+    objectives: list[StructuredResearchObjective] = Field(default_factory=list)
 
     @field_validator("objectives", mode="before")
     @classmethod
@@ -641,64 +822,18 @@ class StructuredResearchObjectives(_StrictModel):
         return _normalize_list_container(value)
 
 
-class StructuredAxisCanonicalizationGroup(_StrictModel):
-    axis_type: Literal["material", "variable", "outcome", "mechanism", "constraint"]
-    canonical: str
-    aliases: list[str] = Field(default_factory=list)
-    confidence: float = 0.0
-    reason: str
-
-    @field_validator("aliases", mode="before")
-    @classmethod
-    def _normalize_aliases(cls, value: object) -> object:
-        return _normalize_list_container(value)
+class StructuredAxisPairDecision(_StrictModel):
+    pair_id: Annotated[str, Field(min_length=1, max_length=80)]
+    equivalent: bool
 
 
 class StructuredAxisCanonicalizationPlan(_StrictModel):
-    axis_groups: list[StructuredAxisCanonicalizationGroup] = Field(
-        default_factory=list
-    )
+    decisions: list[StructuredAxisPairDecision] = Field(default_factory=list)
 
-    @field_validator("axis_groups", mode="before")
+    @field_validator("decisions", mode="before")
     @classmethod
-    def _normalize_axis_groups(cls, value: object) -> object:
+    def _normalize_decisions(cls, value: object) -> object:
         return _normalize_list_container(value)
-
-
-class StructuredObjectiveMergeGroup(_StrictModel):
-    source_objective_ids: list[str] = Field(default_factory=list)
-    question: str
-    material_scope: list[str] = Field(default_factory=list)
-    variables: list[str] = Field(min_length=1)
-    outcomes: list[str] = Field(min_length=1)
-    mechanisms: list[str] = Field(default_factory=list)
-    constraints: list[str] = Field(default_factory=list)
-    requested_comparator: str | None = None
-    confidence: float = 0.0
-    reason: str
-
-    @field_validator(
-        "source_objective_ids",
-        "material_scope",
-        "variables",
-        "outcomes",
-        "mechanisms",
-        "constraints",
-        mode="before",
-    )
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list_container(value)
-
-    @model_validator(mode="after")
-    def _validate_question_roles(self) -> "StructuredObjectiveMergeGroup":
-        _validate_objective_question_roles(
-            question=self.question,
-            variables=self.variables,
-            outcomes=self.outcomes,
-            declared_scope=[*self.material_scope, *self.constraints],
-        )
-        return self
 
 
 class StructuredPaperContributionDraft(_StrictModel):
@@ -1176,13 +1311,4 @@ class StructuredFindingSynthesis(_StrictModel):
     @field_validator("findings", mode="before")
     @classmethod
     def _normalize_findings(cls, value: object) -> object:
-        return _normalize_list_container(value)
-
-
-class StructuredObjectiveMergePlan(_StrictModel):
-    merged_objectives: list[StructuredObjectiveMergeGroup] = Field(default_factory=list)
-
-    @field_validator("merged_objectives", mode="before")
-    @classmethod
-    def _normalize_merged_objectives(cls, value: object) -> object:
         return _normalize_list_container(value)

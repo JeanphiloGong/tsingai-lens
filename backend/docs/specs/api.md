@@ -66,6 +66,7 @@ distinguishes collection-grounded, collection-limited, and general content.
 ### Research Objectives
 
 - `GET /api/v1/collections/{collection_id}/objectives`
+- `GET /api/v1/collections/{collection_id}/paper-study-inventory`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}`
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/confirm`
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
@@ -78,7 +79,56 @@ distinguishes collection-grounded, collection-limited, and general content.
 - included and excluded document IDs;
 - `confirmation_status`: `candidate | confirmed`;
 - `active_analysis_version` and `published_analysis_version`;
+- ordered `source_relationship_ids` linking the Objective to paper-study
+  relationships;
 - `active_analysis`, `published_analysis`, and warnings on detail responses.
+
+The Objective list is ordered by the persisted collection-build rank and
+supports `offset` and optional `limit`. When `limit` is omitted, the response
+contains every Objective from `offset` onward so lower-ranked candidates remain
+visible without client pagination. An explicit `limit` applies ordinary
+pagination. The response contains `total`, `offset`, and the applied `limit`
+(`null` when omitted), and each Objective contains its one-based `rank`. Rank is
+for researcher prioritization and never removes a paper-study relationship from
+the persisted inventory.
+
+The paper-study inventory reads the active persisted Objective build and
+supports `offset` and `limit`. Its response contains `total`, `offset`, `limit`,
+`research_objectives_ready`, and a mixed `items` sequence containing:
+
+- one `paper_study` entry for each paper-local experiment, observation, or
+  modeling study, including design, claim scope, material/process/sample/test
+  context, comparator, and fixed conditions;
+- every study relationship as one complete jointly varied factor set and one
+  outcome with exact `source_kind + source_ref` locators; supported kinds are
+  `document`, `block`, `table`, `table_row`, and `figure`, and `table_row`
+  references the persisted Source `row_id` rather than its enclosing table;
+- each relationship's `pending | promoted | rejected` disposition, linked
+  Objective id for promoted relationships, or explicit backend-derived reason
+  for rejection; the discovery model does not reject relationships, and a
+  relationship too large for model labeling uses a backend-built standalone
+  Objective fallback;
+- one `unresolved_signal` entry for every source-backed variable or outcome
+  that could not yet form a defensible relationship, preserving the same study
+  context, exact Source locators, confidence, and reason;
+- one `source_unit_coverage` entry for every eligible first-stage Source unit,
+  preserving `source_unit_id`, `window_id`, exact Source kind/reference, and one
+  of `relationship_emitted`, `unresolved_signal_emitted`, `no_study_signal`, or
+  backend-derived `extraction_failed`.
+
+The inventory is a typed audit projection of `ObjectiveFactSet`; it is not a
+second aggregate and does not trigger extraction, grouping, or analysis.
+First-stage Source windows split rather than truncate scientific text, table
+metadata, or figure captions. Cross-window reconciliation may receive bounded
+excerpts, while the persisted signal keeps its complete structured fields and
+exact Source locator; failure leaves the signal unresolved. The inventory still
+does not guarantee that the first-stage LLM extracted every source-supported
+study or relationship, so it is complete for extracted records rather than proof
+of complete paper interpretation. `source_unit_coverage_counts` always contains
+all four status counts. `coverage_complete` is `false` when any window produced
+`extraction_failed`; `true` means every eligible Source unit received a
+contract-valid first-stage outcome. It measures extraction execution, not
+scientific recall, relevance certainty, or systematic-review completeness.
 
 `ObjectiveAnalysis` is addressed by the Objective identity plus a positive
 `analysis_version`. It contains immutable Source/pipeline/model/prompt lineage,
@@ -92,6 +142,12 @@ version readable. If the backend cannot dispatch a queued version to its local
 analysis worker, it records that version as failed and returns `503`, allowing
 the client to retry without leaving a permanently queued version. Only a
 complete succeeded version can become published.
+
+Objective document scope and current-analysis projection are build-scoped. A
+rebuild may preserve a confirmed Objective identity and all historical analysis
+rows, but an analysis from an older Source build is not exposed as active or
+published for the rebuilt Objective. It remains readable only by its explicit
+historical `analysis_version`.
 
 ### Published Findings And Evidence
 

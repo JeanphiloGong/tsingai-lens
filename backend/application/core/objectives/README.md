@@ -17,16 +17,41 @@ Objective analysis.
   requested comparator directly. Table-selection hints remain transient
   service values.
 - `paper_skim_service.py`
-  Owns the per-document discovery stage. It builds bounded model input from
-  Source documents, profiles, text blocks, tables, figures, and document trees,
-  then emits one `PaperSkim` research map per document. A skim retains only the
-  stable Source `document_id`; title and filename metadata remain Source-owned.
+  Owns the per-document discovery stage. It assigns every eligible
+  non-reference text node and every table/figure caption to one section-aware
+  `overview`, `methods`, `results`, `conclusion`, or `unknown` source window.
+  Each bounded window is screened independently; duplicate study signals are
+  reconciled only after all windows finish. The resulting one `PaperSkim` per
+  document retains every distinct schema-valid `PaperStudy` and its complete
+  `PaperStudyRelationship` records. It also records one first-stage extraction
+  outcome for every eligible Source unit: `relationship_emitted`,
+  `unresolved_signal_emitted`, `no_study_signal`, or backend-derived
+  `extraction_failed`. Jointly varied factors remain attached to one outcome
+  and exact Source locators. Parsed table rows use
+  `table_row + row_id`, while table captions and headers use
+  `table + table_id`; inline table-matrix rows without a persisted row identity
+  remain table-level. A skim retains only the stable Source `document_id`;
+  title, filename, and window metadata remain Source-owned or transient.
 - `objective_candidate_service.py`
-  Owns collection-level candidate discovery from `PaperSkim` records. It
-  validates seed-paper support, canonicalizes model-produced document ids and
-  research axes, restores a model-omitted material scope only when every seed
-  skim supports the same material, validates merge decisions, and removes exact
-  duplicates.
+  Owns collection-level Objective discovery from `PaperStudyRelationship`
+  records. Before grouping, the backend proposes a bounded set of plausible
+  material, variable, and outcome label pairs. The model classifies every pair
+  as exactly equivalent or different; it cannot invent labels or groups. The
+  backend then builds conservative complete-link groups, anchored by the most
+  frequent source labels, and keeps every unclassified label unchanged. This
+  normalized view is transient: persisted studies retain their extracted labels
+  and exact Source lineage. Objective membership then requires the same complete
+  factor set, one outcome, and a non-conflicting material scope. Process,
+  sample, test, comparator, design, and fixed-condition differences remain on
+  each `PaperStudy`; they do not fragment a candidate Objective because later
+  Evidence and Comparison own scientific comparability. The backend directly
+  promotes each compatible relationship group to one Objective, derives its
+  question, seed documents, shared scope, and lineage, then ranks cross-paper
+  support before relationship count and confidence. Every relationship is
+  promoted to an Objective or receives a backend-derived rejection disposition,
+  while unresolved study signals remain separately visible. No second model
+  call can move a relationship outside its backend-owned group, reject an input
+  relationship, or remove records from persisted accounting.
 - `evidence_routing.py`
   Owns the transient Source-selection decisions created while routing one
   confirmed Objective across its documents.
@@ -45,9 +70,9 @@ Objective analysis.
   Produces evidence-calibrated paper and cross-paper Findings from validated
   Objective Evidence.
 - `extraction.py`
-  Calls the configured model provider for Objective discovery, framing,
-  Evidence extraction, and Finding synthesis and owns their bounded retry and
-  repair behavior.
+  Calls the configured model provider for PaperSkim extraction, relationship
+  axis canonicalization, framing, Evidence extraction, and Finding synthesis
+  and owns their bounded retry and repair behavior.
 - `prompts.py` and `schemas.py`
   Define Objective prompts and their validated response contracts.
 
@@ -60,6 +85,47 @@ build, allocates a new `analysis_version`, and returns:
 - `PaperContribution[]`
 - `ObjectiveEvidence[]`
 - `Finding[]`
+
+Objective discovery has two different bounds. Per-paper screening uses as many
+4,000-character section-aware source windows as the paper requires. Every
+eligible non-reference text node and caption is assigned once, so later Methods,
+Results, Conclusions, and later figure/table captions are not dropped merely by
+position. Unusually long text and structured Source content are split into
+contiguous bounded pieces without truncating captions, headers, or row text.
+Cross-window reconciliation receives bounded excerpts for already extracted
+signals, but each signal retains its complete structured fields and exact Source
+locator. Reconciliation failure leaves those signals unresolved instead of
+removing them. Every valid window response must account for its exact input
+Source-unit IDs. Missing, duplicate, unknown, or status-inconsistent coverage
+invalidates that window, and the backend records `extraction_failed` rather than
+inventing `no_study_signal`. A failed window does not discard valid neighboring
+windows. `coverage_complete` therefore means that every eligible Source unit was
+processed by a contract-valid first-stage extraction; it does not prove that the
+model found every scientifically relevant study, relationship, variable, or
+outcome. Model-call count grows with document length.
+
+After screening, the backend persists extracted studies, relationships,
+unresolved signals, and Source-unit coverage before collection grouping. It
+normalizes material, variable, and outcome labels before computing candidate
+membership. Candidate generation is capped at 96 pairs per axis type, and the
+model receives at most 16 pairs per call. Every response must classify every
+input pair exactly once and in order. Missing, duplicate, unknown, or reordered
+IDs trigger one bounded repair; if any batch still fails, the whole collection
+keeps its source labels rather than applying a partial mapping. Only
+`equivalent=true` decisions form edges, and a label joins a group only when it
+has an explicit edge to every current member. The complete jointly varied
+factor tuple and one outcome then define the research axis; explicit material
+conflicts remain a hard boundary. Other study-context differences are retained,
+not flattened, and are evaluated downstream when Evidence is compared. The
+backend turns each membership group directly into one Objective. All Objectives
+are ranked and persisted; the HTTP list returns all ranked Objectives by default
+and supports explicit pagination when requested. Every relationship is
+persisted as `pending`, `promoted`, or `rejected`; rejection is a backend
+eligibility or schema decision, never a model disposition. Partial Source
+signals remain separately visible.
+The schema migration cannot reconstruct studies from the former independent axis
+lists, so it marks existing Objective builds not ready. Rebuilding the collection
+regenerates the study inventory from Source artifacts.
 
 Source selection and extraction are one persisted Evidence lifecycle:
 `candidate -> selected -> extracted | rejected | failed`. Selection decisions
@@ -82,11 +148,11 @@ scientific attribution contract:
 
 When an extracted Evidence record omits material or process context, the
 service may fill the missing material category or missing process-identity
-attribute from already persisted scope data. It uses the same document's
-`PaperSkim.candidate_materials` and `PaperSkim.candidate_processes`. Objective
-scope alone never supplies document Evidence context. The service preserves
-extracted process attributes, does not replace extracted context, and does not
-infer new scientific attributes.
+attribute from already persisted scope data. It uses material and process values
+from the same document's linked `PaperSkim.studies`. Objective scope
+alone never supplies document Evidence context. The service preserves extracted
+process attributes, does not replace extracted context, and does not infer new
+scientific attributes.
 
 Transient extraction state is scoped to one Objective, analysis version, and
 document. It carries only prior role/outcome coverage and Source positions

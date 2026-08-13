@@ -8,7 +8,7 @@ from tests.integration.persistence.test_postgres_objectives import (
     _analysis_contributions,
     _analysis_evidence,
     _finding,
-    _prepare_candidate,
+    _prepare_studies,
     _queue_and_claim,
 )
 
@@ -18,7 +18,7 @@ pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts"
 
 def test_finding_review_round_trips_versioned_identity(source_repositories) -> None:
     source_repository, builds = source_repositories
-    objectives = _prepare_candidate(source_repository, builds)
+    objectives = _prepare_studies(source_repository, builds)
     _, analysis = _queue_and_claim(objectives)
     objectives.publish_analysis(
         "col_source",
@@ -82,7 +82,7 @@ def test_finding_and_contribution_ids_are_isolated_by_analysis_version(
     source_repositories,
 ) -> None:
     source_repository, builds = source_repositories
-    objectives = _prepare_candidate(source_repository, builds)
+    objectives = _prepare_studies(source_repository, builds)
     _, first_analysis = _queue_and_claim(objectives)
     objectives.publish_analysis(
         "col_source",

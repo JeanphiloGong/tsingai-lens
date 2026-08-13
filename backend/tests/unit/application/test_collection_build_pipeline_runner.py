@@ -17,6 +17,7 @@ from application.pipeline.collection_build.definitions import (
     dependency_graph_for_mode,
 )
 from application.pipeline.collection_build.runner import CollectionBuildPipelineRunner
+from application.pipeline.collection_build.service import CollectionBuildPipelineService
 from domain.pipeline import PipelineRun
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
@@ -48,6 +49,18 @@ class MemoryTaskService:
             fields["pipeline_nodes"] = pipeline_run.to_record()["nodes"]
         self.record.update(fields)
         return dict(self.record)
+
+
+class RecordingTaskService(MemoryTaskService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.progress_updates = []
+
+    def update_task(self, task_id: str, **fields):  # noqa: ANN001
+        record = super().update_task(task_id, **fields)
+        if "progress_detail" in fields:
+            self.progress_updates.append(fields["progress_detail"])
+        return record
 
 
 def build_context(task_service: MemoryTaskService) -> CollectionBuildContext:
@@ -86,6 +99,36 @@ def build_run(node_dependencies) -> PipelineRun:  # noqa: ANN001
         created_at="2026-08-11T01:00:00+00:00",
         output_build_id="build_1",
     )
+
+
+def test_objective_progress_persists_each_window_for_the_active_document():
+    task_service = RecordingTaskService()
+    service = CollectionBuildPipelineService(
+        collection_service=SimpleNamespace(),
+        task_service=task_service,
+        artifact_registry_service=SimpleNamespace(),
+        source_artifact_repository=SimpleNamespace(),
+        document_profile_service=SimpleNamespace(),
+        research_objective_service=SimpleNamespace(),
+    )
+    callback = service._build_objective_progress_callback("task_1", "col_1")
+
+    for window_position in (1, 2, 3):
+        callback(
+            {
+                "phase": "objective_paper_skim_started",
+                "current": 2,
+                "total": 10,
+                "unit": "documents",
+                "active_window_position": window_position,
+                "active_window_count": 3,
+            }
+        )
+
+    assert [
+        detail["active_window_position"]
+        for detail in task_service.progress_updates
+    ] == [1, 2, 3]
 
 
 def test_collection_build_pipeline_runner_uses_run_dependencies_not_config_order():

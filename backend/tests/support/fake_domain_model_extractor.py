@@ -5,7 +5,6 @@ from typing import Any
 
 from application.core.document_profiles.schemas import StructuredDocumentProfile
 from application.core.objectives.schemas import (
-    StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,
     StructuredEvidenceSelection,
     StructuredEvidenceSelections,
@@ -32,6 +31,11 @@ from application.core.paper_facts.schemas import (
     TextWindowMethodMentionPayload,
     TextWindowResultClaimPayload,
     TextWindowVariantMentionPayload,
+)
+from tests.support.objective_extractor import (
+    paper_skim_study_outputs,
+    paper_relationship_records,
+    relationship_lineage,
 )
 
 
@@ -207,15 +211,26 @@ class FakeDomainModelExtractor:
         if "anneal" in lowered_text:
             changed_variables.append("annealing")
 
-        possible_objectives = []
+        variables = changed_variables or candidate_processes or ["processing"]
+        studies = []
         if candidate_materials and candidate_properties:
-            process_phrase = (
-                " and ".join(candidate_processes)
-                if candidate_processes
-                else "processing"
-            )
-            possible_objectives.append(
-                f"How does {process_phrase} affect {candidate_properties[0]} of {candidate_materials[0]}?"
+            studies.append(
+                {
+                    "experiment_label": "inferred primary study",
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "material_scope": candidate_materials,
+                    "process_context": candidate_processes,
+                    "relationships": [
+                        {
+                            "varied_factors": variables,
+                            "outcome": outcome,
+                            "confidence": 0.86,
+                        }
+                        for outcome in candidate_properties
+                    ],
+                    "confidence": 0.86,
+                }
             )
 
         doc_role = str(profile_hint.get("role_hint") or "").strip() or "uncertain"
@@ -223,82 +238,65 @@ class FakeDomainModelExtractor:
             doc_role = "uncertain"
         evidence_density = (
             "high"
-            if possible_objectives
+            if studies
             else "medium" if candidate_materials or candidate_properties else "low"
         )
         return StructuredPaperSkim(
             doc_role=doc_role,
-            candidate_materials=candidate_materials,
-            candidate_processes=candidate_processes,
-            candidate_properties=candidate_properties,
-            changed_variables=changed_variables,
-            possible_objectives=possible_objectives,
+            **paper_skim_study_outputs(
+                payload,
+                studies,
+            ),
+            unresolved_signals=[],
             evidence_density=evidence_density,
-            confidence=0.86 if possible_objectives else 0.62,
-            warnings=[] if possible_objectives else ["objective_uncertain"],
+            confidence=0.86 if studies else 0.62,
+            warnings=[] if studies else ["objective_uncertain"],
         )
 
     def discover_research_objectives(
         self,
         payload: dict[str, Any],
     ) -> StructuredResearchObjectives:
-        skims = payload.get("paper_skims") if isinstance(payload.get("paper_skims"), list) else []
+        relationship_records = paper_relationship_records(payload)
+        grouped_records: dict[
+            tuple[tuple[str, ...], str],
+            list[tuple[str, str, str, dict[str, Any], dict[str, Any]]],
+        ] = {}
+        for record in relationship_records:
+            relationship = record[4]
+            varied_factors = tuple(
+                str(value).strip()
+                for value in relationship.get("varied_factors") or ()
+                if str(value).strip()
+            )
+            outcome = str(relationship.get("outcome") or "").strip()
+            grouped_records.setdefault(
+                (tuple(value.casefold() for value in varied_factors), outcome.casefold()),
+                [],
+            ).append(record)
+
         objectives: list[StructuredResearchObjective] = []
-        seen_questions: set[str] = set()
-        for skim in skims:
-            if not isinstance(skim, dict):
-                continue
-            possible_objectives = skim.get("possible_objectives")
-            if not isinstance(possible_objectives, list):
-                possible_objectives = []
-            candidate_question = next(
-                (str(item).strip() for item in possible_objectives if str(item).strip()),
-                "",
-            )
-            if not candidate_question:
-                continue
-            key = candidate_question.lower()
-            if key in seen_questions:
-                continue
-            seen_questions.add(key)
-            document_id = str(skim.get("document_id") or "").strip()
-            outcome_match = re.fullmatch(
-                r"How does .+? affect (.+?) of .+\?",
-                candidate_question,
-                flags=re.IGNORECASE,
-            )
-            candidate_outcomes = [
-                str(item)
-                for item in skim.get("candidate_properties", [])
-                if str(item).strip()
-            ]
-            if not candidate_outcomes and outcome_match:
-                candidate_outcomes = [outcome_match.group(1).strip()]
+        for grouped in grouped_records.values():
+            study = grouped[0][3]
+            relationship = grouped[0][4]
+            variables = list(relationship.get("varied_factors") or [])
+            outcome = str(relationship.get("outcome") or "").strip()
+            source_relationship_ids, seed_document_ids = relationship_lineage(grouped)
+            variable_phrase = " and ".join(variables)
+            verb = "do" if len(variables) > 1 else "does"
             objectives.append(
                 StructuredResearchObjective(
-                    question=candidate_question,
-                    material_scope=[
-                        str(item)
-                        for item in skim.get("candidate_materials", [])
-                        if str(item).strip()
-                    ],
-                    variables=[
-                        str(item)
-                        for item in skim.get("candidate_processes", [])
-                        if str(item).strip()
-                    ],
-                    outcomes=candidate_outcomes,
+                    question=f"How {verb} {variable_phrase} affect {outcome}?",
+                    material_scope=list(study.get("material_scope") or []),
+                    variables=variables,
+                    outcomes=[outcome],
+                    constraints=list(study.get("process_context") or []),
                     requested_comparator="compare process or treatment effects across papers",
-                    seed_document_ids=[document_id] if document_id else [],
-                    excluded_document_ids=[
-                        str(item.get("document_id") or "").strip()
-                        for item in skims
-                        if isinstance(item, dict)
-                        and str(item.get("doc_role") or "") == "review"
-                        and str(item.get("document_id") or "").strip()
-                    ],
+                    seed_document_ids=seed_document_ids,
+                    excluded_document_ids=[],
                     confidence=0.82,
-                    reason="derived from paper skim objective candidates",
+                    reason="derived from source-linked paper study relationships",
+                    source_relationship_ids=source_relationship_ids,
                 )
             )
         return StructuredResearchObjectives(objectives=objectives)
@@ -307,25 +305,11 @@ class FakeDomainModelExtractor:
         self,
         payload: dict[str, Any],
     ) -> StructuredAxisCanonicalizationPlan:
-        axis_candidates = (
-            payload.get("axis_candidates")
-            if isinstance(payload.get("axis_candidates"), dict)
-            else {}
-        )
         return StructuredAxisCanonicalizationPlan(
-            axis_groups=[
-                StructuredAxisCanonicalizationGroup(
-                    axis_type=axis_type,
-                    canonical=str(value),
-                    aliases=[str(value)],
-                    confidence=1.0,
-                    reason="kept separate",
-                )
-                for axis_type, values in axis_candidates.items()
-                if axis_type in {"material", "process", "property"}
-                and isinstance(values, list)
-                for value in values
-                if str(value).strip()
+            decisions=[
+                {"pair_id": str(pair["pair_id"]), "equivalent": True}
+                for pair in payload.get("axis_pairs") or ()
+                if isinstance(pair, dict) and str(pair.get("pair_id") or "").strip()
             ]
         )
 
@@ -395,16 +379,8 @@ class FakeDomainModelExtractor:
             relevance="high" if paper_skim else "uncertain",
             paper_role="primary_experiment",
             background="Paper directly supports the objective.",
-            material_match=[
-                str(item)
-                for item in paper_skim.get("candidate_materials", [])
-                if str(item).strip()
-            ],
-            changed_variables=[
-                str(item)
-                for item in paper_skim.get("changed_variables", [])
-                if str(item).strip()
-            ],
+            material_match=list(objective.get("material_scope") or []),
+            changed_variables=list(objective.get("variables") or []),
             measured_property_scope=[
                 str(item)
                 for item in objective.get("outcomes", [])

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha1
 import json
 import logging
@@ -40,6 +40,8 @@ from domain.core import (
     ObjectiveFactSet,
     PaperContribution,
     PaperSkim,
+    PaperStudyDisposition,
+    PaperStudyDispositionStatus,
     ResearchObjective,
     normalize_objective_terms,
 )
@@ -272,22 +274,37 @@ class ResearchObjectiveService:
             extractor=extractor,
             progress_callback=progress_callback,
         )
-        research_objectives = self.objective_candidate_service.discover_candidates(
+        self.objective_repository.replace(
+            collection_id,
+            build_id,
+            ObjectiveFactSet(
+                research_objectives_ready=False,
+                paper_skims=paper_skims,
+                study_dispositions=tuple(
+                    PaperStudyDisposition(
+                        document_id=skim.document_id,
+                        study_id=study.study_id,
+                        relationship_id=relationship.relationship_id,
+                        status=PaperStudyDispositionStatus.PENDING,
+                    )
+                    for skim in paper_skims
+                    for study in skim.studies
+                    for relationship in study.relationships
+                ),
+            ),
+        )
+        candidate_facts = self.objective_candidate_service.discover_candidate_facts(
             collection_id,
             paper_skims=paper_skims,
-            documents=artifacts.documents,
             extractor=extractor,
             progress_callback=progress_callback,
         )
         self.objective_repository.replace(
             collection_id,
             build_id,
-            ObjectiveFactSet(
-                research_objectives_ready=True,
-                paper_skims=paper_skims,
-                research_objectives=research_objectives,
-            ),
+            candidate_facts,
         )
+        research_objectives = candidate_facts.research_objectives
         logger.info(
             "Research objective candidates finished collection_id=%s paper_skim_count=%s objective_count=%s",
             collection_id,
@@ -304,16 +321,34 @@ class ResearchObjectiveService:
     ) -> ObjectiveAnalysisArtifacts:
         if analysis.collection_id != collection_id:
             raise ValueError("analysis belongs to another collection")
-        objective = self.objective_repository.read_objective(
+        active_objective = self.objective_repository.read_objective(
             collection_id, analysis.objective_id
         )
-        if objective is None:
+        if active_objective is None:
             raise ResearchObjectiveNotFoundError(collection_id, analysis.objective_id)
-        if objective.active_analysis_version != analysis.analysis_version:
+        if active_objective.active_analysis_version != analysis.analysis_version:
             raise ValueError("analysis is not the active objective version")
         objective_inputs = self._build_objective_analysis_inputs(
             collection_id,
             build_id=analysis.source_build_id,
+        )
+        source_objective = next(
+            (
+                item
+                for item in objective_inputs["research_objectives"]
+                if item.objective_id == analysis.objective_id
+            ),
+            None,
+        )
+        if source_objective is None:
+            raise ResearchObjectiveNotFoundError(collection_id, analysis.objective_id)
+        objective = replace(
+            source_objective,
+            confirmation_status=active_objective.confirmation_status,
+            active_analysis_version=active_objective.active_analysis_version,
+            published_analysis_version=active_objective.published_analysis_version,
+            created_at=active_objective.created_at,
+            updated_at=active_objective.updated_at,
         )
         paper_frames = self._build_objective_paper_frames(
             collection_id=collection_id,
@@ -1964,16 +1999,19 @@ class ResearchObjectiveService:
             paper_skim = skim_by_document_id.get(unit.document_id)
             context = unit.scientific_context.to_record()
             if not context["material"]:
-                material_values = (
-                    paper_skim.candidate_materials
-                    if paper_skim and paper_skim.candidate_materials
-                    else ()
+                material_values = ResearchObjectiveService._paper_skim_study_values(
+                    paper_skim,
+                    "material_scope",
                 )
                 context["material"] = [
                     {"name": "material", "value": value, "unit": None}
                     for value in material_values
                 ]
-            if paper_skim and paper_skim.candidate_processes:
+            process_values = ResearchObjectiveService._paper_skim_study_values(
+                paper_skim,
+                "process_context",
+            )
+            if process_values:
                 process_identity_names = {
                     "fabrication process",
                     "manufacturing process",
@@ -2000,7 +2038,7 @@ class ResearchObjectiveService:
                                 "value": value,
                                 "unit": None,
                             }
-                            for value in paper_skim.candidate_processes
+                            for value in process_values
                         ),
                     ]
             if context == unit.scientific_context.to_record():
@@ -6130,9 +6168,21 @@ class ResearchObjectiveService:
                 [
                     *items,
                     str(getattr(paper_skim, "doc_role", "") or ""),
-                    " ".join(getattr(paper_skim, "changed_variables", ()) or ()),
-                    " ".join(getattr(paper_skim, "candidate_properties", ()) or ()),
-                    " ".join(getattr(paper_skim, "candidate_processes", ()) or ()),
+                    " ".join(
+                        self._paper_skim_relationship_values(
+                            paper_skim,
+                            "varied_factors",
+                        )
+                    ),
+                    " ".join(
+                        self._paper_skim_relationship_values(paper_skim, "outcome")
+                    ),
+                    " ".join(
+                        self._paper_skim_study_values(
+                            paper_skim,
+                            "process_context",
+                        )
+                    ),
                     str(payload.get("document") or ""),
                 ]
             )
@@ -6223,7 +6273,7 @@ class ResearchObjectiveService:
         seen: set[str] = set()
         for candidate in (
             *objective.variables,
-            *(getattr(paper_skim, "changed_variables", ()) if paper_skim else ()),
+            *self._paper_skim_relationship_values(paper_skim, "varied_factors"),
         ):
             self._append_unique_axis(values, seen, candidate)
         return values
@@ -6238,7 +6288,7 @@ class ResearchObjectiveService:
         seen: set[str] = set()
         for candidate in (
             *objective.outcomes,
-            *(getattr(paper_skim, "candidate_properties", ()) if paper_skim else ()),
+            *self._paper_skim_relationship_values(paper_skim, "outcome"),
         ):
             self._append_unique_axis(values, seen, candidate)
         return values
@@ -6264,9 +6314,21 @@ class ResearchObjectiveService:
         append_many(objective.constraints, 3)
         append_many(objective.material_scope, 1)
         if paper_skim is not None:
-            append_many(paper_skim.changed_variables, 3)
-            append_many(paper_skim.candidate_properties, 3)
-            append_many(paper_skim.candidate_processes, 2)
+            append_many(
+                self._paper_skim_relationship_values(
+                    paper_skim,
+                    "varied_factors",
+                ),
+                3,
+            )
+            append_many(
+                self._paper_skim_relationship_values(paper_skim, "outcome"),
+                3,
+            )
+            append_many(
+                self._paper_skim_study_values(paper_skim, "process_context"),
+                2,
+            )
         if profile is not None:
             record = profile.to_record() if hasattr(profile, "to_record") else {}
             if isinstance(record, Mapping):
@@ -6283,6 +6345,45 @@ class ResearchObjectiveService:
             seen.add(key)
             unique.append((term, weight))
         return tuple(unique)
+
+    @staticmethod
+    def _paper_skim_study_values(
+        paper_skim: PaperSkim | None,
+        field_name: str,
+    ) -> tuple[str, ...]:
+        if paper_skim is None:
+            return ()
+        values: list[str] = []
+        seen: set[str] = set()
+        for study in paper_skim.studies:
+            for value in getattr(study, field_name):
+                text = str(value or "").strip()
+                key = text.casefold()
+                if text and key not in seen:
+                    seen.add(key)
+                    values.append(text)
+        return tuple(values)
+
+    @staticmethod
+    def _paper_skim_relationship_values(
+        paper_skim: PaperSkim | None,
+        field_name: str,
+    ) -> tuple[str, ...]:
+        if paper_skim is None:
+            return ()
+        values: list[str] = []
+        seen: set[str] = set()
+        for study in paper_skim.studies:
+            for relationship in study.relationships:
+                raw_values = getattr(relationship, field_name)
+                items = raw_values if isinstance(raw_values, tuple) else (raw_values,)
+                for value in items:
+                    text = str(value or "").strip()
+                    key = text.casefold()
+                    if text and key not in seen:
+                        seen.add(key)
+                        values.append(text)
+        return tuple(values)
 
     def _prioritize_frame_items(
         self,

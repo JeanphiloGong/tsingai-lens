@@ -3,17 +3,64 @@ from __future__ import annotations
 from typing import Any
 
 from application.core.objectives.schemas import (
-    StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
-    StructuredObjectiveMergeGroup,
-    StructuredObjectiveMergePlan,
     StructuredPaperSkim,
     StructuredResearchObjective,
     StructuredResearchObjectives,
 )
-from tests.support.objective_extractor import FakeObjectiveExtractor
+from tests.support.objective_extractor import (
+    FakeObjectiveExtractor,
+    paper_skim_study_outputs,
+    paper_relationship_records,
+    relationship_lineage,
+)
+
+
+def _records_matching(
+    payload: dict[str, Any],
+    *,
+    variable: str | None = None,
+    outcome: str | None = None,
+) -> list[tuple[str, str, str, dict[str, Any], dict[str, Any]]]:
+    return [
+        record
+        for record in paper_relationship_records(payload)
+        if (
+            variable is None
+            or variable in (record[4].get("varied_factors") or ())
+        )
+        and (
+            outcome is None
+            or outcome == record[4].get("outcome")
+        )
+    ]
+
+
+def _study(
+    *,
+    varied_factors: list[str],
+    outcomes: list[str],
+    material_scope: list[str] | None = None,
+    process_context: list[str] | None = None,
+    confidence: float = 0.91,
+) -> dict[str, Any]:
+    return {
+        "design_type": "experimental",
+        "claim_scope": "current_work",
+        "material_scope": material_scope or [],
+        "process_context": process_context or [],
+        "relationships": [
+            {
+                "varied_factors": varied_factors,
+                "outcome": outcome,
+                "confidence": confidence,
+            }
+            for outcome in outcomes
+        ],
+        "confidence": confidence,
+    }
 
 
 class BroadObjectiveExtractor(FakeObjectiveExtractor):
@@ -21,24 +68,22 @@ class BroadObjectiveExtractor(FakeObjectiveExtractor):
         self.skim_payloads.append(payload)
         return StructuredPaperSkim(
             doc_role="experimental",
-            candidate_materials=["316L stainless steel"],
-            candidate_processes=["Selective Laser Melting"],
-            candidate_properties=[
-                "mechanical properties",
-                "yield strength",
-                "ultimate tensile strength",
-                "elongation",
-                "microhardness",
-            ],
-            changed_variables=[
-                "energy density",
-                "scanning strategy",
-                "scanning speed",
-            ],
-            possible_objectives=[
-                "How do energy density, scanning strategy, and scanning speed "
-                "affect mechanical properties?"
-            ],
+            **paper_skim_study_outputs(
+                payload,
+                [
+                    _study(
+                        material_scope=["316L stainless steel"],
+                        process_context=["Selective Laser Melting"],
+                        varied_factors=[
+                            "energy density",
+                            "scanning strategy",
+                            "scanning speed",
+                        ],
+                        outcomes=["mechanical properties"],
+                    )
+                ],
+            ),
+            unresolved_signals=[],
             evidence_density="high",
             confidence=0.91,
             warnings=[],
@@ -49,6 +94,8 @@ class BroadObjectiveExtractor(FakeObjectiveExtractor):
         payload: dict[str, Any],
     ) -> StructuredResearchObjectives:
         self.discovery_payloads.append(payload)
+        records = paper_relationship_records(payload)
+        source_relationship_ids, seed_document_ids = relationship_lineage(records)
         return StructuredResearchObjectives(
             objectives=[
                 StructuredResearchObjective(
@@ -65,10 +112,11 @@ class BroadObjectiveExtractor(FakeObjectiveExtractor):
                     outcomes=["mechanical properties"],
                     constraints=["Selective Laser Melting"],
                     requested_comparator=None,
-                    seed_document_ids=["paper-1"],
+                    seed_document_ids=seed_document_ids,
                     excluded_document_ids=[],
                     confidence=0.88,
                     reason="paper skim points to mechanical-property comparison",
+                    source_relationship_ids=source_relationship_ids,
                 )
             ]
         )
@@ -79,17 +127,39 @@ class DuplicateMechanicalObjectiveExtractor(BroadObjectiveExtractor):
         self.skim_payloads.append(payload)
         return StructuredPaperSkim(
             doc_role="experimental",
-            candidate_materials=["316L stainless steel"],
-            candidate_processes=["Selective Laser Melting"],
-            possible_objectives=[
-                "How do energy density, scanning strategy, and scanning speed "
-                "affect densification and microstructure?",
-                "What are the effects of energy density and scanning speed on "
-                "yield strength, ultimate tensile strength, elongation, and "
-                "microhardness?",
-                "How does scanning strategy influence yield strength and "
-                "microhardness?",
-            ],
+            **paper_skim_study_outputs(
+                payload,
+                [
+                    _study(
+                        material_scope=["316L stainless steel"],
+                        process_context=["Selective Laser Melting"],
+                        varied_factors=[
+                            "energy density",
+                            "scanning strategy",
+                            "scanning speed",
+                        ],
+                        outcomes=["densification", "microstructure"],
+                    ),
+                    _study(
+                        material_scope=["316L stainless steel"],
+                        process_context=["Selective Laser Melting"],
+                        varied_factors=["energy density", "scanning speed"],
+                        outcomes=[
+                            "yield strength",
+                            "ultimate tensile strength",
+                            "elongation",
+                            "microhardness",
+                        ],
+                    ),
+                    _study(
+                        material_scope=["316L stainless steel"],
+                        process_context=["Selective Laser Melting"],
+                        varied_factors=["scanning strategy"],
+                        outcomes=["yield strength", "microhardness"],
+                    ),
+                ],
+            ),
+            unresolved_signals=[],
             evidence_density="high",
             confidence=0.91,
         )
@@ -99,6 +169,20 @@ class DuplicateMechanicalObjectiveExtractor(BroadObjectiveExtractor):
         payload: dict[str, Any],
     ) -> StructuredResearchObjectives:
         self.discovery_payloads.append(payload)
+        structure_records = _records_matching(payload, outcome="densification")
+        broad_mechanical_records = _records_matching(
+            payload,
+            variable="energy density",
+            outcome="ultimate tensile strength",
+        )
+        focused_mechanical_records = [
+            record
+            for record in _records_matching(payload, outcome="microhardness")
+            if record[4].get("varied_factors") == ["scanning strategy"]
+        ]
+        structure_ids, structure_documents = relationship_lineage(structure_records)
+        broad_ids, broad_documents = relationship_lineage(broad_mechanical_records)
+        focused_ids, focused_documents = relationship_lineage(focused_mechanical_records)
         return StructuredResearchObjectives(
             objectives=[
                 StructuredResearchObjective(
@@ -118,10 +202,11 @@ class DuplicateMechanicalObjectiveExtractor(BroadObjectiveExtractor):
                         "Compare the effects of energy density, scanning strategy, "
                         "and scanning speed on densification and microstructure."
                     ),
-                    seed_document_ids=["paper-1"],
+                    seed_document_ids=structure_documents,
                     excluded_document_ids=[],
                     confidence=0.9,
                     reason="processing parameters affect density and structure",
+                    source_relationship_ids=structure_ids,
                 ),
                 StructuredResearchObjective(
                     question=(
@@ -145,10 +230,11 @@ class DuplicateMechanicalObjectiveExtractor(BroadObjectiveExtractor):
                         "Analyze how changes in energy density and scanning speed "
                         "influence mechanical properties."
                     ),
-                    seed_document_ids=["paper-1"],
+                    seed_document_ids=broad_documents,
                     excluded_document_ids=[],
                     confidence=0.9,
                     reason="mechanical properties are reported together",
+                    source_relationship_ids=broad_ids,
                 ),
                 StructuredResearchObjective(
                     question=(
@@ -163,95 +249,13 @@ class DuplicateMechanicalObjectiveExtractor(BroadObjectiveExtractor):
                         "Evaluate scanning strategy effects on yield strength "
                         "and microhardness."
                     ),
-                    seed_document_ids=["paper-1"],
+                    seed_document_ids=focused_documents,
                     excluded_document_ids=[],
                     confidence=0.9,
                     reason="mechanical properties overlap with the prior objective",
+                    source_relationship_ids=focused_ids,
                 ),
-            ]
-        )
-
-    def merge_research_objectives(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredObjectiveMergePlan:
-        self.merge_payloads.append(payload)
-        candidates = payload["candidate_objectives"]
-        structure_candidates = [
-            candidate
-            for candidate in candidates
-            if "densification" in candidate["outcomes"]
-        ]
-        mechanical_candidates = [
-            candidate
-            for candidate in candidates
-            if "yield strength" in candidate["outcomes"]
-        ]
-        return StructuredObjectiveMergePlan(
-            merged_objectives=[
-                StructuredObjectiveMergeGroup(
-                    source_objective_ids=[
-                        candidate["objective_id"]
-                        for candidate in structure_candidates
-                    ],
-                    question=structure_candidates[0]["question"],
-                    material_scope=structure_candidates[0]["material_scope"],
-                    variables=structure_candidates[0]["variables"],
-                    outcomes=structure_candidates[0]["outcomes"],
-                    requested_comparator=structure_candidates[0]["requested_comparator"],
-                    confidence=0.9,
-                    reason="kept structure objective separate",
-                ),
-                StructuredObjectiveMergeGroup(
-                    source_objective_ids=[
-                        candidate["objective_id"]
-                        for candidate in mechanical_candidates
-                    ],
-                    question=(
-                        "How do energy density, scanning speed, and scanning "
-                        "strategy affect yield strength, ultimate tensile strength, "
-                        "elongation, and microhardness?"
-                    ),
-                    material_scope=["316L stainless steel"],
-                    variables=merge_candidate_values(
-                        mechanical_candidates,
-                        "variables",
-                    ),
-                    outcomes=merge_candidate_values(
-                        mechanical_candidates,
-                        "outcomes",
-                    ),
-                    requested_comparator=(
-                        "Compare the combined effects of energy density, scanning "
-                        "speed, and scanning strategy on mechanical properties."
-                    ),
-                    confidence=0.9,
-                    reason="merged overlapping mechanical objectives",
-                ),
-            ]
-        )
-
-
-class DroppedObjectiveMergeExtractor(DuplicateMechanicalObjectiveExtractor):
-    def merge_research_objectives(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredObjectiveMergePlan:
-        self.merge_payloads.append(payload)
-        candidate = payload["candidate_objectives"][0]
-        return StructuredObjectiveMergePlan(
-            merged_objectives=[
-                StructuredObjectiveMergeGroup(
-                    source_objective_ids=[candidate["objective_id"]],
-                    question=candidate["question"],
-                    material_scope=candidate["material_scope"],
-                    variables=candidate["variables"],
-                    outcomes=candidate["outcomes"],
-                    requested_comparator=candidate["requested_comparator"],
-                    confidence=candidate["confidence"],
-                    reason="invalid plan drops other candidates",
-                )
-            ]
+            ],
         )
 
 
@@ -260,31 +264,39 @@ class CanonicalizingAxisExtractor(DuplicateMechanicalObjectiveExtractor):
         self.skim_payloads.append(payload)
         return StructuredPaperSkim(
             doc_role="experimental",
-            candidate_materials=["316L stainless steel"],
-            candidate_processes=["Selective Laser Melting", "scanning strategy"],
-            candidate_properties=[
-                "mechanical properties",
-                "yield strength",
-                "ultimate tensile strength",
-                "elongation",
-                "microhardness",
-                "densification",
-                "microstructure",
-            ],
-            changed_variables=[
-                "energy density",
-                "scan strategy",
-                "scanning speed",
-            ],
-            possible_objectives=[
-                "How do energy density, scanning strategy, and scanning speed "
-                "affect densification and microstructure?",
-                "What are the effects of energy density and scanning speed on "
-                "yield strength, ultimate tensile strength, elongation, and "
-                "microhardness?",
-                "How does scanning strategy influence yield strength and "
-                "microhardness?",
-            ],
+            **paper_skim_study_outputs(
+                payload,
+                [
+                    _study(
+                        material_scope=["316L stainless steel"],
+                        process_context=["Selective Laser Melting"],
+                        varied_factors=[
+                            "energy density",
+                            "scan strategy",
+                            "scanning speed",
+                        ],
+                        outcomes=["densification", "microstructure"],
+                    ),
+                    _study(
+                        material_scope=["316L stainless steel"],
+                        process_context=["Selective Laser Melting"],
+                        varied_factors=["energy density", "scanning speed"],
+                        outcomes=[
+                            "yield strength",
+                            "ultimate tensile strength",
+                            "elongation",
+                            "microhardness",
+                        ],
+                    ),
+                    _study(
+                        material_scope=["316L stainless steel"],
+                        process_context=["Selective Laser Melting"],
+                        varied_factors=["scan strategy"],
+                        outcomes=["yield strength", "microhardness"],
+                    ),
+                ],
+            ),
+            unresolved_signals=[],
             evidence_density="high",
             confidence=0.91,
             warnings=[],
@@ -296,55 +308,16 @@ class CanonicalizingAxisExtractor(DuplicateMechanicalObjectiveExtractor):
     ) -> StructuredAxisCanonicalizationPlan:
         self.canonicalization_payloads.append(payload)
         return StructuredAxisCanonicalizationPlan(
-            axis_groups=[
-                StructuredAxisCanonicalizationGroup(
-                    axis_type="material",
-                    canonical=value,
-                    aliases=[value],
-                    confidence=1.0,
-                    reason="kept separate",
-                )
-                for value in payload["axis_candidates"]["material"]
-            ]
-            + [
-                StructuredAxisCanonicalizationGroup(
-                    axis_type="variable",
-                    canonical="scanning strategy",
-                    aliases=["scanning strategy", "scan strategy"],
-                    confidence=0.95,
-                    reason="same process variable phrased two ways",
-                ),
-                *[
-                    StructuredAxisCanonicalizationGroup(
-                        axis_type="variable",
-                        canonical=value,
-                        aliases=[value],
-                        confidence=1.0,
-                        reason="kept separate",
-                    )
-                    for value in payload["axis_candidates"]["variable"]
-                    if value not in {"scanning strategy", "scan strategy"}
-                ],
-            ]
-            + [
-                StructuredAxisCanonicalizationGroup(
-                    axis_type="outcome",
-                    canonical=value,
-                    aliases=[value],
-                    confidence=1.0,
-                    reason="kept separate",
-                )
-                for value in payload["axis_candidates"]["outcome"]
-            ]
-            + [
-                StructuredAxisCanonicalizationGroup(
-                    axis_type="constraint",
-                    canonical=value,
-                    aliases=[value],
-                    confidence=1.0,
-                    reason="kept separate",
-                )
-                for value in payload["axis_candidates"]["constraint"]
+            decisions=[
+                {
+                    "pair_id": pair["pair_id"],
+                    "equivalent": {
+                        str(pair.get("left") or "").casefold(),
+                        str(pair.get("right") or "").casefold(),
+                    }
+                    == {"scanning strategy", "scan strategy"},
+                }
+                for pair in payload.get("axis_pairs", ())
             ]
         )
 
@@ -356,15 +329,7 @@ class InvalidAxisCanonicalizationExtractor(CanonicalizingAxisExtractor):
     ) -> StructuredAxisCanonicalizationPlan:
         self.canonicalization_payloads.append(payload)
         return StructuredAxisCanonicalizationPlan(
-            axis_groups=[
-                StructuredAxisCanonicalizationGroup(
-                    axis_type="variable",
-                    canonical="scanning strategy",
-                    aliases=["scanning strategy", "scan strategy"],
-                    confidence=0.95,
-                    reason="invalid plan drops material and property axes",
-                )
-            ]
+            decisions=[{"pair_id": "unknown-pair", "equivalent": True}]
         )
 
 
@@ -375,77 +340,36 @@ class OverbroadAxisCanonicalizationExtractor(CanonicalizingAxisExtractor):
     ) -> StructuredAxisCanonicalizationPlan:
         self.canonicalization_payloads.append(payload)
         return StructuredAxisCanonicalizationPlan(
-            axis_groups=[
-                StructuredAxisCanonicalizationGroup(
-                    axis_type="material",
-                    canonical=value,
-                    aliases=[value],
-                    confidence=1.0,
-                    reason="kept separate",
-                )
-                for value in payload["axis_candidates"]["material"]
-            ]
-            + [
-                StructuredAxisCanonicalizationGroup(
-                    axis_type="variable",
-                    canonical="Selective Laser Melting",
-                    aliases=payload["axis_candidates"]["variable"],
-                    confidence=0.9,
-                    reason="invalidly collapses distinct process axes",
-                ),
-            ]
-            + [
-                StructuredAxisCanonicalizationGroup(
-                    axis_type="outcome",
-                    canonical=value,
-                    aliases=[value],
-                    confidence=1.0,
-                    reason="kept separate",
-                )
-                for value in payload["axis_candidates"]["outcome"]
+            decisions=[
+                {"pair_id": pair["pair_id"], "equivalent": True}
+                for pair in payload.get("axis_pairs", ())
             ]
         )
 
 
-class InventedAxisMergeExtractor(DuplicateMechanicalObjectiveExtractor):
-    def merge_research_objectives(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredObjectiveMergePlan:
-        self.merge_payloads.append(payload)
-        return StructuredObjectiveMergePlan(
-            merged_objectives=[
-                StructuredObjectiveMergeGroup(
-                    source_objective_ids=[candidate["objective_id"]],
-                    question=candidate["question"],
-                    material_scope=candidate["material_scope"],
-                    variables=[
-                        *candidate["variables"],
-                        "laser power",
-                    ],
-                    outcomes=candidate["outcomes"],
-                    requested_comparator=candidate["requested_comparator"],
-                    confidence=candidate["confidence"],
-                    reason="invalid plan invents an axis",
-                )
-                for candidate in payload["candidate_objectives"]
-            ]
-        )
-
-
-class CrossObjectiveAxisMergeExtractor(DuplicateMechanicalObjectiveExtractor):
+class CrossObjectiveAxisExtractor(DuplicateMechanicalObjectiveExtractor):
     def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         self.skim_payloads.append(payload)
         return StructuredPaperSkim(
             doc_role="experimental",
-            candidate_materials=["316L stainless steel"],
-            candidate_processes=["Selective Laser Melting"],
-            possible_objectives=[
-                "How do laser power and scanning speed affect yield strength and "
-                "elongation?",
-                "How does porosity influence corrosion potential and "
-                "pitting potential?",
-            ],
+            **paper_skim_study_outputs(
+                payload,
+                [
+                    _study(
+                        material_scope=["316L stainless steel"],
+                        process_context=["Selective Laser Melting"],
+                        varied_factors=["laser power", "scanning speed"],
+                        outcomes=["yield strength", "elongation"],
+                    ),
+                    _study(
+                        material_scope=["316L stainless steel"],
+                        process_context=["Selective Laser Melting"],
+                        varied_factors=["porosity"],
+                        outcomes=["corrosion potential", "pitting potential"],
+                    ),
+                ],
+            ),
+            unresolved_signals=[],
             evidence_density="high",
         )
 
@@ -454,6 +378,10 @@ class CrossObjectiveAxisMergeExtractor(DuplicateMechanicalObjectiveExtractor):
         payload: dict[str, Any],
     ) -> StructuredResearchObjectives:
         self.discovery_payloads.append(payload)
+        mechanical_records = _records_matching(payload, outcome="yield strength")
+        corrosion_records = _records_matching(payload, outcome="corrosion potential")
+        mechanical_ids, mechanical_documents = relationship_lineage(mechanical_records)
+        corrosion_ids, corrosion_documents = relationship_lineage(corrosion_records)
         return StructuredResearchObjectives(
             objectives=[
                 StructuredResearchObjective(
@@ -471,10 +399,11 @@ class CrossObjectiveAxisMergeExtractor(DuplicateMechanicalObjectiveExtractor):
                         "Compare laser power and scanning speed effects on "
                         "mechanical properties."
                     ),
-                    seed_document_ids=["paper-1"],
+                    seed_document_ids=mechanical_documents,
                     excluded_document_ids=[],
                     confidence=0.9,
                     reason="mechanical objective",
+                    source_relationship_ids=mechanical_ids,
                 ),
                 StructuredResearchObjective(
                     question=(
@@ -488,48 +417,35 @@ class CrossObjectiveAxisMergeExtractor(DuplicateMechanicalObjectiveExtractor):
                     requested_comparator=(
                         "Compare corrosion response across porosity conditions."
                     ),
-                    seed_document_ids=["paper-1"],
+                    seed_document_ids=corrosion_documents,
                     excluded_document_ids=[],
                     confidence=0.9,
                     reason="corrosion objective",
+                    source_relationship_ids=corrosion_ids,
                 ),
             ]
         )
 
-    def merge_research_objectives(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredObjectiveMergePlan:
-        self.merge_payloads.append(payload)
-        groups: list[StructuredObjectiveMergeGroup] = []
-        for candidate in payload["candidate_objectives"]:
-            variables = list(candidate["variables"])
-            if "yield strength" in candidate["outcomes"]:
-                variables.append("porosity")
-            groups.append(
-                StructuredObjectiveMergeGroup(
-                    source_objective_ids=[candidate["objective_id"]],
-                    question=candidate["question"],
-                    material_scope=candidate["material_scope"],
-                    variables=variables,
-                    outcomes=candidate["outcomes"],
-                    requested_comparator=candidate["requested_comparator"],
-                    confidence=candidate["confidence"],
-                    reason="invalid plan leaks axes between objectives",
-                )
-            )
-        return StructuredObjectiveMergePlan(merged_objectives=groups)
 
-
-class OppositeDirectionMergeExtractor(DuplicateMechanicalObjectiveExtractor):
+class OppositeDirectionObjectiveExtractor(DuplicateMechanicalObjectiveExtractor):
     def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         self.skim_payloads.append(payload)
         return StructuredPaperSkim(
             doc_role="experimental",
-            possible_objectives=[
-                "How does porosity affect density and roughness?",
-                "How does density affect porosity and roughness?",
-            ],
+            **paper_skim_study_outputs(
+                payload,
+                [
+                    _study(
+                        varied_factors=["porosity"],
+                        outcomes=["density", "roughness"],
+                    ),
+                    _study(
+                        varied_factors=["density"],
+                        outcomes=["porosity", "roughness"],
+                    ),
+                ],
+            ),
+            unresolved_signals=[],
             evidence_density="high",
         )
 
@@ -538,55 +454,48 @@ class OppositeDirectionMergeExtractor(DuplicateMechanicalObjectiveExtractor):
         payload: dict[str, Any],
     ) -> StructuredResearchObjectives:
         self.discovery_payloads.append(payload)
+        porosity_records = _records_matching(payload, variable="porosity")
+        density_records = _records_matching(payload, variable="density")
+        porosity_ids, porosity_documents = relationship_lineage(porosity_records)
+        density_ids, density_documents = relationship_lineage(density_records)
         return StructuredResearchObjectives(
             objectives=[
                 StructuredResearchObjective(
                     question="How does porosity affect density and roughness?",
                     variables=["porosity"],
                     outcomes=["density", "roughness"],
-                    seed_document_ids=["paper-1"],
+                    seed_document_ids=porosity_documents,
                     reason="porosity objective",
+                    source_relationship_ids=porosity_ids,
                 ),
                 StructuredResearchObjective(
                     question="How does density affect porosity and roughness?",
                     variables=["density"],
                     outcomes=["porosity", "roughness"],
-                    seed_document_ids=["paper-1"],
+                    seed_document_ids=density_documents,
                     reason="density objective",
+                    source_relationship_ids=density_ids,
                 ),
             ]
         )
 
-    def merge_research_objectives(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredObjectiveMergePlan:
-        self.merge_payloads.append(payload)
-        return StructuredObjectiveMergePlan(
-            merged_objectives=[
-                StructuredObjectiveMergeGroup(
-                    source_objective_ids=[
-                        candidate["objective_id"]
-                        for candidate in payload["candidate_objectives"]
-                    ],
-                    question="How does density affect porosity?",
-                    variables=["density"],
-                    outcomes=["porosity"],
-                    reason="invalid opposite-direction merge",
-                )
-            ]
-        )
 
-
-class CrossCandidateAxisExtractor(FakeObjectiveExtractor):
+class CrossRelationshipAxisExtractor(FakeObjectiveExtractor):
     def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         self.skim_payloads.append(payload)
         return StructuredPaperSkim(
             doc_role="experimental",
-            possible_objectives=[
-                "How does laser power affect porosity?",
-                "How does heat treatment affect corrosion resistance?",
-            ],
+            **paper_skim_study_outputs(
+                payload,
+                [
+                    _study(varied_factors=["laser power"], outcomes=["porosity"]),
+                    _study(
+                        varied_factors=["heat treatment"],
+                        outcomes=["corrosion resistance"],
+                    ),
+                ],
+            ),
+            unresolved_signals=[],
             evidence_density="high",
         )
 
@@ -595,13 +504,16 @@ class CrossCandidateAxisExtractor(FakeObjectiveExtractor):
         payload: dict[str, Any],
     ) -> StructuredResearchObjectives:
         self.discovery_payloads.append(payload)
+        laser_records = _records_matching(payload, variable="laser power")[:1]
+        source_relationship_ids, seed_document_ids = relationship_lineage(laser_records)
         return StructuredResearchObjectives(
             objectives=[
                 StructuredResearchObjective(
                     question="How does laser power affect corrosion resistance?",
                     variables=["laser power"],
                     outcomes=["corrosion resistance"],
-                    seed_document_ids=["paper-1"],
+                    seed_document_ids=seed_document_ids,
+                    source_relationship_ids=source_relationship_ids,
                 )
             ]
         )
@@ -612,8 +524,17 @@ class AxisQuestionMismatchExtractor(FakeObjectiveExtractor):
         self.skim_payloads.append(payload)
         return StructuredPaperSkim(
             doc_role="experimental",
-            candidate_materials=["316L stainless steel"],
-            possible_objectives=["How does scan strategy affect porosity?"],
+            **paper_skim_study_outputs(
+                payload,
+                [
+                    _study(
+                        material_scope=["316L stainless steel"],
+                        varied_factors=["scan strategy"],
+                        outcomes=["porosity"],
+                    )
+                ],
+            ),
+            unresolved_signals=[],
             evidence_density="high",
         )
 
@@ -622,6 +543,8 @@ class AxisQuestionMismatchExtractor(FakeObjectiveExtractor):
         payload: dict[str, Any],
     ) -> StructuredResearchObjectives:
         self.discovery_payloads.append(payload)
+        records = paper_relationship_records(payload)
+        source_relationship_ids, seed_document_ids = relationship_lineage(records)
         return StructuredResearchObjectives(
             objectives=[
                 StructuredResearchObjective(
@@ -629,7 +552,8 @@ class AxisQuestionMismatchExtractor(FakeObjectiveExtractor):
                     material_scope=["316L stainless steel"],
                     variables=["scan strategy"],
                     outcomes=["porosity"],
-                    seed_document_ids=["paper-1"],
+                    seed_document_ids=seed_document_ids,
+                    source_relationship_ids=source_relationship_ids,
                 )
             ]
         )
@@ -640,25 +564,9 @@ class AxisQuestionMismatchExtractor(FakeObjectiveExtractor):
     ) -> StructuredAxisCanonicalizationPlan:
         self.canonicalization_payloads.append(payload)
         return StructuredAxisCanonicalizationPlan(
-            axis_groups=[
-                StructuredAxisCanonicalizationGroup(
-                    axis_type="material",
-                    canonical="316L stainless steel",
-                    aliases=["316L stainless steel"],
-                    reason="unchanged",
-                ),
-                StructuredAxisCanonicalizationGroup(
-                    axis_type="variable",
-                    canonical="scanning strategy",
-                    aliases=["scan strategy"],
-                    reason="canonicalized spelling",
-                ),
-                StructuredAxisCanonicalizationGroup(
-                    axis_type="outcome",
-                    canonical="porosity",
-                    aliases=["porosity"],
-                    reason="unchanged",
-                ),
+            decisions=[
+                {"pair_id": pair["pair_id"], "equivalent": True}
+                for pair in payload.get("axis_pairs", ())
             ]
         )
 
@@ -669,6 +577,9 @@ class UnmatchedSeedObjectiveExtractor(DuplicateMechanicalObjectiveExtractor):
         payload: dict[str, Any],
     ) -> StructuredResearchObjectives:
         self.discovery_payloads.append(payload)
+        records = paper_relationship_records(payload)
+        selected_records = records[:1]
+        source_relationship_ids, _ = relationship_lineage(selected_records)
         return StructuredResearchObjectives(
             objectives=[
                 StructuredResearchObjective(
@@ -684,6 +595,7 @@ class UnmatchedSeedObjectiveExtractor(DuplicateMechanicalObjectiveExtractor):
                     excluded_document_ids=[],
                     confidence=0.9,
                     reason="model returned a source filename instead of document id",
+                    source_relationship_ids=source_relationship_ids,
                 )
             ]
         )
@@ -695,6 +607,8 @@ class MissingSeedObjectiveExtractor(FakeObjectiveExtractor):
         payload: dict[str, Any],
     ) -> StructuredResearchObjectives:
         self.discovery_payloads.append(payload)
+        records = paper_relationship_records(payload)
+        source_relationship_ids, _ = relationship_lineage(records)
         return StructuredResearchObjectives(
             objectives=[
                 StructuredResearchObjective(
@@ -706,6 +620,7 @@ class MissingSeedObjectiveExtractor(FakeObjectiveExtractor):
                     seed_document_ids=[],
                     confidence=0.88,
                     reason="model omitted the source document binding",
+                    source_relationship_ids=source_relationship_ids,
                 )
             ]
         )
@@ -717,6 +632,8 @@ class OmittedMaterialScopeExtractor(FakeObjectiveExtractor):
         payload: dict[str, Any],
     ) -> StructuredResearchObjectives:
         self.discovery_payloads.append(payload)
+        records = paper_relationship_records(payload)
+        source_relationship_ids, seed_document_ids = relationship_lineage(records)
         return StructuredResearchObjectives(
             objectives=[
                 StructuredResearchObjective(
@@ -724,9 +641,10 @@ class OmittedMaterialScopeExtractor(FakeObjectiveExtractor):
                     material_scope=[],
                     variables=["laser power"],
                     outcomes=["relative density"],
-                    seed_document_ids=["paper-1", "paper-2"],
+                    seed_document_ids=seed_document_ids,
                     confidence=0.88,
                     reason="model omitted the shared material scope",
+                    source_relationship_ids=source_relationship_ids,
                 )
             ]
         )
@@ -738,6 +656,8 @@ class OverbroadPersistedObjectiveExtractor(DuplicateMechanicalObjectiveExtractor
         payload: dict[str, Any],
     ) -> StructuredResearchObjectives:
         self.discovery_payloads.append(payload)
+        records = paper_relationship_records(payload)
+        source_relationship_ids, seed_document_ids = relationship_lineage(records)
         return StructuredResearchObjectives(
             objectives=[
                 StructuredResearchObjective(
@@ -757,10 +677,11 @@ class OverbroadPersistedObjectiveExtractor(DuplicateMechanicalObjectiveExtractor
                     requested_comparator=(
                         "Compare reported yield strength across all process axes."
                     ),
-                    seed_document_ids=["paper-1"],
+                    seed_document_ids=seed_document_ids,
                     excluded_document_ids=[],
                     confidence=0.9,
                     reason="persisted objective contains unrelated process axes",
+                    source_relationship_ids=source_relationship_ids,
                 )
             ]
         )
@@ -769,13 +690,18 @@ class OverbroadPersistedObjectiveExtractor(DuplicateMechanicalObjectiveExtractor
         self.skim_payloads.append(payload)
         return StructuredPaperSkim(
             doc_role="experimental",
-            candidate_materials=["316L stainless steel"],
-            candidate_processes=["Selective Laser Melting"],
-            candidate_properties=["yield strength"],
-            changed_variables=["energy density", "scanning speed"],
-            possible_objectives=[
-                "How do energy density and scanning speed affect yield strength?"
-            ],
+            **paper_skim_study_outputs(
+                payload,
+                [
+                    _study(
+                        material_scope=["316L stainless steel"],
+                        process_context=["Selective Laser Melting"],
+                        varied_factors=["energy density", "scanning speed"],
+                        outcomes=["yield strength"],
+                    )
+                ],
+            ),
+            unresolved_signals=[],
             evidence_density="high",
             confidence=0.91,
             warnings=[],
@@ -838,106 +764,14 @@ class OverbroadPersistedObjectiveExtractor(DuplicateMechanicalObjectiveExtractor
         )
 
 
-class DisjointPropertyMergeExtractor(DuplicateMechanicalObjectiveExtractor):
-    def merge_research_objectives(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredObjectiveMergePlan:
-        self.merge_payloads.append(payload)
-        candidates = payload["candidate_objectives"]
-        return StructuredObjectiveMergePlan(
-            merged_objectives=[
-                StructuredObjectiveMergeGroup(
-                    source_objective_ids=[
-                        candidate["objective_id"]
-                        for candidate in candidates
-                    ],
-                    question=(
-                        "How do SLM parameters affect densification, "
-                        "microstructure, and mechanical properties of 316L "
-                        "stainless steel?"
-                    ),
-                    material_scope=["316L stainless steel"],
-                    variables=merge_candidate_values(candidates, "variables"),
-                    outcomes=merge_candidate_values(candidates, "outcomes"),
-                    requested_comparator=(
-                        "Compare all reported structural and mechanical outcomes "
-                        "under one objective."
-                    ),
-                    confidence=0.9,
-                    reason="invalid plan merges disjoint property directions",
-                )
-            ]
-        )
-
-
-class UnderSpecifiedMergeQuestionExtractor(DuplicateMechanicalObjectiveExtractor):
-    def merge_research_objectives(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredObjectiveMergePlan:
-        self.merge_payloads.append(payload)
-        candidates = payload["candidate_objectives"]
-        structure_candidates = [
-            candidate
-            for candidate in candidates
-            if "densification" in candidate["outcomes"]
-        ]
-        mechanical_candidates = [
-            candidate
-            for candidate in candidates
-            if "yield strength" in candidate["outcomes"]
-        ]
-        return StructuredObjectiveMergePlan(
-            merged_objectives=[
-                StructuredObjectiveMergeGroup(
-                    source_objective_ids=[
-                        candidate["objective_id"]
-                        for candidate in structure_candidates
-                    ],
-                    question=structure_candidates[0]["question"],
-                    material_scope=structure_candidates[0]["material_scope"],
-                    variables=structure_candidates[0]["variables"],
-                    outcomes=structure_candidates[0]["outcomes"],
-                    requested_comparator=structure_candidates[0]["requested_comparator"],
-                    confidence=0.9,
-                    reason="kept structure objective separate",
-                ),
-                StructuredObjectiveMergeGroup(
-                    source_objective_ids=[
-                        candidate["objective_id"]
-                        for candidate in mechanical_candidates
-                    ],
-                    question=(
-                        "What is the relationship between scanning speed and "
-                        "the mechanical properties of 316L stainless steel?"
-                    ),
-                    material_scope=["316L stainless steel"],
-                    variables=merge_candidate_values(
-                        mechanical_candidates,
-                        "variables",
-                    ),
-                    outcomes=merge_candidate_values(
-                        mechanical_candidates,
-                        "outcomes",
-                    ),
-                    requested_comparator=(
-                        "Examine how variations in scanning speed influence "
-                        "the mechanical properties of 316L stainless steel."
-                    ),
-                    confidence=0.9,
-                    reason="merged overlapping mechanical objectives",
-                ),
-            ]
-        )
-
-
 class SingleMixedObjectiveExtractor(DuplicateMechanicalObjectiveExtractor):
     def discover_research_objectives(
         self,
         payload: dict[str, Any],
     ) -> StructuredResearchObjectives:
         self.discovery_payloads.append(payload)
+        records = paper_relationship_records(payload)
+        source_relationship_ids, seed_document_ids = relationship_lineage(records)
         return StructuredResearchObjectives(
             objectives=[
                 StructuredResearchObjective(
@@ -964,10 +798,11 @@ class SingleMixedObjectiveExtractor(DuplicateMechanicalObjectiveExtractor):
                         "Compare all reported structural and mechanical outcomes "
                         "under SLM parameter changes."
                     ),
-                    seed_document_ids=["paper-1"],
+                    seed_document_ids=seed_document_ids,
                     excluded_document_ids=[],
                     confidence=0.9,
                     reason="invalidly mixed distinct property directions",
+                    source_relationship_ids=source_relationship_ids,
                 )
             ]
         )
@@ -979,6 +814,8 @@ class DuplicateObjectiveIdExtractor(FakeObjectiveExtractor):
         payload: dict[str, Any],
     ) -> StructuredResearchObjectives:
         self.discovery_payloads.append(payload)
+        records = paper_relationship_records(payload)
+        source_relationship_ids, seed_document_ids = relationship_lineage(records)
         objective = StructuredResearchObjective(
             question="How does heat treatment affect corrosion resistance?",
             material_scope=["316L stainless steel"],
@@ -986,49 +823,30 @@ class DuplicateObjectiveIdExtractor(FakeObjectiveExtractor):
             outcomes=["corrosion resistance"],
             constraints=["LPBF"],
             requested_comparator="compare heat treatment effects on corrosion",
-            seed_document_ids=["paper-1"],
+            seed_document_ids=seed_document_ids,
             excluded_document_ids=[],
             confidence=0.88,
             reason="duplicate objective emitted by model",
+            source_relationship_ids=source_relationship_ids,
         )
-        return StructuredResearchObjectives(objectives=[objective, objective])
-
-
-def merge_candidate_values(
-    candidates: list[dict[str, Any]],
-    key: str,
-) -> list[str]:
-    merged: list[str] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        for value in candidate[key]:
-            text = str(value or "").strip()
-            normalized = text.casefold()
-            if not text or normalized in seen:
-                continue
-            seen.add(normalized)
-            merged.append(text)
-    return merged
+        duplicate = objective.model_copy(update={"source_relationship_ids": []})
+        return StructuredResearchObjectives(objectives=[objective, duplicate])
 
 
 __all__ = [
     "AxisQuestionMismatchExtractor",
     "BroadObjectiveExtractor",
     "CanonicalizingAxisExtractor",
-    "CrossCandidateAxisExtractor",
-    "CrossObjectiveAxisMergeExtractor",
-    "DisjointPropertyMergeExtractor",
-    "DroppedObjectiveMergeExtractor",
+    "CrossRelationshipAxisExtractor",
+    "CrossObjectiveAxisExtractor",
     "DuplicateMechanicalObjectiveExtractor",
     "DuplicateObjectiveIdExtractor",
     "InvalidAxisCanonicalizationExtractor",
-    "InventedAxisMergeExtractor",
     "MissingSeedObjectiveExtractor",
     "OmittedMaterialScopeExtractor",
-    "OppositeDirectionMergeExtractor",
+    "OppositeDirectionObjectiveExtractor",
     "OverbroadAxisCanonicalizationExtractor",
     "OverbroadPersistedObjectiveExtractor",
     "SingleMixedObjectiveExtractor",
-    "UnderSpecifiedMergeQuestionExtractor",
     "UnmatchedSeedObjectiveExtractor",
 ]

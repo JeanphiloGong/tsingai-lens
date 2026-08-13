@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from application.core.objectives.schemas import (
     StructuredEvidenceSelections,
     StructuredPaperContributionDraft,
 )
-from domain.core import ObjectiveFactSet, PaperSkim
+from domain.core import (
+    ObjectiveFactSet,
+    PaperSkim,
+    PaperStudyDisposition,
+    PaperStudyDispositionStatus,
+    ResearchObjective,
+)
 from domain.source import SourceArtifactSet
 from tests.support.collection_service import build_test_collection_service
 from tests.support.objective_repository import MemoryObjectiveRepository
@@ -37,6 +44,111 @@ class _FailingFrameExtractor(_ObjectiveExtractor):
     ) -> StructuredPaperContributionDraft:
         self.frame_payloads.append(payload)
         raise RuntimeError("frame model failed")
+
+
+class _ActiveBuildScopeObjectiveRepository(MemoryObjectiveRepository):
+    """Mirror production's global lifecycle plus active-build support scope."""
+
+    def read_objective(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> ResearchObjective | None:
+        lifecycle = super().read_objective(collection_id, objective_id)
+        if lifecycle is None:
+            return None
+        snapshot = next(
+            (
+                objective
+                for objective in self.read(collection_id).research_objectives
+                if objective.objective_id == objective_id
+            ),
+            None,
+        )
+        if snapshot is None:
+            return lifecycle
+        return replace(
+            snapshot,
+            confirmation_status=lifecycle.confirmation_status,
+            active_analysis_version=lifecycle.active_analysis_version,
+            published_analysis_version=lifecycle.published_analysis_version,
+            created_at=lifecycle.created_at,
+            updated_at=lifecycle.updated_at,
+        )
+
+
+def _ready_objective_facts(
+    paper_skim: PaperSkim,
+    objective: ResearchObjective,
+) -> ObjectiveFactSet:
+    return ObjectiveFactSet(
+        research_objectives_ready=True,
+        paper_skims=(paper_skim,),
+        research_objectives=(objective,),
+        study_dispositions=tuple(
+            PaperStudyDisposition(
+                document_id=paper_skim.document_id,
+                study_id=study.study_id,
+                relationship_id=relationship.relationship_id,
+                status=PaperStudyDispositionStatus.PROMOTED,
+                objective_id=objective.objective_id,
+            )
+            for study in paper_skim.studies
+            for relationship in study.relationships
+        ),
+    )
+
+
+def _relationship_id(document_id: str, outcome: str) -> str:
+    return f"relationship-{document_id}-{'-'.join(outcome.casefold().split())}"
+
+
+def _paper_skim(
+    *,
+    document_id: str,
+    varied_factors: tuple[str, ...],
+    outcomes: tuple[str, ...],
+    material_scope: tuple[str, ...],
+    process_context: tuple[str, ...],
+    source_ref: str,
+) -> PaperSkim:
+    return PaperSkim.from_mapping(
+        {
+            "document_id": document_id,
+            "doc_role": "experimental",
+            "studies": [
+                {
+                    "study_id": f"study-{document_id}",
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "material_scope": list(material_scope),
+                    "process_context": list(process_context),
+                    "relationships": [
+                        {
+                            "relationship_id": _relationship_id(
+                                document_id,
+                                outcome,
+                            ),
+                            "varied_factors": list(varied_factors),
+                            "outcome": outcome,
+                            "source_refs": [
+                                {
+                                    "source_kind": "block",
+                                    "source_ref": source_ref,
+                                }
+                            ],
+                            "confidence": 0.9,
+                        }
+                        for outcome in outcomes
+                    ],
+                    "confidence": 0.9,
+                }
+            ],
+            "evidence_density": "high",
+            "confidence": 0.9,
+            "warnings": [],
+        }
+    )
 
 
 def test_memory_objective_repository_requires_explicit_activation():
@@ -106,31 +218,26 @@ def test_objective_analysis_uses_deterministic_frame_when_frame_model_fails(
             "outcomes": ["crystallographic texture", "yield strength"],
             "requested_comparator": "Compare texture and yield strength across scan strategy.",
             "seed_document_ids": ["paper-1"],
+            "source_relationship_ids": [
+                _relationship_id("paper-1", "crystallographic texture"),
+                _relationship_id("paper-1", "yield strength"),
+            ],
+            "rank": 1,
             "confidence": 0.9,
         }
     )
-    paper_skim = PaperSkim.from_mapping(
-        {
-            "document_id": "paper-1",
-            "collection_id": collection_id,
-            "doc_role": "experimental",
-            "candidate_materials": ["316L stainless steel"],
-            "candidate_processes": ["LPBF"],
-            "candidate_properties": ["crystallographic texture", "yield strength"],
-            "changed_variables": ["scan strategy rotation angle"],
-            "possible_objectives": [objective.question],
-            "evidence_density": "high",
-            "confidence": 0.9,
-        }
+    paper_skim = _paper_skim(
+        document_id="paper-1",
+        varied_factors=("scan strategy rotation angle",),
+        outcomes=("crystallographic texture", "yield strength"),
+        material_scope=("316L stainless steel",),
+        process_context=("LPBF",),
+        source_ref="b1",
     )
     service.objective_repository.replace(
         collection_id,
         "build_test",
-        ObjectiveFactSet(
-            research_objectives_ready=True,
-            paper_skims=(paper_skim,),
-            research_objectives=(objective,),
-        ),
+        _ready_objective_facts(paper_skim, objective),
     )
     analysis = _queue_running_analysis(service, collection_id, objective.objective_id)
 
@@ -205,31 +312,25 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
             "constraints": ["LPBF"],
             "requested_comparator": "Compare corrosion current before and after heat treatment.",
             "seed_document_ids": ["paper-1"],
+            "source_relationship_ids": [
+                _relationship_id("paper-1", "corrosion current")
+            ],
+            "rank": 1,
             "confidence": 0.9,
         }
     )
-    paper_skim = PaperSkim.from_mapping(
-        {
-            "document_id": "paper-1",
-            "collection_id": collection_id,
-            "doc_role": "experimental",
-            "candidate_materials": ["316L stainless steel"],
-            "candidate_processes": ["LPBF", "heat treatment"],
-            "candidate_properties": ["corrosion current"],
-            "changed_variables": ["heat treatment"],
-            "possible_objectives": [objective.question],
-            "evidence_density": "high",
-            "confidence": 0.9,
-        }
+    paper_skim = _paper_skim(
+        document_id="paper-1",
+        varied_factors=("heat treatment",),
+        outcomes=("corrosion current",),
+        material_scope=("316L stainless steel",),
+        process_context=("LPBF", "heat treatment"),
+        source_ref="b1",
     )
     service.objective_repository.replace(
         collection_id,
         "build_test",
-        ObjectiveFactSet(
-            research_objectives_ready=True,
-            paper_skims=(paper_skim,),
-            research_objectives=(objective,),
-        ),
+        _ready_objective_facts(paper_skim, objective),
     )
     analysis = _queue_running_analysis(service, collection_id, objective.objective_id)
 
@@ -308,31 +409,25 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
             "constraints": ["LPBF"],
             "requested_comparator": "Compare corrosion current before and after heat treatment.",
             "seed_document_ids": ["paper-1"],
+            "source_relationship_ids": [
+                _relationship_id("paper-1", "corrosion current")
+            ],
+            "rank": 1,
             "confidence": 0.9,
         }
     )
-    paper_skim = PaperSkim.from_mapping(
-        {
-            "document_id": "paper-1",
-            "collection_id": collection_id,
-            "doc_role": "experimental",
-            "candidate_materials": ["316L stainless steel"],
-            "candidate_processes": ["LPBF", "heat treatment"],
-            "candidate_properties": ["corrosion current"],
-            "changed_variables": ["heat treatment"],
-            "possible_objectives": [objective.question],
-            "evidence_density": "high",
-            "confidence": 0.9,
-        }
+    paper_skim = _paper_skim(
+        document_id="paper-1",
+        varied_factors=("heat treatment",),
+        outcomes=("corrosion current",),
+        material_scope=("316L stainless steel",),
+        process_context=("LPBF", "heat treatment"),
+        source_ref="b1",
     )
     service.objective_repository.replace(
         collection_id,
         "build_test",
-        ObjectiveFactSet(
-            research_objectives_ready=True,
-            paper_skims=(paper_skim,),
-            research_objectives=(objective,),
-        ),
+        _ready_objective_facts(paper_skim, objective),
     )
     active_facts = service.objective_repository.read(collection_id)
     analysis = _queue_running_analysis(service, collection_id, objective.objective_id)
@@ -346,3 +441,113 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
     assert extractor.route_payloads
     assert facts == active_facts
     assert artifacts.contributions
+
+
+def test_queued_analysis_uses_its_source_build_objective_scope_after_rebuild(
+    tmp_path,
+):
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    collection_id = collection_service.create_collection("Build snapshot analysis")[
+        "collection_id"
+    ]
+    extractor = _ObjectiveExtractor()
+    repository = _ActiveBuildScopeObjectiveRepository()
+    service = _build_research_objective_service(
+        collection_service=collection_service,
+        objective_extractor=extractor,
+        objective_repository=repository,
+    )
+    service.finding_synthesis_service.finding_extractor = extractor
+    service.source_artifact_repository.replace_collection_artifacts(
+        collection_id,
+        "build_test",
+        SourceArtifactSet.from_records(
+            documents=[
+                {
+                    "id": "paper-1",
+                    "title": "Queued source paper",
+                    "text": "Heat treatment changed corrosion current.",
+                }
+            ],
+            blocks=[
+                {
+                    "block_id": "paper-1-results",
+                    "document_id": "paper-1",
+                    "block_type": "paragraph",
+                    "text": "Heat treatment changed corrosion current.",
+                    "block_order": 1,
+                    "heading_path": "Results",
+                }
+            ],
+            tables=[],
+        ),
+    )
+    _seed_document_profiles(service, collection_id)
+    queued_objective = _research_objective(
+        {
+            "collection_id": collection_id,
+            "objective_id": "obj_corrosion",
+            "question": "How does heat treatment affect corrosion current?",
+            "variables": ["heat treatment"],
+            "outcomes": ["corrosion current"],
+            "seed_document_ids": ["paper-1"],
+            "source_relationship_ids": [
+                _relationship_id("paper-1", "corrosion current")
+            ],
+            "rank": 1,
+        }
+    )
+    queued_skim = _paper_skim(
+        document_id="paper-1",
+        varied_factors=("heat treatment",),
+        outcomes=("corrosion current",),
+        material_scope=("316L",),
+        process_context=("LPBF",),
+        source_ref="paper-1-results",
+    )
+    repository.replace(
+        collection_id,
+        "build_test",
+        _ready_objective_facts(queued_skim, queued_objective),
+    )
+    analysis = _queue_running_analysis(
+        service,
+        collection_id,
+        queued_objective.objective_id,
+    )
+
+    rebuilt_objective = _research_objective(
+        {
+            **queued_objective.to_record(),
+            "seed_document_ids": ["paper-2"],
+            "source_relationship_ids": [
+                _relationship_id("paper-2", "corrosion current")
+            ],
+            "confirmation_status": "candidate",
+            "active_analysis_version": None,
+            "rank": 1,
+        }
+    )
+    rebuilt_skim = _paper_skim(
+        document_id="paper-2",
+        varied_factors=("heat treatment",),
+        outcomes=("corrosion current",),
+        material_scope=("316L",),
+        process_context=("LPBF",),
+        source_ref="paper-2-results",
+    )
+    repository.replace(
+        collection_id,
+        "build_rebuilt",
+        _ready_objective_facts(rebuilt_skim, rebuilt_objective),
+    )
+    repository.activate("build_rebuilt")
+
+    service.generate_objective_analysis_artifacts(collection_id, analysis)
+
+    assert extractor.frame_payloads[0]["objective"]["seed_document_ids"] == [
+        "paper-1"
+    ]
+    assert extractor.frame_payloads[0]["objective"][
+        "source_relationship_ids"
+    ] == [_relationship_id("paper-1", "corrosion current")]

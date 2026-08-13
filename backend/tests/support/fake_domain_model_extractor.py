@@ -12,8 +12,6 @@ from application.core.objectives.schemas import (
     StructuredEvidenceExtractions,
     StructuredPaperContributionDraft,
     StructuredPaperSkim,
-    StructuredResearchObjective,
-    StructuredResearchObjectives,
 )
 from application.core.paper_facts.schemas import (
     MeasurementValuePayload,
@@ -34,8 +32,6 @@ from application.core.paper_facts.schemas import (
 )
 from tests.support.objective_extractor import (
     paper_skim_study_outputs,
-    paper_relationship_records,
-    relationship_lineage,
 )
 
 
@@ -252,54 +248,6 @@ class FakeDomainModelExtractor:
             confidence=0.86 if studies else 0.62,
             warnings=[] if studies else ["objective_uncertain"],
         )
-
-    def discover_research_objectives(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredResearchObjectives:
-        relationship_records = paper_relationship_records(payload)
-        grouped_records: dict[
-            tuple[tuple[str, ...], str],
-            list[tuple[str, str, str, dict[str, Any], dict[str, Any]]],
-        ] = {}
-        for record in relationship_records:
-            relationship = record[4]
-            varied_factors = tuple(
-                str(value).strip()
-                for value in relationship.get("varied_factors") or ()
-                if str(value).strip()
-            )
-            outcome = str(relationship.get("outcome") or "").strip()
-            grouped_records.setdefault(
-                (tuple(value.casefold() for value in varied_factors), outcome.casefold()),
-                [],
-            ).append(record)
-
-        objectives: list[StructuredResearchObjective] = []
-        for grouped in grouped_records.values():
-            study = grouped[0][3]
-            relationship = grouped[0][4]
-            variables = list(relationship.get("varied_factors") or [])
-            outcome = str(relationship.get("outcome") or "").strip()
-            source_relationship_ids, seed_document_ids = relationship_lineage(grouped)
-            variable_phrase = " and ".join(variables)
-            verb = "do" if len(variables) > 1 else "does"
-            objectives.append(
-                StructuredResearchObjective(
-                    question=f"How {verb} {variable_phrase} affect {outcome}?",
-                    material_scope=list(study.get("material_scope") or []),
-                    variables=variables,
-                    outcomes=[outcome],
-                    constraints=list(study.get("process_context") or []),
-                    requested_comparator="compare process or treatment effects across papers",
-                    seed_document_ids=seed_document_ids,
-                    excluded_document_ids=[],
-                    confidence=0.82,
-                    reason="derived from source-linked paper study relationships",
-                    source_relationship_ids=source_relationship_ids,
-                )
-            )
-        return StructuredResearchObjectives(objectives=objectives)
 
     def canonicalize_research_objective_axes(
         self,

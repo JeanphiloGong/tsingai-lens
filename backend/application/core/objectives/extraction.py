@@ -21,7 +21,6 @@ from application.core.objectives.prompts import (
     build_paper_skim_prompt,
     build_paper_signal_reconciliation_prompt,
     build_research_axis_canonicalization_prompt,
-    build_research_objective_discovery_prompt,
 )
 from application.core.objectives.schemas import (
     StructuredAxisCanonicalizationPlan,
@@ -31,8 +30,6 @@ from application.core.objectives.schemas import (
     StructuredPaperContributionDraft,
     StructuredPaperSignalReconciliation,
     StructuredPaperSkim,
-    StructuredResearchObjective,
-    StructuredResearchObjectives,
 )
 from application.core.structured_extraction.json_support import (
     coerce_message_content,
@@ -49,7 +46,6 @@ _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
 _PAPER_SKIM_MAX_COMPLETION_TOKENS = 4096
 _PAPER_SIGNAL_RECONCILIATION_MAX_COMPLETION_TOKENS = 4096
-_RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS = 2400
 _AXIS_CANONICALIZATION_MAX_COMPLETION_TOKENS = 1024
 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS = 512
 _OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS = 2048
@@ -262,40 +258,6 @@ class ObjectiveExtractor:
         return StructuredPaperSignalReconciliation.model_validate(
             {"studies": studies, "unresolved_signals": unresolved}
         )
-
-    def discover_research_objectives(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredResearchObjectives:
-        system_prompt, user_prompt = build_research_objective_discovery_prompt(payload)
-
-        def validate_relationship_accounting(response: BaseModel) -> None:
-            if not isinstance(response, StructuredResearchObjectives):
-                raise TypeError("unexpected research objective response type")
-            self._validate_research_objective_relationship_accounting(
-                response,
-                paper_relationships=payload.get("paper_relationships"),
-            )
-
-        def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
-            return self._parse_research_objectives_json_response(
-                **kwargs,
-                relationship_accounting_validator=validate_relationship_accounting,
-            )
-
-        response = self._parse_structured_response(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredResearchObjectives,
-            max_completion_tokens=(
-                _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS
-            ),
-            json_text_parser=parse_json_text,
-            parsed_validator=validate_relationship_accounting,
-        )
-        if not isinstance(response, StructuredResearchObjectives):
-            raise TypeError("unexpected research objective response type")
-        return response
 
     def canonicalize_research_objective_axes(
         self,
@@ -726,287 +688,6 @@ class ObjectiveExtractor:
             repair_instruction_builder=build_repair_instruction,
         )
 
-    def _parse_research_objectives_json_response(
-        self,
-        *,
-        messages: list[dict[str, str]],
-        response_model: type[BaseModel],
-        max_completion_tokens: int | None,
-        relationship_accounting_validator: Callable[[BaseModel], None] | None = None,
-    ) -> tuple[BaseModel, str | None]:
-        request_kwargs = {
-            "model": self.model,
-            "temperature": 0,
-            "messages": messages,
-            "response_format": {"type": "json_object"},
-            **self._provider_request_options(),
-        }
-        if max_completion_tokens is not None:
-            request_kwargs["max_completion_tokens"] = max_completion_tokens
-        last_error: Exception | None = None
-        last_raw_content: str | None = None
-        preserved_objectives: list[StructuredResearchObjective] = []
-        for attempt in range(2):
-            attempt_kwargs = dict(request_kwargs)
-            attempt_messages = [*messages]
-            attempt_kwargs["messages"] = attempt_messages
-            if attempt:
-                if isinstance(last_error, ValidationError):
-                    validation_errors = last_error.errors(
-                        include_input=False,
-                        include_url=False,
-                    )
-                    repair_detail = "; ".join(
-                        f"{'.'.join(str(part) for part in error['loc'])}: "
-                        f"{error['msg']}"
-                        for error in validation_errors
-                    )
-                else:
-                    validation_errors = []
-                    repair_detail = str(last_error or "invalid structured output")
-                retry_scope = (
-                    "Return corrections only for invalid objectives; do not repeat "
-                    "or rewrite objectives that were already valid. "
-                    if preserved_objectives
-                    else "Return one corrected relationship-accounting object. "
-                )
-                if validation_errors and all(
-                    "question roles" in str(error["msg"])
-                    for error in validation_errors
-                ):
-                    retry_instruction = (
-                        f"{retry_scope}"
-                        "Correct every research-objective role error. Keep atomic, "
-                        "non-duplicate axes and preserve their variable-to-outcome "
-                        "direction. If an error names a field label missing from the "
-                        "question and another label already occupies that variables or "
-                        "outcomes role, delete the missing label from the list. If "
-                        "deleting it would leave that role empty, put the full missing "
-                        "label verbatim in the question. Then use the canonical form "
-                        "'How does <full variables labels joined with and> affect <full "
-                        "outcomes labels joined with and>?'. Keep material and process "
-                        "scope only in material_scope or constraints. Reword or split an "
-                        "invalid objective as needed, but preserve every assigned "
-                        "source_relationship_id exactly once. Return only compact JSON. "
-                        f"Errors: {repair_detail[:1000]}"
-                    )
-                else:
-                    retry_instruction = (
-                        "Previous output was invalid. "
-                        f"{retry_scope}"
-                        "Correct the JSON or schema errors exactly. The top-level object "
-                        "must contain only `objectives`, use only schema fields, and "
-                        "assign every input relationship exactly once through "
-                        "source_relationship_ids. Return only compact JSON without "
-                        "commentary. Errors: "
-                        f"{repair_detail[:1000]}"
-                    )
-                if last_raw_content:
-                    attempt_messages.append(
-                        {"role": "assistant", "content": last_raw_content}
-                    )
-                attempt_messages.append(
-                    {"role": "user", "content": retry_instruction}
-                )
-                messages[:] = attempt_messages
-                logger.warning(
-                    "Retrying research objective discovery JSON response model=%s",
-                    self.model,
-                )
-            try:
-                completion = self.client.chat.completions.create(**attempt_kwargs)
-                raw_content = coerce_message_content(
-                    completion.choices[0].message.content if completion.choices else None
-                )
-                last_raw_content = raw_content
-                if attempt and raw_content:
-                    messages.append({"role": "assistant", "content": raw_content})
-                if not raw_content:
-                    raise RuntimeError(
-                        "structured extraction returned empty response content"
-                    )
-                payload = load_json_payload(extract_json_object(raw_content))
-                try:
-                    parsed = StructuredResearchObjectives.model_validate(payload)
-                    if attempt and preserved_objectives:
-                        parsed = StructuredResearchObjectives(
-                            objectives=self._deduplicate_objectives(
-                                [*preserved_objectives, *parsed.objectives]
-                            ),
-                        )
-                    if relationship_accounting_validator is not None:
-                        relationship_accounting_validator(parsed)
-                    return parsed, raw_content
-                except ValidationError as validation_error:
-                    if (
-                        isinstance(payload, dict)
-                        and isinstance(payload.get("objectives"), list)
-                    ):
-                        objective_payloads = payload["objectives"]
-                        validation_paths = {
-                            ".".join(str(part) for part in error["loc"])
-                            for candidate_error in (last_error, validation_error)
-                            if isinstance(candidate_error, ValidationError)
-                            for error in candidate_error.errors(
-                                include_input=False,
-                                include_url=False,
-                            )
-                        }
-                        allowed_echo_keys = {
-                            f"`{path}`" for path in validation_paths if path
-                        }
-                        if set(payload) - {"objectives"} - allowed_echo_keys:
-                            raise validation_error
-                        valid_objectives: list[StructuredResearchObjective] = []
-                        invalid_objective_payloads: list[dict[str, Any]] = []
-                        for objective_payload in objective_payloads:
-                            try:
-                                valid_objectives.append(
-                                    StructuredResearchObjective.model_validate(
-                                        objective_payload
-                                    )
-                                )
-                            except ValidationError:
-                                if isinstance(objective_payload, dict):
-                                    invalid_objective_payloads.append(objective_payload)
-                        if attempt == 0:
-                            preserved_objectives = valid_objectives
-                        else:
-                            preserved_keys = {
-                                objective.model_dump_json()
-                                for objective in preserved_objectives
-                            }
-                            corrected_objectives = [
-                                objective
-                                for objective in valid_objectives
-                                if objective.model_dump_json() not in preserved_keys
-                            ]
-                            corrected_objectives.extend(
-                                objective
-                                for objective_payload in invalid_objective_payloads
-                                if (
-                                    objective := self._repair_trailing_scope_objective(
-                                        objective_payload
-                                    )
-                                )
-                                is not None
-                            )
-                            if corrected_objectives:
-                                corrected = StructuredResearchObjectives(
-                                    objectives=self._deduplicate_objectives(
-                                        [
-                                            *preserved_objectives,
-                                            *corrected_objectives,
-                                        ]
-                                    ),
-                                )
-                                if relationship_accounting_validator is not None:
-                                    relationship_accounting_validator(corrected)
-                                return (
-                                    corrected,
-                                    raw_content,
-                                )
-                    if isinstance(payload, dict):
-                        extra_keys = set(payload) - set(response_model.model_fields)
-                        if extra_keys - {"confidence"}:
-                            raise
-                        filtered_payload = {
-                            key: value
-                            for key, value in payload.items()
-                            if key in response_model.model_fields
-                        }
-                        if filtered_payload != payload:
-                            filtered = StructuredResearchObjectives.model_validate(
-                                filtered_payload
-                            )
-                            if relationship_accounting_validator is not None:
-                                relationship_accounting_validator(filtered)
-                            return filtered, raw_content
-                    raise
-            except (
-                RuntimeError,
-                ValueError,
-                ValidationError,
-                json.JSONDecodeError,
-            ) as exc:
-                last_error = exc
-                if attempt == 0:
-                    continue
-                raise
-        raise RuntimeError("structured extraction failed after retry") from last_error
-
-    @staticmethod
-    def _validate_research_objective_relationship_accounting(
-        response: StructuredResearchObjectives,
-        *,
-        paper_relationships: Any,
-    ) -> None:
-        if paper_relationships is None:
-            return
-        if not isinstance(paper_relationships, list):
-            raise ValueError("relationship accounting input must be a list")
-
-        relationship_context: dict[str, tuple[str, str]] = {}
-        for record in paper_relationships:
-            if not isinstance(record, dict):
-                raise ValueError(
-                    "relationship accounting input contains an invalid record"
-                )
-            document_id = str(record.get("document_id") or "").strip()
-            study = record.get("study")
-            relationship = record.get("relationship")
-            study_id = (
-                str(study.get("study_id") or "").strip()
-                if isinstance(study, dict)
-                else ""
-            )
-            relationship_id = (
-                str(relationship.get("relationship_id") or "").strip()
-                if isinstance(relationship, dict)
-                else ""
-            )
-            if not document_id or not study_id or not relationship_id:
-                raise ValueError(
-                    "relationship accounting input requires document, study, and "
-                    "relationship ids"
-                )
-            if relationship_id in relationship_context:
-                raise ValueError(
-                    "relationship accounting input contains a duplicate id"
-                )
-            relationship_context[relationship_id] = (document_id, study_id)
-
-        accounted: list[str] = []
-        for objective in response.objectives:
-            if not objective.source_relationship_ids:
-                raise ValueError(
-                    "relationship accounting objective requires source_relationship_ids"
-                )
-            seed_document_ids = set(objective.seed_document_ids)
-            for relationship_id in objective.source_relationship_ids:
-                context = relationship_context.get(relationship_id)
-                if context is None:
-                    raise ValueError(
-                        "relationship accounting output contains an unknown id"
-                    )
-                document_id, _study_id = context
-                if document_id not in seed_document_ids:
-                    raise ValueError(
-                        "relationship accounting objective links a relationship from a "
-                        "different seed document"
-                    )
-                accounted.append(relationship_id)
-
-        if len(accounted) != len(set(accounted)):
-            raise ValueError(
-                "relationship accounting output contains a duplicate relationship"
-            )
-        if set(accounted) != set(relationship_context):
-            raise ValueError(
-                "relationship accounting output did not account for every input "
-                "relationship"
-            )
-
     def _parse_objective_evidence_json_response(
         self,
         *,
@@ -1152,63 +833,6 @@ class ObjectiveExtractor:
                     continue
                 raise
         raise RuntimeError("structured extraction failed after retry") from last_error
-
-    @staticmethod
-    def _deduplicate_objectives(
-        objectives: list[StructuredResearchObjective],
-    ) -> list[StructuredResearchObjective]:
-        deduplicated: list[StructuredResearchObjective] = []
-        seen: set[str] = set()
-        for objective in objectives:
-            key = objective.model_dump_json()
-            if key in seen:
-                continue
-            seen.add(key)
-            deduplicated.append(objective)
-        return deduplicated
-
-    @staticmethod
-    def _repair_trailing_scope_objective(
-        payload: dict[str, Any],
-    ) -> StructuredResearchObjective | None:
-        filtered = {
-            key: value
-            for key, value in payload.items()
-            if key in StructuredResearchObjective.model_fields
-        }
-        variables = [
-            str(value).strip()
-            for value in filtered.get("variables", [])
-            if str(value).strip()
-        ]
-        outcomes = [
-            str(value).strip()
-            for value in filtered.get("outcomes", [])
-            if str(value).strip()
-        ]
-        question = str(filtered.get("question") or "").strip()
-        if not question or not variables or not outcomes:
-            return None
-
-        probe = dict(filtered)
-        probe["constraints"] = [
-            *list(filtered.get("constraints") or []),
-            *re.findall(r"[^\W_]+", question, flags=re.UNICODE),
-        ]
-        try:
-            StructuredResearchObjective.model_validate(probe)
-        except ValidationError:
-            return None
-
-        subject = " and ".join(variables)
-        result = " and ".join(outcomes)
-        auxiliary = "does" if len(variables) == 1 else "do"
-        repaired = dict(filtered)
-        repaired["question"] = f"How {auxiliary} {subject} affect {result}?"
-        try:
-            return StructuredResearchObjective.model_validate(repaired)
-        except ValidationError:
-            return None
 
     def _parse_provider_structured_response(
         self,

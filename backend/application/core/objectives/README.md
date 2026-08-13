@@ -52,6 +52,10 @@ Objective analysis.
   while unresolved study signals remain separately visible. No second model
   call can move a relationship outside its backend-owned group, reject an input
   relationship, or remove records from persisted accounting.
+  The model does not generate collection Objectives: it is used only for bounded
+  axis-equivalence decisions. The backend constructs each question, variable,
+  outcome, seed-document set, and `source_relationship_ids` from the accepted
+  relationship group.
 - `evidence_routing.py`
   Owns the transient Source-selection decisions created while routing one
   confirmed Objective across its documents.

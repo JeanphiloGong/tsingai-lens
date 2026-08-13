@@ -8,47 +8,13 @@ import pytest
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
-from application.core.objectives.schemas import (
-    StructuredAxisCanonicalizationPlan,
-    StructuredResearchObjectives,
-)
+from application.core.objectives.schemas import StructuredAxisCanonicalizationPlan
 from domain.core import PaperSkim, ResearchObjective
 
 
 class _GroupingExtractor:
     def __init__(self) -> None:
-        self.discovery_payloads: list[dict[str, Any]] = []
         self.canonicalization_payloads: list[dict[str, Any]] = []
-
-    def discover_research_objectives(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredResearchObjectives:
-        self.discovery_payloads.append(payload)
-        records = payload["paper_relationships"]
-        if not records:
-            return StructuredResearchObjectives()
-        first = records[0]["relationship"]
-        factors = first["varied_factors"]
-        outcome = first["outcome"]
-        auxiliary = "does" if len(factors) == 1 else "do"
-        return StructuredResearchObjectives(
-            objectives=[
-                {
-                    "question": (
-                        f"How {auxiliary} {' and '.join(factors)} affect {outcome}?"
-                    ),
-                    "variables": factors,
-                    "outcomes": [outcome],
-                    "source_relationship_ids": [
-                        record["relationship"]["relationship_id"]
-                        for record in records
-                    ],
-                    "confidence": 0.9,
-                    "reason": "The backend supplied one compatible relationship group.",
-                }
-            ]
-        )
 
     def canonicalize_research_objective_axes(
         self,
@@ -61,16 +27,6 @@ class _GroupingExtractor:
                 for pair in payload.get("axis_pairs", ())
             ]
         )
-
-
-class _EmptyGroupingExtractor(_GroupingExtractor):
-    def discover_research_objectives(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredResearchObjectives:
-        self.discovery_payloads.append(payload)
-        return StructuredResearchObjectives()
-
 
 def test_relationship_groups_preserve_complete_study_relationship_records():
     skim = _paper_skim(
@@ -374,7 +330,7 @@ def test_joint_factors_are_indivisible_and_each_outcome_is_accounted_separately(
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=(skim,),
-        extractor=_EmptyGroupingExtractor(),
+        extractor=_GroupingExtractor(),
     )
 
     assert {objective.variables for objective in facts.research_objectives} == {
@@ -421,12 +377,7 @@ def test_different_materials_build_separate_objectives():
     assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
 
 
-def test_candidate_build_does_not_call_redundant_objective_wording_model():
-    class WordingMustNotRunExtractor(_GroupingExtractor):
-        def discover_research_objectives(self, payload: dict[str, Any]):
-            self.discovery_payloads.append(payload)
-            raise AssertionError("objective membership is already backend-owned")
-
+def test_candidate_build_derives_objective_identity_and_lineage_from_relationships():
     skims = tuple(
         _paper_skim(
             document_id=f"paper-{index}",
@@ -438,12 +389,16 @@ def test_candidate_build_does_not_call_redundant_objective_wording_model():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=(extractor := WordingMustNotRunExtractor()),
+        extractor=_GroupingExtractor(),
     )
 
-    assert extractor.discovery_payloads == []
     assert len(facts.research_objectives) == 1
-    assert set(facts.research_objectives[0].source_relationship_ids) == {
+    objective = facts.research_objectives[0]
+    assert objective.question == "How does laser power affect relative density?"
+    assert objective.variables == ("laser power",)
+    assert objective.outcomes == ("relative density",)
+    assert objective.seed_document_ids == ("paper-0", "paper-1", "paper-2")
+    assert set(objective.source_relationship_ids) == {
         "relationship-0",
         "relationship-1",
         "relationship-2",
@@ -471,7 +426,7 @@ def test_fallback_consolidation_keeps_context_differences_on_paper_studies():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=_EmptyGroupingExtractor(),
+        extractor=_GroupingExtractor(),
     )
 
     assert len(facts.research_objectives) == 1
@@ -538,7 +493,6 @@ def test_non_current_work_relationships_remain_in_inventory_without_seeding_obje
 
     assert facts.paper_skims == (skim,)
     assert facts.research_objectives == ()
-    assert extractor.discovery_payloads == []
     assert len(facts.study_dispositions) == 1
     disposition = facts.study_dispositions[0]
     assert disposition.relationship_id == "relationship-review"
@@ -556,7 +510,7 @@ def test_uncertain_claim_scope_is_retained_as_a_standalone_candidate():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=(skim,),
-        extractor=_EmptyGroupingExtractor(),
+        extractor=_GroupingExtractor(),
     )
 
     assert facts.research_objectives[0].source_relationship_ids == (
@@ -665,7 +619,6 @@ def test_semantic_axis_aliases_are_canonicalized_before_relationship_grouping():
         extractor=extractor,
     )
 
-    assert extractor.discovery_payloads == []
     assert len(facts.research_objectives) == 1
     objective = facts.research_objectives[0]
     assert objective.variables == ("volumetric energy density",)
@@ -940,7 +893,7 @@ def test_axis_pair_classification_batches_account_for_every_pair_once():
 
 
 def test_variable_alias_canonicalization_does_not_merge_different_outcomes():
-    class FuzzyAliasExtractor(_EmptyGroupingExtractor):
+    class FuzzyAliasExtractor(_GroupingExtractor):
         def canonicalize_research_objective_axes(
             self,
             payload: dict[str, Any],

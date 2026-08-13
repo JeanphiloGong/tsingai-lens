@@ -11,6 +11,7 @@ from typing import Any
 from openai import OpenAI
 from pydantic import BaseModel, ValidationError
 
+from application.core.objectives import property_matching
 from application.core.objectives.prompts import (
     FINDING_SYNTHESIS_PROMPT_VERSION,
     build_finding_synthesis_prompt,
@@ -132,6 +133,53 @@ class ObjectiveExtractor:
         payload: dict[str, Any],
     ) -> StructuredPaperSignalReconciliation:
         system_prompt, user_prompt = build_paper_signal_reconciliation_prompt(payload)
+        signals_by_id = {
+            str(signal.get("signal_id") or "").strip(): signal
+            for signal in payload.get("signals") or ()
+            if isinstance(signal, Mapping)
+            and str(signal.get("signal_id") or "").strip()
+        }
+        conflicting_response_count = 0
+
+        def validate_or_recover_contexts(response: BaseModel) -> BaseModel | None:
+            nonlocal conflicting_response_count
+            if not isinstance(response, StructuredPaperSignalReconciliation):
+                raise TypeError("unexpected paper signal reconciliation response type")
+            conflicts = self._paper_signal_reconciliation_conflicts(
+                response,
+                signals_by_id=signals_by_id,
+            )
+            if not conflicts:
+                return None
+            conflicting_response_count += 1
+            if conflicting_response_count == 1:
+                raise ValueError(
+                    "paper signal relationships must be context-compatible; "
+                    + "; ".join(conflicts)
+                )
+            return self._discard_conflicting_signal_relationships(
+                response,
+                signals_by_id=signals_by_id,
+            )
+
+        def build_repair_instruction(repair_detail: str) -> str:
+            return (
+                "Previous paper signal reconciliation was invalid: "
+                f"{repair_detail}. Make every relationship context-compatible. "
+                "Do not combine signals when material_scope, process_context, "
+                "sample_context, test_context, fixed_conditions, experiment_label, "
+                "comparator, design_type, or claim_scope conflict. Move signals that "
+                "cannot be linked safely to unresolved_signals, account for every "
+                "input signal exactly once, and return only compact JSON."
+            )
+
+        def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
+            return self._parse_json_text_response(
+                **kwargs,
+                repair_instruction_builder=build_repair_instruction,
+                parsed_validator=validate_or_recover_contexts,
+            )
+
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -139,10 +187,81 @@ class ObjectiveExtractor:
             max_completion_tokens=(
                 _PAPER_SIGNAL_RECONCILIATION_MAX_COMPLETION_TOKENS
             ),
+            json_text_parser=parse_json_text,
+            parsed_validator=validate_or_recover_contexts,
         )
         if not isinstance(response, StructuredPaperSignalReconciliation):
             raise TypeError("unexpected paper signal reconciliation response type")
         return response
+
+    @staticmethod
+    def _paper_signal_reconciliation_conflicts(
+        response: StructuredPaperSignalReconciliation,
+        *,
+        signals_by_id: Mapping[str, Mapping[str, Any]],
+    ) -> tuple[str, ...]:
+        conflicts: list[str] = []
+        for study_position, study in enumerate(response.studies):
+            for relationship_position, relationship in enumerate(study.relationships):
+                signal_ids = tuple(
+                    str(signal_id).strip() for signal_id in relationship.signal_ids
+                )
+                context_conflicts = property_matching.paper_signal_context_conflicts(
+                    signals_by_id[signal_id]
+                    for signal_id in signal_ids
+                    if signal_id in signals_by_id
+                )
+                if context_conflicts:
+                    conflicts.append(
+                        f"studies[{study_position}].relationships"
+                        f"[{relationship_position}] signal_ids={list(signal_ids)} "
+                        f"conflict in {', '.join(context_conflicts)}"
+                    )
+        return tuple(conflicts)
+
+    @staticmethod
+    def _discard_conflicting_signal_relationships(
+        response: StructuredPaperSignalReconciliation,
+        *,
+        signals_by_id: Mapping[str, Mapping[str, Any]],
+    ) -> StructuredPaperSignalReconciliation:
+        studies: list[dict[str, Any]] = []
+        retained_signal_ids: set[str] = set()
+        rejected_reasons_by_id: dict[str, str] = {}
+        for study in response.studies:
+            relationships: list[dict[str, Any]] = []
+            for relationship in study.relationships:
+                signal_ids = tuple(
+                    str(signal_id).strip() for signal_id in relationship.signal_ids
+                )
+                conflicts = property_matching.paper_signal_context_conflicts(
+                    signals_by_id[signal_id]
+                    for signal_id in signal_ids
+                    if signal_id in signals_by_id
+                )
+                if conflicts:
+                    reason = (
+                        "Conflicting reconciliation context: "
+                        f"{', '.join(conflicts)}."
+                    )
+                    for signal_id in signal_ids:
+                        rejected_reasons_by_id.setdefault(signal_id, reason)
+                    continue
+                relationships.append(relationship.model_dump())
+                retained_signal_ids.update(signal_ids)
+            if relationships:
+                studies.append({"relationships": relationships})
+
+        unresolved = [item.model_dump() for item in response.unresolved_signals]
+        unresolved_ids = {str(item["signal_id"]).strip() for item in unresolved}
+        for signal_id, reason in rejected_reasons_by_id.items():
+            if signal_id in retained_signal_ids or signal_id in unresolved_ids:
+                continue
+            unresolved.append({"signal_id": signal_id, "reason": reason})
+            unresolved_ids.add(signal_id)
+        return StructuredPaperSignalReconciliation.model_validate(
+            {"studies": studies, "unresolved_signals": unresolved}
+        )
 
     def discover_research_objectives(
         self,
@@ -338,7 +457,7 @@ class ObjectiveExtractor:
         force_json_text: bool = False,
         include_schema_for_forced_json: bool = True,
         json_text_parser: Callable[..., tuple[BaseModel, str | None]] | None = None,
-        parsed_validator: Callable[[BaseModel], None] | None = None,
+        parsed_validator: Callable[[BaseModel], BaseModel | None] | None = None,
         task_type: str | None = None,
         prompt_version: str | None = None,
     ) -> BaseModel:
@@ -365,8 +484,10 @@ class ObjectiveExtractor:
                         max_completion_tokens=max_completion_tokens,
                     )
                     if parsed_validator is not None:
-                        parsed_validator(parsed)
-                except Exception:
+                        validated = parsed_validator(parsed)
+                        if validated is not None:
+                            parsed = validated
+                except Exception as exc:
                     logger.warning(
                         "Objective provider parse failed; retrying with json_text "
                         "model=%s response_model=%s",
@@ -379,6 +500,16 @@ class ObjectiveExtractor:
                         user_prompt=user_prompt,
                         response_model=response_model,
                         include_schema=True,
+                    )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "The provider-parsed output failed validation. "
+                                "Correct this validation error and return only the "
+                                f"schema-valid JSON object: {str(exc)[:1000]}"
+                            ),
+                        }
                     )
                     parsed, raw_content = parse_json_text(
                         messages=messages,
@@ -480,7 +611,7 @@ class ObjectiveExtractor:
         max_completion_tokens: int | None,
         repair_instruction_builder: Callable[[str], str] | None = None,
         payload_normalizer: Callable[[Any], Any] | None = None,
-        parsed_validator: Callable[[BaseModel], None] | None = None,
+        parsed_validator: Callable[[BaseModel], BaseModel | None] | None = None,
     ) -> tuple[BaseModel, str | None]:
         request_kwargs = {
             "model": self.model,
@@ -540,7 +671,9 @@ class ObjectiveExtractor:
                 try:
                     parsed = response_model.model_validate(payload)
                     if parsed_validator is not None:
-                        parsed_validator(parsed)
+                        validated = parsed_validator(parsed)
+                        if validated is not None:
+                            parsed = validated
                     return parsed, raw_content
                 except ValidationError:
                     if isinstance(payload, dict):
@@ -555,7 +688,9 @@ class ObjectiveExtractor:
                         if filtered_payload != payload:
                             parsed = response_model.model_validate(filtered_payload)
                             if parsed_validator is not None:
-                                parsed_validator(parsed)
+                                validated = parsed_validator(parsed)
+                                if validated is not None:
+                                    parsed = validated
                             return parsed, raw_content
                     raise
             except (

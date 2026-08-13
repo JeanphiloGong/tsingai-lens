@@ -1921,6 +1921,193 @@ def test_domain_model_extractors_validates_paper_signal_reconciliation():
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 4096
 
 
+@pytest.mark.parametrize(
+    ("context_field", "variable_context", "outcome_context"),
+    [
+        ("material_scope", ["316L stainless steel"], ["Ti-6Al-4V"]),
+        ("process_context", ["laser powder bed fusion"], ["heat treatment"]),
+        ("sample_context", ["as-built specimen"], ["annealed specimen"]),
+        ("test_context", ["tensile test"], ["corrosion test"]),
+    ],
+)
+def test_paper_signal_reconciliation_repairs_conflicting_contexts(
+    context_field,
+    variable_context,
+    outcome_context,
+):
+    invalid = {
+        "studies": [
+            {
+                "relationships": [
+                    {
+                        "signal_ids": ["signal-variable", "signal-outcome"],
+                        "confidence": 0.89,
+                    }
+                ]
+            }
+        ],
+        "unresolved_signals": [],
+    }
+    repaired = {
+        "studies": [],
+        "unresolved_signals": [
+            {
+                "signal_id": "signal-variable",
+                "reason": "The signals describe different experimental contexts.",
+            },
+            {
+                "signal_id": "signal-outcome",
+                "reason": "The signals describe different experimental contexts.",
+            },
+        ],
+    }
+    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(repaired)])
+    extractor = _objective_extractor(client)
+
+    reconciliation = extractor.reconcile_paper_signals(
+        {
+            "document_id": "paper-1",
+            "signals": [
+                {
+                    "signal_id": "signal-variable",
+                    "signal_type": "variable",
+                    context_field: variable_context,
+                },
+                {
+                    "signal_id": "signal-outcome",
+                    "signal_type": "outcome",
+                    context_field: outcome_context,
+                },
+            ],
+        }
+    )
+
+    assert reconciliation.studies == []
+    assert len(reconciliation.unresolved_signals) == 2
+    assert len(client.chat.completions.calls) == 2
+    repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "context-compatible" in repair_prompt
+    assert context_field in repair_prompt
+
+
+def test_provider_parsed_signal_reconciliation_repairs_conflicting_contexts(
+    monkeypatch,
+):
+    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
+    invalid = StructuredPaperSignalReconciliation.model_validate(
+        {
+            "studies": [
+                {
+                    "relationships": [
+                        {
+                            "signal_ids": ["signal-variable", "signal-outcome"],
+                            "confidence": 0.89,
+                        }
+                    ]
+                }
+            ]
+        }
+    )
+    repaired = {
+        "studies": [],
+        "unresolved_signals": [
+            {
+                "signal_id": signal_id,
+                "reason": "The signals describe different material contexts.",
+            }
+            for signal_id in ("signal-variable", "signal-outcome")
+        ],
+    }
+    client = _FakeOpenAIClient(json.dumps(repaired), parsed=invalid)
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
+
+    reconciliation = extractor.reconcile_paper_signals(
+        {
+            "document_id": "paper-1",
+            "signals": [
+                {
+                    "signal_id": "signal-variable",
+                    "signal_type": "variable",
+                    "material_scope": ["316L stainless steel"],
+                },
+                {
+                    "signal_id": "signal-outcome",
+                    "signal_type": "outcome",
+                    "material_scope": ["Ti-6Al-4V"],
+                },
+            ],
+        }
+    )
+
+    assert reconciliation.studies == []
+    assert len(reconciliation.unresolved_signals) == 2
+    assert len(client.beta.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 1
+    repair_prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
+    assert "context-compatible" in repair_prompt
+    assert "material_scope" in repair_prompt
+
+
+def test_unrepaired_signal_context_conflict_keeps_valid_relationships():
+    invalid = {
+        "studies": [
+            {
+                "relationships": [
+                    {
+                        "signal_ids": ["signal-variable", "signal-outcome"],
+                        "confidence": 0.9,
+                    },
+                    {
+                        "signal_ids": [
+                            "signal-conflicting-variable",
+                            "signal-outcome",
+                        ],
+                        "confidence": 0.8,
+                    },
+                ]
+            }
+        ],
+        "unresolved_signals": [],
+    }
+    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(invalid)])
+    extractor = _objective_extractor(client)
+
+    reconciliation = extractor.reconcile_paper_signals(
+        {
+            "document_id": "paper-1",
+            "signals": [
+                {
+                    "signal_id": "signal-variable",
+                    "signal_type": "variable",
+                    "process_context": ["laser powder bed fusion"],
+                },
+                {
+                    "signal_id": "signal-conflicting-variable",
+                    "signal_type": "variable",
+                    "process_context": ["heat treatment"],
+                },
+                {
+                    "signal_id": "signal-outcome",
+                    "signal_type": "outcome",
+                    "process_context": ["laser powder bed fusion"],
+                },
+            ],
+        }
+    )
+
+    assert len(reconciliation.studies) == 1
+    assert len(reconciliation.studies[0].relationships) == 1
+    assert reconciliation.studies[0].relationships[0].signal_ids == [
+        "signal-variable",
+        "signal-outcome",
+    ]
+    assert [
+        signal.signal_id for signal in reconciliation.unresolved_signals
+    ] == ["signal-conflicting-variable"]
+    assert "process_context" in reconciliation.unresolved_signals[0].reason
+    assert len(client.chat.completions.calls) == 2
+
+
 def test_domain_model_extractors_validates_research_objective_response():
     client = _FakeOpenAIClient(
         """

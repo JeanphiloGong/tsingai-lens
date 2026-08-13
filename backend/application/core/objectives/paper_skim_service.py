@@ -1039,10 +1039,10 @@ class PaperSkimService:
             raise ValueError("paper signals do not have unique ids")
 
         linked_ids: set[str] = set()
+        conflicting_reasons_by_id: dict[str, str] = {}
         studies: list[PaperStudy] = []
         for parsed_study in parsed.studies:
-            study_relationships: list[dict[str, Any]] = []
-            study_signal_ids: set[str] = set()
+            study_groups: list[tuple[list[dict[str, Any]], set[str]]] = []
             for relationship in parsed_study.relationships:
                 signal_ids = tuple(
                     str(value).strip() for value in relationship.signal_ids
@@ -1066,49 +1066,70 @@ class PaperSkimService:
                     raise ValueError(
                         "paper signal relationship requires variables and one outcome"
                     )
-                if not cls._signal_contexts_are_compatible(signals):
-                    raise ValueError(
-                        "paper signal relationship combines conflicting contexts"
+                context_conflicts = property_matching.paper_signal_context_conflicts(
+                    signal.to_record() for signal in signals
+                )
+                if context_conflicts:
+                    reason = (
+                        "Conflicting reconciliation context: "
+                        f"{', '.join(context_conflicts)}."
                     )
-                study_relationships.append(
-                    {
-                        "document_id": document_id,
-                        "varied_factors": variables,
-                        "outcome": outcomes[0],
-                        "confidence": min(
-                            relationship.confidence,
-                            *(signal.confidence for signal in signals),
-                        ),
-                        "source_refs": [
-                            ref.to_record()
-                            for ref in cls._unique_source_refs(
-                                ref for signal in signals for ref in signal.source_refs
+                    for signal_id in signal_ids:
+                        conflicting_reasons_by_id.setdefault(signal_id, reason)
+                    continue
+                relationship_record = {
+                    "document_id": document_id,
+                    "varied_factors": variables,
+                    "outcome": outcomes[0],
+                    "confidence": min(
+                        relationship.confidence,
+                        *(signal.confidence for signal in signals),
+                    ),
+                    "source_refs": [
+                        ref.to_record()
+                        for ref in cls._unique_source_refs(
+                            ref for signal in signals for ref in signal.source_refs
+                        )
+                    ],
+                }
+                compatible_group = next(
+                    (
+                        group
+                        for group in study_groups
+                        if cls._signal_contexts_are_compatible(
+                            tuple(
+                                signals_by_id[signal_id]
+                                for signal_id in group[1] | set(signal_ids)
                             )
-                        ],
-                    }
+                        )
+                    ),
+                    None,
                 )
-                study_signal_ids.update(signal_ids)
+                if compatible_group is None:
+                    study_groups.append(([relationship_record], set(signal_ids)))
+                else:
+                    compatible_group[0].append(relationship_record)
+                    compatible_group[1].update(signal_ids)
 
-            if not study_relationships:
-                raise ValueError("paper signal study requires a relationship")
-            if study_signal_ids & linked_ids:
-                raise ValueError("paper signal cannot belong to multiple studies")
-            study_signals = tuple(
-                signals_by_id[signal_id] for signal_id in study_signal_ids
-            )
-            studies.append(
-                PaperStudy.from_mapping(
-                    {
-                        "document_id": document_id,
-                        **cls._shared_signal_study_context(study_signals),
-                        "relationships": study_relationships,
-                        "confidence": min(
-                            signal.confidence for signal in study_signals
-                        ),
-                    }
+            for study_relationships, study_signal_ids in study_groups:
+                if study_signal_ids & linked_ids:
+                    raise ValueError("paper signal cannot belong to multiple studies")
+                study_signals = tuple(
+                    signals_by_id[signal_id] for signal_id in study_signal_ids
                 )
-            )
-            linked_ids.update(study_signal_ids)
+                studies.append(
+                    PaperStudy.from_mapping(
+                        {
+                            "document_id": document_id,
+                            **cls._shared_signal_study_context(study_signals),
+                            "relationships": study_relationships,
+                            "confidence": min(
+                                signal.confidence for signal in study_signals
+                            ),
+                        }
+                    )
+                )
+                linked_ids.update(study_signal_ids)
 
         unresolved_by_id: dict[str, str] = {}
         for unresolved in parsed.unresolved_signals:
@@ -1118,6 +1139,10 @@ class PaperSkimService:
             if signal_id in linked_ids or signal_id in unresolved_by_id:
                 raise ValueError("paper signal was accounted for more than once")
             unresolved_by_id[signal_id] = str(unresolved.reason).strip()
+        for signal_id, reason in conflicting_reasons_by_id.items():
+            if signal_id in linked_ids or signal_id in unresolved_by_id:
+                continue
+            unresolved_by_id[signal_id] = reason
         if linked_ids | set(unresolved_by_id) != set(signals_by_id):
             raise ValueError("paper signal reconciliation did not account for every signal")
         return (
@@ -1133,36 +1158,9 @@ class PaperSkimService:
         cls,
         signals: tuple[PaperStudySignal, ...],
     ) -> bool:
-        for field in (
-            "material_scope",
-            "process_context",
-            "sample_context",
-            "test_context",
-            "fixed_conditions",
-        ):
-            contexts = [getattr(signal, field) for signal in signals if getattr(signal, field)]
-            for position, left in enumerate(contexts):
-                for right in contexts[position + 1 :]:
-                    if not cls._axis_collections_are_equivalent(left, right):
-                        return False
-        for field in ("experiment_label", "comparator"):
-            values = {
-                property_matching.axis_key(getattr(signal, field))
-                for signal in signals
-                if getattr(signal, field)
-            }
-            if len(values) > 1:
-                return False
-        for field in ("design_type", "claim_scope"):
-            unknown_value = "uncertain"
-            values = {
-                getattr(signal, field)
-                for signal in signals
-                if getattr(signal, field) != unknown_value
-            }
-            if len(values) > 1:
-                return False
-        return True
+        return not property_matching.paper_signal_context_conflicts(
+            signal.to_record() for signal in signals
+        )
 
     @classmethod
     def _shared_signal_study_context(
@@ -1368,36 +1366,11 @@ class PaperSkimService:
         }
 
     @staticmethod
-    def _axis_collections_match(
-        left: tuple[str, ...],
-        right: tuple[str, ...],
-    ) -> bool:
-        if len(left) != len(right):
-            return False
-        unmatched = list(right)
-        for left_axis in left:
-            match_position = next(
-                (
-                    position
-                    for position, right_axis in enumerate(unmatched)
-                    if property_matching.axis_values_match(left_axis, right_axis)
-                ),
-                None,
-            )
-            if match_position is None:
-                return False
-            unmatched.pop(match_position)
-        return True
-
-    @staticmethod
     def _axis_collections_are_equivalent(
         left: tuple[str, ...],
         right: tuple[str, ...],
     ) -> bool:
-        return (
-            len(left) == len(right)
-            and PaperSkimService._axis_collections_match(left, right)
-        )
+        return property_matching.axis_collections_are_equivalent(left, right)
 
     @classmethod
     def _merge_studies(

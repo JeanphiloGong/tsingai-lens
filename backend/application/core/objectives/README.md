@@ -97,8 +97,18 @@ position. Unusually long text and structured Source content are split into
 contiguous bounded pieces without truncating captions, headers, or row text.
 Cross-window reconciliation receives bounded excerpts for already extracted
 signals, but each signal retains its complete structured fields and exact Source
-locator. Reconciliation failure leaves those signals unresolved instead of
-removing them. Every valid window response must account for its exact input
+locator. Before a reconciliation leaves the extractor, every relationship is
+checked against the input signals' material, process, sample, test, fixed,
+experiment, comparator, design, and claim contexts. A conflict triggers one
+bounded repair with the conflicting relationship, signal IDs, and context fields.
+If the repaired response still contains a conflict, only that relationship is
+discarded: signals not retained by another valid relationship become unresolved,
+while valid relationships in the same response survive. The PaperSkim service
+repeats the same deterministic check as a final boundary guard and separates
+individually valid relationships into distinct PaperStudies when their contexts
+do not belong to one study. A broader reconciliation failure leaves all affected
+signals unresolved instead of removing them. Every valid window response must
+account for its exact input
 Source-unit IDs. Missing, duplicate, unknown, or status-inconsistent coverage
 invalidates that window, and the backend records `extraction_failed` rather than
 inventing `no_study_signal`. A failed window does not discard valid neighboring

@@ -105,6 +105,12 @@ class _WindowExtractor:
                 "corrosion potential",
                 ["electrochemical testing"],
             ),
+            (
+                "HEAT_OUTCOME_SIGNAL",
+                "outcome",
+                "microhardness",
+                ["heat treatment"],
+            ),
         ):
             if marker in markers:
                 unresolved_signals.append(
@@ -208,6 +214,60 @@ class _WindowExtractor:
                     }
                     for signal in signals
                 ],
+            )
+        if self.reconciliation == "mixed_conflict":
+            signals_by_label = {signal["label"]: signal for signal in signals}
+            return StructuredPaperSignalReconciliation(
+                studies=[
+                    {
+                        "relationships": [
+                            {
+                                "signal_ids": [
+                                    signals_by_label["laser power"]["signal_id"],
+                                    signals_by_label["relative density"]["signal_id"],
+                                ],
+                                "confidence": 0.9,
+                            },
+                            {
+                                "signal_ids": [
+                                    signals_by_label["heat-treatment temperature"][
+                                        "signal_id"
+                                    ],
+                                    signals_by_label["relative density"]["signal_id"],
+                                ],
+                                "confidence": 0.8,
+                            },
+                        ]
+                    }
+                ],
+                unresolved_signals=[],
+            )
+        if self.reconciliation == "grouped_contexts":
+            signals_by_label = {signal["label"]: signal for signal in signals}
+            return StructuredPaperSignalReconciliation(
+                studies=[
+                    {
+                        "relationships": [
+                            {
+                                "signal_ids": [
+                                    signals_by_label["laser power"]["signal_id"],
+                                    signals_by_label["relative density"]["signal_id"],
+                                ],
+                                "confidence": 0.9,
+                            },
+                            {
+                                "signal_ids": [
+                                    signals_by_label["heat-treatment temperature"][
+                                        "signal_id"
+                                    ],
+                                    signals_by_label["microhardness"]["signal_id"],
+                                ],
+                                "confidence": 0.88,
+                            },
+                        ]
+                    }
+                ],
+                unresolved_signals=[],
             )
         return StructuredPaperSignalReconciliation(
             studies=[
@@ -1104,6 +1164,73 @@ def test_signals_from_different_experiments_remain_unresolved():
         "corrosion potential",
     }
     assert all(signal.reason for signal in skim.unresolved_signals)
+
+
+def test_conflicting_relationship_does_not_discard_valid_reconciliation():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("methods", "Methods", 1),
+            _paragraph(
+                "variables",
+                "VARIABLE_SIGNAL HEAT_VARIABLE_SIGNAL",
+                2,
+                "Methods",
+            ),
+            _heading("results", "Results", 3),
+            _paragraph("outcome", "OUTCOME_SIGNAL", 4, "Results"),
+        ]
+    )
+
+    skim = _build_skims(
+        artifacts,
+        tree,
+        _WindowExtractor(reconciliation="mixed_conflict"),
+    )[0]
+
+    assert len(skim.studies) == 1
+    assert skim.studies[0].relationships[0].varied_factors == ("laser power",)
+    assert skim.studies[0].relationships[0].outcome == "relative density"
+    assert [signal.label for signal in skim.unresolved_signals] == [
+        "heat-treatment temperature"
+    ]
+    assert "process_context" in (skim.unresolved_signals[0].reason or "")
+
+
+def test_relationships_with_distinct_contexts_become_separate_studies():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("methods", "Methods", 1),
+            _paragraph(
+                "variables",
+                "VARIABLE_SIGNAL HEAT_VARIABLE_SIGNAL",
+                2,
+                "Methods",
+            ),
+            _heading("results", "Results", 3),
+            _paragraph(
+                "outcomes",
+                "OUTCOME_SIGNAL HEAT_OUTCOME_SIGNAL",
+                4,
+                "Results",
+            ),
+        ]
+    )
+
+    skim = _build_skims(
+        artifacts,
+        tree,
+        _WindowExtractor(reconciliation="grouped_contexts"),
+    )[0]
+
+    assert len(skim.studies) == 2
+    assert {
+        (study.process_context, study.relationships[0].outcome)
+        for study in skim.studies
+    } == {
+        (("LPBF",), "relative density"),
+        (("heat treatment",), "microhardness"),
+    }
+    assert skim.unresolved_signals == ()
 
 
 def test_invalid_reconciliation_ids_retain_all_signals_as_unresolved():

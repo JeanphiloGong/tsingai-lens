@@ -3,6 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
+PAPER_SKIM_PROMPT_VERSION = "paper_skim.v1"
+PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION = "paper_signal_reconciliation.v1"
+RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = "research_axis_canonicalization.v1"
+OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v1"
+OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION = "objective_evidence_route.v1"
+OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v1"
 FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v8"
 
 _RESEARCH_OBJECTIVE_SYSTEM_PROMPT = """

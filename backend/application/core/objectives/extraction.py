@@ -15,6 +15,12 @@ from pydantic import BaseModel, ValidationError
 from application.core.objectives import property_matching
 from application.core.objectives.prompts import (
     FINDING_SYNTHESIS_PROMPT_VERSION,
+    OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION,
+    OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
+    OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
+    PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION,
+    PAPER_SKIM_PROMPT_VERSION,
+    RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION,
     build_finding_synthesis_prompt,
     build_objective_evidence_prompt,
     build_objective_evidence_route_prompt,
@@ -39,6 +45,7 @@ from application.core.structured_extraction.json_support import (
     trace_json,
     trace_text,
 )
+from infra.llm.usage import record_llm_completion, record_llm_prompt_version
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +134,8 @@ class ObjectiveExtractor:
             json_text_parser=parse_json_text,
             parsed_validator=validate_study_identities,
             fail_on_output_saturation=True,
+            task_type="paper_skim",
+            prompt_version=PAPER_SKIM_PROMPT_VERSION,
         )
         if not isinstance(response, StructuredPaperSkim):
             raise TypeError("unexpected paper skim response type")
@@ -214,6 +223,8 @@ class ObjectiveExtractor:
             ),
             json_text_parser=parse_json_text,
             parsed_validator=validate_or_recover_contexts,
+            task_type="paper_signal_reconciliation",
+            prompt_version=PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION,
         )
         if not isinstance(response, StructuredPaperSignalReconciliation):
             raise TypeError("unexpected paper signal reconciliation response type")
@@ -317,6 +328,8 @@ class ObjectiveExtractor:
             max_completion_tokens=_AXIS_CANONICALIZATION_MAX_COMPLETION_TOKENS,
             json_text_parser=parse_json_text,
             parsed_validator=validate_axis_accounting,
+            task_type="research_axis_canonicalization",
+            prompt_version=RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION,
         )
         if not isinstance(response, StructuredAxisCanonicalizationPlan):
             raise TypeError("unexpected research axis canonicalization response type")
@@ -377,6 +390,8 @@ class ObjectiveExtractor:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredPaperContributionDraft,
+            task_type="objective_paper_frame",
+            prompt_version=OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
         )
         if not isinstance(response, StructuredPaperContributionDraft):
             raise TypeError("unexpected objective paper frame response type")
@@ -397,6 +412,8 @@ class ObjectiveExtractor:
                 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS
             ),
             force_json_text=True,
+            task_type="objective_evidence_route",
+            prompt_version=OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
         )
         if not isinstance(response, StructuredEvidenceSelections):
             raise TypeError("unexpected objective evidence route response type")
@@ -415,6 +432,8 @@ class ObjectiveExtractor:
             force_json_text=True,
             include_schema_for_forced_json=False,
             json_text_parser=self._parse_objective_evidence_json_response,
+            task_type="objective_evidence_extraction",
+            prompt_version=OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION,
         )
         if not isinstance(response, StructuredEvidenceExtractions):
             raise TypeError("unexpected objective evidence extraction response type")
@@ -453,6 +472,8 @@ class ObjectiveExtractor:
         prompt_version: str | None = None,
         fail_on_output_saturation: bool = False,
     ) -> BaseModel:
+        if task_type is not None and prompt_version is not None:
+            record_llm_prompt_version(task_type, prompt_version)
         parse_json_text = json_text_parser or self._parse_json_text_response
         messages = self._build_messages(
             system_prompt=system_prompt,
@@ -676,7 +697,15 @@ class ObjectiveExtractor:
                     response_model.__name__,
                 )
             try:
-                completion = self.client.chat.completions.create(**attempt_kwargs)
+                try:
+                    completion = self.client.chat.completions.create(**attempt_kwargs)
+                except Exception as exc:
+                    record_llm_completion(
+                        getattr(exc, "completion", None),
+                        requested_model=self.model,
+                    )
+                    raise
+                record_llm_completion(completion, requested_model=self.model)
                 choice = completion.choices[0] if completion.choices else None
                 if (
                     fail_on_output_saturation
@@ -833,7 +862,15 @@ class ObjectiveExtractor:
                     self.model,
                 )
             try:
-                completion = self.client.chat.completions.create(**attempt_kwargs)
+                try:
+                    completion = self.client.chat.completions.create(**attempt_kwargs)
+                except Exception as exc:
+                    record_llm_completion(
+                        getattr(exc, "completion", None),
+                        requested_model=self.model,
+                    )
+                    raise
+                record_llm_completion(completion, requested_model=self.model)
                 raw_content = coerce_message_content(
                     completion.choices[0].message.content if completion.choices else None
                 )
@@ -915,7 +952,15 @@ class ObjectiveExtractor:
         }
         if max_completion_tokens is not None:
             request_kwargs["max_completion_tokens"] = max_completion_tokens
-        completion = self.client.beta.chat.completions.parse(**request_kwargs)
+        try:
+            completion = self.client.beta.chat.completions.parse(**request_kwargs)
+        except Exception as exc:
+            record_llm_completion(
+                getattr(exc, "completion", None),
+                requested_model=self.model,
+            )
+            raise
+        record_llm_completion(completion, requested_model=self.model)
         if not completion.choices:
             raise RuntimeError("structured extraction returned no completion choices")
         message = completion.choices[0].message

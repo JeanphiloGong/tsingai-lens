@@ -63,6 +63,8 @@ def test_build_stage_record_projects_pipeline_node_state() -> None:
             "duration_ms": None,
             "token_usage": None,
             "model_usage": [],
+            "unreported_request_count": 0,
+            "prompt_versions": {},
         },
         "timestamps": {
             "started_at": "2026-07-19T10:01:00+00:00",

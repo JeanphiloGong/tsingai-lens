@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 import json
 import logging
 import math
@@ -4321,6 +4322,7 @@ class PaperFactsService:
         ) as executor:
             futures = [
                 executor.submit(
+                    copy_context().run,
                     self._execute_extraction_job,
                     extractor=extractor,
                     job=job,

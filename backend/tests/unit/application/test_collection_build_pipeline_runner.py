@@ -18,7 +18,8 @@ from application.pipeline.collection_build.definitions import (
 )
 from application.pipeline.collection_build.runner import CollectionBuildPipelineRunner
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
-from domain.pipeline import PipelineRun
+from domain.pipeline import ModelUsage, PipelineRun, TokenUsage
+from infra.llm.usage import record_llm_completion, record_llm_prompt_version
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 
@@ -171,6 +172,86 @@ def test_collection_build_pipeline_runner_uses_run_dependencies_not_config_order
     assert result.node("first").status == "succeeded"
     assert result.node("second").status == "succeeded"
     assert task_service.record["pipeline_nodes"]["second"]["status"] == "succeeded"
+
+
+def test_collection_build_pipeline_runner_persists_provider_usage_per_node():
+    task_service = MemoryTaskService()
+    definitions = (
+        CollectionBuildNodeDefinition(
+            "model_node",
+            20,
+            "Model node done.",
+            "model_node_started",
+            "model_node_completed",
+        ),
+    )
+
+    def model_node(context, config):  # noqa: ANN001, ARG001
+        record_llm_prompt_version("paper_framing", "paper_framing.v1")
+        record_llm_completion(
+            SimpleNamespace(
+                model="model-a",
+                usage=SimpleNamespace(
+                    prompt_tokens=120,
+                    completion_tokens=30,
+                    total_tokens=150,
+                ),
+            ),
+            requested_model="configured-model",
+        )
+
+    result = asyncio.run(
+        CollectionBuildPipelineRunner(
+            {"model_node": model_node},
+            definitions=definitions,
+        ).run(
+            build_context(task_service),
+            build_config(),
+            build_run({"model_node": ()}),
+        )
+    )
+
+    expected = (
+        ModelUsage("model-a", 1, TokenUsage(120, 30, 150)),
+    )
+    assert result.node("model_node").stats.model_usage == expected
+    assert result.stats.model_usage == expected
+    assert result.node("model_node").stats.prompt_versions == {
+        "paper_framing": "paper_framing.v1"
+    }
+    assert result.stats.prompt_versions == {"paper_framing": "paper_framing.v1"}
+
+
+def test_collection_build_pipeline_runner_keeps_usage_from_failed_node():
+    task_service = MemoryTaskService()
+    definitions = (
+        CollectionBuildNodeDefinition(
+            "model_node",
+            20,
+            "Model node done.",
+            "model_node_started",
+            "model_node_completed",
+        ),
+    )
+
+    def model_node(context, config):  # noqa: ANN001, ARG001
+        record_llm_completion(None, requested_model="model-a")
+        raise RuntimeError("invalid model output")
+
+    result = asyncio.run(
+        CollectionBuildPipelineRunner(
+            {"model_node": model_node},
+            definitions=definitions,
+        ).run(
+            build_context(task_service),
+            build_config(),
+            build_run({"model_node": ()}),
+        )
+    )
+
+    assert result.node("model_node").stats.model_usage == (
+        ModelUsage("model-a", 1, None, 1),
+    )
 
 
 def test_source_node_persists_figure_metadata_and_references_before_activation():

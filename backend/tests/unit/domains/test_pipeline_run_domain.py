@@ -38,6 +38,7 @@ def test_pipeline_run_tracks_execution_separately_from_output_build() -> None:
         output_summary={"document_count": 3},
         stats=ExecutionStats(
             duration_ms=2000,
+            prompt_versions={"source_triage": "source_triage.v1"},
             model_usage=(
                 ModelUsage(
                     model_name="model-a",
@@ -68,6 +69,7 @@ def test_pipeline_run_tracks_execution_separately_from_output_build() -> None:
     assert run.stats.duration_ms == 6000
     assert run.stats.token_usage == TokenUsage(100, 20, 120)
     assert run.stats.model_usage[0].model_name == "model-a"
+    assert run.stats.prompt_versions == {"source_triage": "source_triage.v1"}
 
 
 def test_pipeline_node_records_the_runtime_dependency_graph() -> None:
@@ -85,11 +87,13 @@ def test_execution_stats_aggregate_usage_by_model() -> None:
     stats = ExecutionStats.aggregate(
         (
             ExecutionStats(
+                prompt_versions={"document_profile": "document_profile.v1"},
                 model_usage=(
                     ModelUsage("model-a", 1, TokenUsage(100, 20, 120)),
                 )
             ),
             ExecutionStats(
+                prompt_versions={"paper_facts": "paper_facts.v1"},
                 model_usage=(
                     ModelUsage("model-a", 2, TokenUsage(200, 40, 240)),
                     ModelUsage("model-b", 1, TokenUsage(50, 10, 60)),
@@ -103,6 +107,10 @@ def test_execution_stats_aggregate_usage_by_model() -> None:
         ModelUsage("model-b", 1, TokenUsage(50, 10, 60)),
     )
     assert stats.token_usage == TokenUsage(350, 70, 420)
+    assert stats.prompt_versions == {
+        "document_profile": "document_profile.v1",
+        "paper_facts": "paper_facts.v1",
+    }
 
 
 def test_pipeline_run_round_trips_as_one_typed_aggregate() -> None:
@@ -124,6 +132,8 @@ def test_pipeline_run_round_trips_as_one_typed_aggregate() -> None:
                     "duration_ms": 1000,
                     "token_usage": None,
                     "model_usage": [],
+                    "unreported_request_count": 0,
+                    "prompt_versions": {},
                 },
                 "timestamps": {
                     "started_at": "2026-08-11T01:00:01+00:00",
@@ -138,6 +148,8 @@ def test_pipeline_run_round_trips_as_one_typed_aggregate() -> None:
             "duration_ms": 1000,
             "token_usage": None,
             "model_usage": [],
+            "unreported_request_count": 0,
+            "prompt_versions": {},
         },
         "timestamps": {
             "created_at": "2026-08-11T01:00:00+00:00",

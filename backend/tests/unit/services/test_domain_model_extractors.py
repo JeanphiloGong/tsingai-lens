@@ -38,6 +38,8 @@ from application.core.paper_facts.schemas import (
     StructuredTableBatchMentions,
     StructuredTextWindowMentions,
 )
+from domain.pipeline import ModelUsage, TokenUsage
+from infra.llm.usage import capture_llm_usage
 
 
 def test_paper_skim_contract_bounds_model_output():
@@ -254,6 +256,12 @@ class _FakeCompletions:
         self.calls.append(kwargs)
         content = self._contents[min(len(self.calls) - 1, len(self._contents) - 1)]
         return SimpleNamespace(
+            model="fake-model",
+            usage=SimpleNamespace(
+                prompt_tokens=100,
+                completion_tokens=20,
+                total_tokens=120,
+            ),
             choices=[
                 SimpleNamespace(
                     message=SimpleNamespace(content=content),
@@ -278,6 +286,12 @@ class _FakeBetaCompletions:
         if self._error is not None:
             raise self._error
         return SimpleNamespace(
+            model="fake-model",
+            usage=SimpleNamespace(
+                prompt_tokens=100,
+                completion_tokens=20,
+                total_tokens=120,
+            ),
             choices=[
                 SimpleNamespace(
                     message=SimpleNamespace(parsed=self._parsed, content=None),
@@ -367,6 +381,50 @@ def test_domain_model_extractors_validate_json_text_response():
     }
     assert client.chat.completions.calls[0]["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
+    }
+
+
+def test_domain_model_extractors_record_provider_reported_usage() -> None:
+    document_client = _FakeOpenAIClient(
+        '{"doc_type":"experimental","confidence":0.9,"parsing_warnings":[]}'
+    )
+    facts_client = _FakeOpenAIClient(
+        '{"method_mentions":[],"material_mentions":[],"variant_mentions":[],'
+        '"condition_mentions":[],"baseline_mentions":[],"result_claims":[]}'
+    )
+    objective_client = _FakeOpenAIClient(
+        "unused",
+        parsed=StructuredFindingSynthesis(findings=[]),
+    )
+
+    with capture_llm_usage() as usage:
+        _document_profile_extractor(document_client).extract_document_profile(
+            {"title": "Paper", "abstract_or_lead_text": "Experimental study."}
+        )
+        _paper_facts_extractor(facts_client).extract_text_window_mentions(
+            {
+                "document_title": "Paper",
+                "document_profile": {"doc_type": "experimental"},
+                "text_window": {"text": "Laser power was 200 W."},
+            }
+        )
+        ObjectiveExtractor(
+            client=objective_client,
+            model="fake-model",
+        ).synthesize_findings(
+            {
+                "objective": {"question": "How does power affect density?"},
+                "result_set": {},
+            }
+        )
+
+    assert usage.execution_stats().model_usage == (
+        ModelUsage("fake-model", 3, TokenUsage(300, 60, 360)),
+    )
+    assert usage.prompt_versions == {
+        "document_profile": "document_profile.v1",
+        "finding_synthesis": "finding_synthesis.v8",
+        "paper_fact_text_window": "paper_fact_text_window.v1",
     }
 
 

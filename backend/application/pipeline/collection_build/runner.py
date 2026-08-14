@@ -16,7 +16,13 @@ from application.pipeline.collection_build.definitions import (
 from application.pipeline.collection_build.progress import (
     build_progress_detail,
 )
-from domain.pipeline import PipelineNodeStatus, PipelineRun, PipelineRunStatus
+from domain.pipeline import (
+    ExecutionStats,
+    PipelineNodeStatus,
+    PipelineRun,
+    PipelineRunStatus,
+)
+from infra.llm.usage import capture_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -80,30 +86,33 @@ class CollectionBuildPipelineRunner:
 
                 definition = definitions_by_name[node.name]
                 pipeline_run = self._mark_running(context, definition, pipeline_run)
-                try:
-                    result = self.node_functions[node.name](context, config)
-                    if inspect.isawaitable(result):
-                        result = await result
-                except Exception as exc:  # noqa: BLE001
-                    pipeline_run = self._mark_failed(
-                        context,
-                        definition,
-                        pipeline_run,
-                        exc,
-                    )
-                    logger.exception(
-                        "Collection build pipeline node failed task_id=%s collection_id=%s node=%s",
-                        context.task_id,
-                        context.collection_id,
-                        node.name,
-                    )
-                else:
-                    pipeline_run = self._mark_succeeded(
-                        context,
-                        definition,
-                        pipeline_run,
-                        result,
-                    )
+                with capture_llm_usage() as usage:
+                    try:
+                        result = self.node_functions[node.name](context, config)
+                        if inspect.isawaitable(result):
+                            result = await result
+                    except Exception as exc:  # noqa: BLE001
+                        pipeline_run = self._mark_failed(
+                            context,
+                            definition,
+                            pipeline_run,
+                            exc,
+                            stats=usage.execution_stats(),
+                        )
+                        logger.exception(
+                            "Collection build pipeline node failed task_id=%s collection_id=%s node=%s",
+                            context.task_id,
+                            context.collection_id,
+                            node.name,
+                        )
+                    else:
+                        pipeline_run = self._mark_succeeded(
+                            context,
+                            definition,
+                            pipeline_run,
+                            result,
+                            stats=usage.execution_stats(),
+                        )
                 progressed = True
 
             if not progressed:
@@ -188,6 +197,8 @@ class CollectionBuildPipelineRunner:
         definition: CollectionBuildNodeDefinition,
         pipeline_run: PipelineRun,
         result: Any,
+        *,
+        stats: ExecutionStats,
     ) -> PipelineRun:
         output_summary: dict[str, Any] = {}
         warnings: tuple[str, ...] = ()
@@ -203,6 +214,7 @@ class CollectionBuildPipelineRunner:
                 _now_iso(),
                 output_summary=output_summary,
                 warnings=warnings,
+                stats=stats,
             )
         )
         self._update_task_for_node(
@@ -222,9 +234,15 @@ class CollectionBuildPipelineRunner:
         definition: CollectionBuildNodeDefinition,
         pipeline_run: PipelineRun,
         exc: Exception,
+        *,
+        stats: ExecutionStats,
     ) -> PipelineRun:
         pipeline_run = pipeline_run.with_node(
-            pipeline_run.node(definition.node_id).fail(str(exc), _now_iso())
+            pipeline_run.node(definition.node_id).fail(
+                str(exc),
+                _now_iso(),
+                stats=stats,
+            )
         )
         self._update_task_for_node(
             context,

@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+PAPER_FACT_TEXT_WINDOW_PROMPT_VERSION = "paper_fact_text_window.v1"
+PAPER_FACT_TABLE_BATCH_PROMPT_VERSION = "paper_fact_table_batch.v1"
+PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION = "paper_fact_table_matrix_repair.v1"
+
 _COMMON_SYSTEM_PROMPT = """
 You are extracting structured research facts for a materials-literature backend.
 

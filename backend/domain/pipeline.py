@@ -167,12 +167,17 @@ class ModelUsage:
     model_name: str
     request_count: int
     token_usage: TokenUsage | None = None
+    unreported_request_count: int = 0
 
     def __post_init__(self) -> None:
         if not self.model_name.strip():
             raise ValueError("model_name cannot be empty")
         if self.request_count < 0:
             raise ValueError("request_count cannot be negative")
+        if not 0 <= self.unreported_request_count <= self.request_count:
+            raise ValueError(
+                "unreported_request_count must be between zero and request_count"
+            )
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "ModelUsage":
@@ -180,6 +185,9 @@ class ModelUsage:
             model_name=str(payload.get("model_name") or "").strip(),
             request_count=int(payload.get("request_count") or 0),
             token_usage=TokenUsage.from_mapping(payload.get("token_usage")),
+            unreported_request_count=int(
+                payload.get("unreported_request_count") or 0
+            ),
         )
 
     @classmethod
@@ -194,6 +202,9 @@ class ModelUsage:
             model_name=model_name,
             request_count=sum(usage.request_count for usage in usages),
             token_usage=TokenUsage.sum(usage.token_usage for usage in usages),
+            unreported_request_count=sum(
+                usage.unreported_request_count for usage in usages
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -203,6 +214,7 @@ class ModelUsage:
             "token_usage": (
                 self.token_usage.to_record() if self.token_usage is not None else None
             ),
+            "unreported_request_count": self.unreported_request_count,
         }
 
 
@@ -210,15 +222,25 @@ class ModelUsage:
 class ExecutionStats:
     duration_ms: int | None = None
     model_usage: tuple[ModelUsage, ...] = ()
+    prompt_versions: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.duration_ms is not None and self.duration_ms < 0:
             raise ValueError("duration_ms cannot be negative")
         object.__setattr__(self, "model_usage", tuple(self.model_usage))
+        object.__setattr__(
+            self,
+            "prompt_versions",
+            deepcopy(dict(self.prompt_versions)),
+        )
 
     @property
     def token_usage(self) -> TokenUsage | None:
         return TokenUsage.sum(usage.token_usage for usage in self.model_usage)
+
+    @property
+    def unreported_request_count(self) -> int:
+        return sum(usage.unreported_request_count for usage in self.model_usage)
 
     @classmethod
     def from_mapping(cls, payload: Any) -> "ExecutionStats":
@@ -231,6 +253,14 @@ class ExecutionStats:
                 for item in source.get("model_usage") or ()
                 if isinstance(item, Mapping)
             ),
+            prompt_versions=(
+                {
+                    str(task_type): str(version)
+                    for task_type, version in source["prompt_versions"].items()
+                }
+                if isinstance(source.get("prompt_versions"), Mapping)
+                else {}
+            ),
         )
 
     @classmethod
@@ -242,14 +272,24 @@ class ExecutionStats:
     ) -> "ExecutionStats":
         stats = tuple(values)
         usage_by_model: dict[str, list[ModelUsage]] = {}
+        prompt_versions: dict[str, str] = {}
         for item in stats:
             for model in item.model_usage:
                 usage_by_model.setdefault(model.model_name, []).append(model)
+            for task_type, version in item.prompt_versions.items():
+                previous = prompt_versions.get(task_type)
+                if previous is not None and previous != version:
+                    raise ValueError(
+                        f"multiple prompt versions recorded for {task_type}: "
+                        f"{previous}, {version}"
+                    )
+                prompt_versions[task_type] = version
         return cls(
             duration_ms=duration_ms,
             model_usage=tuple(
                 ModelUsage.aggregate(models) for models in usage_by_model.values()
             ),
+            prompt_versions=prompt_versions,
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -259,6 +299,8 @@ class ExecutionStats:
                 self.token_usage.to_record() if self.token_usage is not None else None
             ),
             "model_usage": [item.to_record() for item in self.model_usage],
+            "unreported_request_count": self.unreported_request_count,
+            "prompt_versions": dict(self.prompt_versions),
         }
 
 
@@ -333,13 +375,23 @@ class PipelineNodeRun:
             output_summary=output_summary or {},
         )
 
-    def fail(self, error: str, finished_at: str) -> "PipelineNodeRun":
+    def fail(
+        self,
+        error: str,
+        finished_at: str,
+        *,
+        stats: ExecutionStats | None = None,
+    ) -> "PipelineNodeRun":
         timestamps = replace(self.timestamps, finished_at=finished_at)
+        execution_stats = stats or self.stats
         return replace(
             self,
             status=PipelineNodeStatus.FAILED,
             errors=(str(error),),
-            stats=replace(self.stats, duration_ms=timestamps.duration_ms()),
+            stats=replace(
+                execution_stats,
+                duration_ms=timestamps.duration_ms(),
+            ),
             timestamps=timestamps,
         )
 

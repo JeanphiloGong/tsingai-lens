@@ -27,6 +27,9 @@ class _WindowExtractor:
         self.reconciliation = reconciliation
         self.window_failure_marker = window_failure_marker
 
+    def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
+        return 0
+
     def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         self.payloads.append(payload)
         source_units = payload.get("source_units") or []
@@ -596,6 +599,92 @@ def test_source_unit_count_bound_creates_more_windows_without_dropping_units():
     }
 
 
+def test_same_role_sections_are_screened_in_separate_contiguous_batches():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("methods-a", "Materials and Methods", 1),
+            _paragraph("method-a", "BACKGROUND_ONLY_A", 2, "Materials and Methods"),
+            _heading("methods-b", "Validation Methods", 3),
+            _paragraph("method-b", "BACKGROUND_ONLY_B", 4, "Validation Methods"),
+        ]
+    )
+    extractor = _WindowExtractor()
+
+    _build_skims(artifacts, tree, extractor)
+
+    assert [payload["section_paths"] for payload in extractor.payloads] == [
+        ["Materials and Methods"],
+        ["Validation Methods"],
+    ]
+    assert [
+        [unit["source_ref"] for unit in payload["source_units"]]
+        for payload in extractor.payloads
+    ] == [["method-a"], ["method-b"]]
+
+
+def test_complete_prompt_token_preflight_splits_before_model_execution():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("results", "Results", 1),
+            _paragraph("result-a", "BACKGROUND_ONLY_A", 2, "Results"),
+            _paragraph("result-b", "BACKGROUND_ONLY_B", 3, "Results"),
+        ]
+    )
+
+    class PromptBoundExtractor(_WindowExtractor):
+        def __init__(self) -> None:
+            super().__init__()
+            self.preflight_payloads: list[dict[str, Any]] = []
+
+        def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
+            self.preflight_payloads.append(payload)
+            return 20_000 if len(payload["source_units"]) > 1 else 1_000
+
+    extractor = PromptBoundExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.preflight_payloads) == 3
+    assert [len(payload["source_units"]) for payload in extractor.payloads] == [1, 1]
+    assert [
+        unit["source_unit_id"]
+        for payload in extractor.payloads
+        for unit in payload["source_units"]
+    ] == ["source-unit-000001", "source-unit-000002"]
+    assert len(skim.source_unit_coverage) == 2
+
+
+def test_model_declared_output_saturation_splits_without_losing_source_units():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("results", "Results", 1),
+            _paragraph("result-a", "BACKGROUND_ONLY_A", 2, "Results"),
+            _paragraph("result-b", "BACKGROUND_ONLY_B", 3, "Results"),
+        ]
+    )
+
+    class SaturatingExtractor(_WindowExtractor):
+        def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            if len(payload["source_units"]) > 1:
+                self.payloads.append(payload)
+                return StructuredPaperSkim(output_saturated=True)
+            return super().extract_paper_skim(payload)
+
+    extractor = SaturatingExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert [len(payload["source_units"]) for payload in extractor.payloads] == [2, 1, 1]
+    assert {item.source_ref for item in skim.source_unit_coverage} == {
+        "result-a",
+        "result-b",
+    }
+    assert all(
+        item.status.value == "no_study_signal"
+        for item in skim.source_unit_coverage
+    )
+
+
 def test_late_results_content_is_screened_after_the_first_four_thousand_characters():
     artifacts, tree = _artifacts(
         blocks=[
@@ -840,6 +929,14 @@ def test_table_row_relationship_preserves_its_stable_row_locator():
     assert [
         (unit["source_kind"], unit["source_ref"]) for unit in row_units
     ] == [("table_row", "row-result-7")]
+    assert row_units[0]["content"]["table_context"]["caption_text"] == (
+        "Process conditions and measured porosity"
+    )
+    assert row_units[0]["content"]["table_context"]["column_headers"] == [
+        "scan speed",
+        "porosity",
+    ]
+    assert row_units[0]["content"]["table_context"]["heading_path"] == "Results"
     assert [
         source_ref.to_record()
         for source_ref in skim.studies[0].relationships[0].source_refs
@@ -994,6 +1091,19 @@ def test_oversized_structured_table_row_is_split_without_text_loss():
     assert {
         (unit["source_kind"], unit["source_ref"]) for unit in source_units
     } == {("table_row", "row-long")}
+    assert all(
+        unit["content"]["table_context"]["caption_text"] == "Long result row"
+        for unit in source_units
+    )
+    assert all(
+        unit["content"]["table_context"]["column_headers"]
+        == ["sample", "reported result"]
+        for unit in source_units
+    )
+    assert all(
+        unit["content"]["table_context"]["heading_path"] == "Results"
+        for unit in source_units
+    )
 
 
 def test_each_source_text_and_caption_is_assigned_once_and_references_are_excluded():

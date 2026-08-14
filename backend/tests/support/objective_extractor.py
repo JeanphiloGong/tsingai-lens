@@ -62,6 +62,9 @@ class FakeObjectiveExtractor:
         self.unit_payloads: list[dict[str, Any]] = []
         self.finding_payloads: list[dict[str, Any]] = []
 
+    def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
+        return 0
+
     def extract_document_profile(
         self,
         payload: dict[str, Any],

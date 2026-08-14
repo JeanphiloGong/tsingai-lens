@@ -4,10 +4,14 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from openai import LengthFinishReasonError
 from pydantic import ValidationError
 
 from application.core.document_profiles.extraction import DocumentProfileExtractor
-from application.core.objectives.extraction import ObjectiveExtractor
+from application.core.objectives.extraction import (
+    ObjectiveExtractor,
+    PaperSkimOutputSaturatedError,
+)
 from application.core.paper_facts.extraction import PaperFactsExtractor
 from application.core.objectives.prompts import (
     build_objective_evidence_prompt,
@@ -40,7 +44,9 @@ def test_paper_skim_contract_bounds_model_output():
     model_schema = StructuredPaperSkim.model_json_schema()
     schema = model_schema["properties"]
 
-    assert "maxItems" not in schema["studies"]
+    assert schema["studies"]["maxItems"] == 8
+    assert schema["unresolved_signals"]["maxItems"] == 12
+    assert schema["output_saturated"]["type"] == "boolean"
     study_schema = model_schema["$defs"]["StructuredPaperStudy"]["properties"]
     relationship_schema = model_schema["$defs"][
         "StructuredPaperStudyRelationship"
@@ -50,6 +56,7 @@ def test_paper_skim_contract_bounds_model_output():
     assert study_schema["sample_context"]["maxItems"] == 4
     assert study_schema["test_context"]["maxItems"] == 4
     assert study_schema["fixed_conditions"]["maxItems"] == 12
+    assert study_schema["relationships"]["maxItems"] == 8
     assert relationship_schema["varied_factors"]["maxItems"] == 8
     assert relationship_schema["source_unit_ids"]["minItems"] == 1
     signal_schema = model_schema["$defs"]["StructuredPaperStudySignal"][
@@ -148,6 +155,10 @@ def test_paper_skim_prompt_defines_structured_research_map_contract():
     assert "copy `source_unit_ids`" in user_prompt
     assert "Return two studies" in user_prompt
     assert "up to 2 `warnings`, each at most 240 characters" in user_prompt
+    assert "up to 8 studies" in user_prompt
+    assert "up to 8 relationships per study" in user_prompt
+    assert "up to 12 unresolved signals" in user_prompt
+    assert "output_saturated=true" in user_prompt
     assert "neutral scientific axis" in user_prompt
     assert "L-VED, M-VED, and H-VED" in user_prompt
     assert "varied_factors=['volumetric energy density']" in user_prompt
@@ -434,6 +445,96 @@ def test_domain_model_extractors_defaults_to_provider_parse_mode(monkeypatch):
 
 def test_objective_extractor_does_not_generate_backend_owned_objective_lineage():
     assert not hasattr(ObjectiveExtractor, "discover_research_objectives")
+
+
+def test_paper_skim_prompt_token_estimate_counts_complete_schema_prompt():
+    client = _FakeOpenAIClient("unused")
+    extractor = ObjectiveExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="provider_parse",
+    )
+    payload = {
+        "document_id": "paper-1",
+        "title": "Density study",
+        "window_id": "results-1",
+        "window_role": "results",
+        "source_units": [
+            {
+                "source_unit_id": "source-unit-1",
+                "source_kind": "block",
+                "source_ref": "block-1",
+                "section_path": "Results",
+                "content": "Laser power was varied.",
+            }
+        ],
+    }
+
+    estimated_tokens = extractor.estimate_paper_skim_prompt_tokens(payload)
+
+    assert estimated_tokens > 1_000
+    assert client.beta.chat.completions.calls == []
+    assert client.chat.completions.calls == []
+
+
+def test_paper_skim_provider_length_finish_skips_whole_window_json_repair():
+    completion = SimpleNamespace(
+        usage=SimpleNamespace(completion_tokens=4096),
+    )
+    client = _FakeOpenAIClient(
+        '{"studies":[]}',
+        parse_error=LengthFinishReasonError(completion=completion),
+    )
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
+
+    with pytest.raises(PaperSkimOutputSaturatedError):
+        extractor.extract_paper_skim(
+            {
+                "document_id": "paper-1",
+                "title": "Density study",
+                "window_id": "results-1",
+                "window_role": "results",
+                "source_units": [],
+            }
+        )
+
+    assert len(client.beta.chat.completions.calls) == 1
+    assert client.chat.completions.calls == []
+
+
+def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
+    client = _FakeOpenAIClient('{"studies":[]}')
+
+    def create_with_length_finish(**kwargs):  # noqa: ANN003
+        client.chat.completions.calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason="length",
+                    message=SimpleNamespace(content='{"studies":[]}'),
+                )
+            ]
+        )
+
+    client.chat.completions.create = create_with_length_finish
+    extractor = ObjectiveExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="json_text",
+    )
+
+    with pytest.raises(PaperSkimOutputSaturatedError):
+        extractor.extract_paper_skim(
+            {
+                "document_id": "paper-1",
+                "title": "Density study",
+                "window_id": "results-1",
+                "window_role": "results",
+                "source_units": [],
+            }
+        )
+
+    assert len(client.chat.completions.calls) == 1
 
 
 def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace():

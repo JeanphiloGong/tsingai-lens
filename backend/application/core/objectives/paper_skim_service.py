@@ -7,7 +7,11 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from application.core.objectives import property_matching
-from application.core.objectives.extraction import ObjectiveExtractor
+from application.core.objectives.extraction import (
+    ObjectiveExtractor,
+    PAPER_SKIM_PROMPT_TOKEN_LIMIT,
+    PaperSkimOutputSaturatedError,
+)
 from application.core.objectives.schemas import (
     StructuredPaperStudy,
     StructuredPaperSignalReconciliation,
@@ -125,6 +129,7 @@ class PaperSkimService:
                 table_rows=document_table_rows,
                 figures=document_figures,
                 document_tree=document_trees_by_document_id.get(document.document_id),
+                extractor=extractor,
             )
             window_skims: list[PaperSkim] = []
             paper_signals: list[_PaperSignalInput] = []
@@ -195,6 +200,7 @@ class PaperSkimService:
         table_rows: list[Any],
         figures: list[Any],
         document_tree: SourceDocumentTree | None = None,
+        extractor: ObjectiveExtractor,
     ) -> list[dict[str, Any]]:
         source_items = self._build_source_items(
             document=document,
@@ -216,36 +222,52 @@ class PaperSkimService:
             )
             for position, bounded_item in enumerate(bounded_items, start=1)
         ]
-        grouped_items = {role: [] for role in _SKIM_WINDOW_ROLES}
-        for item in items:
-            grouped_items[item.role].append(item)
-
         payloads: list[dict[str, Any]] = []
-        for role in _SKIM_WINDOW_ROLES:
-            role_windows = self._pack_source_items(grouped_items[role])
-            for role_window_position, window_items in enumerate(role_windows, start=1):
-                payloads.append(
-                    self._build_window_payload(
-                        collection_id=collection_id,
-                        document=document,
-                        profile=profile,
-                        role=role,
-                        role_window_position=role_window_position,
-                        items=window_items,
+        role_window_positions = {role: 0 for role in _SKIM_WINDOW_ROLES}
+        for section_items in self._section_item_groups(items):
+            role = section_items[0].role
+            for window_items in self._pack_source_items(list(section_items)):
+                role_window_positions[role] += 1
+                payload = self._build_window_payload(
+                    collection_id=collection_id,
+                    document=document,
+                    profile=profile,
+                    role=role,
+                    role_window_position=role_window_positions[role],
+                    items=window_items,
+                )
+                payloads.extend(
+                    self._fit_payload_to_prompt_limit(
+                        payload,
+                        extractor=extractor,
                     )
                 )
         if payloads:
             return payloads
-        return [
-            self._build_window_payload(
-                collection_id=collection_id,
-                document=document,
-                profile=profile,
-                role="unknown",
-                role_window_position=1,
-                items=(),
+        empty_payload = self._build_window_payload(
+            collection_id=collection_id,
+            document=document,
+            profile=profile,
+            role="unknown",
+            role_window_position=1,
+            items=(),
+        )
+        return list(
+            self._fit_payload_to_prompt_limit(
+                empty_payload,
+                extractor=extractor,
             )
-        ]
+        )
+
+    @staticmethod
+    def _section_item_groups(
+        items: list[_SkimSourceItem],
+    ) -> tuple[tuple[_SkimSourceItem, ...], ...]:
+        groups: dict[str, list[_SkimSourceItem]] = {}
+        for item in items:
+            section_key = item.section_path.strip().casefold() or "unsectioned"
+            groups.setdefault(section_key, []).append(item)
+        return tuple(tuple(group) for group in groups.values())
 
     def _build_source_items(
         self,
@@ -340,20 +362,19 @@ class PaperSkimService:
             )
             if role == "references":
                 continue
+            table_context = {
+                "table_id": table.table_id,
+                "caption_text": str(table.caption_text or ""),
+                "heading_path": str(table.heading_path or ""),
+                "column_headers": [str(value) for value in table.column_headers],
+            }
             items.append(
                 _SkimSourceItem(
                     role=role,
                     order=200_000 + int(table.table_order or 0) * 10_000,
                     source_kind="table",
                     source_ref=table.table_id,
-                    content={
-                        "table_id": table.table_id,
-                        "caption_text": str(table.caption_text or ""),
-                        "heading_path": str(table.heading_path or ""),
-                        "column_headers": [
-                            str(value) for value in table.column_headers
-                        ],
-                    },
+                    content=table_context,
                     section_path=str(table.heading_path or "").strip()
                     or "Unsectioned",
                 )
@@ -368,6 +389,7 @@ class PaperSkimService:
                         "table_row",
                         str(row.row_id),
                         {
+                            "table_context": table_context,
                             "row_id": str(row.row_id),
                             "row_index": int(row.row_index),
                             "row_text": str(row.row_text or ""),
@@ -382,8 +404,9 @@ class PaperSkimService:
                         "table",
                         table.table_id,
                         {
+                            "table_context": table_context,
                             "row_index": row_index,
-                            "values": [str(value) for value in row],
+                            "row_text": " | ".join(str(value) for value in row),
                         },
                     )
                     for row_index, row in enumerate(table.table_matrix)
@@ -401,7 +424,7 @@ class PaperSkimService:
                     ),
                     source_kind=source_kind,
                     source_ref=source_ref,
-                    content={"table_id": table.table_id, **row_record},
+                    content=row_record,
                     section_path=str(table.heading_path or "").strip()
                     or "Unsectioned",
                 )
@@ -473,6 +496,8 @@ class PaperSkimService:
         if item.size <= _SKIM_WINDOW_CHARS:
             return (item,)
         if isinstance(item.content, Mapping):
+            if "row_text" in item.content:
+                return PaperSkimService._split_table_row_source_item(item)
             return PaperSkimService._split_structured_source_item(item)
         if not isinstance(item.content, str):
             raise ValueError(
@@ -498,6 +523,54 @@ class PaperSkimService:
             )
             for position, chunk in enumerate(chunks)
         )
+
+    @staticmethod
+    def _split_table_row_source_item(
+        item: _SkimSourceItem,
+    ) -> tuple[_SkimSourceItem, ...]:
+        content = dict(item.content)
+        row_text = str(content.pop("row_text", ""))
+        chunks: list[_SkimSourceItem] = []
+        start = 0
+        while start < len(row_text):
+            low = start + 1
+            high = len(row_text)
+            end = start
+            while low <= high:
+                candidate_end = (low + high) // 2
+                candidate = replace(
+                    item,
+                    content={
+                        **content,
+                        "structured_path": ["row_text"],
+                        "fragment_start": start,
+                        "fragment": row_text[start:candidate_end],
+                    },
+                )
+                if candidate.size <= _SKIM_WINDOW_CHARS:
+                    end = candidate_end
+                    low = candidate_end + 1
+                else:
+                    high = candidate_end - 1
+            if end == start:
+                raise ValueError(
+                    "paper skim table context cannot fit in a bounded window"
+                )
+            if end < len(row_text):
+                end = PaperSkimService._natural_text_split(row_text, start, end)
+            chunks.append(
+                replace(
+                    item,
+                    content={
+                        **content,
+                        "structured_path": ["row_text"],
+                        "fragment_start": start,
+                        "fragment": row_text[start:end],
+                    },
+                )
+            )
+            start = end
+        return tuple(chunks)
 
     @staticmethod
     def _split_structured_source_item(
@@ -723,10 +796,10 @@ class PaperSkimService:
                     retry_skims, retry_signals = self._extract_window_batch(
                         collection_id=collection_id,
                         document_id=document_id,
-                        payload=self._build_retry_payload(
+                        payload=self._payload_with_source_units(
                             payload,
                             source_units=child_units,
-                            branch=branch,
+                            suffix=f"retry-{branch}",
                         ),
                         extractor=extractor,
                         attempt=attempt + 1,
@@ -757,23 +830,73 @@ class PaperSkimService:
             )
 
     @staticmethod
-    def _build_retry_payload(
+    def _payload_with_source_units(
         payload: Mapping[str, Any],
         *,
         source_units: tuple[Mapping[str, Any], ...],
-        branch: str,
+        suffix: str,
     ) -> dict[str, Any]:
-        retry_payload = dict(payload)
-        retry_payload["window_id"] = f"{payload.get('window_id')}.retry-{branch}"
-        retry_payload["section_paths"] = list(
+        child_payload = dict(payload)
+        child_payload["window_id"] = f"{payload.get('window_id')}.{suffix}"
+        child_payload["section_paths"] = list(
             dict.fromkeys(
                 str(unit.get("section_path") or "").strip()
                 for unit in source_units
                 if str(unit.get("section_path") or "").strip()
             )
         )
-        retry_payload["source_units"] = [dict(unit) for unit in source_units]
-        return retry_payload
+        child_payload["source_units"] = [dict(unit) for unit in source_units]
+        return child_payload
+
+    def _fit_payload_to_prompt_limit(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        extractor: ObjectiveExtractor,
+    ) -> tuple[dict[str, Any], ...]:
+        candidate = dict(payload)
+        prompt_tokens = extractor.estimate_paper_skim_prompt_tokens(candidate)
+        if prompt_tokens <= PAPER_SKIM_PROMPT_TOKEN_LIMIT:
+            return (candidate,)
+
+        source_units = tuple(
+            unit
+            for unit in candidate.get("source_units") or ()
+            if isinstance(unit, Mapping)
+        )
+        if len(source_units) <= 1:
+            raise ValueError(
+                "one PaperSkim Source unit exceeds the complete prompt-token limit: "
+                f"window_id={candidate.get('window_id')} "
+                f"prompt_tokens={prompt_tokens} "
+                f"limit={PAPER_SKIM_PROMPT_TOKEN_LIMIT}"
+            )
+
+        logger.info(
+            "Paper skim prompt exceeds token limit; splitting before extraction "
+            "window_id=%s source_unit_count=%s prompt_tokens=%s limit=%s",
+            candidate.get("window_id"),
+            len(source_units),
+            prompt_tokens,
+            PAPER_SKIM_PROMPT_TOKEN_LIMIT,
+        )
+        midpoint = len(source_units) // 2
+        children: list[dict[str, Any]] = []
+        for suffix, child_units in (
+            ("prompt-left", source_units[:midpoint]),
+            ("prompt-right", source_units[midpoint:]),
+        ):
+            children.extend(
+                self._fit_payload_to_prompt_limit(
+                    self._payload_with_source_units(
+                        candidate,
+                        source_units=child_units,
+                        suffix=suffix,
+                    ),
+                    extractor=extractor,
+                )
+            )
+        return tuple(children)
 
     def _resolve_window_result(
         self,
@@ -782,6 +905,10 @@ class PaperSkimService:
         payload: Mapping[str, Any],
         parsed: StructuredPaperSkim,
     ) -> tuple[PaperSkim, tuple[_PaperSignalInput, ...]]:
+        if parsed.output_saturated:
+            raise PaperSkimOutputSaturatedError(
+                "PaperSkim model reported that the bounded output omitted visible facts"
+            )
         source_units = {
             str(unit.get("source_unit_id") or ""): unit
             for unit in payload.get("source_units") or ()

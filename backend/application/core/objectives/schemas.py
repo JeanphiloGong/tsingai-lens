@@ -27,6 +27,9 @@ PAPER_OBJECTIVE_CANDIDATE_OUTPUT_LIMITS = {
     "outcomes": (8, 80),
 }
 PAPER_SKIM_WARNING_LIMIT = (2, 240)
+PAPER_SKIM_STUDY_LIMIT = 8
+PAPER_SKIM_RELATIONSHIP_LIMIT = 8
+PAPER_SKIM_UNRESOLVED_SIGNAL_LIMIT = 12
 _OBJECTIVE_FRAME_RELEVANCE = {"high", "medium", "low", "irrelevant", "uncertain"}
 _OBJECTIVE_FRAME_PAPER_ROLES = {
     "primary_experiment",
@@ -170,7 +173,10 @@ class StructuredPaperStudy(_StrictModel):
     fixed_conditions: list[
         Annotated[str, Field(max_length=120)]
     ] = Field(default_factory=list, max_length=12)
-    relationships: list[StructuredPaperStudyRelationship] = Field(min_length=1)
+    relationships: list[StructuredPaperStudyRelationship] = Field(
+        min_length=1,
+        max_length=PAPER_SKIM_RELATIONSHIP_LIMIT,
+    )
     confidence: float = 0.0
 
     @field_validator(
@@ -297,8 +303,15 @@ class StructuredPaperSkim(_StrictModel):
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
         "uncertain"
     )
-    studies: list[StructuredPaperStudy] = Field(default_factory=list)
-    unresolved_signals: list[StructuredPaperStudySignal] = Field(default_factory=list)
+    studies: list[StructuredPaperStudy] = Field(
+        default_factory=list,
+        max_length=PAPER_SKIM_STUDY_LIMIT,
+    )
+    unresolved_signals: list[StructuredPaperStudySignal] = Field(
+        default_factory=list,
+        max_length=PAPER_SKIM_UNRESOLVED_SIGNAL_LIMIT,
+    )
+    output_saturated: bool = False
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
     confidence: float = 0.0
     warnings: list[

@@ -8,7 +8,8 @@ from collections.abc import Callable, Mapping
 from time import perf_counter
 from typing import Any
 
-from openai import OpenAI
+import tiktoken
+from openai import LengthFinishReasonError, OpenAI
 from pydantic import BaseModel, ValidationError
 
 from application.core.objectives import property_matching
@@ -45,6 +46,7 @@ _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
 _PAPER_SKIM_MAX_COMPLETION_TOKENS = 4096
+PAPER_SKIM_PROMPT_TOKEN_LIMIT = 12_288
 _PAPER_SIGNAL_RECONCILIATION_MAX_COMPLETION_TOKENS = 4096
 _AXIS_CANONICALIZATION_MAX_COMPLETION_TOKENS = 1024
 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS = 512
@@ -55,6 +57,10 @@ _SUPPORTED_EXTRACTION_MODES = {
     _EXTRACTION_MODE_JSON_TEXT,
     _EXTRACTION_MODE_PROVIDER_PARSE,
 }
+
+
+class PaperSkimOutputSaturatedError(Exception):
+    """A PaperSkim response cannot completely fit in one bounded output."""
 
 
 class ObjectiveExtractor:
@@ -110,6 +116,7 @@ class ObjectiveExtractor:
             return self._parse_json_text_response(
                 **kwargs,
                 parsed_validator=validate_study_identities,
+                fail_on_output_saturation=True,
             )
 
         response = self._parse_structured_response(
@@ -119,10 +126,32 @@ class ObjectiveExtractor:
             max_completion_tokens=_PAPER_SKIM_MAX_COMPLETION_TOKENS,
             json_text_parser=parse_json_text,
             parsed_validator=validate_study_identities,
+            fail_on_output_saturation=True,
         )
         if not isinstance(response, StructuredPaperSkim):
             raise TypeError("unexpected paper skim response type")
         return response
+
+    def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
+        """Count the complete repair-capable prompt before model execution."""
+
+        system_prompt, user_prompt = build_paper_skim_prompt(payload)
+        messages = self._build_messages(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredPaperSkim,
+            include_schema=True,
+        )
+        try:
+            encoding = tiktoken.encoding_for_model(self.model)
+        except KeyError:
+            encoding = tiktoken.get_encoding("cl100k_base")
+        serialized_messages = json.dumps(
+            messages,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return len(encoding.encode(serialized_messages))
 
     def reconcile_paper_signals(
         self,
@@ -422,6 +451,7 @@ class ObjectiveExtractor:
         parsed_validator: Callable[[BaseModel], BaseModel | None] | None = None,
         task_type: str | None = None,
         prompt_version: str | None = None,
+        fail_on_output_saturation: bool = False,
     ) -> BaseModel:
         parse_json_text = json_text_parser or self._parse_json_text_response
         messages = self._build_messages(
@@ -449,6 +479,32 @@ class ObjectiveExtractor:
                         validated = parsed_validator(parsed)
                         if validated is not None:
                             parsed = validated
+                except LengthFinishReasonError as exc:
+                    if fail_on_output_saturation:
+                        raise PaperSkimOutputSaturatedError(
+                            "PaperSkim provider output reached the completion-token "
+                            "limit"
+                        ) from exc
+                    logger.warning(
+                        "Objective provider output reached the completion-token limit; "
+                        "retrying with json_text model=%s response_model=%s",
+                        self.model,
+                        response_model.__name__,
+                    )
+                    messages = self._build_messages(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        response_model=response_model,
+                        include_schema=True,
+                    )
+                    parsed, raw_content = parse_json_text(
+                        messages=messages,
+                        response_model=response_model,
+                        max_completion_tokens=max_completion_tokens,
+                    )
+                    trace_extraction_mode = (
+                        f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
+                    )
                 except Exception as exc:
                     logger.warning(
                         "Objective provider parse failed; retrying with json_text "
@@ -574,6 +630,7 @@ class ObjectiveExtractor:
         repair_instruction_builder: Callable[[str], str] | None = None,
         payload_normalizer: Callable[[Any], Any] | None = None,
         parsed_validator: Callable[[BaseModel], BaseModel | None] | None = None,
+        fail_on_output_saturation: bool = False,
     ) -> tuple[BaseModel, str | None]:
         request_kwargs = {
             "model": self.model,
@@ -620,8 +677,16 @@ class ObjectiveExtractor:
                 )
             try:
                 completion = self.client.chat.completions.create(**attempt_kwargs)
+                choice = completion.choices[0] if completion.choices else None
+                if (
+                    fail_on_output_saturation
+                    and getattr(choice, "finish_reason", None) == "length"
+                ):
+                    raise PaperSkimOutputSaturatedError(
+                        "PaperSkim JSON output reached the completion-token limit"
+                    )
                 raw_content = coerce_message_content(
-                    completion.choices[0].message.content if completion.choices else None
+                    choice.message.content if choice is not None else None
                 )
                 if not raw_content:
                     raise RuntimeError(

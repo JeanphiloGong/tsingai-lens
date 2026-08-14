@@ -18,14 +18,24 @@ Objective analysis.
   service values.
 - `paper_skim_service.py`
   Owns the per-document discovery stage. It assigns every eligible
-  non-reference text node and every table/figure caption to one section-aware
-  `overview`, `methods`, `results`, `conclusion`, or `unknown` source window.
-  Each bounded window is screened independently. A failed multi-unit batch is
-  split recursively, preserving stable Source-unit ids until only a terminal
-  singleton can become `extraction_failed`; duplicate study signals are
-  reconciled only after all batches finish. The resulting one `PaperSkim` per
-  document retains every distinct schema-valid `PaperStudy` and its complete
-  `PaperStudyRelationship` records. The backend derives one first-stage
+  non-reference text node, table row, and table/figure caption to one full
+  section-path group. `overview`, `methods`, `results`, `conclusion`, and
+  `unknown` remain window metadata; they no longer collect unrelated sections
+  into one global role bucket. Each section group is packed without sampling or
+  truncation, then screened independently. Every table row repeats its table
+  caption, heading path, and column headers while retaining the row locator as
+  Source authority. The complete serialized prompt, including the response
+  schema, is preflighted against a 12,288-token prompt budget before the model
+  receives it; PaperSkim generation has a separate 4,096-token completion
+  budget. Prompt overflow splits before execution. Provider length termination
+  or model-declared output saturation enters the same recursive Source-unit
+  subdivision path as a failed multi-unit batch, preserving stable Source-unit
+  ids until only a terminal singleton can become `extraction_failed`.
+  Successful siblings are retained. Duplicate studies are consolidated and
+  unresolved study signals are reconciled only after every terminal batch has
+  finished. The resulting one `PaperSkim` per document retains every distinct
+  schema-valid `PaperStudy` and its complete `PaperStudyRelationship` records.
+  The backend derives one first-stage
   extraction outcome for every eligible Source unit from validated relationship
   and signal references: `relationship_emitted`, `unresolved_signal_emitted`,
   `no_study_signal`, or `extraction_failed`. Jointly varied factors remain
@@ -95,12 +105,16 @@ build, allocates a new `analysis_version`, and returns:
 - `ObjectiveEvidence[]`
 - `Finding[]`
 
-Objective discovery has two different bounds. Per-paper screening uses as many
-4,000-character section-aware source windows as the paper requires. Every
-eligible non-reference text node and caption is assigned once, so later Methods,
-Results, Conclusions, and later figure/table captions are not dropped merely by
-position. Unusually long text and structured Source content are split into
-contiguous bounded pieces without truncating captions, headers, or row text.
+Objective discovery has separate prompt and output bounds. Per-paper screening
+uses as many full-section-path batches as the paper requires. Source units in a
+section are packed at 4,000 characters and 12 units, then the exact system
+message, user message, input payload, and response schema are counted against a
+12,288-token prompt budget. Every eligible non-reference text node, table row,
+and caption is assigned once, so later Methods, Results, Conclusions, and later
+figure/table content are not dropped merely by position. Unusually long text
+and structured Source content are split into contiguous bounded pieces without
+truncating captions, headers, or row text. Each table-row unit repeats the full
+caption, heading path, and column headers needed to interpret that row.
 Cross-window reconciliation receives bounded excerpts for already extracted
 signals, but each signal retains its complete structured fields and exact Source
 locator. Before a reconciliation leaves the extractor, every relationship is
@@ -117,9 +131,12 @@ signals unresolved instead of removing them. Every emitted relationship and
 signal Source-unit ID must resolve to the exact batch input. The backend derives
 coverage from those validated references; an unreferenced unit becomes
 `no_study_signal` without requiring the model to repeat a coverage object. A
-failed call or invalid reference causes a multi-unit batch to split recursively.
+failed call, invalid reference, 4,096-token output termination, or explicit
+`output_saturated=true` result causes a multi-unit batch to split recursively.
 Successful siblings survive, while only a terminal failed singleton becomes
-`extraction_failed`. `coverage_complete` therefore means that every eligible
+`extraction_failed`. After all terminal batches finish, deterministic study
+consolidation and paper-level unresolved-signal reconciliation remain the final
+paper authority. `coverage_complete` therefore means that every eligible
 Source unit was processed by a contract-valid first-stage extraction; it does
 not prove that the model found every scientifically relevant study,
 relationship, variable, or outcome. Model-call count grows with document length

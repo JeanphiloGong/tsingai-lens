@@ -62,7 +62,6 @@ def build_pdf_bundle(
                 human_readable_id=0,
                 title=title,
                 text=str(document.export_to_text() or "").strip(),
-                text_unit_ids=tuple(text_units["id"].tolist()),
                 creation_date=row.get("creation_date"),
                 metadata=build_source_metadata(row, parser_name="docling"),
             ).to_record()

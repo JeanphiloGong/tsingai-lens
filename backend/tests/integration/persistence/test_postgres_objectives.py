@@ -172,7 +172,7 @@ def _study_facts(objective: ResearchObjective | None = None) -> ObjectiveFactSet
 
 
 def _analysis_artifacts():
-    artifacts = _artifacts()
+    source_document = _artifacts()[0]
     source_document_ids = (
         "srcdoc_runtime",
         "srcdoc_supporting",
@@ -181,7 +181,7 @@ def _analysis_artifacts():
     )
     blocks = tuple(
         replace(
-            artifacts.blocks[0],
+            source_document.blocks[0],
             block_id=block_id,
             document_id=document_id,
             text=text,
@@ -195,30 +195,29 @@ def _analysis_artifacts():
             ("block-mechanism", source_document_ids[0], "Grain refinement occurred."),
         )
     )
-    return replace(
-        artifacts,
-        documents=tuple(
-            replace(
-                artifacts.documents[0],
-                document_id=document_id,
-                human_readable_id=position,
-                title=f"Paper {position + 1}",
-                text_unit_ids=(),
-            )
-            for position, document_id in enumerate(source_document_ids)
-        ),
-        text_units=(),
-        blocks=blocks,
-        tables=(),
-        table_rows=(),
-        table_cells=(),
+    return tuple(
+        replace(
+            source_document,
+            document_id=document_id,
+            human_readable_id=position,
+            title=f"Paper {position + 1}",
+            text_units=(),
+            blocks=tuple(
+                block for block in blocks if block.document_id == document_id
+            ),
+            tables=(),
+            table_rows=(),
+            table_cells=(),
+            figures=(),
+        )
+        for position, document_id in enumerate(source_document_ids)
     )
 
 
 def _prepare_studies(source_repository, builds, build_id: str = "build_objectives"):
     task = _task(f"task_{build_id}")
     builds.add_task(task, build_id=build_id)
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source", build_id, _analysis_artifacts()
     )
     repository = PostgresObjectiveRepository(source_repository.session_factory)
@@ -482,16 +481,22 @@ def test_study_build_round_trips_table_row_source_locator(
     build_id = "build_table_row_objective_source"
     builds.add_task(task, build_id=build_id)
     source_artifacts = _artifacts()
+    source_document = source_artifacts[0]
     long_row_id = f"row-{'x' * 300}"
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source",
         build_id,
-        replace(
-            _analysis_artifacts(),
-            tables=source_artifacts.tables,
-            table_rows=(
-                replace(source_artifacts.table_rows[0], row_id=long_row_id),
-            ),
+        tuple(
+            replace(
+                document,
+                tables=source_document.tables,
+                table_rows=(
+                    replace(source_document.table_rows[0], row_id=long_row_id),
+                ),
+            )
+            if document.document_id == source_document.document_id
+            else document
+            for document in _analysis_artifacts()
         ),
     )
     repository = PostgresObjectiveRepository(source_repository.session_factory)
@@ -581,7 +586,7 @@ def test_postgresql_round_trips_long_source_unit_coverage_locator() -> None:
         builds = PostgresBuildRepository(sessions)
         build_id = "build_objectives_postgresql"
         builds.add_task(_task("task_objectives_postgresql"), build_id=build_id)
-        source_repository.replace_collection_artifacts(
+        source_repository.replace_collection_documents(
             "col_source",
             build_id,
             _real_shape_artifacts(),
@@ -747,7 +752,7 @@ def test_confirmed_objective_rebuild_scopes_lineage_and_analysis_to_each_build(
     expanded_task = _task("task_expanded_objective_scope")
     expanded_build_id = "build_expanded_objective_scope"
     builds.add_task(expanded_task, build_id=expanded_build_id)
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source", expanded_build_id, _analysis_artifacts()
     )
 
@@ -784,7 +789,7 @@ def test_confirmed_objective_rebuild_scopes_lineage_and_analysis_to_each_build(
     contracted_task = _task("task_contracted_objective_scope")
     contracted_build_id = "build_contracted_objective_scope"
     builds.add_task(contracted_task, build_id=contracted_build_id)
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source", contracted_build_id, _analysis_artifacts()
     )
 
@@ -857,7 +862,7 @@ def test_rebuild_rejects_reused_objective_id_for_another_scientific_definition(
     task = _task("task_conflicting_objective_identity")
     build_id = "build_conflicting_objective_identity"
     builds.add_task(task, build_id=build_id)
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source", build_id, _analysis_artifacts()
     )
 
@@ -882,7 +887,7 @@ def test_study_build_rejects_missing_or_cross_document_source_refs(
     task = _task("task_invalid_objective_source")
     build_id = "build_invalid_objective_source"
     builds.add_task(task, build_id=build_id)
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source", build_id, _analysis_artifacts()
     )
     repository = PostgresObjectiveRepository(source_repository.session_factory)
@@ -913,7 +918,7 @@ def test_study_build_rejects_invalid_source_unit_coverage_ref(
     task = _task("task_invalid_objective_coverage_source")
     build_id = "build_invalid_objective_coverage_source"
     builds.add_task(task, build_id=build_id)
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source", build_id, _analysis_artifacts()
     )
     repository = PostgresObjectiveRepository(source_repository.session_factory)
@@ -954,7 +959,7 @@ def test_list_objectives_uses_only_the_active_ready_build_and_persisted_rank(
     task = _task("task_ranked_objectives")
     build_id = "build_ranked_objectives"
     builds.add_task(task, build_id=build_id)
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source", build_id, _analysis_artifacts()
     )
     skim = PaperSkim.from_mapping(
@@ -1070,7 +1075,7 @@ def test_list_objectives_uses_only_the_active_ready_build_and_persisted_rank(
     pending_task = _task("task_pending_objectives")
     pending_build_id = "build_pending_objectives"
     builds.add_task(pending_task, build_id=pending_build_id)
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source", pending_build_id, _analysis_artifacts()
     )
     repository.replace(

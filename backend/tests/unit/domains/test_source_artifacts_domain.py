@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from domain.source import (
     SourceBlock,
     SourceBoundingBox,
@@ -11,10 +13,42 @@ from domain.source import (
     SourceReferenceSet,
     SourceTable,
     SourceTableCell,
+    assemble_source_documents,
     build_source_document_tree,
     build_heading_blocks,
     build_source_table_rows_from_cells,
 )
+
+
+def test_source_document_assembly_rejects_orphan_artifacts():
+    document = SourceDocument(
+        document_id="doc-1",
+        human_readable_id=0,
+        title="Paper",
+        text="",
+    )
+    orphan = SourceBlock(
+        block_id="block-orphan",
+        document_id="missing-document",
+        block_type="paragraph",
+        text="Orphan text",
+        block_order=0,
+    )
+
+    with pytest.raises(ValueError, match="block references unknown document"):
+        assemble_source_documents(documents=(document,), blocks=(orphan,))
+
+
+def test_source_document_assembly_rejects_duplicate_document_ids():
+    document = SourceDocument(
+        document_id="doc-1",
+        human_readable_id=0,
+        title="Paper",
+        text="",
+    )
+
+    with pytest.raises(ValueError, match="duplicate document ids"):
+        assemble_source_documents(documents=(document, document))
 
 
 def test_source_table_record_renders_complete_table_payload():

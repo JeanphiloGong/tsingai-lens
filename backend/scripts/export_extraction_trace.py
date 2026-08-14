@@ -188,9 +188,9 @@ def _load_artifacts(
     engine = build_database_engine(DatabaseSettings())
     try:
         session_factory = build_session_factory(engine)
-        source_artifacts = PostgresSourceArtifactRepository(
+        source_documents = PostgresSourceArtifactRepository(
             session_factory
-        ).read_collection_artifacts(collection_id)
+        ).read_collection_documents(collection_id)
         paper_facts = PostgresPaperFactRepository(session_factory).read(collection_id)
         comparison_facts = PostgresComparisonRepository(session_factory).read(
             collection_id
@@ -205,13 +205,25 @@ def _load_artifacts(
     projection = build_core_fact_projection_records(paper_facts, comparison_rows)
     frames: dict[str, pd.DataFrame] = {}
     source_records = {
-        "documents": source_artifacts.documents,
-        "text_units": source_artifacts.text_units,
-        "blocks": source_artifacts.blocks,
-        "figures": source_artifacts.figures,
-        "tables": source_artifacts.tables,
-        "table_rows": source_artifacts.table_rows,
-        "table_cells": source_artifacts.table_cells,
+        "documents": source_documents,
+        "text_units": tuple(
+            item for document in source_documents for item in document.text_units
+        ),
+        "blocks": tuple(
+            item for document in source_documents for item in document.blocks
+        ),
+        "figures": tuple(
+            item for document in source_documents for item in document.figures
+        ),
+        "tables": tuple(
+            item for document in source_documents for item in document.tables
+        ),
+        "table_rows": tuple(
+            item for document in source_documents for item in document.table_rows
+        ),
+        "table_cells": tuple(
+            item for document in source_documents for item in document.table_cells
+        ),
     }
     for name in SOURCE_ARTIFACTS:
         frames[name] = _normalize_frame(

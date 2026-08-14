@@ -17,7 +17,7 @@ from domain.core.document_profile import (
     summarize_document_profile_collection,
 )
 from domain.ports import PaperFactRepository, SourceArtifactRepository
-from domain.source import SourceArtifactSet
+from domain.source import SourceDocument
 from domain.shared.enums import (
     DOC_TYPE_UNCERTAIN,
 )
@@ -142,11 +142,11 @@ class DocumentProfileService:
     ) -> dict[str, Any]:
         self.collection_service.get_collection(collection_id)
         try:
-            artifacts = self._load_source_artifacts(collection_id)
+            documents = self._load_source_documents(collection_id)
         except FileNotFoundError as exc:
             raise DocumentContentNotReadyError(collection_id) from exc
 
-        document_records = self._build_document_records(artifacts)
+        document_records = self._build_document_records(documents)
         row = next(
             (
                 record
@@ -158,7 +158,10 @@ class DocumentProfileService:
         if row is None:
             raise DocumentNotFoundError(collection_id, document_id)
 
-        blocks_by_doc = self._group_blocks_by_document(artifacts)
+        blocks_by_doc = {
+            document.document_id: [block.to_record() for block in document.blocks]
+            for document in documents
+        }
         profile = self._find_profile_row(collection_id, document_id)
         file_lookup = self._build_collection_file_lookup(collection_id)
 
@@ -220,17 +223,22 @@ class DocumentProfileService:
     ) -> tuple[DocumentProfile, ...]:
         self.collection_service.get_collection(collection_id)
         try:
-            artifacts = self._load_source_artifacts(collection_id, build_id=build_id)
+            documents = self._load_source_documents(
+                collection_id, build_id=build_id
+            )
         except FileNotFoundError as exc:
             raise DocumentProfilesNotReadyError(collection_id) from exc
-        document_records = self._build_document_records(artifacts)
-        blocks_by_doc = self._group_blocks_by_document(artifacts)
+        document_records = self._build_document_records(documents)
+        blocks_by_doc = {
+            document.document_id: [block.to_record() for block in document.blocks]
+            for document in documents
+        }
         file_lookup = self._build_collection_file_lookup(collection_id)
         logger.info(
             "Document profile build started collection_id=%s document_count=%s block_count=%s",
             collection_id,
             len(document_records),
-            len(artifacts.blocks),
+            sum(len(document.blocks) for document in documents),
         )
 
         profiles: list[DocumentProfile] = []
@@ -273,42 +281,36 @@ class DocumentProfileService:
             self._document_profile_extractor = build_default_document_profile_extractor()
         return self._document_profile_extractor
 
-    def _load_source_artifacts(
+    def _load_source_documents(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
-    ) -> SourceArtifactSet:
-        artifacts = (
-            self.source_artifact_repository.read_collection_artifacts(
+    ) -> tuple[SourceDocument, ...]:
+        documents = (
+            self.source_artifact_repository.read_collection_documents(
                 collection_id,
                 build_id=build_id,
             )
             if build_id is not None
-            else self.source_artifact_repository.read_collection_artifacts(collection_id)
+            else self.source_artifact_repository.read_collection_documents(collection_id)
         )
-        if not artifacts.documents:
+        if not documents:
             raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
-        return artifacts
+        return documents
 
     def _build_document_records(
         self,
-        artifacts: SourceArtifactSet,
+        documents: tuple[SourceDocument, ...],
     ) -> list[dict[str, Any]]:
-        text_unit_lookup = {
-            text_unit.text_unit_id: text_unit
-            for text_unit in artifacts.text_units
-            if text_unit.text_unit_id
-        }
         records: list[dict[str, Any]] = []
-        for document in artifacts.documents:
+        for document in documents:
             text = str(document.text or "").strip()
-            if not text and document.text_unit_ids:
+            if not text and document.text_units:
                 text = "\n\n".join(
-                    str(text_unit_lookup[text_unit_id].text or "").strip()
-                    for text_unit_id in document.text_unit_ids
-                    if text_unit_id in text_unit_lookup
-                    and str(text_unit_lookup[text_unit_id].text or "").strip()
+                    str(text_unit.text or "").strip()
+                    for text_unit in document.text_units
+                    if str(text_unit.text or "").strip()
                 )
             records.append(
                 {
@@ -505,16 +507,6 @@ class DocumentProfileService:
 
     def _serialize_profile_record(self, profile: DocumentProfile) -> dict[str, Any]:
         return profile.to_record()
-
-    def _group_blocks_by_document(
-        self,
-        artifacts: SourceArtifactSet,
-    ) -> dict[str, list[dict[str, Any]]]:
-        grouped: dict[str, list[dict[str, Any]]] = {}
-        for block in artifacts.blocks:
-            document_id = str(block.document_id or "")
-            grouped.setdefault(document_id, []).append(block.to_record())
-        return grouped
 
     def _normalize_string_list(self, value: Any) -> list[str]:
         normalized = normalize_record_value(value)

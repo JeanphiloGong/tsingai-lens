@@ -10,7 +10,6 @@ from domain.source.build import (
 from domain.source.artifacts import (
     SourceBlock,
     SourceBlockType,
-    SourceArtifactSet,
     SourceBoundingBox,
     SourceCharRange,
     SourceDocument,
@@ -28,6 +27,7 @@ from domain.source.artifacts import (
     SourceTableCell,
     SourceTableRow,
     SourceTextUnit,
+    assemble_source_documents,
     build_figure_caption_blocks,
     build_heading_blocks,
     build_source_document_tree,
@@ -43,6 +43,7 @@ from domain.source.artifacts import (
     resolve_heading_path_for_page,
     resolve_heading_path_for_target,
     safe_int,
+    source_documents_from_records,
     update_heading_stack,
 )
 from domain.source.collection import (
@@ -76,7 +77,6 @@ __all__ = [
     "DocumentVersionRecord",
     "SourceBlock",
     "SourceBlockType",
-    "SourceArtifactSet",
     "SourceBoundingBox",
     "SourceCharRange",
     "SourceDocument",
@@ -95,6 +95,7 @@ __all__ = [
     "SourceTableRow",
     "SourceTextUnit",
     "TaskRecord",
+    "assemble_source_documents",
     "build_figure_caption_blocks",
     "build_heading_blocks",
     "build_source_document_tree",
@@ -113,5 +114,6 @@ __all__ = [
     "resolve_heading_path_for_page",
     "resolve_heading_path_for_target",
     "safe_int",
+    "source_documents_from_records",
     "update_heading_stack",
 ]

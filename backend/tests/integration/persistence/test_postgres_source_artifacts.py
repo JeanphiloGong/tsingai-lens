@@ -18,7 +18,7 @@ from domain.source import (
     CollectionImportDocumentRecord,
     CollectionImportRecord,
     CollectionRecord,
-    SourceArtifactSet,
+    assemble_source_documents,
     SourceBlock,
     SourceBoundingBox,
     SourceCharRange,
@@ -172,16 +172,15 @@ def _task(task_id: str) -> TaskRecord:
     )
 
 
-def _artifacts(title: str = "Paper") -> SourceArtifactSet:
+def _artifacts(title: str = "Paper") -> tuple[SourceDocument, ...]:
     bbox = SourceBoundingBox(l=1, t=2, r=3, b=4, coord_origin="top-left")
-    return SourceArtifactSet(
+    return assemble_source_documents(
         documents=(
             SourceDocument(
                 document_id="srcdoc_runtime",
                 human_readable_id=0,
                 title=title,
                 text="Methods\nResult",
-                text_unit_ids=("tu-1",),
                 creation_date=NOW,
                 metadata={
                     "source_path": "stored-paper.pdf",
@@ -258,54 +257,50 @@ def _artifacts(title: str = "Paper") -> SourceArtifactSet:
     )
 
 
-def _real_shape_artifacts() -> SourceArtifactSet:
-    artifacts = _artifacts()
-    return replace(
-        artifacts,
-        documents=(
-            replace(
-                artifacts.documents[0],
-                document_id=REAL_SOURCE_DOCUMENT_ID,
-                text_unit_ids=(REAL_SOURCE_TEXT_UNIT_ID,),
+def _real_shape_artifacts() -> tuple[SourceDocument, ...]:
+    document = _artifacts()[0]
+    return (
+        replace(
+            document,
+            document_id=REAL_SOURCE_DOCUMENT_ID,
+            text_units=(
+                replace(
+                    document.text_units[0],
+                    text_unit_id=REAL_SOURCE_TEXT_UNIT_ID,
+                    document_ids=(REAL_SOURCE_DOCUMENT_ID,),
+                ),
             ),
-        ),
-        text_units=(
-            replace(
-                artifacts.text_units[0],
-                text_unit_id=REAL_SOURCE_TEXT_UNIT_ID,
-                document_ids=(REAL_SOURCE_DOCUMENT_ID,),
+            blocks=(
+                replace(
+                    document.blocks[0],
+                    block_id=REAL_SOURCE_BLOCK_ID,
+                    document_id=REAL_SOURCE_DOCUMENT_ID,
+                    text_unit_ids=(REAL_SOURCE_TEXT_UNIT_ID,),
+                ),
             ),
-        ),
-        blocks=(
-            replace(
-                artifacts.blocks[0],
-                block_id=REAL_SOURCE_BLOCK_ID,
-                document_id=REAL_SOURCE_DOCUMENT_ID,
-                text_unit_ids=(REAL_SOURCE_TEXT_UNIT_ID,),
+            tables=(
+                replace(
+                    document.tables[0],
+                    table_id=REAL_SOURCE_TABLE_ID,
+                    document_id=REAL_SOURCE_DOCUMENT_ID,
+                    caption_block_id=REAL_SOURCE_BLOCK_ID,
+                ),
             ),
-        ),
-        tables=(
-            replace(
-                artifacts.tables[0],
-                table_id=REAL_SOURCE_TABLE_ID,
-                document_id=REAL_SOURCE_DOCUMENT_ID,
-                caption_block_id=REAL_SOURCE_BLOCK_ID,
+            table_rows=(
+                replace(
+                    document.table_rows[0],
+                    row_id=REAL_SOURCE_ROW_ID,
+                    document_id=REAL_SOURCE_DOCUMENT_ID,
+                    table_id=REAL_SOURCE_TABLE_ID,
+                ),
             ),
-        ),
-        table_rows=(
-            replace(
-                artifacts.table_rows[0],
-                row_id=REAL_SOURCE_ROW_ID,
-                document_id=REAL_SOURCE_DOCUMENT_ID,
-                table_id=REAL_SOURCE_TABLE_ID,
-            ),
-        ),
-        table_cells=(
-            replace(
-                artifacts.table_cells[0],
-                cell_id="c" * 128,
-                document_id=REAL_SOURCE_DOCUMENT_ID,
-                table_id=REAL_SOURCE_TABLE_ID,
+            table_cells=(
+                replace(
+                    document.table_cells[0],
+                    cell_id="c" * 128,
+                    document_id=REAL_SOURCE_DOCUMENT_ID,
+                    table_id=REAL_SOURCE_TABLE_ID,
+                ),
             ),
         ),
     )
@@ -460,10 +455,10 @@ def test_source_repository_round_trips_structure_with_document_lineage(
     task = _task("task_source")
     builds.add_task(task, build_id="build_source")
 
-    repository.replace_collection_artifacts("col_source", "build_source", _artifacts())
+    repository.replace_collection_documents("col_source", "build_source", _artifacts())
 
-    assert repository.read_collection_artifacts("col_source").is_empty()
-    restored = repository.read_collection_artifacts(
+    assert not repository.read_collection_documents("col_source")
+    restored = repository.read_collection_documents(
         "col_source", build_id="build_source"
     )
     assert restored == _artifacts()
@@ -486,19 +481,19 @@ def test_default_reads_keep_last_successful_build_when_next_build_fails(
     repository, builds = source_repositories
     first_task = _task("task_first")
     builds.add_task(first_task, build_id="build_first")
-    repository.replace_collection_artifacts(
+    repository.replace_collection_documents(
         "col_source", "build_first", _artifacts("First")
     )
     _finish(builds, first_task, success=True)
     with pytest.raises(ValueError, match="collection build is not writable"):
-        repository.replace_collection_artifacts(
+        repository.replace_collection_documents(
             "col_source", "build_first", _artifacts("Rewritten")
         )
     assert repository.list_documents("col_source")[0].title == "First"
 
     second_task = _task("task_second")
     builds.add_task(second_task, build_id="build_second")
-    repository.replace_collection_artifacts(
+    repository.replace_collection_documents(
         "col_source", "build_second", _artifacts("Pending")
     )
 
@@ -518,9 +513,10 @@ def test_source_repository_versions_figures_and_references_with_the_source_build
     task = _task("task_source_media")
     build_id = "build_source_media"
     builds.add_task(task, build_id=build_id)
-    artifacts = replace(_artifacts(), figures=(_figure(build_id),))
+    document = _artifacts()[0]
+    artifacts = (replace(document, figures=(_figure(build_id),)),)
 
-    repository.replace_collection_artifacts("col_source", build_id, artifacts)
+    repository.replace_collection_documents("col_source", build_id, artifacts)
     repository.replace_collection_references(
         "col_source",
         build_id,
@@ -559,7 +555,7 @@ def test_collection_artifact_read_pins_one_active_build(
     repository, builds = source_repositories
     first_task = _task("task_first_snapshot")
     builds.add_task(first_task, build_id="build_first_snapshot")
-    repository.replace_collection_artifacts(
+    repository.replace_collection_documents(
         "col_source", "build_first_snapshot", _artifacts("First")
     )
     _finish(builds, first_task, success=True)
@@ -567,10 +563,15 @@ def test_collection_artifact_read_pins_one_active_build(
     second_task = _task("task_second_snapshot")
     second_build_id = "build_second_snapshot"
     builds.add_task(second_task, build_id=second_build_id)
-    repository.replace_collection_artifacts(
+    repository.replace_collection_documents(
         "col_source",
         second_build_id,
-        replace(_artifacts("Second"), figures=(_figure(second_build_id),)),
+        (
+            replace(
+                _artifacts("Second")[0],
+                figures=(_figure(second_build_id),),
+            ),
+        ),
     )
     original_list_text_units = repository.list_text_units
 
@@ -584,10 +585,10 @@ def test_collection_artifact_read_pins_one_active_build(
         activate_then_list_text_units,
     )
 
-    artifacts = repository.read_collection_artifacts("col_source")
+    artifacts = repository.read_collection_documents("col_source")
 
-    assert artifacts.documents[0].title == "First"
-    assert artifacts.figures == ()
+    assert artifacts[0].title == "First"
+    assert artifacts[0].figures == ()
 
 
 def test_document_tree_read_pins_one_active_build(
@@ -597,7 +598,7 @@ def test_document_tree_read_pins_one_active_build(
     repository, builds = source_repositories
     first_task = _task("task_first_tree")
     builds.add_task(first_task, build_id="build_first_tree")
-    repository.replace_collection_artifacts(
+    repository.replace_collection_documents(
         "col_source", "build_first_tree", _artifacts("First")
     )
     repository.replace_collection_references(
@@ -608,10 +609,15 @@ def test_document_tree_read_pins_one_active_build(
     second_task = _task("task_second_tree")
     second_build_id = "build_second_tree"
     builds.add_task(second_task, build_id=second_build_id)
-    repository.replace_collection_artifacts(
+    repository.replace_collection_documents(
         "col_source",
         second_build_id,
-        replace(_artifacts("Second"), figures=(_figure(second_build_id),)),
+        (
+            replace(
+                _artifacts("Second")[0],
+                figures=(_figure(second_build_id),),
+            ),
+        ),
     )
     repository.replace_collection_references(
         "col_source", second_build_id, _references()
@@ -636,30 +642,29 @@ def test_source_repository_rejects_unresolved_document_and_orphan_links(
     repository, builds = source_repositories
     task = _task("task_invalid")
     builds.add_task(task, build_id="build_invalid")
-    bad_document = replace(
-        _artifacts().documents[0], metadata={"source_path": "missing.pdf"}
-    )
+    document = _artifacts()[0]
+    bad_document = replace(document, metadata={"source_path": "missing.pdf"})
     with pytest.raises(ValueError, match="exactly one collection file"):
-        repository.replace_collection_artifacts(
+        repository.replace_collection_documents(
             "col_source",
             "build_invalid",
-            replace(_artifacts(), documents=(bad_document,)),
+            (bad_document,),
         )
-    assert repository.read_collection_artifacts(
+    assert repository.read_collection_documents(
         "col_source", build_id="build_invalid"
-    ).is_empty()
+    ) == ()
     orphan_text_unit = replace(
-        _artifacts().text_units[0], document_ids=("missing-document",)
+        document.text_units[0], document_ids=("missing-document",)
     )
     with pytest.raises(IntegrityError):
-        repository.replace_collection_artifacts(
+        repository.replace_collection_documents(
             "col_source",
             "build_invalid",
-            replace(_artifacts(), text_units=(orphan_text_unit,)),
+            (replace(document, text_units=(orphan_text_unit,)),),
         )
-    assert repository.read_collection_artifacts(
+    assert repository.read_collection_documents(
         "col_source", build_id="build_invalid"
-    ).is_empty()
+    ) == ()
 
 
 def test_source_repository_rejects_cross_document_and_orphan_reference_links(
@@ -674,27 +679,29 @@ def test_source_repository_rejects_cross_document_and_orphan_reference_links(
         updated_at=NOW,
     )
     first = _artifacts()
+    first_document = first[0]
     second_document = replace(
-        first.documents[0],
+        first_document,
         document_id="srcdoc_other",
         title="Other",
-        text_unit_ids=(),
         metadata={"source_path": "stored-other.pdf", "source_parser": "docling"},
+        text_units=(),
+        blocks=(),
+        tables=(),
+        table_rows=(),
+        table_cells=(),
+        figures=(),
     )
     second_block = replace(
-        first.blocks[0],
+        first_document.blocks[0],
         block_id="block-other",
         document_id="srcdoc_other",
         text_unit_ids=(),
     )
-    repository.replace_collection_artifacts(
+    repository.replace_collection_documents(
         "col_source",
         build_id,
-        replace(
-            first,
-            documents=first.documents + (second_document,),
-            blocks=first.blocks + (second_block,),
-        ),
+        first + (replace(second_document, blocks=(second_block,)),),
     )
     references = _references()
     cross_document_mention = replace(
@@ -770,11 +777,11 @@ def test_postgresql_enforces_source_structure_contract() -> None:
         builds.add_task(task, build_id="build_source")
 
         real_shape_artifacts = _real_shape_artifacts()
-        repository.replace_collection_artifacts(
+        repository.replace_collection_documents(
             "col_source", "build_source", real_shape_artifacts
         )
         assert (
-            repository.read_collection_artifacts("col_source", build_id="build_source")
+            repository.read_collection_documents("col_source", build_id="build_source")
             == real_shape_artifacts
         )
 
@@ -819,21 +826,24 @@ def test_postgresql_enforces_source_structure_contract() -> None:
             REAL_SOURCE_MENTION_ID,
         ]
 
-        orphan_block = replace(_artifacts().blocks[0], document_id="missing-document")
+        document = _artifacts()[0]
+        orphan_block = replace(
+            document.blocks[0], document_id="missing-document"
+        )
         with pytest.raises(IntegrityError):
-            repository.replace_collection_artifacts(
+            repository.replace_collection_documents(
                 "col_source",
                 "build_source",
-                replace(_artifacts(), blocks=(orphan_block,)),
+                (replace(document, blocks=(orphan_block,)),),
             )
         assert (
-            repository.read_collection_artifacts("col_source", build_id="build_source")
+            repository.read_collection_documents("col_source", build_id="build_source")
             == real_shape_artifacts
         )
 
         _finish(builds, task, success=True)
         with pytest.raises(ValueError, match="collection build is not writable"):
-            repository.replace_collection_artifacts(
+            repository.replace_collection_documents(
                 "col_source", "build_source", _artifacts("Rewritten")
             )
         assert repository.list_documents("col_source")[0].title == "Paper"

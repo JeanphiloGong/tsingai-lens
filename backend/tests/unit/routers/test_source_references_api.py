@@ -18,7 +18,7 @@ from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
 from controllers.source import references as references_controller
-from domain.source import SourceArtifactSet, SourceBlock, SourceDocument
+from domain.source import SourceBlock, SourceDocument, assemble_source_documents
 from infra.persistence.sqlite import SqliteSourceArtifactRepository
 
 
@@ -44,7 +44,7 @@ def test_source_reference_routes_build_and_read_refs(source_reference_services):
     collection_service, repository, request = source_reference_services
     collection = collection_service.create_collection("Refs Collection")
     collection_id = collection["collection_id"]
-    artifacts = SourceArtifactSet(
+    artifacts = assemble_source_documents(
         documents=(
             SourceDocument(
                 document_id="doc-1",
@@ -77,7 +77,7 @@ def test_source_reference_routes_build_and_read_refs(source_reference_services):
             ),
         ),
     )
-    repository.replace_collection_artifacts(collection_id, artifacts)
+    repository.replace_collection_documents(collection_id, artifacts)
     repository.replace_collection_references(
         collection_id,
         SourceReferenceExtractionService().extract(artifacts),

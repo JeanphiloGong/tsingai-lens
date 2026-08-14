@@ -21,7 +21,7 @@ from domain.core import (
     PaperStudyRelationship,
     PaperStudySignal,
 )
-from domain.source import SourceArtifactSet, SourceDocumentTree
+from domain.source import SourceDocument, SourceDocumentTree
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ class PaperSkimService:
         self,
         collection_id: str,
         *,
-        artifacts: SourceArtifactSet,
+        documents: tuple[SourceDocument, ...],
         profiles_by_document_id: Mapping[str, Any],
         document_trees_by_document_id: Mapping[
             str,
@@ -92,27 +92,19 @@ class PaperSkimService:
         extractor: ObjectiveExtractor,
         progress_callback: ProgressCallback | None = None,
     ) -> tuple[PaperSkim, ...]:
-        blocks_by_document_id = self._group_by_document_id(artifacts.blocks)
-        tables_by_document_id = self._group_by_document_id(artifacts.tables)
-        table_rows_by_document_id = self._group_by_document_id(artifacts.table_rows)
-        figures_by_document_id = self._group_by_document_id(artifacts.figures)
-
         logger.info(
             "Research objective paper skim started collection_id=%s document_count=%s",
             collection_id,
-            len(artifacts.documents),
+            len(documents),
         )
         paper_skims: list[PaperSkim] = []
-        document_count = len(artifacts.documents)
-        for document_position, document in enumerate(artifacts.documents, start=1):
+        document_count = len(documents)
+        for document_position, document in enumerate(documents, start=1):
             source_filename = self._resolve_source_filename(document)
-            document_blocks = blocks_by_document_id.get(document.document_id, [])
-            document_tables = tables_by_document_id.get(document.document_id, [])
-            document_table_rows = table_rows_by_document_id.get(
-                document.document_id,
-                [],
-            )
-            document_figures = figures_by_document_id.get(document.document_id, [])
+            document_blocks = list(document.blocks)
+            document_tables = list(document.tables)
+            document_table_rows = list(document.table_rows)
+            document_figures = list(document.figures)
             logger.info(
                 "Research objective paper skim document started collection_id=%s document_id=%s document_position=%s document_count=%s block_count=%s table_count=%s figure_count=%s",
                 collection_id,
@@ -1582,15 +1574,6 @@ class PaperSkimService:
             if value:
                 return value
         return None
-
-    @staticmethod
-    def _group_by_document_id(values: tuple[Any, ...]) -> dict[str, list[Any]]:
-        grouped: dict[str, list[Any]] = {}
-        for value in values:
-            document_id = str(getattr(value, "document_id", "") or "")
-            if document_id:
-                grouped.setdefault(document_id, []).append(value)
-        return grouped
 
     @staticmethod
     def _notify_progress(

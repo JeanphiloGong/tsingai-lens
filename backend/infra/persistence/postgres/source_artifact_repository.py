@@ -8,7 +8,6 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from domain.source import (
-    SourceArtifactSet,
     SourceBlock,
     SourceDocument,
     SourceDocumentTree,
@@ -22,6 +21,7 @@ from domain.source import (
     SourceTableCell,
     SourceTableRow,
     SourceTextUnit,
+    assemble_source_documents,
     build_source_document_tree,
 )
 from infra.persistence.postgres.models.build import (
@@ -55,12 +55,28 @@ class PostgresSourceArtifactRepository:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self.session_factory = session_factory
 
-    def replace_collection_artifacts(
+    def replace_collection_documents(
         self,
         collection_id: str,
         build_id: str,
-        artifacts: SourceArtifactSet,
+        documents: tuple[SourceDocument, ...],
     ) -> None:
+        text_units = tuple(
+            {
+                item.text_unit_id: item
+                for document in documents
+                for item in document.text_units
+            }.values()
+        )
+        blocks = tuple(item for document in documents for item in document.blocks)
+        tables = tuple(item for document in documents for item in document.tables)
+        table_rows = tuple(
+            item for document in documents for item in document.table_rows
+        )
+        table_cells = tuple(
+            item for document in documents for item in document.table_cells
+        )
+        figures = tuple(item for document in documents for item in document.figures)
         with self.session_factory.begin() as session:
             build = self._require_build(session, collection_id, build_id)
             if build.status not in {"queued", "building"}:
@@ -68,7 +84,7 @@ class PostgresSourceArtifactRepository:
             lineage = self._resolve_document_lineage(
                 session,
                 collection_id,
-                artifacts.documents,
+                documents,
             )
             session.execute(
                 delete(SourceDocumentRow).where(SourceDocumentRow.build_id == build_id)
@@ -86,7 +102,7 @@ class PostgresSourceArtifactRepository:
                     creation_date=document.creation_date,
                     metadata_json=dict(document.metadata),
                 )
-                for document in artifacts.documents
+                for document in documents
             )
             session.flush()
             session.add_all(
@@ -98,7 +114,7 @@ class PostgresSourceArtifactRepository:
                     text=text_unit.text,
                     n_tokens=text_unit.n_tokens,
                 )
-                for text_unit in artifacts.text_units
+                for text_unit in text_units
             )
             session.flush()
             session.add_all(
@@ -108,7 +124,7 @@ class PostgresSourceArtifactRepository:
                     source_document_id=document_id,
                     collection_id=collection_id,
                 )
-                for text_unit in artifacts.text_units
+                for text_unit in text_units
                 for document_id in text_unit.document_ids
             )
             session.add_all(
@@ -130,7 +146,7 @@ class PostgresSourceArtifactRepository:
                     heading_path=block.heading_path,
                     heading_level=block.heading_level,
                 )
-                for block in artifacts.blocks
+                for block in blocks
             )
             session.flush()
             session.add_all(
@@ -140,7 +156,7 @@ class PostgresSourceArtifactRepository:
                     text_unit_id=text_unit_id,
                     collection_id=collection_id,
                 )
-                for block in artifacts.blocks
+                for block in blocks
                 for text_unit_id in block.text_unit_ids
             )
             session.add_all(
@@ -159,7 +175,7 @@ class PostgresSourceArtifactRepository:
                     table_matrix=[list(row) for row in table.table_matrix],
                     metadata_json=dict(table.metadata),
                 )
-                for table in artifacts.tables
+                for table in tables
             )
             session.flush()
             session.add_all(
@@ -175,7 +191,7 @@ class PostgresSourceArtifactRepository:
                     bbox_json=row.bbox.to_payload() if row.bbox else None,
                     heading_path=row.heading_path,
                 )
-                for row in artifacts.table_rows
+                for row in table_rows
             )
             session.add_all(
                 SourceTableCellRow(
@@ -197,7 +213,7 @@ class PostgresSourceArtifactRepository:
                     ),
                     unit_hint=cell.unit_hint,
                 )
-                for cell in artifacts.table_cells
+                for cell in table_cells
             )
             session.add_all(
                 SourceFigureRow(
@@ -220,20 +236,20 @@ class PostgresSourceArtifactRepository:
                     image_size_bytes=figure.image_size_bytes,
                     metadata_json=dict(figure.metadata),
                 )
-                for figure in artifacts.figures
+                for figure in figures
             )
 
-    def read_collection_artifacts(
+    def read_collection_documents(
         self,
         collection_id: str,
         build_id: str | None = None,
-    ) -> SourceArtifactSet:
+    ) -> tuple[SourceDocument, ...]:
         if build_id is None:
             with self.session_factory() as session:
                 build_id = self._resolve_read_build(session, collection_id, None)
             if build_id is None:
-                return SourceArtifactSet()
-        return SourceArtifactSet(
+                return ()
+        return assemble_source_documents(
             documents=tuple(self.list_documents(collection_id, build_id=build_id)),
             text_units=tuple(self.list_text_units(collection_id, build_id=build_id)),
             blocks=tuple(self.list_blocks(collection_id, build_id=build_id)),
@@ -259,7 +275,9 @@ class PostgresSourceArtifactRepository:
         document = next(
             (
                 item
-                for item in self.list_documents(collection_id, build_id=build_id)
+                for item in self.read_collection_documents(
+                    collection_id, build_id=build_id
+                )
                 if item.document_id == document_id
             ),
             None,
@@ -271,9 +289,9 @@ class PostgresSourceArtifactRepository:
         return build_source_document_tree(
             collection_id=collection_id,
             document=document,
-            blocks=self.list_blocks(collection_id, document_id, build_id=build_id),
-            tables=self.list_tables(collection_id, document_id, build_id=build_id),
-            figures=self.list_figures(collection_id, document_id, build_id=build_id),
+            blocks=document.blocks,
+            tables=document.tables,
+            figures=document.figures,
             references=self.read_collection_references(
                 collection_id, build_id=build_id
             ),

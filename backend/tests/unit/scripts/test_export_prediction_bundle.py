@@ -22,7 +22,7 @@ from domain.core import (
     TestCondition,
 )
 from domain.core.paper_fact import PaperFactSet
-from domain.source import SourceArtifactSet
+from domain.source import source_documents_from_records
 from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
@@ -287,9 +287,9 @@ def _write_system_artifacts(
 def _write_system_artifacts_to_db(
     db_path: Path, collection_id: str
 ) -> tuple[MemoryPaperFactRepository, MemoryComparisonRepository]:
-    SqliteSourceArtifactRepository(db_path).replace_collection_artifacts(
+    SqliteSourceArtifactRepository(db_path).replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[
                 {
                     "id": "paper-1",

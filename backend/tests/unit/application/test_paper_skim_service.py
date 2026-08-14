@@ -12,7 +12,7 @@ from application.core.objectives.schemas import (
     StructuredPaperSkim,
 )
 from domain.core import PaperSkim, PaperStudy
-from domain.source import SourceArtifactSet, build_source_document_tree
+from domain.source import SourceDocument, build_source_document_tree, source_documents_from_records
 
 
 class _WindowExtractor:
@@ -325,8 +325,8 @@ def _artifacts(
     tables: list[dict[str, Any]] | None = None,
     table_rows: list[dict[str, Any]] | None = None,
     figures: list[dict[str, Any]] | None = None,
-) -> tuple[SourceArtifactSet, Any]:
-    artifacts = SourceArtifactSet.from_records(
+) -> tuple[tuple[SourceDocument, ...], Any]:
+    artifacts = source_documents_from_records(
         documents=[
             {
                 "id": document_id,
@@ -340,11 +340,12 @@ def _artifacts(
         table_rows=table_rows or [],
         figures=figures or [],
     )
+    document = artifacts[0]
     tree = build_source_document_tree(
-        document=artifacts.documents[0],
-        blocks=artifacts.blocks,
-        tables=artifacts.tables,
-        figures=artifacts.figures,
+        document=document,
+        blocks=document.blocks,
+        tables=document.tables,
+        figures=document.figures,
         collection_id="collection-test",
     )
     return artifacts, tree
@@ -387,7 +388,7 @@ def _paragraph(
 
 
 def _build_skims(
-    artifacts: SourceArtifactSet,
+    artifacts: tuple[SourceDocument, ...],
     tree: Any,
     extractor: Any,
     *,
@@ -395,9 +396,9 @@ def _build_skims(
 ) -> tuple[PaperSkim, ...]:
     return PaperSkimService().build_collection_paper_skims(
         "collection-test",
-        artifacts=artifacts,
+        documents=artifacts,
         profiles_by_document_id={},
-        document_trees_by_document_id={artifacts.documents[0].document_id: tree},
+        document_trees_by_document_id={artifacts[0].document_id: tree},
         extractor=extractor,
         progress_callback=progress.append if progress is not None else None,
     )

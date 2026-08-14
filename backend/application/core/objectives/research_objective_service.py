@@ -50,7 +50,7 @@ from domain.ports import (
     PaperFactRepository,
     SourceArtifactRepository,
 )
-from domain.source import SourceArtifactSet, SourceDocumentTree
+from domain.source import SourceDocument, SourceDocumentTree
 
 logger = logging.getLogger(__name__)
 
@@ -262,11 +262,11 @@ class ResearchObjectiveService:
             collection_id,
             build_id=build_id,
         )
-        artifacts = source_inputs["artifacts"]
+        documents = source_inputs["documents"]
         extractor = source_inputs["extractor"]
         paper_skims = self.paper_skim_service.build_collection_paper_skims(
             collection_id,
-            artifacts=artifacts,
+            documents=documents,
             profiles_by_document_id=source_inputs["profiles_by_document_id"],
             document_trees_by_document_id=source_inputs[
                 "document_trees_by_document_id"
@@ -355,7 +355,7 @@ class ResearchObjectiveService:
             extractor=objective_inputs["extractor"],
             objectives=(objective,),
             paper_skims=objective_inputs["paper_skims"],
-            documents=objective_inputs["artifacts"].documents,
+            documents=objective_inputs["documents"],
             profiles_by_document_id=objective_inputs["profiles_by_document_id"],
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
@@ -688,7 +688,9 @@ class ResearchObjectiveService:
     ) -> dict[str, Any]:
         self.collection_service.get_collection(collection_id)
         try:
-            artifacts = self._load_source_artifacts(collection_id, build_id=build_id)
+            documents = self._load_source_documents(
+                collection_id, build_id=build_id
+            )
             profiles = self.document_profile_service.read_document_profiles(
                 collection_id,
                 build_id=build_id,
@@ -697,17 +699,27 @@ class ResearchObjectiveService:
             raise ResearchObjectivesNotReadyError(collection_id) from exc
 
         return {
-            "artifacts": artifacts,
+            "documents": documents,
             "profiles_by_document_id": {
                 profile.document_id: profile
                 for profile in profiles
             },
-            "blocks_by_document_id": self._group_by_document_id(artifacts.blocks),
-            "tables_by_document_id": self._group_by_document_id(artifacts.tables),
-            "table_cells_by_document_id": self._group_by_document_id(
-                artifacts.table_cells
-            ),
-            "figures_by_document_id": self._group_by_document_id(artifacts.figures),
+            "blocks_by_document_id": {
+                document.document_id: list(document.blocks)
+                for document in documents
+            },
+            "tables_by_document_id": {
+                document.document_id: list(document.tables)
+                for document in documents
+            },
+            "table_cells_by_document_id": {
+                document.document_id: list(document.table_cells)
+                for document in documents
+            },
+            "figures_by_document_id": {
+                document.document_id: list(document.figures)
+                for document in documents
+            },
             "document_trees_by_document_id": {
                 document.document_id: load_document_tree(
                     collection_id,
@@ -715,7 +727,7 @@ class ResearchObjectiveService:
                     self.source_artifact_repository,
                     build_id=build_id,
                 )
-                for document in artifacts.documents
+                for document in documents
             },
             "extractor": self._get_objective_extractor(),
         }
@@ -6598,31 +6610,23 @@ class ResearchObjectiveService:
             self._paper_facts_extractor = build_default_paper_facts_extractor()
         return self._paper_facts_extractor
 
-    def _load_source_artifacts(
+    def _load_source_documents(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
-    ) -> SourceArtifactSet:
-        artifacts = (
-            self.source_artifact_repository.read_collection_artifacts(
+    ) -> tuple[SourceDocument, ...]:
+        documents = (
+            self.source_artifact_repository.read_collection_documents(
                 collection_id,
                 build_id=build_id,
             )
             if build_id is not None
-            else self.source_artifact_repository.read_collection_artifacts(collection_id)
+            else self.source_artifact_repository.read_collection_documents(collection_id)
         )
-        if not artifacts.documents:
+        if not documents:
             raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
-        return SourceArtifactSet(
-            documents=artifacts.documents,
-            text_units=artifacts.text_units,
-            blocks=artifacts.blocks,
-            tables=artifacts.tables,
-            table_rows=artifacts.table_rows,
-            table_cells=artifacts.table_cells,
-            figures=artifacts.figures,
-        )
+        return documents
 
     def _document_tree_nodes_in_order(
         self,

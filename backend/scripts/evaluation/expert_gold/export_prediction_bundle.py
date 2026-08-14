@@ -314,9 +314,9 @@ def _load_artifacts(
     engine = build_database_engine(DatabaseSettings())
     try:
         session_factory = build_session_factory(engine)
-        source_artifacts = PostgresSourceArtifactRepository(
+        source_documents = PostgresSourceArtifactRepository(
             session_factory
-        ).read_collection_artifacts(collection_id)
+        ).read_collection_documents(collection_id)
         paper_facts = PostgresPaperFactRepository(session_factory).read(collection_id)
         objective_repository = PostgresObjectiveRepository(session_factory)
         objective_evidence = []
@@ -352,7 +352,7 @@ def _load_artifacts(
         scoped_results=comparison_facts.collection_comparable_results,
     )
     records_by_artifact: dict[str, list[dict[str, Any]]] = {
-        "documents": [record.to_record() for record in source_artifacts.documents],
+        "documents": [record.to_record() for record in source_documents],
         "document_profiles": [
             record.to_record() for record in paper_facts.document_profiles
         ],

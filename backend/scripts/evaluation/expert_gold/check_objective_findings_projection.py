@@ -885,18 +885,18 @@ def _load_source_index(
 
         engine = build_database_engine(DatabaseSettings())
         try:
-            artifacts = PostgresSourceArtifactRepository(
+            documents = PostgresSourceArtifactRepository(
                 build_session_factory(engine)
-            ).read_collection_artifacts(collection_id)
+            ).read_collection_documents(collection_id)
         finally:
             engine.dispose()
     index: dict[tuple[str, str, str], dict[str, Any]] = {}
-    for block in artifacts.blocks:
+    for block in (item for document in documents for item in document.blocks):
         index[(block.document_id, "text_window", block.block_id)] = {
             "text": _text(block.text)[:12_000],
             "page": getattr(block, "page", None),
         }
-    for table in artifacts.tables:
+    for table in (item for document in documents for item in document.tables):
         record = table.to_record()
         index[(table.document_id, "table", table.table_id)] = {
             "text": _text(
@@ -907,7 +907,7 @@ def _load_source_index(
             "page": getattr(table, "page", None),
             "rows": record.get("table_matrix") or [],
         }
-    for figure in artifacts.figures:
+    for figure in (item for document in documents for item in document.figures):
         index[(figure.document_id, "figure", figure.figure_id)] = {
             "text": _text(getattr(figure, "caption_text", None))[:12_000],
             "page": getattr(figure, "page", None),

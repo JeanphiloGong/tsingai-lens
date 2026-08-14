@@ -11,7 +11,10 @@ from domain.core import (
     EvidenceAnchor,
 )
 from domain.core.paper_fact import PaperFactSet
-from domain.source import SourceArtifactSet
+from domain.source import (
+    SourceDocument,
+    source_documents_from_records,
+)
 from infra.persistence.memory import MemoryBuildRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
@@ -19,12 +22,12 @@ from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 def _registry(
     *,
-    source_artifacts: SourceArtifactSet = SourceArtifactSet(),
+    source_documents: tuple[SourceDocument, ...] = (),
     paper_repository: MemoryPaperFactRepository | None = None,
     comparison_repository: MemoryComparisonRepository | None = None,
 ) -> ArtifactRegistryService:
     source_repository = Mock()
-    source_repository.read_collection_artifacts.return_value = source_artifacts
+    source_repository.read_collection_documents.return_value = source_documents
     return ArtifactRegistryService(
         MemoryBuildRepository(),
         source_artifact_repository=source_repository,
@@ -105,7 +108,7 @@ def test_artifact_registry_reads_paper_facts_and_comparisons_directly(tmp_path):
             ),
         ),
     )
-    source_artifacts = SourceArtifactSet.from_records(
+    source_documents = source_documents_from_records(
         documents=[{"id": "paper-1", "title": "Core Paper", "text": "Text"}],
         figures=[
             {
@@ -118,7 +121,7 @@ def test_artifact_registry_reads_paper_facts_and_comparisons_directly(tmp_path):
     )
 
     payload = _registry(
-        source_artifacts=source_artifacts,
+        source_documents=source_documents,
         paper_repository=paper_repository,
         comparison_repository=comparison_repository,
     ).build_registry(collection_id, tmp_path / "output")

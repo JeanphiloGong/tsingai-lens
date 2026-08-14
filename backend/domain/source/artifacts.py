@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import math
 import re
@@ -132,9 +132,18 @@ class SourceDocument:
     human_readable_id: int
     title: str
     text: str
-    text_unit_ids: tuple[str, ...] = ()
     creation_date: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    text_units: tuple[SourceTextUnit, ...] = ()
+    blocks: tuple[SourceBlock, ...] = ()
+    tables: tuple[SourceTable, ...] = ()
+    table_rows: tuple[SourceTableRow, ...] = ()
+    table_cells: tuple[SourceTableCell, ...] = ()
+    figures: tuple[SourceFigure, ...] = ()
+
+    @property
+    def text_unit_ids(self) -> tuple[str, ...]:
+        return tuple(text_unit.text_unit_id for text_unit in self.text_units)
 
     @classmethod
     def from_record(cls, value: Mapping[str, Any]) -> "SourceDocument":
@@ -143,9 +152,38 @@ class SourceDocument:
             human_readable_id=safe_int(value.get("human_readable_id")) or 0,
             title=str(value.get("title") or ""),
             text=str(value.get("text") or ""),
-            text_unit_ids=_string_tuple(value.get("text_unit_ids")),
             creation_date=normalize_optional_text(value.get("creation_date")),
             metadata=_mapping(value.get("metadata")),
+            text_units=tuple(
+                SourceTextUnit.from_record(item)
+                for item in value.get("text_units") or ()
+                if isinstance(item, Mapping)
+            ),
+            blocks=tuple(
+                SourceBlock.from_record(item)
+                for item in value.get("blocks") or ()
+                if isinstance(item, Mapping)
+            ),
+            tables=tuple(
+                SourceTable.from_record(item)
+                for item in value.get("tables") or ()
+                if isinstance(item, Mapping)
+            ),
+            table_rows=tuple(
+                SourceTableRow.from_record(item)
+                for item in value.get("table_rows") or ()
+                if isinstance(item, Mapping)
+            ),
+            table_cells=tuple(
+                SourceTableCell.from_record(item)
+                for item in value.get("table_cells") or ()
+                if isinstance(item, Mapping)
+            ),
+            figures=tuple(
+                SourceFigure.from_record(item)
+                for item in value.get("figures") or ()
+                if isinstance(item, Mapping)
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -474,52 +512,109 @@ class SourceFigure:
         }
 
 
-@dataclass(frozen=True)
-class SourceArtifactSet:
-    documents: tuple[SourceDocument, ...] = ()
-    text_units: tuple[SourceTextUnit, ...] = ()
-    blocks: tuple[SourceBlock, ...] = ()
-    tables: tuple[SourceTable, ...] = ()
-    table_rows: tuple[SourceTableRow, ...] = ()
-    table_cells: tuple[SourceTableCell, ...] = ()
-    figures: tuple[SourceFigure, ...] = ()
+def assemble_source_documents(
+    *,
+    documents: Iterable[SourceDocument] = (),
+    text_units: Iterable[SourceTextUnit] = (),
+    blocks: Iterable[SourceBlock] = (),
+    tables: Iterable[SourceTable] = (),
+    table_rows: Iterable[SourceTableRow] = (),
+    table_cells: Iterable[SourceTableCell] = (),
+    figures: Iterable[SourceFigure] = (),
+) -> tuple[SourceDocument, ...]:
+    """Attach parser artifacts to the document that owns them."""
 
-    @classmethod
-    def from_records(
-        cls,
-        *,
-        documents: Iterable[Mapping[str, Any]] = (),
-        text_units: Iterable[Mapping[str, Any]] = (),
-        blocks: Iterable[Mapping[str, Any]] = (),
-        tables: Iterable[Mapping[str, Any]] = (),
-        table_rows: Iterable[Mapping[str, Any]] = (),
-        table_cells: Iterable[Mapping[str, Any]] = (),
-        figures: Iterable[Mapping[str, Any]] = (),
-    ) -> "SourceArtifactSet":
-        return cls(
-            documents=tuple(SourceDocument.from_record(item) for item in documents),
-            text_units=tuple(SourceTextUnit.from_record(item) for item in text_units),
-            blocks=tuple(SourceBlock.from_record(item) for item in blocks),
-            tables=tuple(SourceTable.from_record(item) for item in tables),
-            table_rows=tuple(SourceTableRow.from_record(item) for item in table_rows),
-            table_cells=tuple(
-                SourceTableCell.from_record(item) for item in table_cells
-            ),
-            figures=tuple(SourceFigure.from_record(item) for item in figures),
-        )
+    document_items = tuple(documents)
+    text_unit_items = tuple(text_units)
+    block_items = tuple(blocks)
+    table_items = tuple(tables)
+    table_row_items = tuple(table_rows)
+    table_cell_items = tuple(table_cells)
+    figure_items = tuple(figures)
+    document_ids = {document.document_id for document in document_items}
+    if len(document_ids) != len(document_items):
+        raise ValueError("source documents contain duplicate document ids")
 
-    def is_empty(self) -> bool:
-        return not any(
-            (
-                self.documents,
-                self.text_units,
-                self.blocks,
-                self.tables,
-                self.table_rows,
-                self.table_cells,
-                self.figures,
+    for text_unit in text_unit_items:
+        if not text_unit.document_ids:
+            raise ValueError(
+                f"source text unit has no owning document: {text_unit.text_unit_id}"
             )
+        unknown_ids = set(text_unit.document_ids) - document_ids
+        if unknown_ids:
+            raise ValueError(
+                "source text unit references unknown documents: "
+                f"{text_unit.text_unit_id} -> {sorted(unknown_ids)}"
+            )
+    for artifact_kind, artifact_items in (
+        ("block", block_items),
+        ("table", table_items),
+        ("table row", table_row_items),
+        ("table cell", table_cell_items),
+        ("figure", figure_items),
+    ):
+        for artifact in artifact_items:
+            if artifact.document_id not in document_ids:
+                raise ValueError(
+                    f"source {artifact_kind} references unknown document: "
+                    f"{artifact.document_id}"
+                )
+
+    return tuple(
+        replace(
+            document,
+            text_units=tuple(
+                item
+                for item in text_unit_items
+                if document.document_id in item.document_ids
+            ),
+            blocks=tuple(
+                item for item in block_items if item.document_id == document.document_id
+            ),
+            tables=tuple(
+                item for item in table_items if item.document_id == document.document_id
+            ),
+            table_rows=tuple(
+                item
+                for item in table_row_items
+                if item.document_id == document.document_id
+            ),
+            table_cells=tuple(
+                item
+                for item in table_cell_items
+                if item.document_id == document.document_id
+            ),
+            figures=tuple(
+                item
+                for item in figure_items
+                if item.document_id == document.document_id
+            ),
         )
+        for document in document_items
+    )
+
+
+def source_documents_from_records(
+    *,
+    documents: Iterable[Mapping[str, Any]] = (),
+    text_units: Iterable[Mapping[str, Any]] = (),
+    blocks: Iterable[Mapping[str, Any]] = (),
+    tables: Iterable[Mapping[str, Any]] = (),
+    table_rows: Iterable[Mapping[str, Any]] = (),
+    table_cells: Iterable[Mapping[str, Any]] = (),
+    figures: Iterable[Mapping[str, Any]] = (),
+) -> tuple[SourceDocument, ...]:
+    """Build document aggregates from the Source runtime's flat records."""
+
+    return assemble_source_documents(
+        documents=(SourceDocument.from_record(item) for item in documents),
+        text_units=(SourceTextUnit.from_record(item) for item in text_units),
+        blocks=(SourceBlock.from_record(item) for item in blocks),
+        tables=(SourceTable.from_record(item) for item in tables),
+        table_rows=(SourceTableRow.from_record(item) for item in table_rows),
+        table_cells=(SourceTableCell.from_record(item) for item in table_cells),
+        figures=(SourceFigure.from_record(item) for item in figures),
+    )
 
 
 @dataclass(frozen=True)
@@ -1606,12 +1701,12 @@ __all__ = [
     "SourceReferenceMention",
     "SourceReferenceResolution",
     "SourceReferenceSet",
-    "SourceArtifactSet",
     "SourceLayoutBlock",
     "SourceTable",
     "SourceTableCell",
     "SourceTableRow",
     "SourceTextUnit",
+    "assemble_source_documents",
     "build_figure_caption_blocks",
     "build_heading_blocks",
     "build_source_document_tree",
@@ -1627,5 +1722,6 @@ __all__ = [
     "resolve_heading_path_for_page",
     "resolve_heading_path_for_target",
     "safe_int",
+    "source_documents_from_records",
     "update_heading_stack",
 ]

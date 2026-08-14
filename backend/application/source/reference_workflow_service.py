@@ -34,10 +34,10 @@ class SourceReferenceWorkflowService:
         self,
         collection_id: str,
     ) -> SourceReferenceWorkflowResult:
-        artifacts = self.source_artifact_repository.read_collection_artifacts(
+        documents = self.source_artifact_repository.read_collection_documents(
             collection_id
         )
-        if not artifacts.documents:
+        if not documents:
             raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
         references = self.source_artifact_repository.read_collection_references(
             collection_id

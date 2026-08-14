@@ -8,7 +8,6 @@ from urllib.parse import quote
 from application.source.collection_service import CollectionService
 from domain.ports import SourceArtifactRepository
 from domain.source import (
-    SourceArtifactSet,
     SourceDocument,
     SourceDocumentNode,
     SourceDocumentTree,
@@ -89,8 +88,8 @@ class DocumentMarkdownService:
         document_id: str,
     ) -> dict[str, Any]:
         self.collection_service.get_collection(collection_id)
-        artifacts = self._load_source_artifacts(collection_id)
-        document = self._find_document(artifacts, collection_id, document_id)
+        documents = self._load_source_documents(collection_id)
+        document = self._find_document(documents, collection_id, document_id)
         document_tree = load_document_tree(
             collection_id,
             document_id,
@@ -102,8 +101,8 @@ class DocumentMarkdownService:
             collection_id=collection_id,
             document=document,
             document_tree=document_tree,
-            tables_by_id=self._document_tables_by_id(artifacts, document_id),
-            figures_by_id=self._document_figures_by_id(artifacts, document_id),
+            tables_by_id={table.table_id: table for table in document.tables},
+            figures_by_id={figure.figure_id: figure for figure in document.figures},
             display_title=display_names["title"],
         )
 
@@ -195,46 +194,26 @@ class DocumentMarkdownService:
             "media_type": media_type,
         }
 
-    def _load_source_artifacts(self, collection_id: str) -> SourceArtifactSet:
-        artifacts = self.source_artifact_repository.read_collection_artifacts(
+    def _load_source_documents(
+        self, collection_id: str
+    ) -> tuple[SourceDocument, ...]:
+        documents = self.source_artifact_repository.read_collection_documents(
             collection_id
         )
-        if not artifacts.documents:
+        if not documents:
             raise DocumentMarkdownNotReadyError(collection_id)
-        return artifacts
+        return documents
 
     def _find_document(
         self,
-        artifacts: SourceArtifactSet,
+        documents: tuple[SourceDocument, ...],
         collection_id: str,
         document_id: str,
     ) -> SourceDocument:
-        for document in artifacts.documents:
+        for document in documents:
             if str(document.document_id) == str(document_id):
                 return document
         raise SourceDocumentNotFoundError(collection_id, document_id)
-
-    def _document_tables_by_id(
-        self,
-        artifacts: SourceArtifactSet,
-        document_id: str,
-    ) -> dict[str, SourceTable]:
-        return {
-            table.table_id: table
-            for table in artifacts.tables
-            if str(table.document_id) == str(document_id)
-        }
-
-    def _document_figures_by_id(
-        self,
-        artifacts: SourceArtifactSet,
-        document_id: str,
-    ) -> dict[str, SourceFigure]:
-        return {
-            figure.figure_id: figure
-            for figure in artifacts.figures
-            if str(figure.document_id) == str(document_id)
-        }
 
     def _project_markdown_from_tree(
         self,

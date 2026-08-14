@@ -23,8 +23,9 @@ from domain.core.document_profile import DocumentProfile
 from domain.core.evidence_backbone import EvidenceAnchor, MeasurementResult
 from domain.core.paper_fact import PaperFactSet
 from domain.source import (
-    SourceArtifactSet,
+    SourceDocument,
     SourceReferenceSet,
+    assemble_source_documents,
     build_source_document_tree,
 )
 from infra.persistence.memory import MemoryBuildRepository
@@ -69,26 +70,26 @@ class DummyWorkflowOutput:
 
 class MemorySourceArtifactRepository:
     def __init__(self) -> None:
-        self._artifacts: dict[tuple[str, str], SourceArtifactSet] = {}
+        self._documents: dict[tuple[str, str], tuple[SourceDocument, ...]] = {}
         self._references: dict[tuple[str, str], SourceReferenceSet] = {}
 
-    def replace_collection_artifacts(
+    def replace_collection_documents(
         self,
         collection_id: str,
         build_id: str,
-        artifacts: SourceArtifactSet,
+        documents: tuple[SourceDocument, ...],
     ) -> None:
-        self._artifacts[(collection_id, build_id)] = artifacts
+        self._documents[(collection_id, build_id)] = documents
 
-    def read_collection_artifacts(
+    def read_collection_documents(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
-    ) -> SourceArtifactSet:
+    ) -> tuple[SourceDocument, ...]:
         if build_id is None:
-            return SourceArtifactSet()
-        return self._artifacts.get((collection_id, build_id), SourceArtifactSet())
+            return ()
+        return self._documents.get((collection_id, build_id), ())
 
     def replace_collection_references(
         self,
@@ -114,25 +115,19 @@ class MemorySourceArtifactRepository:
         document_id: str,
         build_id: str | None = None,
     ):
-        artifacts = self.read_collection_artifacts(
+        documents = self.read_collection_documents(
             collection_id,
             build_id=build_id,
         )
         document = next(
-            item for item in artifacts.documents if item.document_id == document_id
+            item for item in documents if item.document_id == document_id
         )
         return build_source_document_tree(
             collection_id=collection_id,
             document=document,
-            blocks=tuple(
-                item for item in artifacts.blocks if item.document_id == document_id
-            ),
-            tables=tuple(
-                item for item in artifacts.tables if item.document_id == document_id
-            ),
-            figures=tuple(
-                item for item in artifacts.figures if item.document_id == document_id
-            ),
+            blocks=document.blocks,
+            tables=document.tables,
+            figures=document.figures,
             references=self.read_collection_references(
                 collection_id,
                 build_id=build_id,

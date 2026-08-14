@@ -3,11 +3,19 @@ from __future__ import annotations
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
-from domain.source import SourceArtifactSet, SourceBlock
+from domain.source import SourceBlock, SourceDocument, assemble_source_documents
 
 
 def test_source_reference_extraction_builds_entries_mentions_and_candidates():
-    artifacts = SourceArtifactSet(
+    artifacts = assemble_source_documents(
+        documents=(
+            SourceDocument(
+                document_id="doc-1",
+                human_readable_id=0,
+                title="LPBF 316L Study",
+                text="",
+            ),
+        ),
         blocks=(
             SourceBlock(
                 block_id="blk-title",
@@ -95,7 +103,15 @@ def test_source_reference_extraction_builds_entries_mentions_and_candidates():
 
 
 def test_source_reference_extraction_ignores_reference_section_citation_markers():
-    artifacts = SourceArtifactSet(
+    artifacts = assemble_source_documents(
+        documents=(
+            SourceDocument(
+                document_id="doc-1",
+                human_readable_id=0,
+                title="Citation Study",
+                text="",
+            ),
+        ),
         blocks=(
             SourceBlock(
                 block_id="blk-body",

@@ -28,7 +28,6 @@ from domain.source import (
     CollectionDocumentRecord,
     DocumentRecord,
     DocumentVersionRecord,
-    SourceArtifactSet,
     SourceBlock,
     SourceDocument,
     SourceDocumentTree,
@@ -203,18 +202,18 @@ class ExperimentPlanRepository(Protocol):
 class SourceArtifactRepository(Protocol):
     backend_name: str
 
-    def replace_collection_artifacts(
+    def replace_collection_documents(
         self,
         collection_id: str,
         build_id: str,
-        artifacts: SourceArtifactSet,
+        documents: tuple[SourceDocument, ...],
     ) -> None: ...
 
-    def read_collection_artifacts(
+    def read_collection_documents(
         self,
         collection_id: str,
         build_id: str | None = None,
-    ) -> SourceArtifactSet: ...
+    ) -> tuple[SourceDocument, ...]: ...
 
     def read_document_tree(
         self,

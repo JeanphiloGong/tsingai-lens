@@ -14,7 +14,7 @@ from domain.core import (
     PaperStudyDispositionStatus,
     ResearchObjective,
 )
-from domain.source import SourceArtifactSet
+from domain.source import source_documents_from_records
 from tests.support.collection_service import build_test_collection_service
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.objective_extractor import (
@@ -179,10 +179,10 @@ def test_objective_analysis_uses_deterministic_frame_when_frame_model_fails(
         objective_extractor=extractor,
     )
     service.finding_synthesis_service.finding_extractor = extractor
-    service.source_artifact_repository.replace_collection_artifacts(
+    service.source_artifact_repository.replace_collection_documents(
         collection_id,
         "build_test",
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[
                 {
                     "id": "paper-1",
@@ -265,10 +265,10 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
         objective_extractor=_ObjectiveExtractor(),
     )
     service.finding_synthesis_service.finding_extractor = service._objective_extractor
-    service.source_artifact_repository.replace_collection_artifacts(
+    service.source_artifact_repository.replace_collection_documents(
         collection_id,
         "build_test",
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[
                 {
                     "id": "paper-1",
@@ -361,10 +361,10 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
         objective_extractor=extractor,
     )
     service.finding_synthesis_service.finding_extractor = extractor
-    service.source_artifact_repository.replace_collection_artifacts(
+    service.source_artifact_repository.replace_collection_documents(
         collection_id,
         "build_test",
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[
                 {
                     "id": "paper-1",
@@ -458,10 +458,10 @@ def test_queued_analysis_uses_its_source_build_objective_scope_after_rebuild(
         objective_repository=repository,
     )
     service.finding_synthesis_service.finding_extractor = extractor
-    service.source_artifact_repository.replace_collection_artifacts(
+    service.source_artifact_repository.replace_collection_documents(
         collection_id,
         "build_test",
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[
                 {
                     "id": "paper-1",

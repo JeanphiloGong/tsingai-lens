@@ -39,7 +39,7 @@ from domain.source import (
     CollectionFileRecord,
     CollectionImportDocumentRecord,
     CollectionImportRecord,
-    SourceArtifactSet,
+    source_documents_from_records,
 )
 from infra.source.ingestion.normalized_import import (
     NormalizedImportBatch,
@@ -400,9 +400,9 @@ def test_document_content_route_includes_source_locators(
     ) = document_services
     record = collection_service.create_collection(name="Document Locator Collection")
     collection_id = record["collection_id"]
-    document_profile_service.source_artifact_repository.replace_collection_artifacts(
+    document_profile_service.source_artifact_repository.replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[
                 {
                     "id": "paper-1",
@@ -479,9 +479,9 @@ def test_document_markdown_route_returns_markdown_projection(document_services):
     ) = document_services
     record = collection_service.create_collection(name="Markdown Route Collection")
     collection_id = record["collection_id"]
-    markdown_service.source_artifact_repository.replace_collection_artifacts(
+    markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[
                 {
                     "id": "paper-1",
@@ -845,9 +845,9 @@ def test_document_figure_image_route_streams_extracted_asset(document_services):
         content,
         asset_sha256,
     )
-    markdown_service.source_artifact_repository.replace_collection_artifacts(
+    markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -892,9 +892,9 @@ def test_document_figure_image_route_rejects_figure_from_other_document(
         name="Cross Document Figure Collection"
     )
     collection_id = record["collection_id"]
-    markdown_service.source_artifact_repository.replace_collection_artifacts(
+    markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[
                 {"id": "paper-1", "title": "Paper 1", "text": ""},
                 {"id": "paper-2", "title": "Paper 2", "text": ""},
@@ -942,9 +942,9 @@ def test_document_figure_image_route_rejects_path_outside_collection(
     collection_id = record["collection_id"]
     outside_path = tmp_path / "outside.png"
     outside_path.write_bytes(b"outside")
-    markdown_service.source_artifact_repository.replace_collection_artifacts(
+    markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -994,9 +994,9 @@ def test_document_figure_image_route_rejects_another_collections_object_key(
         content,
         digest,
     )
-    markdown_service.source_artifact_repository.replace_collection_artifacts(
+    markdown_service.source_artifact_repository.replace_collection_documents(
         first["collection_id"],
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -1052,9 +1052,9 @@ def test_document_figure_image_route_reports_unavailable_object_bytes(
         collection_service.object_store.delete(storage_key)
     else:
         (collection_service.root_dir / storage_key).write_bytes(b"corrupt")
-    markdown_service.source_artifact_repository.replace_collection_artifacts(
+    markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {

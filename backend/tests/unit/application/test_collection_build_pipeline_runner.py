@@ -253,7 +253,7 @@ def test_source_node_persists_figure_metadata_and_references_before_activation()
         ),
         artifact_registry_service=SimpleNamespace(),
         source_artifact_repository=SimpleNamespace(
-            replace_collection_artifacts=replace_artifacts,
+            replace_collection_documents=replace_artifacts,
             replace_collection_references=replace_references,
         ),
         document_profile_service=SimpleNamespace(),
@@ -264,8 +264,8 @@ def test_source_node_persists_figure_metadata_and_references_before_activation()
     result = asyncio.run(nodes.build_source_artifacts(context, build_config()))
 
     assert [call[0] for call in calls] == ["artifacts", "references"]
-    assert calls[0][3].figures[0].image_path.endswith(f"{digest}.png")
-    assert calls[0][3].figures[0].image_size_bytes == len(content)
+    assert calls[0][3][0].figures[0].image_path.endswith(f"{digest}.png")
+    assert calls[0][3][0].figures[0].image_size_bytes == len(content)
     assert len(calls[1][3].entries) == 1
     assert len(calls[1][3].mentions) == 1
     assert context.state["file_count"] == 1

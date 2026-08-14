@@ -14,6 +14,11 @@ PostgreSQL rows, writes extracted figure bytes through the existing object
 store, and persists figure metadata plus deterministic references under the
 same pending build before activation.
 
+`SourceArtifactBundle` is a parser interchange type backed by data frames. It
+is not a domain aggregate. Before persistence, the application converts each
+bundle into `SourceDocument` aggregates, with every block, table, row, cell,
+text unit, and figure attached to its owning document.
+
 Source does not extract scientific facts. It does not decide materials,
 samples, methods, measurements, baselines, comparisons, or report content.
 Those semantic decisions belong to Core and downstream layers.
@@ -55,7 +60,8 @@ comparison rows
 The final Source artifact family is:
 
 - `documents`
-  Document records, source metadata, full text, and text-unit ids.
+  Document records, source metadata, and full text. In the domain handoff each
+  document owns the parsed structures listed below.
 - `text_units`
   Text windows used by Core extraction and traceback.
 - `blocks`

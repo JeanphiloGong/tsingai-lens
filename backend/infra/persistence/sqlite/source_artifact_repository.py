@@ -10,7 +10,6 @@ from typing import Any
 
 from config import DATA_DIR
 from domain.source import (
-    SourceArtifactSet,
     SourceBlock,
     SourceDocument,
     SourceDocumentTree,
@@ -24,6 +23,7 @@ from domain.source import (
     SourceTableCell,
     SourceTableRow,
     SourceTextUnit,
+    assemble_source_documents,
     build_source_document_tree,
 )
 
@@ -37,23 +37,39 @@ class SqliteSourceArtifactRepository:
         self.db_path = Path(db_path or (DATA_DIR / "lens.sqlite")).resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def replace_collection_artifacts(
+    def replace_collection_documents(
         self,
         collection_id: str,
-        artifacts: SourceArtifactSet,
+        documents: tuple[SourceDocument, ...],
     ) -> None:
+        text_units = tuple(
+            {
+                item.text_unit_id: item
+                for document in documents
+                for item in document.text_units
+            }.values()
+        )
+        blocks = tuple(item for document in documents for item in document.blocks)
+        tables = tuple(item for document in documents for item in document.tables)
+        table_rows = tuple(
+            item for document in documents for item in document.table_rows
+        )
+        table_cells = tuple(
+            item for document in documents for item in document.table_cells
+        )
+        figures = tuple(item for document in documents for item in document.figures)
         self._ensure_schema()
         with self._connection() as connection:
             self._delete_collection_artifacts(connection, collection_id)
-            self._insert_documents(connection, collection_id, artifacts.documents)
-            self._insert_text_units(connection, collection_id, artifacts.text_units)
-            self._insert_text_unit_documents(connection, collection_id, artifacts)
-            self._insert_blocks(connection, collection_id, artifacts.blocks)
-            self._insert_block_text_units(connection, collection_id, artifacts.blocks)
-            self._insert_tables(connection, collection_id, artifacts.tables)
-            self._insert_table_rows(connection, collection_id, artifacts.table_rows)
-            self._insert_table_cells(connection, collection_id, artifacts.table_cells)
-            self._insert_figures(connection, collection_id, artifacts.figures)
+            self._insert_documents(connection, collection_id, documents)
+            self._insert_text_units(connection, collection_id, text_units)
+            self._insert_text_unit_documents(connection, collection_id, documents)
+            self._insert_blocks(connection, collection_id, blocks)
+            self._insert_block_text_units(connection, collection_id, blocks)
+            self._insert_tables(connection, collection_id, tables)
+            self._insert_table_rows(connection, collection_id, table_rows)
+            self._insert_table_cells(connection, collection_id, table_cells)
+            self._insert_figures(connection, collection_id, figures)
             connection.execute(
                 """
                 INSERT INTO source_artifact_builds (
@@ -66,8 +82,10 @@ class SqliteSourceArtifactRepository:
                 (collection_id, 1, "source-artifacts-v1", _now_iso()),
             )
 
-    def read_collection_artifacts(self, collection_id: str) -> SourceArtifactSet:
-        return SourceArtifactSet(
+    def read_collection_documents(
+        self, collection_id: str
+    ) -> tuple[SourceDocument, ...]:
+        return assemble_source_documents(
             documents=tuple(self.list_documents(collection_id)),
             text_units=tuple(self.list_text_units(collection_id)),
             blocks=tuple(self.list_blocks(collection_id)),
@@ -85,7 +103,7 @@ class SqliteSourceArtifactRepository:
         document = next(
             (
                 item
-                for item in self.list_documents(collection_id)
+                for item in self.read_collection_documents(collection_id)
                 if item.document_id == document_id
             ),
             None,
@@ -97,9 +115,9 @@ class SqliteSourceArtifactRepository:
         return build_source_document_tree(
             collection_id=collection_id,
             document=document,
-            blocks=self.list_blocks(collection_id, document_id),
-            tables=self.list_tables(collection_id, document_id),
-            figures=self.list_figures(collection_id, document_id),
+            blocks=document.blocks,
+            tables=document.tables,
+            figures=document.figures,
             references=self.read_collection_references(collection_id),
         )
 
@@ -902,16 +920,17 @@ class SqliteSourceArtifactRepository:
         self,
         connection: sqlite3.Connection,
         collection_id: str,
-        artifacts: SourceArtifactSet,
+        documents: tuple[SourceDocument, ...],
     ) -> None:
         links = {
             (text_unit.text_unit_id, document_id)
-            for text_unit in artifacts.text_units
+            for document in documents
+            for text_unit in document.text_units
             for document_id in text_unit.document_ids
         }
         links.update(
             (text_unit_id, document.document_id)
-            for document in artifacts.documents
+            for document in documents
             for text_unit_id in document.text_unit_ids
         )
         connection.executemany(

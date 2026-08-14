@@ -115,21 +115,36 @@ figure/table content are not dropped merely by position. Unusually long text
 and structured Source content are split into contiguous bounded pieces without
 truncating captions, headers, or row text. Each table-row unit repeats the full
 caption, heading path, and column headers needed to interpret that row.
-Cross-window reconciliation receives bounded excerpts for already extracted
-signals, but each signal retains its complete structured fields and exact Source
-locator. Before a reconciliation leaves the extractor, every relationship is
-checked against the input signals' material, process, sample, test, fixed,
+Cross-window reconciliation is outcome-centered. For each measured or predicted
+outcome, the backend selects variable signals that have no hard context conflict
+and share positive experiment evidence: an exact Source locator, nearby stable
+Source-unit position, explicit experiment label, or overlapping process, sample,
+test, fixed-condition, or comparator context. Shared material alone is not enough
+to propose a link. Candidate variables are packed with one repeated outcome anchor
+into batches of at most 12 signals, and the complete schema-bearing prompt is
+preflighted against a 12,288-token budget. Omitted signals remain outside that
+batch rather than becoming negative evidence. Model payloads receive bounded
+excerpts and stable Source-unit positions while exact Source locators remain
+backend-owned. The model decides only supported memberships and may explain
+rejected candidates. The backend derives unresolved records for omitted inputs,
+ignores an unresolved copy of an already linked signal, and permits only the
+single outcome anchor, never a variable, to support multiple valid study groups.
+Before a reconciliation leaves the extractor, every relationship
+is checked against the input signals' material, process, sample, test, fixed,
 experiment, comparator, design, and claim contexts. A conflict triggers one
 bounded repair with the conflicting relationship, signal IDs, and context fields.
 If the repaired response still contains a conflict, only that relationship is
 discarded: signals not retained by another valid relationship become unresolved,
-while valid relationships in the same response survive. The PaperSkim service
-repeats the same deterministic check as a final boundary guard and separates
-individually valid relationships into distinct PaperStudies when their contexts
-do not belong to one study. A broader reconciliation failure leaves all affected
-signals unresolved instead of removing them. Every emitted relationship and
-signal Source-unit ID must resolve to the exact batch input. The backend derives
-coverage from those validated references; an unreferenced unit becomes
+while valid relationships in the same response survive. Failed reconciliation
+batches do not erase successful sibling batches, and a relationship established
+in any batch overrides another batch's local unresolved decision. After all
+batches finish, the backend derives final paper-wide signal accounting. The
+PaperSkim service repeats the same deterministic check as a final boundary guard
+and separates individually valid relationships into distinct PaperStudies when
+their contexts do not belong to one study. A broader reconciliation failure
+leaves all affected signals unresolved instead of removing them. Every emitted
+relationship and signal Source-unit ID must resolve to the exact batch input.
+The backend derives coverage from those validated references; an unreferenced unit becomes
 `no_study_signal` without requiring the model to repeat a coverage object. A
 failed call, invalid reference, 4,096-token output termination, or explicit
 `output_saturated=true` result causes a multi-unit batch to split recursively.

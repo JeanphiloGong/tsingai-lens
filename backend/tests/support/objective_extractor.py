@@ -65,6 +65,12 @@ class FakeObjectiveExtractor:
     def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
         return 0
 
+    def estimate_paper_signal_reconciliation_prompt_tokens(
+        self,
+        payload: dict[str, Any],
+    ) -> int:
+        return 0
+
     def extract_document_profile(
         self,
         payload: dict[str, Any],

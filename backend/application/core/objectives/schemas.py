@@ -377,7 +377,8 @@ class StructuredUnresolvedPaperSignal(_StrictModel):
 
 class StructuredPaperSignalStudy(_StrictModel):
     relationships: list[StructuredPaperSignalRelationship] = Field(
-        min_length=1
+        min_length=1,
+        max_length=11,
     )
 
     @field_validator("relationships", mode="before")
@@ -387,9 +388,13 @@ class StructuredPaperSignalStudy(_StrictModel):
 
 
 class StructuredPaperSignalReconciliation(_StrictModel):
-    studies: list[StructuredPaperSignalStudy] = Field(default_factory=list)
+    studies: list[StructuredPaperSignalStudy] = Field(
+        default_factory=list,
+        max_length=1,
+    )
     unresolved_signals: list[StructuredUnresolvedPaperSignal] = Field(
-        default_factory=list
+        default_factory=list,
+        max_length=12,
     )
 
     @field_validator("studies", "unresolved_signals", mode="before")

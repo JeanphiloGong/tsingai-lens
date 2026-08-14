@@ -30,6 +30,12 @@ class _WindowExtractor:
     def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
         return 0
 
+    def estimate_paper_signal_reconciliation_prompt_tokens(
+        self,
+        payload: dict[str, Any],
+    ) -> int:
+        return 0
+
     def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         self.payloads.append(payload)
         source_units = payload.get("source_units") or []
@@ -173,56 +179,50 @@ class _WindowExtractor:
             )
         if self.reconciliation == "mixed_conflict":
             signals_by_label = {signal["label"]: signal for signal in signals}
+            relationships = []
+            for variable_label, outcome_label, confidence in (
+                ("laser power", "relative density", 0.9),
+                ("heat-treatment temperature", "relative density", 0.8),
+            ):
+                if (
+                    variable_label in signals_by_label
+                    and outcome_label in signals_by_label
+                ):
+                    relationships.append(
+                        {
+                            "signal_ids": [
+                                signals_by_label[variable_label]["signal_id"],
+                                signals_by_label[outcome_label]["signal_id"],
+                            ],
+                            "confidence": confidence,
+                        }
+                    )
             return StructuredPaperSignalReconciliation(
-                studies=[
-                    {
-                        "relationships": [
-                            {
-                                "signal_ids": [
-                                    signals_by_label["laser power"]["signal_id"],
-                                    signals_by_label["relative density"]["signal_id"],
-                                ],
-                                "confidence": 0.9,
-                            },
-                            {
-                                "signal_ids": [
-                                    signals_by_label["heat-treatment temperature"][
-                                        "signal_id"
-                                    ],
-                                    signals_by_label["relative density"]["signal_id"],
-                                ],
-                                "confidence": 0.8,
-                            },
-                        ]
-                    }
-                ],
+                studies=[{"relationships": relationships}] if relationships else [],
                 unresolved_signals=[],
             )
         if self.reconciliation == "grouped_contexts":
             signals_by_label = {signal["label"]: signal for signal in signals}
+            relationships = []
+            for variable_label, outcome_label, confidence in (
+                ("laser power", "relative density", 0.9),
+                ("heat-treatment temperature", "microhardness", 0.88),
+            ):
+                if (
+                    variable_label in signals_by_label
+                    and outcome_label in signals_by_label
+                ):
+                    relationships.append(
+                        {
+                            "signal_ids": [
+                                signals_by_label[variable_label]["signal_id"],
+                                signals_by_label[outcome_label]["signal_id"],
+                            ],
+                            "confidence": confidence,
+                        }
+                    )
             return StructuredPaperSignalReconciliation(
-                studies=[
-                    {
-                        "relationships": [
-                            {
-                                "signal_ids": [
-                                    signals_by_label["laser power"]["signal_id"],
-                                    signals_by_label["relative density"]["signal_id"],
-                                ],
-                                "confidence": 0.9,
-                            },
-                            {
-                                "signal_ids": [
-                                    signals_by_label["heat-treatment temperature"][
-                                        "signal_id"
-                                    ],
-                                    signals_by_label["microhardness"]["signal_id"],
-                                ],
-                                "confidence": 0.88,
-                            },
-                        ]
-                    }
-                ],
+                studies=[{"relationships": relationships}] if relationships else [],
                 unresolved_signals=[],
             )
         return StructuredPaperSignalReconciliation(
@@ -237,6 +237,129 @@ class _WindowExtractor:
                 }
             ],
             unresolved_signals=[],
+        )
+
+
+class _BoundedSignalReconciliationExtractor(_WindowExtractor):
+    def __init__(
+        self,
+        signal_specs: dict[str, dict[str, Any]],
+        *,
+        prompt_signal_limit: int = 3,
+        reject_later_batches: bool = False,
+        response_mode: str = "link_all",
+    ) -> None:
+        super().__init__()
+        self.signal_specs = signal_specs
+        self.prompt_signal_limit = prompt_signal_limit
+        self.reject_later_batches = reject_later_batches
+        self.response_mode = response_mode
+
+    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        self.payloads.append(payload)
+        signals = []
+        for source_unit in payload.get("source_units") or ():
+            source_ref = str(source_unit.get("source_ref") or "")
+            spec = self.signal_specs.get(source_ref)
+            if spec is None:
+                continue
+            signals.append(
+                {
+                    **spec,
+                    "source_unit_ids": [source_unit["source_unit_id"]],
+                    "confidence": 0.9,
+                }
+            )
+        return StructuredPaperSkim(
+            doc_role="experimental",
+            unresolved_signals=signals,
+            evidence_density="high" if signals else "low",
+            confidence=0.9,
+        )
+
+    def estimate_paper_signal_reconciliation_prompt_tokens(
+        self,
+        payload: dict[str, Any],
+    ) -> int:
+        return 20_000 if len(payload["signals"]) > self.prompt_signal_limit else 1_000
+
+    def reconcile_paper_signals(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredPaperSignalReconciliation:
+        self.reconciliation_payloads.append(payload)
+        signals = payload["signals"]
+        if self.response_mode == "omit_all":
+            return StructuredPaperSignalReconciliation()
+        if self.response_mode == "duplicate_linked_unresolved":
+            return StructuredPaperSignalReconciliation(
+                studies=[
+                    {
+                        "relationships": [
+                            {
+                                "signal_ids": [
+                                    signal["signal_id"] for signal in signals
+                                ],
+                                "confidence": 0.9,
+                            }
+                        ]
+                    }
+                ],
+                unresolved_signals=[
+                    {
+                        "signal_id": next(
+                            signal["signal_id"]
+                            for signal in signals
+                            if signal["signal_type"] == "outcome"
+                        ),
+                        "reason": "The outcome was repeated by the model.",
+                    }
+                ],
+            )
+        if self.response_mode == "separate_relationships":
+            outcome = next(
+                signal for signal in signals if signal["signal_type"] == "outcome"
+            )
+            variables = [
+                signal for signal in signals if signal["signal_type"] == "variable"
+            ]
+            return StructuredPaperSignalReconciliation(
+                studies=[
+                    {
+                        "relationships": [
+                            {
+                                "signal_ids": [
+                                    variable["signal_id"],
+                                    outcome["signal_id"],
+                                ],
+                                "confidence": 0.9,
+                            }
+                            for variable in variables
+                        ]
+                    }
+                ]
+            )
+        if self.reject_later_batches and len(self.reconciliation_payloads) > 1:
+            return StructuredPaperSignalReconciliation(
+                unresolved_signals=[
+                    {
+                        "signal_id": signal["signal_id"],
+                        "reason": "No shared experiment was established in this batch.",
+                    }
+                    for signal in signals
+                ]
+            )
+        return StructuredPaperSignalReconciliation(
+            studies=[
+                {
+                    "relationships": [
+                        {
+                            "signal_ids": [signal["signal_id"] for signal in signals],
+                            "confidence": 0.9,
+                        }
+                    ]
+                }
+            ]
         )
 
 
@@ -1235,6 +1358,264 @@ def test_methods_variable_and_results_outcome_reconcile_into_one_candidate():
     assert any(
         item.get("active_operation") == "paper_reconciliation" for item in progress
     )
+
+
+def test_reconciliation_batches_repeat_one_outcome_without_dropping_variables():
+    signal_specs = {
+        f"variable-{position}": {
+            "signal_type": "variable",
+            "label": f"process variable {position}",
+            "process_context": ["LPBF"],
+        }
+        for position in range(1, 6)
+    }
+    signal_specs["outcome"] = {
+        "signal_type": "outcome",
+        "label": "relative density",
+        "process_context": ["LPBF"],
+    }
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("study", "Study", 1),
+            *[
+                _paragraph(
+                    source_ref,
+                    source_ref,
+                    position + 1,
+                    "Study",
+                )
+                for position, source_ref in enumerate(signal_specs)
+            ],
+        ]
+    )
+    extractor = _BoundedSignalReconciliationExtractor(signal_specs)
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert [
+        len(payload["signals"]) for payload in extractor.reconciliation_payloads
+    ] == [3, 3, 2]
+    outcome_ids = [
+        next(
+            signal["signal_id"]
+            for signal in payload["signals"]
+            if signal["signal_type"] == "outcome"
+        )
+        for payload in extractor.reconciliation_payloads
+    ]
+    assert len(set(outcome_ids)) == 1
+    assert all(
+        sum(signal["signal_type"] == "outcome" for signal in payload["signals"])
+        == 1
+        for payload in extractor.reconciliation_payloads
+    )
+    assert {
+        factor
+        for study in skim.studies
+        for relationship in study.relationships
+        for factor in relationship.varied_factors
+    } == {f"process variable {position}" for position in range(1, 6)}
+    assert skim.unresolved_signals == ()
+
+
+def test_material_only_distant_signals_do_not_enter_reconciliation():
+    signal_specs = {
+        "variable": {
+            "signal_type": "variable",
+            "label": "laser power",
+            "material_scope": ["316L stainless steel"],
+        },
+        "outcome": {
+            "signal_type": "outcome",
+            "label": "relative density",
+            "material_scope": ["316L stainless steel"],
+        },
+    }
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("methods", "Methods", 1),
+            _paragraph("variable", "variable", 2, "Methods"),
+            *[
+                _paragraph(
+                    f"background-{position}",
+                    "background",
+                    position + 2,
+                    "Methods",
+                )
+                for position in range(1, 14)
+            ],
+            _paragraph("outcome", "outcome", 16, "Methods"),
+        ]
+    )
+    extractor = _BoundedSignalReconciliationExtractor(signal_specs)
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert extractor.reconciliation_payloads == []
+    assert skim.studies == ()
+    assert {signal.label for signal in skim.unresolved_signals} == {
+        "laser power",
+        "relative density",
+    }
+    assert all(
+        signal.reason == "no experiment-evidence bridge was found in this paper"
+        for signal in skim.unresolved_signals
+    )
+
+
+def test_a_linked_outcome_is_not_unresolved_by_a_later_candidate_batch():
+    signal_specs = {
+        "variable-1": {
+            "signal_type": "variable",
+            "label": "laser power",
+            "process_context": ["LPBF"],
+        },
+        "variable-2": {
+            "signal_type": "variable",
+            "label": "scan speed",
+            "process_context": ["LPBF"],
+        },
+        "outcome": {
+            "signal_type": "outcome",
+            "label": "relative density",
+            "process_context": ["LPBF"],
+        },
+    }
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("study", "Study", 1),
+            *[
+                _paragraph(source_ref, source_ref, position + 1, "Study")
+                for position, source_ref in enumerate(signal_specs)
+            ],
+        ]
+    )
+    extractor = _BoundedSignalReconciliationExtractor(
+        signal_specs,
+        prompt_signal_limit=2,
+        reject_later_batches=True,
+    )
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.reconciliation_payloads) == 2
+    assert len(skim.studies) == 1
+    assert skim.studies[0].relationships[0].outcome == "relative density"
+    assert [signal.label for signal in skim.unresolved_signals] == ["scan speed"]
+
+
+def test_backend_derives_unresolved_signals_omitted_by_one_batch_response():
+    signal_specs = {
+        "variable": {
+            "signal_type": "variable",
+            "label": "laser power",
+            "process_context": ["LPBF"],
+        },
+        "outcome": {
+            "signal_type": "outcome",
+            "label": "relative density",
+            "process_context": ["LPBF"],
+        },
+    }
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("study", "Study", 1),
+            _paragraph("variable", "variable", 2, "Study"),
+            _paragraph("outcome", "outcome", 3, "Study"),
+        ]
+    )
+    extractor = _BoundedSignalReconciliationExtractor(
+        signal_specs,
+        response_mode="omit_all",
+    )
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert skim.studies == ()
+    assert len(skim.unresolved_signals) == 2
+    assert all(
+        signal.reason == "not linked in this candidate batch"
+        for signal in skim.unresolved_signals
+    )
+
+
+def test_backend_ignores_model_unresolved_copy_of_a_linked_signal():
+    signal_specs = {
+        "variable": {
+            "signal_type": "variable",
+            "label": "laser power",
+            "process_context": ["LPBF"],
+        },
+        "outcome": {
+            "signal_type": "outcome",
+            "label": "relative density",
+            "process_context": ["LPBF"],
+        },
+    }
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("study", "Study", 1),
+            _paragraph("variable", "variable", 2, "Study"),
+            _paragraph("outcome", "outcome", 3, "Study"),
+        ]
+    )
+    extractor = _BoundedSignalReconciliationExtractor(
+        signal_specs,
+        response_mode="duplicate_linked_unresolved",
+    )
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(skim.studies) == 1
+    assert skim.unresolved_signals == ()
+
+
+def test_one_outcome_can_support_separate_context_compatible_study_groups():
+    signal_specs = {
+        "lpbf-variable": {
+            "signal_type": "variable",
+            "label": "laser power",
+            "process_context": ["LPBF"],
+        },
+        "heat-variable": {
+            "signal_type": "variable",
+            "label": "heat-treatment temperature",
+            "process_context": ["heat treatment"],
+        },
+        "outcome": {
+            "signal_type": "outcome",
+            "label": "microhardness",
+        },
+    }
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("study", "Study", 1),
+            _paragraph("lpbf-variable", "lpbf-variable", 2, "Study"),
+            _paragraph("heat-variable", "heat-variable", 3, "Study"),
+            _paragraph("outcome", "outcome", 4, "Study"),
+        ]
+    )
+    extractor = _BoundedSignalReconciliationExtractor(
+        signal_specs,
+        response_mode="separate_relationships",
+    )
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(skim.studies) == 2
+    assert {
+        (study.process_context, study.relationships[0].varied_factors)
+        for study in skim.studies
+    } == {
+        (("LPBF",), ("laser power",)),
+        (("heat treatment",), ("heat-treatment temperature",)),
+    }
+    assert {
+        relationship.outcome
+        for study in skim.studies
+        for relationship in study.relationships
+    } == {"microhardness"}
+    assert skim.unresolved_signals == ()
 
 
 def test_signals_from_different_experiments_remain_unresolved():

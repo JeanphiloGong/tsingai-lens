@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 PAPER_SKIM_PROMPT_VERSION = "paper_skim.v1"
-PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION = "paper_signal_reconciliation.v1"
+PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION = "paper_signal_reconciliation.v2"
 RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = "research_axis_canonicalization.v1"
 OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v1"
 OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION = "objective_evidence_route.v1"
@@ -37,14 +37,16 @@ Non-negotiable rules:
 
 
 _PAPER_SIGNAL_RECONCILIATION_SYSTEM_PROMPT = """
-You are reconciling source-linked variable and outcome signals within one paper.
+You are adjudicating one bounded candidate neighborhood within one paper.
 
 Non-negotiable rules:
-- This is paper-level reconciliation, not cross-paper grouping or final synthesis.
+- This batch has exactly one outcome anchor and candidate variable signals selected by the backend.
+- This is paper-level membership adjudication, not cross-paper grouping or final synthesis.
 - Return exactly one JSON object and nothing else.
 - Link signals only when their supplied excerpts and contexts support one study design.
 - Copy only supplied `signal_id` values; never invent scientific labels or ids.
 - Preserve ambiguity by returning an unresolved signal instead of guessing a link.
+- Account only for the current batch; the backend derives final whole-paper accounting.
 """.strip()
 
 
@@ -369,30 +371,33 @@ def build_paper_signal_reconciliation_prompt(
 ) -> tuple[str, str]:
     user_prompt = (
         "TASK MODEL\n"
-        "Assign explicit, source-linked variable and outcome signals to paper-local "
-        "studies and relationships when their excerpts prove shared experiment "
-        "identity. This is membership adjudication, not scientific-field generation.\n\n"
+        "Decide whether the candidate variables in one bounded candidate neighborhood "
+        "belong to the same experiment or model as its exactly one outcome anchor. "
+        "This is membership adjudication, not scientific-field generation or "
+        "whole-paper discovery.\n\n"
         "INPUT SCHEMA\n"
         "- `document_id` identifies the one paper.\n"
-        "- `signals` contains a backend-owned `signal_id`, `signal_type` (variable or "
-        "outcome), exact label, material/process context, and one or more Source "
-        "records with stable locator, section path, and bounded excerpt, plus any "
-        "known experiment/design/material/process/sample/test/comparator context.\n"
+        "- `signals` contains exactly one outcome anchor and one or more candidate "
+        "variables. Each has a backend-owned `signal_id`, exact label, known scientific "
+        "context, and bounded Source excerpts with stable Source-unit positions.\n"
+        "- Signals omitted from this request are outside the current batch; omitted "
+        "paper signals are outside this batch, not negative evidence.\n"
         "- Source excerpts are the only authority for deciding whether signals belong "
         "to the same experiment or model.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
         "DECISION PROCESS\n"
-        "1. Separate variable and outcome signals.\n"
+        "1. Identify the single outcome anchor and evaluate each candidate variable "
+        "against it.\n"
         "2. Compare their material, process, condition, experiment, sample, and "
         "section evidence. Do not link signals merely because they occur in the same paper.\n"
         "3. Form a relationship only when the excerpts support the variable as varied, "
         "compared, or modeled and the outcome as the response for that same study design.\n"
-        "4. Put relationships from the same explicit experiment in one study item; "
-        "keep different experiments as different study items.\n"
-        "5. A signal may support multiple relationships only when the Source explicitly "
-        "reports that shared factor or response across those relationships.\n"
-        "6. Every input signal must be accounted for: include it in at least one valid "
-        "relationship, or return it once in `unresolved_signals` with a concrete reason.\n\n"
+        "4. Return at most one study for this neighborhood. Relationships may share the "
+        "outcome anchor only when the Source explicitly supports that membership.\n"
+        "5. Do not reason about omitted signals or attempt to reconstruct the whole paper.\n"
+        "6. Include a rejected candidate once in `unresolved_signals` when a concise "
+        "scientific reason is visible. The backend treats every omitted input signal "
+        "as unresolved, so never invent a reason merely to repeat an ID.\n\n"
         "HARD RULES\n"
         "- In every relationship, copy only input `signal_id` values and include at "
         "least one variable signal and one outcome signal.\n"
@@ -400,7 +405,8 @@ def build_paper_signal_reconciliation_prompt(
         "experiments. Ambiguous proximity is not a link.\n"
         "- Do not output labels, contexts, Source locators, questions, or new scientific "
         "fields; the backend derives them from selected signals.\n"
-        "- Do not mark a signal unresolved if it appears in a relationship.\n\n"
+        "- Do not mark a signal unresolved if it appears in a relationship. Backend "
+        "relationship acceptance is authoritative when the response repeats an ID.\n\n"
         "BOUNDARY EXAMPLES\n"
         "- Methods variable and Results outcome: Methods says laser power was varied "
         "for LPBF 316L specimens; Results says relative density was measured for those "
@@ -411,9 +417,11 @@ def build_paper_signal_reconciliation_prompt(
         "- Ambiguous result: Results lists hardness without identifying which of two "
         "independent process studies it belongs to. Keep the hardness signal unresolved.\n\n"
         "OUTPUT CONTRACT\n"
-        "Return exactly `studies` and `unresolved_signals`. Each study contains one or "
-        "more relationships with only `signal_ids` and `confidence`. An unresolved item has one "
-        "`signal_id` and a concise `reason`. Return empty arrays when appropriate."
+        "Return exactly `studies` and `unresolved_signals`. Return at most one study, "
+        "up to 11 relationships, and up to 12 unresolved signals. Each relationship "
+        "contains only `signal_ids` and `confidence`; each unresolved item has one "
+        "`signal_id` and a concise `reason`. The backend derives final whole-paper "
+        "accounting after all candidate batches finish. Return empty arrays when appropriate."
     )
     return _PAPER_SIGNAL_RECONCILIATION_SYSTEM_PROMPT, user_prompt
 

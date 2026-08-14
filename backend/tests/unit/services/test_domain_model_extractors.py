@@ -111,6 +111,16 @@ def test_paper_signal_reconciliation_contract_requires_source_signal_ids():
         )
 
 
+def test_paper_signal_reconciliation_contract_is_bounded_to_one_neighborhood():
+    model_schema = StructuredPaperSignalReconciliation.model_json_schema()
+    response_schema = model_schema["properties"]
+    study_schema = model_schema["$defs"]["StructuredPaperSignalStudy"]["properties"]
+
+    assert response_schema["studies"]["maxItems"] == 1
+    assert response_schema["unresolved_signals"]["maxItems"] == 12
+    assert study_schema["relationships"]["maxItems"] == 11
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -204,7 +214,7 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
     assert "surface hardness and hardness" in user_prompt
 
 
-def test_paper_signal_reconciliation_prompt_requires_complete_accounting():
+def test_paper_signal_reconciliation_prompt_defines_backend_owned_accounting():
     _, user_prompt = build_paper_signal_reconciliation_prompt(
         {
             "document_id": "paper-1",
@@ -240,8 +250,13 @@ def test_paper_signal_reconciliation_prompt_requires_complete_accounting():
     )
 
     assert "membership adjudication" in user_prompt
+    assert "one bounded candidate neighborhood" in user_prompt
+    assert "exactly one outcome anchor" in user_prompt
+    assert "omitted paper signals are outside this batch" in user_prompt
+    assert "backend derives final whole-paper accounting" in user_prompt
     assert "Do not link signals merely because they occur in the same paper" in user_prompt
-    assert "Every input signal must be accounted for" in user_prompt
+    assert "backend treats every omitted input signal as unresolved" in user_prompt
+    assert "never invent a reason merely to repeat an ID" in user_prompt
     assert "copy only input `signal_id` values" in user_prompt
     assert "Methods variable and Results outcome" in user_prompt
     assert "different experiments" in user_prompt.lower()
@@ -531,6 +546,52 @@ def test_paper_skim_prompt_token_estimate_counts_complete_schema_prompt():
     estimated_tokens = extractor.estimate_paper_skim_prompt_tokens(payload)
 
     assert estimated_tokens > 1_000
+    assert client.beta.chat.completions.calls == []
+    assert client.chat.completions.calls == []
+
+
+def test_signal_reconciliation_prompt_token_estimate_counts_complete_schema_prompt():
+    client = _FakeOpenAIClient("unused")
+    extractor = ObjectiveExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="provider_parse",
+    )
+    payload = {
+        "document_id": "paper-1",
+        "signals": [
+            {
+                "signal_id": "signal-variable",
+                "signal_type": "variable",
+                "label": "laser power",
+                "sources": [
+                    {
+                        "source_unit_id": "source-unit-000001",
+                        "section_path": "Methods",
+                        "excerpt": "Laser power was varied from 150 to 250 W.",
+                    }
+                ],
+            },
+            {
+                "signal_id": "signal-outcome",
+                "signal_type": "outcome",
+                "label": "relative density",
+                "sources": [
+                    {
+                        "source_unit_id": "source-unit-000010",
+                        "section_path": "Results",
+                        "excerpt": "Relative density was measured for each condition.",
+                    }
+                ],
+            },
+        ],
+    }
+
+    estimated_tokens = extractor.estimate_paper_signal_reconciliation_prompt_tokens(
+        payload
+    )
+
+    assert estimated_tokens > 500
     assert client.beta.chat.completions.calls == []
     assert client.chat.completions.calls == []
 

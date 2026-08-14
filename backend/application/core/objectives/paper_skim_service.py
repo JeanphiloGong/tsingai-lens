@@ -9,6 +9,7 @@ from typing import Any
 from application.core.objectives import property_matching
 from application.core.objectives.extraction import (
     ObjectiveExtractor,
+    PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT,
     PAPER_SKIM_PROMPT_TOKEN_LIMIT,
     PaperSkimOutputSaturatedError,
 )
@@ -44,6 +45,8 @@ _SKIM_ROLE_BY_SEMANTIC_ROLE = {
     "conclusion": "conclusion",
 }
 _EVIDENCE_DENSITY_RANK = {"unknown": 0, "low": 1, "medium": 2, "high": 3}
+_SIGNAL_RECONCILIATION_SIGNAL_LIMIT = 12
+_SIGNAL_RECONCILIATION_NEARBY_SOURCE_UNIT_DISTANCE = 12
 
 
 @dataclass(frozen=True)
@@ -75,9 +78,21 @@ class _PaperSignalInput:
     source_contexts: tuple[dict[str, Any], ...]
 
     def to_payload(self) -> dict[str, Any]:
+        signal_record = self.signal.to_record()
         return {
-            **self.signal.to_record(),
-            "sources": [dict(source) for source in self.source_contexts],
+            **{
+                key: value
+                for key, value in signal_record.items()
+                if key not in {"source_refs", "reason"}
+            },
+            "sources": [
+                {
+                    "source_unit_id": source.get("source_unit_id"),
+                    "section_path": source.get("section_path"),
+                    "excerpt": source.get("excerpt"),
+                }
+                for source in self.source_contexts
+            ],
         }
 
 
@@ -1112,6 +1127,7 @@ class PaperSkimService:
             signal=domain_signal,
             source_contexts=tuple(
                 {
+                    "source_unit_id": str(unit.get("source_unit_id") or ""),
                     "source_kind": str(unit.get("source_kind") or ""),
                     "source_ref": str(unit.get("source_ref") or ""),
                     "section_path": str(unit.get("section_path") or ""),
@@ -1174,6 +1190,23 @@ class PaperSkimService:
                 ),
             )
 
+        batches = self._build_signal_reconciliation_batches(
+            paper_skim.document_id,
+            unique_inputs,
+            extractor=extractor,
+        )
+        if not batches:
+            return replace(
+                paper_skim,
+                unresolved_signals=tuple(
+                    replace(
+                        item.signal,
+                        reason="no experiment-evidence bridge was found in this paper",
+                    )
+                    for item in unique_inputs
+                ),
+            )
+
         self._notify_progress(
             progress_callback,
             phase="objective_paper_skim_started",
@@ -1186,39 +1219,268 @@ class PaperSkimService:
             active_source_filename=source_filename,
             active_operation="paper_reconciliation",
         )
-        try:
-            parsed = extractor.reconcile_paper_signals(
-                {
-                    "document_id": paper_skim.document_id,
-                    "signals": [item.to_payload() for item in unique_inputs],
-                }
+        reconciled_studies: list[PaperStudy] = []
+        linked_signal_ids: set[str] = set()
+        unresolved_reasons: dict[str, str] = {}
+        for batch_position, batch in enumerate(batches, start=1):
+            batch_studies, batch_unresolved = self._reconcile_signal_batch(
+                batch,
+                extractor=extractor,
+                document_id=paper_skim.document_id,
+                batch_position=batch_position,
+                batch_count=len(batches),
             )
-            reconciled_studies, unresolved_signals = (
-                self._validate_signal_reconciliation(
-                    parsed,
-                    unique_inputs,
-                    document_id=paper_skim.document_id,
+            reconciled_studies.extend(batch_studies)
+            batch_unresolved_ids = {
+                signal.signal_id for signal in batch_unresolved
+            }
+            linked_signal_ids.update(
+                item.signal.signal_id
+                for item in batch
+                if item.signal.signal_id not in batch_unresolved_ids
+            )
+            for signal in batch_unresolved:
+                reason = signal.reason or "paper signal reconciliation failed"
+                current_reason = unresolved_reasons.get(signal.signal_id)
+                if current_reason is None or current_reason == (
+                    "paper signal reconciliation failed"
+                ):
+                    unresolved_reasons[signal.signal_id] = reason
+
+        unresolved_signals: list[PaperStudySignal] = []
+        for item in unique_inputs:
+            signal_id = item.signal.signal_id
+            if signal_id in linked_signal_ids:
+                continue
+            reason = unresolved_reasons.get(signal_id)
+            if reason is None:
+                opposite_signals = (
+                    other.signal
+                    for other in unique_inputs
+                    if other.signal.signal_type != item.signal.signal_type
                 )
-            )
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Paper study signal reconciliation failed; retaining unresolved signals document_id=%s",
-                paper_skim.document_id,
-                exc_info=True,
-            )
-            reconciled_studies = ()
-            unresolved_signals = tuple(
-                replace(item.signal, reason="paper signal reconciliation failed")
-                for item in unique_inputs
-            )
+                conflicting_fields = self._unique_text_values(
+                    field
+                    for opposite in opposite_signals
+                    for field in property_matching.paper_signal_context_conflicts(
+                        (item.signal.to_record(), opposite.to_record())
+                    )
+                )
+                reason = (
+                    "Conflicting reconciliation context: "
+                    f"{', '.join(conflicting_fields)}."
+                    if conflicting_fields
+                    else "no experiment-evidence bridge was found in this paper"
+                )
+            unresolved_signals.append(replace(item.signal, reason=reason))
+
         return replace(
             paper_skim,
             studies=self._consolidate_studies(
                 (*paper_skim.studies, *reconciled_studies),
                 document_id=paper_skim.document_id,
             ),
-            unresolved_signals=unresolved_signals,
+            unresolved_signals=tuple(unresolved_signals),
         )
+
+    @staticmethod
+    def _signal_inputs_share_experiment_evidence(
+        left: _PaperSignalInput,
+        right: _PaperSignalInput,
+    ) -> bool:
+        if property_matching.paper_signal_context_conflicts(
+            (left.signal.to_record(), right.signal.to_record())
+        ):
+            return False
+
+        left_source_keys = {
+            (source.source_kind, source.source_ref)
+            for source in left.signal.source_refs
+        }
+        right_source_keys = {
+            (source.source_kind, source.source_ref)
+            for source in right.signal.source_refs
+        }
+        if left_source_keys & right_source_keys:
+            return True
+
+        def source_positions(item: _PaperSignalInput) -> tuple[int, ...]:
+            positions: list[int] = []
+            for source in item.source_contexts:
+                source_unit_id = str(source.get("source_unit_id") or "")
+                position = source_unit_id.rsplit("-", maxsplit=1)[-1]
+                if position.isdigit():
+                    positions.append(int(position))
+            return tuple(positions)
+
+        left_positions = source_positions(left)
+        right_positions = source_positions(right)
+        if any(
+            abs(left_position - right_position)
+            <= _SIGNAL_RECONCILIATION_NEARBY_SOURCE_UNIT_DISTANCE
+            for left_position in left_positions
+            for right_position in right_positions
+        ):
+            return True
+
+        placeholder_experiment_labels = {
+            "n a",
+            "none",
+            "not reported",
+            "not specified",
+            "unknown",
+            "uncertain",
+        }
+        left_experiment = property_matching.axis_key(left.signal.experiment_label)
+        right_experiment = property_matching.axis_key(right.signal.experiment_label)
+        if (
+            left_experiment
+            and right_experiment
+            and left_experiment not in placeholder_experiment_labels
+            and right_experiment not in placeholder_experiment_labels
+            and property_matching.axis_values_match(
+                left_experiment,
+                right_experiment,
+            )
+        ):
+            return True
+
+        for field_name in (
+            "process_context",
+            "sample_context",
+            "test_context",
+            "fixed_conditions",
+        ):
+            if any(
+                property_matching.axis_values_match(left_value, right_value)
+                for left_value in getattr(left.signal, field_name)
+                for right_value in getattr(right.signal, field_name)
+            ):
+                return True
+        return bool(
+            left.signal.comparator
+            and right.signal.comparator
+            and property_matching.axis_values_match(
+                left.signal.comparator,
+                right.signal.comparator,
+            )
+        )
+
+    def _build_signal_reconciliation_batches(
+        self,
+        document_id: str,
+        signal_inputs: tuple[_PaperSignalInput, ...],
+        *,
+        extractor: ObjectiveExtractor,
+    ) -> tuple[tuple[_PaperSignalInput, ...], ...]:
+        variables = tuple(
+            item for item in signal_inputs if item.signal.signal_type == "variable"
+        )
+        outcomes = tuple(
+            item for item in signal_inputs if item.signal.signal_type == "outcome"
+        )
+        batches: list[tuple[_PaperSignalInput, ...]] = []
+        for outcome in outcomes:
+            candidates = tuple(
+                variable
+                for variable in variables
+                if self._signal_inputs_share_experiment_evidence(variable, outcome)
+            )
+            current_variables: list[_PaperSignalInput] = []
+            for variable in candidates:
+                candidate = (outcome, *current_variables, variable)
+                payload = {
+                    "document_id": document_id,
+                    "signals": [item.to_payload() for item in candidate],
+                }
+                prompt_tokens = (
+                    extractor.estimate_paper_signal_reconciliation_prompt_tokens(
+                        payload
+                    )
+                )
+                if (
+                    len(candidate) <= _SIGNAL_RECONCILIATION_SIGNAL_LIMIT
+                    and prompt_tokens
+                    <= PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT
+                ):
+                    current_variables.append(variable)
+                    continue
+                if current_variables:
+                    batches.append((outcome, *current_variables))
+                    current_variables = []
+
+                pair = (outcome, variable)
+                pair_payload = {
+                    "document_id": document_id,
+                    "signals": [item.to_payload() for item in pair],
+                }
+                pair_prompt_tokens = (
+                    extractor.estimate_paper_signal_reconciliation_prompt_tokens(
+                        pair_payload
+                    )
+                )
+                if (
+                    pair_prompt_tokens
+                    <= PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT
+                ):
+                    current_variables.append(variable)
+                    continue
+                logger.warning(
+                    "Paper signal pair exceeds reconciliation prompt limit; "
+                    "retaining signals as unresolved document_id=%s outcome_signal_id=%s "
+                    "variable_signal_id=%s prompt_tokens=%s limit=%s",
+                    document_id,
+                    outcome.signal.signal_id,
+                    variable.signal.signal_id,
+                    pair_prompt_tokens,
+                    PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT,
+                )
+            if current_variables:
+                batches.append((outcome, *current_variables))
+        return tuple(batches)
+
+    def _reconcile_signal_batch(
+        self,
+        signal_inputs: tuple[_PaperSignalInput, ...],
+        *,
+        extractor: ObjectiveExtractor,
+        document_id: str,
+        batch_position: int,
+        batch_count: int,
+    ) -> tuple[tuple[PaperStudy, ...], tuple[PaperStudySignal, ...]]:
+        try:
+            parsed = extractor.reconcile_paper_signals(
+                {
+                    "document_id": document_id,
+                    "signals": [item.to_payload() for item in signal_inputs],
+                }
+            )
+            return self._validate_signal_reconciliation(
+                parsed,
+                signal_inputs,
+                document_id=document_id,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Paper study signal reconciliation batch failed; retaining batch "
+                "signals document_id=%s batch_position=%s batch_count=%s "
+                "signal_count=%s",
+                document_id,
+                batch_position,
+                batch_count,
+                len(signal_inputs),
+                exc_info=True,
+            )
+            return (
+                (),
+                tuple(
+                    replace(
+                        item.signal,
+                        reason="paper signal reconciliation failed",
+                    )
+                    for item in signal_inputs
+                ),
+            )
 
     @staticmethod
     def _unique_signal_inputs(
@@ -1319,8 +1581,14 @@ class PaperSkimService:
                     compatible_group[1].update(signal_ids)
 
             for study_relationships, study_signal_ids in study_groups:
-                if study_signal_ids & linked_ids:
-                    raise ValueError("paper signal cannot belong to multiple studies")
+                repeated_signal_ids = study_signal_ids & linked_ids
+                if any(
+                    signals_by_id[signal_id].signal_type != "outcome"
+                    for signal_id in repeated_signal_ids
+                ):
+                    raise ValueError(
+                        "paper variable signal cannot belong to multiple studies"
+                    )
                 study_signals = tuple(
                     signals_by_id[signal_id] for signal_id in study_signal_ids
                 )
@@ -1344,14 +1612,16 @@ class PaperSkimService:
             if signal_id not in signals_by_id:
                 raise ValueError("unresolved paper signal contains an unknown id")
             if signal_id in linked_ids or signal_id in unresolved_by_id:
-                raise ValueError("paper signal was accounted for more than once")
+                continue
             unresolved_by_id[signal_id] = str(unresolved.reason).strip()
         for signal_id, reason in conflicting_reasons_by_id.items():
             if signal_id in linked_ids or signal_id in unresolved_by_id:
                 continue
             unresolved_by_id[signal_id] = reason
-        if linked_ids | set(unresolved_by_id) != set(signals_by_id):
-            raise ValueError("paper signal reconciliation did not account for every signal")
+        for signal_id in signals_by_id:
+            if signal_id in linked_ids or signal_id in unresolved_by_id:
+                continue
+            unresolved_by_id[signal_id] = "not linked in this candidate batch"
         return (
             tuple(studies),
             tuple(

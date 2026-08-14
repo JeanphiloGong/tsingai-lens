@@ -55,6 +55,7 @@ _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
 _PAPER_SKIM_MAX_COMPLETION_TOKENS = 4096
 PAPER_SKIM_PROMPT_TOKEN_LIMIT = 12_288
 _PAPER_SIGNAL_RECONCILIATION_MAX_COMPLETION_TOKENS = 4096
+PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT = 12_288
 _AXIS_CANONICALIZATION_MAX_COMPLETION_TOKENS = 1024
 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS = 512
 _OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS = 2048
@@ -202,9 +203,10 @@ class ObjectiveExtractor:
                 f"{repair_detail}. Make every relationship context-compatible. "
                 "Do not combine signals when material_scope, process_context, "
                 "sample_context, test_context, fixed_conditions, experiment_label, "
-                "comparator, design_type, or claim_scope conflict. Move signals that "
-                "cannot be linked safely to unresolved_signals, account for every "
-                "input signal exactly once, and return only compact JSON."
+                "comparator, design_type, or claim_scope conflict. Return only safe "
+                "relationships, optionally explain rejected candidates in "
+                "unresolved_signals, and return only compact JSON. The backend derives "
+                "unresolved records for omitted inputs."
             )
 
         def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
@@ -229,6 +231,30 @@ class ObjectiveExtractor:
         if not isinstance(response, StructuredPaperSignalReconciliation):
             raise TypeError("unexpected paper signal reconciliation response type")
         return response
+
+    def estimate_paper_signal_reconciliation_prompt_tokens(
+        self,
+        payload: dict[str, Any],
+    ) -> int:
+        """Count the complete schema-bearing reconciliation prompt."""
+
+        system_prompt, user_prompt = build_paper_signal_reconciliation_prompt(payload)
+        messages = self._build_messages(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredPaperSignalReconciliation,
+            include_schema=True,
+        )
+        try:
+            encoding = tiktoken.encoding_for_model(self.model)
+        except KeyError:
+            encoding = tiktoken.get_encoding("cl100k_base")
+        serialized_messages = json.dumps(
+            messages,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return len(encoding.encode(serialized_messages))
 
     @staticmethod
     def _paper_signal_reconciliation_conflicts(

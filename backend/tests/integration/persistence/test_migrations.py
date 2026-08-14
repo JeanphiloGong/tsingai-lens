@@ -23,7 +23,7 @@ from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260814_0027"
+HEAD_REVISION = "20260814_0028"
 EXPECTED_TABLES = {
     "alembic_version",
     "artifact_versions",
@@ -325,6 +325,74 @@ def test_legacy_evidence_locators_migrate_to_stable_source_references(
                 )
             }
             assert {"char_start", "char_end"}.isdisjoint(mention_columns)
+    finally:
+        engine.dispose()
+
+
+def test_source_artifact_order_migration_preserves_sequence_values(tmp_path) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "source-artifact-order-migration.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    try:
+        with engine.begin() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "20260814_0027")
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO source_documents (
+                        build_id, source_document_id, collection_id,
+                        collection_document_id, document_version_id,
+                        human_readable_id, title, text, creation_date,
+                        metadata_json
+                    ) VALUES (
+                        'build-order', 'source-order', 'collection-order',
+                        'membership-order', 'version-order', 4,
+                        'Ordered paper', 'Ordered text', NULL, '{}'
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO source_text_units (
+                        build_id, text_unit_id, collection_id,
+                        human_readable_id, text, n_tokens
+                    ) VALUES (
+                        'build-order', 'text-unit-order', 'collection-order',
+                        7, 'Ordered unit', 2
+                    )
+                    """
+                )
+            )
+
+            command.upgrade(config, "head")
+
+            assert connection.execute(
+                text(
+                    "SELECT document_order FROM source_documents "
+                    "WHERE source_document_id = 'source-order'"
+                )
+            ).scalar_one() == 4
+            assert connection.execute(
+                text(
+                    "SELECT text_unit_order FROM source_text_units "
+                    "WHERE text_unit_id = 'text-unit-order'"
+                )
+            ).scalar_one() == 7
+            assert "human_readable_id" not in {
+                column["name"]
+                for column in inspect(connection).get_columns("source_documents")
+            }
+            assert "human_readable_id" not in {
+                column["name"]
+                for column in inspect(connection).get_columns("source_text_units")
+            }
     finally:
         engine.dispose()
 
@@ -1636,7 +1704,7 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
                     INSERT INTO source_documents (
                         build_id, source_document_id, collection_id,
                         collection_document_id, document_version_id,
-                        human_readable_id, title, text, creation_date,
+                        document_order, title, text, creation_date,
                         metadata_json
                     ) VALUES (
                         'build-evidence-pg', 'source-evidence-pg-2',

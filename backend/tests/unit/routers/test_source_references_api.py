@@ -48,7 +48,7 @@ def test_source_reference_routes_build_and_read_refs(source_reference_services):
         documents=(
             SourceDocument(
                 document_id="doc-1",
-                human_readable_id=0,
+                document_order=0,
                 title="Paper",
                 text="Prior work [1] matters.\nReferences\n[1] Smith A. Paper. Journal. 2024.",
             ),

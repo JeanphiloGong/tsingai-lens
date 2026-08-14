@@ -175,7 +175,7 @@ def _artifacts(title: str = "Paper") -> tuple[SourceDocument, ...]:
         documents=(
             SourceDocument(
                 document_id="srcdoc_runtime",
-                human_readable_id=0,
+                document_order=0,
                 title=title,
                 text="Methods\nResult",
                 creation_date=NOW,
@@ -188,7 +188,7 @@ def _artifacts(title: str = "Paper") -> tuple[SourceDocument, ...]:
         text_units=(
             SourceTextUnit(
                 text_unit_id="tu-1",
-                human_readable_id=0,
+                text_unit_order=0,
                 text="Result",
                 n_tokens=1,
                 document_ids=("srcdoc_runtime",),

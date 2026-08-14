@@ -79,7 +79,7 @@
     "source_documents": [
       {
         "id": "doc_strength",
-        "human_readable_id": 1,
+        "document_order": 1,
         "title": "Synthetic Heat Treatment Study",
         "text": "Method: heat treat Alloy A. Result: yield strength reached 620 MPa.",
         "text_unit_ids": ["tu_method", "tu_result"],
@@ -90,14 +90,14 @@
     "source_text_units": [
       {
         "id": "tu_method",
-        "human_readable_id": 1,
+        "text_unit_order": 1,
         "text": "Method: heat treat Alloy A.",
         "n_tokens": 7,
         "document_ids": ["doc_strength"]
       },
       {
         "id": "tu_result",
-        "human_readable_id": 2,
+        "text_unit_order": 2,
         "text": "Result: yield strength reached 620 MPa.",
         "n_tokens": 8,
         "document_ids": ["doc_strength"]

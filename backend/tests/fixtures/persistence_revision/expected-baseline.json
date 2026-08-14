@@ -131,7 +131,7 @@
     ],
     "source_document": [
       "creation_date",
-      "human_readable_id",
+      "document_order",
       "id",
       "metadata",
       "text",

@@ -96,7 +96,7 @@ class PostgresSourceArtifactRepository:
                     collection_id=collection_id,
                     collection_document_id=lineage[document.document_id][0],
                     document_version_id=lineage[document.document_id][1],
-                    human_readable_id=document.human_readable_id,
+                    document_order=document.document_order,
                     title=document.title,
                     text=document.text,
                     creation_date=document.creation_date,
@@ -110,7 +110,7 @@ class PostgresSourceArtifactRepository:
                     build_id=build_id,
                     text_unit_id=text_unit.text_unit_id,
                     collection_id=collection_id,
-                    human_readable_id=text_unit.human_readable_id,
+                    text_unit_order=text_unit.text_unit_order,
                     text=text_unit.text,
                     n_tokens=text_unit.n_tokens,
                 )
@@ -304,7 +304,7 @@ class PostgresSourceArtifactRepository:
                     SourceDocumentRow.build_id == resolved_build_id,
                 )
                 .order_by(
-                    SourceDocumentRow.human_readable_id,
+                    SourceDocumentRow.document_order,
                     SourceDocumentRow.source_document_id,
                 )
             )
@@ -312,7 +312,7 @@ class PostgresSourceArtifactRepository:
                 SourceDocument.from_record(
                     {
                         "document_id": row.source_document_id,
-                        "human_readable_id": row.human_readable_id,
+                        "document_order": row.document_order,
                         "title": row.title,
                         "text": row.text,
                         "text_unit_ids": text_units_by_document.get(
@@ -358,7 +358,7 @@ class PostgresSourceArtifactRepository:
                 ).where(SourceTextUnitDocument.source_document_id == document_id)
             rows = session.scalars(
                 statement.order_by(
-                    SourceTextUnitRow.human_readable_id,
+                    SourceTextUnitRow.text_unit_order,
                     SourceTextUnitRow.text_unit_id,
                 )
             )
@@ -366,7 +366,7 @@ class PostgresSourceArtifactRepository:
                 SourceTextUnit.from_record(
                     {
                         "text_unit_id": row.text_unit_id,
-                        "human_readable_id": row.human_readable_id,
+                        "text_unit_order": row.text_unit_order,
                         "text": row.text,
                         "n_tokens": row.n_tokens,
                         "document_ids": documents_by_text_unit.get(
@@ -951,7 +951,7 @@ class PostgresSourceArtifactRepository:
             )
             .order_by(
                 SourceTextUnitDocument.source_document_id,
-                SourceTextUnitRow.human_readable_id,
+                SourceTextUnitRow.text_unit_order,
                 SourceTextUnitDocument.text_unit_id,
             )
         )
@@ -974,7 +974,7 @@ class PostgresSourceArtifactRepository:
             )
             .order_by(
                 SourceBlockTextUnit.block_id,
-                SourceTextUnitRow.human_readable_id,
+                SourceTextUnitRow.text_unit_order,
                 SourceBlockTextUnit.text_unit_id,
             )
         )

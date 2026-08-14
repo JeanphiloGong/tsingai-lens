@@ -49,7 +49,7 @@ def create_final_text_units(
     selected["id"] = selected["id"].astype(str)
     selected["text"] = selected["text"].fillna("").astype(str)
     selected["document_ids"] = selected["document_ids"].apply(_normalize_string_list)
-    selected["human_readable_id"] = range(len(selected))
+    selected["text_unit_order"] = range(len(selected))
 
     return selected.loc[:, TEXT_UNITS_FINAL_COLUMNS]
 

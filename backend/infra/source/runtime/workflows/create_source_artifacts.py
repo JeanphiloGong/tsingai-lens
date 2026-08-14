@@ -120,10 +120,10 @@ async def create_source_artifacts(
 
     if not documents.empty:
         documents = documents.copy()
-        documents["human_readable_id"] = range(len(documents))
+        documents["document_order"] = range(len(documents))
     if not text_units.empty:
         text_units = text_units.copy()
-        text_units["human_readable_id"] = range(len(text_units))
+        text_units["text_unit_order"] = range(len(text_units))
 
     return SourceArtifactBundle(
         documents=documents.loc[:, DOCUMENTS_FINAL_COLUMNS],

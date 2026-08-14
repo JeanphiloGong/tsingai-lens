@@ -14,7 +14,7 @@ from infra.source.contracts.artifact_schemas import (
 def test_source_contract_columns_cover_materials_comparison_v2_targets():
     assert DOCUMENTS_FINAL_COLUMNS == [
         "id",
-        "human_readable_id",
+        "document_order",
         "title",
         "text",
         "text_unit_ids",
@@ -23,7 +23,7 @@ def test_source_contract_columns_cover_materials_comparison_v2_targets():
     ]
     assert TEXT_UNITS_FINAL_COLUMNS == [
         "id",
-        "human_readable_id",
+        "text_unit_order",
         "text",
         "n_tokens",
         "document_ids",

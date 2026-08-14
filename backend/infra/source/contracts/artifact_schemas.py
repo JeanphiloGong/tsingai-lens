@@ -4,6 +4,8 @@
 
 ID = "id"
 SHORT_ID = "human_readable_id"
+DOCUMENT_ORDER = "document_order"
+TEXT_UNIT_ORDER = "text_unit_order"
 TITLE = "title"
 DESCRIPTION = "description"
 
@@ -143,7 +145,7 @@ COVARIATES_FINAL_COLUMNS = [
 
 TEXT_UNITS_FINAL_COLUMNS = [
     ID,
-    SHORT_ID,
+    TEXT_UNIT_ORDER,
     TEXT,
     N_TOKENS,
     DOCUMENT_IDS,
@@ -151,7 +153,7 @@ TEXT_UNITS_FINAL_COLUMNS = [
 
 DOCUMENTS_FINAL_COLUMNS = [
     ID,
-    SHORT_ID,
+    DOCUMENT_ORDER,
     TITLE,
     TEXT,
     TEXT_UNIT_IDS,

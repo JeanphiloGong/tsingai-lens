@@ -184,14 +184,14 @@ class SqliteSourceArtifactRepository:
                 """
                 SELECT
                     document_id,
-                    human_readable_id,
+                    document_order,
                     title,
                     text,
                     creation_date,
                     metadata_json
                 FROM source_documents
                 WHERE collection_id = ?
-                ORDER BY human_readable_id ASC, document_id ASC
+                ORDER BY document_order ASC, document_id ASC
                 """,
                 (collection_id,),
             ).fetchall()
@@ -199,7 +199,7 @@ class SqliteSourceArtifactRepository:
             SourceDocument.from_record(
                 {
                     "document_id": row["document_id"],
-                    "human_readable_id": row["human_readable_id"],
+                    "document_order": row["document_order"],
                     "title": row["title"],
                     "text": row["text"],
                     "text_unit_ids": text_unit_ids_by_document.get(
@@ -229,12 +229,12 @@ class SqliteSourceArtifactRepository:
                     """
                     SELECT
                         text_unit_id,
-                        human_readable_id,
+                        text_unit_order,
                         text,
                         n_tokens
                     FROM source_text_units
                     WHERE collection_id = ?
-                    ORDER BY human_readable_id ASC, text_unit_id ASC
+                    ORDER BY text_unit_order ASC, text_unit_id ASC
                     """,
                     (collection_id,),
                 ).fetchall()
@@ -243,7 +243,7 @@ class SqliteSourceArtifactRepository:
                     """
                     SELECT
                         tu.text_unit_id,
-                        tu.human_readable_id,
+                        tu.text_unit_order,
                         tu.text,
                         tu.n_tokens
                     FROM source_text_units tu
@@ -252,7 +252,7 @@ class SqliteSourceArtifactRepository:
                      AND link.text_unit_id = tu.text_unit_id
                     WHERE tu.collection_id = ?
                       AND link.document_id = ?
-                    ORDER BY tu.human_readable_id ASC, tu.text_unit_id ASC
+                    ORDER BY tu.text_unit_order ASC, tu.text_unit_id ASC
                     """,
                     (collection_id, document_id),
                 ).fetchall()
@@ -260,7 +260,7 @@ class SqliteSourceArtifactRepository:
             SourceTextUnit.from_record(
                 {
                     "text_unit_id": row["text_unit_id"],
-                    "human_readable_id": row["human_readable_id"],
+                    "text_unit_order": row["text_unit_order"],
                     "text": row["text"],
                     "n_tokens": row["n_tokens"],
                     "document_ids": document_ids_by_text_unit.get(
@@ -521,7 +521,7 @@ class SqliteSourceArtifactRepository:
                 CREATE TABLE IF NOT EXISTS source_documents (
                     collection_id TEXT NOT NULL,
                     document_id TEXT NOT NULL,
-                    human_readable_id INTEGER NOT NULL,
+                    document_order INTEGER NOT NULL,
                     title TEXT NOT NULL,
                     text TEXT NOT NULL,
                     creation_date TEXT,
@@ -535,7 +535,7 @@ class SqliteSourceArtifactRepository:
                 CREATE TABLE IF NOT EXISTS source_text_units (
                     collection_id TEXT NOT NULL,
                     text_unit_id TEXT NOT NULL,
-                    human_readable_id INTEGER NOT NULL,
+                    text_unit_order INTEGER NOT NULL,
                     text TEXT NOT NULL,
                     n_tokens INTEGER,
                     PRIMARY KEY (collection_id, text_unit_id)
@@ -844,7 +844,7 @@ class SqliteSourceArtifactRepository:
             INSERT INTO source_documents (
                 collection_id,
                 document_id,
-                human_readable_id,
+                document_order,
                 title,
                 text,
                 creation_date,
@@ -855,7 +855,7 @@ class SqliteSourceArtifactRepository:
                 (
                     collection_id,
                     document.document_id,
-                    document.human_readable_id,
+                    document.document_order,
                     document.title,
                     document.text,
                     document.creation_date,
@@ -876,7 +876,7 @@ class SqliteSourceArtifactRepository:
             INSERT INTO source_text_units (
                 collection_id,
                 text_unit_id,
-                human_readable_id,
+                text_unit_order,
                 text,
                 n_tokens
             ) VALUES (?, ?, ?, ?, ?)
@@ -885,7 +885,7 @@ class SqliteSourceArtifactRepository:
                 (
                     collection_id,
                     text_unit.text_unit_id,
-                    text_unit.human_readable_id,
+                    text_unit.text_unit_order,
                     text_unit.text,
                     text_unit.n_tokens,
                 )

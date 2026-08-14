@@ -43,7 +43,7 @@ def test_text_unit_final_columns_only_expose_minimal_source_handoff():
 
     assert columns == [
         "id",
-        "human_readable_id",
+        "text_unit_order",
         "text",
         "n_tokens",
         "document_ids",

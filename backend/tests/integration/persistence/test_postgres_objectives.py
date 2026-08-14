@@ -199,7 +199,7 @@ def _analysis_artifacts():
         replace(
             source_document,
             document_id=document_id,
-            human_readable_id=position,
+            document_order=position,
             title=f"Paper {position + 1}",
             text_units=(),
             blocks=tuple(

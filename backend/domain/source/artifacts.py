@@ -37,7 +37,7 @@ _UNIT_HINT_PATTERN = re.compile(
 @dataclass(frozen=True)
 class SourceDocument:
     document_id: str
-    human_readable_id: int
+    document_order: int
     title: str
     text: str
     creation_date: str | None = None
@@ -57,7 +57,7 @@ class SourceDocument:
     def from_record(cls, value: Mapping[str, Any]) -> "SourceDocument":
         return cls(
             document_id=str(value.get("document_id") or value.get("id") or ""),
-            human_readable_id=safe_int(value.get("human_readable_id")) or 0,
+            document_order=safe_int(value.get("document_order")) or 0,
             title=str(value.get("title") or ""),
             text=str(value.get("text") or ""),
             creation_date=normalize_optional_text(value.get("creation_date")),
@@ -97,7 +97,7 @@ class SourceDocument:
     def to_record(self) -> dict[str, Any]:
         return {
             "id": self.document_id,
-            "human_readable_id": self.human_readable_id,
+            "document_order": self.document_order,
             "title": self.title,
             "text": self.text,
             "text_unit_ids": list(self.text_unit_ids),
@@ -109,7 +109,7 @@ class SourceDocument:
 @dataclass(frozen=True)
 class SourceTextUnit:
     text_unit_id: str
-    human_readable_id: int
+    text_unit_order: int
     text: str
     n_tokens: int | None
     document_ids: tuple[str, ...]
@@ -118,7 +118,7 @@ class SourceTextUnit:
     def from_record(cls, value: Mapping[str, Any]) -> "SourceTextUnit":
         return cls(
             text_unit_id=str(value.get("text_unit_id") or value.get("id") or ""),
-            human_readable_id=safe_int(value.get("human_readable_id")) or 0,
+            text_unit_order=safe_int(value.get("text_unit_order")) or 0,
             text=str(value.get("text") or ""),
             n_tokens=safe_int(value.get("n_tokens")),
             document_ids=_string_tuple(value.get("document_ids")),
@@ -127,7 +127,7 @@ class SourceTextUnit:
     def to_record(self) -> dict[str, Any]:
         return {
             "id": self.text_unit_id,
-            "human_readable_id": self.human_readable_id,
+            "text_unit_order": self.text_unit_order,
             "text": self.text,
             "n_tokens": self.n_tokens,
             "document_ids": list(self.document_ids),

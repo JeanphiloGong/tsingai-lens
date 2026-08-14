@@ -283,7 +283,7 @@ def _artifacts(
         documents=[
             {
                 "id": document_id,
-                "human_readable_id": 1,
+                "document_order": 1,
                 "title": "Section-aware objective study",
                 "text": "",
             }

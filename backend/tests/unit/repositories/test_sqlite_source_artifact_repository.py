@@ -24,7 +24,7 @@ def test_sqlite_source_artifact_repository_round_trips_document_aggregates(tmp_p
         documents=(
             SourceDocument(
                 document_id="doc-1",
-                human_readable_id=0,
+                document_order=0,
                 title="Paper",
                 text="Methods\nTable 1 Results",
                 creation_date="2026-05-10T00:00:00+00:00",
@@ -34,7 +34,7 @@ def test_sqlite_source_artifact_repository_round_trips_document_aggregates(tmp_p
         text_units=(
             SourceTextUnit(
                 text_unit_id="tu-1",
-                human_readable_id=0,
+                text_unit_order=0,
                 text="Methods",
                 n_tokens=3,
                 document_ids=("doc-1",),
@@ -133,7 +133,7 @@ def test_sqlite_source_artifact_repository_round_trips_document_aggregates(tmp_p
             documents=(
                 SourceDocument(
                     document_id="doc-2",
-                    human_readable_id=0,
+                    document_order=0,
                     title="Replacement",
                     text="Replacement text",
                 ),
@@ -232,7 +232,7 @@ def test_sqlite_source_artifact_repository_keeps_reference_state_separate(tmp_pa
             documents=(
                 SourceDocument(
                     document_id="doc-1",
-                    human_readable_id=0,
+                    document_order=0,
                     title="Paper",
                     text="Prior LPBF 316L work [1] studied porosity.",
                 ),
@@ -254,13 +254,13 @@ def test_sqlite_source_artifact_repository_reads_document_tree_projection(tmp_pa
             documents=(
                 SourceDocument(
                     document_id="doc-1",
-                    human_readable_id=0,
+                    document_order=0,
                     title="Paper",
                     text="Methods\nResult paragraph",
                 ),
                 SourceDocument(
                     document_id="doc-2",
-                    human_readable_id=1,
+                    document_order=1,
                     title="Other Paper",
                     text="Other text",
                 ),
@@ -268,7 +268,7 @@ def test_sqlite_source_artifact_repository_reads_document_tree_projection(tmp_pa
             text_units=(
                 SourceTextUnit(
                     text_unit_id="tu-1",
-                    human_readable_id=0,
+                    text_unit_order=0,
                     text="Result paragraph",
                     n_tokens=2,
                     document_ids=("doc-1",),

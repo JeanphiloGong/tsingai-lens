@@ -11,7 +11,7 @@ def test_source_reference_extraction_builds_entries_mentions_and_candidates():
         documents=(
             SourceDocument(
                 document_id="doc-1",
-                human_readable_id=0,
+                document_order=0,
                 title="LPBF 316L Study",
                 text="",
             ),
@@ -107,7 +107,7 @@ def test_source_reference_extraction_ignores_reference_section_citation_markers(
         documents=(
             SourceDocument(
                 document_id="doc-1",
-                human_readable_id=0,
+                document_order=0,
                 title="Citation Study",
                 text="",
             ),

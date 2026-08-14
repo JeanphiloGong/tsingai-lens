@@ -27,7 +27,7 @@ class SourceDocument(Base):
     __tablename__ = "source_documents"
     __table_args__ = (
         CheckConstraint(
-            "human_readable_id >= 0", name="human_readable_id_non_negative"
+            "document_order >= 0", name="document_order_non_negative"
         ),
         ForeignKeyConstraint(
             ["collection_id", "build_id"],
@@ -60,7 +60,7 @@ class SourceDocument(Base):
     document_version_id: Mapped[str] = mapped_column(
         String(64), nullable=False, index=True
     )
-    human_readable_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    document_order: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     creation_date: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -73,7 +73,7 @@ class SourceTextUnit(Base):
     __tablename__ = "source_text_units"
     __table_args__ = (
         CheckConstraint(
-            "human_readable_id >= 0", name="human_readable_id_non_negative"
+            "text_unit_order >= 0", name="text_unit_order_non_negative"
         ),
         CheckConstraint(
             "n_tokens IS NULL OR n_tokens >= 0", name="n_tokens_non_negative"
@@ -95,7 +95,7 @@ class SourceTextUnit(Base):
     build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     text_unit_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    human_readable_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    text_unit_order: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     n_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

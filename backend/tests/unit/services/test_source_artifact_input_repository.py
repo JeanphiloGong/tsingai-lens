@@ -56,7 +56,7 @@ def test_artifact_input_service_uses_explicit_source_repository():
             documents=(
                 SourceDocument(
                     document_id="doc-1",
-                    human_readable_id=0,
+                    document_order=0,
                     title="Paper",
                     text="Methods",
                 ),
@@ -64,7 +64,7 @@ def test_artifact_input_service_uses_explicit_source_repository():
             text_units=(
                 SourceTextUnit(
                     text_unit_id="tu-1",
-                    human_readable_id=0,
+                    text_unit_order=0,
                     text="Methods",
                     n_tokens=3,
                     document_ids=("doc-1",),
@@ -144,7 +144,7 @@ def test_artifact_input_service_loads_document_tree():
             documents=(
                 SourceDocument(
                     document_id="doc-1",
-                    human_readable_id=0,
+                    document_order=0,
                     title="Paper",
                     text="Methods\nEvidence text",
                 ),

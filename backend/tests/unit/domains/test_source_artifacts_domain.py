@@ -20,7 +20,7 @@ from domain.source import (
 def test_source_document_assembly_rejects_orphan_artifacts():
     document = SourceDocument(
         document_id="doc-1",
-        human_readable_id=0,
+        document_order=0,
         title="Paper",
         text="",
     )
@@ -39,7 +39,7 @@ def test_source_document_assembly_rejects_orphan_artifacts():
 def test_source_document_assembly_rejects_duplicate_document_ids():
     document = SourceDocument(
         document_id="doc-1",
-        human_readable_id=0,
+        document_order=0,
         title="Paper",
         text="",
     )
@@ -186,7 +186,7 @@ def test_source_table_cell_record_keeps_document_id_alias():
 def test_source_document_tree_builds_section_parent_child_links():
     document = SourceDocument(
         document_id="doc-1",
-        human_readable_id=0,
+        document_order=0,
         title="LPBF 316L",
         text="",
     )
@@ -308,7 +308,7 @@ def test_source_document_tree_builds_section_parent_child_links():
 def test_source_document_tree_keeps_references_as_records_linking_to_future_trees():
     document = SourceDocument(
         document_id="doc-1",
-        human_readable_id=0,
+        document_order=0,
         title="Paper",
         text="",
     )

@@ -20,14 +20,16 @@ Objective analysis.
   Owns the per-document discovery stage. It assigns every eligible
   non-reference text node and every table/figure caption to one section-aware
   `overview`, `methods`, `results`, `conclusion`, or `unknown` source window.
-  Each bounded window is screened independently; duplicate study signals are
-  reconciled only after all windows finish. The resulting one `PaperSkim` per
+  Each bounded window is screened independently. A failed multi-unit batch is
+  split recursively, preserving stable Source-unit ids until only a terminal
+  singleton can become `extraction_failed`; duplicate study signals are
+  reconciled only after all batches finish. The resulting one `PaperSkim` per
   document retains every distinct schema-valid `PaperStudy` and its complete
-  `PaperStudyRelationship` records. It also records one first-stage extraction
-  outcome for every eligible Source unit: `relationship_emitted`,
-  `unresolved_signal_emitted`, `no_study_signal`, or backend-derived
-  `extraction_failed`. Jointly varied factors remain attached to one outcome
-  and exact Source locators. Parsed table rows use
+  `PaperStudyRelationship` records. The backend derives one first-stage
+  extraction outcome for every eligible Source unit from validated relationship
+  and signal references: `relationship_emitted`, `unresolved_signal_emitted`,
+  `no_study_signal`, or `extraction_failed`. Jointly varied factors remain
+  attached to one outcome and exact Source locators. Parsed table rows use
   `table_row + row_id`, while table captions and headers use
   `table + table_id`; inline table-matrix rows without a persisted row identity
   remain table-level. A skim retains only the stable Source `document_id`;
@@ -111,15 +113,17 @@ while valid relationships in the same response survive. The PaperSkim service
 repeats the same deterministic check as a final boundary guard and separates
 individually valid relationships into distinct PaperStudies when their contexts
 do not belong to one study. A broader reconciliation failure leaves all affected
-signals unresolved instead of removing them. Every valid window response must
-account for its exact input
-Source-unit IDs. Missing, duplicate, unknown, or status-inconsistent coverage
-invalidates that window, and the backend records `extraction_failed` rather than
-inventing `no_study_signal`. A failed window does not discard valid neighboring
-windows. `coverage_complete` therefore means that every eligible Source unit was
-processed by a contract-valid first-stage extraction; it does not prove that the
-model found every scientifically relevant study, relationship, variable, or
-outcome. Model-call count grows with document length.
+signals unresolved instead of removing them. Every emitted relationship and
+signal Source-unit ID must resolve to the exact batch input. The backend derives
+coverage from those validated references; an unreferenced unit becomes
+`no_study_signal` without requiring the model to repeat a coverage object. A
+failed call or invalid reference causes a multi-unit batch to split recursively.
+Successful siblings survive, while only a terminal failed singleton becomes
+`extraction_failed`. `coverage_complete` therefore means that every eligible
+Source unit was processed by a contract-valid first-stage extraction; it does
+not prove that the model found every scientifically relevant study,
+relationship, variable, or outcome. Model-call count grows with document length
+and with failed-batch subdivision.
 
 After screening, the backend persists extracted studies, relationships,
 unresolved signals, and Source-unit coverage before collection grouping. It

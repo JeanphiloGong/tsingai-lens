@@ -26,7 +26,6 @@ Non-negotiable rules:
 - Return exactly one JSON object and nothing else.
 - Scientific labels must be supported by supplied Source-unit content.
 - Copy only supplied `source_unit_id` values; never invent or rewrite an id.
-- Account for every supplied `source_unit_id` exactly once in `source_unit_coverage`.
 - Do not infer material systems from filenames or section names.
 """.strip()
 
@@ -303,12 +302,7 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "8. When the window explicitly identifies a varied/modeled variable but no "
         "response, or a measured/predicted outcome but no changed variable, return "
         "the explicit axis in `unresolved_signals` for paper-level reconciliation.\n"
-        "9. Account for every input Source unit exactly once in "
-        "`source_unit_coverage`: use `relationship_emitted` when it supports any "
-        "returned relationship, otherwise `unresolved_signal_emitted` when it "
-        "supports a returned unresolved signal, otherwise `no_study_signal` with a "
-        "concise reason. Relationship coverage takes precedence if both apply.\n"
-        "10. Use evidence density, confidence, and warnings to expose incomplete or "
+        "9. Use evidence density, confidence, and warnings to expose incomplete or "
         "ambiguous input rather than filling gaps.\n\n"
         "HARD RULES\n"
         "- Return only the schema object. Return every distinct, explicitly supported "
@@ -320,9 +314,6 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "- Never move a factor, outcome, or context between studies.\n"
         "- Every relationship and unresolved signal must copy `source_unit_ids` that "
         "directly support it. Do not return an id absent from `source_units`.\n"
-        "- `source_unit_coverage` must contain the exact set of input Source-unit ids, "
-        "with no omitted, invented, or duplicate id. Emitted statuses have no reason; "
-        "every `no_study_signal` item has a reason grounded in that unit.\n"
         "- Do not repeat an axis in `unresolved_signals` when it is already part of a "
         "complete relationship in this window. Material and fixed process context are "
         "not partial variable/outcome signals.\n"
@@ -330,8 +321,8 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "- Do not infer scientific content from filenames or generic section names.\n"
         "- Return empty arrays rather than guessing unsupported study structure.\n\n"
         "OUTPUT CONTRACT\n"
-        "- Return `studies`, `unresolved_signals`, `source_unit_coverage`, doc_role, "
-        "evidence_density, confidence, and warnings. A study has experiment/design/context fields and "
+        "- Return `studies`, `unresolved_signals`, doc_role, evidence_density, "
+        "confidence, and warnings. A study has experiment/design/context fields and "
         "one or more relationships. A relationship has `varied_factors`, one "
         "`outcome`, `source_unit_ids`, and confidence.\n"
         "- Return up to 2 `warnings`, each at most 240 characters.\n"
@@ -353,8 +344,7 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "borrow an outcome from another section. Return the explicit axis in "
         "`unresolved_signals` with its supporting Source-unit id.\n"
         "- No study signal: a unit contains only general background. Return no study "
-        "or signal for it and classify its id as `no_study_signal` with a concise "
-        "reason. Do not omit the id.\n"
+        "or unresolved signal for that unit.\n"
         "- Separate relationships: one experiment links scan speed to porosity and "
         "another links heat treatment to yield strength. Return two studies."
     )

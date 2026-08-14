@@ -46,57 +46,11 @@ def studies_with_source_units(
     ]
 
 
-def source_unit_coverage_for_outputs(
-    payload: dict[str, Any],
-    *,
-    studies: list[dict[str, Any]],
-    unresolved_signals: list[dict[str, Any]] | None = None,
-) -> list[dict[str, Any]]:
-    relationship_ids = {
-        str(source_unit_id)
-        for study in studies
-        for relationship in study.get("relationships") or ()
-        for source_unit_id in relationship.get("source_unit_ids") or ()
-    }
-    signal_ids = {
-        str(source_unit_id)
-        for signal in unresolved_signals or ()
-        for source_unit_id in signal.get("source_unit_ids") or ()
-    }
-    return [
-        {
-            "source_unit_id": source_unit_id,
-            "status": (
-                "relationship_emitted"
-                if source_unit_id in relationship_ids
-                else (
-                    "unresolved_signal_emitted"
-                    if source_unit_id in signal_ids
-                    else "no_study_signal"
-                )
-            ),
-            "reason": (
-                None
-                if source_unit_id in relationship_ids | signal_ids
-                else "No study relationship or partial signal is present."
-            ),
-        }
-        for source_unit_id in source_unit_ids_from_payload(payload)
-    ]
-
-
 def paper_skim_study_outputs(
     payload: dict[str, Any],
     studies: list[dict[str, Any]],
 ) -> dict[str, list[dict[str, Any]]]:
-    resolved_studies = studies_with_source_units(payload, studies)
-    return {
-        "studies": resolved_studies,
-        "source_unit_coverage": source_unit_coverage_for_outputs(
-            payload,
-            studies=resolved_studies,
-        ),
-    }
+    return {"studies": studies_with_source_units(payload, studies)}
 
 
 class FakeObjectiveExtractor:
@@ -127,10 +81,6 @@ class FakeObjectiveExtractor:
                 doc_role="review",
                 studies=[],
                 unresolved_signals=[],
-                source_unit_coverage=source_unit_coverage_for_outputs(
-                    payload,
-                    studies=[],
-                ),
                 evidence_density="low",
                 confidence=0.72,
                 warnings=[],
@@ -159,10 +109,6 @@ class FakeObjectiveExtractor:
             doc_role="experimental",
             studies=studies,
             unresolved_signals=[],
-            source_unit_coverage=source_unit_coverage_for_outputs(
-                payload,
-                studies=studies,
-            ),
             evidence_density="high",
             confidence=0.91,
             warnings=[],

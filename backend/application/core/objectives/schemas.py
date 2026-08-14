@@ -293,36 +293,12 @@ class StructuredPaperStudySignal(_StrictModel):
         return _normalize_list_container(value)
 
 
-class StructuredPaperSourceUnitCoverage(_StrictModel):
-    source_unit_id: Annotated[str, Field(min_length=1, max_length=160)]
-    status: Literal[
-        "relationship_emitted",
-        "unresolved_signal_emitted",
-        "no_study_signal",
-    ]
-    reason: str | None = Field(default=None, max_length=240)
-
-    @model_validator(mode="after")
-    def _validate_reason(self) -> "StructuredPaperSourceUnitCoverage":
-        reason = str(self.reason or "").strip()
-        if self.status == "no_study_signal":
-            if not reason:
-                raise ValueError("no_study_signal coverage requires a reason")
-            self.reason = reason
-        else:
-            self.reason = None
-        return self
-
-
 class StructuredPaperSkim(_StrictModel):
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
         "uncertain"
     )
     studies: list[StructuredPaperStudy] = Field(default_factory=list)
     unresolved_signals: list[StructuredPaperStudySignal] = Field(default_factory=list)
-    source_unit_coverage: list[StructuredPaperSourceUnitCoverage] = Field(
-        max_length=12,
-    )
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
     confidence: float = 0.0
     warnings: list[
@@ -335,7 +311,6 @@ class StructuredPaperSkim(_StrictModel):
     @field_validator(
         "studies",
         "unresolved_signals",
-        "source_unit_coverage",
         "warnings",
         mode="before",
     )
@@ -362,51 +337,10 @@ class StructuredPaperSkim(_StrictModel):
         )
 
     @model_validator(mode="after")
-    def _validate_source_unit_coverage(self) -> "StructuredPaperSkim":
+    def _validate_study_identities(self) -> "StructuredPaperSkim":
         study_identities = [study.identity_key() for study in self.studies]
         if len(study_identities) != len(set(study_identities)):
             raise ValueError("studies contain duplicate study identities")
-
-        coverage_by_id = {
-            item.source_unit_id: item for item in self.source_unit_coverage
-        }
-        if len(coverage_by_id) != len(self.source_unit_coverage):
-            raise ValueError("source_unit_coverage contains duplicate ids")
-
-        relationship_ids = {
-            source_unit_id
-            for study in self.studies
-            for relationship in study.relationships
-            for source_unit_id in relationship.source_unit_ids
-        }
-        signal_ids = {
-            source_unit_id
-            for signal in self.unresolved_signals
-            for source_unit_id in signal.source_unit_ids
-        }
-        missing_ids = (relationship_ids | signal_ids) - set(coverage_by_id)
-        if missing_ids:
-            raise ValueError(
-                "source_unit_coverage omits ids used by emitted facts: "
-                + ", ".join(sorted(missing_ids))
-            )
-
-        for source_unit_id, coverage in coverage_by_id.items():
-            expected_status = (
-                "relationship_emitted"
-                if source_unit_id in relationship_ids
-                else (
-                    "unresolved_signal_emitted"
-                    if source_unit_id in signal_ids
-                    else "no_study_signal"
-                )
-            )
-            if coverage.status != expected_status:
-                raise ValueError(
-                    "source_unit_coverage status does not agree with emitted facts "
-                    f"for {source_unit_id}: expected {expected_status}, "
-                    f"received {coverage.status}"
-                )
         return self
 
 

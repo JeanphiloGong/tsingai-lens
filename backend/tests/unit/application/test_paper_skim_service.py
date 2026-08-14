@@ -21,15 +21,11 @@ class _WindowExtractor:
         *,
         reconciliation: str = "link",
         window_failure_marker: str | None = None,
-        omit_coverage_marker: str | None = None,
-        coverage_mutation: str | None = None,
     ) -> None:
         self.payloads: list[dict[str, Any]] = []
         self.reconciliation_payloads: list[dict[str, Any]] = []
         self.reconciliation = reconciliation
         self.window_failure_marker = window_failure_marker
-        self.omit_coverage_marker = omit_coverage_marker
-        self.coverage_mutation = coverage_mutation
 
     def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         self.payloads.append(payload)
@@ -123,53 +119,10 @@ class _WindowExtractor:
                         "confidence": 0.88,
                     }
                 )
-        relationship_source_ids = {
-            source_unit_id
-            for study in studies
-            for relationship in study.get("relationships") or ()
-            for source_unit_id in relationship.get("source_unit_ids") or ()
-        }
-        signal_source_ids = {
-            source_unit_id
-            for signal in unresolved_signals
-            for source_unit_id in signal.get("source_unit_ids") or ()
-        }
-        source_unit_coverage = [
-            {
-                "source_unit_id": str(unit["source_unit_id"]),
-                "status": (
-                    "relationship_emitted"
-                    if unit["source_unit_id"] in relationship_source_ids
-                    else (
-                        "unresolved_signal_emitted"
-                        if unit["source_unit_id"] in signal_source_ids
-                        else "no_study_signal"
-                    )
-                ),
-                "reason": (
-                    None
-                    if unit["source_unit_id"]
-                    in relationship_source_ids | signal_source_ids
-                    else "No study relationship or partial signal is present."
-                ),
-            }
-            for unit in source_units
-        ]
-        if self.omit_coverage_marker and self.omit_coverage_marker in text:
-            source_unit_coverage = []
-        elif self.coverage_mutation == "duplicate" and source_unit_coverage:
-            source_unit_coverage.append(dict(source_unit_coverage[0]))
-        elif self.coverage_mutation == "inconsistent" and source_unit_coverage:
-            source_unit_coverage[0] = {
-                **source_unit_coverage[0],
-                "status": "no_study_signal",
-                "reason": "Incorrectly classified as having no study signal.",
-            }
         return StructuredPaperSkim(
             doc_role="experimental",
             studies=studies,
             unresolved_signals=unresolved_signals,
-            source_unit_coverage=source_unit_coverage,
             evidence_density="high" if studies or unresolved_signals else "low",
             confidence=0.92 if studies or unresolved_signals else 0.55,
             warnings=(
@@ -469,58 +422,95 @@ def test_every_source_unit_receives_one_explicit_coverage_outcome():
         "signal": "unresolved_signal_emitted",
         "background": "no_study_signal",
     }
+    assert next(
+        item.reason
+        for item in skim.source_unit_coverage
+        if item.source_ref == "background"
+    ) == (
+        "No study relationship or unresolved signal was emitted for this Source "
+        "unit."
+    )
     assert skim.coverage_complete is True
 
 
-def test_missing_model_coverage_marks_the_whole_window_failed():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("results", "Results", 1),
-            _paragraph(
-                "invalid-window",
-                "RESULT_CANDIDATE OMIT_COVERAGE",
-                2,
-                "Results",
-            ),
-        ]
-    )
-
-    skim = _build_skims(
-        artifacts,
-        tree,
-        _WindowExtractor(omit_coverage_marker="OMIT_COVERAGE"),
-    )[0]
-
-    assert skim.studies == ()
-    assert [item.status.value for item in skim.source_unit_coverage] == [
-        "extraction_failed"
-    ]
-    assert skim.source_unit_coverage[0].reason
-    assert skim.coverage_complete is False
-
-
-@pytest.mark.parametrize("coverage_mutation", ("duplicate", "inconsistent"))
-def test_invalid_model_coverage_marks_the_whole_window_failed(
-    coverage_mutation: str,
+def test_failed_batch_splits_until_only_permanent_source_unit_failure_remains(
+    caplog: pytest.LogCaptureFixture,
 ):
     artifacts, tree = _artifacts(
         blocks=[
             _heading("results", "Results", 1),
-            _paragraph("invalid-window", "RESULT_CANDIDATE", 2, "Results"),
+            _paragraph("relationship", "RESULT_CANDIDATE", 2, "Results"),
+            _paragraph("background", "BACKGROUND_ONLY", 3, "Results"),
+            _paragraph("failed", "FAIL_WINDOW", 4, "Results"),
+            _paragraph("signal", "VARIABLE_SIGNAL", 5, "Results"),
+        ]
+    )
+    extractor = _WindowExtractor(window_failure_marker="FAIL_WINDOW")
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(skim.studies) == 1
+    assert {
+        item.source_ref: item.status.value for item in skim.source_unit_coverage
+    } == {
+        "relationship": "relationship_emitted",
+        "background": "no_study_signal",
+        "failed": "extraction_failed",
+        "signal": "unresolved_signal_emitted",
+    }
+    assert skim.coverage_complete is False
+    parent_ids = {
+        unit["source_unit_id"] for unit in extractor.payloads[0]["source_units"]
+    }
+    assert len(parent_ids) == 4
+    assert all(
+        {unit["source_unit_id"] for unit in payload["source_units"]} <= parent_ids
+        for payload in extractor.payloads[1:]
+    )
+    assert all(
+        source_unit_id.startswith("source-unit-")
+        for source_unit_id in parent_ids
+    )
+    assert len(extractor.payloads) == 5
+    assert any(
+        "attempt=1 source_unit_count=4 error=window extraction unavailable"
+        in record.message
+        for record in caplog.records
+    )
+    assert any(
+        "attempt=3 source_unit_count=1 error=window extraction unavailable"
+        in record.message
+        for record in caplog.records
+    )
+
+
+def test_retry_consolidates_duplicate_successful_relationships_once():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("results", "Results", 1),
+            _paragraph("candidate-1", "RESULT_CANDIDATE", 2, "Results"),
+            _paragraph("failed", "FAIL_WINDOW", 3, "Results"),
+            _paragraph("candidate-2", "RESULT_CANDIDATE", 4, "Results"),
         ]
     )
 
     skim = _build_skims(
         artifacts,
         tree,
-        _WindowExtractor(coverage_mutation=coverage_mutation),
+        _WindowExtractor(window_failure_marker="FAIL_WINDOW"),
     )[0]
 
-    assert skim.studies == ()
-    assert [item.status.value for item in skim.source_unit_coverage] == [
-        "extraction_failed"
-    ]
-    assert skim.coverage_complete is False
+    assert len(skim.studies) == 1
+    assert len(skim.studies[0].relationships) == 1
+    assert {
+        source_ref.source_ref
+        for source_ref in skim.studies[0].relationships[0].source_refs
+    } == {"candidate-1", "candidate-2"}
+    assert [
+        item.source_ref
+        for item in skim.source_unit_coverage
+        if item.status.value == "extraction_failed"
+    ] == ["failed"]
 
 
 def test_unrepaired_duplicate_study_identity_marks_the_whole_window_failed():
@@ -538,7 +528,6 @@ def test_unrepaired_duplicate_study_identity_marks_the_whole_window_failed():
                 doc_role=parsed.doc_role,
                 studies=[*parsed.studies, *parsed.studies],
                 unresolved_signals=parsed.unresolved_signals,
-                source_unit_coverage=parsed.source_unit_coverage,
                 evidence_density=parsed.evidence_density,
                 confidence=parsed.confidence,
                 warnings=parsed.warnings,

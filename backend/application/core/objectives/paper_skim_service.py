@@ -50,6 +50,7 @@ class _SkimSourceItem:
     source_ref: str
     content: Any
     section_path: str
+    source_unit_id: str = ""
 
     @property
     def size(self) -> int:
@@ -143,29 +144,14 @@ class PaperSkimService:
                     active_window_count=window_count,
                     active_window_role=payload["window_role"],
                 )
-                try:
-                    parsed = extractor.extract_paper_skim(payload)
-                    window_skim, window_signals = self._resolve_window_result(
-                        document_id=document.document_id,
-                        payload=payload,
-                        parsed=parsed,
-                    )
-                except Exception:  # noqa: BLE001
-                    logger.warning(
-                        "Paper skim window extraction failed; preserving Source-unit "
-                        "coverage collection_id=%s document_id=%s window_id=%s",
-                        collection_id,
-                        document.document_id,
-                        payload["window_id"],
-                        exc_info=True,
-                    )
-                    window_skim = self._failed_window_skim(
-                        document_id=document.document_id,
-                        payload=payload,
-                    )
-                    window_signals = ()
-                window_skims.append(window_skim)
-                paper_signals.extend(window_signals)
+                batch_skims, batch_signals = self._extract_window_batch(
+                    collection_id=collection_id,
+                    document_id=document.document_id,
+                    payload=payload,
+                    extractor=extractor,
+                )
+                window_skims.extend(batch_skims)
+                paper_signals.extend(batch_signals)
             paper_skim = self._consolidate_window_skims(
                 document.document_id,
                 window_skims,
@@ -210,7 +196,7 @@ class PaperSkimService:
         figures: list[Any],
         document_tree: SourceDocumentTree | None = None,
     ) -> list[dict[str, Any]]:
-        items = self._build_source_items(
+        source_items = self._build_source_items(
             document=document,
             blocks=blocks,
             tables=tables,
@@ -218,6 +204,18 @@ class PaperSkimService:
             figures=figures,
             document_tree=document_tree,
         )
+        bounded_items = [
+            bounded_item
+            for item in source_items
+            for bounded_item in self._split_oversized_source_item(item)
+        ]
+        items = [
+            replace(
+                bounded_item,
+                source_unit_id=f"source-unit-{position:06d}",
+            )
+            for position, bounded_item in enumerate(bounded_items, start=1)
+        ]
         grouped_items = {role: [] for role in _SKIM_WINDOW_ROLES}
         for item in items:
             grouped_items[item.role].append(item)
@@ -452,12 +450,7 @@ class PaperSkimService:
         windows: list[tuple[_SkimSourceItem, ...]] = []
         current: list[_SkimSourceItem] = []
         current_size = 0
-        bounded_items = (
-            bounded_item
-            for item in items
-            for bounded_item in PaperSkimService._split_oversized_source_item(item)
-        )
-        for item in bounded_items:
+        for item in items:
             separator_size = 2 if current else 0
             if current and (
                 len(current) >= _SKIM_WINDOW_SOURCE_UNIT_LIMIT
@@ -651,15 +644,20 @@ class PaperSkimService:
         section_paths = self._unique_text_values(
             item.section_path for item in items if item.section_path
         )
+        source_unit_ids = [item.source_unit_id for item in items]
+        if not all(source_unit_ids) or len(source_unit_ids) != len(
+            set(source_unit_ids)
+        ):
+            raise ValueError("paper skim Source-unit ids must be non-empty and unique")
         source_units = [
             {
-                "source_unit_id": f"{role}-{role_window_position}-source-{position}",
+                "source_unit_id": item.source_unit_id,
                 "source_kind": item.source_kind,
                 "source_ref": item.source_ref,
                 "section_path": item.section_path,
                 "content": item.content,
             }
-            for position, item in enumerate(items, start=1)
+            for item in items
         ]
         return {
             "collection_id": collection_id,
@@ -680,6 +678,103 @@ class PaperSkimService:
             "source_units": source_units,
         }
 
+    def _extract_window_batch(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        payload: Mapping[str, Any],
+        extractor: ObjectiveExtractor,
+        attempt: int = 1,
+    ) -> tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]]:
+        try:
+            parsed = extractor.extract_paper_skim(dict(payload))
+            window_skim, window_signals = self._resolve_window_result(
+                document_id=document_id,
+                payload=payload,
+                parsed=parsed,
+            )
+            return (window_skim,), window_signals
+        except Exception as exc:  # noqa: BLE001
+            source_units = tuple(
+                unit
+                for unit in payload.get("source_units") or ()
+                if isinstance(unit, Mapping)
+            )
+            if len(source_units) > 1:
+                logger.warning(
+                    "Paper skim batch failed; splitting retry "
+                    "collection_id=%s document_id=%s window_id=%s attempt=%s "
+                    "source_unit_count=%s error=%s",
+                    collection_id,
+                    document_id,
+                    payload.get("window_id"),
+                    attempt,
+                    len(source_units),
+                    exc,
+                )
+                midpoint = len(source_units) // 2
+                child_skims: list[PaperSkim] = []
+                child_signals: list[_PaperSignalInput] = []
+                for branch, child_units in (
+                    ("left", source_units[:midpoint]),
+                    ("right", source_units[midpoint:]),
+                ):
+                    retry_skims, retry_signals = self._extract_window_batch(
+                        collection_id=collection_id,
+                        document_id=document_id,
+                        payload=self._build_retry_payload(
+                            payload,
+                            source_units=child_units,
+                            branch=branch,
+                        ),
+                        extractor=extractor,
+                        attempt=attempt + 1,
+                    )
+                    child_skims.extend(retry_skims)
+                    child_signals.extend(retry_signals)
+                return tuple(child_skims), tuple(child_signals)
+
+            logger.warning(
+                "Paper skim Source-unit extraction failed permanently "
+                "collection_id=%s document_id=%s window_id=%s attempt=%s "
+                "source_unit_count=%s error=%s",
+                collection_id,
+                document_id,
+                payload.get("window_id"),
+                attempt,
+                len(source_units),
+                exc,
+            )
+            return (
+                (
+                    self._failed_source_unit_skim(
+                        document_id=document_id,
+                        payload=payload,
+                    ),
+                ),
+                (),
+            )
+
+    @staticmethod
+    def _build_retry_payload(
+        payload: Mapping[str, Any],
+        *,
+        source_units: tuple[Mapping[str, Any], ...],
+        branch: str,
+    ) -> dict[str, Any]:
+        retry_payload = dict(payload)
+        retry_payload["window_id"] = f"{payload.get('window_id')}.retry-{branch}"
+        retry_payload["section_paths"] = list(
+            dict.fromkeys(
+                str(unit.get("section_path") or "").strip()
+                for unit in source_units
+                if str(unit.get("section_path") or "").strip()
+            )
+        )
+        retry_payload["source_units"] = [dict(unit) for unit in source_units]
+        return retry_payload
+
     def _resolve_window_result(
         self,
         *,
@@ -692,6 +787,9 @@ class PaperSkimService:
             for unit in payload.get("source_units") or ()
             if isinstance(unit, Mapping) and str(unit.get("source_unit_id") or "")
         }
+        study_identities = [study.identity_key() for study in parsed.studies]
+        if len(study_identities) != len(set(study_identities)):
+            raise ValueError("paper skim response contains duplicate study identities")
         studies = tuple(
             self._study_from_window_result(
                 item,
@@ -708,7 +806,7 @@ class PaperSkimService:
             )
             for item in parsed.unresolved_signals
         )
-        source_unit_coverage = self._source_unit_coverage_from_window_result(
+        source_unit_coverage = self._derive_source_unit_coverage(
             payload=payload,
             parsed=parsed,
             source_units=source_units,
@@ -731,7 +829,7 @@ class PaperSkimService:
         )
 
     @staticmethod
-    def _source_unit_coverage_from_window_result(
+    def _derive_source_unit_coverage(
         *,
         payload: Mapping[str, Any],
         parsed: StructuredPaperSkim,
@@ -740,23 +838,6 @@ class PaperSkimService:
         input_ids = tuple(source_units)
         if len(input_ids) != len(payload.get("source_units") or ()):
             raise ValueError("paper skim window contains duplicate Source-unit ids")
-
-        coverage_by_id: dict[str, Any] = {}
-        for item in parsed.source_unit_coverage:
-            source_unit_id = str(item.source_unit_id).strip()
-            if source_unit_id in coverage_by_id:
-                raise ValueError(
-                    "paper skim response contains duplicate Source-unit coverage ids"
-                )
-            if source_unit_id not in source_units:
-                raise ValueError(
-                    "paper skim response contains unknown Source-unit coverage id"
-                )
-            coverage_by_id[source_unit_id] = item
-        if set(coverage_by_id) != set(input_ids):
-            raise ValueError(
-                "paper skim response must account for every Source-unit id exactly once"
-            )
 
         relationship_ids = {
             str(source_unit_id).strip()
@@ -769,6 +850,12 @@ class PaperSkimService:
             for signal in parsed.unresolved_signals
             for source_unit_id in signal.source_unit_ids
         }
+        unknown_ids = (relationship_ids | signal_ids) - set(input_ids)
+        if unknown_ids:
+            raise ValueError(
+                "paper skim response contains unknown Source-unit ids: "
+                + ", ".join(sorted(unknown_ids))
+            )
         coverage: list[PaperSourceUnitCoverage] = []
         for source_unit_id in input_ids:
             expected_status = (
@@ -780,11 +867,6 @@ class PaperSkimService:
                     else PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL
                 )
             )
-            item = coverage_by_id[source_unit_id]
-            if item.status != expected_status.value:
-                raise ValueError(
-                    "paper skim Source-unit coverage does not agree with emitted facts"
-                )
             source_unit = source_units[source_unit_id]
             coverage.append(
                 PaperSourceUnitCoverage.from_mapping(
@@ -793,20 +875,26 @@ class PaperSkimService:
                         "window_id": payload.get("window_id"),
                         "source_kind": source_unit.get("source_kind"),
                         "source_ref": source_unit.get("source_ref"),
-                        "status": item.status,
-                        "reason": item.reason,
+                        "status": expected_status.value,
+                        "reason": (
+                            "No study relationship or unresolved signal was emitted "
+                            "for this Source unit."
+                            if expected_status
+                            == PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL
+                            else None
+                        ),
                     }
                 )
             )
         return tuple(coverage)
 
     @staticmethod
-    def _failed_window_skim(
+    def _failed_source_unit_skim(
         *,
         document_id: str,
         payload: Mapping[str, Any],
     ) -> PaperSkim:
-        reason = "Paper skim window extraction or coverage validation failed."
+        reason = "Paper skim Source-unit extraction failed after batch splitting."
         return PaperSkim.from_mapping(
             {
                 "document_id": document_id,

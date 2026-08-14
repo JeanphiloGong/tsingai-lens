@@ -57,15 +57,8 @@ def test_paper_skim_contract_bounds_model_output():
     ]
     assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
     assert signal_schema["source_unit_ids"]["minItems"] == 1
-    coverage_schema = model_schema["$defs"][
-        "StructuredPaperSourceUnitCoverage"
-    ]["properties"]
-    assert schema["source_unit_coverage"]["maxItems"] == 12
-    assert coverage_schema["status"]["enum"] == [
-        "relationship_emitted",
-        "unresolved_signal_emitted",
-        "no_study_signal",
-    ]
+    assert "source_unit_coverage" not in schema
+    assert "StructuredPaperSourceUnitCoverage" not in model_schema.get("$defs", {})
     assert schema["warnings"]["items"]["maxLength"] == 240
 
 
@@ -160,6 +153,7 @@ def test_paper_skim_prompt_defines_structured_research_map_contract():
     assert "varied_factors=['volumetric energy density']" in user_prompt
     assert "outcome='fatigue strength'" in user_prompt
     assert "result direction, value, or comparison sentence" in user_prompt
+    assert "source_unit_coverage" not in user_prompt
 
 
 def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
@@ -803,13 +797,6 @@ def test_domain_model_extractors_validates_paper_skim_response():
             }
           ],
           "unresolved_signals": [],
-          "source_unit_coverage": [
-            {
-              "source_unit_id": "window-source-1",
-              "status": "relationship_emitted",
-              "reason": null
-            }
-          ],
           "evidence_density": "high",
           "confidence": 0.91,
           "warnings": []
@@ -840,36 +827,6 @@ def test_domain_model_extractors_validates_paper_skim_response():
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 4096
 
 
-def test_paper_skim_normalizes_reason_from_emitted_source_unit_coverage():
-    skim = StructuredPaperSkim.model_validate(
-        {
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "relationships": [
-                        {
-                            "varied_factors": ["laser power"],
-                            "outcome": "porosity",
-                            "source_unit_ids": ["window-source-1"],
-                        }
-                    ],
-                }
-            ],
-            "source_unit_coverage": [
-                {
-                    "source_unit_id": "window-source-1",
-                    "status": "relationship_emitted",
-                    "reason": "This unit supports the returned relationship.",
-                }
-            ],
-        }
-    )
-
-    assert skim.source_unit_coverage[0].reason is None
-
-
 def test_structured_paper_skim_rejects_duplicate_study_identities():
     study = {
         "experiment_label": "LPBF parameter study",
@@ -890,12 +847,6 @@ def test_structured_paper_skim_rejects_duplicate_study_identities():
         StructuredPaperSkim.model_validate(
             {
                 "studies": [study, study],
-                "source_unit_coverage": [
-                    {
-                        "source_unit_id": "window-source-1",
-                        "status": "relationship_emitted",
-                    }
-                ],
             }
         )
 
@@ -928,16 +879,6 @@ def test_paper_skim_retries_duplicate_study_identities_before_returning():
         "doc_role": "experimental",
         "studies": [first_study, second_study],
         "unresolved_signals": [],
-        "source_unit_coverage": [
-            {
-                "source_unit_id": "window-source-1",
-                "status": "relationship_emitted",
-            },
-            {
-                "source_unit_id": "window-source-2",
-                "status": "relationship_emitted",
-            },
-        ],
         "evidence_density": "high",
         "confidence": 0.9,
         "warnings": [],
@@ -1018,13 +959,6 @@ def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypat
     invalid = {
         "doc_role": "experimental",
         "studies": [first_study, second_study],
-        "source_unit_coverage": [
-            {
-                "source_unit_id": source_unit_id,
-                "status": "relationship_emitted",
-            }
-            for source_unit_id in ("window-source-1", "window-source-2")
-        ],
     }
     valid = {
         **invalid,
@@ -1077,65 +1011,6 @@ def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypat
     )
 
 
-def test_paper_skim_retries_when_coverage_disagrees_with_emitted_relationship():
-    invalid = {
-        "doc_role": "experimental",
-        "studies": [
-            {
-                "design_type": "experimental",
-                "claim_scope": "current_work",
-                "relationships": [
-                    {
-                        "varied_factors": ["laser power"],
-                        "outcome": "porosity",
-                        "source_unit_ids": ["window-source-1"],
-                    }
-                ],
-            }
-        ],
-        "source_unit_coverage": [
-            {
-                "source_unit_id": "window-source-1",
-                "status": "no_study_signal",
-                "reason": "No study signal was found.",
-            }
-        ],
-    }
-    valid = {
-        **invalid,
-        "source_unit_coverage": [
-            {
-                "source_unit_id": "window-source-1",
-                "status": "relationship_emitted",
-                "reason": None,
-            }
-        ],
-    }
-    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
-    extractor = _objective_extractor(client)
-
-    skim = extractor.extract_paper_skim(
-        {
-            "document_id": "paper-1",
-            "title": "LPBF porosity study",
-            "source_units": [
-                {
-                    "source_unit_id": "window-source-1",
-                    "source_kind": "block",
-                    "source_ref": "block-1",
-                    "content": "Laser power was varied and porosity was measured.",
-                }
-            ],
-        }
-    )
-
-    assert skim.source_unit_coverage[0].status == "relationship_emitted"
-    assert len(client.chat.completions.calls) == 2
-    assert "coverage status does not agree" in client.chat.completions.calls[1][
-        "messages"
-    ][-1]["content"]
-
-
 def test_paper_skim_preserves_multi_material_multi_outcome_study():
     client = _FakeOpenAIClient(
         json.dumps(
@@ -1174,13 +1049,6 @@ def test_paper_skim_preserves_multi_material_multi_outcome_study():
                     }
                 ],
                 "unresolved_signals": [],
-                "source_unit_coverage": [
-                    {
-                        "source_unit_id": "window-source-1",
-                        "status": "relationship_emitted",
-                        "reason": None,
-                    }
-                ],
                 "evidence_density": "high",
                 "confidence": 0.92,
                 "warnings": [
@@ -1245,13 +1113,6 @@ def test_paper_skim_retries_oversized_study_without_truncating_relationships():
             }
         ],
         "unresolved_signals": [],
-        "source_unit_coverage": [
-            {
-                "source_unit_id": "window-source-1",
-                "status": "relationship_emitted",
-                "reason": None,
-            }
-        ],
         "evidence_density": "medium",
         "confidence": 0.8,
         "warnings": [],

@@ -17,6 +17,7 @@ from application.core.objectives import property_matching
 from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
 from application.core.objectives.evidence_routing import EvidenceCandidate
 from application.core.objectives.extraction import (
+    OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
     ObjectiveExtractor,
     build_default_objective_extractor,
 )
@@ -117,6 +118,7 @@ class PaperAnalysisFrame:
     measured_property_scope: tuple[str, ...]
     test_environment_scope: tuple[str, ...]
     relevant_sections: tuple[str, ...]
+    relevant_text_source_refs: tuple[str, ...]
     relevant_tables: tuple[str, ...]
     excluded_tables: tuple[str, ...]
 
@@ -141,6 +143,9 @@ class PaperAnalysisFrame:
             relevant_sections=normalize_objective_terms(
                 payload.get("relevant_sections")
             ),
+            relevant_text_source_refs=normalize_objective_terms(
+                payload.get("relevant_text_source_refs")
+            ),
             relevant_tables=normalize_objective_terms(payload.get("relevant_tables")),
             excluded_tables=normalize_objective_terms(payload.get("excluded_tables")),
         )
@@ -157,6 +162,7 @@ class PaperAnalysisFrame:
             "measured_property_scope": list(self.measured_property_scope),
             "test_environment_scope": list(self.test_environment_scope),
             "relevant_sections": list(self.relevant_sections),
+            "relevant_text_source_refs": list(self.relevant_text_source_refs),
             "relevant_tables": list(self.relevant_tables),
             "excluded_tables": list(self.excluded_tables),
         }
@@ -171,10 +177,13 @@ def _transient_optional_text(value: Any) -> str | None:
     return text or None
 
 
-_FRAME_SECTION_SNIPPET_LIMIT = 12
-_FRAME_SECTION_TEXT_CHARS = 420
-_FRAME_TABLE_LIMIT = 10
 _FRAME_TABLE_ROW_LIMIT = 3
+_FRAME_SOURCE_UNIT_LIMIT = 8
+_FRAME_SECTION_CHUNK_CHARS = 2_400
+_FRAME_PRIOR_STUDY_LIMIT = 8
+_FRAME_PRIOR_RELATIONSHIP_LIMIT = 12
+_FRAME_TABLE_TEXT_CHARS = 800
+_FRAME_TABLE_VALUE_CHARS = 240
 _ROUTE_TEXT_CHARS = 900
 _ROUTE_PROMPT_TEXT_CHARS = 320
 _ROUTE_PROMPT_HEADER_LIMIT = 8
@@ -860,11 +869,6 @@ class ResearchObjectiveService:
                     active_objective_id=objective.objective_id,
                 )
                 tables = tables_by_document_id.get(document_id, [])
-                known_table_ids = {
-                    str(getattr(table, "table_id", "") or "")
-                    for table in tables
-                    if str(getattr(table, "table_id", "") or "")
-                }
                 logger.info(
                     "Research objective paper framing document started collection_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s table_count=%s",
                     collection_id,
@@ -879,6 +883,31 @@ class ResearchObjectiveService:
                     max(total_frame_requests - completed_frame_requests + 1, 0),
                     len(tables),
                 )
+                if document_id in set(objective.excluded_document_ids):
+                    frames.append(
+                        PaperAnalysisFrame.from_mapping(
+                            {
+                                "objective_id": objective.objective_id,
+                                "document_id": document_id,
+                                "relevance": "irrelevant",
+                                "paper_role": "irrelevant",
+                                "background": (
+                                    "Paper was explicitly excluded from this research "
+                                    "objective."
+                                ),
+                            }
+                        )
+                    )
+                    logger.info(
+                        "Research objective paper framing skipped explicitly excluded document collection_id=%s objective_id=%s document_id=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s",
+                        collection_id,
+                        objective.objective_id,
+                        document_id,
+                        completed_frame_requests,
+                        total_frame_requests,
+                        max(total_frame_requests - completed_frame_requests, 0),
+                    )
+                    continue
                 payload = self._build_objective_paper_frame_payload(
                     collection_id=collection_id,
                     objective=objective,
@@ -889,55 +918,72 @@ class ResearchObjectiveService:
                     tables=tables,
                     document_tree=document_trees_by_document_id.get(document_id),
                 )
-                try:
-                    parsed = extractor.assess_objective_paper(payload)
-                    record = parsed.model_dump()
-                except Exception as exc:  # noqa: BLE001
+                batches = self._build_objective_paper_frame_batches(
+                    extractor=extractor,
+                    payload=payload,
+                )
+                batch_results: list[tuple[Mapping[str, Any], bool]] = []
+                fallback_batch_count = 0
+                for batch_position, (batch_payload, prompt_tokens) in enumerate(
+                    batches,
+                    start=1,
+                ):
+                    fallback_reason: str | None = None
+                    if (
+                        prompt_tokens is None
+                        or prompt_tokens > OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT
+                    ):
+                        fallback_reason = "prompt_token_preflight_failed"
+                    else:
+                        try:
+                            parsed = extractor.assess_objective_paper(batch_payload)
+                            batch_results.append((parsed.model_dump(), False))
+                            continue
+                        except Exception:  # noqa: BLE001
+                            fallback_reason = "model_call_failed"
+                            logger.warning(
+                                "Research objective paper framing batch model failed; preserving batch sources collection_id=%s objective_id=%s document_id=%s batch_position=%s batch_count=%s prompt_tokens=%s",
+                                collection_id,
+                                objective.objective_id,
+                                document_id,
+                                batch_position,
+                                len(batches),
+                                prompt_tokens,
+                                exc_info=True,
+                            )
+
+                    fallback_batch_count += 1
                     logger.warning(
-                        "Research objective paper framing model failed; using deterministic frame collection_id=%s objective_id=%s document_id=%s",
+                        "Research objective paper framing batch used conservative fallback collection_id=%s objective_id=%s document_id=%s batch_position=%s batch_count=%s source_unit_count=%s reason=%s prompt_tokens=%s",
                         collection_id,
                         objective.objective_id,
                         document_id,
-                        exc_info=True,
+                        batch_position,
+                        len(batches),
+                        len(batch_payload["source_units"]),
+                        fallback_reason,
+                        prompt_tokens,
                     )
-                    record = self._build_deterministic_objective_paper_frame_record(
-                        objective=objective,
-                        paper_skim=skim_by_document_id.get(document_id),
-                        payload=payload,
+                    batch_results.append(
+                        (
+                            self._build_conservative_objective_paper_frame_batch(
+                                payload=batch_payload,
+                                paper_skim=skim_by_document_id.get(document_id),
+                            ),
+                            True,
+                        )
                     )
-                relevant_tables = self._filter_known_values(
-                    record.get("relevant_tables"),
-                    known_values=known_table_ids,
+
+                frame = self._aggregate_objective_paper_frame_batches(
+                    objective_id=objective.objective_id,
+                    document_id=document_id,
+                    source_units=payload["source_units"],
+                    batch_results=batch_results,
+                    paper_skim=skim_by_document_id.get(document_id),
                 )
-                excluded_tables = tuple(
-                    table_id
-                    for table_id in self._filter_known_values(
-                        record.get("excluded_tables"),
-                        known_values=known_table_ids,
-                    )
-                    if table_id not in set(relevant_tables)
-                )
-                section_labels = {
-                    str(item.get("section_label") or "")
-                    for item in payload["section_snippets"]
-                    if str(item.get("section_label") or "")
-                }
-                record.update(
-                    {
-                        "objective_id": objective.objective_id,
-                        "document_id": document_id,
-                        "relevant_sections": self._filter_known_values(
-                            record.get("relevant_sections"),
-                            known_values=section_labels,
-                        ),
-                        "relevant_tables": relevant_tables,
-                        "excluded_tables": excluded_tables,
-                    }
-                )
-                frame = PaperAnalysisFrame.from_mapping(record)
                 frames.append(frame)
                 logger.info(
-                    "Research objective paper framing document finished collection_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s relevance=%s paper_role=%s relevant_tables=%s excluded_tables=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s",
+                    "Research objective paper framing document finished collection_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s relevance=%s paper_role=%s relevant_tables=%s excluded_tables=%s batch_count=%s fallback_batch_count=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s",
                     collection_id,
                     objective.objective_id,
                     objective_position,
@@ -949,6 +995,8 @@ class ResearchObjectiveService:
                     frame.paper_role,
                     len(frame.relevant_tables),
                     len(frame.excluded_tables),
+                    len(batches),
+                    fallback_batch_count,
                     completed_frame_requests,
                     total_frame_requests,
                     max(total_frame_requests - completed_frame_requests, 0),
@@ -5382,6 +5430,7 @@ class ResearchObjectiveService:
         if limit <= 0:
             return []
         scored_candidates: list[tuple[int, int, dict[str, Any]]] = []
+        selected_source_refs = set(frame.relevant_text_source_refs)
         for block in sorted(
             blocks,
             key=lambda item: int(getattr(item, "block_order", 0) or 0),
@@ -5397,6 +5446,8 @@ class ResearchObjectiveService:
                 or block_type
                 not in {"paragraph", "list_item", "figure_caption"}
             ):
+                continue
+            if selected_source_refs and block_id not in selected_source_refs:
                 continue
             score = self._route_text_candidate_score(
                 frame=frame,
@@ -5468,11 +5519,19 @@ class ResearchObjectiveService:
                 node=node,
                 block=block,
             )
-            if restrict_to_frame_sections and not self._route_section_matches_frame(
-                section_label=section_label,
-                frame=frame,
-            ):
-                continue
+            if restrict_to_frame_sections:
+                if frame.relevant_text_source_refs:
+                    if not self._route_tree_source_matches_frame(
+                        document_tree=document_tree,
+                        node=node,
+                        frame=frame,
+                    ):
+                        continue
+                elif not self._route_section_matches_frame(
+                    section_label=section_label,
+                    frame=frame,
+                ):
+                    continue
             score = self._route_text_candidate_score(
                 frame=frame,
                 objective_context=objective_context,
@@ -5698,11 +5757,35 @@ class ResearchObjectiveService:
         self,
         frame: PaperAnalysisFrame,
     ) -> bool:
+        if frame.relevant_text_source_refs:
+            return True
         if not frame.relevant_sections:
             return False
         if frame.relevance == "high" and frame.paper_role == "primary_experiment":
             return False
         return True
+
+    def _route_tree_source_matches_frame(
+        self,
+        *,
+        document_tree: SourceDocumentTree,
+        node: Any,
+        frame: PaperAnalysisFrame,
+    ) -> bool:
+        selected_source_refs = set(frame.relevant_text_source_refs)
+        current = node
+        while current is not None:
+            if any(
+                str(value or "").strip() in selected_source_refs
+                for value in (
+                    getattr(current, "node_id", None),
+                    getattr(current, "source_ref_id", None),
+                )
+            ):
+                return True
+            parent_id = getattr(current, "parent_id", None)
+            current = document_tree.nodes.get(parent_id) if parent_id else None
+        return False
 
     def _route_section_matches_frame(
         self,
@@ -5902,122 +5985,549 @@ class ResearchObjectiveService:
         tables: list[Any],
         document_tree: SourceDocumentTree | None,
     ) -> dict[str, Any]:
+        section_units = self._build_frame_section_source_units(
+            blocks,
+            document_tree=document_tree,
+        )
+        table_units = self._build_frame_table_source_units(tables)
+        source_units = [*section_units, *table_units]
+        source_unit_ids = [
+            str(item.get("source_unit_id") or "")
+            for item in source_units
+        ]
+        if (
+            any(not source_unit_id for source_unit_id in source_unit_ids)
+            or len(source_unit_ids) != len(set(source_unit_ids))
+        ):
+            raise ValueError(
+                "objective paper framing requires unique backend source-unit ids"
+            )
         return {
             "collection_id": collection_id,
-            "objective": objective.to_record(),
-            "paper_skim": paper_skim.to_record() if paper_skim is not None else {},
+            "objective": self._route_prompt_objective_record(objective),
+            "paper_prior": self._build_objective_paper_frame_prior(
+                objective=objective,
+                paper_skim=paper_skim,
+            ),
             "document": {
                 "document_id": getattr(document, "document_id", None),
                 "title": getattr(document, "title", None),
                 "source_filename": self._resolve_source_filename(document),
             },
             "document_profile": profile.to_record() if profile else {},
-            "section_snippets": self._build_frame_section_snippets(
-                blocks,
-                objective=objective,
-                paper_skim=paper_skim,
-                profile=profile,
-                document_tree=document_tree,
-            ),
-            "table_summaries": self._build_frame_table_summaries(
-                tables,
-                objective=objective,
-                paper_skim=paper_skim,
-                profile=profile,
-            ),
+            "source_units": source_units,
         }
 
-    def _build_frame_section_snippets(
+    def _build_objective_paper_frame_batches(
         self,
-        blocks: list[Any],
+        *,
+        extractor: ObjectiveExtractor,
+        payload: Mapping[str, Any],
+    ) -> tuple[tuple[dict[str, Any], int | None], ...]:
+        base_payload = {
+            key: value
+            for key, value in payload.items()
+            if key != "source_units"
+        }
+        source_units = [
+            dict(item)
+            for item in payload.get("source_units") or ()
+            if isinstance(item, Mapping)
+        ]
+        batches: list[tuple[dict[str, Any], int | None]] = []
+        current_units: list[dict[str, Any]] = []
+        current_tokens: int | None = None
+
+        def batch_payload(units: list[dict[str, Any]]) -> dict[str, Any]:
+            return {**base_payload, "source_units": list(units)}
+
+        def estimate(candidate: dict[str, Any]) -> int | None:
+            try:
+                return extractor.estimate_objective_paper_frame_prompt_tokens(
+                    candidate
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Research objective paper framing token preflight failed",
+                    exc_info=True,
+                )
+                return None
+
+        for source_unit in source_units:
+            if len(current_units) >= _FRAME_SOURCE_UNIT_LIMIT:
+                batches.append((batch_payload(current_units), current_tokens))
+                current_units = []
+                current_tokens = None
+
+            candidate_units = [*current_units, source_unit]
+            candidate_payload = batch_payload(candidate_units)
+            candidate_tokens = estimate(candidate_payload)
+            if (
+                candidate_tokens is not None
+                and candidate_tokens <= OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT
+            ):
+                current_units = candidate_units
+                current_tokens = candidate_tokens
+                continue
+
+            if current_units:
+                batches.append((batch_payload(current_units), current_tokens))
+                singleton_payload = batch_payload([source_unit])
+                singleton_tokens = estimate(singleton_payload)
+            else:
+                singleton_payload = candidate_payload
+                singleton_tokens = candidate_tokens
+
+            if (
+                singleton_tokens is not None
+                and singleton_tokens <= OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT
+            ):
+                current_units = [source_unit]
+                current_tokens = singleton_tokens
+            else:
+                batches.append((singleton_payload, singleton_tokens))
+                current_units = []
+                current_tokens = None
+
+        if current_units:
+            batches.append((batch_payload(current_units), current_tokens))
+        return tuple(batches)
+
+    def _build_conservative_objective_paper_frame_batch(
+        self,
+        *,
+        payload: Mapping[str, Any],
+        paper_skim: PaperSkim | None,
+    ) -> dict[str, Any]:
+        return {
+            "relevance": "uncertain",
+            "paper_role": self._deterministic_frame_paper_role(paper_skim),
+            "background": None,
+            "material_match": [],
+            "changed_variables": [],
+            "measured_property_scope": [],
+            "test_environment_scope": [],
+            "relevant_source_unit_ids": [
+                str(item.get("source_unit_id") or "")
+                for item in payload.get("source_units") or ()
+                if isinstance(item, Mapping)
+                and str(item.get("source_unit_id") or "")
+            ],
+            "excluded_source_unit_ids": [],
+        }
+
+    def _aggregate_objective_paper_frame_batches(
+        self,
+        *,
+        objective_id: str,
+        document_id: str,
+        source_units: Iterable[Mapping[str, Any]],
+        batch_results: Iterable[tuple[Mapping[str, Any], bool]],
+        paper_skim: PaperSkim | None,
+    ) -> PaperAnalysisFrame:
+        units = tuple(source_units)
+        results = tuple(batch_results)
+        units_by_id = {
+            str(unit.get("source_unit_id") or ""): unit
+            for unit in units
+            if str(unit.get("source_unit_id") or "")
+        }
+        relevant_ids: set[str] = set()
+        excluded_ids: set[str] = set()
+        for record, _used_fallback in results:
+            relevant_ids.update(
+                str(value)
+                for value in record.get("relevant_source_unit_ids") or ()
+                if str(value) in units_by_id
+            )
+            excluded_ids.update(
+                str(value)
+                for value in record.get("excluded_source_unit_ids") or ()
+                if str(value) in units_by_id
+            )
+
+        relevant_ids.update(set(units_by_id) - relevant_ids - excluded_ids)
+        excluded_ids.difference_update(relevant_ids)
+        all_sources_excluded = bool(units_by_id) and not relevant_ids
+
+        relevance_rank = {
+            "irrelevant": 0,
+            "uncertain": 1,
+            "low": 2,
+            "medium": 3,
+            "high": 4,
+        }
+
+        def record_relevance(record: Mapping[str, Any]) -> str:
+            value = str(record.get("relevance") or "uncertain")
+            return value if value in relevance_rank else "uncertain"
+
+        ranked_results = sorted(
+            enumerate(results),
+            key=lambda item: (
+                relevance_rank[record_relevance(item[1][0])],
+                -item[0],
+            ),
+            reverse=True,
+        )
+        relevance = (
+            "irrelevant"
+            if all_sources_excluded
+            else (
+                record_relevance(ranked_results[0][1][0])
+                if ranked_results
+                else "uncertain"
+            )
+        )
+        if relevant_ids and relevance == "irrelevant":
+            relevance = "uncertain"
+
+        representative_results = ranked_results
+        representative = (
+            representative_results[0][1][0]
+            if representative_results
+            else {}
+        )
+        background_record = next(
+            (
+                record
+                for _position, (record, used_fallback) in representative_results
+                if not used_fallback
+                and record_relevance(record) != "irrelevant"
+                and str(record.get("background") or "").strip()
+            ),
+            {},
+        )
+
+        def values(field: str) -> list[str]:
+            return list(
+                dict.fromkeys(
+                    text
+                    for record, _used_fallback in results
+                    for value in record.get(field) or ()
+                    if (text := str(value).strip())
+                )
+            )
+
+        relevant_sections: list[str] = []
+        relevant_text_source_refs: list[str] = []
+        relevant_tables: list[str] = []
+        excluded_tables: list[str] = []
+        for unit in units:
+            source_unit_id = str(unit.get("source_unit_id") or "")
+            source_kind = str(unit.get("source_kind") or "")
+            if source_kind == "section" and source_unit_id in relevant_ids:
+                label = str(unit.get("section_label") or "").strip()
+                if label and label not in relevant_sections:
+                    relevant_sections.append(label)
+                source_ref = str(unit.get("source_ref") or "").strip()
+                if (
+                    source_ref
+                    and source_ref not in relevant_text_source_refs
+                ):
+                    relevant_text_source_refs.append(source_ref)
+            if source_kind != "table":
+                continue
+            table_id = str(unit.get("source_ref") or "").strip()
+            if not table_id:
+                continue
+            if source_unit_id in relevant_ids and table_id not in relevant_tables:
+                relevant_tables.append(table_id)
+            elif source_unit_id in excluded_ids and table_id not in excluded_tables:
+                excluded_tables.append(table_id)
+        excluded_tables = [
+            table_id
+            for table_id in excluded_tables
+            if table_id not in set(relevant_tables)
+        ]
+
+        paper_role = (
+            str(representative.get("paper_role") or "").strip()
+            or self._deterministic_frame_paper_role(paper_skim)
+        )
+        if relevance != "irrelevant" and paper_role == "irrelevant":
+            paper_role = self._deterministic_frame_paper_role(paper_skim)
+
+        return PaperAnalysisFrame.from_mapping(
+            {
+                "objective_id": objective_id,
+                "document_id": document_id,
+                "relevance": relevance,
+                "paper_role": paper_role,
+                "background": background_record.get("background"),
+                "material_match": values("material_match"),
+                "changed_variables": values("changed_variables"),
+                "measured_property_scope": values("measured_property_scope"),
+                "test_environment_scope": values("test_environment_scope"),
+                "relevant_sections": relevant_sections,
+                "relevant_text_source_refs": relevant_text_source_refs,
+                "relevant_tables": relevant_tables,
+                "excluded_tables": excluded_tables,
+            }
+        )
+
+    def _build_objective_paper_frame_prior(
+        self,
         *,
         objective: ResearchObjective,
         paper_skim: PaperSkim | None,
-        profile: Any,
-        document_tree: SourceDocumentTree | None = None,
-    ) -> list[dict[str, Any]]:
-        frame_terms = self._frame_relevance_terms(
-            objective=objective,
-            paper_skim=paper_skim,
-            profile=profile,
-        )
-        if document_tree is not None:
-            snippets = self._build_frame_section_snippets_from_tree(document_tree)
-            if snippets:
-                return self._prioritize_frame_items(snippets, frame_terms=frame_terms)
+    ) -> dict[str, Any]:
+        if paper_skim is None:
+            return {}
 
-        snippets: list[dict[str, Any]] = []
+        lineage_relationship_ids = set(objective.source_relationship_ids)
+        studies: list[dict[str, Any]] = []
+        relationship_count = 0
+        for study in paper_skim.studies:
+            selected_relationships = []
+            for relationship in study.relationships:
+                if lineage_relationship_ids:
+                    selected = relationship.relationship_id in lineage_relationship_ids
+                else:
+                    selected = self._frame_relationship_supports_objective(
+                        relationship=relationship,
+                        objective=objective,
+                    )
+                if not selected:
+                    continue
+                selected_relationships.append(
+                    {
+                        "varied_factors": list(relationship.varied_factors),
+                        "outcome": relationship.outcome,
+                    }
+                )
+                relationship_count += 1
+                if relationship_count >= _FRAME_PRIOR_RELATIONSHIP_LIMIT:
+                    break
+            if selected_relationships:
+                studies.append(
+                    {
+                        "experiment_label": study.experiment_label,
+                        "design_type": study.design_type,
+                        "claim_scope": study.claim_scope,
+                        "material_scope": list(study.material_scope),
+                        "process_context": list(study.process_context),
+                        "sample_context": list(study.sample_context),
+                        "test_context": list(study.test_context),
+                        "comparator": study.comparator,
+                        "fixed_conditions": list(study.fixed_conditions),
+                        "relationships": selected_relationships,
+                    }
+                )
+            if (
+                len(studies) >= _FRAME_PRIOR_STUDY_LIMIT
+                or relationship_count >= _FRAME_PRIOR_RELATIONSHIP_LIMIT
+            ):
+                break
+        return {
+            "doc_role": paper_skim.doc_role,
+            "evidence_density": paper_skim.evidence_density,
+            "studies": studies,
+        }
+
+    @staticmethod
+    def _frame_relationship_supports_objective(
+        *,
+        relationship: Any,
+        objective: ResearchObjective,
+    ) -> bool:
+        variable_supported = any(
+            property_matching.axis_values_match(factor, variable)
+            for factor in relationship.varied_factors
+            for variable in objective.variables
+        )
+        outcome_supported = any(
+            property_matching.axis_values_match(relationship.outcome, outcome)
+            for outcome in objective.outcomes
+        )
+        return variable_supported and outcome_supported
+
+    @staticmethod
+    def _frame_source_unit_id(
+        *,
+        source_kind: str,
+        source_ref: str,
+        chunk_position: int,
+    ) -> str:
+        identity = json.dumps(
+            [source_kind, source_ref, chunk_position],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        return f"frame:{source_kind}:{sha1(identity.encode('utf-8')).hexdigest()}"
+
+    def _build_frame_section_source_units(
+        self,
+        blocks: list[Any],
+        *,
+        document_tree: SourceDocumentTree | None,
+    ) -> list[dict[str, Any]]:
+        if document_tree is not None:
+            units = self._build_frame_tree_section_source_units(document_tree)
+            if units:
+                return units
+
+        units: list[dict[str, Any]] = []
         for block in sorted(
             blocks,
             key=lambda item: int(getattr(item, "block_order", 0) or 0),
         ):
             text = str(getattr(block, "text", "") or "").strip()
-            if not text:
-                continue
             block_type = str(getattr(block, "block_type", "") or "")
-            if block_type not in {"heading", "paragraph", "list_item"}:
+            if not text or block_type not in {"heading", "paragraph", "list_item"}:
                 continue
+            source_ref = str(getattr(block, "block_id", "") or "").strip()
+            if not source_ref:
+                source_ref = f"block-order-{int(getattr(block, 'block_order', 0) or 0)}"
             section_label = str(getattr(block, "heading_path", "") or "").strip()
             if block_type == "heading":
                 section_label = text
-            if not section_label:
-                section_label = "Unsectioned"
-            snippets.append(
-                {
-                    "section_label": section_label,
-                    "block_type": block_type,
-                    "text": text[:_FRAME_SECTION_TEXT_CHARS],
-                }
-            )
-        return self._prioritize_frame_items(snippets, frame_terms=frame_terms)
+            section_label = section_label or "Unsectioned"
+            for chunk_position, chunk in enumerate(
+                self._split_frame_section_text(text),
+                start=1,
+            ):
+                units.append(
+                    {
+                        "source_unit_id": self._frame_source_unit_id(
+                            source_kind="section",
+                            source_ref=source_ref,
+                            chunk_position=chunk_position,
+                        ),
+                        "source_kind": "section",
+                        "source_ref": source_ref,
+                        "section_label": section_label,
+                        "text": chunk,
+                    }
+                )
+        return units
 
-    def _build_frame_section_snippets_from_tree(
+    def _build_frame_tree_section_source_units(
         self,
         document_tree: SourceDocumentTree,
     ) -> list[dict[str, Any]]:
-        snippets: list[dict[str, Any]] = []
-        nodes = self._document_tree_nodes_in_order(document_tree)
-        section_nodes = [
-            node
-            for node in nodes
-            if node.node_type == "section"
-            and not self._tree_node_in_reference_branch(document_tree, node)
-        ]
-        for node in section_nodes:
-            text = self._section_text_from_tree_node(document_tree, node)
-            if not text and node.title:
-                text = node.title
+        units: list[dict[str, Any]] = []
+        for node in self._document_tree_nodes_in_order(document_tree):
+            is_section = node.node_type == "section"
+            is_root_text = (
+                node.parent_id == document_tree.root_node_id
+                and node.node_type in {"paragraph", "list_item"}
+            )
+            if (
+                not (is_section or is_root_text)
+                or self._tree_node_in_reference_branch(document_tree, node)
+            ):
+                continue
+            text = (
+                self._section_text_from_tree_node(document_tree, node)
+                if is_section
+                else str(node.text or "").strip()
+            )
+            if not text and is_section and node.title:
+                text = str(node.title)
             if not text:
                 continue
-            snippets.append(
-                {
-                    "section_label": self._tree_section_label(node),
-                    "block_type": "section",
-                    "text": text[:_FRAME_SECTION_TEXT_CHARS],
-                }
+            for chunk_position, chunk in enumerate(
+                self._split_frame_section_text(text),
+                start=1,
+            ):
+                units.append(
+                    {
+                        "source_unit_id": self._frame_source_unit_id(
+                            source_kind="section",
+                            source_ref=node.node_id,
+                            chunk_position=chunk_position,
+                        ),
+                        "source_kind": "section",
+                        "source_ref": node.node_id,
+                        "section_label": (
+                            self._tree_section_label(node)
+                            if is_section
+                            else "Unsectioned"
+                        ),
+                        "text": chunk,
+                    }
+                )
+        return units
+
+    @staticmethod
+    def _split_frame_section_text(text: str) -> tuple[str, ...]:
+        remaining = str(text or "").strip()
+        chunks: list[str] = []
+        while remaining:
+            if len(remaining) <= _FRAME_SECTION_CHUNK_CHARS:
+                chunks.append(remaining)
+                break
+            split_at = max(
+                remaining.rfind("\n\n", 0, _FRAME_SECTION_CHUNK_CHARS + 1),
+                remaining.rfind(". ", 0, _FRAME_SECTION_CHUNK_CHARS + 1),
+                remaining.rfind(" ", 0, _FRAME_SECTION_CHUNK_CHARS + 1),
             )
+            if split_at < _FRAME_SECTION_CHUNK_CHARS // 2:
+                split_at = _FRAME_SECTION_CHUNK_CHARS
+            elif remaining[split_at : split_at + 2] == ". ":
+                split_at += 1
+            chunk = remaining[:split_at].strip()
+            if chunk:
+                chunks.append(chunk)
+            remaining = remaining[split_at:].strip()
+        return tuple(chunks)
 
-        if snippets:
-            return snippets
-
-        unsectioned_texts = [
-            str(node.text or "").strip()
-            for node in nodes
-            if node.node_type in {"paragraph", "list_item"}
-            and node.parent_id == document_tree.root_node_id
-            and not self._tree_node_in_reference_branch(document_tree, node)
-            and str(node.text or "").strip()
-        ]
-        text = "\n\n".join(unsectioned_texts).strip()
-        if not text:
-            return []
-        return [
-            {
-                "section_label": "Unsectioned",
-                "block_type": "section",
-                "text": text[:_FRAME_SECTION_TEXT_CHARS],
-            }
-        ]
+    def _build_frame_table_source_units(
+        self,
+        tables: list[Any],
+    ) -> list[dict[str, Any]]:
+        units: list[dict[str, Any]] = []
+        for table in sorted(
+            tables,
+            key=lambda item: int(getattr(item, "table_order", 0) or 0),
+        ):
+            table_id = str(getattr(table, "table_id", "") or "").strip()
+            if not table_id:
+                continue
+            matrix = tuple(getattr(table, "table_matrix", ()) or ())
+            serialized_rows = [
+                [
+                    str(cell)[:_FRAME_TABLE_VALUE_CHARS]
+                    for cell in (
+                        row if isinstance(row, (list, tuple)) else (row,)
+                    )
+                ]
+                for row in matrix
+            ]
+            row_chunks = [
+                serialized_rows[position : position + _FRAME_TABLE_ROW_LIMIT]
+                for position in range(0, len(serialized_rows), _FRAME_TABLE_ROW_LIMIT)
+            ] or [[]]
+            for chunk_position, rows in enumerate(row_chunks, start=1):
+                row_start = (chunk_position - 1) * _FRAME_TABLE_ROW_LIMIT
+                units.append(
+                    {
+                        "source_unit_id": self._frame_source_unit_id(
+                            source_kind="table",
+                            source_ref=table_id,
+                            chunk_position=chunk_position,
+                        ),
+                        "source_kind": "table",
+                        "source_ref": table_id,
+                        "caption_text": str(
+                            getattr(table, "caption_text", None) or ""
+                        )[:_FRAME_TABLE_TEXT_CHARS],
+                        "heading_path": str(
+                            getattr(table, "heading_path", None) or ""
+                        )[:_FRAME_TABLE_TEXT_CHARS],
+                        "column_headers": [
+                            str(value)[:_FRAME_TABLE_VALUE_CHARS]
+                            for value in getattr(table, "column_headers", ()) or ()
+                        ],
+                        "row_count": int(getattr(table, "row_count", 0) or 0),
+                        "col_count": int(getattr(table, "col_count", 0) or 0),
+                        "row_start": row_start,
+                        "row_end": row_start + len(rows),
+                        "sample_rows": rows,
+                    }
+                )
+        return units
 
     def _section_text_from_tree_node(
         self,
@@ -6042,231 +6552,6 @@ class ResearchObjectiveService:
         title = str(getattr(node, "title", "") or "").strip()
         return title or "Unsectioned"
 
-    def _build_frame_table_summaries(
-        self,
-        tables: list[Any],
-        *,
-        objective: ResearchObjective,
-        paper_skim: PaperSkim | None,
-        profile: Any,
-    ) -> list[dict[str, Any]]:
-        frame_terms = self._frame_relevance_terms(
-            objective=objective,
-            paper_skim=paper_skim,
-            profile=profile,
-        )
-        summaries: list[dict[str, Any]] = []
-        for table in sorted(
-            tables,
-            key=lambda item: int(getattr(item, "table_order", 0) or 0),
-        ):
-            matrix = tuple(getattr(table, "table_matrix", ()) or ())
-            sample_rows = [
-                [str(cell) for cell in row]
-                for row in matrix[:_FRAME_TABLE_ROW_LIMIT]
-                if isinstance(row, (list, tuple))
-            ]
-            summaries.append(
-                {
-                    "table_id": str(getattr(table, "table_id", "") or ""),
-                    "caption_text": getattr(table, "caption_text", None),
-                    "heading_path": getattr(table, "heading_path", None),
-                    "column_headers": [
-                        str(value)
-                        for value in getattr(table, "column_headers", ()) or ()
-                    ],
-                    "row_count": int(getattr(table, "row_count", 0) or 0),
-                    "col_count": int(getattr(table, "col_count", 0) or 0),
-                    "sample_rows": sample_rows,
-                }
-            )
-        return self._prioritize_frame_items(
-            summaries,
-            frame_terms=frame_terms,
-            limit=_FRAME_TABLE_LIMIT,
-        )
-
-    def _build_deterministic_objective_paper_frame_record(
-        self,
-        *,
-        objective: ResearchObjective,
-        paper_skim: PaperSkim | None,
-        payload: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        frame_terms = self._frame_relevance_terms(
-            objective=objective,
-            paper_skim=paper_skim,
-            profile=None,
-        )
-        sections = [
-            str(item.get("section_label") or "").strip()
-            for item in self._frame_relevant_items(
-                payload.get("section_snippets"),
-                frame_terms=frame_terms,
-            )
-            if str(item.get("section_label") or "").strip()
-        ]
-        tables = [
-            str(item.get("table_id") or "").strip()
-            for item in self._frame_relevant_items(
-                payload.get("table_summaries"),
-                frame_terms=frame_terms,
-            )
-            if str(item.get("table_id") or "").strip()
-        ]
-        visible_table_ids = [
-            str(item.get("table_id") or "").strip()
-            for item in payload.get("table_summaries") or ()
-            if isinstance(item, Mapping) and str(item.get("table_id") or "").strip()
-        ]
-        excluded_tables = [table_id for table_id in visible_table_ids if table_id not in tables]
-        evidence_density = str(getattr(paper_skim, "evidence_density", "") or "")
-        has_relevant_content = bool(sections or tables)
-        axis_coverage = self._deterministic_frame_axis_coverage(
-            objective=objective,
-            paper_skim=paper_skim,
-            items=[*sections, *tables],
-            payload=payload,
-        )
-        has_axis_coverage = (
-            axis_coverage["variable"] and axis_coverage["target_property"]
-        )
-        is_seed_document = bool(
-            getattr(paper_skim, "document_id", None)
-            and getattr(paper_skim, "document_id", None)
-            in set(objective.seed_document_ids)
-        )
-        relevance = "medium" if has_relevant_content and has_axis_coverage else "low"
-        if has_relevant_content and is_seed_document:
-            relevance = "medium"
-        if (
-            not has_relevant_content
-            or (not has_axis_coverage and not is_seed_document)
-        ) and evidence_density == "low":
-            relevance = "irrelevant"
-        if not has_axis_coverage and not is_seed_document:
-            sections = []
-            tables = []
-            excluded_tables = visible_table_ids
-        return {
-            "relevance": relevance,
-            "paper_role": self._deterministic_frame_paper_role(paper_skim),
-            "background": "Deterministic frame built after model framing failed.",
-            "material_match": list(objective.material_scope),
-            "changed_variables": self._deterministic_frame_variables(
-                objective=objective,
-                paper_skim=paper_skim,
-            ),
-            "measured_property_scope": self._deterministic_frame_target_properties(
-                objective=objective,
-                paper_skim=paper_skim,
-            ),
-            "test_environment_scope": [],
-            "relevant_sections": sections[:_FRAME_SECTION_SNIPPET_LIMIT],
-            "relevant_tables": tables[:_FRAME_TABLE_LIMIT],
-            "excluded_tables": excluded_tables,
-        }
-
-    def _deterministic_frame_axis_coverage(
-        self,
-        *,
-        objective: ResearchObjective,
-        paper_skim: PaperSkim | None,
-        items: list[str],
-        payload: Mapping[str, Any],
-    ) -> dict[str, bool]:
-        text = property_matching.axis_key(
-            " ".join(
-                [
-                    *items,
-                    str(getattr(paper_skim, "doc_role", "") or ""),
-                    " ".join(
-                        self._paper_skim_relationship_values(
-                            paper_skim,
-                            "varied_factors",
-                        )
-                    ),
-                    " ".join(
-                        self._paper_skim_relationship_values(paper_skim, "outcome")
-                    ),
-                    " ".join(
-                        self._paper_skim_study_values(
-                            paper_skim,
-                            "process_context",
-                        )
-                    ),
-                    str(payload.get("document") or ""),
-                ]
-            )
-        )
-        variable_axes = tuple(objective.variables)
-        target_axes = tuple(objective.outcomes)
-        return {
-            "variable": self._frame_mentions_any_axis(text, variable_axes),
-            "target_property": self._frame_mentions_any_axis(text, target_axes),
-        }
-
-    def _frame_mentions_any_axis(self, text_key: str, axes: Iterable[Any]) -> bool:
-        text_tokens = property_matching.axis_tokens(text_key)
-        for axis in axes:
-            axis_text = str(axis or "").strip()
-            if not axis_text:
-                continue
-            axis_key = property_matching.axis_key(axis_text)
-            axis_tokens = property_matching.axis_tokens(axis_key)
-            if not axis_tokens:
-                continue
-            if axis_key in text_key or property_matching.source_text_mentions_axis(
-                text_key,
-                axis_text,
-            ):
-                return True
-            meaningful_tokens = {
-                token
-                for token in axis_tokens
-                if token
-                not in {
-                    "additive",
-                    "affect",
-                    "alloy",
-                    "laser",
-                    "lpbf",
-                    "manufacturing",
-                    "melting",
-                    "powder",
-                    "process",
-                    "selective",
-                    "slm",
-                    "steel",
-                }
-            }
-            if meaningful_tokens and meaningful_tokens.issubset(text_tokens):
-                return True
-        return False
-
-    def _frame_relevant_items(
-        self,
-        raw_items: Any,
-        *,
-        frame_terms: tuple[tuple[str, int], ...],
-    ) -> list[Mapping[str, Any]]:
-        if not isinstance(raw_items, list):
-            return []
-        scored: list[tuple[int, int, Mapping[str, Any]]] = []
-        for index, item in enumerate(raw_items):
-            if not isinstance(item, Mapping):
-                continue
-            score = self._frame_item_relevance_score(item, frame_terms=frame_terms)
-            if score > 0:
-                scored.append((score, index, item))
-        return [
-            item
-            for _score, _index, item in sorted(
-                scored,
-                key=lambda value: (-value[0], value[1]),
-            )
-        ]
-
     def _deterministic_frame_paper_role(self, paper_skim: PaperSkim | None) -> str:
         doc_role = str(getattr(paper_skim, "doc_role", "") or "")
         if doc_role == "experimental":
@@ -6274,89 +6559,6 @@ class ResearchObjectiveService:
         if doc_role == "review":
             return "review"
         return "uncertain"
-
-    def _deterministic_frame_variables(
-        self,
-        *,
-        objective: ResearchObjective,
-        paper_skim: PaperSkim | None,
-    ) -> list[str]:
-        values: list[str] = []
-        seen: set[str] = set()
-        for candidate in (
-            *objective.variables,
-            *self._paper_skim_relationship_values(paper_skim, "varied_factors"),
-        ):
-            self._append_unique_axis(values, seen, candidate)
-        return values
-
-    def _deterministic_frame_target_properties(
-        self,
-        *,
-        objective: ResearchObjective,
-        paper_skim: PaperSkim | None,
-    ) -> list[str]:
-        values: list[str] = []
-        seen: set[str] = set()
-        for candidate in (
-            *objective.outcomes,
-            *self._paper_skim_relationship_values(paper_skim, "outcome"),
-        ):
-            self._append_unique_axis(values, seen, candidate)
-        return values
-
-    def _frame_relevance_terms(
-        self,
-        *,
-        objective: ResearchObjective,
-        paper_skim: PaperSkim | None,
-        profile: Any,
-    ) -> tuple[tuple[str, int], ...]:
-        terms: list[tuple[str, int]] = []
-
-        def append_many(values: Iterable[Any], weight: int) -> None:
-            for value in values:
-                text = str(value or "").strip()
-                if text:
-                    terms.append((text, weight))
-
-        append_many(objective.variables, 6)
-        append_many(objective.outcomes, 6)
-        append_many(objective.mechanisms, 3)
-        append_many(objective.constraints, 3)
-        append_many(objective.material_scope, 1)
-        if paper_skim is not None:
-            append_many(
-                self._paper_skim_relationship_values(
-                    paper_skim,
-                    "varied_factors",
-                ),
-                3,
-            )
-            append_many(
-                self._paper_skim_relationship_values(paper_skim, "outcome"),
-                3,
-            )
-            append_many(
-                self._paper_skim_study_values(paper_skim, "process_context"),
-                2,
-            )
-        if profile is not None:
-            record = profile.to_record() if hasattr(profile, "to_record") else {}
-            if isinstance(record, Mapping):
-                append_many(record.get("materials") or (), 1)
-                append_many(record.get("processes") or (), 2)
-                append_many(record.get("properties") or (), 2)
-
-        unique: list[tuple[str, int]] = []
-        seen: set[str] = set()
-        for term, weight in terms:
-            key = property_matching.axis_key(term)
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            unique.append((term, weight))
-        return tuple(unique)
 
     @staticmethod
     def _paper_skim_study_values(
@@ -6375,108 +6577,6 @@ class ResearchObjectiveService:
                     seen.add(key)
                     values.append(text)
         return tuple(values)
-
-    @staticmethod
-    def _paper_skim_relationship_values(
-        paper_skim: PaperSkim | None,
-        field_name: str,
-    ) -> tuple[str, ...]:
-        if paper_skim is None:
-            return ()
-        values: list[str] = []
-        seen: set[str] = set()
-        for study in paper_skim.studies:
-            for relationship in study.relationships:
-                raw_values = getattr(relationship, field_name)
-                items = raw_values if isinstance(raw_values, tuple) else (raw_values,)
-                for value in items:
-                    text = str(value or "").strip()
-                    key = text.casefold()
-                    if text and key not in seen:
-                        seen.add(key)
-                        values.append(text)
-        return tuple(values)
-
-    def _prioritize_frame_items(
-        self,
-        items: list[dict[str, Any]],
-        *,
-        frame_terms: tuple[tuple[str, int], ...],
-        limit: int = _FRAME_SECTION_SNIPPET_LIMIT,
-    ) -> list[dict[str, Any]]:
-        scored = [
-            (
-                self._frame_item_relevance_score(item, frame_terms=frame_terms),
-                index,
-                item,
-            )
-            for index, item in enumerate(items)
-        ]
-        selected_indexes: set[int] = set()
-        for score, index, _item in sorted(scored, key=lambda item: (-item[0], item[1])):
-            if len(selected_indexes) >= limit:
-                break
-            if score <= 0:
-                continue
-            selected_indexes.add(index)
-        if selected_indexes:
-            return [dict(items[index]) for index in sorted(selected_indexes)]
-        if len(selected_indexes) < limit:
-            for _score, index, _item in scored:
-                selected_indexes.add(index)
-                if len(selected_indexes) >= limit:
-                    break
-        return [dict(items[index]) for index in sorted(selected_indexes)]
-
-    def _frame_item_relevance_score(
-        self,
-        item: Mapping[str, Any],
-        *,
-        frame_terms: tuple[tuple[str, int], ...],
-    ) -> int:
-        text = self._frame_item_search_text(item)
-        if not text:
-            return 0
-        axis_score = 0
-        text_tokens = property_matching.axis_tokens(property_matching.axis_key(text))
-        for term, weight in frame_terms:
-            term_key = property_matching.axis_key(term)
-            term_tokens = property_matching.axis_tokens(term_key)
-            if not term_tokens:
-                continue
-            if property_matching.source_text_mentions_axis(text, term):
-                axis_score += weight * max(2, len(term_tokens))
-                continue
-            overlap = text_tokens & term_tokens
-            if overlap:
-                axis_score += weight * len(overlap)
-        if axis_score <= 0:
-            return 0
-        return axis_score + self._frame_section_kind_score(text)
-
-    def _frame_item_search_text(self, item: Mapping[str, Any]) -> str:
-        pieces = [
-            str(item.get("section_label") or ""),
-            str(item.get("block_type") or ""),
-            str(item.get("text") or ""),
-            str(item.get("caption_text") or ""),
-            str(item.get("heading_path") or ""),
-            " ".join(str(value) for value in item.get("column_headers") or ()),
-        ]
-        for row in item.get("sample_rows") or ():
-            if isinstance(row, (list, tuple)):
-                pieces.append(" ".join(str(cell) for cell in row))
-        return " ".join(piece for piece in pieces if piece.strip())
-
-    def _frame_section_kind_score(self, text: str) -> int:
-        lowered = text.casefold()
-        if any(term in lowered for term in ("result", "discussion", "conclusion")):
-            return 3
-        if any(term in lowered for term in ("method", "experiment", "material")):
-            return 2
-        if "abstract" in lowered:
-            return 1
-        return 0
 
     def _block_section_label(self, block: Any) -> str:
         block_type = str(getattr(block, "block_type", "") or "")

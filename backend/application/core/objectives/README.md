@@ -157,6 +157,33 @@ not prove that the model found every scientifically relevant study,
 relationship, variable, or outcome. Model-call count grows with document length
 and with failed-batch subdivision.
 
+Objective paper framing is also source-batched. Explicitly excluded documents
+are rejected by the backend without entering the model. The framing prior
+contains only scientific fields from the paper relationships linked to the confirmed
+Objective; full studies, Source locators, coverage records, unresolved signals,
+and backend lineage IDs stay out of the prompt. Root-level unsectioned text and
+every non-reference section are split into stable contiguous chunks. Every table
+row enters a stable contiguous row chunk, with caption, heading path, and column
+headers repeated on each chunk; one relevant or uncertain chunk keeps the whole
+table routable. There is no keyword sampling or top-N removal. Model-visible
+source-unit IDs are bounded opaque hashes of the Source kind, full stable Source
+ref, and chunk position; the full Source ref remains backend-owned for downstream
+traceability. The service packs at most eight
+source units per request and preflights the complete schema-bearing prompt
+against a 12,288-token input budget while reserving 1,024 completion tokens.
+The model is instructed to place every supplied source-unit ID exactly once in
+a relevant or excluded set. Unknown, duplicate, or overlapping IDs remain
+invalid and enter bounded repair. If a schema-valid response omits an input ID,
+the extractor logs that omission and conservatively adds the source to the
+relevant set; an omitted source can therefore never disappear or become negative
+evidence. The backend merges those decisions into the existing
+`PaperAnalysisFrame` while retaining selected section or block Source refs as
+transient routing lineage. Duplicate section headings therefore remain distinct
+when the downstream router traverses the document tree. A failed or irreducibly
+large batch keeps only its own sources routable and cannot erase successful
+sibling decisions or mark their paper role irrelevant. A paper becomes
+`irrelevant` only when every visible source unit was explicitly excluded.
+
 After screening, the backend persists extracted studies, relationships,
 unresolved signals, and Source-unit coverage before collection grouping. It
 normalizes material, variable, and outcome labels before computing candidate

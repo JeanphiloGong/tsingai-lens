@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 
 from application.core.objectives import property_matching
+from application.core.objectives.extraction import (
+    OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
+)
 from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
 from application.core.objectives.evidence_routing import EvidenceCandidate
 from application.core.objectives.research_objective_service import PaperAnalysisFrame
-from application.core.objectives.schemas import StructuredEvidenceExtractions
+from application.core.objectives.schemas import (
+    StructuredEvidenceExtractions,
+    StructuredPaperFrameBatch,
+)
 from application.core.paper_facts.schemas import StructuredTableMatrixRepair
 from domain.core import PaperSkim
 from domain.source import SourceDocumentNode, SourceDocumentTree
@@ -16,6 +23,167 @@ from tests.support.research_objective_service import (
     build_research_objective_service as _build_research_objective_service,
     research_objective as _research_objective,
 )
+
+
+class _BoundedFrameExtractor:
+    def __init__(
+        self,
+        *,
+        max_source_units: int,
+        records_by_source_ref: dict[str, dict[str, Any]] | None = None,
+        failing_source_refs: set[str] | None = None,
+    ) -> None:
+        self.max_source_units = max_source_units
+        self.records_by_source_ref = records_by_source_ref or {}
+        self.failing_source_refs = failing_source_refs or set()
+        self.frame_payloads: list[dict[str, Any]] = []
+
+    def estimate_objective_paper_frame_prompt_tokens(
+        self,
+        payload: dict[str, Any],
+    ) -> int:
+        return (
+            20_000
+            if len(payload.get("source_units") or ()) > self.max_source_units
+            else 1_000
+        )
+
+    def assess_objective_paper(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredPaperFrameBatch:
+        assert (
+            self.estimate_objective_paper_frame_prompt_tokens(payload)
+            <= OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT
+        )
+        self.frame_payloads.append(payload)
+        source_units = payload["source_units"]
+        source_refs = {str(unit["source_ref"]) for unit in source_units}
+        if source_refs & self.failing_source_refs:
+            raise RuntimeError("frame batch unavailable")
+
+        records = [
+            self.records_by_source_ref.get(str(unit["source_ref"]), {})
+            for unit in source_units
+        ]
+        relevant_source_unit_ids = [
+            str(unit["source_unit_id"])
+            for unit, record in zip(source_units, records, strict=True)
+            if not record.get("excluded")
+        ]
+        excluded_source_unit_ids = [
+            str(unit["source_unit_id"])
+            for unit, record in zip(source_units, records, strict=True)
+            if record.get("excluded")
+        ]
+        relevance_rank = {
+            "irrelevant": 0,
+            "uncertain": 1,
+            "low": 2,
+            "medium": 3,
+            "high": 4,
+        }
+        relevance = max(
+            (str(record.get("relevance") or "medium") for record in records),
+            key=lambda value: relevance_rank[value],
+            default="medium",
+        )
+
+        def values(field: str) -> list[str]:
+            return list(
+                dict.fromkeys(
+                    str(value)
+                    for record in records
+                    for value in record.get(field) or ()
+                    if str(value).strip()
+                )
+            )
+
+        return StructuredPaperFrameBatch(
+            relevance=relevance,
+            paper_role=next(
+                (
+                    str(record["paper_role"])
+                    for record in records
+                    if record.get("paper_role")
+                ),
+                "primary_experiment",
+            ),
+            background=next(
+                (
+                    str(record["background"])
+                    for record in records
+                    if record.get("background")
+                ),
+                "Bounded model frame.",
+            ),
+            material_match=values("material_match"),
+            changed_variables=values("changed_variables"),
+            measured_property_scope=values("measured_property_scope"),
+            test_environment_scope=values("test_environment_scope"),
+            relevant_source_unit_ids=relevant_source_unit_ids,
+            excluded_source_unit_ids=excluded_source_unit_ids,
+        )
+
+
+def _frame_test_tree(*section_specs: tuple[str, str, str]) -> SourceDocumentTree:
+    section_ids = tuple(spec[0] for spec in section_specs)
+    nodes: dict[str, SourceDocumentNode] = {
+        "root": SourceDocumentNode(
+            node_id="root",
+            document_id="paper-1",
+            parent_id=None,
+            child_ids=section_ids,
+            node_type="document",
+            order=0,
+        )
+    }
+    for position, (section_id, label, text) in enumerate(section_specs, start=1):
+        paragraph_id = f"{section_id}-paragraph"
+        nodes[section_id] = SourceDocumentNode(
+            node_id=section_id,
+            document_id="paper-1",
+            parent_id="root",
+            child_ids=(paragraph_id,),
+            node_type="section",
+            order=position * 100,
+            title=label,
+            heading_path=(label,),
+        )
+        nodes[paragraph_id] = SourceDocumentNode(
+            node_id=paragraph_id,
+            document_id="paper-1",
+            parent_id=section_id,
+            child_ids=(),
+            node_type="paragraph",
+            order=position * 100 + 1,
+            text=text,
+            heading_path=(label,),
+            source_ref_kind="block",
+            source_ref_id=paragraph_id,
+        )
+    return SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes=nodes,
+    )
+
+
+def _frame_test_table(table_id: str, caption: str, order: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        table_id=table_id,
+        table_order=order,
+        caption_text=caption,
+        heading_path="Results",
+        column_headers=("condition", "relative density"),
+        row_count=2,
+        col_count=2,
+        table_matrix=(
+            ("condition", "relative density"),
+            ("A", "99.1"),
+        ),
+    )
 
 
 def test_research_objective_table_source_payload_includes_table_cells(tmp_path):
@@ -163,7 +331,9 @@ def test_research_objective_text_source_payload_uses_document_tree(tmp_path):
     }
 
 
-def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_path):
+def test_objective_paper_frame_payload_keeps_all_tree_sections_with_stable_ids(
+    tmp_path,
+):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
@@ -286,10 +456,15 @@ def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_pa
         document_tree=document_tree,
     )
 
-    labels = [item["section_label"] for item in payload["section_snippets"]]
+    section_units = [
+        item for item in payload["source_units"] if item["source_kind"] == "section"
+    ]
+    labels = [item["section_label"] for item in section_units]
     assert "Results > Texture results" in labels
     assert "Results > Tensile properties" in labels
-    assert len(labels) <= 12
+    assert len(labels) == 32
+    assert len({item["source_unit_id"] for item in section_units}) == 32
+    assert all(item["source_ref"] for item in section_units)
     assert payload["objective"]["variables"] == [
         "scan strategy rotation angle",
         "build orientation angle",
@@ -302,7 +477,178 @@ def test_objective_paper_frame_payload_prioritizes_relevant_tree_sections(tmp_pa
     assert "objective_context" not in payload
 
 
-def test_objective_paper_frame_payload_filters_unscored_tables(tmp_path):
+def test_objective_paper_frame_payload_gives_unsectioned_chunks_unique_ids(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    source_text = "Relative density changed with laser power. " * 200
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes={
+            "root": SourceDocumentNode(
+                node_id="root",
+                document_id="paper-1",
+                parent_id=None,
+                child_ids=("paragraph",),
+                node_type="document",
+                order=0,
+            ),
+            "paragraph": SourceDocumentNode(
+                node_id="paragraph",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=(),
+                node_type="paragraph",
+                order=1,
+                text=source_text,
+                source_ref_kind="block",
+                source_ref_id="block-1",
+            ),
+        },
+    )
+
+    payload = service._build_objective_paper_frame_payload(
+        collection_id="col-test",
+        objective=_research_objective(
+            {
+                "objective_id": "obj-density",
+                "question": "How does laser power affect relative density?",
+                "variables": ["laser power"],
+                "outcomes": ["relative density"],
+            }
+        ),
+        paper_skim=None,
+        document=SimpleNamespace(document_id="paper-1", title="Density"),
+        profile=None,
+        blocks=[],
+        tables=[],
+        document_tree=document_tree,
+    )
+
+    source_unit_ids = [
+        str(item["source_unit_id"])
+        for item in payload["source_units"]
+    ]
+    assert len(source_unit_ids) > 1
+    assert len(source_unit_ids) == len(set(source_unit_ids))
+    assert " ".join(
+        str(item["text"])
+        for item in payload["source_units"]
+    ).split() == source_text.split()
+
+
+def test_objective_paper_frame_payload_keeps_root_text_beside_sections(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    document_tree = SourceDocumentTree(
+        document_id="paper-1",
+        collection_id="col-test",
+        root_node_id="root",
+        nodes={
+            "root": SourceDocumentNode(
+                node_id="root",
+                document_id="paper-1",
+                parent_id=None,
+                child_ids=("abstract", "results"),
+                node_type="document",
+                order=0,
+            ),
+            "abstract": SourceDocumentNode(
+                node_id="abstract",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=(),
+                node_type="paragraph",
+                order=1,
+                text="Laser power controlled relative density in the current work.",
+                source_ref_kind="block",
+                source_ref_id="block-abstract",
+            ),
+            "results": SourceDocumentNode(
+                node_id="results",
+                document_id="paper-1",
+                parent_id="root",
+                child_ids=("results-paragraph",),
+                node_type="section",
+                order=2,
+                title="Results",
+                heading_path=("Results",),
+            ),
+            "results-paragraph": SourceDocumentNode(
+                node_id="results-paragraph",
+                document_id="paper-1",
+                parent_id="results",
+                child_ids=(),
+                node_type="paragraph",
+                order=3,
+                text="Relative density reached 99.5 percent.",
+                source_ref_kind="block",
+                source_ref_id="block-results",
+            ),
+        },
+    )
+
+    payload = service._build_objective_paper_frame_payload(
+        collection_id="col-test",
+        objective=_research_objective(
+            {
+                "objective_id": "obj-density",
+                "question": "How does laser power affect relative density?",
+                "variables": ["laser power"],
+                "outcomes": ["relative density"],
+            }
+        ),
+        paper_skim=None,
+        document=SimpleNamespace(document_id="paper-1", title="Density"),
+        profile=None,
+        blocks=[],
+        tables=[],
+        document_tree=document_tree,
+    )
+
+    section_units = [
+        item for item in payload["source_units"] if item["source_kind"] == "section"
+    ]
+    assert [item["section_label"] for item in section_units] == [
+        "Unsectioned",
+        "Results",
+    ]
+    assert "current work" in section_units[0]["text"]
+    assert "99.5 percent" in section_units[1]["text"]
+    assert len({item["source_unit_id"] for item in section_units}) == 2
+
+
+def test_objective_paper_frame_uses_bounded_opaque_ids_for_long_source_refs(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    long_section_id = f"node_{'a' * 280}"
+    document_tree = _frame_test_tree(
+        (
+            long_section_id,
+            "Results",
+            "Laser power increased relative density.",
+        ),
+    )
+
+    units = service._build_frame_tree_section_source_units(document_tree)
+
+    assert len(units) == 1
+    assert units[0]["source_ref"] == long_section_id
+    assert len(units[0]["source_unit_id"]) <= 200
+    assert long_section_id not in units[0]["source_unit_id"]
+
+
+def test_objective_paper_frame_payload_keeps_all_tables_for_model_classification(
+    tmp_path,
+):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
@@ -367,9 +713,517 @@ def test_objective_paper_frame_payload_filters_unscored_tables(tmp_path):
         document_tree=None,
     )
 
-    table_ids = [item["table_id"] for item in payload["table_summaries"]]
-    assert "tbl-yield-texture" in table_ids
-    assert "tbl-density" not in table_ids
+    table_units = [
+        item for item in payload["source_units"] if item["source_kind"] == "table"
+    ]
+    assert [item["source_ref"] for item in table_units] == [
+        "tbl-density",
+        "tbl-yield-texture",
+    ]
+    assert len({item["source_unit_id"] for item in table_units}) == 2
+
+
+def test_objective_paper_frame_payload_keeps_every_table_row_in_stable_chunks(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    matrix = tuple(
+        (f"condition-{index}", f"result-{index}")
+        for index in range(8)
+    )
+
+    units = service._build_frame_table_source_units(
+        [
+            SimpleNamespace(
+                table_id="table-late-result",
+                table_order=1,
+                caption_text="Process and property measurements.",
+                heading_path="Results",
+                column_headers=("condition", "result"),
+                row_count=len(matrix),
+                col_count=2,
+                table_matrix=matrix,
+            )
+        ]
+    )
+
+    assert len(units) == 3
+    assert len({unit["source_unit_id"] for unit in units}) == 3
+    assert [row for unit in units for row in unit["sample_rows"]] == [
+        list(row) for row in matrix
+    ]
+    assert all(
+        unit["caption_text"] == "Process and property measurements."
+        and unit["heading_path"] == "Results"
+        and unit["column_headers"] == ["condition", "result"]
+        for unit in units
+    )
+
+    frame = service._aggregate_objective_paper_frame_batches(
+        objective_id="obj-density",
+        document_id="paper-1",
+        source_units=units,
+        batch_results=(
+            (
+                {
+                    "relevance": "irrelevant",
+                    "paper_role": "irrelevant",
+                    "relevant_source_unit_ids": [],
+                    "excluded_source_unit_ids": [units[0]["source_unit_id"]],
+                },
+                False,
+            ),
+            (
+                {
+                    "relevance": "high",
+                    "paper_role": "primary_experiment",
+                    "relevant_source_unit_ids": [units[1]["source_unit_id"]],
+                    "excluded_source_unit_ids": [],
+                },
+                False,
+            ),
+            (
+                {
+                    "relevance": "irrelevant",
+                    "paper_role": "irrelevant",
+                    "relevant_source_unit_ids": [],
+                    "excluded_source_unit_ids": [units[2]["source_unit_id"]],
+                },
+                False,
+            ),
+        ),
+        paper_skim=None,
+    )
+
+    assert frame.relevant_tables == ("table-late-result",)
+    assert frame.excluded_tables == ()
+
+
+def test_objective_paper_frame_payload_uses_compact_lineage_scientific_prior(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+            "source_relationship_ids": ["relationship-density"],
+        }
+    )
+    paper_skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "doc_role": "experimental",
+            "studies": [
+                {
+                    "study_id": "study-private-lineage",
+                    "experiment_label": "LPBF density experiment",
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "material_scope": ["316L stainless steel"],
+                    "process_context": ["LPBF"],
+                    "relationships": [
+                        {
+                            "relationship_id": "relationship-density",
+                            "varied_factors": ["laser power"],
+                            "outcome": "relative density",
+                            "source_refs": [
+                                {
+                                    "source_kind": "block",
+                                    "source_ref": "results-density",
+                                }
+                            ],
+                        },
+                        {
+                            "relationship_id": "relationship-unrelated",
+                            "varied_factors": ["heat treatment"],
+                            "outcome": "microhardness",
+                            "source_refs": [
+                                {
+                                    "source_kind": "block",
+                                    "source_ref": "results-hardness",
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ],
+            "evidence_density": "high",
+            "confidence": 0.91,
+            "source_unit_coverage": [
+                {
+                    "source_unit_id": f"source-unit-{index}",
+                    "window_id": "window-1",
+                    "source_kind": "block",
+                    "source_ref": f"block-{index}",
+                    "status": "no_study_signal",
+                    "reason": "coverage-marker-that-must-not-enter-framing",
+                }
+                for index in range(40)
+            ],
+        }
+    )
+
+    payload = service._build_objective_paper_frame_payload(
+        collection_id="col-test",
+        objective=objective,
+        paper_skim=paper_skim,
+        document=SimpleNamespace(document_id="paper-1", title="Density study"),
+        profile=None,
+        blocks=[],
+        tables=[],
+        document_tree=None,
+    )
+
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert payload["paper_prior"] == {
+        "doc_role": "experimental",
+        "evidence_density": "high",
+        "studies": [
+            {
+                "experiment_label": "LPBF density experiment",
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "material_scope": ["316L stainless steel"],
+                "process_context": ["LPBF"],
+                "sample_context": [],
+                "test_context": [],
+                "comparator": None,
+                "fixed_conditions": [],
+                "relationships": [
+                    {
+                        "varied_factors": ["laser power"],
+                        "outcome": "relative density",
+                    }
+                ],
+            }
+        ],
+    }
+    assert "source_unit_coverage" not in serialized
+    assert "unresolved_signals" not in serialized
+    assert "study-private-lineage" not in serialized
+    assert "relationship-density" not in serialized
+    assert "source_refs" not in serialized
+    assert "coverage-marker-that-must-not-enter-framing" not in serialized
+    assert "microhardness" not in serialized
+
+
+def test_objective_paper_framing_batches_every_stable_source_once(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "material_scope": ["316L stainless steel"],
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    document_tree = _frame_test_tree(
+        ("methods", "Methods", "Laser power was varied for LPBF samples."),
+        ("results", "Results", "Relative density increased with laser power."),
+        ("discussion", "Discussion", "The density trend is discussed."),
+    )
+    tables = [
+        _frame_test_table("table-density", "Relative density results.", 1),
+        _frame_test_table("table-background", "Nominal composition.", 2),
+    ]
+    extractor = _BoundedFrameExtractor(
+        max_source_units=2,
+        records_by_source_ref={
+            "methods": {"changed_variables": ["laser power"]},
+            "results": {
+                "relevance": "high",
+                "measured_property_scope": ["relative density"],
+            },
+            "table-density": {
+                "relevance": "high",
+                "measured_property_scope": ["relative density"],
+            },
+            "table-background": {"excluded": True, "relevance": "low"},
+        },
+    )
+
+    frames = service._build_objective_paper_frames(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        paper_skims=(),
+        documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
+        profiles_by_document_id={},
+        blocks_by_document_id={},
+        tables_by_document_id={"paper-1": tables},
+        document_trees_by_document_id={"paper-1": document_tree},
+    )
+
+    assert [len(payload["source_units"]) for payload in extractor.frame_payloads] == [
+        2,
+        2,
+        1,
+    ]
+    sent_ids = [
+        unit["source_unit_id"]
+        for payload in extractor.frame_payloads
+        for unit in payload["source_units"]
+    ]
+    assert len(sent_ids) == len(set(sent_ids)) == 5
+    assert all(
+        payload["document"]["document_id"] == "paper-1"
+        for payload in extractor.frame_payloads
+    )
+    assert len(frames) == 1
+    assert frames[0].relevance == "high"
+    assert frames[0].changed_variables == ("laser power",)
+    assert frames[0].measured_property_scope == ("relative density",)
+    assert frames[0].relevant_sections == ("Methods", "Results", "Discussion")
+    assert frames[0].relevant_text_source_refs == (
+        "methods",
+        "results",
+        "discussion",
+    )
+    assert frames[0].relevant_tables == ("table-density",)
+    assert frames[0].excluded_tables == ("table-background",)
+
+
+def test_objective_paper_frame_routes_duplicate_headings_by_selected_source_ref(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    document_tree = _frame_test_tree(
+        (
+            "current-results",
+            "Results",
+            "Laser power increased relative density in the current experiment.",
+        ),
+        (
+            "literature-results",
+            "Results",
+            "Laser power increased relative density in a cited study.",
+        ),
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "medium",
+            "paper_role": "primary_experiment",
+            "relevant_sections": ["Results"],
+            "relevant_text_source_refs": ["current-results"],
+        }
+    )
+
+    candidates = service._build_tree_route_text_candidates(
+        frame=frame,
+        objective_context=objective,
+        blocks=[],
+        document_tree=document_tree,
+    )
+
+    assert [candidate["source_ref"] for candidate in candidates] == [
+        "current-results-paragraph"
+    ]
+
+
+def test_objective_paper_framing_preserves_siblings_when_one_batch_fails(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    document_tree = _frame_test_tree(
+        ("methods", "Methods", "Laser power was varied."),
+        ("middle", "Experimental setup", "Samples were prepared consistently."),
+        ("results", "Results", "Relative density increased."),
+    )
+    extractor = _BoundedFrameExtractor(
+        max_source_units=1,
+        records_by_source_ref={
+            "methods": {
+                "relevance": "medium",
+                "background": "Variable definition.",
+                "changed_variables": ["laser power"],
+            },
+            "results": {
+                "relevance": "high",
+                "background": "Direct density result.",
+                "measured_property_scope": ["relative density"],
+            },
+        },
+        failing_source_refs={"middle"},
+    )
+
+    frames = service._build_objective_paper_frames(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        paper_skims=(),
+        documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
+        profiles_by_document_id={},
+        blocks_by_document_id={},
+        tables_by_document_id={},
+        document_trees_by_document_id={"paper-1": document_tree},
+    )
+
+    assert len(extractor.frame_payloads) == 3
+    assert len(frames) == 1
+    frame = frames[0]
+    assert frame.relevance == "high"
+    assert frame.changed_variables == ("laser power",)
+    assert frame.measured_property_scope == ("relative density",)
+    assert frame.relevant_sections == ("Methods", "Experimental setup", "Results")
+    assert frame.background == "Direct density result."
+    assert frame.background != "Deterministic frame built after model framing failed."
+
+
+def test_objective_paper_framing_keeps_failed_batch_routable_when_sibling_is_irrelevant(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    extractor = _BoundedFrameExtractor(
+        max_source_units=1,
+        records_by_source_ref={
+            "background": {
+                "excluded": True,
+                "relevance": "irrelevant",
+                "paper_role": "irrelevant",
+                "background": "This source is unrelated.",
+            },
+        },
+        failing_source_refs={"results"},
+    )
+
+    frames = service._build_objective_paper_frames(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        paper_skims=(),
+        documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
+        profiles_by_document_id={},
+        blocks_by_document_id={},
+        tables_by_document_id={},
+        document_trees_by_document_id={
+            "paper-1": _frame_test_tree(
+                ("background", "Background", "General background."),
+                ("results", "Results", "Relative density increased."),
+            )
+        },
+    )
+
+    assert len(frames) == 1
+    assert frames[0].relevance == "uncertain"
+    assert frames[0].paper_role == "uncertain"
+    assert frames[0].background is None
+    assert frames[0].relevant_sections == ("Results",)
+
+
+def test_objective_paper_framing_skips_explicitly_excluded_document(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+            "excluded_document_ids": ["paper-1"],
+        }
+    )
+    extractor = _BoundedFrameExtractor(max_source_units=8)
+
+    frames = service._build_objective_paper_frames(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        paper_skims=(),
+        documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
+        profiles_by_document_id={},
+        blocks_by_document_id={},
+        tables_by_document_id={},
+        document_trees_by_document_id={
+            "paper-1": _frame_test_tree(
+                ("results", "Results", "Relative density increased."),
+            )
+        },
+    )
+
+    assert extractor.frame_payloads == []
+    assert len(frames) == 1
+    assert frames[0].relevance == "irrelevant"
+    assert frames[0].paper_role == "irrelevant"
+    assert frames[0].relevant_sections == ()
+
+
+def test_objective_paper_framing_does_not_send_over_budget_singleton(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    extractor = _BoundedFrameExtractor(max_source_units=0)
+
+    frames = service._build_objective_paper_frames(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        paper_skims=(),
+        documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
+        profiles_by_document_id={},
+        blocks_by_document_id={},
+        tables_by_document_id={},
+        document_trees_by_document_id={
+            "paper-1": _frame_test_tree(
+                ("results", "Results", "Relative density increased."),
+            )
+        },
+    )
+
+    assert extractor.frame_payloads == []
+    assert frames[0].relevance == "uncertain"
+    assert frames[0].relevant_sections == ("Results",)
 
 
 def test_objective_symbol_axes_distinguish_scan_and_build_angles(tmp_path):
@@ -1284,80 +2138,50 @@ def test_llm_context_drops_attribute_not_bound_to_name_value_and_unit(
     assert record["scientific_context"]["process"] == []
 
 
-def test_deterministic_frame_requires_variable_and_property_axis(tmp_path):
+def test_objective_paper_framing_marks_all_explicitly_excluded_sources_irrelevant(
+    tmp_path,
+):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = _research_objective(
         {
-            "objective_id": "obj-texture-yield",
-            "question": (
-                "How do scan strategy rotation angle and build orientation angle "
-                "affect crystallographic texture and yield strength?"
-            ),
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
             "material_scope": ["316L stainless steel"],
-            "variables": ["scan strategy rotation angle", "build orientation angle"],
-            "outcomes": ["crystallographic texture", "yield strength"],
-            "confidence": 0.9,
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
         }
     )
-    paper_skim = PaperSkim.from_mapping(
-        {
-            "document_id": "paper-ved",
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "study_id": "study-paper-ved",
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "process_context": ["LPBF", "VED"],
-                    "relationships": [
-                        {
-                            "relationship_id": "relationship-paper-ved-density",
-                            "varied_factors": ["laser power", "scan speed"],
-                            "outcome": "density",
-                            "source_refs": [
-                                {
-                                    "source_kind": "block",
-                                    "source_ref": "block-ved",
-                                }
-                            ],
-                            "confidence": 0.9,
-                        }
-                    ],
-                    "confidence": 0.9,
-                }
-            ],
-            "evidence_density": "low",
-        }
-    )
-
-    record = service._build_deterministic_objective_paper_frame_record(
-        objective=objective,
-        paper_skim=paper_skim,
-        payload={
-            "document": {
-                "document_id": "paper-ved",
-                "title": "VED density study",
-            },
-            "section_snippets": [
-                {
-                    "section_label": "Results",
-                    "text": "Laser power and scan speed changed density.",
-                }
-            ],
-            "table_summaries": [
-                {
-                    "table_id": "tbl-density",
-                    "caption_text": "VED and density.",
-                    "column_headers": ["VED", "density"],
-                }
-            ],
+    table = _frame_test_table("table-composition", "Nominal composition.", 1)
+    extractor = _BoundedFrameExtractor(
+        max_source_units=8,
+        records_by_source_ref={
+            "background": {"excluded": True, "relevance": "irrelevant"},
+            "table-composition": {"excluded": True, "relevance": "irrelevant"},
         },
     )
 
-    assert record["relevance"] == "irrelevant"
-    assert record["relevant_tables"] == []
+    frames = service._build_objective_paper_frames(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        paper_skims=(),
+        documents=(SimpleNamespace(document_id="paper-1", title="Background"),),
+        profiles_by_document_id={},
+        blocks_by_document_id={},
+        tables_by_document_id={"paper-1": [table]},
+        document_trees_by_document_id={
+            "paper-1": _frame_test_tree(
+                ("background", "Background", "General alloy context."),
+            )
+        },
+    )
+
+    assert frames[0].relevance == "irrelevant"
+    assert frames[0].relevant_sections == ()
+    assert frames[0].relevant_tables == ()
+    assert frames[0].excluded_tables == ("table-composition",)
 
 
 def test_research_objective_text_source_payload_resolves_tree_node_to_block(tmp_path):

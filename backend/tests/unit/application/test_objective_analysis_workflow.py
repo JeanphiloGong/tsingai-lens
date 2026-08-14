@@ -5,7 +5,7 @@ from typing import Any
 
 from application.core.objectives.schemas import (
     StructuredEvidenceSelections,
-    StructuredPaperContributionDraft,
+    StructuredPaperFrameBatch,
 )
 from domain.core import (
     ObjectiveFactSet,
@@ -41,7 +41,7 @@ class _FailingFrameExtractor(_ObjectiveExtractor):
     def assess_objective_paper(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperContributionDraft:
+    ) -> StructuredPaperFrameBatch:
         self.frame_payloads.append(payload)
         raise RuntimeError("frame model failed")
 
@@ -167,7 +167,7 @@ def test_memory_objective_repository_requires_explicit_activation():
     assert repository.read("col-1") == pending
 
 
-def test_objective_analysis_uses_deterministic_frame_when_frame_model_fails(
+def test_objective_analysis_uses_conservative_frame_batch_when_model_fails(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
@@ -545,9 +545,12 @@ def test_queued_analysis_uses_its_source_build_objective_scope_after_rebuild(
 
     service.generate_objective_analysis_artifacts(collection_id, analysis)
 
-    assert extractor.frame_payloads[0]["objective"]["seed_document_ids"] == [
-        "paper-1"
+    frame_payload = extractor.frame_payloads[0]
+    assert "seed_document_ids" not in frame_payload["objective"]
+    assert "source_relationship_ids" not in frame_payload["objective"]
+    assert frame_payload["paper_prior"]["studies"][0]["relationships"] == [
+        {
+            "varied_factors": ["heat treatment"],
+            "outcome": "corrosion current",
+        }
     ]
-    assert extractor.frame_payloads[0]["objective"][
-        "source_relationship_ids"
-    ] == [_relationship_id("paper-1", "corrosion current")]

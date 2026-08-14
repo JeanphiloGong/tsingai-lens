@@ -417,7 +417,7 @@ class StructuredAxisCanonicalizationPlan(_StrictModel):
         return _normalize_list_container(value)
 
 
-class StructuredPaperContributionDraft(_StrictModel):
+class StructuredPaperFrameBatch(_StrictModel):
     relevance: Literal["high", "medium", "low", "irrelevant", "uncertain"] = (
         "uncertain"
     )
@@ -431,28 +431,54 @@ class StructuredPaperContributionDraft(_StrictModel):
         "mixed",
         "uncertain",
     ] = "uncertain"
-    background: str | None = None
-    material_match: list[str] = Field(default_factory=list)
-    changed_variables: list[str] = Field(default_factory=list)
-    measured_property_scope: list[str] = Field(default_factory=list)
-    test_environment_scope: list[str] = Field(default_factory=list)
-    relevant_sections: list[str] = Field(default_factory=list)
-    relevant_tables: list[str] = Field(default_factory=list)
-    excluded_tables: list[str] = Field(default_factory=list)
+    background: str | None = Field(default=None, max_length=320)
+    material_match: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    changed_variables: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    measured_property_scope: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    test_environment_scope: list[Annotated[str, Field(max_length=160)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    relevant_source_unit_ids: list[Annotated[str, Field(max_length=200)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    excluded_source_unit_ids: list[Annotated[str, Field(max_length=200)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
 
     @field_validator(
         "material_match",
         "changed_variables",
         "measured_property_scope",
         "test_environment_scope",
-        "relevant_sections",
-        "relevant_tables",
-        "excluded_tables",
+        "relevant_source_unit_ids",
+        "excluded_source_unit_ids",
         mode="before",
     )
     @classmethod
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list_container(value)
+
+    @model_validator(mode="after")
+    def _validate_source_partition(self) -> "StructuredPaperFrameBatch":
+        relevant = self.relevant_source_unit_ids
+        excluded = self.excluded_source_unit_ids
+        if len(relevant) != len(set(relevant)) or len(excluded) != len(set(excluded)):
+            raise ValueError("paper frame source-unit ids must be unique")
+        if set(relevant) & set(excluded):
+            raise ValueError("paper frame source-unit ids cannot be both relevant and excluded")
+        return self
 
     @field_validator("relevance", mode="before")
     @classmethod

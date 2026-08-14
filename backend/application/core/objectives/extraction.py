@@ -34,7 +34,7 @@ from application.core.objectives.schemas import (
     StructuredEvidenceExtractions,
     StructuredEvidenceSelections,
     StructuredFindingSynthesis,
-    StructuredPaperContributionDraft,
+    StructuredPaperFrameBatch,
     StructuredPaperSignalReconciliation,
     StructuredPaperSkim,
 )
@@ -57,6 +57,8 @@ PAPER_SKIM_PROMPT_TOKEN_LIMIT = 12_288
 _PAPER_SIGNAL_RECONCILIATION_MAX_COMPLETION_TOKENS = 4096
 PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT = 12_288
 _AXIS_CANONICALIZATION_MAX_COMPLETION_TOKENS = 1024
+_OBJECTIVE_PAPER_FRAME_MAX_COMPLETION_TOKENS = 1024
+OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT = 12_288
 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS = 512
 _OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS = 2048
 _FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS = 1024
@@ -410,18 +412,115 @@ class ObjectiveExtractor:
     def assess_objective_paper(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperContributionDraft:
+    ) -> StructuredPaperFrameBatch:
         system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
+
+        source_unit_ids = tuple(
+            str(item.get("source_unit_id") or "").strip()
+            for item in payload.get("source_units") or ()
+            if isinstance(item, Mapping)
+            and str(item.get("source_unit_id") or "").strip()
+        )
+        if not source_unit_ids or len(source_unit_ids) != len(set(source_unit_ids)):
+            raise ValueError("objective paper framing requires unique source-unit ids")
+
+        def validate_source_accounting(parsed: BaseModel) -> BaseModel:
+            if not isinstance(parsed, StructuredPaperFrameBatch):
+                raise TypeError("unexpected objective paper frame response type")
+            returned_ids = (
+                *parsed.relevant_source_unit_ids,
+                *parsed.excluded_source_unit_ids,
+            )
+            missing_ids = [
+                source_unit_id
+                for source_unit_id in source_unit_ids
+                if source_unit_id not in returned_ids
+            ]
+            unknown_ids = [
+                source_unit_id
+                for source_unit_id in returned_ids
+                if source_unit_id not in source_unit_ids
+            ]
+            if unknown_ids:
+                raise ValueError(
+                    "objective paper frame must account for every source-unit id "
+                    "exactly once; "
+                    f"expected_source_unit_ids={list(source_unit_ids)}; "
+                    f"missing_source_unit_ids={missing_ids}; "
+                    f"unknown_source_unit_ids={unknown_ids}"
+                )
+            if missing_ids:
+                logger.warning(
+                    "Objective paper framing omitted source-unit ids; preserving "
+                    "them as relevant model=%s missing_source_unit_ids=%s",
+                    self.model,
+                    missing_ids,
+                )
+                payload = parsed.model_dump()
+                payload["relevant_source_unit_ids"] = [
+                    *parsed.relevant_source_unit_ids,
+                    *missing_ids,
+                ]
+                if parsed.relevance == "irrelevant":
+                    payload["relevance"] = "uncertain"
+                return StructuredPaperFrameBatch.model_validate(payload)
+            return parsed
+
+        def build_repair_instruction(repair_detail: str) -> str:
+            return (
+                "Previous objective paper framing output had invalid source-unit "
+                f"accounting: {repair_detail}. Return only one compact JSON object. "
+                "Partition this exact ID list once and only once between "
+                "relevant_source_unit_ids and excluded_source_unit_ids: "
+                f"{json.dumps(source_unit_ids, ensure_ascii=True)}. Copy every ID "
+                "verbatim; do not omit, duplicate, shorten, or invent an ID. Treat "
+                "an uncertain source as relevant."
+            )
+
+        def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
+            return self._parse_json_text_response(
+                **kwargs,
+                repair_instruction_builder=build_repair_instruction,
+                parsed_validator=validate_source_accounting,
+            )
+
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredPaperContributionDraft,
+            response_model=StructuredPaperFrameBatch,
+            max_completion_tokens=_OBJECTIVE_PAPER_FRAME_MAX_COMPLETION_TOKENS,
+            json_text_parser=parse_json_text,
+            parsed_validator=validate_source_accounting,
             task_type="objective_paper_frame",
             prompt_version=OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
         )
-        if not isinstance(response, StructuredPaperContributionDraft):
+        if not isinstance(response, StructuredPaperFrameBatch):
             raise TypeError("unexpected objective paper frame response type")
         return response
+
+    def estimate_objective_paper_frame_prompt_tokens(
+        self,
+        payload: dict[str, Any],
+    ) -> int:
+        """Count the complete schema-bearing objective framing prompt."""
+
+        system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
+        messages = self._build_messages(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredPaperFrameBatch,
+            include_schema=True,
+        )
+        try:
+            encoding = tiktoken.encoding_for_model(self.model)
+        except KeyError:
+            encoding = tiktoken.get_encoding("cl100k_base")
+        serialized_messages = json.dumps(
+            messages,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return len(encoding.encode(serialized_messages))
 
     def select_objective_evidence(
         self,

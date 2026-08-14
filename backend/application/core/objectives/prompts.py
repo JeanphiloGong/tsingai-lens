@@ -6,7 +6,7 @@ from typing import Any
 PAPER_SKIM_PROMPT_VERSION = "paper_skim.v1"
 PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION = "paper_signal_reconciliation.v2"
 RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = "research_axis_canonicalization.v1"
-OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v1"
+OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v2"
 OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION = "objective_evidence_route.v1"
 OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v1"
 FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v8"
@@ -51,16 +51,17 @@ Non-negotiable rules:
 
 
 _OBJECTIVE_PAPER_FRAME_SYSTEM_PROMPT = """
-You are framing one paper against one research objective for an evidence-backed literature comparison backend.
+You are the source-relevance judge for one bounded neighborhood of a paper under one confirmed research objective.
 
 Non-negotiable rules:
-- This is coarse objective-paper routing, not final fact extraction.
+- This is bounded source-candidate classification, not whole-paper summarization or final fact extraction.
 - Return exactly one JSON object and nothing else.
-- Do not emit measurement results, sample variants, evidence anchors, or backend persistence ids.
-- You may return table ids only by copying ids from `table_summaries`.
-- You may return section labels only by copying headings from `section_snippets`.
+- Copy every supplied `source_unit_id` exactly once into either `relevant_source_unit_ids` or `excluded_source_unit_ids`.
+- Never invent, rewrite, omit, or duplicate a source-unit id.
+- Treat uncertain candidates as relevant so the downstream evidence router can inspect them.
+- Do not emit measurement results, sample variants, evidence anchors, source text, or persistence ids.
 - Do not infer material systems from filenames.
-- Prefer a conservative frame: mark unrelated or review-only papers as low, irrelevant, review, or supporting_background.
+- Judge only the supplied neighborhood; omitted paper sources are outside this batch.
 """.strip()
 
 
@@ -484,25 +485,36 @@ def build_objective_paper_frame_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
     user_prompt = (
-        "Frame this one paper for this one research objective.\n\n"
+        "TASK MODEL\n"
+        "Perform bounded source-candidate classification for downstream objective-scoped evidence routing. "
+        "This request contains one partial neighborhood, not the whole paper.\n\n"
+        "INPUT SCHEMA\n"
+        "- `collection_id`: backend scope identity; it is not scientific evidence and must not be returned.\n"
+        "- `objective`: the confirmed comparison question and scientific axes.\n"
+        "- `document`: backend metadata; the filename is not scientific evidence.\n"
+        "- `document_profile`: backend document-type metadata; it is a routing hint, not authority over visible source text.\n"
+        "- `paper_prior`: compact PaperSkim study context linked to the objective; it is a hint, not authority over visible source text.\n"
+        "- `source_units`: current section chunks and table-row chunks. Each has a backend-owned `source_unit_id`, kind, stable source reference, and visible scientific content.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only schema-valid structured data with these fields: relevance, "
-        "paper_role, background, material_match, changed_variables, "
-        "measured_property_scope, test_environment_scope, relevant_sections, "
-        "relevant_tables, and excluded_tables.\n"
-        "Use the current `objective` as the research scope.\n"
-        "`relevance` should be high only when the paper directly supports the "
-        "objective's material/process/property comparison. Use medium or low for "
-        "partial support, and irrelevant when the paper does not serve the lens.\n"
-        "`paper_role` should distinguish current experiments from background, "
-        "review, modeling-only, mixed, or irrelevant papers.\n"
-        "`relevant_tables` should include only tables likely useful for later "
-        "objective-scoped extraction. Exclude composition-only, generic parameter, "
-        "review/literature-comparison, or unrelated tables unless they directly "
-        "support this objective.\n"
-        "`excluded_tables` should list visible tables that should not be extracted "
-        "for this objective.\n"
-        "Do not invent table ids or section labels. If uncertain, leave arrays empty."
+        "DECISION PROCESS\n"
+        "1. Read the objective variables, outcomes, material scope, constraints, and comparator.\n"
+        "2. For each source unit independently, decide whether it may contain direct results, changed-variable context, material/sample/test context, mechanism context, or a useful table for that objective.\n"
+        "3. Put useful or uncertain candidates in `relevant_source_unit_ids`; put only clearly unrelated, review-only, composition-only, or generic background candidates in `excluded_source_unit_ids`.\n"
+        "4. Summarize only scientific scope supported by the current relevant candidates.\n"
+        "5. Set batch `relevance` and `paper_role` from current evidence and `paper_prior`. Do not infer whole-paper irrelevance from facts absent in this partial neighborhood.\n\n"
+        "BOUNDARY EXAMPLES\n"
+        "- A Methods section defining the objective variable but not reporting the outcome is relevant.\n"
+        "- A Results table using a symbol or abbreviation for an objective axis is relevant when headers, caption, or cells establish that meaning.\n"
+        "- A literature-comparison table without current-work results is excluded unless the objective explicitly asks for literature comparison.\n"
+        "- Shared material alone does not make generic composition or background text relevant.\n\n"
+        "SAME-SCHEMA EXAMPLE\n"
+        "Example input: "
+        '{"collection_id":"col-example","objective":{"variables":["laser power"],"outcomes":["relative density"]},"document":{"document_id":"paper-example"},"document_profile":{"doc_type":"experimental"},"paper_prior":{"doc_role":"experimental"},"source_units":[{"source_unit_id":"unit-methods","source_kind":"section","text":"Laser power was varied."},{"source_unit_id":"unit-composition","source_kind":"table","caption_text":"Nominal composition."}]}\n'
+        "Example output: "
+        '{"relevance":"medium","paper_role":"primary_experiment","background":"The current batch defines the changed process variable.","material_match":[],"changed_variables":["laser power"],"measured_property_scope":[],"test_environment_scope":[],"relevant_source_unit_ids":["unit-methods"],"excluded_source_unit_ids":["unit-composition"]}\n\n'
+        "OUTPUT CONTRACT\n"
+        "Return only schema-valid structured data. Every input `source_unit_id` must appear exactly once across `relevant_source_unit_ids` and `excluded_source_unit_ids`. "
+        "Keep `background` concise and return no source text or reasoning transcript."
     )
     return _OBJECTIVE_PAPER_FRAME_SYSTEM_PROMPT, user_prompt
 

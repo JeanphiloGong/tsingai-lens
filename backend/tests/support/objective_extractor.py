@@ -11,7 +11,7 @@ from application.core.objectives.schemas import (
     StructuredEvidenceSelections,
     StructuredFindingSynthesis,
     StructuredFindingSynthesisItem,
-    StructuredPaperContributionDraft,
+    StructuredPaperFrameBatch,
     StructuredPaperSkim,
 )
 
@@ -66,6 +66,12 @@ class FakeObjectiveExtractor:
         return 0
 
     def estimate_paper_signal_reconciliation_prompt_tokens(
+        self,
+        payload: dict[str, Any],
+    ) -> int:
+        return 0
+
+    def estimate_objective_paper_frame_prompt_tokens(
         self,
         payload: dict[str, Any],
     ) -> int:
@@ -138,15 +144,20 @@ class FakeObjectiveExtractor:
     def assess_objective_paper(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperContributionDraft:
+    ) -> StructuredPaperFrameBatch:
         self.frame_payloads.append(payload)
         objective = payload["objective"]
         document = payload["document"]
-        paper_skim = payload["paper_skim"]
+        paper_prior = payload["paper_prior"]
         document_id = str(document.get("document_id") or "")
-        table_summaries = payload["table_summaries"]
+        source_units = payload["source_units"]
+        source_unit_ids = [
+            str(unit["source_unit_id"])
+            for unit in source_units
+            if unit.get("source_unit_id")
+        ]
         if document_id in objective.get("excluded_document_ids", ()):
-            return StructuredPaperContributionDraft(
+            return StructuredPaperFrameBatch(
                 relevance="irrelevant",
                 paper_role="review",
                 background="Excluded by objective discovery.",
@@ -154,27 +165,23 @@ class FakeObjectiveExtractor:
                 changed_variables=[],
                 measured_property_scope=[],
                 test_environment_scope=[],
-                relevant_sections=[],
-                relevant_tables=[],
-                excluded_tables=[
-                    table["table_id"]
-                    for table in table_summaries
-                    if table.get("table_id")
-                ],
+                relevant_source_unit_ids=[],
+                excluded_source_unit_ids=source_unit_ids,
             )
-        relevant_tables = self._matching_frame_table_ids(
-            table_summaries,
+        relevant_source_unit_ids = self._matching_frame_source_unit_ids(
+            source_units,
             axes=(
                 *objective.get("variables", ()),
                 *objective.get("outcomes", ()),
             ),
         )
-        section_labels = [
-            item["section_label"]
-            for item in payload["section_snippets"]
-            if item.get("section_label")
-        ]
-        return StructuredPaperContributionDraft(
+        relevant_source_unit_ids.extend(
+            source_unit_id
+            for source_unit_id, unit in zip(source_unit_ids, source_units, strict=True)
+            if unit.get("source_kind") == "section"
+            and source_unit_id not in relevant_source_unit_ids
+        )
+        return StructuredPaperFrameBatch(
             relevance="high",
             paper_role="primary_experiment",
             background="Paper directly supports the active research objective.",
@@ -182,34 +189,35 @@ class FakeObjectiveExtractor:
             changed_variables=list(objective.get("variables") or []),
             measured_property_scope=list(objective.get("outcomes") or []),
             test_environment_scope=[],
-            relevant_sections=section_labels[:2],
-            relevant_tables=relevant_tables,
-            excluded_tables=[
-                table["table_id"]
-                for table in table_summaries
-                if table.get("table_id") and table["table_id"] not in relevant_tables
+            relevant_source_unit_ids=relevant_source_unit_ids,
+            excluded_source_unit_ids=[
+                source_unit_id
+                for source_unit_id in source_unit_ids
+                if source_unit_id not in relevant_source_unit_ids
             ],
         )
 
-    def _matching_frame_table_ids(
+    def _matching_frame_source_unit_ids(
         self,
-        table_summaries: list[dict[str, Any]],
+        source_units: list[dict[str, Any]],
         *,
         axes: tuple[str, ...],
     ) -> list[str]:
-        table_ids: list[str] = []
-        for table in table_summaries:
+        source_unit_ids: list[str] = []
+        for unit in source_units:
+            if unit.get("source_kind") != "table":
+                continue
             text = " ".join(
                 str(value or "")
                 for value in (
-                    table.get("caption_text"),
-                    table.get("heading_path"),
-                    " ".join(table.get("column_headers") or []),
+                    unit.get("caption_text"),
+                    unit.get("heading_path"),
+                    " ".join(unit.get("column_headers") or []),
                 )
             ).lower()
             if any(str(axis or "").lower() in text for axis in axes):
-                table_ids.append(str(table["table_id"]))
-        return table_ids
+                source_unit_ids.append(str(unit["source_unit_id"]))
+        return source_unit_ids
 
     def select_objective_evidence(
         self,

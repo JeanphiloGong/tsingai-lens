@@ -10,7 +10,7 @@ from application.core.objectives.schemas import (
     StructuredEvidenceSelections,
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
-    StructuredPaperContributionDraft,
+    StructuredPaperFrameBatch,
     StructuredPaperSkim,
 )
 from application.core.paper_facts.schemas import (
@@ -264,31 +264,32 @@ class FakeDomainModelExtractor:
     def assess_objective_paper(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperContributionDraft:
+    ) -> StructuredPaperFrameBatch:
         objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
-        paper_skim = payload.get("paper_skim") if isinstance(payload.get("paper_skim"), dict) else {}
+        paper_prior = payload.get("paper_prior") if isinstance(payload.get("paper_prior"), dict) else {}
         document = payload.get("document") if isinstance(payload.get("document"), dict) else {}
         document_id = str(document.get("document_id") or "")
-        table_summaries = (
-            payload.get("table_summaries")
-            if isinstance(payload.get("table_summaries"), list)
+        source_units = (
+            payload.get("source_units")
+            if isinstance(payload.get("source_units"), list)
             else []
         )
+        source_unit_ids = [
+            str(unit.get("source_unit_id") or "")
+            for unit in source_units
+            if isinstance(unit, dict) and str(unit.get("source_unit_id") or "")
+        ]
         excluded_document_ids = {
             str(value)
             for value in objective.get("excluded_document_ids", [])
             if str(value).strip()
         }
-        if document_id in excluded_document_ids or paper_skim.get("doc_role") == "review":
-            return StructuredPaperContributionDraft(
+        if document_id in excluded_document_ids or paper_prior.get("doc_role") == "review":
+            return StructuredPaperFrameBatch(
                 relevance="irrelevant",
                 paper_role="review",
                 background="Paper does not directly support the objective.",
-                excluded_tables=[
-                    str(table.get("table_id"))
-                    for table in table_summaries
-                    if isinstance(table, dict) and table.get("table_id")
-                ],
+                excluded_source_unit_ids=source_unit_ids,
             )
 
         axes = [
@@ -299,32 +300,31 @@ class FakeDomainModelExtractor:
             )
             if str(value).strip()
         ]
-        relevant_tables: list[str] = []
-        excluded_tables: list[str] = []
-        for table in table_summaries:
-            if not isinstance(table, dict):
+        relevant_source_unit_ids: list[str] = []
+        excluded_source_unit_ids: list[str] = []
+        for unit in source_units:
+            if not isinstance(unit, dict):
                 continue
-            table_id = str(table.get("table_id") or "")
-            table_text = " ".join(
+            source_unit_id = str(unit.get("source_unit_id") or "")
+            if unit.get("source_kind") == "section":
+                if source_unit_id:
+                    relevant_source_unit_ids.append(source_unit_id)
+                continue
+            source_text = " ".join(
                 str(value or "")
                 for value in (
-                    table.get("caption_text"),
-                    table.get("heading_path"),
-                    " ".join(str(item) for item in table.get("column_headers") or []),
+                    unit.get("caption_text"),
+                    unit.get("heading_path"),
+                    " ".join(str(item) for item in unit.get("column_headers") or []),
                 )
             ).lower()
-            if table_id and any(axis in table_text for axis in axes):
-                relevant_tables.append(table_id)
-            elif table_id:
-                excluded_tables.append(table_id)
+            if source_unit_id and any(axis in source_text for axis in axes):
+                relevant_source_unit_ids.append(source_unit_id)
+            elif source_unit_id:
+                excluded_source_unit_ids.append(source_unit_id)
 
-        section_labels = [
-            str(item.get("section_label"))
-            for item in payload.get("section_snippets", [])
-            if isinstance(item, dict) and item.get("section_label")
-        ]
-        return StructuredPaperContributionDraft(
-            relevance="high" if paper_skim else "uncertain",
+        return StructuredPaperFrameBatch(
+            relevance="high" if paper_prior else "uncertain",
             paper_role="primary_experiment",
             background="Paper directly supports the objective.",
             material_match=list(objective.get("material_scope") or []),
@@ -335,10 +335,15 @@ class FakeDomainModelExtractor:
                 if str(item).strip()
             ],
             test_environment_scope=[],
-            relevant_sections=section_labels[:2],
-            relevant_tables=relevant_tables,
-            excluded_tables=excluded_tables,
+            relevant_source_unit_ids=relevant_source_unit_ids,
+            excluded_source_unit_ids=excluded_source_unit_ids,
         )
+
+    def estimate_objective_paper_frame_prompt_tokens(
+        self,
+        payload: dict[str, Any],
+    ) -> int:
+        return 0
 
     def select_objective_evidence(
         self,

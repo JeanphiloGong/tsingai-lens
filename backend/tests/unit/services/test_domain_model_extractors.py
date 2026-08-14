@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+import tiktoken
 from openai import LengthFinishReasonError
 from pydantic import ValidationError
 
@@ -15,6 +16,7 @@ from application.core.objectives.extraction import (
 from application.core.paper_facts.extraction import PaperFactsExtractor
 from application.core.objectives.prompts import (
     build_objective_evidence_prompt,
+    build_objective_paper_frame_prompt,
     build_paper_skim_prompt,
     build_paper_signal_reconciliation_prompt,
     build_research_axis_canonicalization_prompt,
@@ -27,7 +29,7 @@ from application.core.objectives.schemas import (
     StructuredEvidenceExtraction,
     StructuredEvidenceSelections,
     StructuredEvidenceExtractions,
-    StructuredPaperContributionDraft,
+    StructuredPaperFrameBatch,
     StructuredPaperSignalReconciliation,
     StructuredPaperSkim,
     StructuredFindingMechanism,
@@ -1710,9 +1712,8 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
           "changed_variables": ["heat treatment"],
           "measured_property_scope": ["corrosion"],
           "test_environment_scope": ["3.5 wt.% NaCl"],
-          "relevant_sections": ["Results"],
-          "relevant_tables": ["table-1"],
-          "excluded_tables": ["table-2"]
+          "relevant_source_unit_ids": ["frame-section-results"],
+          "excluded_source_unit_ids": ["frame-table-2"]
         }
         """
     )
@@ -1722,15 +1723,362 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
         {
             "collection_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
-            "paper_skim": {"document_id": "paper-1"},
-            "section_snippets": [{"section_label": "Results"}],
-            "table_summaries": [{"table_id": "table-1"}, {"table_id": "table-2"}],
+            "paper_prior": {"doc_role": "experimental"},
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "results",
+                    "section_label": "Results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                },
+                {
+                    "source_unit_id": "frame-table-2",
+                    "source_kind": "table",
+                    "source_ref": "table-2",
+                    "caption_text": "Composition only.",
+                },
+            ],
         }
     )
 
-    assert isinstance(frame, StructuredPaperContributionDraft)
+    assert isinstance(frame, StructuredPaperFrameBatch)
     assert frame.relevance == "high"
-    assert frame.relevant_tables == ["table-1"]
+    assert frame.relevant_source_unit_ids == ["frame-section-results"]
+    assert frame.excluded_source_unit_ids == ["frame-table-2"]
+    assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
+
+
+def test_objective_paper_frame_json_repair_rejects_unknown_source_id():
+    invalid = json.dumps(
+        {
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "relevant_source_unit_ids": ["frame-section-results"],
+            "excluded_source_unit_ids": ["frame-unknown"],
+        }
+    )
+    repaired = json.dumps(
+        {
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "relevant_source_unit_ids": ["frame-section-results"],
+            "excluded_source_unit_ids": ["frame-table-background"],
+        }
+    )
+    client = _FakeOpenAIClient([invalid, repaired])
+    extractor = _objective_extractor(client)
+
+    frame = extractor.assess_objective_paper(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                },
+                {
+                    "source_unit_id": "frame-table-background",
+                    "source_kind": "table",
+                    "source_ref": "table-background",
+                    "caption_text": "Nominal composition.",
+                },
+            ],
+        }
+    )
+
+    assert frame.relevant_source_unit_ids == ["frame-section-results"]
+    assert frame.excluded_source_unit_ids == ["frame-table-background"]
+    assert len(client.chat.completions.calls) == 2
+    assert "account for every source-unit id" in client.chat.completions.calls[1][
+        "messages"
+    ][-1]["content"]
+    assert "frame-section-results" in client.chat.completions.calls[1]["messages"][-1][
+        "content"
+    ]
+    assert "frame-table-background" in client.chat.completions.calls[1]["messages"][
+        -1
+    ]["content"]
+    assert "frame-unknown" in client.chat.completions.calls[1]["messages"][-1][
+        "content"
+    ]
+
+
+def test_objective_paper_frame_conservatively_routes_omitted_source_unit(caplog):
+    incomplete = json.dumps(
+        {
+            "relevance": "irrelevant",
+            "paper_role": "irrelevant",
+            "relevant_source_unit_ids": [
+                "frame-section-1",
+                "frame-section-2",
+                "frame-section-3",
+                "frame-section-4",
+                "frame-section-5",
+                "frame-section-6",
+                "frame-section-7",
+            ],
+            "excluded_source_unit_ids": [],
+        }
+    )
+    client = _FakeOpenAIClient([incomplete, incomplete])
+    extractor = _objective_extractor(client)
+    source_unit_ids = [f"frame-section-{position}" for position in range(1, 9)]
+
+    frame = extractor.assess_objective_paper(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "source_units": [
+                {
+                    "source_unit_id": source_unit_id,
+                    "source_kind": "section",
+                    "source_ref": f"section-{position}",
+                    "text": "Potentially relevant scientific evidence.",
+                }
+                for position, source_unit_id in enumerate(source_unit_ids, start=1)
+            ],
+        }
+    )
+
+    assert frame.relevance == "uncertain"
+    assert frame.relevant_source_unit_ids == source_unit_ids
+    assert frame.excluded_source_unit_ids == []
+    assert len(client.chat.completions.calls) == 1
+    assert "preserving them as relevant" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "invalid_partition",
+    [
+        {
+            "relevant_source_unit_ids": ["frame-section-results"],
+            "excluded_source_unit_ids": ["frame-unknown"],
+        },
+        {
+            "relevant_source_unit_ids": [
+                "frame-section-results",
+                "frame-section-results",
+            ],
+            "excluded_source_unit_ids": ["frame-table-background"],
+        },
+        {
+            "relevant_source_unit_ids": ["frame-section-results"],
+            "excluded_source_unit_ids": [
+                "frame-section-results",
+                "frame-table-background",
+            ],
+        },
+    ],
+    ids=["unknown", "duplicate", "overlap"],
+)
+def test_objective_paper_frame_still_rejects_invalid_ids_after_repair(
+    invalid_partition,
+):
+    response = json.dumps(
+        {
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            **invalid_partition,
+        }
+    )
+    client = _FakeOpenAIClient([response, response])
+    extractor = _objective_extractor(client)
+
+    with pytest.raises((ValueError, ValidationError)):
+        extractor.assess_objective_paper(
+            {
+                "collection_id": "col-1",
+                "objective": {
+                    "question": "How does heat treatment affect corrosion?"
+                },
+                "source_units": [
+                    {
+                        "source_unit_id": "frame-section-results",
+                        "source_kind": "section",
+                        "source_ref": "results",
+                        "text": "Heat treatment changed corrosion resistance.",
+                    },
+                    {
+                        "source_unit_id": "frame-table-background",
+                        "source_kind": "table",
+                        "source_ref": "table-background",
+                        "caption_text": "Nominal composition.",
+                    },
+                ],
+            }
+        )
+
+    assert len(client.chat.completions.calls) == 2
+
+
+def test_provider_parsed_objective_paper_frame_conservatively_routes_omission(
+    monkeypatch,
+):
+    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
+    incomplete = StructuredPaperFrameBatch.model_validate(
+        {
+            "relevance": "irrelevant",
+            "paper_role": "irrelevant",
+            "relevant_source_unit_ids": ["frame-section-results"],
+            "excluded_source_unit_ids": [],
+        }
+    )
+    client = _FakeOpenAIClient("unused", parsed=incomplete)
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
+
+    frame = extractor.assess_objective_paper(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                },
+                {
+                    "source_unit_id": "frame-table-background",
+                    "source_kind": "table",
+                    "source_ref": "table-background",
+                    "caption_text": "Nominal composition.",
+                },
+            ],
+        }
+    )
+
+    assert frame.relevance == "uncertain"
+    assert frame.relevant_source_unit_ids == [
+        "frame-section-results",
+        "frame-table-background",
+    ]
+    assert len(client.beta.chat.completions.calls) == 1
+    assert client.chat.completions.calls == []
+
+
+def test_provider_parsed_objective_paper_frame_repairs_source_accounting(
+    monkeypatch,
+):
+    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
+    invalid = StructuredPaperFrameBatch.model_validate(
+        {
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "relevant_source_unit_ids": ["frame-section-results"],
+            "excluded_source_unit_ids": ["frame-unknown"],
+        }
+    )
+    repaired = {
+        "relevance": "high",
+        "paper_role": "primary_experiment",
+        "relevant_source_unit_ids": ["frame-section-results"],
+        "excluded_source_unit_ids": ["frame-table-background"],
+    }
+    client = _FakeOpenAIClient(json.dumps(repaired), parsed=invalid)
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
+
+    frame = extractor.assess_objective_paper(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                },
+                {
+                    "source_unit_id": "frame-table-background",
+                    "source_kind": "table",
+                    "source_ref": "table-background",
+                    "caption_text": "Nominal composition.",
+                },
+            ],
+        }
+    )
+
+    assert frame.excluded_source_unit_ids == ["frame-table-background"]
+    assert len(client.beta.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 1
+    repair_prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
+    assert "account for every source-unit id" in repair_prompt
+    assert "frame-section-results" in repair_prompt
+    assert "frame-table-background" in repair_prompt
+    assert (
+        extractor.consume_last_trace()["extraction_mode"]
+        == "provider_parse->json_text"
+    )
+
+
+def test_objective_paper_frame_prompt_defines_bounded_source_accounting():
+    _, user_prompt = build_objective_paper_frame_prompt(
+        {
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "paper_prior": {"doc_role": "experimental"},
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "results",
+                    "section_label": "Results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                }
+            ],
+        }
+    )
+
+    assert "bounded source-candidate classification" in user_prompt
+    assert "one partial neighborhood" in user_prompt
+    assert "`collection_id`: backend scope identity" in user_prompt
+    assert "`document_profile`: backend document-type metadata" in user_prompt
+    assert "table-row chunks" in user_prompt
+    assert "Every input `source_unit_id`" in user_prompt
+    assert "relevant_source_unit_ids" in user_prompt
+    assert "excluded_source_unit_ids" in user_prompt
+    assert "Do not infer whole-paper irrelevance" in user_prompt
+    assert '"relevant_source_unit_ids":["unit-methods"]' in user_prompt
+    assert '"excluded_source_unit_ids":["unit-composition"]' in user_prompt
+
+
+def test_objective_paper_frame_prompt_token_estimate_counts_complete_schema():
+    client = _FakeOpenAIClient("unused")
+    extractor = _objective_extractor(client)
+    payload = {
+        "objective": {"question": "How does heat treatment affect corrosion?"},
+        "paper_prior": {"doc_role": "experimental"},
+        "source_units": [
+            {
+                "source_unit_id": "frame-section-results",
+                "source_kind": "section",
+                "source_ref": "results",
+                "section_label": "Results",
+                "text": "Heat treatment changed corrosion resistance.",
+            }
+        ],
+    }
+
+    estimated_tokens = extractor.estimate_objective_paper_frame_prompt_tokens(payload)
+    system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
+    prompt_without_schema = json.dumps(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    prompt_tokens_without_schema = len(
+        tiktoken.get_encoding("cl100k_base").encode(prompt_without_schema)
+    )
+
+    assert estimated_tokens > prompt_tokens_without_schema + 100
+    assert client.beta.chat.completions.calls == []
+    assert client.chat.completions.calls == []
 
 
 def test_domain_model_extractors_validates_objective_evidence_routes_response():

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 from hashlib import sha1
@@ -8,6 +8,8 @@ import json
 import math
 import re
 from typing import Any, Final, Mapping
+
+from domain.pipeline import ExecutionStats
 
 
 PAPER_RELEVANCE_VALUES: Final[frozenset[str]] = frozenset(
@@ -951,6 +953,7 @@ class ObjectiveAnalysis:
     pipeline_version: str
     model_name: str | None
     prompt_versions: dict[str, str]
+    stats: ExecutionStats = field(default_factory=ExecutionStats)
     status: str = "queued"
     phase: str = "queued"
     processed_document_count: int = 0
@@ -1063,6 +1066,7 @@ class ObjectiveAnalysis:
             "pipeline_version": self.pipeline_version,
             "model_name": self.model_name,
             "prompt_versions": dict(self.prompt_versions),
+            "stats": self.stats.to_record(),
             "status": self.status,
             "phase": self.phase,
             "processed_document_count": self.processed_document_count,

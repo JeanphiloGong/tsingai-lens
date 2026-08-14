@@ -487,6 +487,7 @@ class ObjectiveAnalysisRecord(Base):
     prompt_versions: Mapped[dict[str, str]] = mapped_column(
         _JSON_DOCUMENT, nullable=False
     )
+    stats: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     phase: Mapped[str] = mapped_column(String(64), nullable=False)
     processed_document_count: Mapped[int] = mapped_column(Integer, nullable=False)

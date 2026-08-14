@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
@@ -30,6 +31,7 @@ from domain.core import (
     ResearchObjective,
     build_research_objective_id,
 )
+from domain.pipeline import ExecutionStats
 from infra.persistence.postgres.models.build import (
     CollectionActiveBuild,
     CollectionBuild,
@@ -524,6 +526,7 @@ class PostgresObjectiveRepository:
                 pipeline_version=pipeline_version,
                 model_name=model_name,
                 prompt_versions=dict(prompt_versions),
+                stats=ExecutionStats().to_record(),
                 status="queued",
                 phase="queued",
                 processed_document_count=0,
@@ -602,6 +605,29 @@ class PostgresObjectiveRepository:
                 total_document_count=total_document_count,
                 current_document_id=current_document_id,
                 progress_message=progress_message,
+            )
+            self._apply_analysis(row, updated)
+            return updated
+
+    def update_analysis_execution_stats(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        *,
+        stats: ExecutionStats,
+        model_name: str | None,
+        prompt_versions: dict[str, str],
+    ) -> ObjectiveAnalysis:
+        with self.session_factory.begin() as session:
+            row = self._locked_analysis(
+                session, collection_id, objective_id, analysis_version
+            )
+            updated = replace(
+                self._analysis_record(row),
+                stats=stats,
+                model_name=model_name,
+                prompt_versions=dict(prompt_versions),
             )
             self._apply_analysis(row, updated)
             return updated
@@ -925,6 +951,9 @@ class PostgresObjectiveRepository:
     def _apply_analysis(
         row: ObjectiveAnalysisRecord, analysis: ObjectiveAnalysis
     ) -> None:
+        row.model_name = analysis.model_name
+        row.prompt_versions = dict(analysis.prompt_versions)
+        row.stats = analysis.stats.to_record()
         row.status = analysis.status
         row.phase = analysis.phase
         row.processed_document_count = analysis.processed_document_count
@@ -1355,6 +1384,7 @@ class PostgresObjectiveRepository:
             pipeline_version=row.pipeline_version,
             model_name=row.model_name,
             prompt_versions=dict(row.prompt_versions),
+            stats=ExecutionStats.from_mapping(row.stats),
             status=row.status,
             phase=row.phase,
             processed_document_count=row.processed_document_count,

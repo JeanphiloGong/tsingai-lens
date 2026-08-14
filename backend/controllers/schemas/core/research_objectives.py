@@ -47,6 +47,27 @@ class ObjectiveSummaryResponse(BaseModel):
     updated_at: str | None = None
 
 
+class TokenUsageResponse(BaseModel):
+    input_tokens: int = Field(..., ge=0)
+    output_tokens: int = Field(..., ge=0)
+    total_tokens: int = Field(..., ge=0)
+
+
+class ModelUsageResponse(BaseModel):
+    model_name: str
+    request_count: int = Field(..., ge=0)
+    token_usage: TokenUsageResponse | None = None
+    unreported_request_count: int = Field(default=0, ge=0)
+
+
+class ExecutionStatsResponse(BaseModel):
+    duration_ms: int | None = Field(default=None, ge=0)
+    token_usage: TokenUsageResponse | None = None
+    model_usage: list[ModelUsageResponse] = Field(default_factory=list)
+    unreported_request_count: int = Field(default=0, ge=0)
+    prompt_versions: dict[str, str] = Field(default_factory=dict)
+
+
 class ObjectiveAnalysisStateResponse(BaseModel):
     collection_id: str
     objective_id: str
@@ -55,6 +76,7 @@ class ObjectiveAnalysisStateResponse(BaseModel):
     pipeline_version: str
     model_name: str | None = None
     prompt_versions: dict[str, str] = Field(default_factory=dict)
+    stats: ExecutionStatsResponse = Field(default_factory=ExecutionStatsResponse)
     status: AnalysisStatus
     phase: str
     processed_document_count: int = 0

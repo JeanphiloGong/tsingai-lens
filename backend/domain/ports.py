@@ -16,6 +16,7 @@ from domain.core.research_objective import (
     PaperContribution,
     ResearchObjective,
 )
+from domain.pipeline import ExecutionStats
 from domain.core.finding import Finding
 from domain.source import (
     ArtifactVersionRecord,
@@ -379,6 +380,17 @@ class ObjectiveRepository(Protocol):
         total_document_count: int,
         current_document_id: str | None,
         progress_message: str | None,
+    ) -> ObjectiveAnalysis: ...
+
+    def update_analysis_execution_stats(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        *,
+        stats: ExecutionStats,
+        model_name: str | None,
+        prompt_versions: dict[str, str],
     ) -> ObjectiveAnalysis: ...
 
     def fail_analysis(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
 from application.core.objectives.research_objective_service import (
@@ -12,6 +13,11 @@ from domain.core import (
     ObjectiveEvidence,
     PaperContribution,
     ResearchObjective,
+)
+from domain.pipeline import ExecutionStats, ModelUsage, TokenUsage
+from infra.llm.usage import (
+    record_llm_completion,
+    record_llm_prompt_version,
 )
 
 
@@ -210,6 +216,25 @@ class FakeObjectiveRepository:
         self.analyses[analysis_version] = analysis
         return analysis
 
+    def update_analysis_execution_stats(
+        self,
+        collection_id,
+        objective_id,
+        analysis_version,
+        *,
+        stats,
+        model_name,
+        prompt_versions,
+    ):
+        analysis = replace(
+            self.analyses[analysis_version],
+            stats=stats,
+            model_name=model_name,
+            prompt_versions=prompt_versions,
+        )
+        self.analyses[analysis_version] = analysis
+        return analysis
+
     def fail_analysis(self, collection_id, objective_id, analysis_version, **kwargs):
         analysis = self.analyses[analysis_version]
         if self.claim_before_fail and analysis.status == "queued":
@@ -269,13 +294,35 @@ class FakeResearchObjectiveService:
         return self.artifacts or _artifacts(analysis.analysis_version)
 
 
+class UsageRecordingResearchObjectiveService(FakeResearchObjectiveService):
+    def generate_objective_analysis_artifacts(
+        self, collection_id, analysis, progress_callback=None
+    ):
+        record_llm_prompt_version("paper_framing", "paper_framing.v1")
+        record_llm_completion(
+            SimpleNamespace(
+                model="model-a",
+                usage=SimpleNamespace(
+                    prompt_tokens=200,
+                    completion_tokens=40,
+                    total_tokens=240,
+                ),
+            ),
+            requested_model="configured-model",
+        )
+        return super().generate_objective_analysis_artifacts(
+            collection_id,
+            analysis,
+            progress_callback=progress_callback,
+        )
+
+
 def _service(*, repository=None, analyzer=None):
     repository = repository or FakeObjectiveRepository()
     analyzer = analyzer or FakeResearchObjectiveService()
     service = ObjectiveAnalysisService(
         objective_repository=repository,
         research_objective_service=analyzer,
-        model_name="test-model",
     )
     return service, repository, analyzer
 
@@ -290,6 +337,26 @@ def test_objective_analysis_publishes_one_complete_version() -> None:
     assert result["objective"].published_analysis_version == 1
     assert result["findings"] == (_finding(1),)
     assert repository.published_calls == 1
+
+
+def test_objective_analysis_persists_real_model_prompt_and_token_usage() -> None:
+    service, _repository, _analyzer = _service(
+        analyzer=UsageRecordingResearchObjectiveService()
+    )
+    service.queue_analysis("collection-1", "objective-1")
+
+    result = service.execute_queued_analysis("collection-1", "objective-1", 1)
+
+    analysis = result["analysis"]
+    assert analysis.model_name == "model-a"
+    assert analysis.prompt_versions == {"paper_framing": "paper_framing.v1"}
+    assert analysis.stats.model_usage == (
+        ModelUsage("model-a", 1, TokenUsage(200, 40, 240)),
+    )
+    assert analysis.stats.prompt_versions == {
+        "paper_framing": "paper_framing.v1"
+    }
+    assert analysis.stats.duration_ms is not None
 
 
 def test_route_progress_does_not_replace_paper_counts() -> None:

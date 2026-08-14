@@ -20,6 +20,7 @@ from domain.core import (
     PaperSkim,
     ResearchObjective,
 )
+from domain.pipeline import ExecutionStats, ModelUsage, TokenUsage
 from domain.source import CollectionRecord
 from infra.persistence.database import build_session_factory
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
@@ -1152,6 +1153,41 @@ def test_analysis_version_claim_progress_and_retry_are_explicit(source_repositor
     )
     assert retry.analysis_version == 2
     assert objective.active_analysis_version == 2
+
+
+def test_analysis_execution_stats_round_trip_provider_usage(source_repositories) -> None:
+    source_repository, builds = source_repositories
+    repository = _prepare_studies(source_repository, builds)
+    _objective_row, claimed = _queue_and_claim(repository)
+    stats = ExecutionStats(
+        duration_ms=1400,
+        model_usage=(
+            ModelUsage("merged-qwen", 2, TokenUsage(1800, 240, 2040)),
+        ),
+        prompt_versions={"paper_framing": "paper_framing.v1"},
+    )
+
+    updated = repository.update_analysis_execution_stats(
+        "col_source",
+        "objective-1",
+        claimed.analysis_version,
+        stats=stats,
+        model_name="merged-qwen",
+        prompt_versions={"paper_framing": "paper_framing.v1"},
+    )
+
+    assert updated.stats == stats
+    assert updated.model_name == "merged-qwen"
+    assert updated.prompt_versions == {"paper_framing": "paper_framing.v1"}
+    persisted = repository.read_analysis(
+        "col_source",
+        "objective-1",
+        claimed.analysis_version,
+    )
+    assert persisted is not None
+    assert persisted.stats == stats
+    assert persisted.model_name == "merged-qwen"
+    assert persisted.prompt_versions == {"paper_framing": "paper_framing.v1"}
 
 
 def test_publish_is_atomic_and_reads_findings_and_exact_evidence(source_repositories) -> None:

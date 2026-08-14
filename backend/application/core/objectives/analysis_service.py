@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 from typing import Any, Callable
 
 from application.core.objectives.research_objective_service import (
@@ -9,6 +10,7 @@ from application.core.objectives.research_objective_service import (
 )
 from domain.core import ObjectiveAnalysis, ResearchObjective
 from domain.ports import ObjectiveRepository
+from infra.llm.usage import capture_llm_usage
 
 
 logger = logging.getLogger(__name__)
@@ -24,13 +26,9 @@ class ObjectiveAnalysisService:
         *,
         objective_repository: ObjectiveRepository,
         research_objective_service: ResearchObjectiveService,
-        model_name: str | None = None,
-        prompt_versions: dict[str, str] | None = None,
     ) -> None:
         self.objective_repository = objective_repository
         self.research_objective_service = research_objective_service
-        self.model_name = model_name
-        self.prompt_versions = dict(prompt_versions or {})
 
     def confirm_objective(self, collection_id: str, objective_id: str) -> dict[str, Any]:
         objective = self.objective_repository.confirm_objective(
@@ -43,8 +41,8 @@ class ObjectiveAnalysisService:
             collection_id,
             objective_id,
             pipeline_version=_PIPELINE_VERSION,
-            model_name=self.model_name,
-            prompt_versions=self.prompt_versions,
+            model_name=None,
+            prompt_versions={},
         )
         return self._result(collection_id, objective, analysis=analysis)
 
@@ -185,14 +183,30 @@ class ObjectiveAnalysisService:
             )
             if claimed is None:
                 return self._result(collection_id, objective)
-            artifacts = (
-                self.research_objective_service.generate_objective_analysis_artifacts(
-                    collection_id,
-                    claimed,
-                    progress_callback=self._build_progress_callback(claimed),
-                )
-            )
-            self._validate_artifacts(artifacts)
+            usage_started_at = perf_counter()
+            with capture_llm_usage() as usage:
+                try:
+                    artifacts = (
+                        self.research_objective_service.generate_objective_analysis_artifacts(
+                            collection_id,
+                            claimed,
+                            progress_callback=self._build_progress_callback(claimed),
+                        )
+                    )
+                    self._validate_artifacts(artifacts)
+                finally:
+                    claimed = self.objective_repository.update_analysis_execution_stats(
+                        collection_id,
+                        objective_id,
+                        analysis_version,
+                        stats=usage.execution_stats(
+                            duration_ms=round(
+                                (perf_counter() - usage_started_at) * 1000
+                            )
+                        ),
+                        model_name=usage.model_name,
+                        prompt_versions=usage.prompt_versions,
+                    )
             objective, completed = self.objective_repository.publish_analysis(
                 collection_id,
                 objective_id,

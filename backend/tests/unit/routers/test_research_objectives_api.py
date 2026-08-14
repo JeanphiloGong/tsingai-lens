@@ -14,6 +14,7 @@ from domain.core import (
     PaperSkim,
     ResearchObjective,
 )
+from domain.pipeline import ExecutionStats, ModelUsage, TokenUsage
 
 
 def _objective() -> ResearchObjective:
@@ -44,7 +45,14 @@ def _analysis(*, status: str = "succeeded") -> ObjectiveAnalysis:
         source_build_id="build-1",
         pipeline_version="test.v1",
         model_name="model-1",
-        prompt_versions={},
+        prompt_versions={"paper_framing": "paper_framing.v1"},
+        stats=ExecutionStats(
+            duration_ms=1250,
+            model_usage=(
+                ModelUsage("model-1", 2, TokenUsage(300, 50, 350)),
+            ),
+            prompt_versions={"paper_framing": "paper_framing.v1"},
+        ),
         total_document_count=1,
     )
     if status == "queued":
@@ -651,6 +659,28 @@ def test_objective_api_exposes_definition_and_separate_analysis_state() -> None:
     assert payload["objective"]["confirmation_status"] == "confirmed"
     assert payload["active_analysis"]["status"] == "succeeded"
     assert payload["published_analysis"]["analysis_version"] == 1
+    assert payload["active_analysis"]["stats"] == {
+        "duration_ms": 1250,
+        "token_usage": {
+            "input_tokens": 300,
+            "output_tokens": 50,
+            "total_tokens": 350,
+        },
+        "model_usage": [
+            {
+                "model_name": "model-1",
+                "request_count": 2,
+                "token_usage": {
+                    "input_tokens": 300,
+                    "output_tokens": 50,
+                    "total_tokens": 350,
+                },
+                "unreported_request_count": 0,
+            }
+        ],
+        "unreported_request_count": 0,
+        "prompt_versions": {"paper_framing": "paper_framing.v1"},
+    }
     assert "status" not in payload["objective"]
     assert "understanding" not in payload
 

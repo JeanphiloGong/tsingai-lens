@@ -133,7 +133,13 @@ scientific recall, relevance certainty, or systematic-review completeness.
 `ObjectiveAnalysis` is addressed by the Objective identity plus a positive
 `analysis_version`. It contains immutable Source/pipeline/model/prompt lineage,
 `queued | running | succeeded | failed` status, phase, document progress,
-current document, terminal error, and timestamps.
+current document, terminal error, timestamps, and provider-reported execution
+`stats`. Statistics include duration, request counts and provider-reported token
+usage grouped by response model, plus the prompt versions used by the analysis.
+`unreported_request_count` identifies calls that failed without provider usage
+or omitted token fields. Token totals contain only reported usage and remain
+`null` when no call reported usage; the backend never estimates missing tokens
+from prompt or response text.
 
 Confirmation does not start analysis. `POST .../analysis` queues the next
 version and returns immediately. The frontend polls `GET .../analysis`. Retry

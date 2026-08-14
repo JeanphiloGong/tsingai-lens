@@ -14,7 +14,7 @@ Non-negotiable rules:
 - Never treat years, citation numbers, row numbers, or footnote markers as result values.
 - Never treat years, reference numbers, or numbering artifacts as units.
 - Reject literature-summary rows or review-summary rows that are not directly attributable.
-- Never emit backend-facing ids or locator fields such as `section_id`, `block_id`, `snippet_id`, or `figure_or_table`.
+- Never emit backend-owned Source references or persistence IDs.
 - Never emit backend persistence ids, Source ids, or bundle ref fields such as `method_ref`, `variant_ref`, `test_condition_ref`, `baseline_ref`, or `result_ref`.
 - Prefer fewer, higher-signal outputs over speculative coverage.
 """.strip()
@@ -39,7 +39,7 @@ JSON compliance rules for text-window extraction:
 - `evidence_quote` is required on every emitted item.
 - `evidence_quote` must be an exact contiguous substring copied from `text_window.text`.
 - Do not paraphrase, shorten with ellipses, or merge non-contiguous spans.
-- Do not emit page, source_type, section_id, block_id, snippet_id, figure_or_table, char_range, bbox, or deep_link.
+- Do not emit page, source type, Source references, or deep links.
 - Do not emit final `measurement_results` in this stage.
 - Classify every `result_claim` with `claim_scope`.
 - Only set `eligible_for_measurement_result` to true when the claim is an explicit current-work result.

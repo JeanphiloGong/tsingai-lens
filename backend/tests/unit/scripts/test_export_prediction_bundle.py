@@ -99,7 +99,7 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(
 
     assert result_path == prediction_path
     bundle = json.loads(prediction_path.read_text(encoding="utf-8"))
-    assert bundle["metadata"]["schema_version"] == "prediction-bundle-v0.1"
+    assert bundle["metadata"]["schema_version"] == "prediction-bundle-v0.2"
     assert bundle["metadata"]["collection_id"] == collection_id
     assert bundle["metadata"]["artifact_rows"]["measurement_results"] == 1
     assert bundle["metadata"]["artifact_rows"]["pairwise_comparison_relations"] == 1
@@ -121,6 +121,8 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(
     assert bundle["comparisons"][0]["comparison_metric"] == "yield_strength"
     assert bundle["observations"][0]["sample_id"] == "var-1"
     assert bundle["evidence"][0]["quote_or_cell"] == "S1 YS 940 MPa"
+    assert bundle["evidence"][0]["source_kind"] == "table"
+    assert bundle["evidence"][0]["source_ref"] == "Table 1"
     assert bundle["comparison_rows"][0]["source"] == {
         "artifact": "comparison_rows",
         "row": 1,
@@ -328,21 +330,19 @@ def _write_system_artifacts_to_db(
                     {
                         "anchor_id": "anchor-result",
                         "document_id": "paper-1",
-                        "locator_type": "table_row",
-                        "locator_confidence": "direct",
+                        "source_kind": "table",
+                        "source_ref": "Table 1",
                         "source_type": "table",
-                        "section_id": "Results",
                         "page": 3,
                         "quote": "S1 YS 940 MPa",
-                        "figure_or_table": "Table 1",
                     }
                 ),
                 EvidenceAnchor.from_mapping(
                     {
                         "anchor_id": "anchor-sample",
                         "document_id": "paper-1",
-                        "locator_type": "text",
-                        "locator_confidence": "direct",
+                        "source_kind": "block",
+                        "source_ref": "sample-block",
                         "source_type": "text",
                         "quote": "S1 was printed by LPBF.",
                     }

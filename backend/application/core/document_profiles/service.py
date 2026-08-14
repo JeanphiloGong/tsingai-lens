@@ -549,20 +549,11 @@ class DocumentProfileService:
             key=lambda item: self._safe_int(item.get("block_order"), default=0),
         )
         payload: list[dict[str, Any]] = []
-        cursor = 0
 
         for index, block in enumerate(ordered_blocks, start=1):
             block_text = str(block.get("text") or "").strip()
             if not block_text:
                 continue
-
-            start_offset, end_offset = self._locate_text_span(
-                full_text,
-                block_text,
-                cursor,
-            )
-            if end_offset is not None:
-                cursor = end_offset
 
             payload.append(
                 {
@@ -573,13 +564,7 @@ class DocumentProfileService:
                     "order": self._safe_int(block.get("block_order"), default=index),
                     "text": block_text,
                     "text_unit_ids": self._normalize_string_list(block.get("text_unit_ids")),
-                    "start_offset": start_offset,
-                    "end_offset": end_offset,
                     "page": self._normalize_page(block.get("page")),
-                    "bbox": self._normalize_bbox_payload(block.get("bbox")),
-                    "char_range": self._normalize_char_range_payload(
-                        block.get("char_range")
-                    ),
                 }
             )
 
@@ -596,40 +581,10 @@ class DocumentProfileService:
                     "order": 1,
                     "text": full_text,
                     "text_unit_ids": [],
-                    "start_offset": 0,
-                    "end_offset": len(full_text),
                     "page": None,
-                    "bbox": None,
-                    "char_range": None,
                 }
             ]
         return []
-
-    def _locate_text_span(
-        self,
-        full_text: str,
-        target_text: str,
-        start_index: int = 0,
-    ) -> tuple[int | None, int | None]:
-        source = str(full_text or "")
-        target = str(target_text or "").strip()
-        if not source or not target:
-            return (None, None)
-
-        index = source.find(target, max(start_index, 0))
-        if index < 0 and start_index > 0:
-            index = source.find(target)
-        if index < 0 and len(target) > 60:
-            short_target = target[: min(len(target), 160)].strip()
-            if short_target:
-                index = source.find(short_target, max(start_index, 0))
-                if index < 0 and start_index > 0:
-                    index = source.find(short_target)
-                if index >= 0:
-                    return (index, index + len(short_target))
-        if index < 0:
-            return (None, None)
-        return (index, index + len(target))
 
     def _safe_int(self, value: Any, default: int) -> int:
         try:
@@ -644,66 +599,6 @@ class DocumentProfileService:
         page = int(number)
         return page if page > 0 and page == number else None
 
-    def _normalize_char_range_payload(self, value: Any) -> dict[str, int] | None:
-        payload = self._normalize_object_payload(value)
-        if payload is None:
-            return None
-
-        start = self._whole_number(payload.get("start"))
-        end = self._whole_number(payload.get("end"))
-        if start is None or end is None or start < 0 or end < start:
-            return None
-        return {"start": start, "end": end}
-
-    def _normalize_bbox_payload(self, value: Any) -> dict[str, float | str | None] | None:
-        payload = self._normalize_object_payload(value)
-        if payload is None:
-            return None
-
-        x0 = self._finite_float(payload.get("x0", payload.get("l")))
-        y0 = self._finite_float(payload.get("y0", payload.get("t")))
-        x1 = self._finite_float(payload.get("x1", payload.get("r")))
-        y1 = self._finite_float(payload.get("y1", payload.get("b")))
-        if x0 is None or y0 is None or x1 is None or y1 is None:
-            return None
-
-        return {
-            "x0": x0,
-            "y0": y0,
-            "x1": x1,
-            "y1": y1,
-            "coord_origin": self._normalize_optional_text(payload.get("coord_origin")),
-        }
-
-    def _normalize_object_payload(self, value: Any) -> dict[str, Any] | None:
-        if isinstance(value, dict):
-            return value
-        if value is None:
-            return None
-        if isinstance(value, float) and math.isnan(value):
-            return None
-        if not isinstance(value, str):
-            return None
-
-        text = value.strip()
-        if not text:
-            return None
-
-        for loader in (json.loads, ast.literal_eval):
-            try:
-                parsed = loader(text)
-            except (TypeError, ValueError, SyntaxError, json.JSONDecodeError):
-                continue
-            if isinstance(parsed, dict):
-                return parsed
-        return None
-
-    def _whole_number(self, value: Any) -> int | None:
-        number = self._finite_float(value)
-        if number is None:
-            return None
-        whole = int(number)
-        return whole if number == whole else None
 
     def _finite_float(self, value: Any) -> float | None:
         if value is None:

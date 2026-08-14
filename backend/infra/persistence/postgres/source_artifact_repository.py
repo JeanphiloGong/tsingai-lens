@@ -137,12 +137,6 @@ class PostgresSourceArtifactRepository:
                     text=block.text,
                     block_order=block.block_order,
                     page=block.page,
-                    bbox_json=block.bbox.to_payload() if block.bbox else None,
-                    char_range_json=(
-                        {"start": block.char_range.start, "end": block.char_range.end}
-                        if block.char_range
-                        else None
-                    ),
                     heading_path=block.heading_path,
                     heading_level=block.heading_level,
                 )
@@ -169,7 +163,6 @@ class PostgresSourceArtifactRepository:
                     caption_text=table.caption_text,
                     caption_block_id=table.caption_block_id,
                     page=table.page,
-                    bbox_json=table.bbox.to_payload() if table.bbox else None,
                     heading_path=table.heading_path,
                     column_headers=list(table.column_headers),
                     table_matrix=[list(row) for row in table.table_matrix],
@@ -188,7 +181,6 @@ class PostgresSourceArtifactRepository:
                     row_index=row.row_index,
                     row_text=row.row_text,
                     page=row.page,
-                    bbox_json=row.bbox.to_payload() if row.bbox else None,
                     heading_path=row.heading_path,
                 )
                 for row in table_rows
@@ -205,12 +197,6 @@ class PostgresSourceArtifactRepository:
                     cell_text=cell.cell_text,
                     header_path=cell.header_path,
                     page=cell.page,
-                    bbox_json=cell.bbox.to_payload() if cell.bbox else None,
-                    char_range_json=(
-                        {"start": cell.char_range.start, "end": cell.char_range.end}
-                        if cell.char_range
-                        else None
-                    ),
                     unit_hint=cell.unit_hint,
                 )
                 for cell in table_cells
@@ -226,7 +212,6 @@ class PostgresSourceArtifactRepository:
                     caption_text=figure.caption_text,
                     caption_block_id=figure.caption_block_id,
                     page=figure.page,
-                    bbox_json=figure.bbox.to_payload() if figure.bbox else None,
                     heading_path=figure.heading_path,
                     image_storage_key=figure.image_path,
                     image_mime_type=figure.image_mime_type,
@@ -433,8 +418,6 @@ class PostgresSourceArtifactRepository:
                         "block_order": row.block_order,
                         "text_unit_ids": text_units_by_block.get(row.block_id, ()),
                         "page": row.page,
-                        "bbox": row.bbox_json,
-                        "char_range": row.char_range_json,
                         "heading_path": row.heading_path,
                         "heading_level": row.heading_level,
                     }
@@ -479,7 +462,6 @@ class PostgresSourceArtifactRepository:
                         "caption_text": row.caption_text,
                         "caption_block_id": row.caption_block_id,
                         "page": row.page,
-                        "bbox": row.bbox_json,
                         "heading_path": row.heading_path,
                         "column_headers": row.column_headers,
                         "table_matrix": row.table_matrix,
@@ -525,7 +507,6 @@ class PostgresSourceArtifactRepository:
                         "row_index": row.row_index,
                         "row_text": row.row_text,
                         "page": row.page,
-                        "bbox": row.bbox_json,
                         "heading_path": row.heading_path,
                     }
                 )
@@ -574,8 +555,6 @@ class PostgresSourceArtifactRepository:
                         "cell_text": row.cell_text,
                         "header_path": row.header_path,
                         "page": row.page,
-                        "bbox": row.bbox_json,
-                        "char_range": row.char_range_json,
                         "unit_hint": row.unit_hint,
                     }
                 )
@@ -620,7 +599,6 @@ class PostgresSourceArtifactRepository:
                         "caption_text": row.caption_text,
                         "caption_block_id": row.caption_block_id,
                         "page": row.page,
-                        "bbox": row.bbox_json,
                         "heading_path": row.heading_path,
                         "image_path": row.image_storage_key,
                         "image_mime_type": row.image_mime_type,
@@ -682,8 +660,6 @@ class PostgresSourceArtifactRepository:
                     context_text=mention.context_text,
                     source_block_id=mention.source_block_id,
                     page=mention.page,
-                    char_start=mention.char_start,
-                    char_end=mention.char_end,
                     confidence=mention.confidence,
                     metadata_json=dict(mention.metadata),
                 )
@@ -761,7 +737,6 @@ class PostgresSourceArtifactRepository:
                 .order_by(
                     SourceReferenceMentionRow.source_document_id,
                     SourceReferenceMentionRow.source_block_id.asc().nulls_first(),
-                    SourceReferenceMentionRow.char_start.asc().nulls_first(),
                     SourceReferenceMentionRow.mention_id,
                 )
             )
@@ -818,8 +793,6 @@ class PostgresSourceArtifactRepository:
                             "context_text": row.context_text,
                             "source_block_id": row.source_block_id,
                             "page": row.page,
-                            "char_start": row.char_start,
-                            "char_end": row.char_end,
                             "confidence": row.confidence,
                             "metadata": row.metadata_json,
                         }

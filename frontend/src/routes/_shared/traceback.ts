@@ -1,33 +1,16 @@
 import { requestJson } from './api';
 import { USE_API_FIXTURES } from './base';
 
-export type LocatorType = 'char_range' | 'bbox' | 'section';
-export type LocatorConfidence = 'high' | 'medium' | 'low';
 export type TracebackStatus = 'ready' | 'partial' | 'unavailable';
-
-export type TracebackCharRange = {
-	start: number;
-	end: number;
-};
-
-export type TracebackBoundingBox = {
-	x0: number;
-	y0: number;
-	x1: number;
-	y1: number;
-};
 
 export type TracebackAnchor = {
 	anchor_id: string;
 	document_id: string;
-	locator_type: LocatorType;
-	locator_confidence: LocatorConfidence;
+	source_kind: string;
+	source_ref: string;
+	source_type: string;
 	page: number | null;
 	quote: string | null;
-	section_id: string | null;
-	block_id: string | null;
-	char_range: TracebackCharRange | null;
-	bbox: TracebackBoundingBox | null;
 	deep_link: string | null;
 };
 
@@ -36,28 +19,6 @@ export type EvidenceTracebackResponse = {
 	evidence_id: string;
 	traceback_status: TracebackStatus;
 	anchors: TracebackAnchor[];
-};
-
-export type DocumentContentBlock = {
-	block_id: string;
-	block_type: string | null;
-	heading_path: string | null;
-	heading_level: number;
-	order: number;
-	text: string;
-	start_offset: number | null;
-	end_offset: number | null;
-	text_unit_ids: string[];
-};
-
-export type DocumentContentResponse = {
-	collection_id: string;
-	document_id: string;
-	title: string | null;
-	source_filename: string | null;
-	content_text: string;
-	blocks: DocumentContentBlock[];
-	warnings: string[];
 };
 
 type BuildViewerHrefOptions = {
@@ -87,68 +48,6 @@ function toOptionalNumber(value: unknown) {
 	return null;
 }
 
-function normalizeLocatorType(value: unknown, anchor: Record<string, unknown>): LocatorType {
-	const locatorType = String(value ?? '').trim();
-	if (locatorType === 'char_range' || locatorType === 'bbox' || locatorType === 'section') {
-		return locatorType;
-	}
-	if (asRecord(anchor.char_range)) return 'char_range';
-	if (asRecord(anchor.bbox)) return 'bbox';
-	return 'section';
-}
-
-function normalizeLocatorConfidence(value: unknown, locatorType: LocatorType): LocatorConfidence {
-	const confidence = String(value ?? '').trim();
-	if (confidence === 'high' || confidence === 'medium' || confidence === 'low') {
-		return confidence;
-	}
-	if (locatorType === 'char_range') return 'high';
-	if (locatorType === 'bbox') return 'medium';
-	return 'low';
-}
-
-function normalizeCharRange(value: unknown): TracebackCharRange | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const start = toOptionalNumber(record.start ?? record.offset_start ?? record.span_start);
-	const end = toOptionalNumber(record.end ?? record.offset_end ?? record.span_end);
-	if (start === null || end === null) return null;
-
-	return {
-		start,
-		end
-	};
-}
-
-function normalizeBoundingBox(value: unknown): TracebackBoundingBox | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const x0 = toOptionalNumber(record.x0 ?? record.x ?? record.left);
-	const y0 = toOptionalNumber(record.y0 ?? record.y ?? record.top);
-	const x1 =
-		toOptionalNumber(record.x1) ??
-		(() => {
-			const width = toOptionalNumber(record.width ?? record.w);
-			return x0 !== null && width !== null ? x0 + width : null;
-		})();
-	const y1 =
-		toOptionalNumber(record.y1) ??
-		(() => {
-			const height = toOptionalNumber(record.height ?? record.h);
-			return y0 !== null && height !== null ? y0 + height : null;
-		})();
-	if (x0 === null || y0 === null || x1 === null || y1 === null) return null;
-
-	return {
-		x0,
-		y0,
-		x1,
-		y1
-	};
-}
-
 function normalizeAnchor(
 	value: unknown,
 	collectionId: string,
@@ -161,21 +60,19 @@ function normalizeAnchor(
 	const anchor_id = String(record.anchor_id ?? record.id ?? '').trim();
 	if (!anchor_id) return null;
 
-	const locator_type = normalizeLocatorType(record.locator_type, record);
-	const locator_confidence = normalizeLocatorConfidence(record.locator_confidence, locator_type);
 	const document_id = String(record.document_id ?? fallbackDocumentId).trim() || fallbackDocumentId;
+	const source_kind = String(record.source_kind ?? '').trim();
+	const source_ref = String(record.source_ref ?? '').trim();
+	if (!source_kind || !source_ref) return null;
 
 	return {
 		anchor_id,
 		document_id,
-		locator_type,
-		locator_confidence,
+		source_kind,
+		source_ref,
+		source_type: String(record.source_type ?? 'text').trim() || 'text',
 		page: toOptionalNumber(record.page),
-		quote: toOptionalText(record.quote ?? record.quote_span ?? record.label),
-		section_id: toOptionalText(record.section_id),
-		block_id: toOptionalText(record.block_id),
-		char_range: normalizeCharRange(record.char_range),
-		bbox: normalizeBoundingBox(record.bbox),
+		quote: toOptionalText(record.quote),
 		deep_link:
 			toOptionalText(record.deep_link) ??
 			buildDocumentViewerHref(collectionId, document_id, {
@@ -215,63 +112,6 @@ function normalizeTracebackResponse(
 	};
 }
 
-function normalizeBlock(value: unknown, index: number): DocumentContentBlock | null {
-	const record = asRecord(value);
-	if (!record) return null;
-
-	const text = String(record.text ?? record.content ?? '').trim();
-	const block_id = String(record.block_id ?? '').trim();
-	if (!text || !block_id) return null;
-
-	return {
-		block_id,
-		block_type: toOptionalText(record.block_type ?? record.type),
-		heading_path: toOptionalText(
-			record.heading_path ?? record.heading ?? record.title ?? record.name
-		),
-		heading_level: toOptionalNumber(record.heading_level) ?? 0,
-		order: toOptionalNumber(record.order ?? record.block_order) ?? index + 1,
-		text,
-		start_offset: toOptionalNumber(record.start_offset),
-		end_offset: toOptionalNumber(record.end_offset),
-		text_unit_ids: Array.isArray(record.text_unit_ids)
-			? record.text_unit_ids.map((item) => String(item ?? '').trim()).filter((item) => item !== '')
-			: []
-	};
-}
-
-function normalizeDocumentContent(
-	value: unknown,
-	collectionId: string,
-	documentId: string
-): DocumentContentResponse {
-	const record = asRecord(value);
-	if (!record) {
-		throw new Error('Document content response is invalid.');
-	}
-
-	const contentText = String(record.content_text ?? '').trim();
-	const rawBlocks = Array.isArray(record.blocks) ? record.blocks : [];
-	const blocks = rawBlocks
-		.map((item, index) => normalizeBlock(item, index))
-		.filter((item): item is DocumentContentBlock => item !== null);
-
-	return {
-		collection_id: String(record.collection_id ?? collectionId).trim() || collectionId,
-		document_id: String(record.document_id ?? documentId).trim() || documentId,
-		title: toOptionalText(record.title ?? record.document_title),
-		source_filename:
-			toOptionalText(record.source_filename) ??
-			toOptionalText(record.original_filename) ??
-			toOptionalText(record.source_file_name),
-		content_text: contentText,
-		blocks,
-		warnings: Array.isArray(record.warnings)
-			? record.warnings.map((item) => String(item ?? '').trim()).filter((item) => item !== '')
-			: []
-	};
-}
-
 function fixtureTraceback(collectionId: string, evidenceId: string): EvidenceTracebackResponse {
 	const fixtures: Record<string, EvidenceTracebackResponse> = {
 		ev_1: {
@@ -282,15 +122,12 @@ function fixtureTraceback(collectionId: string, evidenceId: string): EvidenceTra
 				{
 					anchor_id: 'anc_ev_1',
 					document_id: 'doc_a',
-					locator_type: 'char_range',
-					locator_confidence: 'high',
+					source_kind: 'block',
+					source_ref: 'results',
+					source_type: 'text',
 					page: 4,
 					quote:
 						'Annealing at lower oxygen partial pressure improved cycle retention by stabilizing the structure.',
-					section_id: 'results',
-					block_id: 'results',
-					char_range: { start: 214, end: 324 },
-					bbox: null,
 					deep_link: buildDocumentViewerHref(collectionId, 'doc_a', {
 						evidenceId,
 						anchorId: 'anc_ev_1'
@@ -306,15 +143,12 @@ function fixtureTraceback(collectionId: string, evidenceId: string): EvidenceTra
 				{
 					anchor_id: 'anc_ev_2',
 					document_id: 'doc_c',
-					locator_type: 'section',
-					locator_confidence: 'low',
+					source_kind: 'block',
+					source_ref: 'discussion',
+					source_type: 'text',
 					page: null,
 					quote:
 						'Carbon coating reduced impedance, but the baseline reference was only partially specified.',
-					section_id: 'discussion',
-					block_id: 'discussion',
-					char_range: null,
-					bbox: null,
 					deep_link: buildDocumentViewerHref(collectionId, 'doc_c', {
 						evidenceId,
 						anchorId: 'anc_ev_2'
@@ -330,100 +164,6 @@ function fixtureTraceback(collectionId: string, evidenceId: string): EvidenceTra
 			evidence_id: evidenceId,
 			traceback_status: 'unavailable',
 			anchors: []
-		}
-	);
-}
-
-function fixtureDocumentContent(collectionId: string, documentId: string): DocumentContentResponse {
-	const fixtures: Record<string, DocumentContentResponse> = {
-		doc_a: {
-			collection_id: collectionId,
-			document_id: 'doc_a',
-			title: 'High-entropy oxide cycling study',
-			source_filename: 'high-entropy-oxide-cycling-study.pdf',
-			content_text:
-				'This study examines high-entropy oxide cathodes and the relationship between annealing atmosphere and cycle performance.\nPowders were mixed, dried, and annealed under controlled oxygen partial pressure before electrochemical evaluation.\nAnnealing at lower oxygen partial pressure improved cycle retention by stabilizing the structure. The treated sample retained more capacity after extended cycling than the air-annealed baseline.',
-			blocks: [
-				{
-					block_id: 'intro',
-					block_type: 'background',
-					heading_path: 'Introduction',
-					heading_level: 1,
-					order: 1,
-					text: 'This study examines high-entropy oxide cathodes and the relationship between annealing atmosphere and cycle performance.',
-					start_offset: 0,
-					end_offset: 114,
-					text_unit_ids: []
-				},
-				{
-					block_id: 'methods',
-					block_type: 'methods',
-					heading_path: 'Methods',
-					heading_level: 1,
-					order: 2,
-					text: 'Powders were mixed, dried, and annealed under controlled oxygen partial pressure before electrochemical evaluation.',
-					start_offset: 115,
-					end_offset: 223,
-					text_unit_ids: []
-				},
-				{
-					block_id: 'results',
-					block_type: 'results',
-					heading_path: 'Results',
-					heading_level: 1,
-					order: 3,
-					text: 'Annealing at lower oxygen partial pressure improved cycle retention by stabilizing the structure. The treated sample retained more capacity after extended cycling than the air-annealed baseline.',
-					start_offset: 224,
-					end_offset: 421,
-					text_unit_ids: []
-				}
-			],
-			warnings: []
-		},
-		doc_c: {
-			collection_id: collectionId,
-			document_id: 'doc_c',
-			title: 'Mixed experimental survey benchmark',
-			source_filename: 'mixed-experimental-survey-benchmark.txt',
-			content_text:
-				'This mixed document contains both survey-style framing and experimental observations about coating strategies.\nCarbon coating reduced impedance, but the baseline reference was only partially specified. Additional controls would be required for a stronger cross-paper comparison.',
-			blocks: [
-				{
-					block_id: 'overview',
-					block_type: 'background',
-					heading_path: 'Overview',
-					heading_level: 1,
-					order: 1,
-					text: 'This mixed document contains both survey-style framing and experimental observations about coating strategies.',
-					start_offset: 0,
-					end_offset: 101,
-					text_unit_ids: []
-				},
-				{
-					block_id: 'discussion',
-					block_type: 'discussion',
-					heading_path: 'Discussion',
-					heading_level: 1,
-					order: 2,
-					text: 'Carbon coating reduced impedance, but the baseline reference was only partially specified. Additional controls would be required for a stronger cross-paper comparison.',
-					start_offset: 102,
-					end_offset: 267,
-					text_unit_ids: []
-				}
-			],
-			warnings: []
-		}
-	};
-
-	return (
-		fixtures[documentId] ?? {
-			collection_id: collectionId,
-			document_id: documentId,
-			title: null,
-			source_filename: null,
-			content_text: '',
-			blocks: [],
-			warnings: []
 		}
 	);
 }
@@ -460,22 +200,4 @@ export async function fetchEvidenceTraceback(
 	);
 
 	return normalizeTracebackResponse(data, collectionId, evidenceId);
-}
-
-export async function fetchDocumentContent(
-	collectionId: string,
-	documentId: string
-): Promise<DocumentContentResponse> {
-	if (USE_API_FIXTURES) {
-		return fixtureDocumentContent(collectionId, documentId);
-	}
-
-	const data = await requestJson(
-		`/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(documentId)}/content`,
-		{
-			method: 'GET'
-		}
-	);
-
-	return normalizeDocumentContent(data, collectionId, documentId);
 }

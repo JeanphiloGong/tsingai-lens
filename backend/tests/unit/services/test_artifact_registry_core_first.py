@@ -73,7 +73,8 @@ def test_artifact_registry_reads_paper_facts_and_comparisons_directly(tmp_path):
                     {
                         "anchor_id": "anchor-1",
                         "document_id": "paper-1",
-                        "locator_type": "text",
+                        "source_kind": "block",
+                        "source_ref": "conductivity-result",
                         "source_type": "text",
                         "quote": "Conductivity increased after annealing.",
                     }

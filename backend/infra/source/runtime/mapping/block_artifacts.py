@@ -6,8 +6,6 @@ import pandas as pd
 
 from domain.source import (
     SourceBlock,
-    SourceBoundingBox,
-    SourceCharRange,
     normalize_optional_text,
     update_heading_stack,
 )
@@ -15,8 +13,6 @@ from infra.source.contracts.artifact_schemas import BLOCKS_FINAL_COLUMNS
 from infra.source.runtime.mapping.layout_binding import (
     first_bbox,
     first_page,
-    serialize_char_range,
-    serialize_prov_bbox,
 )
 from infra.source.runtime.mapping.text_quality import is_garbled_pdf_text
 
@@ -81,8 +77,6 @@ def build_pdf_blocks(
                     [item["text_unit_id"]] if item.get("text_unit_id") else []
                 ),
                 page=item["page"],
-                bbox=SourceBoundingBox.from_value(item.get("bbox")),
-                char_range=SourceCharRange.from_value(item["char_range"]),
                 heading_path=heading_path,
                 heading_level=heading_level,
             ).to_record()
@@ -135,7 +129,7 @@ def collect_pdf_text_items(document: Any) -> list[dict[str, Any]]:
         ref = f"#/texts/{index}"
         provenance = getattr(item, "prov", None)
         page = first_page(provenance)
-        bbox = SourceBoundingBox.from_value(first_bbox(provenance))
+        bbox = first_bbox(provenance)
         if ref not in caption_refs and _is_inside_figure(page, bbox, figure_regions):
             continue
         rows.append(
@@ -145,8 +139,6 @@ def collect_pdf_text_items(document: Any) -> list[dict[str, Any]]:
                 "text": text,
                 "label": str(getattr(item, "label", "") or ""),
                 "page": page,
-                "bbox": serialize_prov_bbox(provenance),
-                "char_range": serialize_char_range(provenance),
             }
         )
     return rows
@@ -154,12 +146,12 @@ def collect_pdf_text_items(document: Any) -> list[dict[str, Any]]:
 
 def _collect_figure_regions(
     document: Any,
-) -> list[tuple[int, SourceBoundingBox]]:
-    regions: list[tuple[int, SourceBoundingBox]] = []
+) -> list[tuple[int, Any]]:
+    regions: list[tuple[int, Any]] = []
     for picture in getattr(document, "pictures", []) or []:
         provenance = getattr(picture, "prov", None)
         page = first_page(provenance)
-        bbox = SourceBoundingBox.from_value(first_bbox(provenance))
+        bbox = first_bbox(provenance)
         if page is not None and bbox is not None:
             regions.append((page, bbox))
     return regions
@@ -167,28 +159,39 @@ def _collect_figure_regions(
 
 def _is_inside_figure(
     page: int | None,
-    bbox: SourceBoundingBox | None,
-    figure_regions: list[tuple[int, SourceBoundingBox]],
+    bbox: Any | None,
+    figure_regions: list[tuple[int, Any]],
 ) -> bool:
     if page is None or bbox is None:
         return False
     for figure_page, figure_bbox in figure_regions:
         if figure_page != page:
             continue
-        if (
-            bbox.coord_origin
-            and figure_bbox.coord_origin
-            and bbox.coord_origin != figure_bbox.coord_origin
-        ):
+        bbox_coords = _bbox_coords(bbox)
+        figure_coords = _bbox_coords(figure_bbox)
+        if bbox_coords is None or figure_coords is None:
             continue
-        if (
-            min(bbox.l, bbox.r) >= min(figure_bbox.l, figure_bbox.r)
-            and max(bbox.l, bbox.r) <= max(figure_bbox.l, figure_bbox.r)
-            and min(bbox.t, bbox.b) >= min(figure_bbox.t, figure_bbox.b)
-            and max(bbox.t, bbox.b) <= max(figure_bbox.t, figure_bbox.b)
-        ):
+        left, top, right, bottom = bbox_coords
+        figure_left, figure_top, figure_right, figure_bottom = figure_coords
+        if min(left, right) >= min(figure_left, figure_right) and max(
+            left, right
+        ) <= max(figure_left, figure_right) and min(top, bottom) >= min(
+            figure_top, figure_bottom
+        ) and max(top, bottom) <= max(figure_top, figure_bottom):
             return True
     return False
+
+
+def _bbox_coords(value: Any) -> tuple[float, float, float, float] | None:
+    try:
+        return (
+            float(getattr(value, "l")),
+            float(getattr(value, "t")),
+            float(getattr(value, "r")),
+            float(getattr(value, "b")),
+        )
+    except (AttributeError, TypeError, ValueError):
+        return None
 
 
 def _map_docling_block_type(

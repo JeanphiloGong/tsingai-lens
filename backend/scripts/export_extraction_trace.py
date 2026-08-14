@@ -477,7 +477,7 @@ def _render_fact_block(
     if anchors:
         lines.extend(["", "Anchors:"])
         for anchor in anchors:
-            quote = anchor.get("quote") or anchor.get("quote_span") or "n/a"
+            quote = anchor.get("quote") or "n/a"
             lines.append(
                 "- "
                 + "; ".join(
@@ -485,7 +485,7 @@ def _render_fact_block(
                     for part in (
                         f"source={anchor.get('source_type')}",
                         f"page={anchor.get('page')}",
-                        f"figure_or_table={anchor.get('figure_or_table')}",
+                        f"source={anchor.get('source_kind')}:{anchor.get('source_ref')}",
                         f"quote={_one_line(quote)}",
                     )
                     if part and not part.endswith("=None")

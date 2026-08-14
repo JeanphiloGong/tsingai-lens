@@ -23,7 +23,7 @@ from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260812_0026"
+HEAD_REVISION = "20260814_0027"
 EXPECTED_TABLES = {
     "alembic_version",
     "artifact_versions",
@@ -223,6 +223,108 @@ def test_empty_database_upgrades_and_rejects_irreversible_downgrade(
 
             with pytest.raises(NotImplementedError, match="irreversible"):
                 command.downgrade(config, "20260722_0018")
+    finally:
+        engine.dispose()
+
+
+def test_legacy_evidence_locators_migrate_to_stable_source_references(
+    tmp_path,
+) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "source-locator-migration.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    try:
+        with engine.begin() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "20260812_0026")
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO paper_fact_evidence_anchors (
+                        build_id, anchor_id, collection_id, source_document_id,
+                        document_version_id, anchor_order, locator_type,
+                        locator_confidence, source_type, section_id, page,
+                        quote, block_id, figure_or_table
+                    ) VALUES
+                        (
+                            'build-legacy', 'anchor-block', 'collection-legacy',
+                            'document-legacy', 'version-legacy', 0, 'char_range',
+                            'high', 'text', 'Results', 3, 'block quote',
+                            'block-stable', NULL
+                        ),
+                        (
+                            'build-legacy', 'anchor-table', 'collection-legacy',
+                            'document-legacy', 'version-legacy', 1, 'table_row',
+                            'high', 'table', 'Results', 4, 'table quote',
+                            NULL, 'table-stable'
+                        ),
+                        (
+                            'build-legacy', 'anchor-section-only',
+                            'collection-legacy', 'document-legacy',
+                            'version-legacy', 2, 'section', 'low', 'text',
+                            'Discussion', 5, 'section quote', NULL, NULL
+                        )
+                    """
+                )
+            )
+
+            command.upgrade(config, "head")
+
+            rows = connection.execute(
+                text(
+                    """
+                    SELECT anchor_id, source_kind, source_ref
+                    FROM paper_fact_evidence_anchors
+                    ORDER BY anchor_order
+                    """
+                )
+            ).mappings().all()
+            assert [dict(row) for row in rows] == [
+                {
+                    "anchor_id": "anchor-block",
+                    "source_kind": "block",
+                    "source_ref": "block-stable",
+                },
+                {
+                    "anchor_id": "anchor-table",
+                    "source_kind": "table",
+                    "source_ref": "table-stable",
+                },
+                {
+                    "anchor_id": "anchor-section-only",
+                    "source_kind": "document",
+                    "source_ref": "document-legacy",
+                },
+            ]
+            columns = {
+                column["name"]
+                for column in inspect(connection).get_columns(
+                    "paper_fact_evidence_anchors"
+                )
+            }
+            assert {"source_kind", "source_ref"}.issubset(columns)
+            assert {
+                "locator_type",
+                "locator_confidence",
+                "section_id",
+                "char_range_json",
+                "bbox_json",
+                "block_id",
+                "snippet_id",
+                "figure_or_table",
+                "quote_span",
+            }.isdisjoint(columns)
+            mention_columns = {
+                column["name"]
+                for column in inspect(connection).get_columns(
+                    "source_reference_mentions"
+                )
+            }
+            assert {"char_start", "char_end"}.isdisjoint(mention_columns)
     finally:
         engine.dispose()
 
@@ -1550,13 +1652,13 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
                     """
                     INSERT INTO source_blocks (
                         build_id, block_id, collection_id, source_document_id,
-                        block_type, text, block_order, page, bbox_json,
-                        char_range_json, heading_path, heading_level
+                        block_type, text, block_order, page,
+                        heading_path, heading_level
                     ) VALUES (
                         'build-evidence-pg', 'block-evidence-pg-2',
                         'col-evidence-pg', 'source-evidence-pg-2', 'paragraph',
-                        'Strength decreased in the second paper.', 0, 1, NULL,
-                        NULL, 'Results', 1
+                        'Strength decreased in the second paper.', 0, 1,
+                        'Results', 1
                     )
                     """
                 )
@@ -1566,12 +1668,12 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
                     """
                     INSERT INTO source_blocks (
                         build_id, block_id, collection_id, source_document_id,
-                        block_type, text, block_order, page, bbox_json,
-                        char_range_json, heading_path, heading_level
+                        block_type, text, block_order, page,
+                        heading_path, heading_level
                     ) VALUES (
                         'build-evidence-pg', 'block-evidence-pg',
                         'col-evidence-pg', 'source-evidence-pg', 'paragraph',
-                        'Strength and mechanism evidence.', 0, 1, NULL, NULL,
+                        'Strength and mechanism evidence.', 0, 1,
                         'Results', 1
                     )
                     """

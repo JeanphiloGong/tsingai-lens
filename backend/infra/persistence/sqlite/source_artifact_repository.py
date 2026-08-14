@@ -292,8 +292,6 @@ class SqliteSourceArtifactRepository:
                     text,
                     block_order,
                     page,
-                    bbox_json,
-                    char_range_json,
                     heading_path,
                     heading_level
                 FROM source_blocks
@@ -313,8 +311,6 @@ class SqliteSourceArtifactRepository:
                     "block_order": row["block_order"],
                     "text_unit_ids": text_unit_ids_by_block.get(row["block_id"], []),
                     "page": row["page"],
-                    "bbox": _load_json_object_or_none(row["bbox_json"]),
-                    "char_range": _load_json_object_or_none(row["char_range_json"]),
                     "heading_path": row["heading_path"],
                     "heading_level": row["heading_level"],
                 }
@@ -338,7 +334,6 @@ class SqliteSourceArtifactRepository:
                     caption_text,
                     caption_block_id,
                     page,
-                    bbox_json,
                     heading_path,
                     column_headers_json,
                     table_matrix_json,
@@ -359,7 +354,6 @@ class SqliteSourceArtifactRepository:
                     "caption_text": row["caption_text"],
                     "caption_block_id": row["caption_block_id"],
                     "page": row["page"],
-                    "bbox": _load_json_object_or_none(row["bbox_json"]),
                     "heading_path": row["heading_path"],
                     "column_headers": _load_json_list(row["column_headers_json"]),
                     "table_matrix": _load_json_list(row["table_matrix_json"]),
@@ -385,7 +379,6 @@ class SqliteSourceArtifactRepository:
                     row_index,
                     row_text,
                     page,
-                    bbox_json,
                     heading_path
                 FROM source_table_rows
                 WHERE collection_id = ?
@@ -403,7 +396,6 @@ class SqliteSourceArtifactRepository:
                     "row_index": row["row_index"],
                     "row_text": row["row_text"],
                     "page": row["page"],
-                    "bbox": _load_json_object_or_none(row["bbox_json"]),
                     "heading_path": row["heading_path"],
                 }
             )
@@ -429,8 +421,6 @@ class SqliteSourceArtifactRepository:
                     cell_text,
                     header_path,
                     page,
-                    bbox_json,
-                    char_range_json,
                     unit_hint
                 FROM source_table_cells
                 WHERE collection_id = ?
@@ -451,8 +441,6 @@ class SqliteSourceArtifactRepository:
                     "cell_text": row["cell_text"],
                     "header_path": row["header_path"],
                     "page": row["page"],
-                    "bbox": _load_json_object_or_none(row["bbox_json"]),
-                    "char_range": _load_json_object_or_none(row["char_range_json"]),
                     "unit_hint": row["unit_hint"],
                 }
             )
@@ -476,7 +464,6 @@ class SqliteSourceArtifactRepository:
                     caption_text,
                     caption_block_id,
                     page,
-                    bbox_json,
                     heading_path,
                     image_path,
                     image_mime_type,
@@ -501,7 +488,6 @@ class SqliteSourceArtifactRepository:
                     "caption_text": row["caption_text"],
                     "caption_block_id": row["caption_block_id"],
                     "page": row["page"],
-                    "bbox": _load_json_object_or_none(row["bbox_json"]),
                     "heading_path": row["heading_path"],
                     "image_path": row["image_path"],
                     "image_mime_type": row["image_mime_type"],
@@ -576,8 +562,6 @@ class SqliteSourceArtifactRepository:
                     text TEXT NOT NULL,
                     block_order INTEGER NOT NULL,
                     page INTEGER,
-                    bbox_json TEXT,
-                    char_range_json TEXT,
                     heading_path TEXT,
                     heading_level INTEGER,
                     PRIMARY KEY (collection_id, block_id)
@@ -604,7 +588,6 @@ class SqliteSourceArtifactRepository:
                     caption_text TEXT,
                     caption_block_id TEXT,
                     page INTEGER,
-                    bbox_json TEXT,
                     heading_path TEXT,
                     row_count INTEGER NOT NULL,
                     col_count INTEGER NOT NULL,
@@ -627,7 +610,6 @@ class SqliteSourceArtifactRepository:
                     row_index INTEGER NOT NULL,
                     row_text TEXT NOT NULL,
                     page INTEGER,
-                    bbox_json TEXT,
                     heading_path TEXT,
                     PRIMARY KEY (collection_id, row_id)
                 )
@@ -645,8 +627,6 @@ class SqliteSourceArtifactRepository:
                     cell_text TEXT NOT NULL,
                     header_path TEXT,
                     page INTEGER,
-                    bbox_json TEXT,
-                    char_range_json TEXT,
                     unit_hint TEXT,
                     PRIMARY KEY (collection_id, cell_id)
                 )
@@ -663,7 +643,6 @@ class SqliteSourceArtifactRepository:
                     caption_text TEXT,
                     caption_block_id TEXT,
                     page INTEGER,
-                    bbox_json TEXT,
                     heading_path TEXT,
                     image_path TEXT,
                     image_mime_type TEXT,
@@ -716,8 +695,6 @@ class SqliteSourceArtifactRepository:
                     context_text TEXT NOT NULL,
                     source_block_id TEXT,
                     page INTEGER,
-                    char_start INTEGER,
-                    char_end INTEGER,
                     confidence REAL NOT NULL,
                     metadata_json TEXT NOT NULL,
                     PRIMARY KEY (collection_id, mention_id)
@@ -963,11 +940,9 @@ class SqliteSourceArtifactRepository:
                 text,
                 block_order,
                 page,
-                bbox_json,
-                char_range_json,
                 heading_path,
                 heading_level
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -978,8 +953,6 @@ class SqliteSourceArtifactRepository:
                     block.text,
                     block.block_order,
                     block.page,
-                    block.bbox.to_json() if block.bbox else None,
-                    block.char_range.to_json() if block.char_range else None,
                     block.heading_path,
                     block.heading_level,
                 )
@@ -1024,7 +997,6 @@ class SqliteSourceArtifactRepository:
                 caption_text,
                 caption_block_id,
                 page,
-                bbox_json,
                 heading_path,
                 row_count,
                 col_count,
@@ -1033,7 +1005,7 @@ class SqliteSourceArtifactRepository:
                 table_markdown,
                 table_text,
                 metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [self._table_values(collection_id, table) for table in tables],
         )
@@ -1054,9 +1026,8 @@ class SqliteSourceArtifactRepository:
                 row_index,
                 row_text,
                 page,
-                bbox_json,
                 heading_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -1067,7 +1038,6 @@ class SqliteSourceArtifactRepository:
                     row.row_index,
                     row.row_text,
                     row.page,
-                    row.bbox.to_json() if row.bbox else None,
                     row.heading_path,
                 )
                 for row in rows
@@ -1092,10 +1062,8 @@ class SqliteSourceArtifactRepository:
                 cell_text,
                 header_path,
                 page,
-                bbox_json,
-                char_range_json,
                 unit_hint
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -1108,8 +1076,6 @@ class SqliteSourceArtifactRepository:
                     cell.cell_text,
                     cell.header_path,
                     cell.page,
-                    cell.bbox.to_json() if cell.bbox else None,
-                    cell.char_range.to_json() if cell.char_range else None,
                     cell.unit_hint,
                 )
                 for cell in cells
@@ -1133,7 +1099,6 @@ class SqliteSourceArtifactRepository:
                 caption_text,
                 caption_block_id,
                 page,
-                bbox_json,
                 heading_path,
                 image_path,
                 image_mime_type,
@@ -1141,7 +1106,7 @@ class SqliteSourceArtifactRepository:
                 image_height,
                 asset_sha256,
                 metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -1153,7 +1118,6 @@ class SqliteSourceArtifactRepository:
                     figure.caption_text,
                     figure.caption_block_id,
                     figure.page,
-                    figure.bbox.to_json() if figure.bbox else None,
                     figure.heading_path,
                     figure.image_path,
                     figure.image_mime_type,
@@ -1227,11 +1191,9 @@ class SqliteSourceArtifactRepository:
                 context_text,
                 source_block_id,
                 page,
-                char_start,
-                char_end,
                 confidence,
                 metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -1243,8 +1205,6 @@ class SqliteSourceArtifactRepository:
                     mention.context_text,
                     mention.source_block_id,
                     mention.page,
-                    mention.char_start,
-                    mention.char_end,
                     mention.confidence,
                     _dump_json_object(mention.metadata),
                 )
@@ -1356,7 +1316,6 @@ class SqliteSourceArtifactRepository:
             table.caption_text,
             table.caption_block_id,
             table.page,
-            table.bbox.to_json() if table.bbox else None,
             table.heading_path,
             table.row_count,
             table.col_count,
@@ -1485,13 +1444,11 @@ class SqliteSourceArtifactRepository:
                 context_text,
                 source_block_id,
                 page,
-                char_start,
-                char_end,
                 confidence,
                 metadata_json
             FROM source_reference_mentions
             WHERE collection_id = ?
-            ORDER BY document_id ASC, source_block_id ASC, char_start ASC, mention_id ASC
+            ORDER BY document_id ASC, source_block_id ASC, mention_id ASC
             """,
             (collection_id,),
         ).fetchall()
@@ -1505,8 +1462,6 @@ class SqliteSourceArtifactRepository:
                     "context_text": row["context_text"],
                     "source_block_id": row["source_block_id"],
                     "page": row["page"],
-                    "char_start": row["char_start"],
-                    "char_end": row["char_end"],
                     "confidence": row["confidence"],
                     "metadata": _load_json_object(row["metadata_json"]),
                 }
@@ -1624,11 +1579,6 @@ def _dump_json_list(value: Any) -> str:
 def _load_json_object(value: Any) -> dict[str, Any]:
     parsed = _load_json(value, {})
     return dict(parsed) if isinstance(parsed, dict) else {}
-
-
-def _load_json_object_or_none(value: Any) -> dict[str, Any] | None:
-    parsed = _load_json(value, None)
-    return dict(parsed) if isinstance(parsed, dict) else None
 
 
 def _load_json_list(value: Any) -> list[Any]:

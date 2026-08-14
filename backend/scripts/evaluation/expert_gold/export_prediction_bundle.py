@@ -13,7 +13,7 @@ from typing import Any
 import pandas as pd
 
 
-SCHEMA_VERSION = "prediction-bundle-v0.1"
+SCHEMA_VERSION = "prediction-bundle-v0.2"
 DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 if str(DEFAULT_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULT_BACKEND_ROOT))
@@ -781,17 +781,13 @@ def _convert_evidence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             {
                 "paper_id": _text(row, "document_id"),
                 "evidence_id": _text(row, "anchor_id"),
-                "evidence_type": _text(row, "source_type", "locator_type"),
+                "evidence_type": _text(row, "source_type"),
                 "page": _first_value(row, "page"),
-                "section": _text(row, "section_id"),
-                "figure_or_table": _text(row, "figure_or_table"),
-                "quote_or_cell": _text(row, "quote", "quote_span"),
+                "source_kind": _text(row, "source_kind"),
+                "source_ref": _text(row, "source_ref"),
+                "quote_or_cell": _text(row, "quote"),
                 "supports": "",
-                "locator_type": _text(row, "locator_type"),
-                "locator_confidence": _text(row, "locator_confidence"),
                 "deep_link": _text(row, "deep_link"),
-                "block_id": _text(row, "block_id"),
-                "snippet_id": _text(row, "snippet_id"),
                 "source": _source("evidence_anchors", row_number),
             }
         )

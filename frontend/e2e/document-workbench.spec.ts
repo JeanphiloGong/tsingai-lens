@@ -78,11 +78,8 @@ function documentContentPayload() {
 				heading_level: 1,
 				order: 1,
 				text: 'Conductivity improved to 12 mS/cm.',
-				start_offset: 9,
-				end_offset: 43,
 				text_unit_ids: [],
 				page: 1,
-				bbox: { x0: 18, y0: 20, x1: 82, y1: 24.5, coord_origin: 'percent' }
 			},
 			{
 				block_id: 'methods',
@@ -91,11 +88,8 @@ function documentContentPayload() {
 				heading_level: 1,
 				order: 2,
 				text: 'The sample was annealed at 700 C.',
-				start_offset: 56,
-				end_offset: 89,
 				text_unit_ids: [],
 				page: 2,
-				bbox: { x0: 22, y0: 44, x1: 72, y1: 48.5, coord_origin: 'percent' }
 			},
 			{
 				block_id: 'results',
@@ -104,11 +98,8 @@ function documentContentPayload() {
 				heading_level: 1,
 				order: 3,
 				text: 'Conductivity improved to 12 mS/cm under EIS.',
-				start_offset: 98,
-				end_offset: 143,
 				text_unit_ids: [],
 				page: 3,
-				bbox: { x0: 18, y0: 62, x1: 76, y1: 66.5, coord_origin: 'percent' }
 			}
 		],
 		warnings: []

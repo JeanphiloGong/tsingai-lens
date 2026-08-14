@@ -112,8 +112,8 @@ def test_evidence_card_route_returns_single_card(evidence_services):
                     {
                         "anchor_id": "anchor-1",
                         "document_id": "paper-1",
-                        "locator_type": "text",
-                        "locator_confidence": "direct",
+                        "source_kind": "block",
+                        "source_ref": "block-1",
                         "source_type": "text",
                         "quote": "Conductivity improved after annealing.",
                     }

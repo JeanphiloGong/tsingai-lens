@@ -36,8 +36,6 @@ def test_source_contract_columns_cover_materials_comparison_v2_targets():
         "block_order",
         "text_unit_ids",
         "page",
-        "bbox",
-        "char_range",
         "heading_path",
         "heading_level",
     ]
@@ -49,7 +47,6 @@ def test_source_contract_columns_cover_materials_comparison_v2_targets():
         "caption_text",
         "caption_block_id",
         "page",
-        "bbox",
         "heading_path",
         "image_path",
         "image_mime_type",
@@ -65,7 +62,6 @@ def test_source_contract_columns_cover_materials_comparison_v2_targets():
         "caption_text",
         "caption_block_id",
         "page",
-        "bbox",
         "heading_path",
         "row_count",
         "col_count",
@@ -82,7 +78,6 @@ def test_source_contract_columns_cover_materials_comparison_v2_targets():
         "row_index",
         "row_text",
         "page",
-        "bbox",
         "heading_path",
     ]
     assert TABLE_CELLS_FINAL_COLUMNS == [
@@ -94,7 +89,5 @@ def test_source_contract_columns_cover_materials_comparison_v2_targets():
         "cell_text",
         "header_path",
         "page",
-        "bbox",
-        "char_range",
         "unit_hint",
     ]

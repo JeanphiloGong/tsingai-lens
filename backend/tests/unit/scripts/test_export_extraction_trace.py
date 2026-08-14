@@ -82,12 +82,11 @@ def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
                     {
                         "anchor_id": "anchor-1",
                         "document_id": "paper-1",
-                        "locator_type": "table_row",
-                        "locator_confidence": "direct",
+                        "source_kind": "table",
+                        "source_ref": "tbl-paper-1-1",
                         "source_type": "table",
                         "page": 5,
                         "quote": "A | 560",
-                        "figure_or_table": "tbl-paper-1-1",
                     }
                 ),
             ),

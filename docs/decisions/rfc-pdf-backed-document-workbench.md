@@ -1,944 +1,142 @@
 # RFC PDF-Backed Document Workbench Contract
 
-## Summary
+## Status
 
-This RFC records the next implementation wave for the collection-scoped
-document detail page:
+Accepted and amended on 2026-08-14.
 
-`/collections/[id]/documents/[document_id]`
-
-The target is a paper understanding workbench with:
-
-- left: original source reader, preferably the uploaded PDF when available
-- middle: structured extraction tabs for summary, methods, results, evidence,
-  and QA
-- right: local knowledge graph for the currently selected claim, result, or
-  source paragraph
-
-The important contract change is that the frontend must stop treating backend
-`blocks` as visible paper sections. A block remains a backend source locator
-unit. The user-facing page should present the original paper, readable
-structured understanding, and local traceback behavior.
-
-This RFC is a shared frontend/backend execution plan. After implementation,
-the long-lived HTTP details still belong in
-[`../../backend/docs/specs/api.md`](../../backend/docs/specs/api.md), and the
-frontend route behavior still belongs under
-[`../../frontend/src/routes/collections/`](../../frontend/src/routes/collections/).
-
-## Related Docs
-
-- [RFC Comparison-Result-Document Product Flow](rfc-comparison-result-document-product-flow.md)
-- [RFC Document-Result Evidence-Chain Contract Freeze](rfc-document-result-evidence-chain-contract-freeze.md)
-- [`../../backend/docs/specs/api.md`](../../backend/docs/specs/api.md)
-- [`../../backend/docs/plans/core/claim-traceback-navigation-implementation-plan.md`](../../backend/docs/plans/core/claim-traceback-navigation-implementation-plan.md)
-- [`../../frontend/src/routes/collections/document-evidence-review-split-view-plan.md`](../../frontend/src/routes/collections/document-evidence-review-split-view-plan.md)
-- [`../../frontend/src/routes/collections/claim-traceback-navigation-contract.md`](../../frontend/src/routes/collections/claim-traceback-navigation-contract.md)
-
-## Product Spec: Document Evidence Verification Workbench
-
-This section is the phase-one specification for redesigning the document detail
-page as the source verification surface for Lens. It is the shared source of
-truth for the next implementation wave; code changes should be planned against
-this target before implementation starts.
-
-### Assumptions
-
-1. The user is a researcher reviewing one paper inside a built collection.
-2. The document page is read-only in this wave. Evidence correction,
-   adjudication, and rebuild controls are later workflows.
-3. The page must preserve the existing same-origin `/api/v1/*` browser
-   contract.
-4. The final source reader should be a controlled PDF.js reader when the
-   original PDF/source is available. Parsed text is a fallback and source
-   search aid, not the primary reading surface.
-5. The local graph is scoped to the selected claim, result, evidence item, or
-   source anchor. It is not the collection graph.
-6. The research-objective workspace can deep link into this page with
-   `result_id`, `evidence_id`, `anchor_id`, `page`, and `return_to` query
-   parameters.
-
-### Objective
-
-The document detail page should answer one product question:
-
-```text
-What did this paper actually say, and can every material, process, test,
-result, comparison, interpretation, and extracted claim from Lens be verified
-against the original source?
-```
-
-The target layout is a three-region evidence verification workbench:
-
-```text
-left:   original paper reader
-middle: structured understanding / extracted evidence
-right:  selected local evidence graph
-```
-
-The page is not a generic document metadata screen and not a standalone PDF
-viewer. It exists to connect Lens extraction back to the source paper.
-
-### Tech Stack
-
-- Frontend: SvelteKit 2, Svelte 5, TypeScript, Vite, Playwright, `pdfjs-dist`.
-- Backend: Python API controllers, Core document content/read models, Source
-  collection file metadata, evidence traceback services.
-- Browser contract: same-origin `/api/v1/*` through the existing shared
-  frontend API helpers.
-- Route:
-  `frontend/src/routes/collections/[id]/documents/[document_id]/+page.svelte`.
-
-### Commands
-
-Frontend verification:
-
-```bash
-cd frontend
-npm run check
-npm run test:unit -- --run src/routes/collections/[id]/documents/[document_id]/document-detail-page.svelte.spec.ts
-npm run test:e2e -- --reporter=line
-npm run build
-```
-
-Backend verification when document/source contracts change:
-
-```bash
-cd backend
-./.venv/bin/python -m pytest tests/unit/routers/test_documents_api.py -q
-./.venv/bin/python -m ruff check controllers application tests/unit/routers/test_documents_api.py
-```
-
-Docs governance check when this RFC changes:
-
-```bash
-python3 scripts/check_docs_governance.py
-```
-
-### Project Structure
-
-```text
-docs/decisions/rfc-pdf-backed-document-workbench.md
-  Shared product, contract, and interaction target for the document workbench.
-
-backend/controllers/core/documents.py
-backend/controllers/schemas/core/documents.py
-  Document content, source file, and document read-model API surfaces.
-
-backend/application/source/collection_service.py
-  Safe original source-file resolution from collection metadata.
-
-backend/application/core/
-  Paper-level structured extraction, evidence, comparison, and traceback
-  read-model assembly.
-
-frontend/src/routes/_shared/documents.ts
-  Browser-side document workbench model, source target normalization, and
-  document API helpers.
-
-frontend/src/routes/_shared/traceback.ts
-frontend/src/routes/_shared/researchView.ts
-frontend/src/routes/_shared/results.ts
-  Shared evidence traceback, paper research-view, and result helpers.
-
-frontend/src/routes/collections/[id]/documents/[document_id]/_components/
-  PaperReader, structured extraction panel, result/evidence cards, and local
-  graph components.
-
-frontend/e2e/
-  Browser-level workbench checks and screenshot verification.
-```
-
-### Code Style
-
-The frontend should keep one selected workbench object and derive the reader
-target and graph focus from that state:
-
-```ts
-let selectedItemId = '';
-
-$: selectedItem = findWorkbenchItem(model, selectedItemId);
-$: selectedSourceTarget = selectedItem
-	? sourceTargetForItem(model, selectedItem)
-	: null;
-$: selectedGraph = selectedItem
-	? localGraphForItem(model, selectedItem)
-	: null;
-```
-
-The reader should receive product-shaped source targets, not backend artifact
-IDs as UI primitives:
-
-```svelte
-<PaperReader
-	sourceFileUrl={model.sourceFileUrl}
-	pages={model.pages}
-	activeSourceTarget={selectedSourceTarget}
-/>
-```
-
-Backend responses should expose stable locator and traceback fields directly
-instead of making the browser reconstruct file paths or source coordinates:
-
-```python
-return {
-    "page": normalized_page,
-    "bbox": normalized_bbox,
-    "char_range": normalized_char_range,
-    "quote": source_quote,
-}
-```
-
-### User-Facing Information Architecture
-
-#### Left: Original Paper Reader
-
-Purpose:
-
-- show the original source PDF when available
-- let any selected result, claim, evidence item, or graph node jump to the
-  source page or region
-- keep parsed text as fallback/search, not as the primary paper representation
-
-Required behavior:
-
-- use PDF.js for the controlled reader surface
-- show page navigation, zoom, and source search without crowding the paper
-- if `bbox` is available, draw a highlight on the PDF page
-- if only `page` is available, jump to that page and show that precise region
-  is unavailable
-- if PDF/source is unavailable, fall back to coherent parsed text grouped by
-  real sections
-- never expose `block_id`, `source_span_id`, or backend artifact IDs in the
-  default UI
-
-#### Middle: Structured Understanding Panel
-
-Purpose:
-
-- show what Lens understood from this one paper
-- organize extraction according to scientific reading order
-- make every row actionable for source verification
-
-The default order should be:
-
-```text
-paper scope
--> experimental objects
--> preparation / processing / treatment conditions
--> test and characterization methods
--> measured results
--> comparisons
--> author interpretations
--> missing context and warnings
--> evidence anchors
-```
-
-The middle panel should include:
-
-- paper summary
-- material system
-- samples / variants
-- process context
-- test conditions
-- measurements
-- comparisons
-- characterization observations
-- interpretations
-- missing context / warnings
-- evidence anchors
-
-It should not render raw JSON as the primary experience. Tables, compact cards,
-and grouped rows are appropriate when they preserve source links and selection
-state.
-
-#### Right: Local Evidence Graph
-
-Purpose:
-
-- show how the selected value or claim is connected to sample, process, test
-  condition, comparison, interpretation, and source anchor
-- help the user understand dependency context before trusting an extracted
-  result
-- remain secondary to source verification
-
-Required behavior:
-
-- center on the selected claim/result/evidence item
-- show only the selected object's local neighborhood
-- connect to sample, process, test condition, comparison, and source anchor
-  where available
-- collapse or move below the main flow on narrow screens
-- avoid becoming the collection graph or replacing the structured panel
-
-### Backend / Frontend Coordination
-
-Backend responsibilities:
-
-- serve document content/profile metadata
-- stream the original source file through a safe document source endpoint
-- provide source locators: `page`, `bbox`, `char_range`, `quote`, and section
-  context
-- provide paper-level structured extraction grouped by scientific role
-- provide evidence traceback for result/evidence/source-anchor verification
-- expose result/evidence/source-anchor relationships
-- expose reverse links from objective evidence units to document source
-  locations
-- return explicit missing-context, warning, and traceability states
-
-Frontend responsibilities:
-
-- render the PDF.js source reader and parsed-text fallback
-- synchronize selected structured evidence with PDF page/region highlight
-- render the middle structured panel with tabs, cards, tables, and selection
-  state
-- render the selected local graph without stealing the main workflow
-- support durable URL parameters:
-  `result_id`, `evidence_id`, `anchor_id`, `page`, and `return_to`
-- preserve the return path to the research-objective workspace
-- hide internal locator IDs in the default UI
-
-### Relationship To Research Objectives
-
-The research-objective workspace uses the document detail page as its source
-verification target.
-
-Expected navigation:
-
-```text
-objective evidence unit
--> document detail
--> selected result/evidence/anchor
--> PDF jumps to the source page or region
--> user verifies the claim
--> return_to navigates back to the objective workspace
-```
-
-The document page should therefore accept objective-origin deep links even when
-the selected item is not a legacy material result. If the objective evidence
-unit cannot be mapped to a result row yet, the page should still select the
-best available evidence anchor and source location.
-
-### Testing Strategy
-
-Backend tests should verify:
-
-- document content blocks expose valid `page`, `bbox`, and `char_range`
-- invalid locator payloads normalize to `null` instead of crashing
-- source endpoint streams an existing original PDF/source file
-- missing or ambiguous source files return explicit structured errors
-- unsafe file paths cannot be requested or leaked
-- evidence traceback returns anchors usable by the document page
-
-Frontend unit/browser tests should verify:
-
-- the document detail route renders source reader, structured panel, and local
-  graph regions
-- PDF source mode is preferred when the source file endpoint works
-- parsed text fallback is coherent and does not repeat section titles per
-  parser block
-- selecting a structured row updates selected state, PDF/source target, and
-  local graph focus
-- `result_id`, `evidence_id`, `anchor_id`, `page`, and `return_to` are honored
-- page-only anchors show a readable precision fallback
-- mobile layout intentionally prioritizes structured verification and source
-  access without horizontal overflow
-
-Playwright screenshot checks should cover at least:
-
-- desktop document workbench
-- mobile document workbench
-- PDF unavailable fallback
-- selected result/evidence with source highlight or page fallback
-
-### Boundaries
-
-- Always:
-  keep source verification visible, use same-origin API helpers, preserve
-  source traceback, show explicit missing/partial states, and verify with
-  focused backend, frontend, and browser checks.
-- Ask first:
-  changing public API shapes, adding new dependencies beyond existing
-  `pdfjs-dist`, changing database tables, adding evidence-edit/approval
-  workflows, deleting old material/result routes, or changing release/build
-  configuration.
-- Never:
-  expose filesystem paths, expose raw `block_id`/`source_span_id` as normal UI
-  labels, treat parsed blocks as the primary paper reader, make the local graph
-  the main route, make browser code infer scientific conclusions from raw JSON,
-  or add a parallel browser API contract.
-
-### Success Criteria
-
-The redesigned document detail page is acceptable when:
-
-- the page visibly answers what the paper says and whether Lens extraction can
-  be verified against the source
-- the desktop layout has a clear source reader, structured understanding
-  panel, and selected local graph
-- the left reader displays the original PDF/source when available
-- source fallback is compact and useful; it does not leave a giant empty reader
-  when only parsed text is available
-- selecting any result, evidence card, comparison, characterization, or graph
-  node drives the source reader to the best available page, region, section, or
-  quote
-- internal backend IDs and artifact codes are hidden from ordinary users
-- the middle panel follows scientific reading order instead of dumping JSON or
-  unrelated diagnostic sections
-- the local graph changes with the selected item and stays auxiliary
-- objective workspace links can open this page, select the corresponding
-  evidence/source anchor, and return to the objective workspace
-- mobile screenshots show no horizontal overflow, clipped toolbar, or first
-  viewport dominated by an empty source preview
-- `npm run check`, targeted frontend tests, relevant backend tests, docs
-  governance, and Playwright screenshots pass for the touched surface
-
-### Open Questions
-
-- Should the first optimized mobile view default to structured understanding
-  first, with source reader opened by a segmented control, or should it show
-  source first when a deep link contains a source anchor?
-- Should objective evidence units get a dedicated query parameter such as
-  `evidence_unit_id`, or should they always map through `evidence_id` /
-  `anchor_id`?
-- Should source-unavailable pages automatically show parsed text fallback in
-  the left region, or switch the middle panel into a source-first verification
-  mode?
-- Should the local graph be visible by default on desktop, or collapsed until a
-  structured item is selected?
-
-## Current State
-
-The frontend document detail page has already moved toward a three-column
-paper workbench, but the left reader is still a facsimile built from parsed
-document content. It does not yet stream and render the original uploaded PDF.
-
-The current backend state is close but incomplete:
-
-- `blocks.parquet` already carries `page`, `bbox`, and `char_range` for PDF
-  parser output.
-- text-source block generation carries `char_range` where plain text offsets
-  can be resolved.
-- `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`
-  currently drops `page`, `bbox`, and `char_range` from each content block.
-- original uploaded source files are stored under the collection input area and
-  tracked by `files.json` plus `import_manifest.json`.
-- there is no document-scoped endpoint that streams the original source file
-  for a browser PDF reader.
-
-The repeated-section problem in the left reader comes from exposing block-level
-parser units as visible section units. Many paragraph blocks share the same
-`heading_path`, so rendering one visible section per block repeats the same
-chapter or section title.
+The workbench uses stable Source artifact references. PDF coordinates and
+character offsets are retired from the domain, persistence, HTTP, and browser
+contracts.
 
 ## Decision
 
-The next wave should make one direct backend contract improvement and one
-direct frontend workbench improvement.
+The collection document route remains the source-verification surface:
 
-### Source Is User-Facing; Blocks Are Internal
+```text
+/collections/[id]/documents/[document_id]
+```
 
-The document page should show either:
+Its three regions are:
 
-- the original PDF/source file when it can be safely served, or
-- coherent parsed paper text grouped by real section fallback when the source
-  file is unavailable or not displayable in the browser.
+- original source reader;
+- structured paper understanding and evidence;
+- local graph for the selected result, Finding, or Evidence item.
 
-It should not present `blk_xxx`, `ev_method_xxx`, or one visible section per
-parser block as the main reading model.
+Every traceable item resolves through one locator contract:
 
-### Locators Travel Through The Document Content Contract
+```text
+document_id + source_kind + source_ref
+```
 
-Document content blocks should expose locator fields that already exist in
-source artifacts:
+Supported Source artifacts include blocks, tables, table rows, cells, and
+figures. Text evidence uses `source_kind = "block"` and the stable `block_id` as
+`source_ref`. `page` and `quote` are display context, not identity.
+
+## Why
+
+Parser coordinates and character offsets were neither stable nor portable:
+
+- coordinate origin and units varied by parser;
+- parsed text offsets changed when normalization changed;
+- the browser could not reliably draw the same region across renderers;
+- quote search could select the wrong repeated sentence;
+- persisted geometry duplicated parser-private implementation detail.
+
+Stable Source artifact IDs survive API serialization and give every evidence
+record one deterministic owner. The workbench can still jump to a page, but it
+does not claim false region precision.
+
+## Backend Contract
+
+Evidence anchors expose:
 
 ```json
 {
-  "block_id": "blk_doc_12",
-  "block_type": "paragraph",
-  "heading_path": "Results > Mechanical properties",
-  "order": 12,
-  "text": "The optimized sample reached 940 MPa...",
-  "start_offset": 1880,
-  "end_offset": 1962,
+  "anchor_id": "anchor_xxx",
+  "document_id": "doc_xxx",
+  "source_kind": "block",
+  "source_ref": "blk_xxx",
+  "source_type": "text",
   "page": 6,
-  "bbox": {
-    "x0": 72.4,
-    "y0": 182.1,
-    "x1": 512.8,
-    "y1": 228.6,
-    "coord_origin": "top_left"
-  },
-  "char_range": {
-    "start": 1880,
-    "end": 1962
-  }
+  "quote": "The optimized sample reached 940 MPa.",
+  "deep_link": "/collections/col_xxx/documents/doc_xxx?anchor_id=anchor_xxx"
 }
 ```
 
-Rules:
+The document content response exposes stable block IDs, reading order,
+heading context, text-unit membership, text, and optional page. It does not
+expose parser coordinates or character offsets.
 
-- `page`, `bbox`, and `char_range` are nullable.
-- `page` is the display page number from the source artifact; invalid,
-  missing, or non-positive values become `null`.
-- `char_range` uses `{ "start": number, "end": number }` and must satisfy
-  `0 <= start <= end`.
-- `bbox` should normalize public keys to `x0`, `y0`, `x1`, `y1`, and may
-  preserve `coord_origin` when the parser provides it.
-- the normalizer should accept existing artifact bbox keys `l`, `t`, `r`, and
-  `b`, mapping them to `x0`, `y0`, `x1`, and `y1`.
-- invalid JSON strings, `NaN`, empty strings, and malformed objects become
-  `null`.
-- `block_id` remains useful for diagnostics and fallback anchors, but the
-  default UI copy must not expose it.
+Source domain records and persistence tables do not store geometry. Parser
+adapters may inspect geometry privately while excluding text embedded inside a
+figure or cropping an extracted figure image. That private value must not cross
+the parser mapping boundary.
 
-### The Backend Serves The Original Source File
+## Frontend Contract
 
-Add a document-scoped source endpoint:
+The browser normalizes evidence into a `WorkbenchSourceTarget` containing:
+
+- `documentId`;
+- `sourceKind`;
+- `sourceRef`;
+- optional `page`, `quote`, and user-facing label;
+- precision of `block`, `page`, or `unavailable`.
+
+Selection follows this order:
+
+1. resolve the stable Source artifact reference;
+2. select or scroll to the matching parsed block/table/figure;
+3. jump the PDF reader to the recorded page when available;
+4. otherwise keep the document open and show that the exact location is
+   unavailable.
+
+The browser must not reconstruct locations from quotes and must not render PDF
+region highlights without a stable persisted region contract.
+
+## Source File Behavior
+
+The backend serves the original collection document through:
 
 ```text
 GET /api/v1/collections/{collection_id}/documents/{document_id}/source
 ```
 
-Behavior:
+The browser uses the original PDF when available and parsed Markdown/text as a
+fallback. Internal Source IDs remain navigation identity and are not presented
+as scientific content.
 
-- stream the stored original source file for the requested document
-- return `Content-Type` from stored metadata when available, otherwise infer it
-  from the filename
-- use inline content disposition by default so a browser PDF viewer can render
-  it
-- return a clear missing-source response when the collection or document
-  exists but no source file can be resolved
+## Removed Contract
 
-Security rules:
+The following are intentionally unsupported:
 
-- never accept a filesystem path from the request
-- resolve files only from repository-owned collection metadata
-- resolve candidate paths and reject anything outside the collection directory,
-  preferably outside the collection input directory
-- do not expose `backend/data/**` directory structure in user-facing errors
+- PDF bounding boxes in Source records or browser payloads;
+- character ranges and start/end offsets as evidence locators;
+- quote-search locator recovery;
+- section-only locator fallback;
+- locator confidence labels derived from coordinate availability;
+- a second compatibility payload for historical anchors.
 
-### The Frontend Uses A Locator, Not A Block UI
+The database migration converts historical anchors to stable Source artifact
+references where possible and falls back to a document reference when the old
+record has no stable artifact ID. The migration is irreversible.
 
-The frontend should normalize claim, result, evidence, paragraph, and block
-payloads into one page-local source target concept:
+## Verification
 
-```ts
-type SourceTargetPrecision =
-  | 'pdf-region'
-  | 'text-range'
-  | 'pdf-page'
-  | 'section'
-  | 'quote-search'
-  | 'unavailable';
+The maintained checks cover:
 
-type WorkbenchSourceTarget = {
-  documentId: string;
-  label: string;
-  page: number | null;
-  bbox: PdfBoundingBox | null;
-  charRange: TextCharRange | null;
-  sectionId: string | null;
-  headingPath: string | null;
-  quote: string | null;
-  precision: SourceTargetPrecision;
-  userMessage: string | null;
-};
-```
+- Source domain and persistence round trips without geometry;
+- evidence API responses containing only stable source references;
+- collection document content without offsets or coordinate payloads;
+- frontend normalization and navigation by `sourceKind/sourceRef`;
+- page-level PDF navigation without synthetic region highlighting.
 
-This can live inside the existing document workbench model code. It should not
-be a new route family or a second browser API contract.
+The long-lived HTTP details belong in
+[`../../backend/docs/specs/api.md`](../../backend/docs/specs/api.md). The
+frontend route behavior belongs under
+[`../../frontend/src/routes/collections/`](../../frontend/src/routes/collections/).
 
-## Fallback Behavior
+## Related Docs
 
-The workbench selection flow should be deterministic.
-
-When the user selects a claim, result row, evidence card, graph node, or source
-paragraph, the frontend should:
-
-1. find the best evidence anchor or document content locator for the selected
-   object
-2. if `page` and `bbox` exist and the active reader can draw PDF overlays,
-   jump to that page and draw a region highlight
-3. otherwise, if `char_range` exists, highlight that range in parsed source
-   text
-4. otherwise, if `page` exists, jump the PDF reader to that page and show that
-   the precise region is unavailable
-5. otherwise, if `section_id` or `heading_path` exists, scroll to the first
-   matching section and highlight the section range
-6. otherwise, if `quote` exists, search the parsed source text and highlight
-   the first match
-7. otherwise, keep the document open and show a source-location-unavailable
-   message
-
-The first implementation can use a native browser PDF view with `#page=N` for
-page navigation. Native PDF viewers cannot reliably draw custom highlights
-inside the PDF surface. Exact PDF-region highlighting requires a controlled
-viewer such as PDF.js or an equivalent existing project dependency.
-
-Until controlled PDF rendering exists, the acceptable fallback is:
-
-- show the original PDF when the source endpoint works
-- synchronize selection to page-level PDF navigation when possible
-- keep parsed text as the highlightable fallback for `char_range`, section, or
-  quote-based source verification
-
-## User-Facing Copy Rules
-
-Backend and artifact codes should not appear in the default workbench UI.
-
-Examples:
-
-| Internal value | Default user-facing copy |
-| --- | --- |
-| `insufficient` | Evidence is insufficient for a strong comparison. |
-| `variant_fact_not_available` | The material or variant is not clearly reported. |
-| `process_context_not_reported` | The paper does not report enough process context. |
-| missing baseline | This result does not include a comparable baseline. |
-| section-only locator | Location precision is limited; review the nearby source section. |
-| missing `bbox` | The PDF region is unavailable; page or section fallback is used. |
-
-Raw codes may appear only in a deliberate detail, diagnostics, or debug mode.
-
-## Backend Implementation
-
-### Extend The Document Content Response
-
-Change:
-
-- `backend/controllers/schemas/core/documents.py`
-
-Add typed locator fields to `DocumentContentBlockResponse`:
-
-- `page: int | None`
-- `bbox: DocumentBoundingBoxResponse | None`
-- `char_range: DocumentCharRangeResponse | None`
-
-Recommended first-slice shape:
-
-```py
-class DocumentCharRangeResponse(BaseModel):
-    start: int = Field(..., ge=0)
-    end: int = Field(..., ge=0)
-
-
-class DocumentBoundingBoxResponse(BaseModel):
-    x0: float
-    y0: float
-    x1: float
-    y1: float
-    coord_origin: str | None = None
-```
-
-Keep these models local to `documents.py` for the first slice. If later work
-needs one shared locator schema across evidence, documents, figures, and
-tables, that can be a separate explicit cleanup.
-
-### Preserve Existing Artifact Locator Fields
-
-Change:
-
-- `backend/application/core/semantic_build/document_profile_service.py`
-
-Inside `_build_document_content_blocks()`:
-
-- read `page`, `bbox`, and `char_range` from each block row
-- parse locator values from either dictionaries or JSON strings
-- normalize `bbox` from both `x0/y0/x1/y1` and `l/t/r/b`
-- return normalized locator fields in each block payload
-- keep existing `start_offset` and `end_offset` as text fallback offsets
-- do not invent a `char_range` from `start_offset` unless the implementation
-  deliberately documents that it is content-text-derived rather than
-  parser-provenance-derived
-
-Helper behavior:
-
-- `_normalize_page(value) -> int | None`
-- `_normalize_char_range_payload(value) -> dict[str, int] | None`
-- `_normalize_bbox_payload(value) -> dict[str, float | str | None] | None`
-- `_normalize_object_payload(value) -> dict | None`
-
-The service already computes `start_offset` and `end_offset`; those should
-remain available for degraded parsed-text highlighting even when artifact
-`char_range` is missing.
-
-### Add Source File Resolution
-
-Change:
-
-- `backend/application/source/collection_service.py`
-
-Add a focused method that resolves the stored source file for one document:
-
-```py
-def resolve_document_source_file(
-    self,
-    collection_id: str,
-    document_id: str,
-) -> dict[str, Any]:
-    ...
-```
-
-The returned payload should include:
-
-- `path: Path`
-- `filename: str`
-- `media_type: str | None`
-- `source_document_id: str`
-
-Resolution order:
-
-1. read the collection to ensure it exists
-2. read `import_manifest.json`
-3. find `imports[*].documents[*]` where `source_document_id == document_id`
-4. resolve `storage_relpath` against the collection directory when available
-5. otherwise resolve `stored_path` from the manifest
-6. validate the resolved path stays inside the collection directory and points
-   to an existing file
-7. if the manifest cannot resolve a file, fall back to `files.json` only when
-   it is unambiguous:
-   - the stored or original filename matches `document_id`, or
-   - the collection has exactly one document file and one document profile
-8. raise a typed missing-source error for unresolved or ambiguous cases
-
-Do not make the controller reconstruct paths itself. Path resolution belongs in
-the source collection service because that service owns collection file
-metadata.
-
-### Add The Source Endpoint
-
-Change:
-
-- `backend/controllers/core/documents.py`
-
-Add:
-
-```py
-@router.get(
-    "/{collection_id}/documents/{document_id}/source",
-    summary="Stream the original source file for one document",
-)
-async def get_collection_document_source(...):
-    ...
-```
-
-Use `fastapi.responses.FileResponse`.
-
-Response rules:
-
-- success: `200` with inline file response
-- missing collection or document: `404`
-- source file unavailable or ambiguous: `409` with structured detail
-- unsafe resolved path: `404` or `409` with structured detail, without leaking
-  local filesystem paths
-
-### Update Backend API Docs And Tests
-
-Change:
-
-- `backend/docs/specs/api.md`
-- `backend/tests/unit/routers/test_documents_api.py`
-- any narrower service test if the source-file resolver is easier to verify
-  below the controller
-
-Test cases:
-
-- document content blocks include `page`, normalized `bbox`, and `char_range`
-- malformed locator payloads become `null` instead of crashing response
-- source endpoint streams a stored PDF with the expected content type
-- source endpoint returns a structured unavailable response when no source file
-  can be resolved
-- path traversal is impossible because the endpoint never accepts a requested
-  path
-
-Suggested backend verification:
-
-```text
-cd backend
-./.venv/bin/python -m pytest tests/unit/routers/test_documents_api.py
-./.venv/bin/python -m pytest tests/unit/services/test_paper_facts_services.py -k traceback
-```
-
-## Frontend Implementation
-
-### Extend The Shared Document Model
-
-Change:
-
-- `frontend/src/routes/_shared/documents.ts`
-
-Add locator fields to the shared document content block type:
-
-- `page: number | null`
-- `bbox: PdfBoundingBox | null`
-- `charRange: TextCharRange | null`
-
-Keep normalizing backend snake_case to UI-friendly camelCase in the existing
-shared helper. Do not add a second browser client or a second API base URL.
-
-Add the document source URL to the workbench model:
-
-```ts
-sourceFileUrl: `/api/v1/collections/${collectionId}/documents/${documentId}/source`
-```
-
-This should be a same-origin URL. The component can try it only when rendering
-the source reader; the normal API helper remains responsible for JSON
-contracts.
-
-### Replace Block Rendering With Source Modes
-
-Change:
-
-- `frontend/src/routes/collections/[id]/documents/[document_id]/_components/PaperReader.svelte`
-
-Reader modes:
-
-- `pdf`: render the original source with native browser PDF/object view when
-  the source endpoint is available and the file is likely PDF
-- `text`: render parsed `content_text` grouped into unique sections
-- `unavailable`: show an explicit empty state when neither source nor parsed
-  text exists
-
-Section grouping:
-
-- derive section navigation from unique `heading_path` values or true heading
-  blocks
-- do not create one visible section per block
-- use block locators only for scroll targets and fallback highlights
-
-PDF behavior in the first source-backed slice:
-
-- source URL can be loaded through `<object>`, `<iframe>`, or `<embed>`
-- page changes can update the URL fragment, for example `#page=6`
-- custom region highlights should remain disabled unless a controlled PDF
-  renderer is added
-
-### Wire Structured Selection To Source Targets
-
-Change:
-
-- `StructuredExtractionPanel.svelte`
-- `ExtractionTabs.svelte`
-- `EvidenceCard.svelte`
-- `ResultTable.svelte`
-- `LocalGraphPanel.svelte`
-- `DocumentQaPanel.svelte` only if it surfaces selected-source context
-- `+page.svelte`
-
-Behavior:
-
-- selecting a summary card, method row, result row, evidence card, or graph
-  node sets one selected workbench object
-- the selected object resolves to one `WorkbenchSourceTarget`
-- the source reader receives that target and applies the fallback behavior
-- the local graph receives the same selected object and rebuilds only the
-  local neighborhood
-- the selected card remains visibly highlighted
-
-Graph rules:
-
-- center the graph on the selected result, claim, or paragraph
-- show at most 6-8 neighbor nodes
-- keep graph as auxiliary context; do not make it the primary route
-
-### Keep Fixture Data Close To Future Contracts
-
-When backend data is missing, fixtures may still fill the workbench, but they
-must use the same model shape:
-
-- document metadata
-- page list and thumbnails
-- summary cards
-- method table rows
-- result rows
-- evidence cards
-- local graph nodes and edges
-- source targets with `page`, `bbox`, `charRange`, `sectionId`, or
-  `headingPath`
-
-Fixture source targets should exercise all fallback paths:
-
-- exact text range
-- page-only fallback
-- section fallback
-- unavailable source
-
-### Frontend Verification
-
-Suggested frontend checks:
-
-```text
-cd frontend
-npm run check
-npm run test:unit -- --run src/routes/collections/[id]/documents/[document_id]/document-detail-page.svelte.spec.ts
-```
-
-Browser acceptance should cover:
-
-- the document detail route renders a three-column workbench
-- the left reader uses original PDF/source mode when the source endpoint works
-- parsed text fallback does not repeat section headings for every block
-- selecting a structured card highlights the card
-- selecting a structured card changes the source target
-- source fallback copy is readable and does not expose raw internal codes
-- local graph center node changes with the selected object
-- graph remains auxiliary and collapses responsively
-
-## Implementation Order
-
-1. Add backend document-content locator fields.
-   Verify with document API tests that `page`, `bbox`, and `char_range` round
-   trip from stored block artifacts.
-2. Add backend source file resolution and source streaming endpoint.
-   Verify success, missing-source, and unsafe-path cases.
-3. Update `backend/docs/specs/api.md`.
-   Keep the API authority aligned with the new response fields and endpoint.
-4. Extend frontend document types and workbench model.
-   Verify TypeScript and existing route unit tests.
-5. Update the source reader so it prefers original PDF/source mode and keeps
-   parsed text as a highlightable fallback.
-   Verify the reader no longer renders repeated sections from block units.
-6. Wire structured selection to `WorkbenchSourceTarget`.
-   Verify card selection, source target fallback, and graph neighborhood update
-   from the same selected object.
-7. Replace default debug/status copy with user-facing language.
-   Keep raw codes only in an explicit detail or debug view.
-
-## Acceptance
-
-This wave is accepted when:
-
-- `/collections/[id]/documents/[document_id]` is a paper reading and
-  structured understanding workbench, not a debug dashboard
-- the left side can display the original PDF/source file when available
-- parsed text fallback is coherent and does not expose block repetition as the
-  paper structure
-- document content blocks expose `page`, `bbox`, and `char_range` when those
-  locators exist in source artifacts
-- selecting a result, claim, evidence card, or paragraph updates the selected
-  source target
-- source targeting falls back from exact location to page, section, quote, or
-  unavailable states deterministically
-- user-facing copy hides raw backend artifact codes by default
-- the local graph shows only the selected object's neighborhood
-- existing collection navigation, comparisons, results, graph, workspace, and
-  protocol routes still work through the same-origin `/api/v1/*` contract
-
-## Risks
-
-Native browser PDF viewers are enough to show the original PDF, but not enough
-to draw reliable custom highlights. If exact PDF-region highlighting is a hard
-acceptance requirement for this wave, the frontend needs a controlled PDF
-renderer. Since the current frontend does not already depend on PDF.js, adding
-that dependency should be treated as a separate explicit implementation
-decision.
-
-Older collections may not have enough import manifest data to resolve a source
-file unambiguously. The source endpoint should return an explicit unavailable
-state rather than guessing the wrong file.
-
-PDF bbox coordinate origin differs across parsers. The backend should normalize
-field names in the public response and preserve `coord_origin`; the frontend
-should avoid drawing bbox overlays until the active PDF renderer understands
-the same coordinate convention.
+- [RFC Comparison-Result-Document Product Flow](rfc-comparison-result-document-product-flow.md)
+- [Research Objective Workspace Contract](../contracts/research-objective-workspace-contract.md)
+- [Claim Traceback Navigation Contract](../../frontend/src/routes/collections/claim-traceback-navigation-contract.md)

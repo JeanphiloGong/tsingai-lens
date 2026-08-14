@@ -174,7 +174,6 @@ def _write_source_artifact_outputs(
                 "caption_text": "Processing summary",
                 "caption_block_id": None,
                 "page": None,
-                "bbox": None,
                 "heading_path": ["Experimental Section"],
                 "row_count": 1,
                 "col_count": 2,

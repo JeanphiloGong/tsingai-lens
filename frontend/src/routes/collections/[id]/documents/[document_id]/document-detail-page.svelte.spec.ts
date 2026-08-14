@@ -193,11 +193,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							heading_level: 1,
 							order: 1,
 							text: 'Conductivity improved to 12 mS/cm.',
-							start_offset: 9,
-							end_offset: 43,
 							text_unit_ids: [],
 							page: 1,
-							bbox: { x0: 18, y0: 20, x1: 82, y1: 24.5, coord_origin: 'percent' }
 						},
 						{
 							block_id: 'methods',
@@ -206,11 +203,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							heading_level: 1,
 							order: 2,
 							text: 'The sample was annealed at 700 C.',
-							start_offset: 56,
-							end_offset: 89,
 							text_unit_ids: [],
 							page: 2,
-							bbox: { x0: 22, y0: 44, x1: 72, y1: 48.5, coord_origin: 'percent' }
 						},
 						{
 							block_id: 'results',
@@ -219,11 +213,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							heading_level: 1,
 							order: 3,
 							text: 'Conductivity improved to 12 mS/cm under EIS.',
-							start_offset: 98,
-							end_offset: 143,
 							text_unit_ids: [],
 							page: 3,
-							bbox: { x0: 18, y0: 62, x1: 76, y1: 66.5, coord_origin: 'percent' }
 						},
 						{
 							block_id: 'list-first',
@@ -232,11 +223,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							heading_level: 1,
 							order: 4,
 							text: 'First listed observation.',
-							start_offset: 144,
-							end_offset: 169,
 							text_unit_ids: [],
 							page: 3,
-							bbox: null
 						},
 						{
 							block_id: 'list-second',
@@ -245,11 +233,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							heading_level: 1,
 							order: 5,
 							text: 'Second listed observation.',
-							start_offset: 170,
-							end_offset: 196,
 							text_unit_ids: [],
 							page: 3,
-							bbox: null
 						},
 						{
 							block_id: 'missing-results-block',
@@ -258,11 +243,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							heading_level: 1,
 							order: 6,
 							text: 'This source block exists in parsed content but is absent from markdown.',
-							start_offset: null,
-							end_offset: null,
 							text_unit_ids: [],
 							page: 3,
-							bbox: null
 						},
 						{
 							block_id: 'glyph-list',
@@ -272,11 +254,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							order: 7,
 							text:
 								'\ufffd The SLM samples processed at higher scanning speed exhibited better densification.',
-							start_offset: null,
-							end_offset: null,
 							text_unit_ids: [],
 							page: 3,
-							bbox: null
 						},
 						{
 							block_id: 'missing-glyph-block',
@@ -285,11 +264,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							heading_level: 1,
 							order: 8,
 							text: '\ufffd This fallback source block should be readable.',
-							start_offset: null,
-							end_offset: null,
 							text_unit_ids: [],
 							page: 3,
-							bbox: null
 						},
 						{
 							block_id: 'conclusion-overview',
@@ -298,11 +274,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							heading_level: 2,
 							order: 9,
 							text: 'The effect of SLM processing parameters has been investigated.',
-							start_offset: null,
-							end_offset: null,
 							text_unit_ids: [],
 							page: 12,
-							bbox: null
 						},
 						{
 							block_id: 'conclusion-first',
@@ -311,11 +284,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							heading_level: 2,
 							order: 10,
 							text: 'The highest densification was observed for alternate hatches.',
-							start_offset: null,
-							end_offset: null,
 							text_unit_ids: [],
 							page: 12,
-							bbox: null
 						},
 						{
 							block_id: 'conclusion-third',
@@ -325,11 +295,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							order: 11,
 							text:
 								'\ufffd The SLM samples processed at higher scanning speed exhibited better densification, refined microstructure, and excellent mechanical properties as compared to samples processed with lower scanning speed.',
-							start_offset: null,
-							end_offset: null,
 							text_unit_ids: [],
 							page: 12,
-							bbox: null
 						}
 					],
 					warnings: []
@@ -617,14 +584,11 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 						{
 							anchor_id: 'anc_1',
 							document_id: 'doc_1',
-							locator_type: 'bbox',
-							locator_confidence: 'high',
+							source_kind: 'block',
+							source_ref: 'results',
+							source_type: 'text',
 							page: 3,
 							quote: 'Conductivity improved to 12 mS/cm under EIS.',
-							section_id: 'Results',
-							block_id: 'results',
-							char_range: { start: 98, end: 143 },
-							bbox: { x0: 18, y0: 62, x1: 76, y1: 66.5 },
 							deep_link: '/collections/col_123/documents/doc_1?evidence_id=ev_1&anchor_id=anc_1'
 						}
 					]
@@ -668,15 +632,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('oxide cathode').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Comparable').first()).toBeInTheDocument();
 		await browserPage.getByRole('button', { name: /oxide cathode.*conductivity/i }).click();
-		await expect.element(browserPage.getByTestId('pdf-highlight').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
 		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
-		const resultHighlightStyle = browserPage
-			.getByTestId('pdf-highlight')
-			.first()
-			.element()
-			.getAttribute('style');
-		expect(resultHighlightStyle).toContain('left: 18%');
 		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
 
 		await browserPage.getByRole('tab', { name: 'Evidence' }).click();
@@ -687,7 +644,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			.element(browserPage.getByRole('button', { name: 'Jump to source' }).first())
 			.toBeInTheDocument();
 		await browserPage.getByRole('button', { name: 'Jump to source' }).first().click();
-		await expect.element(browserPage.getByTestId('pdf-highlight').first()).toBeInTheDocument();
+		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
 	});
 
 	it('uses parsed source text when the PDF cannot be rendered', async () => {

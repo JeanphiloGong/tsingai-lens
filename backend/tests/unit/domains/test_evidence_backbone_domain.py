@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from domain.core.evidence_backbone import (
     CORE_NEUTRAL_DOMAIN_PROFILE,
     CharacterizationObservation,
@@ -15,27 +17,44 @@ from domain.shared.enums import (
 )
 
 
-def test_evidence_anchor_normalizes_nested_locator_payloads() -> None:
+def test_evidence_anchor_keeps_only_stable_source_reference() -> None:
     anchor = EvidenceAnchor.from_mapping(
         {
             "anchor_id": "anchor-1",
             "document_id": "doc-1",
-            "locator_type": "char_range",
-            "locator_confidence": "high",
+            "source_kind": "block",
+            "source_ref": "block-1",
             "source_type": "text",
-            "section_id": "sec-1",
-            "char_range": {"start": 12, "end": 24},
-            "bbox": {"x0": 1, "y0": 2, "x1": 3, "y1": 4},
             "page": 2,
             "quote": "quoted text",
             "deep_link": "/collections/c/documents/d",
-            "snippet_id": "tu-1",
         }
     )
 
-    assert anchor.char_range == {"start": 12, "end": 24}
-    assert anchor.bbox == {"x0": 1.0, "y0": 2.0, "x1": 3.0, "y1": 4.0}
-    assert anchor.to_record()["page"] == 2
+    assert anchor.source_kind == "block"
+    assert anchor.source_ref == "block-1"
+    assert anchor.to_record() == {
+        "anchor_id": "anchor-1",
+        "document_id": "doc-1",
+        "source_kind": "block",
+        "source_ref": "block-1",
+        "source_type": "text",
+        "page": 2,
+        "quote": "quoted text",
+        "deep_link": "/collections/c/documents/d",
+    }
+
+
+def test_evidence_anchor_rejects_payload_without_stable_source_reference() -> None:
+    with pytest.raises(ValueError, match="source_kind"):
+        EvidenceAnchor.from_mapping(
+            {
+                "anchor_id": "anchor-legacy",
+                "document_id": "doc-1",
+                "source_type": "text",
+                "quote": "legacy locator payload",
+            }
+        )
 
 
 def test_sample_variant_and_test_condition_apply_domain_defaults() -> None:

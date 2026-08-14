@@ -167,8 +167,6 @@ BLOCKS_FINAL_COLUMNS = [
     "block_order",
     "text_unit_ids",
     "page",
-    "bbox",
-    "char_range",
     "heading_path",
     "heading_level",
 ]
@@ -180,7 +178,6 @@ TABLES_FINAL_COLUMNS = [
     "caption_text",
     "caption_block_id",
     "page",
-    "bbox",
     "heading_path",
     "row_count",
     "col_count",
@@ -198,7 +195,6 @@ TABLE_ROWS_FINAL_COLUMNS = [
     "row_index",
     "row_text",
     "page",
-    "bbox",
     "heading_path",
 ]
 
@@ -211,8 +207,6 @@ TABLE_CELLS_FINAL_COLUMNS = [
     "cell_text",
     "header_path",
     "page",
-    "bbox",
-    "char_range",
     "unit_hint",
 ]
 
@@ -224,7 +218,6 @@ FIGURES_FINAL_COLUMNS = [
     "caption_text",
     "caption_block_id",
     "page",
-    "bbox",
     "heading_path",
     "image_path",
     "image_mime_type",

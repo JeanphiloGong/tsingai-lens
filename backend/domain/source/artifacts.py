@@ -35,98 +35,6 @@ _UNIT_HINT_PATTERN = re.compile(
 
 
 @dataclass(frozen=True)
-class SourceBoundingBox:
-    l: float
-    t: float
-    r: float
-    b: float
-    coord_origin: str = ""
-
-    @classmethod
-    def from_value(cls, value: Any) -> "SourceBoundingBox | None":
-        if _is_missing_value(value):
-            return None
-        if isinstance(value, cls):
-            return value
-        if isinstance(value, str):
-            text = value.strip()
-            if not text:
-                return None
-            return cls.from_value(json.loads(text))
-        if isinstance(value, Mapping):
-            return cls(
-                l=float(value.get("l", 0.0)),
-                t=float(value.get("t", 0.0)),
-                r=float(value.get("r", 0.0)),
-                b=float(value.get("b", 0.0)),
-                coord_origin=str(value.get("coord_origin") or ""),
-            )
-        return cls(
-            l=float(getattr(value, "l", 0.0)),
-            t=float(getattr(value, "t", 0.0)),
-            r=float(getattr(value, "r", 0.0)),
-            b=float(getattr(value, "b", 0.0)),
-            coord_origin=str(
-                getattr(getattr(value, "coord_origin", None), "value", None) or ""
-            ),
-        )
-
-    @classmethod
-    def merge(cls, values: Iterable[Any]) -> "SourceBoundingBox | None":
-        boxes = [box for box in (cls.from_value(value) for value in values) if box]
-        if not boxes:
-            return None
-        return cls(
-            l=min(box.l for box in boxes),
-            t=min(box.t for box in boxes),
-            r=max(box.r for box in boxes),
-            b=max(box.b for box in boxes),
-            coord_origin=boxes[0].coord_origin,
-        )
-
-    def to_payload(self) -> dict[str, Any]:
-        return {
-            "l": self.l,
-            "t": self.t,
-            "r": self.r,
-            "b": self.b,
-            "coord_origin": self.coord_origin,
-        }
-
-    def to_json(self) -> str:
-        return json.dumps(self.to_payload(), ensure_ascii=True, sort_keys=True)
-
-
-@dataclass(frozen=True)
-class SourceCharRange:
-    start: int
-    end: int
-
-    @classmethod
-    def from_value(cls, value: Any) -> "SourceCharRange | None":
-        if _is_missing_value(value):
-            return None
-        if isinstance(value, cls):
-            return value
-        if isinstance(value, str):
-            text = value.strip()
-            if not text:
-                return None
-            return cls.from_value(json.loads(text))
-        if isinstance(value, Mapping):
-            return cls(start=int(value.get("start", 0)), end=int(value.get("end", 0)))
-        start, end = value
-        return cls(start=int(start), end=int(end))
-
-    def to_json(self) -> str:
-        return json.dumps(
-            {"start": self.start, "end": self.end},
-            ensure_ascii=True,
-            sort_keys=True,
-        )
-
-
-@dataclass(frozen=True)
 class SourceDocument:
     document_id: str
     human_readable_id: int
@@ -235,8 +143,6 @@ class SourceBlock:
     block_order: int
     text_unit_ids: tuple[str, ...] = ()
     page: int | None = None
-    bbox: SourceBoundingBox | None = None
-    char_range: SourceCharRange | None = None
     heading_path: str | None = None
     heading_level: int | None = None
 
@@ -250,8 +156,6 @@ class SourceBlock:
             block_order=safe_int(value.get("block_order")) or 0,
             text_unit_ids=_string_tuple(value.get("text_unit_ids")),
             page=safe_int(value.get("page")),
-            bbox=SourceBoundingBox.from_value(value.get("bbox")),
-            char_range=SourceCharRange.from_value(value.get("char_range")),
             heading_path=normalize_optional_text(value.get("heading_path")),
             heading_level=safe_int(value.get("heading_level")),
         )
@@ -265,8 +169,6 @@ class SourceBlock:
             "block_order": self.block_order,
             "text_unit_ids": list(self.text_unit_ids),
             "page": self.page,
-            "bbox": self.bbox.to_json() if self.bbox else None,
-            "char_range": self.char_range.to_json() if self.char_range else None,
             "heading_path": self.heading_path,
             "heading_level": self.heading_level,
         }
@@ -277,7 +179,6 @@ class SourceLayoutBlock:
     block_id: str | None
     text: str | None
     page: int | None
-    bbox: SourceBoundingBox | None
     block_order: int
     block_type: str
     heading_path: str | None
@@ -291,7 +192,6 @@ class SourceLayoutBlock:
                 block_id=value.block_id,
                 text=value.text,
                 page=value.page,
-                bbox=value.bbox,
                 block_order=value.block_order,
                 block_type=str(value.block_type),
                 heading_path=value.heading_path,
@@ -300,7 +200,6 @@ class SourceLayoutBlock:
             block_id=normalize_optional_text(value.get("block_id")),
             text=normalize_optional_text(value.get("text")),
             page=safe_int(value.get("page")),
-            bbox=SourceBoundingBox.from_value(value.get("bbox")),
             block_order=safe_int(value.get("block_order")) or 0,
             block_type=str(value.get("block_type") or "").strip(),
             heading_path=normalize_optional_text(value.get("heading_path")),
@@ -315,7 +214,6 @@ class SourceTable:
     caption_text: str | None
     caption_block_id: str | None
     page: int | None
-    bbox: SourceBoundingBox | None
     heading_path: str | None
     column_headers: tuple[str, ...]
     table_matrix: tuple[tuple[str, ...], ...]
@@ -338,7 +236,6 @@ class SourceTable:
             caption_text=normalize_optional_text(value.get("caption_text")),
             caption_block_id=normalize_optional_text(value.get("caption_block_id")),
             page=safe_int(value.get("page")),
-            bbox=SourceBoundingBox.from_value(value.get("bbox")),
             heading_path=normalize_optional_text(value.get("heading_path")),
             column_headers=_string_tuple(value.get("column_headers")),
             table_matrix=_table_matrix_tuple(value.get("table_matrix")),
@@ -355,7 +252,6 @@ class SourceTable:
             "caption_text": self.caption_text,
             "caption_block_id": self.caption_block_id,
             "page": self.page,
-            "bbox": self.bbox.to_json() if self.bbox else None,
             "heading_path": self.heading_path,
             "row_count": self.row_count,
             "col_count": self.col_count,
@@ -377,8 +273,6 @@ class SourceTableCell:
     cell_text: str
     header_path: str | None = None
     page: int | None = None
-    bbox: SourceBoundingBox | None = None
-    char_range: SourceCharRange | None = None
     unit_hint: str | None = None
 
     @classmethod
@@ -392,8 +286,6 @@ class SourceTableCell:
             cell_text=str(value.get("cell_text") or ""),
             header_path=normalize_optional_text(value.get("header_path")),
             page=safe_int(value.get("page")),
-            bbox=SourceBoundingBox.from_value(value.get("bbox")),
-            char_range=SourceCharRange.from_value(value.get("char_range")),
             unit_hint=normalize_optional_text(value.get("unit_hint")),
         )
 
@@ -408,8 +300,6 @@ class SourceTableCell:
             "cell_text": self.cell_text,
             "header_path": self.header_path,
             "page": self.page,
-            "bbox": self.bbox.to_json() if self.bbox else None,
-            "char_range": self.char_range.to_json() if self.char_range else None,
             "unit_hint": self.unit_hint,
         }
 
@@ -422,7 +312,6 @@ class SourceTableRow:
     row_index: int
     row_text: str
     page: int | None = None
-    bbox: SourceBoundingBox | None = None
     heading_path: str | None = None
 
     @classmethod
@@ -434,7 +323,6 @@ class SourceTableRow:
             row_index=safe_int(value.get("row_index")) or 0,
             row_text=str(value.get("row_text") or ""),
             page=safe_int(value.get("page")),
-            bbox=SourceBoundingBox.from_value(value.get("bbox")),
             heading_path=normalize_optional_text(value.get("heading_path")),
         )
 
@@ -446,7 +334,6 @@ class SourceTableRow:
             "row_index": self.row_index,
             "row_text": self.row_text,
             "page": self.page,
-            "bbox": self.bbox.to_json() if self.bbox else None,
             "heading_path": self.heading_path,
         }
 
@@ -460,7 +347,6 @@ class SourceFigure:
     caption_text: str | None
     caption_block_id: str | None
     page: int | None
-    bbox: SourceBoundingBox | None
     heading_path: str | None
     image_path: str | None
     image_mime_type: str | None
@@ -480,7 +366,6 @@ class SourceFigure:
             caption_text=normalize_optional_text(value.get("caption_text")),
             caption_block_id=normalize_optional_text(value.get("caption_block_id")),
             page=safe_int(value.get("page")),
-            bbox=SourceBoundingBox.from_value(value.get("bbox")),
             heading_path=normalize_optional_text(value.get("heading_path")),
             image_path=normalize_optional_text(value.get("image_path")),
             image_mime_type=normalize_optional_text(value.get("image_mime_type")),
@@ -500,7 +385,6 @@ class SourceFigure:
             "caption_text": self.caption_text,
             "caption_block_id": self.caption_block_id,
             "page": self.page,
-            "bbox": self.bbox.to_json() if self.bbox else None,
             "heading_path": self.heading_path,
             "image_path": self.image_path,
             "image_mime_type": self.image_mime_type,
@@ -675,8 +559,6 @@ class SourceReferenceMention:
     context_text: str
     source_block_id: str | None = None
     page: int | None = None
-    char_start: int | None = None
-    char_end: int | None = None
     confidence: float = 0.0
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
@@ -690,8 +572,6 @@ class SourceReferenceMention:
             context_text=str(value.get("context_text") or ""),
             source_block_id=normalize_optional_text(value.get("source_block_id")),
             page=safe_int(value.get("page")),
-            char_start=safe_int(value.get("char_start")),
-            char_end=safe_int(value.get("char_end")),
             confidence=float(value.get("confidence") or 0.0),
             metadata=_mapping(value.get("metadata")),
         )
@@ -705,8 +585,6 @@ class SourceReferenceMention:
             "context_text": self.context_text,
             "source_block_id": self.source_block_id,
             "page": self.page,
-            "char_start": self.char_start,
-            "char_end": self.char_end,
             "confidence": self.confidence,
             "metadata": dict(self.metadata),
         }
@@ -844,7 +722,6 @@ class SourceDocumentNode:
     source_ref_id: str | None = None
     page_start: int | None = None
     page_end: int | None = None
-    bbox: SourceBoundingBox | None = None
     text_unit_ids: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
 
@@ -865,7 +742,6 @@ class SourceDocumentNode:
             source_ref_id=self.source_ref_id,
             page_start=self.page_start,
             page_end=self.page_end,
-            bbox=self.bbox,
             text_unit_ids=self.text_unit_ids,
             warnings=self.warnings,
         )
@@ -887,7 +763,6 @@ class SourceDocumentNode:
             "source_ref_id": self.source_ref_id,
             "page_start": self.page_start,
             "page_end": self.page_end,
-            "bbox": self.bbox.to_payload() if self.bbox else None,
             "text_unit_ids": list(self.text_unit_ids),
             "warnings": list(self.warnings),
         }
@@ -969,7 +844,6 @@ def build_table_caption_blocks(
 def find_nearest_caption_block(
     *,
     page: int | None,
-    target_bbox: Any,
     caption_blocks: Iterable[SourceLayoutBlock | Mapping[str, Any]],
     used_block_ids: set[str],
 ) -> SourceLayoutBlock | None:
@@ -985,10 +859,7 @@ def find_nearest_caption_block(
         return None
     return min(
         candidates,
-        key=lambda item: (
-            _caption_distance_score(target_bbox, item.bbox),
-            item.block_order,
-        ),
+        key=lambda item: item.block_order,
     )
 
 
@@ -1011,36 +882,6 @@ def resolve_heading_path_for_page(
     if not eligible:
         return blocks[-1].heading_path
     return eligible[-1].heading_path
-
-
-def resolve_heading_path_for_target(
-    *,
-    page: int | None,
-    target_bbox: Any,
-    heading_blocks: Iterable[SourceLayoutBlock | Mapping[str, Any]],
-) -> str | None:
-    target = SourceBoundingBox.from_value(target_bbox)
-    blocks = _coerce_layout_blocks(heading_blocks)
-    normalized_page = safe_int(page)
-    if target is None or normalized_page is None:
-        return resolve_heading_path_for_page(page, blocks)
-
-    candidates = []
-    for item in blocks:
-        if item.block_type != "heading":
-            continue
-        if item.page != normalized_page:
-            continue
-        if not item.heading_path or item.bbox is None:
-            continue
-        distance = _heading_above_distance(target, item.bbox)
-        if distance is None:
-            continue
-        candidates.append((distance, -item.block_order, item))
-
-    if not candidates:
-        return resolve_heading_path_for_page(page, blocks)
-    return min(candidates, key=lambda item: (item[0], item[1]))[2].heading_path
 
 
 def build_source_table_rows_from_cells(
@@ -1070,7 +911,6 @@ def build_source_table_rows_from_cells(
             if not row_text:
                 continue
             page = first_non_null([cell.page for cell in ordered_cells])
-            bbox = SourceBoundingBox.merge(cell.bbox for cell in ordered_cells)
             rows.append(
                 SourceTableRow(
                     row_id=f"row_{document_id}_{table_id}_{row_index}",
@@ -1079,12 +919,7 @@ def build_source_table_rows_from_cells(
                     row_index=row_index,
                     row_text=row_text,
                     page=page,
-                    bbox=bbox,
-                    heading_path=resolve_heading_path_for_target(
-                        page=page,
-                        target_bbox=bbox,
-                        heading_blocks=headings,
-                    ),
+                    heading_path=resolve_heading_path_for_page(page, headings),
                 )
             )
     return rows
@@ -1297,54 +1132,6 @@ def _coerce_layout_blocks(
     ]
 
 
-def _caption_distance_score(figure_bbox: Any, caption_bbox: Any) -> float:
-    figure = SourceBoundingBox.from_value(figure_bbox)
-    caption = SourceBoundingBox.from_value(caption_bbox)
-    if figure is None or caption is None:
-        return float("inf")
-    return _bbox_vertical_gap(figure, caption)
-
-
-def _heading_above_distance(
-    target: SourceBoundingBox,
-    heading: SourceBoundingBox,
-) -> float | None:
-    if _uses_top_left_origin(target, heading):
-        distance = target.t - heading.b
-    else:
-        distance = heading.b - target.t
-    return distance if distance >= 0 else None
-
-
-def _bbox_vertical_gap(first: SourceBoundingBox, second: SourceBoundingBox) -> float:
-    if _uses_top_left_origin(first, second):
-        first_top = min(first.t, first.b)
-        first_bottom = max(first.t, first.b)
-        second_top = min(second.t, second.b)
-        second_bottom = max(second.t, second.b)
-    else:
-        first_top = max(first.t, first.b)
-        first_bottom = min(first.t, first.b)
-        second_top = max(second.t, second.b)
-        second_bottom = min(second.t, second.b)
-
-    if _uses_top_left_origin(first, second):
-        if first_bottom < second_top:
-            return second_top - first_bottom
-        if second_bottom < first_top:
-            return first_top - second_bottom
-    else:
-        if first_bottom > second_top:
-            return first_bottom - second_top
-        if second_bottom > first_top:
-            return second_bottom - first_top
-    return 0.0
-
-
-def _uses_top_left_origin(*payloads: SourceBoundingBox) -> bool:
-    return any("top" in payload.coord_origin.lower() for payload in payloads)
-
-
 def _source_node_id(document_id: str, kind: str, source_id: str) -> str:
     safe_source = re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(source_id or "")).strip("_")
     return f"node_{document_id}_{kind}_{safe_source}"
@@ -1464,7 +1251,6 @@ class _SourceDocumentTreeBuilder:
                 source_ref_id=table.table_id,
                 page_start=table.page,
                 page_end=table.page,
-                bbox=table.bbox,
             )
             self._insert_node(node)
             if table.caption_text:
@@ -1513,7 +1299,6 @@ class _SourceDocumentTreeBuilder:
                 source_ref_id=figure.figure_id,
                 page_start=figure.page,
                 page_end=figure.page,
-                bbox=figure.bbox,
             )
             self._insert_node(node)
             if figure.caption_text:
@@ -1611,7 +1396,6 @@ class _SourceDocumentTreeBuilder:
             source_ref_id=block.block_id,
             page_start=block.page,
             page_end=block.page,
-            bbox=block.bbox,
             text_unit_ids=block.text_unit_ids,
         )
         self._insert_node(node)
@@ -1638,7 +1422,6 @@ class _SourceDocumentTreeBuilder:
                 source_ref_id=block.block_id,
                 page_start=block.page,
                 page_end=block.page,
-                bbox=block.bbox,
                 text_unit_ids=block.text_unit_ids,
             )
         )
@@ -1689,8 +1472,6 @@ def _escape_markdown_cell(value: str) -> str:
 __all__ = [
     "SourceBlock",
     "SourceBlockType",
-    "SourceBoundingBox",
-    "SourceCharRange",
     "SourceDocument",
     "SourceDocumentNode",
     "SourceDocumentNodeType",
@@ -1720,7 +1501,6 @@ __all__ = [
     "render_markdown_table",
     "render_plain_table_text",
     "resolve_heading_path_for_page",
-    "resolve_heading_path_for_target",
     "safe_int",
     "source_documents_from_records",
     "update_heading_stack",

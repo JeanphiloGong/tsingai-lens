@@ -5,7 +5,6 @@ from typing import Any
 import pandas as pd
 
 from domain.source import (
-    SourceBoundingBox,
     SourceTable,
     SourceTableCell,
     build_heading_blocks,
@@ -15,7 +14,7 @@ from domain.source import (
     find_nearest_caption_block,
     make_table_id,
     normalize_optional_text,
-    resolve_heading_path_for_target,
+    resolve_heading_path_for_page,
     safe_int,
 )
 from infra.source.contracts.artifact_schemas import (
@@ -24,11 +23,7 @@ from infra.source.contracts.artifact_schemas import (
     TABLE_ROWS_FINAL_COLUMNS,
 )
 from infra.source.runtime.hashing import gen_sha512_hash
-from infra.source.runtime.mapping.layout_binding import (
-    first_bbox,
-    first_page,
-    normalize_label,
-)
+from infra.source.runtime.mapping.layout_binding import first_page, normalize_label
 
 
 def build_pdf_tables(
@@ -56,7 +51,6 @@ def build_pdf_tables(
     for table_order, table in enumerate(tables, start=1):
         table_id = make_table_id(document_id, table_order, None)
         page = first_page(getattr(table, "prov", None))
-        bbox = SourceBoundingBox.from_value(first_bbox(getattr(table, "prov", None)))
         caption_text, caption_ref, linkage_method = _extract_table_caption(
             table=table,
             document=document,
@@ -69,7 +63,6 @@ def build_pdf_tables(
         if caption_block_id is None:
             fallback_block = find_nearest_caption_block(
                 page=page,
-                target_bbox=bbox,
                 caption_blocks=table_caption_blocks,
                 used_block_ids=used_caption_block_ids,
             )
@@ -98,12 +91,7 @@ def build_pdf_tables(
                 caption_text=caption_text,
                 caption_block_id=caption_block_id,
                 page=page,
-                bbox=bbox,
-                heading_path=resolve_heading_path_for_target(
-                    page=page,
-                    target_bbox=bbox,
-                    heading_blocks=heading_blocks,
-                ),
+                heading_path=resolve_heading_path_for_page(page, heading_blocks),
                 column_headers=tuple(column_headers),
                 table_matrix=tuple(tuple(cell for cell in row) for row in matrix),
                 metadata={
@@ -161,7 +149,6 @@ def build_pdf_table_cells(*, document_id: str, document: Any) -> pd.DataFrame:
                     cell_text=cell_text,
                     header_path=header_path,
                     page=table_page,
-                    bbox=SourceBoundingBox.from_value(getattr(cell, "bbox", None)),
                     unit_hint=extract_unit_hint(header_path, cell_text),
                 ).to_record()
             )

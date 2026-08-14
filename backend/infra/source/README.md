@@ -65,20 +65,20 @@ The final Source artifact family is:
 - `text_units`
   Text windows used by Core extraction and traceback.
 - `blocks`
-  Reading-order blocks with block type, heading path, page, bbox, and
-  character range. Text contained within a figure region is represented by the
-  figure artifact instead of being duplicated as body blocks.
+  Reading-order blocks with stable block IDs, block type, heading path, and
+  page. Text contained within a figure region is represented by the figure
+  artifact instead of being duplicated as body blocks.
 - `figures`
-  Figure rows with captions, heading context, page, bbox, immutable object key,
+  Figure rows with stable figure IDs, captions, heading context, page, immutable object key,
   SHA-256, MIME type, dimensions, byte size, and parser metadata.
 - `tables`
-  The primary complete-table structure with caption, heading, page, bbox,
+  The primary complete-table structure with stable table IDs, caption, heading, page,
   headers, `table_matrix`, Markdown, and plain text.
 - `table_rows`
   Row-level evidence anchors for table-grounded extraction and traceback.
 - `table_cells`
   Cell-level evidence anchors with header paths, unit hints, row and column
-  indexes, page, and bbox.
+  indexes, page, and stable cell IDs.
 - `image_assets/`
   Parser scratch crops handed to the application pipeline. Product reads use
   the registered object key and never depend on this directory.
@@ -86,6 +86,10 @@ The final Source artifact family is:
 `tables` is the primary table context. `table_rows` and `table_cells` support
 anchoring, UI drilldown, and debugging; they are not replacements for the
 complete table artifact.
+
+Parser adapters may inspect PDF geometry privately to exclude text embedded in
+figures or crop figure images. Geometry is not a Source domain field, persisted
+artifact, evidence locator, or browser contract.
 
 ## Key Areas
 

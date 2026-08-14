@@ -90,7 +90,6 @@ def test_artifact_input_service_uses_explicit_source_repository():
                     caption_text="Table 1",
                     caption_block_id=None,
                     page=1,
-                    bbox=None,
                     heading_path="Methods",
                     column_headers=("Sample", "Value"),
                     table_matrix=(("Sample", "Value"), ("A", "1")),

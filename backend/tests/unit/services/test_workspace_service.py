@@ -52,7 +52,8 @@ def test_workspace_readiness_comes_from_paper_facts_and_comparisons():
                     {
                         "anchor_id": "anchor-1",
                         "document_id": "paper-1",
-                        "locator_type": "text",
+                        "source_kind": "block",
+                        "source_ref": "measured-result",
                         "source_type": "text",
                         "quote": "A measured result.",
                     }

@@ -114,8 +114,6 @@ class SourceReferenceExtractionService:
                                 context_text=_context_window(block.text, match.start()),
                                 source_block_id=block.block_id,
                                 page=block.page,
-                                char_start=match.start(),
-                                char_end=match.end(),
                                 confidence=0.9 if entry else 0.6,
                                 metadata={"raw_marker": match.group(0)},
                             )

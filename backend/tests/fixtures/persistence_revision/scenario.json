@@ -197,19 +197,12 @@
       {
         "anchor_id": "anchor_strength",
         "document_id": "doc_strength",
-        "locator_type": "block",
-        "locator_confidence": "high",
+        "source_kind": "block",
+        "source_ref": "block_result",
         "source_type": "text",
-        "section_id": "results",
-        "char_range": null,
-        "bbox": null,
         "page": 2,
         "quote": "Result: yield strength reached 620 MPa.",
-        "deep_link": null,
-        "block_id": "block_result",
-        "snippet_id": "tu_result",
-        "figure_or_table": null,
-        "quote_span": "yield strength reached 620 MPa"
+        "deep_link": null
       }
     ],
     "core_method_facts": [

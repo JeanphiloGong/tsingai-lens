@@ -12,57 +12,41 @@ CORE_NEUTRAL_DOMAIN_PROFILE: Final[str] = "core_neutral"
 class EvidenceAnchor:
     anchor_id: str
     document_id: str
-    locator_type: str
-    locator_confidence: str
+    source_kind: str
+    source_ref: str
     source_type: str
-    section_id: str | None
-    char_range: dict[str, int] | None
-    bbox: dict[str, float] | None
     page: int | None
     quote: str | None
     deep_link: str | None
-    block_id: str | None
-    snippet_id: str | None
-    figure_or_table: str | None
-    quote_span: str | None
+
+    def __post_init__(self) -> None:
+        for field_name in ("anchor_id", "document_id", "source_kind", "source_ref"):
+            if not getattr(self, field_name).strip():
+                raise ValueError(f"{field_name} cannot be empty")
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "EvidenceAnchor":
         return cls(
             anchor_id=_normalize_text(payload.get("anchor_id")) or "",
             document_id=_normalize_text(payload.get("document_id")) or "",
-            locator_type=_normalize_text(payload.get("locator_type")) or "section",
-            locator_confidence=_normalize_text(payload.get("locator_confidence")) or "low",
+            source_kind=_normalize_text(payload.get("source_kind")) or "",
+            source_ref=_normalize_text(payload.get("source_ref")) or "",
             source_type=_normalize_text(payload.get("source_type")) or "text",
-            section_id=_normalize_text(payload.get("section_id")),
-            char_range=_normalize_int_dict(payload.get("char_range"), ("start", "end")),
-            bbox=_normalize_float_dict(payload.get("bbox"), ("x0", "y0", "x1", "y1")),
             page=_normalize_optional_int(payload.get("page")),
             quote=_normalize_text(payload.get("quote")),
             deep_link=_normalize_text(payload.get("deep_link")),
-            block_id=_normalize_text(payload.get("block_id")),
-            snippet_id=_normalize_text(payload.get("snippet_id")),
-            figure_or_table=_normalize_text(payload.get("figure_or_table")),
-            quote_span=_normalize_text(payload.get("quote_span")),
         )
 
     def to_record(self) -> dict[str, Any]:
         return {
             "anchor_id": self.anchor_id,
             "document_id": self.document_id,
-            "locator_type": self.locator_type,
-            "locator_confidence": self.locator_confidence,
+            "source_kind": self.source_kind,
+            "source_ref": self.source_ref,
             "source_type": self.source_type,
-            "section_id": self.section_id,
-            "char_range": dict(self.char_range) if self.char_range is not None else None,
-            "bbox": dict(self.bbox) if self.bbox is not None else None,
             "page": self.page,
             "quote": self.quote,
             "deep_link": self.deep_link,
-            "block_id": self.block_id,
-            "snippet_id": self.snippet_id,
-            "figure_or_table": self.figure_or_table,
-            "quote_span": self.quote_span,
         }
 
 
@@ -498,38 +482,6 @@ def _normalize_scalar(value: Any) -> Any:
         except Exception:
             pass
     return value
-
-
-def _normalize_int_dict(
-    value: Any,
-    keys: tuple[str, ...],
-) -> dict[str, int] | None:
-    payload = _normalize_mapping(value)
-    if not payload:
-        return None
-    normalized: dict[str, int] = {}
-    for key in keys:
-        parsed = _normalize_optional_int(payload.get(key))
-        if parsed is None:
-            return None
-        normalized[key] = parsed
-    return normalized
-
-
-def _normalize_float_dict(
-    value: Any,
-    keys: tuple[str, ...],
-) -> dict[str, float] | None:
-    payload = _normalize_mapping(value)
-    if not payload:
-        return None
-    normalized: dict[str, float] = {}
-    try:
-        for key in keys:
-            normalized[key] = float(payload.get(key))
-    except (TypeError, ValueError):
-        return None
-    return normalized
 
 
 __all__ = [

@@ -2,11 +2,7 @@
 	import { browser } from '$app/environment';
 	import { onDestroy, onMount, tick } from 'svelte';
 	import { t } from '../../../../../_shared/i18n';
-	import type {
-		SourceAnchor,
-		SourceAnchorRect,
-		WorkbenchPdfPage
-	} from '../../../../../_shared/documents';
+	import type { SourceAnchor, WorkbenchPdfPage } from '../../../../../_shared/documents';
 	import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 	type PdfJsModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
@@ -84,11 +80,6 @@
 	$: pendingSourceJumpReady = Boolean(
 		pendingSourceJumpPage !== null &&
 		pdfPageStates.some((page) => page.pageNumber === pendingSourceJumpPage)
-	);
-	$: activePendingAnchor = Boolean(
-		activeSourceAnchor &&
-		activeSourceAnchor.pageIndex >= 0 &&
-		(activeSourceAnchor.rects.length === 0 || activeSourceAnchor.precision === 'pending')
 	);
 	$: if (mounted && hasPdfSource && sourceFileUrl && sourceFileUrl !== loadedSourceFileUrl) {
 		void loadPdf();
@@ -511,10 +502,6 @@
 		if (sourceSpanId) onSelectSourceSpan(sourceSpanId);
 	}
 
-	function rectStyle(rect: SourceAnchorRect) {
-		return `left: ${rect.left}%; top: ${rect.top}%; width: ${rect.width}%; height: ${rect.height}%;`;
-	}
-
 	function canvasPage(node: HTMLCanvasElement, pageNumber: number) {
 		canvasNodes.set(pageNumber, node);
 		return {
@@ -692,9 +679,6 @@
 					<span class="toolbar-icon toolbar-icon--download" aria-hidden="true"></span>
 				</button>
 			{/if}
-			{#if activePendingAnchor}
-				<span class="source-pending-badge">{$t('workbench.preciseRegionPending')}</span>
-			{/if}
 			{#if sourceSearchOpen}
 				<label class="source-search-control">
 					<span class="visually-hidden">{$t('workbench.searchSource')}</span>
@@ -753,16 +737,6 @@
 					>
 						<canvas class="pdf-canvas-layer" use:canvasPage={page.pageNumber}></canvas>
 						<div class="pdf-text-layer" aria-hidden="true"></div>
-						<div class="pdf-highlight-layer" aria-hidden="true">
-							{#if activeSourceAnchor && activeSourceAnchor.pageIndex === page.pageNumber - 1}
-								{#key sourceJumpToken}
-									{#each activeSourceAnchor.rects as rect}
-										<span class="pdf-highlight" data-testid="pdf-highlight" style={rectStyle(rect)}
-										></span>
-									{/each}
-								{/key}
-							{/if}
-						</div>
 						{#if page.status === 'error'}
 							<div class="page-error">
 								<strong>{$t('workbench.pdfPageRenderError')}</strong>
@@ -1265,20 +1239,6 @@
 		color: #1d4ed8;
 	}
 
-	.source-pending-badge {
-		display: inline-flex;
-		height: 26px;
-		align-items: center;
-		padding: 0 10px;
-		border: 1px solid #bfdbfe;
-		border-radius: 999px;
-		background: #eff6ff;
-		color: #1d4ed8;
-		font-size: 12px;
-		font-weight: 700;
-		white-space: nowrap;
-	}
-
 	.source-search-control {
 		display: flex;
 		width: min(260px, 38vw);
@@ -1350,8 +1310,7 @@
 	}
 
 	.pdf-canvas-layer,
-	.pdf-text-layer,
-	.pdf-highlight-layer {
+	.pdf-text-layer {
 		position: absolute;
 		inset: 0;
 		width: 100%;
@@ -1364,20 +1323,6 @@
 
 	.pdf-text-layer {
 		pointer-events: none;
-	}
-
-	.pdf-highlight-layer {
-		pointer-events: none;
-	}
-
-	.pdf-highlight {
-		position: absolute;
-		display: block;
-		border: 1px solid #60a5fa;
-		border-radius: 4px;
-		background: rgba(59, 130, 246, 0.22);
-		box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
-		animation: highlight-focus 1.1s ease-out;
 	}
 
 	.page-error {
@@ -1569,24 +1514,6 @@
 		font-size: 14px;
 		font-weight: 700;
 		cursor: pointer;
-	}
-
-	@keyframes highlight-focus {
-		0% {
-			box-shadow:
-				0 0 0 2px rgba(37, 99, 235, 0.1),
-				0 0 0 0 rgba(37, 99, 235, 0.35);
-		}
-		55% {
-			box-shadow:
-				0 0 0 2px rgba(37, 99, 235, 0.16),
-				0 0 0 8px rgba(37, 99, 235, 0.12);
-		}
-		100% {
-			box-shadow:
-				0 0 0 2px rgba(37, 99, 235, 0.12),
-				0 0 0 0 rgba(37, 99, 235, 0);
-		}
 	}
 
 	@keyframes page-loading {

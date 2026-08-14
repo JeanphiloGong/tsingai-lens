@@ -212,7 +212,6 @@ def _write_source_artifact_outputs(
                 "caption_text": "Processing summary",
                 "caption_block_id": None,
                 "page": None,
-                "bbox": None,
                 "heading_path": ["Experimental Section"],
                 "row_count": 1,
                 "col_count": 2,
@@ -295,6 +294,8 @@ def _write_core_graph_outputs(comparison_service, collection_id: str) -> None:  
                     {
                         "anchor_id": "anchor-1",
                         "document_id": "paper-1",
+                        "source_kind": "block",
+                        "source_ref": "conductivity-result",
                         "source_type": "text",
                         "quote": "Conductivity increased to 12 mS/cm after annealing.",
                     }

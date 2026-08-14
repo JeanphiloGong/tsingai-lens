@@ -389,7 +389,7 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
     assert payload.doc_type == "experimental"
 
 
-def test_document_content_route_includes_source_locators(
+def test_document_content_route_uses_stable_block_locator(
     document_services,
 ):
     (
@@ -422,14 +422,6 @@ def test_document_content_route_includes_source_locators(
                     "text": "The optimized sample reached 940 MPa.",
                     "text_unit_ids": [],
                     "page": 6,
-                    "bbox": {
-                        "l": 72.4,
-                        "t": 182.1,
-                        "r": 512.8,
-                        "b": 228.6,
-                        "coord_origin": "top_left",
-                    },
-                    "char_range": {"start": 0, "end": 37},
                 },
             ],
         ),
@@ -458,16 +450,18 @@ def test_document_content_route_includes_source_locators(
     )
 
     first = payload.blocks[0]
+    assert first.block_id == "blk-result"
     assert first.page == 6
-    assert first.bbox is not None
-    assert first.bbox.x0 == 72.4
-    assert first.bbox.y0 == 182.1
-    assert first.bbox.x1 == 512.8
-    assert first.bbox.y1 == 228.6
-    assert first.bbox.coord_origin == "top_left"
-    assert first.char_range is not None
-    assert first.char_range.start == 0
-    assert first.char_range.end == 37
+    assert set(first.model_dump()) == {
+        "block_id",
+        "block_type",
+        "heading_path",
+        "heading_level",
+        "order",
+        "text",
+        "text_unit_ids",
+        "page",
+    }
 
 
 def test_document_markdown_route_returns_markdown_projection(document_services):

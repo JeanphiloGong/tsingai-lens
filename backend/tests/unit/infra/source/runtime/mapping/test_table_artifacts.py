@@ -21,7 +21,6 @@ def _cell(
         end_col_offset_idx=col + 1,
         column_header=column_header,
         row_header=row_header,
-        bbox=None,
     )
 
 

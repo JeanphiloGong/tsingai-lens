@@ -42,7 +42,8 @@ def _paper_repository() -> MemoryPaperFactRepository:
                     {
                         "anchor_id": "anchor-1",
                         "document_id": "doc-1",
-                        "locator_type": "text",
+                        "source_kind": "block",
+                        "source_ref": "focused-result",
                         "source_type": "text",
                         "quote": "A focused result.",
                     }

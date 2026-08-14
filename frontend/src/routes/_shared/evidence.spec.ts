@@ -26,19 +26,12 @@ function card(overrides: Partial<EvidenceCard>): EvidenceCard {
 			{
 				anchor_id: 'a1',
 				document_id: 'doc_1',
-				locator_type: 'section',
-				locator_confidence: 'medium',
+				source_kind: 'block',
+				source_ref: '3.2',
 				source_type: 'text',
-				section_id: '3.2',
-				char_range: null,
-				bbox: null,
 				page: 8,
 				quote: 'Auxiliary MF has shown feasibility to reduce porosity.',
 				deep_link: '/collections/col_1/documents/doc_1?evidence_id=ev_1&anchor_id=a1',
-				block_id: null,
-				snippet_id: null,
-				figure_or_table: null,
-				quote_span: 'Auxiliary MF has shown feasibility to reduce porosity.',
 				anchor_type: 'text',
 				label: 'Section 3.2'
 			}
@@ -152,11 +145,11 @@ describe('evidence shared helpers', () => {
 		expect(formatConfidence(0.9)).toBe('90%');
 		expect(getEvidenceQuote(direct)).toMatchObject({
 			text: 'Auxiliary MF has shown feasibility to reduce porosity.',
-			citation: 'AI alloys, Page 8, Section 3.2'
+			citation: 'AI alloys, Page 8, Block 3.2'
 		});
 		expect(getEvidenceSourceLocation(direct)).toMatchObject({
 			documentLabel: 'AI alloys',
-			location: 'Page 8, Section 3.2',
+			location: 'Page 8, Block 3.2',
 			materials: ['Al alloy']
 		});
 		expect(getEvidenceActions(low).map((action) => action.key)).toEqual([
@@ -180,8 +173,8 @@ describe('evidence shared helpers', () => {
 				{
 					...baseAnchor,
 					document_id: documentId,
-					section_id: blockId,
-					block_id: blockId,
+					source_kind: 'block',
+					source_ref: blockId,
 					page: 1,
 					label: blockId
 				}

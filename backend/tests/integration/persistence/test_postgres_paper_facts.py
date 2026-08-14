@@ -57,15 +57,12 @@ def _paper_facts(title: str = "Profiled paper") -> PaperFactSet:
         {
             "anchor_id": "anchor-1",
             "document_id": "srcdoc_runtime",
-            "locator_type": "block",
-            "locator_confidence": "high",
+            "source_kind": "block",
+            "source_ref": "block-1",
             "source_type": "text",
-            "section_id": "Methods",
-            "char_range": {"start": 8, "end": 14},
             "page": 1,
             "quote": "Result",
             "deep_link": "#block-1",
-            "block_id": "block-1",
         }
     )
     variant = SampleVariant.from_mapping(
@@ -507,8 +504,8 @@ def test_postgresql_enforces_paper_fact_contract() -> None:
                 replace(
                     item,
                     document_id=REAL_SOURCE_DOCUMENT_ID,
-                    block_id=REAL_SOURCE_BLOCK_ID,
-                    figure_or_table=REAL_SOURCE_TABLE_ID,
+                    source_kind="block",
+                    source_ref=REAL_SOURCE_BLOCK_ID,
                 )
                 for item in facts.evidence_anchors
             ),

@@ -20,8 +20,6 @@ from domain.source import (
     CollectionRecord,
     assemble_source_documents,
     SourceBlock,
-    SourceBoundingBox,
-    SourceCharRange,
     SourceDocument,
     SourceFigure,
     SourceReferenceCandidate,
@@ -173,7 +171,6 @@ def _task(task_id: str) -> TaskRecord:
 
 
 def _artifacts(title: str = "Paper") -> tuple[SourceDocument, ...]:
-    bbox = SourceBoundingBox(l=1, t=2, r=3, b=4, coord_origin="top-left")
     return assemble_source_documents(
         documents=(
             SourceDocument(
@@ -206,8 +203,6 @@ def _artifacts(title: str = "Paper") -> tuple[SourceDocument, ...]:
                 block_order=0,
                 text_unit_ids=("tu-1",),
                 page=1,
-                bbox=bbox,
-                char_range=SourceCharRange(start=8, end=14),
                 heading_path="Methods",
                 heading_level=1,
             ),
@@ -220,7 +215,6 @@ def _artifacts(title: str = "Paper") -> tuple[SourceDocument, ...]:
                 caption_text="Table 1",
                 caption_block_id=None,
                 page=1,
-                bbox=bbox,
                 heading_path="Methods",
                 column_headers=("Sample", "Value"),
                 table_matrix=(("Sample", "Value"), ("A", "1")),
@@ -235,7 +229,6 @@ def _artifacts(title: str = "Paper") -> tuple[SourceDocument, ...]:
                 row_index=1,
                 row_text="A | 1",
                 page=1,
-                bbox=bbox,
                 heading_path="Methods",
             ),
         ),
@@ -249,8 +242,6 @@ def _artifacts(title: str = "Paper") -> tuple[SourceDocument, ...]:
                 cell_text="1",
                 header_path="Value",
                 page=1,
-                bbox=bbox,
-                char_range=SourceCharRange(start=0, end=1),
                 unit_hint="MPa",
             ),
         ),
@@ -315,7 +306,6 @@ def _figure(build_id: str) -> SourceFigure:
         caption_text="Figure 1. Result morphology.",
         caption_block_id=None,
         page=1,
-        bbox=SourceBoundingBox(l=1, t=2, r=3, b=4, coord_origin="top-left"),
         heading_path="Results",
         image_path=(f"col_source/objects/source/{build_id}/figures/{'a' * 64}.png"),
         image_mime_type="image/png",
@@ -353,8 +343,6 @@ def _references() -> SourceReferenceSet:
                 context_text="Prior result [1].",
                 source_block_id="block-1",
                 page=1,
-                char_start=13,
-                char_end=16,
                 confidence=0.9,
                 metadata={"raw_marker": "[1]"},
             ),
@@ -806,8 +794,6 @@ def test_postgresql_enforces_source_structure_contract() -> None:
                     reference_id=None,
                     citation_marker="[?]",
                     source_block_id=None,
-                    char_start=None,
-                    char_end=None,
                 ),
             ),
         )

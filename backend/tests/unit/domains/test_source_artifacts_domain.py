@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from domain.source import (
     SourceBlock,
-    SourceBoundingBox,
     SourceDocument,
     SourceFigure,
     SourceReferenceEntry,
@@ -59,7 +56,6 @@ def test_source_table_record_renders_complete_table_payload():
         caption_text="Table 1 Mechanical results.",
         caption_block_id="blk-doc-1-2",
         page=3,
-        bbox=SourceBoundingBox(l=1.0, t=2.0, r=3.0, b=4.0, coord_origin="TOPLEFT"),
         heading_path="Results > Mechanical properties",
         column_headers=("Sample", "Strength (MPa)"),
         table_matrix=(("Sample", "Strength (MPa)"), ("A", "123")),
@@ -73,16 +69,10 @@ def test_source_table_record_renders_complete_table_payload():
     assert record["table_matrix"] == [["Sample", "Strength (MPa)"], ["A", "123"]]
     assert "| Sample | Strength (MPa) |" in record["table_markdown"]
     assert record["table_text"] == "Sample | Strength (MPa)\nA | 123"
-    assert json.loads(record["bbox"]) == {
-        "b": 4.0,
-        "coord_origin": "TOPLEFT",
-        "l": 1.0,
-        "r": 3.0,
-        "t": 2.0,
-    }
+    assert "bbox" not in record
 
 
-def test_source_table_rows_bind_heading_by_same_page_bbox():
+def test_source_table_rows_bind_heading_by_page():
     heading = SourceBlock(
         block_id="blk-doc-1-heading",
         document_id="doc-1",
@@ -90,7 +80,6 @@ def test_source_table_rows_bind_heading_by_same_page_bbox():
         text="Results",
         block_order=2,
         page=2,
-        bbox=SourceBoundingBox(l=0.0, t=100.0, r=100.0, b=120.0, coord_origin="TOPLEFT"),
         heading_path="Results",
         heading_level=1,
     )
@@ -112,7 +101,6 @@ def test_source_table_rows_bind_heading_by_same_page_bbox():
             cell_text="A",
             header_path="Sample",
             page=2,
-            bbox=SourceBoundingBox(l=0.0, t=140.0, r=50.0, b=160.0, coord_origin="TOPLEFT"),
         ),
         SourceTableCell(
             cell_id="cell-strength",
@@ -123,7 +111,6 @@ def test_source_table_rows_bind_heading_by_same_page_bbox():
             cell_text="123 MPa",
             header_path="Strength",
             page=2,
-            bbox=SourceBoundingBox(l=50.0, t=140.0, r=100.0, b=160.0, coord_origin="TOPLEFT"),
         ),
     ]
 
@@ -137,13 +124,7 @@ def test_source_table_rows_bind_heading_by_same_page_bbox():
     record = rows[0].to_record()
     assert record["row_text"] == "A | 123 MPa"
     assert record["heading_path"] == "Results"
-    assert json.loads(record["bbox"]) == {
-        "b": 160.0,
-        "coord_origin": "TOPLEFT",
-        "l": 0.0,
-        "r": 100.0,
-        "t": 140.0,
-    }
+    assert "bbox" not in record
 
 
 def test_source_table_rows_keep_raw_cell_text_without_domain_specific_rewrite():
@@ -264,7 +245,6 @@ def test_source_document_tree_builds_section_parent_child_links():
         caption_text="Table 1 Relative density.",
         caption_block_id=None,
         page=2,
-        bbox=None,
         heading_path="2 Results",
         column_headers=("Sample", "Relative density"),
         table_matrix=(("Sample", "Relative density"), ("A", "99.1")),
@@ -277,7 +257,6 @@ def test_source_document_tree_builds_section_parent_child_links():
         caption_text="Figure 1 Porosity map.",
         caption_block_id=None,
         page=2,
-        bbox=None,
         heading_path="2 Results",
         image_path="image_assets/fig-density.png",
         image_mime_type="image/png",

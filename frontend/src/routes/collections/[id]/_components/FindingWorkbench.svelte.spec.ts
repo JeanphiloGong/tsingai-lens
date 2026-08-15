@@ -129,6 +129,12 @@ describe('single Finding workbench', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: '证据对比' }))
 			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('columnheader', { name: '参照条件' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('columnheader', { name: '比较条件' }))
+			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('400 C')).toBeInTheDocument();
 		await expect.element(browserPage.getByRole('cell', { name: '500 C' })).toBeInTheDocument();
 		await expect.element(browserPage.getByRole('cell', { name: '支持结果' })).toBeInTheDocument();

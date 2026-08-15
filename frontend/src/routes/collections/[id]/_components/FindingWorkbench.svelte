@@ -429,8 +429,8 @@
 							<th scope="col">文献</th>
 							<th scope="col">证据关系</th>
 							<th scope="col">变量</th>
-							<th scope="col">基线</th>
-							<th scope="col">目标</th>
+							<th scope="col">参照条件</th>
+							<th scope="col">比较条件</th>
 							<th scope="col">报告结果</th>
 							<th scope="col">方向</th>
 							<th scope="col">可比性</th>

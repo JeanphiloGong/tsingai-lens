@@ -339,6 +339,51 @@ class _BoundedSignalReconciliationExtractor(_WindowExtractor):
                     }
                 ]
             )
+        if self.response_mode in {
+            "duplicate_relationships",
+            "duplicate_signal_id",
+        }:
+            outcome = next(
+                signal for signal in signals if signal["signal_type"] == "outcome"
+            )
+            variables = [
+                signal for signal in signals if signal["signal_type"] == "variable"
+            ]
+            first_signal_ids = [
+                variables[0]["signal_id"],
+                outcome["signal_id"],
+            ]
+            duplicate_signal_ids = (
+                [variables[0]["signal_id"], *first_signal_ids]
+                if self.response_mode == "duplicate_signal_id"
+                else list(reversed(first_signal_ids))
+            )
+            return StructuredPaperSignalReconciliation(
+                studies=[
+                    {
+                        "relationships": [
+                            {
+                                "signal_ids": first_signal_ids,
+                                "confidence": 0.9,
+                            },
+                            {
+                                "signal_ids": duplicate_signal_ids,
+                                "confidence": 0.7,
+                            },
+                            *[
+                                {
+                                    "signal_ids": [
+                                        variable["signal_id"],
+                                        outcome["signal_id"],
+                                    ],
+                                    "confidence": 0.85,
+                                }
+                                for variable in variables[1:]
+                            ],
+                        ]
+                    }
+                ]
+            )
         if self.reject_later_batches and len(self.reconciliation_payloads) > 1:
             return StructuredPaperSignalReconciliation(
                 unresolved_signals=[
@@ -557,6 +602,30 @@ def test_every_source_unit_receives_one_explicit_coverage_outcome():
         "unit."
     )
     assert skim.coverage_complete is True
+
+
+def test_six_source_refs_for_one_signal_do_not_split_a_valid_window():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("methods", "Methods", 1),
+            *[
+                _paragraph(
+                    f"variable-{position}",
+                    "VARIABLE_SIGNAL",
+                    position + 1,
+                    "Methods",
+                )
+                for position in range(1, 7)
+            ],
+        ]
+    )
+    extractor = _WindowExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 1
+    assert len(skim.unresolved_signals) == 1
+    assert len(skim.unresolved_signals[0].source_refs) == 6
 
 
 def test_failed_batch_splits_until_only_permanent_source_unit_failure_remains(
@@ -1415,6 +1484,63 @@ def test_reconciliation_batches_repeat_one_outcome_without_dropping_variables():
         for relationship in study.relationships
         for factor in relationship.varied_factors
     } == {f"process variable {position}" for position in range(1, 6)}
+    assert skim.unresolved_signals == ()
+
+
+@pytest.mark.parametrize(
+    "response_mode",
+    ["duplicate_relationships", "duplicate_signal_id"],
+)
+def test_duplicate_reconciliation_relationship_keeps_valid_siblings(response_mode):
+    signal_specs = {
+        "power": {
+            "signal_type": "variable",
+            "label": "laser power",
+            "process_context": ["LPBF"],
+        },
+        "speed": {
+            "signal_type": "variable",
+            "label": "scan speed",
+            "process_context": ["LPBF"],
+        },
+        "outcome": {
+            "signal_type": "outcome",
+            "label": "relative density",
+            "process_context": ["LPBF"],
+        },
+    }
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("study", "Study", 1),
+            *[
+                _paragraph(source_ref, source_ref, position + 1, "Study")
+                for position, source_ref in enumerate(signal_specs)
+            ],
+        ]
+    )
+    extractor = _BoundedSignalReconciliationExtractor(
+        signal_specs,
+        response_mode=response_mode,
+    )
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    relationships = [
+        relationship
+        for study in skim.studies
+        for relationship in study.relationships
+    ]
+    assert len(relationships) == 2
+    assert {relationship.varied_factors for relationship in relationships} == {
+        ("laser power",),
+        ("scan speed",),
+    }
+    assert next(
+        relationship
+        for relationship in relationships
+        if relationship.varied_factors == ("laser power",)
+    ).confidence == pytest.approx(0.7)
+    assert len({relationship.relationship_id for relationship in relationships}) == 2
     assert skim.unresolved_signals == ()
 
 

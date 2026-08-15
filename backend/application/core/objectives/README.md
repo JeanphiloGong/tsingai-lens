@@ -30,10 +30,13 @@ Objective analysis.
   Source authority. The complete serialized prompt, including the response
   schema, is preflighted against a 12,288-token prompt budget before the model
   receives it; PaperSkim generation has a separate 4,096-token completion
-  budget. Prompt overflow splits before execution. Provider length termination
-  or model-declared output saturation enters the same recursive Source-unit
-  subdivision path as a failed multi-unit batch, preserving stable Source-unit
-  ids until only a terminal singleton can become `extraction_failed`.
+  budget. A relationship or unresolved signal may reference at most the same 12
+  unique Source-unit ids available in one input batch. Duplicate or non-input
+  ids are invalid and enter one bounded structured repair. Prompt overflow
+  splits before execution. Provider length termination or model-declared output
+  saturation enters the same recursive Source-unit subdivision path as a failed
+  multi-unit batch, preserving stable Source-unit ids until only a terminal
+  singleton can become `extraction_failed`.
   Successful siblings are retained. Duplicate studies are consolidated and
   unresolved study signals are reconciled only after every terminal batch has
   finished. The resulting one `PaperSkim` per document retains every distinct
@@ -144,15 +147,20 @@ experiment, comparator, design, and claim contexts. A conflict triggers one
 bounded repair with the conflicting relationship, signal IDs, and context fields.
 If the repaired response still contains a conflict, only that relationship is
 discarded: signals not retained by another valid relationship become unresolved,
-while valid relationships in the same response survive. Failed reconciliation
-batches do not erase successful sibling batches, and a relationship established
-in any batch overrides another batch's local unresolved decision. After all
-batches finish, the backend derives final paper-wide signal accounting. The
-PaperSkim service repeats the same deterministic check as a final boundary guard
-and separates individually valid relationships into distinct PaperStudies when
-their contexts do not belong to one study. A broader reconciliation failure
-leaves all affected signals unresolved instead of removing them. Every emitted
-relationship and signal Source-unit ID must resolve to the exact batch input.
+while valid relationships in the same response survive. The PaperSkim service
+canonicalizes each relationship's unordered signal membership, merges repeated
+memberships, and deduplicates relationships that resolve to the same factors,
+outcome, and Source lineage before constructing a `PaperStudy`. All signal ids
+from merged copies remain linked, and the lowest duplicate confidence is kept.
+Failed reconciliation batches do not erase successful sibling batches, and a
+relationship established in any batch overrides another batch's local unresolved
+decision. After all batches finish, the backend derives final paper-wide signal
+accounting. The PaperSkim service repeats the same deterministic context check as
+a final boundary guard and separates individually valid relationships into
+distinct PaperStudies when their contexts do not belong to one study. A broader
+reconciliation failure leaves all affected signals unresolved instead of removing
+them. Every emitted relationship and signal Source-unit ID must resolve to the
+exact batch input.
 The backend derives coverage from those validated references; an unreferenced unit becomes
 `no_study_signal` without requiring the model to repeat a coverage object. A
 failed call, invalid reference, 4,096-token output termination, or explicit

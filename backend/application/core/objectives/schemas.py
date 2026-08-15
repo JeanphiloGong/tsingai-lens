@@ -31,6 +31,7 @@ PAPER_SKIM_WARNING_LIMIT = (2, 240)
 PAPER_SKIM_STUDY_LIMIT = 8
 PAPER_SKIM_RELATIONSHIP_LIMIT = 8
 PAPER_SKIM_UNRESOLVED_SIGNAL_LIMIT = 12
+PAPER_SKIM_SOURCE_UNIT_LIMIT = 12
 _OBJECTIVE_FRAME_RELEVANCE = {"high", "medium", "low", "irrelevant", "uncertain"}
 _OBJECTIVE_FRAME_PAPER_ROLES = {
     "primary_experiment",
@@ -131,9 +132,11 @@ class StructuredPaperStudyRelationship(_StrictModel):
         Annotated[str, Field(max_length=80)]
     ] = Field(min_length=1, max_length=8)
     outcome: Annotated[str, Field(min_length=1, max_length=80)]
-    source_unit_ids: list[Annotated[str, Field(max_length=160)]] = Field(
+    source_unit_ids: list[
+        Annotated[str, Field(min_length=1, max_length=160)]
+    ] = Field(
         min_length=1,
-        max_length=12,
+        max_length=PAPER_SKIM_SOURCE_UNIT_LIMIT,
     )
     confidence: float = 0.0
 
@@ -141,6 +144,15 @@ class StructuredPaperStudyRelationship(_StrictModel):
     @classmethod
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list_container(value)
+
+    @model_validator(mode="after")
+    def _validate_source_unit_ids(self) -> "StructuredPaperStudyRelationship":
+        normalized = [value.strip() for value in self.source_unit_ids]
+        if any(not value for value in normalized):
+            raise ValueError("paper relationship source-unit ids cannot be empty")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("paper relationship source-unit ids must be unique")
+        return self
 
 
 class StructuredPaperStudy(_StrictModel):
@@ -280,9 +292,11 @@ class StructuredPaperStudySignal(_StrictModel):
     fixed_conditions: list[
         Annotated[str, Field(max_length=120)]
     ] = Field(default_factory=list, max_length=12)
-    source_unit_ids: list[Annotated[str, Field(max_length=160)]] = Field(
+    source_unit_ids: list[
+        Annotated[str, Field(min_length=1, max_length=160)]
+    ] = Field(
         min_length=1,
-        max_length=4,
+        max_length=PAPER_SKIM_SOURCE_UNIT_LIMIT,
     )
     confidence: float = 0.0
 
@@ -298,6 +312,15 @@ class StructuredPaperStudySignal(_StrictModel):
     @classmethod
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list_container(value)
+
+    @model_validator(mode="after")
+    def _validate_source_unit_ids(self) -> "StructuredPaperStudySignal":
+        normalized = [value.strip() for value in self.source_unit_ids]
+        if any(not value for value in normalized):
+            raise ValueError("paper signal source-unit ids cannot be empty")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("paper signal source-unit ids must be unique")
+        return self
 
 
 class StructuredPaperSkim(_StrictModel):

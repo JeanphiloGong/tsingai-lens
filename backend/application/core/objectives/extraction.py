@@ -30,6 +30,7 @@ from application.core.objectives.prompts import (
     build_research_axis_canonicalization_prompt,
 )
 from application.core.objectives.schemas import (
+    PAPER_SKIM_SOURCE_UNIT_LIMIT,
     StructuredAxisCanonicalizationPlan,
     StructuredEvidenceExtractions,
     StructuredEvidenceSelections,
@@ -104,6 +105,17 @@ class ObjectiveExtractor:
     def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         system_prompt, user_prompt = build_paper_skim_prompt(payload)
 
+        def build_repair_instruction(repair_detail: str) -> str:
+            return (
+                "Previous PaperSkim output was invalid: "
+                f"{repair_detail}. Preserve every distinct supported study, "
+                "relationship, and unresolved signal. Copy only unique Source-unit "
+                f"IDs from the input, with at most {PAPER_SKIM_SOURCE_UNIT_LIMIT} IDs "
+                "per relationship or unresolved signal. Set output_saturated=true "
+                "instead of silently omitting a scientific item. Return only compact "
+                "schema-valid JSON."
+            )
+
         def validate_study_identities(response: BaseModel) -> None:
             if not isinstance(response, StructuredPaperSkim):
                 raise TypeError("unexpected paper skim response type")
@@ -125,6 +137,7 @@ class ObjectiveExtractor:
         def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
             return self._parse_json_text_response(
                 **kwargs,
+                repair_instruction_builder=build_repair_instruction,
                 parsed_validator=validate_study_identities,
                 fail_on_output_saturation=True,
             )

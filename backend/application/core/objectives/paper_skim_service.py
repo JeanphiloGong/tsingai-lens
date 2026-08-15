@@ -14,6 +14,7 @@ from application.core.objectives.extraction import (
     PaperSkimOutputSaturatedError,
 )
 from application.core.objectives.schemas import (
+    PAPER_SKIM_SOURCE_UNIT_LIMIT,
     StructuredPaperStudy,
     StructuredPaperSignalReconciliation,
     StructuredPaperSkim,
@@ -33,7 +34,6 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 _SKIM_WINDOW_CHARS = 4000
-_SKIM_WINDOW_SOURCE_UNIT_LIMIT = 12
 _SKIM_HEADING_LIMIT = 16
 _SKIM_WARNING_LIMIT = 2
 _SKIM_WINDOW_ROLES = ("overview", "methods", "results", "conclusion", "unknown")
@@ -491,7 +491,7 @@ class PaperSkimService:
         for item in items:
             separator_size = 2 if current else 0
             if current and (
-                len(current) >= _SKIM_WINDOW_SOURCE_UNIT_LIMIT
+                len(current) >= PAPER_SKIM_SOURCE_UNIT_LIMIT
                 or current_size + separator_size + item.size > _SKIM_WINDOW_CHARS
             ):
                 windows.append(tuple(current))
@@ -1508,18 +1508,28 @@ class PaperSkimService:
             raise ValueError("paper signals do not have unique ids")
 
         linked_ids: set[str] = set()
-        conflicting_reasons_by_id: dict[str, str] = {}
+        rejected_reasons_by_id: dict[str, str] = {}
         studies: list[PaperStudy] = []
         for parsed_study in parsed.studies:
-            study_groups: list[tuple[list[dict[str, Any]], set[str]]] = []
+            study_groups: list[
+                tuple[
+                    list[dict[str, Any]],
+                    set[str],
+                    dict[tuple[object, ...], int],
+                ]
+            ] = []
             for relationship in parsed_study.relationships:
-                signal_ids = tuple(
+                raw_signal_ids = tuple(
                     str(value).strip() for value in relationship.signal_ids
                 )
-                if len(signal_ids) != len(set(signal_ids)):
-                    raise ValueError("paper signal relationship contains duplicate ids")
+                signal_ids = tuple(dict.fromkeys(raw_signal_ids))
                 if any(signal_id not in signals_by_id for signal_id in signal_ids):
-                    raise ValueError("paper signal relationship contains an unknown id")
+                    for signal_id in signals_by_id:
+                        rejected_reasons_by_id.setdefault(
+                            signal_id,
+                            "paper signal reconciliation failed",
+                        )
+                    continue
                 signals = tuple(signals_by_id[signal_id] for signal_id in signal_ids)
                 variables = cls._unique_text_values(
                     signal.label
@@ -1532,9 +1542,12 @@ class PaperSkimService:
                     if signal.signal_type == "outcome"
                 )
                 if not variables or len(outcomes) != 1:
-                    raise ValueError(
-                        "paper signal relationship requires variables and one outcome"
-                    )
+                    for signal_id in signal_ids:
+                        rejected_reasons_by_id.setdefault(
+                            signal_id,
+                            "paper signal relationship requires variables and one outcome",
+                        )
+                    continue
                 context_conflicts = property_matching.paper_signal_context_conflicts(
                     signal.to_record() for signal in signals
                 )
@@ -1544,7 +1557,7 @@ class PaperSkimService:
                         f"{', '.join(context_conflicts)}."
                     )
                     for signal_id in signal_ids:
-                        conflicting_reasons_by_id.setdefault(signal_id, reason)
+                        rejected_reasons_by_id.setdefault(signal_id, reason)
                     continue
                 relationship_record = {
                     "document_id": document_id,
@@ -1561,6 +1574,16 @@ class PaperSkimService:
                         )
                     ],
                 }
+                relationship_key = (
+                    tuple(sorted(value.casefold() for value in variables)),
+                    outcomes[0].casefold(),
+                    tuple(
+                        sorted(
+                            (ref["source_kind"], ref["source_ref"])
+                            for ref in relationship_record["source_refs"]
+                        )
+                    ),
+                )
                 compatible_group = next(
                     (
                         group
@@ -1575,20 +1598,36 @@ class PaperSkimService:
                     None,
                 )
                 if compatible_group is None:
-                    study_groups.append(([relationship_record], set(signal_ids)))
-                else:
+                    compatible_group = ([], set(), {})
+                    study_groups.append(compatible_group)
+                existing_position = compatible_group[2].get(relationship_key)
+                if existing_position is None:
+                    compatible_group[2][relationship_key] = len(compatible_group[0])
                     compatible_group[0].append(relationship_record)
-                    compatible_group[1].update(signal_ids)
+                else:
+                    existing_record = compatible_group[0][existing_position]
+                    existing_record["confidence"] = min(
+                        existing_record["confidence"],
+                        relationship_record["confidence"],
+                    )
+                compatible_group[1].update(signal_ids)
 
-            for study_relationships, study_signal_ids in study_groups:
+            for (
+                study_relationships,
+                study_signal_ids,
+                _relationship_positions,
+            ) in study_groups:
                 repeated_signal_ids = study_signal_ids & linked_ids
                 if any(
                     signals_by_id[signal_id].signal_type != "outcome"
                     for signal_id in repeated_signal_ids
                 ):
-                    raise ValueError(
-                        "paper variable signal cannot belong to multiple studies"
-                    )
+                    for signal_id in study_signal_ids - linked_ids:
+                        rejected_reasons_by_id.setdefault(
+                            signal_id,
+                            "paper variable signal cannot belong to multiple studies",
+                        )
+                    continue
                 study_signals = tuple(
                     signals_by_id[signal_id] for signal_id in study_signal_ids
                 )
@@ -1610,11 +1649,11 @@ class PaperSkimService:
         for unresolved in parsed.unresolved_signals:
             signal_id = str(unresolved.signal_id).strip()
             if signal_id not in signals_by_id:
-                raise ValueError("unresolved paper signal contains an unknown id")
+                continue
             if signal_id in linked_ids or signal_id in unresolved_by_id:
                 continue
             unresolved_by_id[signal_id] = str(unresolved.reason).strip()
-        for signal_id, reason in conflicting_reasons_by_id.items():
+        for signal_id, reason in rejected_reasons_by_id.items():
             if signal_id in linked_ids or signal_id in unresolved_by_id:
                 continue
             unresolved_by_id[signal_id] = reason

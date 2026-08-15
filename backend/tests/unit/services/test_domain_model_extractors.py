@@ -63,11 +63,13 @@ def test_paper_skim_contract_bounds_model_output():
     assert study_schema["relationships"]["maxItems"] == 8
     assert relationship_schema["varied_factors"]["maxItems"] == 8
     assert relationship_schema["source_unit_ids"]["minItems"] == 1
+    assert relationship_schema["source_unit_ids"]["maxItems"] == 12
     signal_schema = model_schema["$defs"]["StructuredPaperStudySignal"][
         "properties"
     ]
     assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
     assert signal_schema["source_unit_ids"]["minItems"] == 1
+    assert signal_schema["source_unit_ids"]["maxItems"] == 12
     assert "source_unit_coverage" not in schema
     assert "StructuredPaperSourceUnitCoverage" not in model_schema.get("$defs", {})
     assert schema["warnings"]["items"]["maxLength"] == 240
@@ -135,6 +137,38 @@ def test_paper_skim_contract_rejects_oversized_values(field, value):
         StructuredPaperSkim.model_validate({field: value})
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "studies": [
+                {
+                    "relationships": [
+                        {
+                            "varied_factors": ["laser power"],
+                            "outcome": "relative density",
+                            "source_unit_ids": ["source-1", "source-1"],
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "unresolved_signals": [
+                {
+                    "signal_type": "variable",
+                    "label": "laser power",
+                    "source_unit_ids": ["source-1", "source-1"],
+                }
+            ]
+        },
+    ],
+)
+def test_paper_skim_contract_rejects_duplicate_source_unit_ids(payload):
+    with pytest.raises(ValidationError, match="source-unit ids must be unique"):
+        StructuredPaperSkim.model_validate(payload)
+
+
 def test_paper_skim_prompt_defines_structured_research_map_contract():
     _, user_prompt = build_paper_skim_prompt(
         {
@@ -167,6 +201,7 @@ def test_paper_skim_prompt_defines_structured_research_map_contract():
     assert "Return `studies=[]`; do not" in user_prompt
     assert "Return the explicit axis in `unresolved_signals`" in user_prompt
     assert "copy `source_unit_ids`" in user_prompt
+    assert "at most 12 unique `source_unit_ids`" in user_prompt
     assert "Return two studies" in user_prompt
     assert "up to 2 `warnings`, each at most 240 characters" in user_prompt
     assert "up to 8 studies" in user_prompt
@@ -260,6 +295,7 @@ def test_paper_signal_reconciliation_prompt_defines_backend_owned_accounting():
     assert "backend treats every omitted input signal as unresolved" in user_prompt
     assert "never invent a reason merely to repeat an ID" in user_prompt
     assert "copy only input `signal_id` values" in user_prompt
+    assert "same signal membership more than once" in user_prompt
     assert "Methods variable and Results outcome" in user_prompt
     assert "different experiments" in user_prompt.lower()
 
@@ -1036,6 +1072,9 @@ def test_paper_skim_retries_duplicate_study_identities_before_returning():
     assert "duplicate study identities" in client.chat.completions.calls[1][
         "messages"
     ][-1]["content"]
+    assert "at most 12 IDs" in client.chat.completions.calls[1]["messages"][-1][
+        "content"
+    ]
 
 
 def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypatch):

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from domain.core import EvidenceAnchor, MeasurementResult, SampleVariant
 from domain.core.paper_fact import PaperFactSet
-from domain.source import SourceArtifactSet
+from domain.source import source_documents_from_records
 from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
@@ -34,9 +34,9 @@ def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
     backend_root = tmp_path / "backend"
     collection_id = "col-test"
     db_path = backend_root / "data" / "lens.sqlite"
-    SqliteSourceArtifactRepository(db_path).replace_collection_artifacts(
+    SqliteSourceArtifactRepository(db_path).replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[
                 {
                     "id": "paper-1",
@@ -82,12 +82,11 @@ def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
                     {
                         "anchor_id": "anchor-1",
                         "document_id": "paper-1",
-                        "locator_type": "table_row",
-                        "locator_confidence": "direct",
+                        "source_kind": "table",
+                        "source_ref": "tbl-paper-1-1",
                         "source_type": "table",
                         "page": 5,
                         "quote": "A | 560",
-                        "figure_or_table": "tbl-paper-1-1",
                     }
                 ),
             ),

@@ -23,8 +23,9 @@ from domain.core.document_profile import DocumentProfile
 from domain.core.evidence_backbone import EvidenceAnchor, MeasurementResult
 from domain.core.paper_fact import PaperFactSet
 from domain.source import (
-    SourceArtifactSet,
+    SourceDocument,
     SourceReferenceSet,
+    assemble_source_documents,
     build_source_document_tree,
 )
 from infra.persistence.memory import MemoryBuildRepository
@@ -69,26 +70,26 @@ class DummyWorkflowOutput:
 
 class MemorySourceArtifactRepository:
     def __init__(self) -> None:
-        self._artifacts: dict[tuple[str, str], SourceArtifactSet] = {}
+        self._documents: dict[tuple[str, str], tuple[SourceDocument, ...]] = {}
         self._references: dict[tuple[str, str], SourceReferenceSet] = {}
 
-    def replace_collection_artifacts(
+    def replace_collection_documents(
         self,
         collection_id: str,
         build_id: str,
-        artifacts: SourceArtifactSet,
+        documents: tuple[SourceDocument, ...],
     ) -> None:
-        self._artifacts[(collection_id, build_id)] = artifacts
+        self._documents[(collection_id, build_id)] = documents
 
-    def read_collection_artifacts(
+    def read_collection_documents(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
-    ) -> SourceArtifactSet:
+    ) -> tuple[SourceDocument, ...]:
         if build_id is None:
-            return SourceArtifactSet()
-        return self._artifacts.get((collection_id, build_id), SourceArtifactSet())
+            return ()
+        return self._documents.get((collection_id, build_id), ())
 
     def replace_collection_references(
         self,
@@ -114,25 +115,19 @@ class MemorySourceArtifactRepository:
         document_id: str,
         build_id: str | None = None,
     ):
-        artifacts = self.read_collection_artifacts(
+        documents = self.read_collection_documents(
             collection_id,
             build_id=build_id,
         )
         document = next(
-            item for item in artifacts.documents if item.document_id == document_id
+            item for item in documents if item.document_id == document_id
         )
         return build_source_document_tree(
             collection_id=collection_id,
             document=document,
-            blocks=tuple(
-                item for item in artifacts.blocks if item.document_id == document_id
-            ),
-            tables=tuple(
-                item for item in artifacts.tables if item.document_id == document_id
-            ),
-            figures=tuple(
-                item for item in artifacts.figures if item.document_id == document_id
-            ),
+            blocks=document.blocks,
+            tables=document.tables,
+            figures=document.figures,
             references=self.read_collection_references(
                 collection_id,
                 build_id=build_id,
@@ -217,7 +212,6 @@ def _write_source_artifact_outputs(
                 "caption_text": "Processing summary",
                 "caption_block_id": None,
                 "page": None,
-                "bbox": None,
                 "heading_path": ["Experimental Section"],
                 "row_count": 1,
                 "col_count": 2,
@@ -300,6 +294,8 @@ def _write_core_graph_outputs(comparison_service, collection_id: str) -> None:  
                     {
                         "anchor_id": "anchor-1",
                         "document_id": "paper-1",
+                        "source_kind": "block",
+                        "source_ref": "conductivity-result",
                         "source_type": "text",
                         "quote": "Conductivity increased to 12 mS/cm after annealing.",
                     }
@@ -1465,6 +1461,7 @@ def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     task_resp = app_client.post(
         f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build",
         json={
+            "mode": "fast",
             "method": "fast",
             "is_update_run": True,
             "verbose": True,
@@ -1478,7 +1475,29 @@ def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     assert task_status["task_type"] == "build"
     assert task_status["status"] == "completed"
 
-    assert captured["method"] == task_runner_module.IndexingMethod.Standard
+    assert captured["method"] == task_runner_module.IndexingMethod.Fast
+    build = app_client.app.state.task_service.repository.read_build(task_id)
+    assert build is not None
+    assert build.mode == "fast"
     assert "is_update_run" not in captured
     assert captured["verbose"] is True
     assert captured["additional_context"] == {"caller": "legacy-frontend"}
+
+
+def test_build_task_contract_rejects_unknown_pipeline_mode(app_client):
+    create_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections",
+        json={"name": "Invalid Pipeline Mode"},
+    )
+    collection_id = create_resp.json()["collection_id"]
+    app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/files",
+        files={"file": ("paper.txt", b"Paper", "text/plain")},
+    )
+
+    response = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build",
+        json={"mode": "unknown"},
+    )
+
+    assert response.status_code == 422

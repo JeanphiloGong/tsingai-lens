@@ -28,6 +28,7 @@ from domain.evaluation import (
     FindingFeedback,
 )
 from domain.goal import ExperimentPlanRecord
+from domain.pipeline import ExecutionTimestamps, PipelineNodeRun
 from domain.source import (
     ArtifactVersionRecord,
     BuildStageRecord,
@@ -35,7 +36,7 @@ from domain.source import (
     CollectionImportDocumentRecord,
     CollectionImportRecord,
     CollectionRecord,
-    SourceArtifactSet,
+    source_documents_from_records,
     SourceReferenceEntry,
     SourceReferenceSet,
     TaskRecord,
@@ -183,15 +184,16 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     artifact_stage = BuildStageRecord(
         stage_id="stage_artifact_registry_baseline",
         build_id="build_baseline",
-        stage_kind="artifact_registry",
-        stage_version=1,
         stage_order=0,
-        status="succeeded",
-        started_at=task_record.created_at,
-        finished_at=task_record.updated_at,
-        errors=(),
-        warnings=(),
-        skip_reason=None,
+        node=PipelineNodeRun(
+            name="artifact_registry",
+            dependencies=("source_artifacts",),
+            status="succeeded",
+            timestamps=ExecutionTimestamps(
+                started_at=task_record.created_at,
+                finished_at=task_record.updated_at,
+            ),
+        ),
     )
     build_repository.update_task(task_record, stages=(artifact_stage,))
     build_repository.add_artifact_versions(
@@ -229,9 +231,9 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         }
     )
 
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=records["source_documents"],
             text_units=records["source_text_units"],
             blocks=records["source_blocks"],
@@ -378,16 +380,28 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         auth_repository.read_session_by_token_hash(session_token_hash)
     ]
 
-    source = source_repository.read_collection_artifacts(collection_id)
+    source = source_repository.read_collection_documents(collection_id)
     references = source_repository.read_collection_references(collection_id)
     source_families = {
-        "source_documents": [item.to_record() for item in source.documents],
-        "source_text_units": [item.to_record() for item in source.text_units],
-        "source_blocks": [item.to_record() for item in source.blocks],
-        "source_tables": [item.to_record() for item in source.tables],
-        "source_table_rows": [item.to_record() for item in source.table_rows],
-        "source_table_cells": [item.to_record() for item in source.table_cells],
-        "source_figures": [item.to_record() for item in source.figures],
+        "source_documents": [item.to_record() for item in source],
+        "source_text_units": [
+            item.to_record() for document in source for item in document.text_units
+        ],
+        "source_blocks": [
+            item.to_record() for document in source for item in document.blocks
+        ],
+        "source_tables": [
+            item.to_record() for document in source for item in document.tables
+        ],
+        "source_table_rows": [
+            item.to_record() for document in source for item in document.table_rows
+        ],
+        "source_table_cells": [
+            item.to_record() for document in source for item in document.table_cells
+        ],
+        "source_figures": [
+            item.to_record() for document in source for item in document.figures
+        ],
         "source_reference_entries": [item.to_record() for item in references.entries],
     }
     for family, actual_items in source_families.items():

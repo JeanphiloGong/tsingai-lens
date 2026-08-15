@@ -32,8 +32,8 @@ Out of scope:
 
 ## Companion Docs
 
-- [`../../../../backend/docs/plans/materials-comparison-v2-plan.md`](../../../../backend/docs/plans/backend-wide/materials-comparison-v2/implementation-plan.md)
-  Backend-owned source plan for the sample/result-backed comparison backbone
+- [`../../../../backend/docs/architecture/core-comparison/current-state.md`](../../../../backend/docs/architecture/core-comparison/current-state.md)
+  Backend authority for the current comparison-semantic substrate
 - [`lens-v1-interface-spec.md`](lens-v1-interface-spec.md)
   Collection route-family interface authority for Lens v1
 - [`claim-traceback-navigation-contract.md`](claim-traceback-navigation-contract.md)

@@ -492,7 +492,7 @@
 				span.id,
 				span.block_id,
 				span.anchor_id,
-				span.target.sectionId,
+				span.target.sourceRef,
 				span.target.headingPath,
 				span.target.label
 			].some((value) => normalizeSourceRefMatchKey(value) === target)

@@ -2,154 +2,85 @@
 
 ## Purpose
 
-This document records the implementation contract for claim-to-source
-navigation in the collection route family.
+This contract defines navigation from comparisons, results, Findings, and
+Evidence to the original collection document.
 
-It aligns frontend behavior and backend payload/API expectations so users can
-move from comparison, result, or document evidence panels to original document
-context with deterministic fallback.
+The backend API authority is
+[`../../../../backend/docs/specs/api.md`](../../../../backend/docs/specs/api.md).
 
-## Scope
+## Anchor Payload
 
-In scope:
-
-- frontend navigation behavior from comparison, result, and document evidence
-  panels to source documents
-- minimum anchor payload required from backend
-- fallback policy when precise anchors are unavailable
-- phased rollout and verification path
-
-Out of scope:
-
-- OCR internals and PDF parsing internals
-- detailed visual design and interaction styling
-- backend extraction algorithm internals
-
-## Companion Docs
-
-- [`../../../../backend/docs/plans/claim-traceback-navigation-implementation-plan.md`](../../../../backend/docs/plans/core/claim-traceback-navigation-implementation-plan.md)
-  Backend-owned child implementation plan for the current v1 traceback slice
-- [`../../../../backend/docs/specs/api.md`](../../../../backend/docs/specs/api.md)
-  Authoritative public API contract for traceback and document content
-
-## User-Level Workflow Contract
-
-1. user views a claim-bearing output in `comparisons`, result detail, or the
-   document evidence panel
-2. user clicks `查看原文证据`
-3. frontend opens the collection-scoped document viewer
-4. frontend resolves the best available anchor and highlights context
-5. user can return to the originating comparison, result, or document flow
-   without losing context
-
-## Shared Anchor Payload
-
-Each claim-bearing evidence output should include one or more anchors with the
-following minimum shape:
+Every usable anchor has one stable Source reference:
 
 ```json
 {
-	"anchor_id": "anc_xxx",
-	"document_id": "doc_xxx",
-	"section_id": "sec_xxx",
-	"block_id": "blk_xxx",
-	"span_start": 120,
-	"span_end": 188,
-	"quote": "source evidence snippet",
-	"source_type": "text",
-	"page": null,
-	"deep_link": "/collections/{collection_id}/documents/{document_id}?anchor_id=anc_xxx"
+  "anchor_id": "anchor_xxx",
+  "document_id": "doc_xxx",
+  "source_kind": "block",
+  "source_ref": "blk_xxx",
+  "source_type": "text",
+  "page": 4,
+  "quote": "source evidence snippet",
+  "deep_link": "/collections/col_xxx/documents/doc_xxx?anchor_id=anchor_xxx"
 }
 ```
 
-Minimum required fields:
+Required identity fields are `anchor_id`, `document_id`, `source_kind`, and
+`source_ref`. `page`, `quote`, and `deep_link` provide display and navigation
+context but do not replace the stable Source reference.
 
-- `anchor_id`
-- `document_id`
-- `source_type`
-- `deep_link`
+Text anchors use `source_kind = "block"`. Table, row, cell, and figure anchors
+use their corresponding Source artifact kind and ID.
 
-Recommended when available:
+## Navigation
 
-- `section_id`
-- `block_id`
-- `span_start`
-- `span_end`
-- `quote`
-- `page`
+The document viewer route is:
 
-## Backend Coordination Contract
+```text
+/collections/[id]/documents/[document_id]
+```
 
-### Artifact Payload Requirements
+The strict resolution order is:
 
-- `evidence_cards` should provide `evidence_anchors` for `direct` and
-  `partial` traceability cases.
-- `comparison_rows` should keep `supporting_evidence_ids` resolvable to
-  evidence anchors.
-- backend should return `deep_link` semantics directly; frontend should not
-  infer deep links from internal assumptions.
+1. load the requested anchor or selected evidence item;
+2. resolve `source_kind + source_ref` in the document Source artifacts;
+3. select or scroll to the matching parsed source artifact;
+4. jump the PDF reader to `page` when available;
+5. otherwise keep the document open and display an explicit unavailable state.
 
-### API Surface Requirements
+The browser does not infer a location from quote text, character offsets,
+section names, or PDF coordinates. It never silently drops a traceback action.
 
-Backend should expose source-viewer APIs compatible with anchor-based
-navigation:
+## Backend Requirements
 
-- `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`
-- `GET /api/v1/collections/{collection_id}/documents/{document_id}/anchors/{anchor_id}`
+- Evidence cards provide stable anchors for direct and partial traceability.
+- Comparison and Finding records keep their Evidence IDs resolvable to those
+  anchors.
+- Deep links are emitted by the backend when needed; the browser does not
+  reconstruct backend paths from storage assumptions.
+- A missing Source artifact is returned as an explicit partial or unavailable
+  traceback state.
 
-### Missingness Rules
+Relevant endpoints include:
 
-- optional anchor fields must be `null` when unavailable
-- `anchor_id` should stay stable for a given artifact build
-- if span/page precision is unavailable, section-level anchoring is still
-  required
+```text
+GET /api/v1/collections/{collection_id}/evidence/{evidence_id}/traceback
+GET /api/v1/collections/{collection_id}/documents/{document_id}/content
+GET /api/v1/collections/{collection_id}/documents/{document_id}/source
+```
 
-## Frontend Coordination Contract
+## Verification
 
-### Route and Entry Points
+The required product path is:
 
-- document viewer route:
-  `/collections/[id]/documents/[document_id]`
-- entry points:
-  - `/collections/[id]/comparisons`
-  - `/collections/[id]/results/[result_id]`
-  - `/collections/[id]/documents/[document_id]`
+```text
+comparison or Finding
+  -> Evidence
+  -> stable Source reference
+  -> document artifact selection
+  -> optional PDF page jump
+```
 
-Standalone `/collections/[id]/evidence` rendering is no longer part of the
-frontend route family. Evidence remains an internal support object for
-traceback and document review.
-
-### Fallback Policy (Strict Order)
-
-1. resolve `anchor_id` and highlight quote/span
-2. if anchor resolution fails, jump to `section_id`
-3. if section is unavailable, open document top and show explicit warning
-
-Frontend must never silently drop traceback actions.
-
-## Rollout Phases
-
-### Phase 1 (v1): Section/Span Traceback
-
-- enable claim to section/span navigation
-- enable quote highlight when quote/span exists
-- do not block on precise PDF page coordinates
-
-### Phase 2 (v2): Page/Figure/Table Precision
-
-- add page-level deep navigation
-- support figure/table anchor targets
-- keep phase-1 fallback behavior intact
-
-## Verification Path
-
-Required end-to-end path:
-
-`comparison row -> supporting evidence -> anchor deep link -> document highlight`
-
-Required checks:
-
-- one-click jump from comparisons to source viewer
-- one-click jump from evidence cards to source viewer
-- deterministic fallback behavior with explicit warning copy
-- no silent failure path
+Tests must cover block, table, and figure references, missing artifacts, and
+page-only display context. Coordinate and character-range highlighting are not
+part of this contract.

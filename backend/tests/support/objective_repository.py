@@ -178,6 +178,26 @@ class MemoryObjectiveRepository:
         self._analyses[key] = analysis
         return analysis
 
+    def update_analysis_execution_stats(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        *,
+        stats,
+        model_name: str | None,
+        prompt_versions: dict[str, str],
+    ) -> ObjectiveAnalysis:
+        key = (collection_id, objective_id, analysis_version)
+        analysis = replace(
+            self._require_analysis(*key),
+            stats=stats,
+            model_name=model_name,
+            prompt_versions=dict(prompt_versions),
+        )
+        self._analyses[key] = analysis
+        return analysis
+
     def fail_analysis(
         self,
         collection_id: str,

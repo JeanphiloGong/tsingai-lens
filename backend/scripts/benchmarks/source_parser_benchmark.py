@@ -424,18 +424,12 @@ def summarize_source_bundle(bundle: Any) -> dict[str, Any]:
         "figure_asset_count": len(getattr(bundle, "figure_assets", {}) or {}),
         "locator_counts": {
             "blocks_with_page": _non_empty_count(blocks, "page"),
-            "blocks_with_bbox": _non_empty_count(blocks, "bbox"),
-            "blocks_with_char_range": _non_empty_count(blocks, "char_range"),
             "tables_with_page": _non_empty_count(tables, "page"),
-            "tables_with_bbox": _non_empty_count(tables, "bbox"),
             "table_cells_with_page": _non_empty_count(table_cells, "page"),
-            "table_cells_with_bbox": _non_empty_count(table_cells, "bbox"),
             "figures_with_page": _non_empty_count(figures, "page"),
-            "figures_with_bbox": _non_empty_count(figures, "bbox"),
         },
         "locator_ratios": {
             "blocks_with_page": _ratio(_non_empty_count(blocks, "page"), block_count),
-            "blocks_with_bbox": _ratio(_non_empty_count(blocks, "bbox"), block_count),
             "tables_with_page": _ratio(_non_empty_count(tables, "page"), table_count),
             "table_cells_with_page": _ratio(
                 _non_empty_count(table_cells, "page"),
@@ -484,7 +478,6 @@ def summarize_mineru_content_items(items: list[dict[str, Any]]) -> dict[str, Any
     counts: Counter[str] = Counter()
     text_chars = 0
     page_locator_count = 0
-    bbox_locator_count = 0
     table_html_count = 0
     table_markdown_count = 0
     table_text_count = 0
@@ -510,8 +503,6 @@ def summarize_mineru_content_items(items: list[dict[str, Any]]) -> dict[str, Any
                 table_text_count += 1
         if _has_any_key(item, ("page", "page_idx", "page_no", "page_number")):
             page_locator_count += 1
-        if _has_any_key(item, ("bbox", "poly", "polygon")):
-            bbox_locator_count += 1
 
     item_count = len(items)
     return {
@@ -528,9 +519,7 @@ def summarize_mineru_content_items(items: list[dict[str, Any]]) -> dict[str, Any
         "figure_count": counts["figure"],
         "equation_count": counts["equation"],
         "page_locator_count": page_locator_count,
-        "bbox_locator_count": bbox_locator_count,
         "page_locator_ratio": _ratio(page_locator_count, item_count),
-        "bbox_locator_ratio": _ratio(bbox_locator_count, item_count),
     }
 
 

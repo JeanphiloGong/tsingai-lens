@@ -104,23 +104,32 @@ The Objective detail page has two levels:
 1. a compact Finding list;
 2. one selected Finding detail.
 
-The list shows statement, factors, one outcome, synthesis status, certainty,
-and directly contributing paper count. It does not expose internal IDs.
+The list shows the statement, synthesis status, qualitative certainty, and
+directly contributing paper count. It does not repeat the selected detail's
+factor/outcome relation or expose internal IDs.
 
 The selected detail shows:
 
 - the Finding statement, factors, outcome, direction, and attribution scope;
-- subordinate mechanisms with assertion strength;
+- baseline, target, reported result, and comparability from structured Evidence;
 - typed material, sample, process, and test scientific context;
-- explicit limitations and every PaperContribution status;
+- deterministic analysis boundaries and aggregate status counts for PaperContributions
+  without Evidence;
+- subordinate mechanisms with translated relation and assertion strength;
 - exact Evidence excerpts grouped by contribution role;
-- paper/page/source metadata and Open source action;
+- titled paper/page/source metadata and Open source action;
 - one Feedback action that expands the review form.
 
-Feedback uses `analysis_version + finding_id`. Changing selection loads that
-Finding detail and Evidence together, and stale rapid-selection responses are
-discarded. Empty Evidence is an explicit failure/empty state, not a fabricated
-source summary.
+Feedback uses `analysis_version + finding_id`. The list response already
+contains the complete Finding display shape, so changing selection reuses that
+item and loads only its Evidence. Stale rapid-selection responses are
+discarded. Only contributions with matched Evidence receive full paper groups;
+empty contributions collapse into one aggregate status line. When every
+contribution is empty, the section shows one collection-level empty state
+instead of repeated paper placeholders. One Evidence comparison remains one
+row even when factors changed jointly; the row identifies support or
+contradiction and retains the reported direction. Empty context categories are
+omitted, and each mechanism links to its exact mechanism-context Evidence.
 
 ## Document Verification
 
@@ -166,8 +175,11 @@ own scientific conclusions or analysis lifecycle.
 
 ## Responsive Rules
 
-- On desktop, the Finding list and selected detail remain sequential full-width
-  regions; feedback opens on demand instead of occupying a permanent column.
+- On desktop, a sticky compact Finding list and the selected review detail form
+  a two-column master-detail workspace; feedback opens on demand near the end
+  of the evidence review.
+- On mobile, the Finding list precedes the selected detail as clearly separated
+  full-width regions.
 - On mobile, tables become scrollable or stacked without truncating statement
   meaning or source quotes.
 - Fixed controls keep stable dimensions; long scientific terms wrap.

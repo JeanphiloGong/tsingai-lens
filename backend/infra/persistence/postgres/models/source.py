@@ -27,7 +27,7 @@ class SourceDocument(Base):
     __tablename__ = "source_documents"
     __table_args__ = (
         CheckConstraint(
-            "human_readable_id >= 0", name="human_readable_id_non_negative"
+            "document_order >= 0", name="document_order_non_negative"
         ),
         ForeignKeyConstraint(
             ["collection_id", "build_id"],
@@ -60,7 +60,7 @@ class SourceDocument(Base):
     document_version_id: Mapped[str] = mapped_column(
         String(64), nullable=False, index=True
     )
-    human_readable_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    document_order: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     creation_date: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -73,7 +73,7 @@ class SourceTextUnit(Base):
     __tablename__ = "source_text_units"
     __table_args__ = (
         CheckConstraint(
-            "human_readable_id >= 0", name="human_readable_id_non_negative"
+            "text_unit_order >= 0", name="text_unit_order_non_negative"
         ),
         CheckConstraint(
             "n_tokens IS NULL OR n_tokens >= 0", name="n_tokens_non_negative"
@@ -95,7 +95,7 @@ class SourceTextUnit(Base):
     build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     text_unit_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    human_readable_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    text_unit_order: Mapped[int] = mapped_column(Integer, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     n_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -166,12 +166,6 @@ class SourceBlock(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     block_order: Mapped[int] = mapped_column(Integer, nullable=False)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    bbox_json: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
-    char_range_json: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
     heading_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     heading_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -239,9 +233,6 @@ class SourceTable(Base):
     caption_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     caption_block_id: Mapped[str | None] = mapped_column(String(), nullable=True)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    bbox_json: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
     heading_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     column_headers: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     table_matrix: Mapped[list[list[str]]] = mapped_column(
@@ -281,9 +272,6 @@ class SourceTableRow(Base):
     row_index: Mapped[int] = mapped_column(Integer, nullable=False)
     row_text: Mapped[str] = mapped_column(Text, nullable=False)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    bbox_json: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
     heading_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -322,12 +310,6 @@ class SourceTableCell(Base):
     cell_text: Mapped[str] = mapped_column(Text, nullable=False)
     header_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    bbox_json: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
-    char_range_json: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
     unit_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -382,9 +364,6 @@ class SourceFigure(Base):
     caption_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     caption_block_id: Mapped[str | None] = mapped_column(String(), nullable=True)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    bbox_json: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
     heading_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_storage_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -461,16 +440,6 @@ class SourceReferenceMention(Base):
     __tablename__ = "source_reference_mentions"
     __table_args__ = (
         CheckConstraint("page IS NULL OR page >= 0", name="page_non_negative"),
-        CheckConstraint(
-            "char_start IS NULL OR char_start >= 0", name="char_start_non_negative"
-        ),
-        CheckConstraint(
-            "char_end IS NULL OR char_end >= 0", name="char_end_non_negative"
-        ),
-        CheckConstraint(
-            "char_start IS NULL OR char_end IS NULL OR char_end >= char_start",
-            name="char_range_ordered",
-        ),
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
         ForeignKeyConstraint(
             ["collection_id", "build_id", "source_document_id"],
@@ -521,8 +490,6 @@ class SourceReferenceMention(Base):
     context_text: Mapped[str] = mapped_column(Text, nullable=False)
     source_block_id: Mapped[str | None] = mapped_column(String(), nullable=True)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    char_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    char_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
         _JSON_DOCUMENT, nullable=False

@@ -23,10 +23,6 @@ The purpose of this cutover is straightforward:
   deterministic Core-derived surfaces rather than opaque model-generated final
   artifacts
 
-For the broader backend roadmap, read
-[`../../../../../docs/plans/backend-wide/goal-source-core-layering/implementation-plan.md`](../../../../../docs/plans/backend-wide/goal-source-core-layering/implementation-plan.md).
-For the immediate parent quality wave, read
-[`../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md`](../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md).
 For the layering rule that keeps stable research facts in Core rather than in
 Source, read
 [`../../../../../docs/architecture/goal-core-source-layering.md`](../../../../../docs/architecture/goal-core-source-layering.md).
@@ -197,9 +193,6 @@ seam in backend infrastructure, three Core fact-extraction slices, and one
 derived-view projection slice above it.
 
 ### Slice 1: Document Profile Extraction
-
-The current narrowed execution plan for this slice is recorded in
-[`../../../../../docs/plans/core/document-profile-lightweight-triage-plan.md`](../../../../../docs/plans/core/document-profile-lightweight-triage-plan.md).
 
 Input:
 
@@ -451,34 +444,18 @@ Guardrails:
 - no new permanent Core contract that rebrands `section` without actually
   removing section semantics
 
-## Parent, Child, And Companion Relationships
+## Companion Docs
 
-### Parent Docs
-
-- [`../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md`](../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md)
-  is the immediate parent execution plan. This page is the detailed child plan
-  for the hard cutover decision inside that quality wave.
-- [`../../../../../docs/plans/backend-wide/goal-source-core-layering/implementation-plan.md`](../../../../../docs/plans/backend-wide/goal-source-core-layering/implementation-plan.md)
-  remains the broader backend roadmap.
-
-### Companion Docs
-
-- [`../../../../../docs/plans/core/minimal-core-domain-backfill-plan.md`](../../../../../docs/plans/core/minimal-core-domain-backfill-plan.md)
-  remains the companion plan for moving stable Core semantics into explicit
-  domain ownership.
 - [`../../../../../docs/architecture/goal-core-source-layering.md`](../../../../../docs/architecture/goal-core-source-layering.md)
   remains the boundary authority for keeping stable research facts in Core.
 
 ### Later Follow-Up Scope
 
 If later work adds benchmark operations, prompt-evaluation tooling, or a second
-wave of deterministic post-validation, record those as later child docs rather
+wave of deterministic post-validation, track that work in GitHub issues rather
 than expanding this page into an open-ended parser program.
 
 ## Related Docs
 
-- [`../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md`](../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md)
 - [`id-boundary.md`](id-boundary.md)
-- [`../../../../../docs/plans/core/minimal-core-domain-backfill-plan.md`](../../../../../docs/plans/core/minimal-core-domain-backfill-plan.md)
 - [`../../../../../docs/architecture/goal-core-source-layering.md`](../../../../../docs/architecture/goal-core-source-layering.md)
-- [`../../../../../docs/plans/backend-wide/goal-source-core-layering/implementation-plan.md`](../../../../../docs/plans/backend-wide/goal-source-core-layering/implementation-plan.md)

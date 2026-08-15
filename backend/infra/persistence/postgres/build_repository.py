@@ -8,6 +8,11 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from domain.pipeline import (
+    ExecutionStats,
+    ExecutionTimestamps,
+    PipelineNodeRun,
+)
 from domain.source import (
     ArtifactVersionRecord,
     BuildStageRecord,
@@ -33,6 +38,7 @@ class PostgresBuildRepository:
         record: TaskRecord,
         *,
         build_id: str,
+        mode: str = "standard",
     ) -> CollectionBuildRecord:
         with self.session_factory.begin() as session:
             collection = session.scalar(
@@ -52,6 +58,7 @@ class PostgresBuildRepository:
                 build_id=str(build_id),
                 task_id=record.task_id,
                 collection_id=record.collection_id,
+                mode=str(mode),
                 build_number=build_number,
                 status="queued",
                 created_at=_datetime(record.created_at),
@@ -315,6 +322,7 @@ def _build_record(row: CollectionBuild) -> CollectionBuildRecord:
         build_id=row.build_id,
         task_id=row.task_id,
         collection_id=row.collection_id,
+        mode=row.mode,
         build_number=row.build_number,
         status=row.status,
         created_at=_iso(row.created_at),
@@ -327,40 +335,49 @@ def _stage_row(record: BuildStageRecord) -> BuildStage:
     return BuildStage(
         stage_id=record.stage_id,
         build_id=record.build_id,
-        stage_kind=record.stage_kind,
-        stage_version=record.stage_version,
+        stage_kind=record.node.name,
         stage_order=record.stage_order,
-        status=record.status,
-        started_at=_optional_datetime(record.started_at),
-        finished_at=_optional_datetime(record.finished_at),
-        errors=list(record.errors),
-        warnings=list(record.warnings),
-        skip_reason=record.skip_reason,
+        status=record.node.status.value,
+        started_at=_optional_datetime(record.node.timestamps.started_at),
+        finished_at=_optional_datetime(record.node.timestamps.finished_at),
+        errors=list(record.node.errors),
+        warnings=list(record.node.warnings),
+        dependencies=list(record.node.dependencies),
+        stats=record.node.stats.to_record(),
+        output_summary=dict(record.node.output_summary),
     )
 
 
 def _update_stage_row(row: BuildStage, record: BuildStageRecord) -> None:
-    row.status = record.status
-    row.started_at = _optional_datetime(record.started_at)
-    row.finished_at = _optional_datetime(record.finished_at)
-    row.errors = list(record.errors)
-    row.warnings = list(record.warnings)
-    row.skip_reason = record.skip_reason
+    row.stage_order = record.stage_order
+    row.status = record.node.status.value
+    row.started_at = _optional_datetime(record.node.timestamps.started_at)
+    row.finished_at = _optional_datetime(record.node.timestamps.finished_at)
+    row.errors = list(record.node.errors)
+    row.warnings = list(record.node.warnings)
+    row.dependencies = list(record.node.dependencies)
+    row.stats = record.node.stats.to_record()
+    row.output_summary = dict(record.node.output_summary)
 
 
 def _stage_record(row: BuildStage) -> BuildStageRecord:
     return BuildStageRecord(
         stage_id=row.stage_id,
         build_id=row.build_id,
-        stage_kind=row.stage_kind,
-        stage_version=row.stage_version,
         stage_order=row.stage_order,
-        status=row.status,
-        started_at=_optional_iso(row.started_at),
-        finished_at=_optional_iso(row.finished_at),
-        errors=tuple(row.errors),
-        warnings=tuple(row.warnings),
-        skip_reason=row.skip_reason,
+        node=PipelineNodeRun(
+            name=row.stage_kind,
+            dependencies=tuple(row.dependencies),
+            status=row.status,
+            errors=tuple(row.errors),
+            warnings=tuple(row.warnings),
+            stats=ExecutionStats.from_mapping(row.stats),
+            timestamps=ExecutionTimestamps(
+                started_at=_optional_iso(row.started_at),
+                finished_at=_optional_iso(row.finished_at),
+            ),
+            output_summary=dict(row.output_summary),
+        ),
     )
 
 

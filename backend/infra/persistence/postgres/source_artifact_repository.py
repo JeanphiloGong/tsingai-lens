@@ -8,7 +8,6 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from domain.source import (
-    SourceArtifactSet,
     SourceBlock,
     SourceDocument,
     SourceDocumentTree,
@@ -22,6 +21,7 @@ from domain.source import (
     SourceTableCell,
     SourceTableRow,
     SourceTextUnit,
+    assemble_source_documents,
     build_source_document_tree,
 )
 from infra.persistence.postgres.models.build import (
@@ -55,12 +55,28 @@ class PostgresSourceArtifactRepository:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self.session_factory = session_factory
 
-    def replace_collection_artifacts(
+    def replace_collection_documents(
         self,
         collection_id: str,
         build_id: str,
-        artifacts: SourceArtifactSet,
+        documents: tuple[SourceDocument, ...],
     ) -> None:
+        text_units = tuple(
+            {
+                item.text_unit_id: item
+                for document in documents
+                for item in document.text_units
+            }.values()
+        )
+        blocks = tuple(item for document in documents for item in document.blocks)
+        tables = tuple(item for document in documents for item in document.tables)
+        table_rows = tuple(
+            item for document in documents for item in document.table_rows
+        )
+        table_cells = tuple(
+            item for document in documents for item in document.table_cells
+        )
+        figures = tuple(item for document in documents for item in document.figures)
         with self.session_factory.begin() as session:
             build = self._require_build(session, collection_id, build_id)
             if build.status not in {"queued", "building"}:
@@ -68,7 +84,7 @@ class PostgresSourceArtifactRepository:
             lineage = self._resolve_document_lineage(
                 session,
                 collection_id,
-                artifacts.documents,
+                documents,
             )
             session.execute(
                 delete(SourceDocumentRow).where(SourceDocumentRow.build_id == build_id)
@@ -80,13 +96,13 @@ class PostgresSourceArtifactRepository:
                     collection_id=collection_id,
                     collection_document_id=lineage[document.document_id][0],
                     document_version_id=lineage[document.document_id][1],
-                    human_readable_id=document.human_readable_id,
+                    document_order=document.document_order,
                     title=document.title,
                     text=document.text,
                     creation_date=document.creation_date,
                     metadata_json=dict(document.metadata),
                 )
-                for document in artifacts.documents
+                for document in documents
             )
             session.flush()
             session.add_all(
@@ -94,11 +110,11 @@ class PostgresSourceArtifactRepository:
                     build_id=build_id,
                     text_unit_id=text_unit.text_unit_id,
                     collection_id=collection_id,
-                    human_readable_id=text_unit.human_readable_id,
+                    text_unit_order=text_unit.text_unit_order,
                     text=text_unit.text,
                     n_tokens=text_unit.n_tokens,
                 )
-                for text_unit in artifacts.text_units
+                for text_unit in text_units
             )
             session.flush()
             session.add_all(
@@ -108,7 +124,7 @@ class PostgresSourceArtifactRepository:
                     source_document_id=document_id,
                     collection_id=collection_id,
                 )
-                for text_unit in artifacts.text_units
+                for text_unit in text_units
                 for document_id in text_unit.document_ids
             )
             session.add_all(
@@ -121,16 +137,10 @@ class PostgresSourceArtifactRepository:
                     text=block.text,
                     block_order=block.block_order,
                     page=block.page,
-                    bbox_json=block.bbox.to_payload() if block.bbox else None,
-                    char_range_json=(
-                        {"start": block.char_range.start, "end": block.char_range.end}
-                        if block.char_range
-                        else None
-                    ),
                     heading_path=block.heading_path,
                     heading_level=block.heading_level,
                 )
-                for block in artifacts.blocks
+                for block in blocks
             )
             session.flush()
             session.add_all(
@@ -140,7 +150,7 @@ class PostgresSourceArtifactRepository:
                     text_unit_id=text_unit_id,
                     collection_id=collection_id,
                 )
-                for block in artifacts.blocks
+                for block in blocks
                 for text_unit_id in block.text_unit_ids
             )
             session.add_all(
@@ -153,13 +163,12 @@ class PostgresSourceArtifactRepository:
                     caption_text=table.caption_text,
                     caption_block_id=table.caption_block_id,
                     page=table.page,
-                    bbox_json=table.bbox.to_payload() if table.bbox else None,
                     heading_path=table.heading_path,
                     column_headers=list(table.column_headers),
                     table_matrix=[list(row) for row in table.table_matrix],
                     metadata_json=dict(table.metadata),
                 )
-                for table in artifacts.tables
+                for table in tables
             )
             session.flush()
             session.add_all(
@@ -172,10 +181,9 @@ class PostgresSourceArtifactRepository:
                     row_index=row.row_index,
                     row_text=row.row_text,
                     page=row.page,
-                    bbox_json=row.bbox.to_payload() if row.bbox else None,
                     heading_path=row.heading_path,
                 )
-                for row in artifacts.table_rows
+                for row in table_rows
             )
             session.add_all(
                 SourceTableCellRow(
@@ -189,15 +197,9 @@ class PostgresSourceArtifactRepository:
                     cell_text=cell.cell_text,
                     header_path=cell.header_path,
                     page=cell.page,
-                    bbox_json=cell.bbox.to_payload() if cell.bbox else None,
-                    char_range_json=(
-                        {"start": cell.char_range.start, "end": cell.char_range.end}
-                        if cell.char_range
-                        else None
-                    ),
                     unit_hint=cell.unit_hint,
                 )
-                for cell in artifacts.table_cells
+                for cell in table_cells
             )
             session.add_all(
                 SourceFigureRow(
@@ -210,7 +212,6 @@ class PostgresSourceArtifactRepository:
                     caption_text=figure.caption_text,
                     caption_block_id=figure.caption_block_id,
                     page=figure.page,
-                    bbox_json=figure.bbox.to_payload() if figure.bbox else None,
                     heading_path=figure.heading_path,
                     image_storage_key=figure.image_path,
                     image_mime_type=figure.image_mime_type,
@@ -220,20 +221,20 @@ class PostgresSourceArtifactRepository:
                     image_size_bytes=figure.image_size_bytes,
                     metadata_json=dict(figure.metadata),
                 )
-                for figure in artifacts.figures
+                for figure in figures
             )
 
-    def read_collection_artifacts(
+    def read_collection_documents(
         self,
         collection_id: str,
         build_id: str | None = None,
-    ) -> SourceArtifactSet:
+    ) -> tuple[SourceDocument, ...]:
         if build_id is None:
             with self.session_factory() as session:
                 build_id = self._resolve_read_build(session, collection_id, None)
             if build_id is None:
-                return SourceArtifactSet()
-        return SourceArtifactSet(
+                return ()
+        return assemble_source_documents(
             documents=tuple(self.list_documents(collection_id, build_id=build_id)),
             text_units=tuple(self.list_text_units(collection_id, build_id=build_id)),
             blocks=tuple(self.list_blocks(collection_id, build_id=build_id)),
@@ -259,7 +260,9 @@ class PostgresSourceArtifactRepository:
         document = next(
             (
                 item
-                for item in self.list_documents(collection_id, build_id=build_id)
+                for item in self.read_collection_documents(
+                    collection_id, build_id=build_id
+                )
                 if item.document_id == document_id
             ),
             None,
@@ -271,9 +274,9 @@ class PostgresSourceArtifactRepository:
         return build_source_document_tree(
             collection_id=collection_id,
             document=document,
-            blocks=self.list_blocks(collection_id, document_id, build_id=build_id),
-            tables=self.list_tables(collection_id, document_id, build_id=build_id),
-            figures=self.list_figures(collection_id, document_id, build_id=build_id),
+            blocks=document.blocks,
+            tables=document.tables,
+            figures=document.figures,
             references=self.read_collection_references(
                 collection_id, build_id=build_id
             ),
@@ -301,7 +304,7 @@ class PostgresSourceArtifactRepository:
                     SourceDocumentRow.build_id == resolved_build_id,
                 )
                 .order_by(
-                    SourceDocumentRow.human_readable_id,
+                    SourceDocumentRow.document_order,
                     SourceDocumentRow.source_document_id,
                 )
             )
@@ -309,7 +312,7 @@ class PostgresSourceArtifactRepository:
                 SourceDocument.from_record(
                     {
                         "document_id": row.source_document_id,
-                        "human_readable_id": row.human_readable_id,
+                        "document_order": row.document_order,
                         "title": row.title,
                         "text": row.text,
                         "text_unit_ids": text_units_by_document.get(
@@ -355,7 +358,7 @@ class PostgresSourceArtifactRepository:
                 ).where(SourceTextUnitDocument.source_document_id == document_id)
             rows = session.scalars(
                 statement.order_by(
-                    SourceTextUnitRow.human_readable_id,
+                    SourceTextUnitRow.text_unit_order,
                     SourceTextUnitRow.text_unit_id,
                 )
             )
@@ -363,7 +366,7 @@ class PostgresSourceArtifactRepository:
                 SourceTextUnit.from_record(
                     {
                         "text_unit_id": row.text_unit_id,
-                        "human_readable_id": row.human_readable_id,
+                        "text_unit_order": row.text_unit_order,
                         "text": row.text,
                         "n_tokens": row.n_tokens,
                         "document_ids": documents_by_text_unit.get(
@@ -415,8 +418,6 @@ class PostgresSourceArtifactRepository:
                         "block_order": row.block_order,
                         "text_unit_ids": text_units_by_block.get(row.block_id, ()),
                         "page": row.page,
-                        "bbox": row.bbox_json,
-                        "char_range": row.char_range_json,
                         "heading_path": row.heading_path,
                         "heading_level": row.heading_level,
                     }
@@ -461,7 +462,6 @@ class PostgresSourceArtifactRepository:
                         "caption_text": row.caption_text,
                         "caption_block_id": row.caption_block_id,
                         "page": row.page,
-                        "bbox": row.bbox_json,
                         "heading_path": row.heading_path,
                         "column_headers": row.column_headers,
                         "table_matrix": row.table_matrix,
@@ -507,7 +507,6 @@ class PostgresSourceArtifactRepository:
                         "row_index": row.row_index,
                         "row_text": row.row_text,
                         "page": row.page,
-                        "bbox": row.bbox_json,
                         "heading_path": row.heading_path,
                     }
                 )
@@ -556,8 +555,6 @@ class PostgresSourceArtifactRepository:
                         "cell_text": row.cell_text,
                         "header_path": row.header_path,
                         "page": row.page,
-                        "bbox": row.bbox_json,
-                        "char_range": row.char_range_json,
                         "unit_hint": row.unit_hint,
                     }
                 )
@@ -602,7 +599,6 @@ class PostgresSourceArtifactRepository:
                         "caption_text": row.caption_text,
                         "caption_block_id": row.caption_block_id,
                         "page": row.page,
-                        "bbox": row.bbox_json,
                         "heading_path": row.heading_path,
                         "image_path": row.image_storage_key,
                         "image_mime_type": row.image_mime_type,
@@ -664,8 +660,6 @@ class PostgresSourceArtifactRepository:
                     context_text=mention.context_text,
                     source_block_id=mention.source_block_id,
                     page=mention.page,
-                    char_start=mention.char_start,
-                    char_end=mention.char_end,
                     confidence=mention.confidence,
                     metadata_json=dict(mention.metadata),
                 )
@@ -743,7 +737,6 @@ class PostgresSourceArtifactRepository:
                 .order_by(
                     SourceReferenceMentionRow.source_document_id,
                     SourceReferenceMentionRow.source_block_id.asc().nulls_first(),
-                    SourceReferenceMentionRow.char_start.asc().nulls_first(),
                     SourceReferenceMentionRow.mention_id,
                 )
             )
@@ -800,8 +793,6 @@ class PostgresSourceArtifactRepository:
                             "context_text": row.context_text,
                             "source_block_id": row.source_block_id,
                             "page": row.page,
-                            "char_start": row.char_start,
-                            "char_end": row.char_end,
                             "confidence": row.confidence,
                             "metadata": row.metadata_json,
                         }
@@ -960,7 +951,7 @@ class PostgresSourceArtifactRepository:
             )
             .order_by(
                 SourceTextUnitDocument.source_document_id,
-                SourceTextUnitRow.human_readable_id,
+                SourceTextUnitRow.text_unit_order,
                 SourceTextUnitDocument.text_unit_id,
             )
         )
@@ -983,7 +974,7 @@ class PostgresSourceArtifactRepository:
             )
             .order_by(
                 SourceBlockTextUnit.block_id,
-                SourceTextUnitRow.human_readable_id,
+                SourceTextUnitRow.text_unit_order,
                 SourceBlockTextUnit.text_unit_id,
             )
         )

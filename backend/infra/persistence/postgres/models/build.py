@@ -122,6 +122,7 @@ class CollectionBuild(Base):
         nullable=False,
         index=True,
     )
+    mode: Mapped[str] = mapped_column(String(64), nullable=False)
     build_number: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -139,7 +140,6 @@ class BuildStage(Base):
     __tablename__ = "build_stages"
     __table_args__ = (
         CheckConstraint("stage_kind <> ''", name="stage_kind_not_empty"),
-        CheckConstraint("stage_version > 0", name="stage_version_positive"),
         CheckConstraint("stage_order >= 0", name="stage_order_non_negative"),
         CheckConstraint(
             "status IN ('queued', 'running', 'succeeded', 'failed', 'skipped')",
@@ -152,8 +152,7 @@ class BuildStage(Base):
         UniqueConstraint(
             "build_id",
             "stage_kind",
-            "stage_version",
-            name="uq_build_stages_build_kind_version",
+            name="uq_build_stages_build_kind",
         ),
         UniqueConstraint(
             "build_id",
@@ -170,7 +169,6 @@ class BuildStage(Base):
         index=True,
     )
     stage_kind: Mapped[str] = mapped_column(String(128), nullable=False)
-    stage_version: Mapped[int] = mapped_column(Integer, nullable=False)
     stage_order: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(
@@ -181,7 +179,12 @@ class BuildStage(Base):
     )
     errors: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     warnings: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    skip_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dependencies: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    stats: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    output_summary: Mapped[dict[str, Any]] = mapped_column(
+        _JSON_DOCUMENT,
+        nullable=False,
+    )
 
 
 class ArtifactVersion(Base):

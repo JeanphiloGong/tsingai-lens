@@ -28,7 +28,7 @@ def test_summarize_mineru_content_items_counts_common_elements() -> None:
     summary = benchmark.summarize_mineru_content_items(
         [
             {"type": "text", "text": "plain paragraph", "page_idx": 0},
-            {"type": "title", "text": "Methods", "text_level": 1, "bbox": [1, 2, 3, 4]},
+            {"type": "title", "text": "Methods", "text_level": 1},
             {"type": "table", "table_body": "<table><tr><td>1</td></tr></table>"},
             {"type": "image", "img_caption": ["Figure 1. Sample"]},
             {"type": "interline_equation", "latex": "E=mc^2"},
@@ -48,9 +48,7 @@ def test_summarize_mineru_content_items_counts_common_elements() -> None:
     assert summary["figure_count"] == 1
     assert summary["equation_count"] == 1
     assert summary["page_locator_count"] == 1
-    assert summary["bbox_locator_count"] == 1
     assert summary["page_locator_ratio"] == 0.2
-    assert summary["bbox_locator_ratio"] == 0.2
 
 
 def test_aggregate_records_preserves_parser_status_counts() -> None:

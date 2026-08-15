@@ -23,7 +23,7 @@ pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts"
 def _write_paper_build(source_repository, builds, build_id: str):
     task = _task(f"task_{build_id}")
     builds.add_task(task, build_id=build_id)
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source",
         build_id,
         _artifacts(),

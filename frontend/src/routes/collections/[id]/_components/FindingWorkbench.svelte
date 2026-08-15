@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import { errorMessage } from '../../../_shared/api';
 	import {
 		createFindingFeedback,
@@ -16,6 +17,7 @@
 	export let finding: ObjectiveFinding;
 	export let evidence: ObjectiveEvidence[] = [];
 	export let collectionId = '';
+	export let documentTitles: Record<string, string> = {};
 
 	let feedbackOpen = false;
 	let feedbackStatus: FindingFeedbackStatus = 'correct';
@@ -72,19 +74,52 @@
 		{ label: '样品状态', items: finding.scientific_context.sample },
 		{ label: '工艺条件', items: finding.scientific_context.process },
 		{ label: '测试条件', items: finding.scientific_context.test }
-	];
+	].filter((group) => group.items.length > 0);
+	$: comparisonRows = evidence
+		.filter(
+			(item) =>
+				item.evidence_role === 'direct_result' || item.evidence_role === 'contradictory_result'
+		)
+		.map((item) => ({
+			evidence: item,
+			binding: directEvidenceBinding(item.evidence_id),
+			variables: item.changed_variables.map((variable) => variable.name),
+			baselines: item.changed_variables.map(
+				(variable) =>
+					formatValue(variable.baseline_value, variable.unit) ||
+					item.comparison?.baseline_label ||
+					'未报告'
+			),
+			targets: item.changed_variables.map(
+				(variable) =>
+					formatValue(variable.target_value, variable.unit) ||
+					item.comparison?.target_label ||
+					'未报告'
+			),
+			result: resultLabel(item),
+			direction: item.reported_result ? directionLabel(item.reported_result.direction) : '方向未知',
+			comparability: comparabilityLabel(item)
+		}));
+	$: contributionGroups = finding.paper_contributions.map((contribution) => ({
+		contribution,
+		paperEvidence: evidenceFor(contribution)
+	}));
+	$: evidencedContributionGroups = contributionGroups.filter(
+		(group) => group.paperEvidence.length > 0
+	);
+	$: emptyContributions = contributionGroups
+		.filter((group) => group.paperEvidence.length === 0)
+		.map((group) => group.contribution);
+	$: emptyContributionSummary = summarizeEmptyContributions(emptyContributions);
 
-	function sourceHref(item: ObjectiveEvidence) {
-		const base = resolve('/collections/[id]/documents/[document_id]', {
-			id: collectionId,
-			document_id: item.document_id
-		});
+	function sourceHref(item: ObjectiveEvidence): `/collections/${string}/documents/${string}` {
+		const base: `/collections/${string}/documents/${string}` = `/collections/${encodeURIComponent(collectionId)}/documents/${encodeURIComponent(item.document_id)}`;
 		const objectiveHref = resolve('/collections/[id]/objectives/[objective_id]', {
 			id: collectionId,
 			objective_id: finding.objective_id
 		});
-		const returnTo = `${objectiveHref}?${new URLSearchParams({ finding_id: finding.finding_id })}`;
-		const params = new URLSearchParams({
+		const returnTo = `${objectiveHref}?${new SvelteURLSearchParams({ finding_id: finding.finding_id })}`;
+		const params = new SvelteURLSearchParams({
 			view: 'parsed-paper',
 			evidence_id: item.evidence_id,
 			source_ref: item.source_ref,
@@ -123,16 +158,84 @@
 		return labels;
 	}
 
-	function paperLabel(index: number, paperEvidence: ObjectiveEvidence[]) {
+	function directEvidenceBinding(evidenceId: string) {
+		for (const contribution of finding.paper_contributions) {
+			if (contribution.supporting_evidence_ids.includes(evidenceId)) return '支持结果';
+			if (contribution.contradicting_evidence_ids.includes(evidenceId)) return '反向结果';
+		}
+		return '未绑定';
+	}
+
+	function evidenceByIds(evidenceIds: string[]) {
+		const ids = new Set(evidenceIds);
+		return evidence.filter((item) => ids.has(item.evidence_id));
+	}
+
+	function paperTitle(documentId: string, index?: number) {
+		const title = documentTitles[documentId]?.trim();
+		if (title) return title;
+		const contributionIndex =
+			index ??
+			evidencedContributionGroups.findIndex(
+				(group) => group.contribution.document_id === documentId
+			);
+		return `文献 ${Math.max(contributionIndex, 0) + 1}`;
+	}
+
+	function paperLabel(
+		contribution: ObjectiveFindingPaperContribution,
+		index: number,
+		paperEvidence: ObjectiveEvidence[]
+	) {
 		const pages = paperEvidence.flatMap((item) => item.page_numbers);
 		const firstPage = pages.length ? Math.min(...pages) : null;
-		return firstPage ? `文献 ${index + 1} · p.${firstPage}` : `文献 ${index + 1}`;
+		const title = paperTitle(contribution.document_id, index);
+		return firstPage ? `${title} · p.${firstPage}` : title;
+	}
+
+	function formatValue(
+		value: string | number | boolean | null | undefined,
+		unit: string | null | undefined
+	) {
+		if (value === null || value === undefined || value === '') return '';
+		return `${String(value)}${unit ? ` ${unit}` : ''}`;
+	}
+
+	function resultLabel(item: ObjectiveEvidence) {
+		if (!item.reported_result) return '未报告';
+		const value = formatValue(item.reported_result.value, item.reported_result.unit);
+		return `${item.reported_result.outcome}: ${value || item.reported_result.result_text}`;
+	}
+
+	function evidenceSourceLabel(item: ObjectiveEvidence) {
+		const page = item.page_numbers[0];
+		return page ? `${paperTitle(item.document_id)} · p.${page}` : paperTitle(item.document_id);
+	}
+
+	function comparabilityLabel(item: ObjectiveEvidence) {
+		if (!item.comparison) return '可比性未报告';
+		if (item.comparison.comparable) return '可直接比较';
+		return item.comparison.incomparability_reasons.length
+			? `不可直接比较：${item.comparison.incomparability_reasons.join('；')}`
+			: '不可直接比较';
 	}
 
 	function contributionStatus(status: ObjectiveFindingPaperContribution['analysis_status']) {
 		if (status === 'analyzed') return '已分析';
 		if (status === 'excluded') return '已排除';
 		return '分析失败';
+	}
+
+	function summarizeEmptyContributions(contributions: ObjectiveFindingPaperContribution[]) {
+		if (!contributions.length) return '';
+		const counts = { analyzed: 0, excluded: 0, failed: 0 };
+		for (const contribution of contributions) counts[contribution.analysis_status] += 1;
+		const states = [
+			counts.analyzed ? `已分析但无 Evidence ${counts.analyzed} 篇` : '',
+			counts.excluded ? `已排除 ${counts.excluded} 篇` : '',
+			counts.failed ? `分析失败 ${counts.failed} 篇` : ''
+		].filter(Boolean);
+		return `另有 ${contributions.length} 篇文献未形成可审计 Evidence：${states.join('，')}。`;
 	}
 
 	function directionLabel(value: ObjectiveFinding['direction']) {
@@ -149,6 +252,29 @@
 
 	function assertionLabel(value: ObjectiveFinding['assertion_strength']) {
 		return { causal: '因果', associative: '关联', descriptive: '描述' }[value];
+	}
+
+	function relationLabel(value: string) {
+		return (
+			{
+				associated_with: '相关联',
+				correlated_with: '相关',
+				causes: '导致',
+				affects: '影响',
+				influences: '影响',
+				contributes_to: '促成',
+				mediates: '介导',
+				mediated_by: '由中介作用连接',
+				moderates: '调节',
+				depends_on: '取决于'
+			}[value] ?? value.replaceAll('_', ' ')
+		);
+	}
+
+	function certaintyLabel(value: number) {
+		if (value >= 0.8) return '较高';
+		if (value >= 0.6) return '中等';
+		return '较低';
 	}
 
 	function attributionLabel(value: ObjectiveFinding['attribution_scope']) {
@@ -264,14 +390,6 @@
 			<span>{directPaperCount >= 2 ? '跨文献研究发现' : '单篇直接证据'}</span>
 			<h2>{finding.statement}</h2>
 		</div>
-		<button
-			class="btn btn--ghost btn--small"
-			type="button"
-			aria-expanded={feedbackOpen}
-			on:click={toggleFeedback}
-		>
-			{feedbackOpen ? '关闭反馈' : '反馈'}
-		</button>
 	</header>
 
 	<section class="result-line" aria-label="Finding 核心结果">
@@ -294,67 +412,106 @@
 		<div><span>表述强度</span><strong>{assertionLabel(finding.assertion_strength)}</strong></div>
 		<div><span>归因范围</span><strong>{attributionLabel(finding.attribution_scope)}</strong></div>
 		<div><span>综合状态</span><strong>{synthesisLabel(finding.synthesis_status)}</strong></div>
-		<div><span>确定性</span><strong>{Math.round(finding.certainty * 100)}%</strong></div>
+		<div><span>证据确定性</span><strong>{certaintyLabel(finding.certainty)}</strong></div>
 		<div><span>直接文献</span><strong>{directPaperCount} 篇</strong></div>
 	</div>
 
-	{#if feedbackOpen}
-		<form class="feedback" aria-busy={feedbackLoading} on:submit|preventDefault={submitFeedback}>
-			<div>
-				<label for="feedback-status">判断</label>
-				<select id="feedback-status" bind:value={feedbackStatus}>
-					{#each feedbackStatuses as option}
-						<option value={option.value}>{option.label}</option>
-					{/each}
-				</select>
+	<section aria-labelledby="evidence-comparison-title">
+		<div class="section-heading">
+			<h3 id="evidence-comparison-title">证据对比</h3>
+			<span>{comparisonRows.length} 条结构化 Evidence</span>
+		</div>
+		{#if comparisonRows.length}
+			<div class="comparison-table-wrap">
+				<table class="comparison-table">
+					<thead>
+						<tr>
+							<th scope="col">文献</th>
+							<th scope="col">证据关系</th>
+							<th scope="col">变量</th>
+							<th scope="col">参照条件</th>
+							<th scope="col">比较条件</th>
+							<th scope="col">报告结果</th>
+							<th scope="col">方向</th>
+							<th scope="col">可比性</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each comparisonRows as row, rowIndex (`${row.evidence.evidence_id}:${rowIndex}`)}
+							<tr>
+								<td>{paperTitle(row.evidence.document_id)}</td>
+								<td>{row.binding}</td>
+								<td><span class="condition-values">{row.variables.join('\n')}</span></td>
+								<td><span class="condition-values">{row.baselines.join('\n')}</span></td>
+								<td><span class="condition-values">{row.targets.join('\n')}</span></td>
+								<td>{row.result}</td>
+								<td>{row.direction}</td>
+								<td>{row.comparability}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
 			</div>
-			<div>
-				<label for="feedback-issue">问题类型</label>
-				<select
-					id="feedback-issue"
-					bind:value={feedbackIssue}
-					disabled={feedbackStatus === 'correct'}
-				>
-					{#each feedbackIssues as option}
-						<option
-							value={option.value}
-							disabled={option.value === 'none' &&
-								(feedbackStatus === 'partial' || feedbackStatus === 'incorrect')}
-							>{option.label}</option
-						>
-					{/each}
-				</select>
+		{:else}
+			<p class="empty">当前证据没有可展示的基线、目标或测量结果。</p>
+		{/if}
+	</section>
+
+	<section>
+		<h3>适用条件</h3>
+		{#if contextGroups.length}
+			<div class="context-grid">
+				{#each contextGroups as group (group.label)}
+					<div>
+						<span>{group.label}</span>
+						<ul>
+							{#each attributes(group.items) as value, attributeIndex (`${group.label}:${attributeIndex}`)}<li
+								>
+									{value}
+								</li>{/each}
+						</ul>
+					</div>
+				{/each}
 			</div>
-			<label class="feedback-note" for="feedback-note">
-				<span>说明</span>
-				<textarea id="feedback-note" rows="3" bind:value={feedbackNote}></textarea>
-			</label>
-			<button
-				class="btn btn--primary btn--small"
-				type="submit"
-				disabled={feedbackSaving || feedbackLoading}
-			>
-				{feedbackSaving ? '提交中...' : '提交反馈'}
-			</button>
-			{#if feedbackMessage}<p class="success" role="status">{feedbackMessage}</p>{/if}
-			{#if feedbackError}<p class="error" role="alert">{feedbackError}</p>{/if}
-		</form>
-	{/if}
+		{:else}
+			<p class="empty">未报告共同适用条件。</p>
+		{/if}
+		<div class="limitations">
+			<strong>分析边界</strong>
+			{#if finding.limitations.length}
+				<ul>
+					{#each finding.limitations as limitation, limitationIndex (limitationIndex)}<li>
+							{limitation}
+						</li>{/each}
+				</ul>
+			{:else}
+				<p>未识别额外分析边界。</p>
+			{/if}
+		</div>
+	</section>
 
 	<section>
 		<h3>作用机制</h3>
 		{#if finding.mechanisms.length}
-			<ol class="mechanisms">
-				{#each finding.mechanisms as mechanism}
+			<ol class="mechanisms" aria-label="作用机制关系">
+				{#each finding.mechanisms as mechanism, mechanismIndex (`${mechanism.source_term}:${mechanism.target_term}:${mechanismIndex}`)}
+					{@const mechanismEvidence = evidenceByIds(mechanism.supporting_evidence_ids)}
 					<li>
 						<strong>{mechanism.source_term}</strong>
-						<span>{mechanism.relation_type}</span>
+						<span>{relationLabel(mechanism.relation_type)}</span>
 						<strong>{mechanism.target_term}</strong>
 						<small
 							>{assertionLabel(mechanism.assertion_strength)}{mechanism.direction
 								? ` · ${directionLabel(mechanism.direction)}`
 								: ''}</small
 						>
+						{#if mechanismEvidence.length}
+							<div class="mechanism-sources" aria-label="机制支撑证据">
+								{#each mechanismEvidence as item (item.evidence_id)}
+									<a href={resolve(sourceHref(item))}>{evidenceSourceLabel(item)}</a>
+								{/each}
+							</div>
+						{/if}
 					</li>
 				{/each}
 			</ol>
@@ -364,58 +521,29 @@
 	</section>
 
 	<section>
-		<h3>适用条件</h3>
-		<div class="context-grid">
-			{#each contextGroups as group}
-				<div>
-					<span>{group.label}</span>
-					{#if group.items.length}
-						<ul>
-							{#each attributes(group.items) as value}<li>{value}</li>{/each}
-						</ul>
-					{:else}
-						<p>未报告</p>
-					{/if}
-				</div>
-			{/each}
-		</div>
-		<div class="limitations">
-			<strong>证据边界</strong>
-			{#if finding.limitations.length}
-				<ul>
-					{#each finding.limitations as limitation}<li>{limitation}</li>{/each}
-				</ul>
-			{:else}
-				<p>未报告额外限制。</p>
-			{/if}
-		</div>
-	</section>
-
-	<section>
 		<div class="section-heading">
 			<h3>文献贡献与原文证据</h3>
-			<span>{evidence.length} 条证据 · {finding.paper_contributions.length} 篇文献</span>
+			<span>{evidence.length} 条证据 · {evidencedContributionGroups.length} 篇文献</span>
 		</div>
-		<div class="paper-groups">
-			{#each finding.paper_contributions as contribution, index}
-				{@const paperEvidence = evidenceFor(contribution)}
-				<section class="paper-group">
-					<header>
-						{#if paperEvidence[0]}
-							<a href={sourceHref(paperEvidence[0])}>{paperLabel(index, paperEvidence)}</a>
-						{:else}
-							<strong>{paperLabel(index, paperEvidence)}</strong>
-						{/if}
-						<span
-							>{contributionStatus(contribution.analysis_status)} · {paperEvidence.length} 条证据</span
-						>
-					</header>
-					{#if paperEvidence.length}
+		{#if evidencedContributionGroups.length}
+			<div class="paper-groups">
+				{#each evidencedContributionGroups as group, index (group.contribution.document_id)}
+					{@const contribution = group.contribution}
+					{@const paperEvidence = group.paperEvidence}
+					<section class="paper-group">
+						<header>
+							<a href={resolve(sourceHref(paperEvidence[0]))}
+								>{paperLabel(contribution, index, paperEvidence)}</a
+							>
+							<span
+								>{contributionStatus(contribution.analysis_status)} · {paperEvidence.length} 条证据</span
+							>
+						</header>
 						<div class="evidence-list">
 							{#each paperEvidence as item (item.evidence_id)}
 								<article class="evidence-item">
 									<div class="evidence-meta">
-										{#each evidenceBindings(contribution, item.evidence_id) as binding}
+										{#each evidenceBindings(contribution, item.evidence_id) as binding (binding)}
 											<strong>{binding}</strong>
 										{/each}
 										<span>{evidenceRoleLabel(item.evidence_role)}</span>
@@ -425,19 +553,86 @@
 												? `p.${item.page_numbers.join(', ')}`
 												: '页码未知'}</span
 										>
-										<a href={sourceHref(item)}>打开原文</a>
+										<a href={resolve(sourceHref(item))}>打开原文</a>
 									</div>
 									<blockquote>{item.source_excerpt}</blockquote>
-									{#if item.reported_result}<p>{item.reported_result.result_text}</p>{/if}
 								</article>
 							{/each}
 						</div>
-					{:else}
-						<p class="empty">该文献未绑定到此 Finding 的可审计证据。</p>
-					{/if}
-				</section>
-			{/each}
+					</section>
+				{/each}
+			</div>
+		{:else}
+			<p class="empty">当前 Finding 没有可审计的原文 Evidence。</p>
+		{/if}
+		{#if emptyContributionSummary}
+			<p class="empty-contribution-summary">{emptyContributionSummary}</p>
+		{/if}
+	</section>
+
+	<section class="review-section" aria-labelledby="finding-review-title">
+		<div class="section-heading">
+			<div>
+				<h3 id="finding-review-title">专家审阅</h3>
+				<p>记录这条 Finding 的科学准确性和证据问题。</p>
+			</div>
+			<button
+				class="btn btn--ghost btn--small"
+				type="button"
+				aria-expanded={feedbackOpen}
+				aria-controls="finding-feedback-form"
+				on:click={toggleFeedback}
+			>
+				{feedbackOpen ? '关闭反馈' : '反馈'}
+			</button>
 		</div>
+		{#if feedbackOpen}
+			<form
+				id="finding-feedback-form"
+				class="feedback"
+				aria-busy={feedbackLoading}
+				on:submit|preventDefault={submitFeedback}
+			>
+				<div>
+					<label for="feedback-status">判断</label>
+					<select id="feedback-status" bind:value={feedbackStatus}>
+						{#each feedbackStatuses as option (option.value)}
+							<option value={option.value}>{option.label}</option>
+						{/each}
+					</select>
+				</div>
+				<div>
+					<label for="feedback-issue">问题类型</label>
+					<select
+						id="feedback-issue"
+						bind:value={feedbackIssue}
+						disabled={feedbackStatus === 'correct'}
+					>
+						{#each feedbackIssues as option (option.value)}
+							<option
+								value={option.value}
+								disabled={option.value === 'none' &&
+									(feedbackStatus === 'partial' || feedbackStatus === 'incorrect')}
+								>{option.label}</option
+							>
+						{/each}
+					</select>
+				</div>
+				<label class="feedback-note" for="feedback-note">
+					<span>说明</span>
+					<textarea id="feedback-note" rows="3" bind:value={feedbackNote}></textarea>
+				</label>
+				<button
+					class="btn btn--primary btn--small"
+					type="submit"
+					disabled={feedbackSaving || feedbackLoading}
+				>
+					{feedbackSaving ? '提交中...' : '提交反馈'}
+				</button>
+				{#if feedbackMessage}<p class="success" role="status">{feedbackMessage}</p>{/if}
+				{#if feedbackError}<p class="error" role="alert">{feedbackError}</p>{/if}
+			</form>
+		{/if}
 	</section>
 </article>
 
@@ -445,6 +640,10 @@
 	.finding-detail {
 		display: grid;
 		gap: 24px;
+		min-width: 0;
+	}
+	.finding-detail > section {
+		min-width: 0;
 	}
 	header,
 	.section-heading,
@@ -453,10 +652,6 @@
 		justify-content: space-between;
 		align-items: flex-start;
 		gap: 16px;
-	}
-	.finding-detail > header > button {
-		flex: 0 0 auto;
-		white-space: nowrap;
 	}
 	header span,
 	.section-heading span,
@@ -519,11 +714,43 @@
 	.metrics div:last-child {
 		border-right: 0;
 	}
+	.comparison-table-wrap {
+		min-width: 0;
+		max-width: 100%;
+		overflow-x: auto;
+		border-block: 1px solid var(--border-default);
+	}
+	.comparison-table {
+		width: 100%;
+		min-width: 960px;
+		border-collapse: collapse;
+		font-size: 13px;
+	}
+	.comparison-table th,
+	.comparison-table td {
+		padding: 10px 12px;
+		border-bottom: 1px solid var(--border-default);
+		text-align: left;
+		vertical-align: top;
+	}
+	.comparison-table th {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 500;
+		background: var(--surface-subtle);
+	}
+	.comparison-table tbody tr:last-child td {
+		border-bottom: 0;
+	}
+	.condition-values {
+		white-space: pre-line;
+	}
 	.feedback {
 		display: grid;
-		grid-template-columns: 180px 220px 1fr auto;
+		grid-template-columns: minmax(140px, 0.7fr) minmax(180px, 0.9fr) minmax(240px, 1.4fr);
 		align-items: end;
 		gap: 12px;
+		margin-top: 12px;
 		padding: 16px;
 		border: 1px solid var(--border-default);
 		background: var(--surface-subtle);
@@ -549,6 +776,10 @@
 	.feedback .error {
 		grid-column: 1 / -1;
 	}
+	.feedback > button {
+		grid-column: 3;
+		justify-self: end;
+	}
 	.success {
 		color: #256346;
 	}
@@ -572,6 +803,15 @@
 	.mechanisms small {
 		color: var(--text-secondary);
 	}
+	.mechanism-sources {
+		grid-column: 1 / -1;
+		display: flex;
+		gap: 8px 16px;
+		flex-wrap: wrap;
+		padding-top: 8px;
+		border-top: 1px solid var(--border-default);
+		font-size: 12px;
+	}
 	.context-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
@@ -587,10 +827,6 @@
 	.limitations ul {
 		margin: 6px 0 0;
 		padding-left: 18px;
-	}
-	.context-grid p {
-		margin-top: 6px;
-		color: var(--text-secondary);
 	}
 	.limitations {
 		margin-top: 12px;
@@ -643,20 +879,33 @@
 		line-height: 1.65;
 		white-space: pre-wrap;
 	}
-	.evidence-item > p {
-		margin-top: 8px;
-		color: var(--text-secondary);
-	}
 	.empty {
 		color: var(--text-secondary);
 		padding: 10px 0;
 	}
+	.empty-contribution-summary {
+		margin-top: 10px;
+		padding-top: 10px;
+		border-top: 1px solid var(--border-default);
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+	.review-section {
+		padding-top: 18px;
+		border-top: 1px solid var(--border-default);
+	}
+	.review-section .section-heading p {
+		margin-top: 4px;
+		color: var(--text-secondary);
+		font-size: 13px;
+	}
 	@media (max-width: 820px) {
 		.result-line {
-			grid-template-columns: 1fr auto 1fr;
+			grid-template-columns: 1fr;
+			gap: 12px;
 		}
-		.result-line .direction {
-			grid-column: 1 / -1;
+		.result-line b {
+			display: none;
 		}
 		.metrics,
 		.context-grid {
@@ -665,6 +914,10 @@
 		.feedback {
 			grid-template-columns: 1fr;
 			align-items: stretch;
+		}
+		.feedback > button {
+			grid-column: auto;
+			justify-self: start;
 		}
 		.mechanisms li {
 			grid-template-columns: 1fr;

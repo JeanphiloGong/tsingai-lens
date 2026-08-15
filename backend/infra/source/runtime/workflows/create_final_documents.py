@@ -72,7 +72,7 @@ def create_final_documents(
     ).reset_index(drop=True)
 
     rejoined["id"] = rejoined["id"].astype(str)
-    rejoined["human_readable_id"] = rejoined.index
+    rejoined["document_order"] = rejoined.index
 
     if "creation_date" not in rejoined.columns:
         rejoined["creation_date"] = pd.Series(dtype="object")

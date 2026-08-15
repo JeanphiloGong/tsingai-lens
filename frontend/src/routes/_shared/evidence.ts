@@ -3,8 +3,6 @@ import { USE_API_FIXTURES } from './base';
 
 export type EvidenceSourceType = 'figure' | 'table' | 'method' | 'text' | 'abstract';
 export type TraceabilityStatus = 'direct' | 'partial' | 'missing' | 'indirect' | 'none';
-export type LocatorType = 'char_range' | 'bbox' | 'section';
-export type LocatorConfidence = 'high' | 'medium' | 'low';
 export type TracebackStatus = 'ready' | 'partial' | 'unavailable';
 export type EvidenceTypeFilter =
 	| ''
@@ -80,34 +78,15 @@ export type EvidenceSourceLocation = {
 	tags: string[];
 };
 
-export type EvidenceCharRange = {
-	start: number;
-	end: number;
-};
-
-export type EvidenceBoundingBox = {
-	x0: number;
-	y0: number;
-	x1: number;
-	y1: number;
-};
-
 export type EvidenceAnchor = {
 	anchor_id: string;
 	document_id: string;
-	locator_type: LocatorType;
-	locator_confidence: LocatorConfidence;
+	source_kind: string;
+	source_ref: string;
 	source_type: EvidenceSourceType;
-	section_id: string | null;
-	char_range: EvidenceCharRange | null;
-	bbox: EvidenceBoundingBox | null;
 	page: number | null;
 	quote: string | null;
 	deep_link: string | null;
-	block_id: string | null;
-	snippet_id: string | null;
-	figure_or_table: string | null;
-	quote_span: string | null;
 	anchor_type: string;
 	label: string;
 };
@@ -249,26 +228,6 @@ function normalizeComparisonStatus(value: unknown): EvidenceComparabilityStatus 
 	return null;
 }
 
-function normalizeCharRange(value: unknown): EvidenceCharRange | null {
-	const record = asRecord(value);
-	if (!record) return null;
-	const start = toNumber(record.start);
-	const end = toNumber(record.end);
-	if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
-	return { start, end };
-}
-
-function normalizeBbox(value: unknown): EvidenceBoundingBox | null {
-	const record = asRecord(value);
-	if (!record) return null;
-	const x0 = toNumber(record.x0);
-	const y0 = toNumber(record.y0);
-	const x1 = toNumber(record.x1);
-	const y1 = toNumber(record.y1);
-	if (![x0, y0, x1, y1].every((item) => Number.isFinite(item))) return null;
-	return { x0, y0, x1, y1 };
-}
-
 function buildTracebackLink(
 	collectionId: string,
 	documentId: string,
@@ -287,86 +246,32 @@ function normalizeAnchor(
 	index: number
 ): EvidenceAnchor | null {
 	const record = asRecord(value);
-	if (!record) {
-		const label = String(value ?? '').trim();
-		return label
-			? {
-					anchor_id: `anchor_${index + 1}`,
-					document_id: documentId,
-					locator_type: 'section',
-					locator_confidence: 'low',
-					source_type: 'text',
-					section_id: null,
-					char_range: null,
-					bbox: null,
-					page: null,
-					quote: label,
-					deep_link: buildTracebackLink(
-						collectionId,
-						documentId,
-						evidenceId,
-						`anchor_${index + 1}`
-					),
-					block_id: null,
-					snippet_id: null,
-					figure_or_table: null,
-					quote_span: label,
-					anchor_type: 'text',
-					label
-				}
-			: null;
-	}
+	if (!record) return null;
 
 	const anchor_id = String(record.anchor_id ?? record.id ?? `anchor_${index + 1}`);
 	const anchorDocumentId = String(record.document_id ?? documentId ?? '').trim();
-	const char_range = normalizeCharRange(record.char_range);
-	const bbox = normalizeBbox(record.bbox);
-	const rawLocatorType = String(record.locator_type ?? '').trim() as LocatorType;
-	const locator_type: LocatorType = ['char_range', 'bbox', 'section'].includes(rawLocatorType)
-		? rawLocatorType
-		: char_range
-			? 'char_range'
-			: bbox
-				? 'bbox'
-				: 'section';
-	const rawConfidence = String(record.locator_confidence ?? '').trim() as LocatorConfidence;
-	const locator_confidence: LocatorConfidence = ['high', 'medium', 'low'].includes(rawConfidence)
-		? rawConfidence
-		: char_range || bbox
-			? 'medium'
-			: 'low';
+	const source_kind = String(record.source_kind ?? '').trim();
+	const source_ref = String(record.source_ref ?? '').trim();
+	if (!source_kind || !source_ref) return null;
 	const source_type = normalizeEvidenceSourceType(
 		record.source_type ?? record.anchor_type ?? record.type
 	);
-	const quote = toOptionalText(record.quote) ?? toOptionalText(record.quote_span);
+	const quote = toOptionalText(record.quote);
 	const label = String(
-		record.label ??
-			quote ??
-			record.figure_or_table ??
-			record.section_id ??
-			record.snippet_id ??
-			record.value ??
-			source_type
+		record.label ?? quote ?? source_ref ?? record.value ?? source_type
 	).trim();
 
 	return {
 		anchor_id,
 		document_id: anchorDocumentId,
-		locator_type,
-		locator_confidence,
+		source_kind,
+		source_ref,
 		source_type,
-		section_id: toOptionalText(record.section_id),
-		char_range,
-		bbox,
 		page: Number.isFinite(toNumber(record.page)) ? toNumber(record.page) : null,
 		quote,
 		deep_link:
 			toOptionalText(record.deep_link) ??
 			buildTracebackLink(collectionId, anchorDocumentId, evidenceId, anchor_id),
-		block_id: toOptionalText(record.block_id),
-		snippet_id: toOptionalText(record.snippet_id),
-		figure_or_table: toOptionalText(record.figure_or_table),
-		quote_span: quote,
 		anchor_type: String(record.anchor_type ?? record.type ?? source_type ?? 'text'),
 		label: label || quote || anchor_id
 	};
@@ -504,38 +409,24 @@ function buildFixture(collectionId: string): EvidenceCardsResponse {
 				{
 					anchor_id: 'a1',
 					document_id: 'doc_a',
-					locator_type: 'section',
-					locator_confidence: 'low',
+					source_kind: 'figure',
+					source_ref: 'fig-3b',
 					source_type: 'figure',
-					section_id: 'results',
-					char_range: null,
-					bbox: null,
 					page: null,
 					quote: 'Figure 3b',
 					deep_link: `/collections/${collectionId}/documents/doc_a?evidence_id=ev_1&anchor_id=a1`,
-					block_id: null,
-					snippet_id: null,
-					figure_or_table: 'Figure 3b',
-					quote_span: 'Figure 3b',
 					anchor_type: 'figure',
 					label: 'Figure 3b'
 				},
 				{
 					anchor_id: 'a2',
 					document_id: 'doc_a',
-					locator_type: 'char_range',
-					locator_confidence: 'medium',
+					source_kind: 'block',
+					source_ref: 'results',
 					source_type: 'text',
-					section_id: 'results',
-					char_range: { start: 120, end: 188 },
-					bbox: null,
 					page: null,
 					quote: 'Results section paragraph 4',
 					deep_link: `/collections/${collectionId}/documents/doc_a?evidence_id=ev_1&anchor_id=a2`,
-					block_id: null,
-					snippet_id: null,
-					figure_or_table: null,
-					quote_span: 'Results section paragraph 4',
 					anchor_type: 'text',
 					label: 'Results section paragraph 4'
 				}
@@ -569,19 +460,12 @@ function buildFixture(collectionId: string): EvidenceCardsResponse {
 				{
 					anchor_id: 'a3',
 					document_id: 'doc_c',
-					locator_type: 'section',
-					locator_confidence: 'low',
+					source_kind: 'table',
+					source_ref: 'table-2',
 					source_type: 'table',
-					section_id: 'results',
-					char_range: null,
-					bbox: null,
 					page: null,
 					quote: 'Table 2',
 					deep_link: `/collections/${collectionId}/documents/doc_c?evidence_id=ev_2&anchor_id=a3`,
-					block_id: null,
-					snippet_id: null,
-					figure_or_table: 'Table 2',
-					quote_span: 'Table 2',
 					anchor_type: 'table',
 					label: 'Table 2'
 				}
@@ -805,15 +689,13 @@ export function getEvidenceActions(evidence: EvidenceCard): EvidenceAction[] {
 export function getEvidenceSourceLocation(evidence: EvidenceCard): EvidenceSourceLocation {
 	const primaryAnchor = evidence.evidence_anchors[0] ?? null;
 	const sourceType = primaryAnchor?.source_type ?? evidence.evidence_source_type;
-	const section = displayLocator(primaryAnchor?.section_id);
-	const figureOrTable = displayLocator(primaryAnchor?.figure_or_table);
-	const blockId = displayLocator(primaryAnchor?.block_id);
+	const sourceRef = displayLocator(primaryAnchor?.source_ref);
 	const anchorLabel = displayLocator(primaryAnchor?.label);
 	const locationParts = [
 		typeof primaryAnchor?.page === 'number' ? `Page ${primaryAnchor.page}` : '',
-		section ? (/^section\b/i.test(section) ? section : `Section ${section}`) : '',
-		figureOrTable,
-		blockId ? `Block ${blockId}` : ''
+		sourceRef
+			? `${primaryAnchor?.source_kind === 'block' ? 'Block' : primaryAnchor?.source_kind} ${sourceRef}`
+			: ''
 	].filter(Boolean);
 	const contextValues = [
 		...evidence.condition_context.process,
@@ -839,15 +721,12 @@ export function getEvidenceSourceLocation(evidence: EvidenceCard): EvidenceSourc
 
 export function getEvidenceQuote(evidence: EvidenceCard): EvidenceQuote {
 	const anchor =
-		evidence.evidence_anchors.find(
-			(item) => usefulText(item.quote) || usefulText(item.quote_span)
-		) ??
+		evidence.evidence_anchors.find((item) => usefulText(item.quote)) ??
 		evidence.evidence_anchors[0] ??
 		null;
 	const location = getEvidenceSourceLocation(evidence);
 	const text =
 		usefulText(anchor?.quote) ||
-		usefulText(anchor?.quote_span) ||
 		usefulText(anchor?.label) ||
 		usefulText(evidence.claim_text) ||
 		'--';
@@ -966,8 +845,7 @@ export function filterEvidenceItems(
 			...item.evidence_anchors.flatMap((anchor) => [
 				anchor.label,
 				anchor.quote ?? '',
-				anchor.quote_span ?? '',
-				anchor.figure_or_table ?? ''
+				anchor.source_ref
 			])
 		]
 			.join(' ')
@@ -1092,10 +970,9 @@ export async function fetchEvidenceTraceback(
 								{
 									anchor_id: 'a3',
 									document_id: 'doc_c',
-									locator_type: 'section',
-									locator_confidence: 'low',
+									source_kind: 'table',
+									source_ref: 'table-2',
 									source_type: 'table',
-									section_id: 'results',
 									quote: 'Table 2'
 								}
 							],
@@ -1108,11 +985,9 @@ export async function fetchEvidenceTraceback(
 								{
 									anchor_id: 'a2',
 									document_id: 'doc_a',
-									locator_type: 'char_range',
-									locator_confidence: 'medium',
+									source_kind: 'block',
+									source_ref: 'results',
 									source_type: 'text',
-									section_id: 'results',
-									char_range: { start: 120, end: 188 },
 									quote: 'Results section paragraph 4'
 								}
 							],

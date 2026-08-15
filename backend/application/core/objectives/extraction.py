@@ -4,35 +4,40 @@ import json
 import logging
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from time import perf_counter
 from typing import Any
 
-from openai import OpenAI
+import tiktoken
+from openai import LengthFinishReasonError, OpenAI
 from pydantic import BaseModel, ValidationError
 
+from application.core.objectives import property_matching
 from application.core.objectives.prompts import (
     FINDING_SYNTHESIS_PROMPT_VERSION,
+    OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION,
+    OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
+    OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
+    PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION,
+    PAPER_SKIM_PROMPT_VERSION,
+    RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION,
     build_finding_synthesis_prompt,
     build_objective_evidence_prompt,
     build_objective_evidence_route_prompt,
     build_objective_paper_frame_prompt,
     build_paper_skim_prompt,
+    build_paper_signal_reconciliation_prompt,
     build_research_axis_canonicalization_prompt,
-    build_research_objective_discovery_prompt,
-    build_research_objective_merge_prompt,
 )
 from application.core.objectives.schemas import (
-    PAPER_SKIM_OUTPUT_LIMITS,
+    PAPER_SKIM_SOURCE_UNIT_LIMIT,
     StructuredAxisCanonicalizationPlan,
     StructuredEvidenceExtractions,
     StructuredEvidenceSelections,
     StructuredFindingSynthesis,
-    StructuredObjectiveMergePlan,
-    StructuredPaperContributionDraft,
+    StructuredPaperFrameBatch,
+    StructuredPaperSignalReconciliation,
     StructuredPaperSkim,
-    StructuredResearchObjective,
-    StructuredResearchObjectives,
 )
 from application.core.structured_extraction.json_support import (
     coerce_message_content,
@@ -41,14 +46,20 @@ from application.core.structured_extraction.json_support import (
     trace_json,
     trace_text,
 )
+from infra.llm.usage import record_llm_completion, record_llm_prompt_version
 
 logger = logging.getLogger(__name__)
 
 _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
-_PAPER_SKIM_MAX_COMPLETION_TOKENS = 1024
-_RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS = 2400
+_PAPER_SKIM_MAX_COMPLETION_TOKENS = 4096
+PAPER_SKIM_PROMPT_TOKEN_LIMIT = 12_288
+_PAPER_SIGNAL_RECONCILIATION_MAX_COMPLETION_TOKENS = 4096
+PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT = 12_288
+_AXIS_CANONICALIZATION_MAX_COMPLETION_TOKENS = 1024
+_OBJECTIVE_PAPER_FRAME_MAX_COMPLETION_TOKENS = 1024
+OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT = 12_288
 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS = 512
 _OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS = 2048
 _FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS = 1024
@@ -57,6 +68,10 @@ _SUPPORTED_EXTRACTION_MODES = {
     _EXTRACTION_MODE_JSON_TEXT,
     _EXTRACTION_MODE_PROVIDER_PARSE,
 }
+
+
+class PaperSkimOutputSaturatedError(Exception):
+    """A PaperSkim response cannot completely fit in one bounded output."""
 
 
 class ObjectiveExtractor:
@@ -89,48 +104,241 @@ class ObjectiveExtractor:
 
     def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         system_prompt, user_prompt = build_paper_skim_prompt(payload)
+
+        def build_repair_instruction(repair_detail: str) -> str:
+            return (
+                "Previous PaperSkim output was invalid: "
+                f"{repair_detail}. Preserve every distinct supported study, "
+                "relationship, and unresolved signal. Copy only unique Source-unit "
+                f"IDs from the input, with at most {PAPER_SKIM_SOURCE_UNIT_LIMIT} IDs "
+                "per relationship or unresolved signal. Set output_saturated=true "
+                "instead of silently omitting a scientific item. Return only compact "
+                "schema-valid JSON."
+            )
+
+        def validate_study_identities(response: BaseModel) -> None:
+            if not isinstance(response, StructuredPaperSkim):
+                raise TypeError("unexpected paper skim response type")
+            source_keys = {
+                str(source_unit.get("source_unit_id") or "").strip(): (
+                    str(source_unit.get("source_kind") or "").strip(),
+                    str(source_unit.get("source_ref") or "").strip(),
+                )
+                for source_unit in payload.get("source_units") or ()
+                if isinstance(source_unit, Mapping)
+                and str(source_unit.get("source_unit_id") or "").strip()
+            }
+            study_identities = [
+                study.identity_key(source_keys) for study in response.studies
+            ]
+            if len(study_identities) != len(set(study_identities)):
+                raise ValueError("studies contain duplicate study identities")
+
+        def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
+            return self._parse_json_text_response(
+                **kwargs,
+                repair_instruction_builder=build_repair_instruction,
+                parsed_validator=validate_study_identities,
+                fail_on_output_saturation=True,
+            )
+
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredPaperSkim,
             max_completion_tokens=_PAPER_SKIM_MAX_COMPLETION_TOKENS,
-            json_text_parser=self._parse_paper_skim_json_response,
+            json_text_parser=parse_json_text,
+            parsed_validator=validate_study_identities,
+            fail_on_output_saturation=True,
+            task_type="paper_skim",
+            prompt_version=PAPER_SKIM_PROMPT_VERSION,
         )
         if not isinstance(response, StructuredPaperSkim):
             raise TypeError("unexpected paper skim response type")
         return response
 
-    def discover_research_objectives(
+    def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
+        """Count the complete repair-capable prompt before model execution."""
+
+        system_prompt, user_prompt = build_paper_skim_prompt(payload)
+        messages = self._build_messages(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredPaperSkim,
+            include_schema=True,
+        )
+        try:
+            encoding = tiktoken.encoding_for_model(self.model)
+        except KeyError:
+            encoding = tiktoken.get_encoding("cl100k_base")
+        serialized_messages = json.dumps(
+            messages,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return len(encoding.encode(serialized_messages))
+
+    def reconcile_paper_signals(
         self,
         payload: dict[str, Any],
-    ) -> StructuredResearchObjectives:
-        system_prompt, user_prompt = build_research_objective_discovery_prompt(payload)
+    ) -> StructuredPaperSignalReconciliation:
+        system_prompt, user_prompt = build_paper_signal_reconciliation_prompt(payload)
+        signals_by_id = {
+            str(signal.get("signal_id") or "").strip(): signal
+            for signal in payload.get("signals") or ()
+            if isinstance(signal, Mapping)
+            and str(signal.get("signal_id") or "").strip()
+        }
+        conflicting_response_count = 0
+
+        def validate_or_recover_contexts(response: BaseModel) -> BaseModel | None:
+            nonlocal conflicting_response_count
+            if not isinstance(response, StructuredPaperSignalReconciliation):
+                raise TypeError("unexpected paper signal reconciliation response type")
+            conflicts = self._paper_signal_reconciliation_conflicts(
+                response,
+                signals_by_id=signals_by_id,
+            )
+            if not conflicts:
+                return None
+            conflicting_response_count += 1
+            if conflicting_response_count == 1:
+                raise ValueError(
+                    "paper signal relationships must be context-compatible; "
+                    + "; ".join(conflicts)
+                )
+            return self._discard_conflicting_signal_relationships(
+                response,
+                signals_by_id=signals_by_id,
+            )
+
+        def build_repair_instruction(repair_detail: str) -> str:
+            return (
+                "Previous paper signal reconciliation was invalid: "
+                f"{repair_detail}. Make every relationship context-compatible. "
+                "Do not combine signals when material_scope, process_context, "
+                "sample_context, test_context, fixed_conditions, experiment_label, "
+                "comparator, design_type, or claim_scope conflict. Return only safe "
+                "relationships, optionally explain rejected candidates in "
+                "unresolved_signals, and return only compact JSON. The backend derives "
+                "unresolved records for omitted inputs."
+            )
+
+        def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
+            return self._parse_json_text_response(
+                **kwargs,
+                repair_instruction_builder=build_repair_instruction,
+                parsed_validator=validate_or_recover_contexts,
+            )
+
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredResearchObjectives,
+            response_model=StructuredPaperSignalReconciliation,
             max_completion_tokens=(
-                _RESEARCH_OBJECTIVE_DISCOVERY_MAX_COMPLETION_TOKENS
+                _PAPER_SIGNAL_RECONCILIATION_MAX_COMPLETION_TOKENS
             ),
-            json_text_parser=self._parse_research_objectives_json_response,
+            json_text_parser=parse_json_text,
+            parsed_validator=validate_or_recover_contexts,
+            task_type="paper_signal_reconciliation",
+            prompt_version=PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION,
         )
-        if not isinstance(response, StructuredResearchObjectives):
-            raise TypeError("unexpected research objective response type")
+        if not isinstance(response, StructuredPaperSignalReconciliation):
+            raise TypeError("unexpected paper signal reconciliation response type")
         return response
 
-    def merge_research_objectives(
+    def estimate_paper_signal_reconciliation_prompt_tokens(
         self,
         payload: dict[str, Any],
-    ) -> StructuredObjectiveMergePlan:
-        system_prompt, user_prompt = build_research_objective_merge_prompt(payload)
-        response = self._parse_structured_response(
+    ) -> int:
+        """Count the complete schema-bearing reconciliation prompt."""
+
+        system_prompt, user_prompt = build_paper_signal_reconciliation_prompt(payload)
+        messages = self._build_messages(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredObjectiveMergePlan,
+            response_model=StructuredPaperSignalReconciliation,
+            include_schema=True,
         )
-        if not isinstance(response, StructuredObjectiveMergePlan):
-            raise TypeError("unexpected research objective merge response type")
-        return response
+        try:
+            encoding = tiktoken.encoding_for_model(self.model)
+        except KeyError:
+            encoding = tiktoken.get_encoding("cl100k_base")
+        serialized_messages = json.dumps(
+            messages,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return len(encoding.encode(serialized_messages))
+
+    @staticmethod
+    def _paper_signal_reconciliation_conflicts(
+        response: StructuredPaperSignalReconciliation,
+        *,
+        signals_by_id: Mapping[str, Mapping[str, Any]],
+    ) -> tuple[str, ...]:
+        conflicts: list[str] = []
+        for study_position, study in enumerate(response.studies):
+            for relationship_position, relationship in enumerate(study.relationships):
+                signal_ids = tuple(
+                    str(signal_id).strip() for signal_id in relationship.signal_ids
+                )
+                context_conflicts = property_matching.paper_signal_context_conflicts(
+                    signals_by_id[signal_id]
+                    for signal_id in signal_ids
+                    if signal_id in signals_by_id
+                )
+                if context_conflicts:
+                    conflicts.append(
+                        f"studies[{study_position}].relationships"
+                        f"[{relationship_position}] signal_ids={list(signal_ids)} "
+                        f"conflict in {', '.join(context_conflicts)}"
+                    )
+        return tuple(conflicts)
+
+    @staticmethod
+    def _discard_conflicting_signal_relationships(
+        response: StructuredPaperSignalReconciliation,
+        *,
+        signals_by_id: Mapping[str, Mapping[str, Any]],
+    ) -> StructuredPaperSignalReconciliation:
+        studies: list[dict[str, Any]] = []
+        retained_signal_ids: set[str] = set()
+        rejected_reasons_by_id: dict[str, str] = {}
+        for study in response.studies:
+            relationships: list[dict[str, Any]] = []
+            for relationship in study.relationships:
+                signal_ids = tuple(
+                    str(signal_id).strip() for signal_id in relationship.signal_ids
+                )
+                conflicts = property_matching.paper_signal_context_conflicts(
+                    signals_by_id[signal_id]
+                    for signal_id in signal_ids
+                    if signal_id in signals_by_id
+                )
+                if conflicts:
+                    reason = (
+                        "Conflicting reconciliation context: "
+                        f"{', '.join(conflicts)}."
+                    )
+                    for signal_id in signal_ids:
+                        rejected_reasons_by_id.setdefault(signal_id, reason)
+                    continue
+                relationships.append(relationship.model_dump())
+                retained_signal_ids.update(signal_ids)
+            if relationships:
+                studies.append({"relationships": relationships})
+
+        unresolved = [item.model_dump() for item in response.unresolved_signals]
+        unresolved_ids = {str(item["signal_id"]).strip() for item in unresolved}
+        for signal_id, reason in rejected_reasons_by_id.items():
+            if signal_id in retained_signal_ids or signal_id in unresolved_ids:
+                continue
+            unresolved.append({"signal_id": signal_id, "reason": reason})
+            unresolved_ids.add(signal_id)
+        return StructuredPaperSignalReconciliation.model_validate(
+            {"studies": studies, "unresolved_signals": unresolved}
+        )
 
     def canonicalize_research_objective_axes(
         self,
@@ -139,28 +347,204 @@ class ObjectiveExtractor:
         system_prompt, user_prompt = build_research_axis_canonicalization_prompt(
             payload
         )
+
+        def validate_axis_accounting(response: BaseModel) -> None:
+            if not isinstance(response, StructuredAxisCanonicalizationPlan):
+                raise TypeError("unexpected research axis canonicalization response type")
+            self._validate_axis_candidate_accounting(
+                response,
+                axis_pairs=payload.get("axis_pairs"),
+            )
+
+        def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
+            return self._parse_axis_canonicalization_json_response(
+                **kwargs,
+                axis_accounting_validator=validate_axis_accounting,
+            )
+
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredAxisCanonicalizationPlan,
+            max_completion_tokens=_AXIS_CANONICALIZATION_MAX_COMPLETION_TOKENS,
+            json_text_parser=parse_json_text,
+            parsed_validator=validate_axis_accounting,
+            task_type="research_axis_canonicalization",
+            prompt_version=RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION,
         )
         if not isinstance(response, StructuredAxisCanonicalizationPlan):
             raise TypeError("unexpected research axis canonicalization response type")
         return response
 
+    @staticmethod
+    def _validate_axis_candidate_accounting(
+        response: StructuredAxisCanonicalizationPlan,
+        *,
+        axis_pairs: Any,
+    ) -> None:
+        if not isinstance(axis_pairs, list):
+            raise ValueError("axis pair selection requires axis_pairs")
+        expected_ids = [
+            str(pair.get("pair_id") or "").strip()
+            for pair in axis_pairs
+            if isinstance(pair, Mapping) and str(pair.get("pair_id") or "").strip()
+        ]
+        decision_ids = [decision.pair_id for decision in response.decisions]
+        if decision_ids != expected_ids:
+            raise ValueError(
+                "axis pair decisions must account for every input pair_id exactly once "
+                "and in input order"
+            )
+
+    def _parse_axis_canonicalization_json_response(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        response_model: type[BaseModel],
+        max_completion_tokens: int | None,
+        axis_accounting_validator: Callable[[BaseModel], None],
+    ) -> tuple[BaseModel, str | None]:
+        def build_repair_instruction(repair_detail: str) -> str:
+            return (
+                "Previous axis pair classification was invalid: "
+                f"{repair_detail}. Return one decision for every input pair_id, in "
+                "input order, without omissions or duplicates. Set equivalent=true "
+                "only when both labels name exactly the same scientific axis. Related, "
+                "inverse, broad, narrow, or uncertain pairs require equivalent=false. "
+                "Return only compact JSON."
+            )
+
+        return self._parse_json_text_response(
+            messages=messages,
+            response_model=response_model,
+            max_completion_tokens=max_completion_tokens,
+            repair_instruction_builder=build_repair_instruction,
+            parsed_validator=axis_accounting_validator,
+        )
+
     def assess_objective_paper(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperContributionDraft:
+    ) -> StructuredPaperFrameBatch:
         system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
-        response = self._parse_structured_response(
+        source_accounting_errors: list[str] = []
+
+        source_unit_ids = tuple(
+            str(item.get("source_unit_id") or "").strip()
+            for item in payload.get("source_units") or ()
+            if isinstance(item, Mapping)
+            and str(item.get("source_unit_id") or "").strip()
+        )
+        if not source_unit_ids or len(source_unit_ids) != len(set(source_unit_ids)):
+            raise ValueError("objective paper framing requires unique source-unit ids")
+
+        def record_source_accounting_error(error: Exception) -> None:
+            detail = str(error).strip()
+            if not detail or not any(
+                marker in detail
+                for marker in (
+                    "objective paper frame must account",
+                    "paper frame source-unit ids",
+                )
+            ):
+                return
+            if detail not in source_accounting_errors:
+                source_accounting_errors.append(detail)
+
+        def validate_source_accounting(parsed: BaseModel) -> BaseModel:
+            if not isinstance(parsed, StructuredPaperFrameBatch):
+                raise TypeError("unexpected objective paper frame response type")
+            returned_ids = (
+                *parsed.relevant_source_unit_ids,
+                *parsed.excluded_source_unit_ids,
+            )
+            missing_ids = [
+                source_unit_id
+                for source_unit_id in source_unit_ids
+                if source_unit_id not in returned_ids
+            ]
+            unknown_ids = [
+                source_unit_id
+                for source_unit_id in returned_ids
+                if source_unit_id not in source_unit_ids
+            ]
+            if missing_ids or unknown_ids:
+                raise ValueError(
+                    "objective paper frame must account for every source-unit id "
+                    "exactly once; "
+                    f"expected_source_unit_ids={list(source_unit_ids)}; "
+                    f"missing_source_unit_ids={missing_ids}; "
+                    f"unknown_source_unit_ids={unknown_ids}"
+                )
+            return parsed
+
+        def build_repair_instruction(repair_detail: str) -> str:
+            return (
+                "Previous objective paper framing output had invalid source-unit "
+                f"accounting: {repair_detail}. Return only one compact JSON object. "
+                "Partition this exact ID list once and only once between "
+                "relevant_source_unit_ids and excluded_source_unit_ids: "
+                f"{json.dumps(source_unit_ids, ensure_ascii=True)}. Copy every ID "
+                "verbatim; do not omit, duplicate, shorten, or invent an ID. Treat "
+                "an uncertain source as relevant."
+            )
+
+        def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
+            return self._parse_json_text_response(
+                **kwargs,
+                repair_instruction_builder=build_repair_instruction,
+                parsed_validator=validate_source_accounting,
+                validation_error_observer=record_source_accounting_error,
+            )
+
+        try:
+            response = self._parse_structured_response(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_model=StructuredPaperFrameBatch,
+                max_completion_tokens=_OBJECTIVE_PAPER_FRAME_MAX_COMPLETION_TOKENS,
+                json_text_parser=parse_json_text,
+                parsed_validator=validate_source_accounting,
+                validation_error_observer=record_source_accounting_error,
+                task_type="objective_paper_frame",
+                prompt_version=OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
+            )
+        except Exception as exc:
+            if not source_accounting_errors:
+                raise
+            raise ValueError(
+                "objective paper frame source accounting repair failed; "
+                f"initial_errors={source_accounting_errors}; final_error={exc}"
+            ) from exc
+        if not isinstance(response, StructuredPaperFrameBatch):
+            raise TypeError("unexpected objective paper frame response type")
+        if source_accounting_errors:
+            response.record_source_accounting_repair(source_accounting_errors)
+        return response
+
+    def estimate_objective_paper_frame_prompt_tokens(
+        self,
+        payload: dict[str, Any],
+    ) -> int:
+        """Count the complete schema-bearing objective framing prompt."""
+
+        system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
+        messages = self._build_messages(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredPaperContributionDraft,
+            response_model=StructuredPaperFrameBatch,
+            include_schema=True,
         )
-        if not isinstance(response, StructuredPaperContributionDraft):
-            raise TypeError("unexpected objective paper frame response type")
-        return response
+        try:
+            encoding = tiktoken.encoding_for_model(self.model)
+        except KeyError:
+            encoding = tiktoken.get_encoding("cl100k_base")
+        serialized_messages = json.dumps(
+            messages,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return len(encoding.encode(serialized_messages))
 
     def select_objective_evidence(
         self,
@@ -177,6 +561,8 @@ class ObjectiveExtractor:
                 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS
             ),
             force_json_text=True,
+            task_type="objective_evidence_route",
+            prompt_version=OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
         )
         if not isinstance(response, StructuredEvidenceSelections):
             raise TypeError("unexpected objective evidence route response type")
@@ -185,8 +571,25 @@ class ObjectiveExtractor:
     def extract_objective_evidence(
         self,
         payload: dict[str, Any],
+        *,
+        invalid_extraction: Mapping[str, Any] | None = None,
+        validation_errors: Iterable[str] = (),
     ) -> StructuredEvidenceExtractions:
         system_prompt, user_prompt = build_objective_evidence_prompt(payload)
+        repair_errors = tuple(
+            str(error).strip() for error in validation_errors if str(error).strip()
+        )
+        if invalid_extraction is not None:
+            user_prompt = (
+                f"{user_prompt}\n\n"
+                + self._objective_evidence_repair_instruction(
+                    repair_detail="; ".join(repair_errors)
+                    or "the extraction failed deterministic Source grounding",
+                    invalid_extraction=invalid_extraction,
+                )
+            )
+        elif repair_errors:
+            raise ValueError("Evidence repair errors require an invalid extraction")
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -195,6 +598,8 @@ class ObjectiveExtractor:
             force_json_text=True,
             include_schema_for_forced_json=False,
             json_text_parser=self._parse_objective_evidence_json_response,
+            task_type="objective_evidence_extraction",
+            prompt_version=OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION,
         )
         if not isinstance(response, StructuredEvidenceExtractions):
             raise TypeError("unexpected objective evidence extraction response type")
@@ -228,9 +633,14 @@ class ObjectiveExtractor:
         force_json_text: bool = False,
         include_schema_for_forced_json: bool = True,
         json_text_parser: Callable[..., tuple[BaseModel, str | None]] | None = None,
+        parsed_validator: Callable[[BaseModel], BaseModel | None] | None = None,
+        validation_error_observer: Callable[[Exception], None] | None = None,
         task_type: str | None = None,
         prompt_version: str | None = None,
+        fail_on_output_saturation: bool = False,
     ) -> BaseModel:
+        if task_type is not None and prompt_version is not None:
+            record_llm_prompt_version(task_type, prompt_version)
         parse_json_text = json_text_parser or self._parse_json_text_response
         messages = self._build_messages(
             system_prompt=system_prompt,
@@ -253,7 +663,39 @@ class ObjectiveExtractor:
                         response_model=response_model,
                         max_completion_tokens=max_completion_tokens,
                     )
-                except Exception:
+                    if parsed_validator is not None:
+                        validated = parsed_validator(parsed)
+                        if validated is not None:
+                            parsed = validated
+                except LengthFinishReasonError as exc:
+                    if fail_on_output_saturation:
+                        raise PaperSkimOutputSaturatedError(
+                            "PaperSkim provider output reached the completion-token "
+                            "limit"
+                        ) from exc
+                    logger.warning(
+                        "Objective provider output reached the completion-token limit; "
+                        "retrying with json_text model=%s response_model=%s",
+                        self.model,
+                        response_model.__name__,
+                    )
+                    messages = self._build_messages(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        response_model=response_model,
+                        include_schema=True,
+                    )
+                    parsed, raw_content = parse_json_text(
+                        messages=messages,
+                        response_model=response_model,
+                        max_completion_tokens=max_completion_tokens,
+                    )
+                    trace_extraction_mode = (
+                        f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
+                    )
+                except Exception as exc:
+                    if validation_error_observer is not None:
+                        validation_error_observer(exc)
                     logger.warning(
                         "Objective provider parse failed; retrying with json_text "
                         "model=%s response_model=%s",
@@ -266,6 +708,16 @@ class ObjectiveExtractor:
                         user_prompt=user_prompt,
                         response_model=response_model,
                         include_schema=True,
+                    )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "The provider-parsed output failed validation. "
+                                "Correct this validation error and return only the "
+                                f"schema-valid JSON object: {str(exc)[:1000]}"
+                            ),
+                        }
                     )
                     parsed, raw_content = parse_json_text(
                         messages=messages,
@@ -367,6 +819,9 @@ class ObjectiveExtractor:
         max_completion_tokens: int | None,
         repair_instruction_builder: Callable[[str], str] | None = None,
         payload_normalizer: Callable[[Any], Any] | None = None,
+        parsed_validator: Callable[[BaseModel], BaseModel | None] | None = None,
+        validation_error_observer: Callable[[Exception], None] | None = None,
+        fail_on_output_saturation: bool = False,
     ) -> tuple[BaseModel, str | None]:
         request_kwargs = {
             "model": self.model,
@@ -412,9 +867,25 @@ class ObjectiveExtractor:
                     response_model.__name__,
                 )
             try:
-                completion = self.client.chat.completions.create(**attempt_kwargs)
+                try:
+                    completion = self.client.chat.completions.create(**attempt_kwargs)
+                except Exception as exc:
+                    record_llm_completion(
+                        getattr(exc, "completion", None),
+                        requested_model=self.model,
+                    )
+                    raise
+                record_llm_completion(completion, requested_model=self.model)
+                choice = completion.choices[0] if completion.choices else None
+                if (
+                    fail_on_output_saturation
+                    and getattr(choice, "finish_reason", None) == "length"
+                ):
+                    raise PaperSkimOutputSaturatedError(
+                        "PaperSkim JSON output reached the completion-token limit"
+                    )
                 raw_content = coerce_message_content(
-                    completion.choices[0].message.content if completion.choices else None
+                    choice.message.content if choice is not None else None
                 )
                 if not raw_content:
                     raise RuntimeError(
@@ -424,7 +895,12 @@ class ObjectiveExtractor:
                 if payload_normalizer is not None:
                     payload = payload_normalizer(payload)
                 try:
-                    return response_model.model_validate(payload), raw_content
+                    parsed = response_model.model_validate(payload)
+                    if parsed_validator is not None:
+                        validated = parsed_validator(parsed)
+                        if validated is not None:
+                            parsed = validated
+                    return parsed, raw_content
                 except ValidationError:
                     if isinstance(payload, dict):
                         extra_keys = set(payload) - set(response_model.model_fields)
@@ -436,10 +912,12 @@ class ObjectiveExtractor:
                             if key in response_model.model_fields
                         }
                         if filtered_payload != payload:
-                            return (
-                                response_model.model_validate(filtered_payload),
-                                raw_content,
-                            )
+                            parsed = response_model.model_validate(filtered_payload)
+                            if parsed_validator is not None:
+                                validated = parsed_validator(parsed)
+                                if validated is not None:
+                                    parsed = validated
+                            return parsed, raw_content
                     raise
             except (
                 RuntimeError,
@@ -447,73 +925,13 @@ class ObjectiveExtractor:
                 ValidationError,
                 json.JSONDecodeError,
             ) as exc:
+                if validation_error_observer is not None:
+                    validation_error_observer(exc)
                 last_error = exc
                 if attempt == 0:
                     continue
                 raise
         raise RuntimeError("structured extraction failed after retry") from last_error
-
-    def _parse_paper_skim_json_response(
-        self,
-        *,
-        messages: list[dict[str, str]],
-        response_model: type[BaseModel],
-        max_completion_tokens: int | None,
-    ) -> tuple[BaseModel, str | None]:
-        return self._parse_json_text_response(
-            messages=messages,
-            response_model=response_model,
-            max_completion_tokens=max_completion_tokens,
-            payload_normalizer=self._normalize_paper_skim_payload,
-        )
-
-    @staticmethod
-    def _normalize_paper_skim_payload(payload: Any) -> Any:
-        if not isinstance(payload, dict):
-            return payload
-        normalized = dict(payload)
-        normalized_fields: list[str] = []
-        for field_name, (max_items, max_characters) in PAPER_SKIM_OUTPUT_LIMITS.items():
-            values = payload.get(field_name)
-            if not isinstance(values, list):
-                continue
-            bounded_values = [
-                ObjectiveExtractor._bound_paper_skim_text(
-                    value,
-                    max_characters=max_characters,
-                    preserve_question_mark=field_name == "possible_objectives",
-                )
-                if isinstance(value, str)
-                else value
-                for value in values[:max_items]
-            ]
-            if bounded_values != values:
-                normalized[field_name] = bounded_values
-                normalized_fields.append(field_name)
-        if normalized_fields:
-            logger.warning(
-                "Normalized PaperSkim model output to schema bounds fields=%s",
-                ",".join(normalized_fields),
-            )
-        return normalized
-
-    @staticmethod
-    def _bound_paper_skim_text(
-        value: str,
-        *,
-        max_characters: int,
-        preserve_question_mark: bool,
-    ) -> str:
-        compact = " ".join(value.split())
-        if len(compact) <= max_characters:
-            return compact
-        suffix = "?" if preserve_question_mark and compact.endswith("?") else ""
-        prefix_limit = max_characters - len(suffix)
-        prefix = compact[:prefix_limit].rstrip()
-        if " " in prefix:
-            prefix = prefix.rsplit(" ", 1)[0]
-        prefix = prefix.rstrip(" ,;:")
-        return f"{prefix}{suffix}"
 
     def _parse_finding_synthesis_json_response(
         self,
@@ -535,208 +953,6 @@ class ObjectiveExtractor:
             max_completion_tokens=max_completion_tokens,
             repair_instruction_builder=build_repair_instruction,
         )
-
-    def _parse_research_objectives_json_response(
-        self,
-        *,
-        messages: list[dict[str, str]],
-        response_model: type[BaseModel],
-        max_completion_tokens: int | None,
-    ) -> tuple[BaseModel, str | None]:
-        request_kwargs = {
-            "model": self.model,
-            "temperature": 0,
-            "messages": messages,
-            "response_format": {"type": "json_object"},
-            **self._provider_request_options(),
-        }
-        if max_completion_tokens is not None:
-            request_kwargs["max_completion_tokens"] = max_completion_tokens
-        last_error: Exception | None = None
-        last_raw_content: str | None = None
-        preserved_objectives: list[StructuredResearchObjective] = []
-        for attempt in range(2):
-            attempt_kwargs = dict(request_kwargs)
-            attempt_messages = [*messages]
-            attempt_kwargs["messages"] = attempt_messages
-            if attempt:
-                if isinstance(last_error, ValidationError):
-                    validation_errors = last_error.errors(
-                        include_input=False,
-                        include_url=False,
-                    )
-                    repair_detail = "; ".join(
-                        f"{'.'.join(str(part) for part in error['loc'])}: "
-                        f"{error['msg']}"
-                        for error in validation_errors
-                    )
-                else:
-                    validation_errors = []
-                    repair_detail = str(last_error or "invalid structured output")
-                retry_scope = (
-                    "Return corrections only for invalid objectives; do not repeat "
-                    "or rewrite objectives that were already valid. "
-                    if preserved_objectives
-                    else "Return one corrected `objectives` JSON array. "
-                )
-                if validation_errors and all(
-                    "question roles" in str(error["msg"])
-                    for error in validation_errors
-                ):
-                    retry_instruction = (
-                        f"{retry_scope}"
-                        "Correct every research-objective role error. Keep atomic, "
-                        "non-duplicate axes and preserve their variable-to-outcome "
-                        "direction. If an error names a field label missing from the "
-                        "question and another label already occupies that variables or "
-                        "outcomes role, delete the missing label from the list. If "
-                        "deleting it would leave that role empty, put the full missing "
-                        "label verbatim in the question. Then use the canonical form "
-                        "'How does <full variables labels joined with and> affect <full "
-                        "outcomes labels joined with and>?'. Keep material and process "
-                        "scope only in material_scope or constraints. Drop any objective "
-                        "that still cannot satisfy this form. Return only compact JSON. "
-                        f"Errors: {repair_detail[:1000]}"
-                    )
-                else:
-                    retry_instruction = (
-                        "Previous output was invalid. "
-                        f"{retry_scope}"
-                        "Correct the JSON or schema errors exactly. Keep the top-level "
-                        "object to the single `objectives` field, use only schema fields, "
-                        "and return no more than six objectives. Return only compact JSON "
-                        f"without commentary. Errors: {repair_detail[:1000]}"
-                    )
-                if last_raw_content:
-                    attempt_messages.append(
-                        {"role": "assistant", "content": last_raw_content}
-                    )
-                attempt_messages.append(
-                    {"role": "user", "content": retry_instruction}
-                )
-                messages[:] = attempt_messages
-                logger.warning(
-                    "Retrying research objective discovery JSON response model=%s",
-                    self.model,
-                )
-            try:
-                completion = self.client.chat.completions.create(**attempt_kwargs)
-                raw_content = coerce_message_content(
-                    completion.choices[0].message.content if completion.choices else None
-                )
-                last_raw_content = raw_content
-                if attempt and raw_content:
-                    messages.append({"role": "assistant", "content": raw_content})
-                if not raw_content:
-                    raise RuntimeError(
-                        "structured extraction returned empty response content"
-                    )
-                payload = load_json_payload(extract_json_object(raw_content))
-                try:
-                    parsed = StructuredResearchObjectives.model_validate(payload)
-                    if attempt and preserved_objectives:
-                        parsed = StructuredResearchObjectives(
-                            objectives=self._deduplicate_objectives(
-                                [*preserved_objectives, *parsed.objectives]
-                            )
-                        )
-                    return parsed, raw_content
-                except ValidationError as validation_error:
-                    if (
-                        isinstance(payload, dict)
-                        and isinstance(payload.get("objectives"), list)
-                    ):
-                        objective_payloads = payload["objectives"]
-                        if len(objective_payloads) > 6:
-                            raise validation_error
-                        validation_paths = {
-                            ".".join(str(part) for part in error["loc"])
-                            for candidate_error in (last_error, validation_error)
-                            if isinstance(candidate_error, ValidationError)
-                            for error in candidate_error.errors(
-                                include_input=False,
-                                include_url=False,
-                            )
-                        }
-                        allowed_echo_keys = {
-                            f"`{path}`" for path in validation_paths if path
-                        }
-                        if set(payload) - {"objectives"} - allowed_echo_keys:
-                            raise validation_error
-                        valid_objectives: list[StructuredResearchObjective] = []
-                        invalid_objective_payloads: list[dict[str, Any]] = []
-                        for objective_payload in objective_payloads:
-                            try:
-                                valid_objectives.append(
-                                    StructuredResearchObjective.model_validate(
-                                        objective_payload
-                                    )
-                                )
-                            except ValidationError:
-                                if isinstance(objective_payload, dict):
-                                    invalid_objective_payloads.append(objective_payload)
-                        if attempt == 0:
-                            preserved_objectives = valid_objectives
-                        else:
-                            preserved_keys = {
-                                objective.model_dump_json()
-                                for objective in preserved_objectives
-                            }
-                            corrected_objectives = [
-                                objective
-                                for objective in valid_objectives
-                                if objective.model_dump_json() not in preserved_keys
-                            ]
-                            corrected_objectives.extend(
-                                objective
-                                for objective_payload in invalid_objective_payloads
-                                if (
-                                    objective := self._repair_trailing_scope_objective(
-                                        objective_payload
-                                    )
-                                )
-                                is not None
-                            )
-                            if corrected_objectives:
-                                return (
-                                    StructuredResearchObjectives(
-                                        objectives=self._deduplicate_objectives(
-                                            [
-                                                *preserved_objectives,
-                                                *corrected_objectives,
-                                            ]
-                                        )
-                                    ),
-                                    raw_content,
-                                )
-                    if isinstance(payload, dict):
-                        extra_keys = set(payload) - set(response_model.model_fields)
-                        if extra_keys - {"confidence"}:
-                            raise
-                        filtered_payload = {
-                            key: value
-                            for key, value in payload.items()
-                            if key in response_model.model_fields
-                        }
-                        if filtered_payload != payload:
-                            return (
-                                StructuredResearchObjectives.model_validate(
-                                    filtered_payload
-                                ),
-                                raw_content,
-                            )
-                    raise
-            except (
-                RuntimeError,
-                ValueError,
-                ValidationError,
-                json.JSONDecodeError,
-            ) as exc:
-                last_error = exc
-                if attempt == 0:
-                    continue
-                raise
-        raise RuntimeError("structured extraction failed after retry") from last_error
 
     def _parse_objective_evidence_json_response(
         self,
@@ -770,7 +986,9 @@ class ObjectiveExtractor:
             "SOURCE",
         }
         last_error: Exception | None = None
-        for attempt in range(2):
+        last_invalid_extraction: dict[str, Any] | None = None
+        max_attempts = 3
+        for attempt in range(max_attempts):
             attempt_kwargs = dict(request_kwargs)
             attempt_messages = [*messages]
             attempt_kwargs["messages"] = attempt_messages
@@ -797,28 +1015,30 @@ class ObjectiveExtractor:
                         "that answers the objective."
                     )
                 else:
-                    retry_instruction = (
-                        "Previous evidence extraction output failed validation: "
-                        f"{repair_detail[:1000]}. Return at most one schema-valid "
-                        "extraction or {\"extractions\":[]}. Context evidence must "
-                        "use reported_result null, no changed variables, no "
-                        "comparison, and not_attributable. One extraction represents "
-                        "one comparison interval. isolated_effect requires exactly one "
-                        "distinct changed-variable name and a comparable comparison; "
-                        "joint_effect requires at least two distinct changed-variable "
-                        "names. Never repeat a changed-variable name; for a condition "
-                        "series choose one complete source-supported pair. Return only "
-                        "compact JSON."
+                    retry_instruction = self._objective_evidence_repair_instruction(
+                        repair_detail=repair_detail,
+                        invalid_extraction=last_invalid_extraction,
                     )
                 attempt_messages.append(
                     {"role": "user", "content": retry_instruction}
                 )
                 logger.warning(
-                    "Retrying objective evidence JSON response model=%s",
+                    "Retrying objective evidence JSON response model=%s "
+                    "repair_attempt=%s max_repair_attempts=%s",
                     self.model,
+                    attempt,
+                    max_attempts - 1,
                 )
             try:
-                completion = self.client.chat.completions.create(**attempt_kwargs)
+                try:
+                    completion = self.client.chat.completions.create(**attempt_kwargs)
+                except Exception as exc:
+                    record_llm_completion(
+                        getattr(exc, "completion", None),
+                        requested_model=self.model,
+                    )
+                    raise
+                record_llm_completion(completion, requested_model=self.model)
                 raw_content = coerce_message_content(
                     completion.choices[0].message.content if completion.choices else None
                 )
@@ -826,13 +1046,18 @@ class ObjectiveExtractor:
                     raise RuntimeError(
                         "structured extraction returned empty response content"
                     )
-                payload = load_json_payload(extract_json_object(raw_content))
+                payload = self._normalize_fixed_objective_evidence_conditions(
+                    load_json_payload(extract_json_object(raw_content))
+                )
                 try:
                     return (
                         StructuredEvidenceExtractions.model_validate(payload),
                         raw_content,
                     )
                 except ValidationError:
+                    last_invalid_extraction = (
+                        self._single_objective_evidence_extraction(payload)
+                    )
                     if (
                         isinstance(payload, dict)
                         and isinstance(payload.get("extractions"), list)
@@ -879,67 +1104,169 @@ class ObjectiveExtractor:
                 json.JSONDecodeError,
             ) as exc:
                 last_error = exc
-                if attempt == 0:
+                if attempt < max_attempts - 1:
                     continue
                 raise
-        raise RuntimeError("structured extraction failed after retry") from last_error
+        raise RuntimeError("structured extraction failed after repairs") from last_error
 
     @staticmethod
-    def _deduplicate_objectives(
-        objectives: list[StructuredResearchObjective],
-    ) -> list[StructuredResearchObjective]:
-        deduplicated: list[StructuredResearchObjective] = []
-        seen: set[str] = set()
-        for objective in objectives:
-            key = objective.model_dump_json()
-            if key in seen:
+    def _normalize_fixed_objective_evidence_conditions(payload: Any) -> Any:
+        def identical_nonempty_scalar(left: Any, right: Any) -> bool:
+            if isinstance(left, bool) or isinstance(right, bool):
+                return type(left) is type(right) and left == right
+            if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+                return left == right
+            if isinstance(left, str) and isinstance(right, str):
+                return bool(left.strip()) and left == right
+            return False
+
+        if not isinstance(payload, Mapping):
+            return payload
+        extractions = payload.get("extractions")
+        if not isinstance(extractions, list):
+            return payload
+
+        changed = False
+        normalized_extractions: list[Any] = []
+        for extraction in extractions:
+            if not isinstance(extraction, Mapping):
+                normalized_extractions.append(extraction)
                 continue
-            seen.add(key)
-            deduplicated.append(objective)
-        return deduplicated
+            variables = extraction.get("changed_variables")
+            if not isinstance(variables, list):
+                normalized_extractions.append(extraction)
+                continue
+
+            fixed_names: set[str] = set()
+            changed_variables: list[Any] = []
+            for variable in variables:
+                if not isinstance(variable, Mapping):
+                    changed_variables.append(variable)
+                    continue
+                baseline = variable.get("baseline_value")
+                target = variable.get("target_value")
+                variable_name = str(variable.get("name") or "").strip().casefold()
+                if not variable_name or not identical_nonempty_scalar(
+                    baseline,
+                    target,
+                ):
+                    changed_variables.append(variable)
+                    continue
+                fixed_names.add(variable_name)
+                changed = True
+
+            if not fixed_names:
+                normalized_extractions.append(extraction)
+                continue
+            normalized_extraction = dict(extraction)
+            normalized_extraction["changed_variables"] = changed_variables
+            remaining_variable_names = {
+                str(variable.get("name") or "").strip().casefold()
+                for variable in changed_variables
+                if isinstance(variable, Mapping)
+                and str(variable.get("name") or "").strip()
+            }
+            comparison = extraction.get("comparison")
+            if isinstance(comparison, Mapping) and isinstance(
+                comparison.get("axis_names"), list
+            ):
+                normalized_comparison = dict(comparison)
+                normalized_comparison["axis_names"] = [
+                    axis
+                    for axis in comparison["axis_names"]
+                    if str(axis).strip().casefold() not in fixed_names
+                    or str(axis).strip().casefold() in remaining_variable_names
+                ]
+                normalized_extraction["comparison"] = normalized_comparison
+            if (
+                extraction.get("attribution_scope") == "joint_effect"
+                and len(changed_variables) == 1
+                and len(remaining_variable_names) == 1
+            ):
+                normalized_extraction["attribution_scope"] = "isolated_effect"
+            normalized_extractions.append(normalized_extraction)
+
+        if not changed:
+            return payload
+        normalized_payload = dict(payload)
+        normalized_payload["extractions"] = normalized_extractions
+        return normalized_payload
 
     @staticmethod
-    def _repair_trailing_scope_objective(
-        payload: dict[str, Any],
-    ) -> StructuredResearchObjective | None:
-        filtered = {
-            key: value
-            for key, value in payload.items()
-            if key in StructuredResearchObjective.model_fields
-        }
-        variables = [
-            str(value).strip()
-            for value in filtered.get("variables", [])
-            if str(value).strip()
-        ]
-        outcomes = [
-            str(value).strip()
-            for value in filtered.get("outcomes", [])
-            if str(value).strip()
-        ]
-        question = str(filtered.get("question") or "").strip()
-        if not question or not variables or not outcomes:
+    def _single_objective_evidence_extraction(
+        payload: Any,
+    ) -> dict[str, Any] | None:
+        if not isinstance(payload, Mapping):
             return None
+        extractions = payload.get("extractions")
+        if not isinstance(extractions, list) or len(extractions) != 1:
+            return None
+        item = extractions[0]
+        return dict(item) if isinstance(item, Mapping) else None
 
-        probe = dict(filtered)
-        probe["constraints"] = [
-            *list(filtered.get("constraints") or []),
-            *re.findall(r"[^\W_]+", question, flags=re.UNICODE),
-        ]
-        try:
-            StructuredResearchObjective.model_validate(probe)
-        except ValidationError:
-            return None
-
-        subject = " and ".join(variables)
-        result = " and ".join(outcomes)
-        auxiliary = "does" if len(variables) == 1 else "do"
-        repaired = dict(filtered)
-        repaired["question"] = f"How {auxiliary} {subject} affect {result}?"
-        try:
-            return StructuredResearchObjective.model_validate(repaired)
-        except ValidationError:
-            return None
+    @staticmethod
+    def _objective_evidence_repair_instruction(
+        *,
+        repair_detail: str,
+        invalid_extraction: Mapping[str, Any] | None,
+    ) -> str:
+        invalid_json = (
+            json.dumps(
+                dict(invalid_extraction),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            if invalid_extraction is not None
+            else "null"
+        )
+        return (
+            "TASK\nRepair one invalid Evidence extraction against the original "
+            "SOURCE. This is correction of the supplied candidate, not a new Source "
+            "search or a new extraction task.\n"
+            "REPAIR INPUT\n"
+            f"- VALIDATION ERRORS: {repair_detail[:1000]}\n"
+            f"- INVALID EXTRACTION: {invalid_json}\n"
+            "DECISION PROCESS\n"
+            "1. Check each named invalid field against SOURCE and keep every valid "
+            "field unchanged.\n"
+            "2. Correct a field only when its replacement is explicit in SOURCE. "
+            "When SOURCE does not support a valid correction, remove the unsupported "
+            "claim only if the remaining item still has honest scientific meaning; "
+            "otherwise abstain with {\"extractions\":[]}.\n"
+            "3. If `reported_result` is non-null, use `direct_result` or "
+            "`contradictory_result` as `evidence_role`. If keeping a context role, "
+            "set `reported_result` to null, `changed_variables` to [], `comparison` "
+            "to null, and `attribution_scope` to `not_attributable`.\n"
+            "4. `isolated_effect` and `joint_effect` require distinct baseline and "
+            "target values for every changed variable. `comparison.axis_names` must "
+            "exactly match the distinct `changed_variables` names. If SOURCE lacks "
+            "complete endpoints, use `association_only` only for an explicit "
+            "association; otherwise use `descriptive_only` or abstain.\n"
+            "5. If `comparison.comparable` is false, use `not_attributable`; do not "
+            "change it to true unless SOURCE explicitly supports a complete "
+            "comparison. Remove each fixed parameter from `changed_variables` and "
+            "`comparison.axis_names` when its endpoints are identical. A fixed "
+            "control does not make the comparison incomparable. For a condition "
+            "series, choose one complete Source-supported interval.\n"
+            "HARD RULES\n"
+            "- Correct only values supported by SOURCE; do not invent comparison "
+            "endpoints or scientific context, and never copy from outside SOURCE.\n"
+            "- A fixed parameter is fixed context, not a changed variable.\n"
+            "- For a condition series, choose one complete source-supported interval "
+            "and never merge separate intervals.\n"
+            "- Preserve valid fields that do not require correction.\n"
+            "BOUNDARY EXAMPLES\n"
+            "- If candidate target is 160 W but SOURCE explicitly compares 100 W "
+            "with 140 W, 140 W may replace 160 W; other grounded fields stay fixed.\n"
+            "- If candidate unit is MPa but SOURCE gives no unit, set that unit to "
+            "null only when the remaining result is still meaningful; never infer a "
+            "unit from domain knowledge.\n"
+            "- If SOURCE contains no complete comparison or attributable result, "
+            "return {\"extractions\":[]}.\n"
+            "OUTPUT SCHEMA\nReturn only "
+            "{\"extractions\":[<one corrected extraction>]} or "
+            "{\"extractions\":[]}."
+        )
 
     def _parse_provider_structured_response(
         self,
@@ -957,7 +1284,15 @@ class ObjectiveExtractor:
         }
         if max_completion_tokens is not None:
             request_kwargs["max_completion_tokens"] = max_completion_tokens
-        completion = self.client.beta.chat.completions.parse(**request_kwargs)
+        try:
+            completion = self.client.beta.chat.completions.parse(**request_kwargs)
+        except Exception as exc:
+            record_llm_completion(
+                getattr(exc, "completion", None),
+                requested_model=self.model,
+            )
+            raise
+        record_llm_completion(completion, requested_model=self.model)
         if not completion.choices:
             raise RuntimeError("structured extraction returned no completion choices")
         message = completion.choices[0].message

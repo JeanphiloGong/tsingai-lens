@@ -4,6 +4,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from controllers.schemas.core.research_objectives import (
@@ -11,7 +12,8 @@ from controllers.schemas.core.research_objectives import (
     FindingListResponse,
     ObjectiveAnalysisResponse,
     ObjectiveEvidenceListResponse,
-    ObjectiveListResponse,
+    ObjectiveSummaryResponse,
+    PaperStudyInventoryResponse,
 )
 
 
@@ -23,15 +25,29 @@ _objective_analysis_executor = ThreadPoolExecutor(
 )
 
 
+class RankedObjectiveSummaryResponse(ObjectiveSummaryResponse):
+    rank: int = Field(..., ge=1)
+
+
+class PaginatedObjectiveListResponse(BaseModel):
+    collection_id: str
+    objectives: list[RankedObjectiveSummaryResponse] = Field(default_factory=list)
+    offset: int = Field(..., ge=0)
+    limit: int | None = Field(default=None, ge=1)
+    total: int = Field(..., ge=0)
+
+
 @router.get(
     "/{collection_id}/objectives",
-    response_model=ObjectiveListResponse,
+    response_model=PaginatedObjectiveListResponse,
     summary="List collection research objectives",
 )
 async def list_collection_objectives(
     collection_id: str,
     request: Request,
-) -> ObjectiveListResponse:
+    offset: int = Query(default=0, ge=0),
+    limit: int | None = Query(default=None, ge=1, le=100),
+) -> PaginatedObjectiveListResponse:
     try:
         objectives = await run_in_threadpool(
             request.app.state.objective_repository.list_objectives,
@@ -39,9 +55,114 @@ async def list_collection_objectives(
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return ObjectiveListResponse(
+    ranked_objectives = [objective.to_record() for objective in objectives]
+    page = (
+        ranked_objectives[offset:]
+        if limit is None
+        else ranked_objectives[offset : offset + limit]
+    )
+    return PaginatedObjectiveListResponse(
         collection_id=collection_id,
-        objectives=[objective.to_record() for objective in objectives],
+        objectives=page,
+        offset=offset,
+        limit=limit,
+        total=len(ranked_objectives),
+    )
+
+
+@router.get(
+    "/{collection_id}/paper-study-inventory",
+    response_model=PaperStudyInventoryResponse,
+    summary="List the persisted paper study inventory",
+)
+async def list_paper_study_inventory(
+    collection_id: str,
+    request: Request,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> PaperStudyInventoryResponse:
+    try:
+        facts = await run_in_threadpool(
+            request.app.state.objective_repository.read,
+            collection_id,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    items: list[dict] = []
+    coverage_counts = {
+        "relationship_emitted": 0,
+        "unresolved_signal_emitted": 0,
+        "no_study_signal": 0,
+        "extraction_failed": 0,
+    }
+    dispositions = {
+        (item.document_id, item.study_id, item.relationship_id): item
+        for item in facts.study_dispositions
+    }
+    for skim in facts.paper_skims:
+        for study in skim.studies:
+            study_record = study.to_record()
+            study_record["relationships"] = []
+            for relationship in study.relationships:
+                disposition = dispositions.get(
+                    (
+                        skim.document_id,
+                        study.study_id,
+                        relationship.relationship_id,
+                    )
+                )
+                relationship_record = relationship.to_record()
+                relationship_record["disposition"] = {
+                    "status": (
+                        disposition.status.value
+                        if disposition is not None
+                        else "pending"
+                    ),
+                    "objective_id": (
+                        disposition.objective_id
+                        if disposition is not None
+                        else None
+                    ),
+                    "reason": disposition.reason if disposition is not None else None,
+                }
+                study_record["relationships"].append(relationship_record)
+            items.append(
+                {
+                    "item_type": "paper_study",
+                    "doc_role": skim.doc_role,
+                    **study_record,
+                }
+            )
+        for signal in skim.unresolved_signals:
+            items.append(
+                {
+                    "item_type": "unresolved_signal",
+                    "document_id": skim.document_id,
+                    "doc_role": skim.doc_role,
+                    **signal.to_record(),
+                }
+            )
+        for coverage in skim.source_unit_coverage:
+            coverage_counts[coverage.status.value] += 1
+            items.append(
+                {
+                    "item_type": "source_unit_coverage",
+                    "document_id": skim.document_id,
+                    "doc_role": skim.doc_role,
+                    **coverage.to_record(),
+                }
+            )
+
+    return PaperStudyInventoryResponse(
+        collection_id=collection_id,
+        research_objectives_ready=facts.research_objectives_ready,
+        coverage_complete=coverage_counts["extraction_failed"] == 0,
+        source_unit_coverage_counts=coverage_counts,
+        items=items[offset : offset + limit],
+        offset=offset,
+        limit=limit,
+        total=len(items),
     )
 
 
@@ -268,6 +389,9 @@ def _to_objective_analysis_response(payload: dict) -> ObjectiveAnalysisResponse:
         objective=objective.to_record(),
         active_analysis=active.to_record() if active is not None else None,
         published_analysis=(published.to_record() if published is not None else None),
+        paper_contributions=[
+            item.to_record() for item in payload.get("paper_contributions") or ()
+        ],
         warnings=payload.get("warnings") or [],
     )
 

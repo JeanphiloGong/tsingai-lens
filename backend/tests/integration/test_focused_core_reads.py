@@ -8,7 +8,7 @@ from application.core.research_view_aggregation_service import (
 from application.core.workspace_overview_service import WorkspaceService
 from domain.core import DocumentProfile, EvidenceAnchor
 from domain.core.paper_fact import PaperFactSet
-from domain.source import SourceArtifactSet
+from domain.source import assemble_source_documents
 from tests.support.comparison_repository import MemoryComparisonRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
@@ -42,7 +42,8 @@ def _paper_repository() -> MemoryPaperFactRepository:
                     {
                         "anchor_id": "anchor-1",
                         "document_id": "doc-1",
-                        "locator_type": "text",
+                        "source_kind": "block",
+                        "source_ref": "focused-result",
                         "source_type": "text",
                         "quote": "A focused result.",
                     }
@@ -59,7 +60,7 @@ def test_workspace_reads_each_collection_fact_family_once():
     paper_repository.read = Mock(wraps=paper_repository.read)
     comparison_repository.read = Mock(wraps=comparison_repository.read)
     source_repository = Mock()
-    source_repository.read_collection_artifacts.return_value = SourceArtifactSet()
+    source_repository.read_collection_documents.return_value = assemble_source_documents()
     collection_service = Mock()
     collection_service.get_collection.return_value = {
         "collection_id": COLLECTION_ID,

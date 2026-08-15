@@ -29,6 +29,7 @@ class MemoryBuildRepository:
         record: TaskRecord,
         *,
         build_id: str,
+        mode: str = "standard",
     ) -> CollectionBuildRecord:
         with self._lock:
             if record.task_id in self._tasks or build_id in self._builds:
@@ -45,6 +46,7 @@ class MemoryBuildRepository:
                 build_id=build_id,
                 task_id=record.task_id,
                 collection_id=record.collection_id,
+                mode=str(mode),
                 build_number=build_number,
                 status="queued",
                 created_at=record.created_at,

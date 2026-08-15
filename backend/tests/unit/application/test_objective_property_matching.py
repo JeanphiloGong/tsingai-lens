@@ -64,6 +64,30 @@ def test_axis_matching_preserves_explicit_synonyms_and_source_aliases() -> None:
     assert property_matching.source_text_mentions_axis("E p", "pitting potential")
 
 
+@pytest.mark.parametrize(
+    ("source_label", "objective_axes", "expected"),
+    (
+        ("Laser power (W)", ("laser power",), "laser power"),
+        (
+            "preheating",
+            ("base plate preheating temperature",),
+            "base plate preheating temperature",
+        ),
+        ("density", ("density", "relative density"), "density"),
+        ("unmapped condition", ("laser power",), None),
+    ),
+)
+def test_resolve_objective_axis_requires_one_unambiguous_match(
+    source_label: str,
+    objective_axes: tuple[str, ...],
+    expected: str | None,
+) -> None:
+    assert (
+        property_matching.resolve_objective_axis(source_label, objective_axes)
+        == expected
+    )
+
+
 def test_generic_model_roles_do_not_replace_specific_source_labels() -> None:
     assert not property_matching.process_role_is_specific("parameter variable")
     assert property_matching.process_role_is_specific("laser power")

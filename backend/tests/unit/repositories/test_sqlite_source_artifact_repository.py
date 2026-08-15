@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from domain.source import (
-    SourceArtifactSet,
+    assemble_source_documents,
     SourceBlock,
-    SourceBoundingBox,
     SourceDocument,
     SourceFigure,
     SourceReferenceCandidate,
@@ -19,16 +18,15 @@ from domain.source import (
 from infra.persistence.sqlite import SqliteSourceArtifactRepository
 
 
-def test_sqlite_source_artifact_repository_round_trips_artifact_set(tmp_path):
+def test_sqlite_source_artifact_repository_round_trips_document_aggregates(tmp_path):
     repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
-    artifacts = SourceArtifactSet(
+    documents = assemble_source_documents(
         documents=(
             SourceDocument(
                 document_id="doc-1",
-                human_readable_id=0,
+                document_order=0,
                 title="Paper",
                 text="Methods\nTable 1 Results",
-                text_unit_ids=("tu-1",),
                 creation_date="2026-05-10T00:00:00+00:00",
                 metadata={"source_parser": "test"},
             ),
@@ -36,7 +34,7 @@ def test_sqlite_source_artifact_repository_round_trips_artifact_set(tmp_path):
         text_units=(
             SourceTextUnit(
                 text_unit_id="tu-1",
-                human_readable_id=0,
+                text_unit_order=0,
                 text="Methods",
                 n_tokens=3,
                 document_ids=("doc-1",),
@@ -51,13 +49,6 @@ def test_sqlite_source_artifact_repository_round_trips_artifact_set(tmp_path):
                 block_order=1,
                 text_unit_ids=("tu-1",),
                 page=1,
-                bbox=SourceBoundingBox(
-                    l=0.0,
-                    t=10.0,
-                    r=100.0,
-                    b=20.0,
-                    coord_origin="TOPLEFT",
-                ),
                 heading_path="Methods",
                 heading_level=1,
             ),
@@ -70,7 +61,6 @@ def test_sqlite_source_artifact_repository_round_trips_artifact_set(tmp_path):
                 caption_text="Table 1 Results",
                 caption_block_id="blk-2",
                 page=1,
-                bbox=None,
                 heading_path="Methods",
                 column_headers=("Sample", "Strength (MPa)"),
                 table_matrix=(("Sample", "Strength (MPa)"), ("A", "123")),
@@ -110,7 +100,6 @@ def test_sqlite_source_artifact_repository_round_trips_artifact_set(tmp_path):
                 caption_text="Figure 1 SEM",
                 caption_block_id="blk-3",
                 page=2,
-                bbox=None,
                 heading_path="Results",
                 image_path="image_assets/fig-1.png",
                 image_mime_type="image/png",
@@ -122,28 +111,29 @@ def test_sqlite_source_artifact_repository_round_trips_artifact_set(tmp_path):
         ),
     )
 
-    repository.replace_collection_artifacts("col_test", artifacts)
-    restored = repository.read_collection_artifacts("col_test")
+    repository.replace_collection_documents("col_test", documents)
+    restored = repository.read_collection_documents("col_test")
 
-    assert restored.documents[0].document_id == "doc-1"
-    assert restored.documents[0].text_unit_ids == ("tu-1",)
-    assert restored.text_units[0].document_ids == ("doc-1",)
-    assert restored.blocks[0].text_unit_ids == ("tu-1",)
-    assert restored.tables[0].table_matrix == (
+    document = restored[0]
+    assert document.document_id == "doc-1"
+    assert document.text_unit_ids == ("tu-1",)
+    assert document.text_units[0].document_ids == ("doc-1",)
+    assert document.blocks[0].text_unit_ids == ("tu-1",)
+    assert document.tables[0].table_matrix == (
         ("Sample", "Strength (MPa)"),
         ("A", "123"),
     )
-    assert restored.table_rows[0].row_text == "A | 123"
-    assert restored.table_cells[0].unit_hint == "MPa"
-    assert restored.figures[0].image_path == "image_assets/fig-1.png"
+    assert document.table_rows[0].row_text == "A | 123"
+    assert document.table_cells[0].unit_hint == "MPa"
+    assert document.figures[0].image_path == "image_assets/fig-1.png"
 
-    repository.replace_collection_artifacts(
+    repository.replace_collection_documents(
         "col_test",
-        SourceArtifactSet(
+        assemble_source_documents(
             documents=(
                 SourceDocument(
                     document_id="doc-2",
-                    human_readable_id=0,
+                    document_order=0,
                     title="Replacement",
                     text="Replacement text",
                 ),
@@ -151,9 +141,9 @@ def test_sqlite_source_artifact_repository_round_trips_artifact_set(tmp_path):
         ),
     )
 
-    replaced = repository.read_collection_artifacts("col_test")
-    assert [document.document_id for document in replaced.documents] == ["doc-2"]
-    assert replaced.tables == ()
+    replaced = repository.read_collection_documents("col_test")
+    assert [document.document_id for document in replaced] == ["doc-2"]
+    assert replaced[0].tables == ()
 
 
 def test_sqlite_source_artifact_repository_keeps_reference_state_separate(tmp_path):
@@ -189,8 +179,6 @@ def test_sqlite_source_artifact_repository_keeps_reference_state_separate(tmp_pa
                     context_text="Prior LPBF 316L work [1] studied porosity.",
                     source_block_id="blk-body",
                     page=2,
-                    char_start=22,
-                    char_end=25,
                     confidence=0.88,
                     metadata={"source": "body"},
                 ),
@@ -238,13 +226,13 @@ def test_sqlite_source_artifact_repository_keeps_reference_state_separate(tmp_pa
     assert restored.resolutions[0].resolved_venue == "Acta Materialia"
     assert restored.candidates[0].mention_count == 1
 
-    repository.replace_collection_artifacts(
+    repository.replace_collection_documents(
         "col_refs",
-        SourceArtifactSet(
+        assemble_source_documents(
             documents=(
                 SourceDocument(
                     document_id="doc-1",
-                    human_readable_id=0,
+                    document_order=0,
                     title="Paper",
                     text="Prior LPBF 316L work [1] studied porosity.",
                 ),
@@ -255,25 +243,24 @@ def test_sqlite_source_artifact_repository_keeps_reference_state_separate(tmp_pa
 
     repository.replace_collection_references("col_refs", SourceReferenceSet())
     assert repository.read_collection_references("col_refs") == SourceReferenceSet()
-    assert repository.read_collection_artifacts("col_refs").documents[0].document_id == "doc-1"
+    assert repository.read_collection_documents("col_refs")[0].document_id == "doc-1"
 
 
 def test_sqlite_source_artifact_repository_reads_document_tree_projection(tmp_path):
     repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
-    repository.replace_collection_artifacts(
+    repository.replace_collection_documents(
         "col_tree",
-        SourceArtifactSet(
+        assemble_source_documents(
             documents=(
                 SourceDocument(
                     document_id="doc-1",
-                    human_readable_id=0,
+                    document_order=0,
                     title="Paper",
                     text="Methods\nResult paragraph",
-                    text_unit_ids=("tu-1",),
                 ),
                 SourceDocument(
                     document_id="doc-2",
-                    human_readable_id=1,
+                    document_order=1,
                     title="Other Paper",
                     text="Other text",
                 ),
@@ -281,7 +268,7 @@ def test_sqlite_source_artifact_repository_reads_document_tree_projection(tmp_pa
             text_units=(
                 SourceTextUnit(
                     text_unit_id="tu-1",
-                    human_readable_id=0,
+                    text_unit_order=0,
                     text="Result paragraph",
                     n_tokens=2,
                     document_ids=("doc-1",),
@@ -323,7 +310,6 @@ def test_sqlite_source_artifact_repository_reads_document_tree_projection(tmp_pa
                     caption_text="Table 1",
                     caption_block_id=None,
                     page=2,
-                    bbox=None,
                     heading_path="Methods",
                     column_headers=("Sample", "Value"),
                     table_matrix=(("Sample", "Value"), ("A", "1")),
@@ -338,7 +324,6 @@ def test_sqlite_source_artifact_repository_reads_document_tree_projection(tmp_pa
                     caption_text="Figure 1 caption",
                     caption_block_id=None,
                     page=3,
-                    bbox=None,
                     heading_path="Methods",
                     image_path=None,
                     image_mime_type=None,

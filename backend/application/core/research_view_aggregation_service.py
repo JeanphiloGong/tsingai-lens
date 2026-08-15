@@ -1042,28 +1042,20 @@ class ResearchViewAggregationService:
                     "evidence_ref_id": f"eref:{anchor_id}",
                     "fact_ids": self._dedupe_strings(fact_ids),
                     "anchor_ids": [anchor_id],
-                    "source_kind": self._safe_text(anchor.get("source_type"))
+                    "source_kind": self._safe_text(anchor.get("source_kind"))
                     or "anchor",
                     "document_id": self._safe_text(anchor.get("document_id")),
                     "locator": {
                         key: self._clean_value(anchor.get(key))
                         for key in (
-                            "locator_type",
+                            "source_ref",
                             "page",
-                            "section_id",
-                            "block_id",
-                            "snippet_id",
-                            "figure_or_table",
-                            "char_range",
-                            "bbox",
                             "deep_link",
                             "quote",
                         )
                         if self._has_observed_value(anchor.get(key))
                     },
-                    "confidence": self._numeric_or_none(
-                        anchor.get("locator_confidence")
-                    ),
+                    "confidence": None,
                     "traceability_status": "direct",
                 }
             )

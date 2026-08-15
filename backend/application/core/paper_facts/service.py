@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 import json
 import logging
 import math
@@ -121,19 +122,12 @@ _STRUCTURE_FEATURE_COLUMNS = [
 _EVIDENCE_ANCHOR_COLUMNS = [
     "anchor_id",
     "document_id",
-    "locator_type",
-    "locator_confidence",
+    "source_kind",
+    "source_ref",
     "source_type",
-    "section_id",
-    "char_range",
-    "bbox",
     "page",
     "quote",
     "deep_link",
-    "block_id",
-    "snippet_id",
-    "figure_or_table",
-    "quote_span",
 ]
 _METHOD_FACT_COLUMNS = [
     "method_id",
@@ -530,12 +524,6 @@ class PaperFactsService:
             collection_id,
             document_id,
         )
-        _, text_units = load_collection_inputs(
-            collection_id,
-            self.source_artifact_repository,
-        )
-        text_unit_lookup = self._build_text_unit_lookup(text_units, document_id)
-
         anchors = self._normalize_evidence_anchors_payload(
             row.get("evidence_anchors"),
             collection_id=collection_id,
@@ -545,7 +533,7 @@ class PaperFactsService:
         resolved_anchors = [
             resolved
             for anchor in anchors
-            if (resolved := self._resolve_traceback_anchor(anchor, content, text_unit_lookup))
+            if (resolved := self._resolve_traceback_anchor(anchor, content))
             is not None
         ]
         traceback_status = self._derive_traceback_status(resolved_anchors)
@@ -3597,17 +3585,14 @@ class PaperFactsService:
         document_state: dict[str, Any],
     ) -> list[dict[str, Any]]:
         payload: list[dict[str, Any]] = []
-        section_id = self._normalize_scalar_text(text_window.get("window_id")) if text_window else None
         window_block_ids = self._normalize_list(text_window.get("block_ids")) if text_window else []
         block_id = self._normalize_scalar_text(window_block_ids[0]) if window_block_ids else None
-        snippet_ids = self._normalize_list(text_window.get("text_unit_ids")) if text_window else []
-        resolved_section_id = block_id or section_id
-        resolved_snippet_id = snippet_ids[0] if len(snippet_ids) == 1 else None
-        window_text = self._normalize_scalar_text(text_window.get("text")) if text_window else None
-        window_char_range = (
-            self._normalize_char_range_payload(text_window.get("char_range")) if text_window else None
-        )
         scope_page = self._safe_int(text_window.get("page")) if text_window else None
+        source_kind = "table" if table_id else "block"
+        source_ref = table_id or block_id
+        if source_ref is None:
+            return payload
+
         for anchor in anchors:
             quote = self._normalize_scalar_text(anchor.quote)
             source_type = (
@@ -3616,28 +3601,13 @@ class PaperFactsService:
                 else ("table" if table_id else "text")
             )
             page = self._safe_int(anchor.page) or scope_page
-            char_range = None
-            locator_type = "section"
-            locator_confidence = "low"
-            if quote and window_text and window_char_range is not None:
-                local_index = window_text.find(quote)
-                if local_index >= 0:
-                    char_range = {
-                        "start": window_char_range["start"] + local_index,
-                        "end": window_char_range["start"] + local_index + len(quote),
-                    }
-                    locator_type = "char_range"
-                    locator_confidence = "high"
             anchor_key = (
                 document_id,
+                source_kind,
+                source_ref,
                 source_type,
-                resolved_section_id,
-                resolved_snippet_id,
-                table_id,
                 page,
                 quote,
-                char_range["start"] if char_range is not None else None,
-                char_range["end"] if char_range is not None else None,
             )
             existing_id = document_state["anchor_ids_by_key"].get(anchor_key)
             if existing_id:
@@ -3650,19 +3620,12 @@ class PaperFactsService:
                 {
                     "anchor_id": f"anchor_{uuid4().hex[:12]}",
                     "document_id": document_id,
-                    "locator_type": locator_type,
-                    "locator_confidence": locator_confidence,
+                    "source_kind": source_kind,
+                    "source_ref": source_ref,
                     "source_type": source_type,
-                    "section_id": resolved_section_id,
-                    "char_range": char_range,
-                    "bbox": None,
                     "page": page,
                     "quote": quote,
                     "deep_link": None,
-                    "block_id": block_id,
-                    "snippet_id": resolved_snippet_id,
-                    "figure_or_table": table_id,
-                    "quote_span": quote,
                 }
             ).to_record()
             rows.append(anchor_record)
@@ -4359,6 +4322,7 @@ class PaperFactsService:
         ) as executor:
             futures = [
                 executor.submit(
+                    copy_context().run,
                     self._execute_extraction_job,
                     extractor=extractor,
                     job=job,
@@ -4446,9 +4410,11 @@ class PaperFactsService:
             text_windows = text_windows_by_doc.get(document_id, [])
             anchor_ids = self._normalize_list(method_fact.get("evidence_anchor_ids"))
             anchor_block_ids = {
-                self._normalize_scalar_text(anchor_lookup.get(anchor_id, {}).get("block_id"))
-                or self._normalize_scalar_text(anchor_lookup.get(anchor_id, {}).get("section_id"))
+                self._normalize_scalar_text(
+                    anchor_lookup.get(anchor_id, {}).get("source_ref")
+                )
                 for anchor_id in anchor_ids
+                if anchor_lookup.get(anchor_id, {}).get("source_kind") == "block"
             }
             anchor_block_ids.discard(None)
             section_text = self._resolve_characterization_window_text(
@@ -4856,9 +4822,10 @@ class PaperFactsService:
             window_block_ids.add(window_id)
         anchor_ids = []
         for anchor in evidence_anchors:
-            block_id = self._normalize_scalar_text(anchor.get("block_id"))
-            section_id = self._normalize_scalar_text(anchor.get("section_id"))
-            if not ({block_id, section_id} & window_block_ids):
+            if self._normalize_scalar_text(anchor.get("source_kind")) != "block":
+                continue
+            block_id = self._normalize_scalar_text(anchor.get("source_ref"))
+            if block_id not in window_block_ids:
                 continue
             anchor_id = self._normalize_scalar_text(anchor.get("anchor_id"))
             if anchor_id:
@@ -5080,7 +5047,6 @@ class PaperFactsService:
                     "order": self._safe_int(block_payload.get("block_order")) or 0,
                     "text_unit_ids": self._normalize_list(block_payload.get("text_unit_ids")),
                     "page": self._safe_int(block_payload.get("page")),
-                    "char_range": block_payload.get("char_range"),
                     "block_ids": [block_id] if block_id else [],
                     "block_type": self._normalize_scalar_text(block_payload.get("block_type")),
                 }
@@ -5598,36 +5564,11 @@ class PaperFactsService:
             source_type = self._normalize_scalar_text(anchor.get("source_type")) or "text"
             if source_type not in _EVIDENCE_SOURCE_TYPES:
                 source_type = "text"
-            quote = self._normalize_scalar_text(anchor.get("quote")) or self._normalize_scalar_text(
-                anchor.get("quote_span")
-            )
-            section_id = self._normalize_scalar_text(anchor.get("section_id"))
-            char_range = self._normalize_char_range_payload(anchor.get("char_range"))
-            bbox = self._normalize_bbox_payload(anchor.get("bbox"))
-            explicit_locator_type = self._normalize_scalar_text(anchor.get("locator_type"))
-            locator_type = explicit_locator_type if explicit_locator_type in {
-                "char_range",
-                "bbox",
-                "section",
-            } else None
-            if locator_type is None:
-                if char_range is not None:
-                    locator_type = "char_range"
-                elif bbox is not None:
-                    locator_type = "bbox"
-                elif section_id:
-                    locator_type = "section"
-                elif quote or self._normalize_scalar_text(anchor.get("snippet_id")):
-                    locator_type = "char_range"
-                else:
-                    locator_type = "section"
-
-            explicit_confidence = self._normalize_scalar_text(anchor.get("locator_confidence"))
-            locator_confidence = explicit_confidence if explicit_confidence in {
-                "high",
-                "medium",
-                "low",
-            } else ("medium" if char_range is not None or bbox is not None else "low")
+            source_kind = self._normalize_scalar_text(anchor.get("source_kind"))
+            source_ref = self._normalize_scalar_text(anchor.get("source_ref"))
+            if source_kind is None or source_ref is None:
+                continue
+            quote = self._normalize_scalar_text(anchor.get("quote"))
             page = self._normalize_optional_int(anchor.get("page"))
             deep_link = self._normalize_scalar_text(anchor.get("deep_link")) or self._build_traceback_deep_link(
                 collection_id=collection_id,
@@ -5642,21 +5583,12 @@ class PaperFactsService:
                     {
                         "anchor_id": anchor_id,
                         "document_id": anchor_document_id,
-                        "locator_type": locator_type,
-                        "locator_confidence": locator_confidence,
+                        "source_kind": source_kind,
+                        "source_ref": source_ref,
                         "source_type": source_type,
-                        "section_id": section_id,
-                        "char_range": char_range,
-                        "bbox": bbox,
                         "page": page,
                         "quote": quote,
                         "deep_link": deep_link,
-                        "block_id": self._normalize_scalar_text(anchor.get("block_id")),
-                        "snippet_id": self._normalize_scalar_text(anchor.get("snippet_id")),
-                        "figure_or_table": self._normalize_scalar_text(
-                            anchor.get("figure_or_table")
-                        ),
-                        "quote_span": quote,
                     }
                 ).to_record()
             )
@@ -5666,155 +5598,26 @@ class PaperFactsService:
         self,
         anchor: dict[str, Any],
         content: dict[str, Any],
-        text_unit_lookup: dict[str, dict[str, Any]],
     ) -> dict[str, Any] | None:
-        full_text = str(content.get("content_text") or "")
-        blocks = content.get("blocks") if isinstance(content.get("blocks"), list) else []
-        section_id = self._normalize_scalar_text(anchor.get("section_id"))
-        block_id = self._normalize_scalar_text(anchor.get("block_id")) or section_id
-        block = self._find_block_by_id(block_id, blocks) if block_id else None
-
-        quote = self._normalize_scalar_text(anchor.get("quote")) or self._normalize_scalar_text(
-            anchor.get("quote_span")
-        )
-        snippet_id = self._normalize_scalar_text(anchor.get("snippet_id"))
-        snippet_text = None
-        if snippet_id:
-            snippet_text = self._normalize_scalar_text(text_unit_lookup.get(snippet_id, {}).get("text"))
-
-        explicit_char_range = self._normalize_char_range_payload(anchor.get("char_range"))
-        explicit_bbox = self._normalize_bbox_payload(anchor.get("bbox"))
-        locator_confidence = str(anchor.get("locator_confidence") or "low")
-
-        if explicit_char_range is not None:
-            block = block or self._find_block_for_char_range(explicit_char_range, blocks)
-            block_id = block_id or (
-                self._normalize_scalar_text(block.get("block_id")) if block else None
-            )
-            return {
-                **anchor,
-                "section_id": section_id or block_id,
-                "block_id": block_id,
-                "char_range": explicit_char_range,
-                "bbox": None,
-                "locator_type": "char_range",
-                "locator_confidence": locator_confidence if locator_confidence in {"high", "medium"} else "medium",
-                "quote": quote or snippet_text,
-                "quote_span": quote or snippet_text,
-            }
-
-        if explicit_bbox is not None:
-            return {
-                **anchor,
-                "section_id": section_id or block_id,
-                "block_id": block_id,
-                "char_range": None,
-                "bbox": explicit_bbox,
-                "locator_type": "bbox",
-                "locator_confidence": locator_confidence if locator_confidence in {"high", "medium"} else "medium",
-                "quote": quote or snippet_text,
-                "quote_span": quote or snippet_text,
-            }
-
-        match_text = quote or snippet_text
-        resolved_char_range: dict[str, int] | None = None
-
-        if match_text:
-            if block is None:
-                block = self._find_block_by_snippet_id(snippet_id, blocks)
-            if block is None:
-                block = self._find_block_for_quote(match_text, blocks)
-
-            if block is not None:
-                local_index = str(block.get("text") or "").find(match_text)
-                if local_index >= 0 and block.get("start_offset") is not None:
-                    section_start = self._safe_int(block.get("start_offset"))
-                    resolved_char_range = {
-                        "start": section_start + local_index,
-                        "end": section_start + local_index + len(match_text),
-                    }
-                    block_id = self._normalize_scalar_text(block.get("block_id")) or block_id
-                    section_id = section_id or block_id
-
-            if resolved_char_range is None and full_text:
-                global_index = full_text.find(match_text)
-                if global_index >= 0:
-                    resolved_char_range = {
-                        "start": global_index,
-                        "end": global_index + len(match_text),
-                    }
-                    block = block or self._find_block_for_char_range(resolved_char_range, blocks)
-                    block_id = (
-                        self._normalize_scalar_text(block.get("block_id")) if block else block_id
-                    ) or block_id
-                    section_id = section_id or block_id
-
-        if resolved_char_range is not None:
-            return {
-                **anchor,
-                "section_id": section_id or block_id,
-                "block_id": block_id,
-                "char_range": resolved_char_range,
-                "bbox": None,
-                "locator_type": "char_range",
-                "locator_confidence": "medium" if snippet_text else "high",
-                "quote": match_text,
-                "quote_span": match_text,
-            }
-
-        if block is None:
-            block = self._find_block_by_snippet_id(snippet_id, blocks)
-        block_id = block_id or (
-            self._normalize_scalar_text(block.get("block_id")) if block else None
-        )
-        section_id = section_id or block_id
-        if block_id is None and section_id is None:
+        source_kind = self._normalize_scalar_text(anchor.get("source_kind"))
+        source_ref = self._normalize_scalar_text(anchor.get("source_ref"))
+        if source_kind is None or source_ref is None:
             return None
 
-        return {
-            **anchor,
-            "section_id": section_id,
-            "block_id": block_id,
-            "char_range": None,
-            "bbox": None,
-            "locator_type": "section",
-            "locator_confidence": "low",
-            "quote": match_text,
-            "quote_span": match_text,
-        }
+        if source_kind == "block":
+            blocks = (
+                content.get("blocks")
+                if isinstance(content.get("blocks"), list)
+                else []
+            )
+            if self._find_block_by_id(source_ref, blocks) is None:
+                return None
+        return anchor
 
     def _derive_traceback_status(self, anchors: list[dict[str, Any]]) -> str:
-        if any(
-            str(anchor.get("locator_type")) in {"char_range", "bbox"}
-            and str(anchor.get("locator_confidence")) in {"high", "medium"}
-            for anchor in anchors
-        ):
+        if anchors:
             return "ready"
-        if any(
-            str(anchor.get("locator_type")) in {"char_range", "bbox", "section"}
-            for anchor in anchors
-        ):
-            return "partial"
         return "unavailable"
-
-    def _build_text_unit_lookup(
-        self,
-        text_units: tuple[dict[str, Any], ...] | None,
-        document_id: str,
-    ) -> dict[str, dict[str, Any]]:
-        if not text_units:
-            return {}
-
-        lookup: dict[str, dict[str, Any]] = {}
-        for row in text_units:
-            text_unit_id = self._normalize_scalar_text(row.get("id"))
-            if text_unit_id is None:
-                continue
-            document_ids = self._normalize_list(row.get("document_ids"))
-            if document_ids and str(document_id) not in document_ids:
-                continue
-            lookup[text_unit_id] = dict(row)
-        return lookup
 
     def _find_block_by_id(
         self,
@@ -5828,45 +5631,6 @@ class PaperFactsService:
                 return block
         return None
 
-    def _find_block_by_snippet_id(
-        self,
-        snippet_id: str | None,
-        blocks: list[dict[str, Any]],
-    ) -> dict[str, Any] | None:
-        if not snippet_id:
-            return None
-        for block in blocks:
-            if snippet_id in self._normalize_list(block.get("text_unit_ids")):
-                return block
-        return None
-
-    def _find_block_for_quote(
-        self,
-        quote: str,
-        blocks: list[dict[str, Any]],
-    ) -> dict[str, Any] | None:
-        for block in blocks:
-            if quote and quote in str(block.get("text") or ""):
-                return block
-        return None
-
-    def _find_block_for_char_range(
-        self,
-        char_range: dict[str, int],
-        blocks: list[dict[str, Any]],
-    ) -> dict[str, Any] | None:
-        start = self._safe_int(char_range.get("start"))
-        end = self._safe_int(char_range.get("end"))
-        if start is None or end is None:
-            return None
-        for block in blocks:
-            section_start = self._safe_int(block.get("start_offset"))
-            section_end = self._safe_int(block.get("end_offset"))
-            if section_start is None or section_end is None:
-                continue
-            if section_start <= start and end <= section_end:
-                return block
-        return None
 
     def _build_traceback_deep_link(
         self,
@@ -5890,30 +5654,6 @@ class PaperFactsService:
         query_text = urlencode(query)
         base = f"/collections/{collection_id}/documents/{document_id}"
         return f"{base}?{query_text}" if query_text else base
-
-    def _normalize_char_range_payload(self, value: Any) -> dict[str, int] | None:
-        payload = self._normalize_object(value)
-        if payload is None or not isinstance(payload, dict):
-            return None
-
-        start = self._safe_int(payload.get("start"))
-        end = self._safe_int(payload.get("end"))
-        if start is None or end is None or end < start:
-            return None
-        return {"start": start, "end": end}
-
-    def _normalize_bbox_payload(self, value: Any) -> dict[str, float] | None:
-        payload = self._normalize_object(value)
-        if payload is None or not isinstance(payload, dict):
-            return None
-        try:
-            x0 = float(payload.get("x0"))
-            y0 = float(payload.get("y0"))
-            x1 = float(payload.get("x1"))
-            y1 = float(payload.get("y1"))
-        except (TypeError, ValueError):
-            return None
-        return {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
 
     def _normalize_optional_int(self, value: Any) -> int | None:
         parsed = self._safe_int(value)
@@ -6124,10 +5864,7 @@ class PaperFactsService:
     ) -> tuple[dict[str, Any], ...]:
         records = []
         for row in evidence_anchors or ():
-            payload = dict(row)
-            payload["char_range"] = self._normalize_object(row.get("char_range"))
-            payload["bbox"] = self._normalize_object(row.get("bbox"))
-            records.append(EvidenceAnchor.from_mapping(payload).to_record())
+            records.append(EvidenceAnchor.from_mapping(row).to_record())
         return tuple(records)
 
     def _normalize_method_fact_records(

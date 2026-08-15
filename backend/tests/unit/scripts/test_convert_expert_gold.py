@@ -35,7 +35,7 @@ def test_convert_expert_gold_writes_traceable_gold_bundle(tmp_path):
 
     assert result_path == output_path
     bundle = json.loads(output_path.read_text(encoding="utf-8"))
-    assert bundle["metadata"]["schema_version"] == "expert-gold-bundle-v0.1"
+    assert bundle["metadata"]["schema_version"] == "expert-gold-bundle-v0.2"
     assert bundle["metadata"]["table_counts"]["05_性能结果表.csv"] == 2
     assert bundle["papers"][0]["paper_id"] == "P001"
     assert bundle["samples"][1]["is_control_sample"] == "no"
@@ -46,6 +46,7 @@ def test_convert_expert_gold_writes_traceable_gold_bundle(tmp_path):
     assert bundle["comparisons"][0]["baseline_sample_ids"] == ["S001"]
     assert bundle["observations"][0]["sample_ids"] == ["S001", "S002"]
     assert bundle["evidence"][0]["quote_or_cell"] == "value"
+    assert bundle["evidence"][0]["source_ref"] == "Table 1"
     assert bundle["uncertainties"][0]["issue_id"] == "Q001"
     assert bundle["global_notes"][0]["scope"] == "ALL"
 

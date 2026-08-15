@@ -26,8 +26,9 @@ from tests.support.collection_service import build_test_collection_service
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
 from application.source.task_service import TaskService
 from domain.source import (
-    SourceArtifactSet,
+    SourceDocument,
     SourceReferenceSet,
+    assemble_source_documents,
     build_source_document_tree,
 )
 from infra.persistence.memory import MemoryBuildRepository
@@ -57,26 +58,26 @@ class DummyWorkflowOutput:
 
 class MemorySourceArtifactRepository:
     def __init__(self) -> None:
-        self._artifacts: dict[tuple[str, str], SourceArtifactSet] = {}
+        self._documents: dict[tuple[str, str], tuple[SourceDocument, ...]] = {}
         self._references: dict[tuple[str, str], SourceReferenceSet] = {}
 
-    def replace_collection_artifacts(
+    def replace_collection_documents(
         self,
         collection_id: str,
         build_id: str,
-        artifacts: SourceArtifactSet,
+        documents: tuple[SourceDocument, ...],
     ) -> None:
-        self._artifacts[(collection_id, build_id)] = artifacts
+        self._documents[(collection_id, build_id)] = documents
 
-    def read_collection_artifacts(
+    def read_collection_documents(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
-    ) -> SourceArtifactSet:
+    ) -> tuple[SourceDocument, ...]:
         if build_id is None:
-            return SourceArtifactSet()
-        return self._artifacts.get((collection_id, build_id), SourceArtifactSet())
+            return ()
+        return self._documents.get((collection_id, build_id), ())
 
     def replace_collection_references(
         self,
@@ -102,25 +103,19 @@ class MemorySourceArtifactRepository:
         document_id: str,
         build_id: str | None = None,
     ):
-        artifacts = self.read_collection_artifacts(
+        documents = self.read_collection_documents(
             collection_id,
             build_id=build_id,
         )
         document = next(
-            item for item in artifacts.documents if item.document_id == document_id
+            item for item in documents if item.document_id == document_id
         )
         return build_source_document_tree(
             collection_id=collection_id,
             document=document,
-            blocks=tuple(
-                item for item in artifacts.blocks if item.document_id == document_id
-            ),
-            tables=tuple(
-                item for item in artifacts.tables if item.document_id == document_id
-            ),
-            figures=tuple(
-                item for item in artifacts.figures if item.document_id == document_id
-            ),
+            blocks=document.blocks,
+            tables=document.tables,
+            figures=document.figures,
             references=self.read_collection_references(
                 collection_id,
                 build_id=build_id,
@@ -179,7 +174,6 @@ def _write_source_artifact_outputs(
                 "caption_text": "Processing summary",
                 "caption_block_id": None,
                 "page": None,
-                "bbox": None,
                 "heading_path": ["Experimental Section"],
                 "row_count": 1,
                 "col_count": 2,
@@ -263,7 +257,7 @@ def test_build_pipeline_service_builds_runtime_config_without_config_file(
     assert config.source.input.encoding == "utf-8"
     assert config.source.input.file_pattern == r".*\.(txt|pdf)$"
     assert config.source.cache.base_dir == "../cache"
-    assert config.method == IndexingMethod.Standard
+    assert config.mode == IndexingMethod.Standard
 
 
 def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_path):
@@ -306,6 +300,14 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
     assert result["progress_detail"]["phase"] == "artifacts_ready"
     assert captured["method"] == task_runner_module.IndexingMethod.Standard
     assert "is_update_run" not in captured
+    pipeline_run = task_service.read_pipeline_run(task["task_id"])
+    assert pipeline_run.status == "completed"
+    assert pipeline_run.run_id == task["task_id"]
+    assert pipeline_run.output_build_id == build_repository.read_build(
+        task["task_id"]
+    ).build_id
+    assert pipeline_run.node("source_artifacts").output_summary["document_count"] == 1
+    assert pipeline_run.stats.duration_ms is not None
     artifacts = artifact_registry.get_for_task(task["task_id"])
     assert artifacts["documents_generated"] is True
     assert artifacts["documents_ready"] is True
@@ -412,6 +414,11 @@ def test_build_pipeline_service_marks_source_artifact_errors_failed(
     assert result["pipeline_nodes"]["source_artifacts"]["status"] == "failed"
     assert result["pipeline_nodes"]["artifact_registry"]["status"] == "skipped"
     assert result["errors"] == ["source_artifacts: docling import failed"]
+    pipeline_run = task_service.read_pipeline_run(task["task_id"])
+    assert pipeline_run.status == "failed"
+    assert pipeline_run.node("artifact_registry").dependencies == (
+        "source_artifacts",
+    )
 
 
 def test_build_pipeline_service_logs_stage_progress(monkeypatch, tmp_path, caplog):

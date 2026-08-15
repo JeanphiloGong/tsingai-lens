@@ -8,13 +8,84 @@ from domain.core import (
     OBJECTIVE_ANALYSIS_STATUSES,
     ObjectiveAnalysis,
     ObjectiveEvidence,
+    ObjectiveFactSet,
     PaperContribution,
+    PaperSourceUnitCoverage,
+    PaperSourceUnitCoverageStatus,
+    PaperStudy,
+    PaperStudyDisposition,
+    PaperStudyDispositionStatus,
+    PaperStudyRelationship,
+    PaperSkim,
     ResearchObjective,
     build_research_objective_id,
     is_question_shaped_objective,
     normalize_objective_confidence,
     normalize_objective_terms,
 )
+
+
+def test_paper_source_unit_coverage_requires_status_specific_reason() -> None:
+    no_signal = PaperSourceUnitCoverage.from_mapping(
+        {
+            "source_unit_id": "results-1-source-1",
+            "window_id": "results-1",
+            "source_kind": "block",
+            "source_ref": "block-1",
+            "status": "no_study_signal",
+            "reason": "The unit contains only general background.",
+        }
+    )
+
+    assert no_signal.status is PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL
+    assert PaperSourceUnitCoverage.from_mapping(no_signal.to_record()) == no_signal
+
+    with pytest.raises(ValueError, match="requires a reason"):
+        PaperSourceUnitCoverage.from_mapping(
+            {
+                **no_signal.to_record(),
+                "reason": None,
+            }
+        )
+
+    with pytest.raises(ValueError, match="cannot have a reason"):
+        PaperSourceUnitCoverage.from_mapping(
+            {
+                **no_signal.to_record(),
+                "status": "relationship_emitted",
+            }
+        )
+
+
+def test_paper_skim_retains_unique_source_unit_coverage() -> None:
+    coverage = PaperSourceUnitCoverage.from_mapping(
+        {
+            "source_unit_id": "methods-1-source-1",
+            "window_id": "methods-1",
+            "source_kind": "block",
+            "source_ref": "block-1",
+            "status": "extraction_failed",
+            "reason": "The window extraction failed validation.",
+        }
+    )
+    skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "source_unit_coverage": [coverage.to_record()],
+        }
+    )
+
+    assert skim.source_unit_coverage == (coverage,)
+    assert skim.coverage_complete is False
+    assert PaperSkim.from_mapping(skim.to_record()) == skim
+
+    with pytest.raises(ValueError, match="coverage ids must be unique"):
+        PaperSkim.from_mapping(
+            {
+                "document_id": "paper-1",
+                "source_unit_coverage": [coverage.to_record(), coverage.to_record()],
+            }
+        )
 
 
 def _objective(**overrides) -> ResearchObjective:
@@ -272,6 +343,69 @@ def test_paper_contribution_uses_document_as_subordinate_identity() -> None:
     assert "frame_id" not in contribution.to_record()
 
 
+def test_paper_contribution_records_auditable_evidence_disposition() -> None:
+    contribution = PaperContribution.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 1,
+            "document_id": "paper-1",
+            "analysis_status": "analyzed",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "evidence_disposition": "comparable_evidence",
+            "routed_source_count": 3,
+            "extracted_source_count": 2,
+            "comparable_evidence_count": 7,
+            "failed_source_count": 1,
+            "evidence_disposition_reason": (
+                "One selected source failed; comparable evidence survived."
+            ),
+            "confidence": 0.9,
+        }
+    )
+
+    assert contribution.evidence_disposition == "comparable_evidence"
+    assert contribution.routed_source_count == 3
+    assert contribution.extracted_source_count == 2
+    assert contribution.comparable_evidence_count == 7
+    assert contribution.failed_source_count == 1
+    assert PaperContribution.from_mapping(contribution.to_record()) == contribution
+
+
+def test_paper_contribution_rejects_partial_or_inconsistent_evidence_accounting() -> None:
+    base = {
+        "collection_id": "collection-1",
+        "objective_id": "objective-1",
+        "analysis_version": 1,
+        "document_id": "paper-1",
+        "analysis_status": "analyzed",
+        "relevance": "high",
+        "paper_role": "primary_experiment",
+        "confidence": 0.9,
+    }
+
+    with pytest.raises(ValueError, match="all present or all absent"):
+        PaperContribution.from_mapping(
+            {
+                **base,
+                "evidence_disposition": "no_routable_evidence",
+                "routed_source_count": 0,
+            }
+        )
+    with pytest.raises(ValueError, match="requires comparable Evidence"):
+        PaperContribution.from_mapping(
+            {
+                **base,
+                "evidence_disposition": "comparable_evidence",
+                "routed_source_count": 1,
+                "extracted_source_count": 1,
+                "comparable_evidence_count": 0,
+                "failed_source_count": 0,
+            }
+        )
+
+
 def test_excluded_paper_contribution_requires_reason() -> None:
     with pytest.raises(ValueError, match="requires a reason"):
         PaperContribution.from_mapping(
@@ -482,3 +616,513 @@ def test_normalizers_remain_stable() -> None:
         "SLM",
     )
     assert normalize_objective_confidence(float("nan")) == 0.0
+
+
+def test_paper_skim_round_trips_multi_outcome_study_context_and_signals() -> None:
+    skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "studies": [
+                {
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "experiment_label": "LPBF process-window study",
+                    "material_scope": ["316L"],
+                    "process_context": ["LPBF"],
+                    "sample_context": ["vertical tensile coupons"],
+                    "test_context": ["Archimedes density", "ASTM E8 tensile test"],
+                    "comparator": "200 W baseline",
+                    "fixed_conditions": ["scan speed = 800 mm/s"],
+                    "relationships": [
+                        {
+                            "varied_factors": ["laser power", "hatch spacing"],
+                            "outcome": "relative density",
+                            "source_refs": [
+                                {"source_kind": "block", "source_ref": "methods-1"},
+                                {"source_kind": "table", "source_ref": "table-2"},
+                            ],
+                            "confidence": 0.88,
+                        },
+                        {
+                            "varied_factors": ["laser power", "hatch spacing"],
+                            "outcome": "yield strength",
+                            "source_refs": [
+                                {"source_kind": "block", "source_ref": "methods-1"},
+                                {"source_kind": "block", "source_ref": "results-3"},
+                            ],
+                            "confidence": 0.84,
+                        },
+                    ],
+                    "confidence": 0.88,
+                }
+            ],
+            "unresolved_signals": [
+                {
+                    "signal_id": "signal-1",
+                    "signal_type": "outcome",
+                    "label": "surface roughness",
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "experiment_label": "surface study",
+                    "material_scope": ["316L"],
+                    "process_context": ["LPBF"],
+                    "sample_context": ["horizontal surface coupons"],
+                    "test_context": ["confocal microscopy"],
+                    "comparator": "as-built reference",
+                    "fixed_conditions": ["layer thickness = 30 um"],
+                    "source_refs": [
+                        {"source_kind": "table", "source_ref": "table-4"}
+                    ],
+                    "confidence": 0.71,
+                    "reason": "No source-supported changed variable was identified.",
+                }
+            ],
+        }
+    )
+
+    record = skim.to_record()
+
+    study = skim.studies[0]
+    assert len(study.relationships) == 2
+    assert study.relationships[0].varied_factors == ("laser power", "hatch spacing")
+    assert {item.outcome for item in study.relationships} == {
+        "relative density",
+        "yield strength",
+    }
+    assert record["studies"][0]["sample_context"] == ["vertical tensile coupons"]
+    assert record["studies"][0]["test_context"] == [
+        "Archimedes density",
+        "ASTM E8 tensile test",
+    ]
+    assert record["studies"][0]["comparator"] == "200 W baseline"
+    assert record["studies"][0]["relationships"][0]["source_refs"] == [
+        {"source_kind": "block", "source_ref": "methods-1"},
+        {"source_kind": "table", "source_ref": "table-2"},
+    ]
+    assert record["unresolved_signals"][0]["signal_type"] == "outcome"
+    assert record["unresolved_signals"][0]["design_type"] == "experimental"
+    assert record["unresolved_signals"][0]["claim_scope"] == "current_work"
+    assert record["unresolved_signals"][0]["experiment_label"] == "surface study"
+    assert record["unresolved_signals"][0]["sample_context"] == [
+        "horizontal surface coupons"
+    ]
+    assert record["unresolved_signals"][0]["test_context"] == [
+        "confocal microscopy"
+    ]
+    assert record["unresolved_signals"][0]["comparator"] == "as-built reference"
+    assert record["unresolved_signals"][0]["fixed_conditions"] == [
+        "layer thickness = 30 um"
+    ]
+    assert PaperSkim.from_mapping(record) == skim
+
+
+def test_paper_study_signal_identity_includes_study_boundary_context() -> None:
+    payload = {
+        "signal_type": "outcome",
+        "label": "yield strength",
+        "design_type": "experimental",
+        "claim_scope": "current_work",
+        "experiment_label": "tensile study",
+        "material_scope": ["316L"],
+        "process_context": ["LPBF"],
+        "sample_context": ["vertical coupons"],
+        "test_context": ["ASTM E8"],
+        "comparator": "as-built reference",
+        "fixed_conditions": ["strain rate = 0.001 /s"],
+        "source_refs": [{"source_kind": "block", "source_ref": "results-1"}],
+        "confidence": 0.8,
+    }
+
+    base = PaperSkim.from_mapping(
+        {"document_id": "paper-1", "unresolved_signals": [payload]}
+    ).unresolved_signals[0]
+    other_test = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "unresolved_signals": [{**payload, "test_context": ["nanoindentation"]}],
+        }
+    ).unresolved_signals[0]
+
+    assert base.signal_id != other_test.signal_id
+    with pytest.raises(ValueError, match="design type"):
+        PaperSkim.from_mapping(
+            {
+                "document_id": "paper-1",
+                "unresolved_signals": [{**payload, "design_type": "invalid"}],
+            }
+        )
+    with pytest.raises(ValueError, match="claim scope"):
+        PaperSkim.from_mapping(
+            {
+                "document_id": "paper-1",
+                "unresolved_signals": [{**payload, "claim_scope": "invalid"}],
+            }
+        )
+
+
+def test_paper_study_signal_identity_is_scoped_to_its_document() -> None:
+    signal = {
+        "signal_type": "outcome",
+        "label": "yield strength",
+        "source_refs": [{"source_kind": "block", "source_ref": "results-1"}],
+    }
+
+    first = PaperSkim.from_mapping(
+        {"document_id": "paper-1", "unresolved_signals": [signal]}
+    ).unresolved_signals[0]
+    second = PaperSkim.from_mapping(
+        {"document_id": "paper-2", "unresolved_signals": [signal]}
+    ).unresolved_signals[0]
+
+    assert first.signal_id != second.signal_id
+
+
+def test_paper_study_and_relationship_ids_are_backend_derived_and_stable() -> None:
+    payload = {
+        "document_id": "paper-1",
+        "design_type": "experimental",
+        "claim_scope": "current_work",
+        "experiment_label": "density experiment",
+        "material_scope": ["316L"],
+        "process_context": ["LPBF"],
+        "relationships": [
+            {
+                "varied_factors": ["laser power"],
+                "outcome": "relative density",
+                "source_refs": [
+                    {"source_kind": "block", "source_ref": "methods-1"},
+                    {"source_kind": "block", "source_ref": "results-1"},
+                ],
+                "confidence": 0.88,
+            }
+        ],
+        "confidence": 0.88,
+    }
+
+    study = PaperStudy.from_mapping(payload)
+    same_study = PaperStudy.from_mapping(payload)
+    different_source = PaperStudy.from_mapping(
+        {
+            **payload,
+            "relationships": [
+                {
+                    **payload["relationships"][0],
+                    "source_refs": [
+                        {"source_kind": "block", "source_ref": "methods-1"},
+                        {"source_kind": "block", "source_ref": "results-2"},
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert study.study_id.startswith("study_")
+    assert study.relationships[0].relationship_id.startswith("relationship_")
+    assert same_study.study_id == study.study_id
+    assert different_source.study_id != study.study_id
+    assert PaperStudy.from_mapping(study.to_record()) == study
+
+
+def test_relationship_identity_includes_its_parent_study_boundary() -> None:
+    shared_relationship = {
+        "varied_factors": ["laser power"],
+        "outcome": "yield strength",
+        "source_refs": [{"source_kind": "table", "source_ref": "table-1"}],
+    }
+    tensile_study = PaperStudy.from_mapping(
+        {
+            "document_id": "paper-1",
+            "design_type": "experimental",
+            "claim_scope": "current_work",
+            "experiment_label": "tensile experiment",
+            "test_context": ["ASTM E8 tensile test"],
+            "relationships": [shared_relationship],
+        }
+    )
+    hardness_study = PaperStudy.from_mapping(
+        {
+            "document_id": "paper-1",
+            "design_type": "experimental",
+            "claim_scope": "current_work",
+            "experiment_label": "hardness experiment",
+            "test_context": ["Vickers microhardness test"],
+            "relationships": [shared_relationship],
+        }
+    )
+
+    assert (
+        tensile_study.relationships[0].relationship_id
+        != hardness_study.relationships[0].relationship_id
+    )
+    ObjectiveFactSet(
+        paper_skims=(
+            PaperSkim.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "studies": [
+                        tensile_study.to_record(),
+                        hardness_study.to_record(),
+                    ],
+                }
+            ),
+        ),
+    )
+
+
+def test_paper_study_owns_nested_relationship_identity() -> None:
+    relationship = {
+        "varied_factors": ["laser power"],
+        "outcome": "relative density",
+        "source_refs": [{"source_kind": "block", "source_ref": "results-1"}],
+    }
+
+    expected = PaperStudy.from_mapping(
+        {"document_id": "paper-1", "relationships": [relationship]}
+    )
+    attempted_override = PaperStudy.from_mapping(
+        {
+            "document_id": "paper-1",
+            "relationships": [{**relationship, "document_id": "paper-2"}],
+        }
+    )
+
+    assert attempted_override.relationships == expected.relationships
+
+
+def test_paper_skim_rejects_study_owned_by_another_document() -> None:
+    study = PaperStudy.from_mapping(
+        {
+            "document_id": "paper-2",
+            "relationships": [
+                {
+                    "varied_factors": ["laser power"],
+                    "outcome": "density",
+                    "source_refs": [
+                        {"source_kind": "block", "source_ref": "results-1"}
+                    ],
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="another document|document"):
+        PaperSkim(
+            document_id="paper-1",
+            doc_role="experimental",
+            studies=(study,),
+            evidence_density="high",
+            confidence=0.9,
+            warnings=(),
+        )
+
+
+def _accounted_study_skim(
+    document_id: str,
+    *,
+    relationships: list[tuple[list[str], str]],
+) -> PaperSkim:
+    return PaperSkim.from_mapping(
+        {
+            "document_id": document_id,
+            "studies": [
+                {
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "relationships": [
+                        {
+                            "varied_factors": factors,
+                            "outcome": outcome,
+                            "source_refs": [
+                                {
+                                    "source_kind": "block",
+                                    "source_ref": f"{document_id}-{position}",
+                                }
+                            ],
+                            "confidence": 0.9,
+                        }
+                        for position, (factors, outcome) in enumerate(
+                            relationships,
+                            start=1,
+                        )
+                    ],
+                    "confidence": 0.9,
+                }
+            ],
+        }
+    )
+
+
+def _study_disposition(
+    skim: PaperSkim,
+    relationship_position: int,
+    status: PaperStudyDispositionStatus,
+    *,
+    objective_id: str | None = None,
+    reason: str | None = None,
+) -> PaperStudyDisposition:
+    study = skim.studies[0]
+    return PaperStudyDisposition(
+        document_id=skim.document_id,
+        study_id=study.study_id,
+        relationship_id=study.relationships[relationship_position].relationship_id,
+        status=status,
+        objective_id=objective_id,
+        reason=reason,
+    )
+
+
+def test_ready_objective_fact_set_requires_every_relationship_exactly_once() -> None:
+    skim = _accounted_study_skim(
+        "paper-1", relationships=[(["laser power"], "density")]
+    )
+
+    with pytest.raises(ValueError, match="pending"):
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            paper_skims=(skim,),
+            study_dispositions=(
+                _study_disposition(
+                    skim,
+                    0,
+                    PaperStudyDispositionStatus.PENDING,
+                ),
+            ),
+        )
+
+
+def test_ready_objective_fact_set_rejects_duplicate_relationship_accounting() -> None:
+    skim = _accounted_study_skim(
+        "paper-1", relationships=[(["laser power"], "density")]
+    )
+    rejected = _study_disposition(
+        skim,
+        0,
+        PaperStudyDispositionStatus.REJECTED,
+        reason="Insufficient evidence for a defensible comparison.",
+    )
+
+    with pytest.raises(ValueError, match="duplicate|exactly once|more than once"):
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            paper_skims=(skim,),
+            study_dispositions=(rejected, rejected),
+        )
+
+
+def test_ready_objective_fact_set_rejects_unknown_relationship_disposition() -> None:
+    skim = _accounted_study_skim(
+        "paper-1", relationships=[(["laser power"], "density")]
+    )
+
+    with pytest.raises(ValueError, match="unknown|dangling"):
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            paper_skims=(skim,),
+            study_dispositions=(
+                _study_disposition(
+                    skim,
+                    0,
+                    PaperStudyDispositionStatus.REJECTED,
+                    reason="Insufficient evidence for a defensible comparison.",
+                ),
+                PaperStudyDisposition(
+                    document_id="paper-missing",
+                    study_id="study_missing",
+                    relationship_id="relationship_missing",
+                    status=PaperStudyDispositionStatus.REJECTED,
+                    reason="No source relationship exists for this identity.",
+                ),
+            ),
+        )
+
+
+def test_ready_objective_fact_set_rejects_cross_document_objective_lineage() -> None:
+    skim = _accounted_study_skim(
+        "paper-1", relationships=[(["laser power"], "relative density")]
+    )
+    relationship_id = skim.studies[0].relationships[0].relationship_id
+    objective = _objective(
+        objective_id="objective-cross-document",
+        question="How does laser power affect relative density?",
+        material_scope=[],
+        variables=["laser power"],
+        outcomes=["relative density"],
+        mechanisms=[],
+        constraints=[],
+        seed_document_ids=["paper-2"],
+        source_relationship_ids=[relationship_id],
+        rank=1,
+    )
+
+    with pytest.raises(ValueError):
+        ObjectiveFactSet(
+            research_objectives_ready=True,
+            paper_skims=(skim,),
+            research_objectives=(objective,),
+            study_dispositions=(
+                _study_disposition(
+                    skim,
+                    0,
+                    PaperStudyDispositionStatus.PROMOTED,
+                    objective_id=objective.objective_id,
+                ),
+            ),
+        )
+
+
+def test_ready_objective_fact_set_accounts_multi_outcome_relationships_separately() -> None:
+    skim = _accounted_study_skim(
+        "paper-1",
+        relationships=[
+            (["laser power", "hatch spacing"], "relative density"),
+            (["laser power", "hatch spacing"], "yield strength"),
+        ],
+    )
+    density_id, strength_id = (
+        relationship.relationship_id for relationship in skim.studies[0].relationships
+    )
+    density_objective = _objective(
+        objective_id="objective-density",
+        question="How do laser power and hatch spacing affect relative density?",
+        variables=["laser power", "hatch spacing"],
+        outcomes=["relative density"],
+        seed_document_ids=["paper-1"],
+        source_relationship_ids=[density_id],
+        rank=1,
+    )
+    strength_objective = _objective(
+        objective_id="objective-strength",
+        question="How do laser power and hatch spacing affect yield strength?",
+        variables=["laser power", "hatch spacing"],
+        outcomes=["yield strength"],
+        seed_document_ids=["paper-1"],
+        source_relationship_ids=[strength_id],
+        rank=2,
+    )
+
+    facts = ObjectiveFactSet(
+        research_objectives_ready=True,
+        paper_skims=(skim,),
+        research_objectives=(density_objective, strength_objective),
+        study_dispositions=(
+            _study_disposition(
+                skim,
+                0,
+                PaperStudyDispositionStatus.PROMOTED,
+                objective_id=density_objective.objective_id,
+            ),
+            _study_disposition(
+                skim,
+                1,
+                PaperStudyDispositionStatus.PROMOTED,
+                objective_id=strength_objective.objective_id,
+            ),
+        ),
+    )
+
+    assert {item.relationship_id for item in facts.study_dispositions} == {
+        density_id,
+        strength_id,
+    }
+    assert density_objective.source_relationship_ids == (density_id,)
+    assert strength_objective.source_relationship_ids == (strength_id,)

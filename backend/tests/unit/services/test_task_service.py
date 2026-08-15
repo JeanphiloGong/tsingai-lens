@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
+import pytest
+
 from application.source.task_service import TaskService
+from domain.pipeline import PipelineRun
 from infra.persistence.memory import MemoryBuildRepository
 
 
@@ -36,41 +41,48 @@ def test_task_service_persists_pipeline_nodes_as_ordered_stages() -> None:
     repository = MemoryBuildRepository()
     task_service = TaskService(repository)
     task = task_service.create_task("col_a", "build")
+    build = repository.read_build(task["task_id"])
+    assert build is not None
+    pipeline_run = PipelineRun.create(
+        pipeline_name="collection_build",
+        mode="standard",
+        run_id=task["task_id"],
+        scope_type="collection",
+        scope_id="col_a",
+        node_dependencies={
+            "source_artifacts": (),
+            "document_profiles": ("source_artifacts",),
+        },
+        created_at=task["created_at"],
+        output_build_id=build.build_id,
+    ).start(task["created_at"])
+    pipeline_run = pipeline_run.with_node(
+        pipeline_run.node("source_artifacts").start(task["created_at"]).succeed(
+            task["created_at"],
+            output_summary={"document_count": 2},
+        )
+    )
+    pipeline_run = pipeline_run.with_node(
+        pipeline_run.node("document_profiles").start(task["created_at"])
+    )
 
     updated = task_service.update_task(
         task["task_id"],
         status="running",
         current_stage="document_profiles_started",
         progress_percent=70,
-        pipeline_nodes={
-            "source_artifacts": {
-                "status": "succeeded",
-                "started_at": "2026-07-19T10:00:00+00:00",
-                "finished_at": "2026-07-19T10:00:01+00:00",
-                "errors": [],
-                "warnings": [],
-                "skip_reason": None,
-            },
-            "document_profiles": {
-                "status": "running",
-                "started_at": "2026-07-19T10:00:01+00:00",
-                "finished_at": None,
-                "errors": [],
-                "warnings": ["slow parser"],
-                "skip_reason": None,
-            },
-        },
+        pipeline_run=pipeline_run,
     )
 
-    build = repository.read_build(task["task_id"])
     stages = repository.list_stages(task["task_id"])
+    build = repository.read_build(task["task_id"])
     assert build is not None
     assert build.status == "building"
-    assert [stage.stage_kind for stage in stages] == [
+    assert [stage.node.name for stage in stages] == [
         "source_artifacts",
         "document_profiles",
     ]
-    assert stages[1].warnings == ("slow parser",)
+    assert stages[0].node.output_summary == {"document_count": 2}
     assert updated["pipeline_nodes"]["document_profiles"]["status"] == "running"
     assert (
         task_service.get_task(task["task_id"])["pipeline_nodes"]
@@ -80,6 +92,23 @@ def test_task_service_persists_pipeline_nodes_as_ordered_stages() -> None:
         task_service.list_tasks(collection_id="col_a")[0]["pipeline_nodes"]
         == (updated["pipeline_nodes"])
     )
+    restored = task_service.read_pipeline_run(task["task_id"])
+    assert restored.run_id == task["task_id"]
+    assert restored.mode == "standard"
+    assert restored.output_build_id == build.build_id
+    assert restored.node("document_profiles").dependencies == ("source_artifacts",)
+    assert restored.node("source_artifacts").output_summary == {"document_count": 2}
+
+    with pytest.raises(ValueError, match="another build"):
+        task_service.update_task(
+            task["task_id"],
+            pipeline_run=replace(pipeline_run, output_build_id="build_other"),
+        )
+    with pytest.raises(ValueError, match="another build mode"):
+        task_service.update_task(
+            task["task_id"],
+            pipeline_run=replace(pipeline_run, mode="fast"),
+        )
 
 
 def test_task_service_only_activates_newer_successful_builds() -> None:

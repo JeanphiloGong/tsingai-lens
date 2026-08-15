@@ -28,8 +28,6 @@ class SourceReferenceMentionResponse(BaseModel):
     context_text: str = Field(..., description="citation 附近正文上下文")
     source_block_id: str | None = Field(default=None, description="正文来源 block")
     page: int | None = Field(default=None, description="正文页码")
-    char_start: int | None = Field(default=None, description="block 内起始字符")
-    char_end: int | None = Field(default=None, description="block 内结束字符")
     confidence: float = Field(default=0.0, description="mention 解析置信度")
     metadata: dict[str, Any] = Field(default_factory=dict, description="扩展元数据")
 

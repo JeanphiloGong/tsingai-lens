@@ -158,21 +158,33 @@ def _load_existing_artifacts(
     collection_id = collection_dir.name
     engine = build_database_engine(DatabaseSettings())
     try:
-        artifacts = PostgresSourceArtifactRepository(
+        documents = PostgresSourceArtifactRepository(
             build_session_factory(engine)
-        ).read_collection_artifacts(collection_id)
+        ).read_collection_documents(collection_id)
     finally:
         engine.dispose()
-    if not artifacts.documents:
+    if not documents:
         raise SystemExit(f"source artifacts not found: {collection_id}")
     return {
-        "documents": _records_to_frame(artifacts.documents),
-        "text_units": _records_to_frame(artifacts.text_units),
-        "blocks": _records_to_frame(artifacts.blocks),
-        "figures": _records_to_frame(artifacts.figures),
-        "tables": _records_to_frame(artifacts.tables),
-        "table_rows": _records_to_frame(artifacts.table_rows),
-        "table_cells": _records_to_frame(artifacts.table_cells),
+        "documents": _records_to_frame(documents),
+        "text_units": _records_to_frame(
+            tuple(item for document in documents for item in document.text_units)
+        ),
+        "blocks": _records_to_frame(
+            tuple(item for document in documents for item in document.blocks)
+        ),
+        "figures": _records_to_frame(
+            tuple(item for document in documents for item in document.figures)
+        ),
+        "tables": _records_to_frame(
+            tuple(item for document in documents for item in document.tables)
+        ),
+        "table_rows": _records_to_frame(
+            tuple(item for document in documents for item in document.table_rows)
+        ),
+        "table_cells": _records_to_frame(
+            tuple(item for document in documents for item in document.table_cells)
+        ),
     }
 
 

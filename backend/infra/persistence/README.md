@@ -72,8 +72,11 @@ second research identity.
   Owns tasks, collection builds, ordered stages, artifact versions, and active
   build selection.
 - `PostgresSourceArtifactRepository`
-  Owns build-versioned Source documents, text units, blocks, tables, figures,
-  references, and their associations.
+  Accepts build-versioned `SourceDocument` aggregates and maps their owned text
+  units, blocks, tables, rows, cells, and figures into normalized Source tables.
+  Collection membership and import provenance remain owned by
+  `PostgresCollectionRepository`; `build_id` selects the collection snapshot
+  and is not part of parsed-document identity.
 - `PostgresPaperFactRepository`
   Owns document profiles and reusable evidence-backed paper facts.
 - `PostgresComparisonRepository`

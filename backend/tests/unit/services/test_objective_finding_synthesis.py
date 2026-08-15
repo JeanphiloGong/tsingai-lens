@@ -27,11 +27,7 @@ class _Extractor:
         if response is None:
             findings: list[dict] = []
         else:
-            candidate = dict(response)
-            candidate.setdefault(
-                "result_set_id", payload["result_set"]["result_set_id"]
-            )
-            findings = [candidate]
+            findings = [dict(response)]
         return SimpleNamespace(model_dump=lambda: {"findings": findings})
 
 
@@ -177,30 +173,15 @@ def _evidence(
 
 def _candidate(**overrides) -> dict:
     payload = {
-        "statement": (
-            "Laser power and scan speed were jointly associated with an increase "
-            "in relative density."
-        ),
-        "direction": "increase",
         "assertion_strength": "associative",
-        "condition_boundary_evidence_ids": [],
         "context_evidence_ids": [],
         "mechanisms": [],
-        "limitations": [],
     }
     payload.update(overrides)
     return payload
 
 
 def _heterogeneous_candidate(**overrides) -> dict:
-    overrides.setdefault(
-        "statement",
-        (
-            "Laser power and scan speed showed heterogeneous relative density "
-            "responses across the reported conditions, with an increase and an "
-            "opposing decrease."
-        ),
-    )
     return _candidate(**overrides)
 
 
@@ -227,6 +208,28 @@ def test_synthesis_builds_one_atomic_single_paper_finding() -> None:
     assert finding.paper_contributions[0].supporting_evidence_ids == ("ev-1",)
     assert extractor.payloads[0]["result_set"]["outcome"] == "relative density"
     assert "synthesis_status" not in extractor.payloads[0]
+
+
+def test_synthesis_publishes_only_deterministic_analysis_limitations() -> None:
+    service = FindingSynthesisService(
+        finding_extractor=_Extractor(
+            [_candidate(limitations=["The model inferred an uncited limitation."])]
+        )
+    )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(_evidence("ev-1", "paper-1"),),
+    )[0]
+
+    assert finding.limitations == (
+        "The reported comparison changes the complete factor set; "
+        "individual-factor effects are not identifiable.",
+        "Cross-paper confirmation is absent for this atomic result.",
+    )
 
 
 def test_synthesis_accepts_concrete_defect_measurement_for_defect_structure() -> None:
@@ -323,6 +326,117 @@ def test_synthesis_accepts_relative_density_for_densification_outcome() -> None:
     assert result_sets[0]["outcome"] == "relative density"
 
 
+def test_synthesis_canonicalizes_unit_qualified_axes_across_papers() -> None:
+    service = FindingSynthesisService(finding_extractor=_Extractor([]))
+
+    result_sets = service._result_sets(
+        _objective(variables=["laser power"], outcomes=["relative density"]),
+        (
+            _evidence(
+                "paper-1-power",
+                "paper-1",
+                factors=("laser power",),
+            ),
+            _evidence(
+                "paper-2-power",
+                "paper-2",
+                factors=("Laser power (W)",),
+            ),
+        ),
+    )
+
+    assert len(result_sets) == 1
+    assert result_sets[0]["factors"] == ["laser power"]
+    assert {
+        item["document_id"] for item in result_sets[0]["result_evidence"]
+    } == {"paper-1", "paper-2"}
+
+
+def test_synthesis_excludes_unknown_direction_from_directional_result_sets() -> None:
+    service = FindingSynthesisService(finding_extractor=_Extractor([]))
+
+    result_sets = service._result_sets(
+        _objective(variables=["laser power"], outcomes=["relative density"]),
+        (
+            _evidence(
+                "unknown-direction",
+                "paper-1",
+                factors=("laser power",),
+                direction="unknown",
+            ),
+        ),
+    )
+
+    assert result_sets == ()
+
+
+def test_synthesis_prompt_balances_representatives_across_documents() -> None:
+    extractor = _Extractor([None])
+    service = FindingSynthesisService(finding_extractor=extractor)
+    heavy_evidence = tuple(
+        _evidence(
+            f"heavy-{position}",
+            "paper-heavy",
+            factors=("laser power",),
+            confidence=0.99 - position / 1000,
+            changed_variables=[
+                {
+                    "name": "laser power",
+                    "baseline_value": position,
+                    "target_value": position + 1,
+                    "unit": "W",
+                }
+            ],
+        )
+        for position in range(50)
+    )
+    sparse_evidence = _evidence(
+        "sparse-1",
+        "paper-sparse",
+        factors=("Laser power (W)",),
+        confidence=0.8,
+        changed_variables=[
+            {
+                "name": "Laser power (W)",
+                "baseline_value": 150,
+                "target_value": 200,
+                "unit": "W",
+            }
+        ],
+    )
+
+    service.synthesize(
+        collection_id="col-1",
+        objective=_objective(variables=["laser power"]),
+        analysis=_analysis(),
+        contributions=(
+            _contribution("paper-heavy"),
+            _contribution("paper-sparse"),
+        ),
+        evidence_records=(*heavy_evidence, sparse_evidence),
+    )
+
+    prompt_result_set = extractor.payloads[0]["result_set"]
+    assert prompt_result_set["total_evidence_count"] == 51
+    assert len(prompt_result_set["result_evidence"]) <= 16
+    assert {
+        item["document_id"]
+        for item in prompt_result_set["result_evidence"][:2]
+    } == {"paper-heavy", "paper-sparse"}
+    assert {
+        item["document_id"]: item["direction_counts"]
+        for item in prompt_result_set["document_evidence_summaries"]
+    } == {
+        "paper-heavy": {"increase": 50},
+        "paper-sparse": {"increase": 1},
+    }
+    full_result_set = service._result_sets(
+        _objective(variables=["laser power"]),
+        (*heavy_evidence, sparse_evidence),
+    )[0]
+    assert len(full_result_set["result_evidence"]) == 51
+
+
 def test_synthesis_derives_cross_paper_agreement() -> None:
     extractor = _Extractor([_candidate()])
     service = FindingSynthesisService(finding_extractor=extractor)
@@ -380,6 +494,247 @@ def test_synthesis_groups_comparison_intervals_as_one_condition_series() -> None
     assert [len(item["result_evidence"]) for item in result_sets] == [3]
 
 
+def test_synthesis_generates_uniform_no_change_statement_from_evidence() -> None:
+    extractor = _Extractor([_candidate()])
+    service = FindingSynthesisService(finding_extractor=extractor)
+    evidence = tuple(
+        _evidence(
+            evidence_id,
+            "paper-1",
+            direction="no_change",
+            changed_variables=[
+                {
+                    "name": "laser power",
+                    "baseline_value": baseline,
+                    "target_value": target,
+                    "unit": "W",
+                },
+                {
+                    "name": "scan speed",
+                    "baseline_value": 100,
+                    "target_value": 200,
+                    "unit": "mm/s",
+                },
+            ],
+        )
+        for evidence_id, baseline, target in (
+            ("uniform-100-120", 100, 120),
+            ("uniform-120-140", 120, 140),
+        )
+    )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=evidence,
+    )[0]
+
+    assert len(extractor.payloads) == 1
+    assert finding.direction == "no_change"
+    assert finding.statement == (
+        "Joint changes in laser power and scan speed were associated with no "
+        "reported change in relative density."
+    )
+
+
+def test_synthesis_accepts_source_supported_uniform_mixed_condition_series() -> None:
+    extractor = _Extractor([_candidate()])
+    service = FindingSynthesisService(finding_extractor=extractor)
+    evidence = tuple(
+        _evidence(
+            evidence_id,
+            "paper-1",
+            direction="mixed",
+            changed_variables=[
+                {
+                    "name": "laser power",
+                    "baseline_value": baseline,
+                    "target_value": target,
+                    "unit": "W",
+                },
+                {
+                    "name": "scan speed",
+                    "baseline_value": 100,
+                    "target_value": 200,
+                    "unit": "mm/s",
+                },
+            ],
+        )
+        for evidence_id, baseline, target in (
+            ("mixed-100-120", 100, 120),
+            ("mixed-120-140", 120, 140),
+        )
+    )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=evidence,
+    )[0]
+
+    assert len(extractor.payloads) == 1
+    assert finding.direction == "mixed"
+    assert finding.statement == (
+        "Joint changes in laser power and scan speed were associated with a "
+        "source-reported mixed change in relative density."
+    )
+
+
+def test_synthesis_ignores_model_owned_statement_and_direction_fields() -> None:
+    model_candidate = _candidate(
+        statement=(
+            "Across the reported condition series, laser power and scan speed "
+            "showed conflicting responses in relative density."
+        ),
+        direction="increase",
+    )
+    extractor = _Extractor([model_candidate])
+    service = FindingSynthesisService(finding_extractor=extractor)
+    evidence = tuple(
+        _evidence(
+            evidence_id,
+            "paper-1",
+            direction="no_change",
+            changed_variables=[
+                {
+                    "name": "laser power",
+                    "baseline_value": baseline,
+                    "target_value": target,
+                    "unit": "W",
+                },
+                {
+                    "name": "scan speed",
+                    "baseline_value": 100,
+                    "target_value": 200,
+                    "unit": "mm/s",
+                },
+            ],
+        )
+        for evidence_id, baseline, target in (
+            ("uniform-100-120", 100, 120),
+            ("uniform-120-140", 120, 140),
+        )
+    )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=evidence,
+    )[0]
+
+    assert len(extractor.payloads) == 1
+    assert finding.direction == "no_change"
+    assert "no reported change" in finding.statement
+    assert "conflict" not in finding.statement.casefold()
+
+
+def test_synthesis_uses_backend_direction_and_statement_for_no_change() -> None:
+    extractor = _Extractor(
+        [
+            _candidate(
+                statement=(
+                    "Laser power and scan speed increased relative density across "
+                    "the reported comparisons."
+                ),
+                direction="increase",
+            )
+        ]
+    )
+    service = FindingSynthesisService(finding_extractor=extractor)
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(
+            _evidence(
+                "no-change-result",
+                "paper-1",
+                direction="no_change",
+            ),
+        ),
+    )[0]
+
+    assert len(extractor.payloads) == 1
+    assert finding.direction == "no_change"
+    assert "no reported change" in finding.statement
+    assert "increas" not in finding.statement.casefold()
+
+
+def test_synthesis_does_not_read_mixed_powder_as_result_heterogeneity() -> None:
+    extractor = _Extractor(
+        [
+            _candidate(
+                statement=(
+                    "For mixed powder batches, the effects of laser power and scan "
+                    "speed increased relative density."
+                ),
+                direction="increase",
+            )
+        ]
+    )
+    service = FindingSynthesisService(finding_extractor=extractor)
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(_evidence("increase-result", "paper-1"),),
+    )[0]
+
+    assert len(extractor.payloads) == 1
+    assert finding.direction == "increase"
+    assert "increase" in finding.statement
+
+
+def test_synthesis_splits_non_opposing_directions_without_dropping_evidence() -> None:
+    class BackendDirectionExtractor:
+        def __init__(self) -> None:
+            self.payloads: list[dict] = []
+
+        def synthesize_findings(self, payload: dict) -> SimpleNamespace:
+            self.payloads.append(payload)
+            return SimpleNamespace(
+                model_dump=lambda: {"findings": [_candidate()]},
+            )
+
+    extractor = BackendDirectionExtractor()
+    service = FindingSynthesisService(finding_extractor=extractor)
+
+    findings = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(
+            _contribution("paper-increase"),
+            _contribution("paper-mixed"),
+        ),
+        evidence_records=(
+            _evidence("increase-result", "paper-increase", direction="increase"),
+            _evidence("mixed-result", "paper-mixed", direction="mixed"),
+        ),
+    )
+
+    assert {finding.direction for finding in findings} == {"increase", "mixed"}
+    assert {
+        evidence_id
+        for finding in findings
+        for evidence_id in finding.supporting_evidence_ids
+    } == {"increase-result", "mixed-result"}
+    assert all(not finding.contradicting_evidence_ids for finding in findings)
+    assert {
+        payload["result_set"]["primary_direction"] for payload in extractor.payloads
+    } == {"increase", "mixed"}
+
+
 def test_synthesis_normalizes_scientific_unit_typography_for_display() -> None:
     service = FindingSynthesisService(finding_extractor=_Extractor([]))
 
@@ -402,7 +757,7 @@ def test_synthesis_normalizes_scientific_unit_typography_for_display() -> None:
         ),
     )[0]
 
-    assert result_set["factors"] == ["Energy density (J/mm3)"]
+    assert result_set["factors"] == ["energy density"]
     assert result_set["result_evidence"][0]["changed_variables"] == [
         {
             "name": "Energy density (J/mm3)",
@@ -641,8 +996,8 @@ def test_synthesis_keeps_coupled_factors_outside_the_objective_axis() -> None:
                 "ev-1",
                 "paper-1",
                 factors=(
-                    "scan strategy rotation angle",
-                    "build orientation angle",
+                    "scan strategy rotation angles",
+                    "build orientation angles",
                     "layer thickness",
                 ),
                 outcome="yield strength",
@@ -652,9 +1007,9 @@ def test_synthesis_keeps_coupled_factors_outside_the_objective_axis() -> None:
 
     assert len(findings) == 1
     assert findings[0].factors == (
-        "build orientation angle",
+        "build orientation angles",
         "layer thickness",
-        "scan strategy rotation angle",
+        "scan strategy rotation angles",
     )
     assert findings[0].attribution_scope == "joint_effect"
 
@@ -688,7 +1043,7 @@ def test_synthesis_keeps_every_eligible_result_in_one_atomic_set() -> None:
     ] == ["comparison-1", "measurement-1"]
 
 
-def test_synthesis_rejects_statement_mixing_numeric_evidence_endpoints() -> None:
+def test_synthesis_does_not_copy_model_numeric_endpoints_into_statement() -> None:
     extractor = _Extractor(
         [
             _candidate(
@@ -723,7 +1078,7 @@ def test_synthesis_rejects_statement_mixing_numeric_evidence_endpoints() -> None
         ),
     )
 
-    findings = service.synthesize(
+    finding = service.synthesize(
         collection_id="col-1",
         objective=_objective(
             question="How does scan strategy rotation angle affect yield strength?",
@@ -733,12 +1088,14 @@ def test_synthesis_rejects_statement_mixing_numeric_evidence_endpoints() -> None
         analysis=_analysis(),
         contributions=(_contribution("paper-1"),),
         evidence_records=evidence_records,
-    )
+    )[0]
 
-    assert findings == ()
+    assert finding.factors == ("scan strategy rotation angle",)
+    assert finding.outcome == "yield strength"
+    assert not any(character.isdigit() for character in finding.statement)
 
 
-def test_synthesis_rejects_numeric_endpoint_for_multi_interval_series() -> None:
+def test_synthesis_generates_non_numeric_statement_for_multi_interval_series() -> None:
     extractor = _Extractor(
         [
             _heterogeneous_candidate(
@@ -748,12 +1105,11 @@ def test_synthesis_rejects_numeric_endpoint_for_multi_interval_series() -> None:
                     "responses, with an increase and an opposing decrease."
                 ),
             ),
-            None,
         ]
     )
     service = FindingSynthesisService(finding_extractor=extractor)
 
-    findings = service.synthesize(
+    finding = service.synthesize(
         collection_id="col-1",
         objective=_objective(),
         analysis=_analysis(),
@@ -778,15 +1134,14 @@ def test_synthesis_rejects_numeric_endpoint_for_multi_interval_series() -> None:
                 ],
             ),
         ),
-    )
+    )[0]
 
-    assert findings == ()
-    assert extractor.payloads[1]["candidate_rejection"]["reason"] == (
-        "condition-series statement contains a numeric endpoint"
-    )
+    assert len(extractor.payloads) == 1
+    assert "opposing directions" in finding.statement
+    assert not any(character.isdigit() for character in finding.statement)
 
 
-def test_synthesis_rejects_statement_number_absent_from_bound_evidence() -> None:
+def test_synthesis_does_not_publish_number_absent_from_structured_evidence() -> None:
     service = FindingSynthesisService(
         finding_extractor=_Extractor(
             [
@@ -800,7 +1155,7 @@ def test_synthesis_rejects_statement_number_absent_from_bound_evidence() -> None
         )
     )
 
-    findings = service.synthesize(
+    finding = service.synthesize(
         collection_id="col-1",
         objective=_objective(
             question="How does scan strategy rotation angle affect yield strength?",
@@ -821,12 +1176,14 @@ def test_synthesis_rejects_statement_number_absent_from_bound_evidence() -> None
                 ),
             ),
         ),
-    )
+    )[0]
 
-    assert findings == ()
+    assert not any(character.isdigit() for character in finding.statement)
+    assert "scan strategy rotation angle" in finding.statement
+    assert "yield strength" in finding.statement
 
 
-def test_synthesis_rejects_statement_number_from_unrelated_source_property() -> None:
+def test_synthesis_does_not_publish_number_from_unrelated_source_property() -> None:
     service = FindingSynthesisService(
         finding_extractor=_Extractor(
             [
@@ -840,7 +1197,7 @@ def test_synthesis_rejects_statement_number_from_unrelated_source_property() -> 
         )
     )
 
-    findings = service.synthesize(
+    finding = service.synthesize(
         collection_id="col-1",
         objective=_objective(),
         analysis=_analysis(),
@@ -861,9 +1218,10 @@ def test_synthesis_rejects_statement_number_from_unrelated_source_property() -> 
                 },
             ),
         ),
-    )
+    )[0]
 
-    assert findings == ()
+    assert not any(character.isdigit() for character in finding.statement)
+    assert "relative density" in finding.statement
 
 
 def test_synthesis_derives_all_same_direction_results_as_support() -> None:
@@ -912,20 +1270,8 @@ def test_synthesis_derives_opposing_result_as_contradiction() -> None:
     assert finding.synthesis_status == "conflict"
 
 
-def test_synthesis_requires_within_paper_heterogeneity_in_statement_and_limitations(
-) -> None:
-    extractor = _Extractor(
-        [
-            _candidate(),
-            _candidate(
-                statement=(
-                    "Across the reported conditions, joint changes in laser power "
-                    "and scan speed showed heterogeneous relative density responses: "
-                    "increases were accompanied by an opposing decrease."
-                )
-            ),
-        ]
-    )
+def test_synthesis_derives_within_paper_opposition_statement_and_limitation() -> None:
+    extractor = _Extractor([_candidate()])
     service = FindingSynthesisService(finding_extractor=extractor)
 
     finding = service.synthesize(
@@ -940,23 +1286,20 @@ def test_synthesis_requires_within_paper_heterogeneity_in_statement_and_limitati
         ),
     )[0]
 
-    assert len(extractor.payloads) == 2
-    assert "opposing directions" in extractor.payloads[1]["candidate_rejection"][
-        "reason"
-    ]
-    assert "heterogeneous" in finding.statement
+    assert len(extractor.payloads) == 1
+    assert "opposing directions" in finding.statement
     assert (
         "Within-paper condition comparisons report opposing directions."
         in finding.limitations
     )
 
 
-def test_synthesis_rejects_result_direction_that_is_not_an_explicit_opposition() -> None:
+def test_synthesis_ignores_unknown_direction_instead_of_treating_it_as_opposition() -> None:
     service = FindingSynthesisService(
         finding_extractor=_Extractor([_candidate()])
     )
 
-    assert service.synthesize(
+    finding = service.synthesize(
         collection_id="col-1",
         objective=_objective(),
         analysis=_analysis(),
@@ -965,7 +1308,11 @@ def test_synthesis_rejects_result_direction_that_is_not_an_explicit_opposition()
             _evidence("ev-1", "paper-1"),
             _evidence("unknown-1", "paper-2", direction="unknown"),
         ),
-    ) == ()
+    )[0]
+
+    assert finding.supporting_evidence_ids == ("ev-1",)
+    assert finding.contradicting_evidence_ids == ()
+    assert finding.direct_document_count == 1
 
 
 def test_synthesis_assigns_support_and_contradiction_by_direction_not_role() -> None:
@@ -999,10 +1346,42 @@ def test_synthesis_assigns_support_and_contradiction_by_direction_not_role() -> 
         ),
     )[0]
 
-    assert finding.direction == "decrease"
-    assert finding.supporting_evidence_ids == ("conflict-1",)
-    assert finding.contradicting_evidence_ids == ("ev-1",)
+    assert finding.direction == "increase"
+    assert finding.supporting_evidence_ids == ("ev-1",)
+    assert finding.contradicting_evidence_ids == ("conflict-1",)
     assert finding.synthesis_status == "conflict"
+
+
+def test_synthesis_primary_direction_counts_documents_before_rows() -> None:
+    extractor = _Extractor([_candidate()])
+    service = FindingSynthesisService(finding_extractor=extractor)
+    repeated_single_paper = tuple(
+        _evidence(f"increase-{index}", "paper-heavy", direction="increase")
+        for index in range(10)
+    )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(
+            _contribution("paper-heavy"),
+            _contribution("paper-2"),
+            _contribution("paper-3"),
+        ),
+        evidence_records=(
+            *repeated_single_paper,
+            _evidence("decrease-2", "paper-2", direction="decrease"),
+            _evidence("decrease-3", "paper-3", direction="decrease"),
+        ),
+    )[0]
+
+    assert finding.direction == "decrease"
+    assert finding.supporting_evidence_ids == ("decrease-2", "decrease-3")
+    assert set(finding.contradicting_evidence_ids) == {
+        item.evidence_id for item in repeated_single_paper
+    }
+    assert finding.direct_document_count == 3
 
 
 def test_synthesis_does_not_drop_results_after_the_first_48() -> None:
@@ -1025,7 +1404,10 @@ def test_synthesis_does_not_drop_results_after_the_first_48() -> None:
         evidence_records=evidence,
     )[0]
 
-    assert len(extractor.payloads[0]["result_set"]["result_evidence"]) == 49
+    result_set_payload = extractor.payloads[0]["result_set"]
+    assert len(result_set_payload["result_evidence"]) == 16
+    assert result_set_payload["total_evidence_count"] == 49
+    assert len(result_set_payload["document_evidence_summaries"]) == 49
     assert finding.direct_document_count == 49
 
 
@@ -1075,8 +1457,8 @@ def test_synthesis_compacts_large_condition_series_without_dropping_results() ->
 
     payload = extractor.payloads[0]
     result_evidence = payload["result_set"]["result_evidence"]
-    assert len(result_evidence) == len(evidence_ids)
-    assert {item["evidence_id"] for item in result_evidence} == set(evidence_ids)
+    assert len(result_evidence) == 16
+    assert {item["evidence_id"] for item in result_evidence} <= set(evidence_ids)
     assert all(
         set(item)
         == {
@@ -1089,6 +1471,10 @@ def test_synthesis_compacts_large_condition_series_without_dropping_results() ->
         for item in result_evidence
     )
     assert len(json.dumps(payload, ensure_ascii=False, separators=(",", ":"))) < 45_000
+    assert payload["result_set"]["total_evidence_count"] == len(evidence_ids)
+    assert len(payload["result_set"]["document_evidence_summaries"]) == len(
+        evidence_ids
+    )
     assert finding.direct_document_count == 49
 
 
@@ -1148,11 +1534,12 @@ def test_synthesis_bounds_prompt_excerpts_and_context_without_dropping_results()
     assert len(payload["result_set"]["result_evidence"]) == 12
     assert len(payload["context_evidence"]) == 8
     assert all(
+        "source_excerpt" not in item
+        for item in payload["result_set"]["result_evidence"]
+    )
+    assert all(
         len(item["source_excerpt"]) <= 320
-        for item in (
-            *payload["result_set"]["result_evidence"],
-            *payload["context_evidence"],
-        )
+        for item in payload["context_evidence"]
     )
     assert finding.direct_document_count == 12
 
@@ -1487,7 +1874,7 @@ def test_synthesis_keeps_every_candidate_paper_binding() -> None:
     ] == "excluded"
 
 
-def test_synthesis_rejects_statement_that_drops_one_joint_factor() -> None:
+def test_synthesis_statement_keeps_complete_joint_factor_set() -> None:
     extractor = _Extractor(
         [
             _candidate(
@@ -1497,19 +1884,19 @@ def test_synthesis_rejects_statement_that_drops_one_joint_factor() -> None:
     )
     service = FindingSynthesisService(finding_extractor=extractor)
 
-    assert (
-        service.synthesize(
-            collection_id="col-1",
-            objective=_objective(),
-            analysis=_analysis(),
-            contributions=(_contribution("paper-1"),),
-            evidence_records=(_evidence("ev-1", "paper-1"),),
-        )
-        == ()
-    )
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(_evidence("ev-1", "paper-1"),),
+    )[0]
+
+    assert finding.factors == ("laser power", "scan speed")
+    assert "laser power and scan speed" in finding.statement
 
 
-def test_synthesis_rejects_statement_that_adds_an_unbound_objective_factor() -> None:
+def test_synthesis_statement_does_not_add_unbound_objective_factor() -> None:
     extractor = _Extractor(
         [
             _candidate(
@@ -1522,7 +1909,7 @@ def test_synthesis_rejects_statement_that_adds_an_unbound_objective_factor() -> 
     )
     service = FindingSynthesisService(finding_extractor=extractor)
 
-    findings = service.synthesize(
+    finding = service.synthesize(
         collection_id="col-1",
         objective=_objective(
             variables=[
@@ -1541,12 +1928,13 @@ def test_synthesis_rejects_statement_that_adds_an_unbound_objective_factor() -> 
                 outcome="yield strength",
             ),
         ),
-    )
+    )[0]
 
-    assert findings == ()
+    assert finding.factors == ("Scan strategy",)
+    assert "build orientation" not in finding.statement.casefold()
 
 
-def test_synthesis_rejects_statement_that_specializes_a_broad_factor() -> None:
+def test_synthesis_statement_keeps_broad_source_factor_without_specializing_it() -> None:
     extractor = _Extractor(
         [
             _candidate(
@@ -1559,7 +1947,7 @@ def test_synthesis_rejects_statement_that_specializes_a_broad_factor() -> None:
     )
     service = FindingSynthesisService(finding_extractor=extractor)
 
-    findings = service.synthesize(
+    finding = service.synthesize(
         collection_id="col-1",
         objective=_objective(
             variables=["scan strategy rotation angles"],
@@ -1575,9 +1963,11 @@ def test_synthesis_rejects_statement_that_specializes_a_broad_factor() -> None:
                 outcome="yield strength",
             ),
         ),
-    )
+    )[0]
 
-    assert findings == ()
+    assert finding.factors == ("Scan strategy",)
+    assert "Scan strategy" in finding.statement
+    assert "rotation angles" not in finding.statement
 
 
 def test_synthesis_accepts_experimental_outcome_without_repeating_qualifier() -> None:
@@ -1611,7 +2001,7 @@ def test_synthesis_accepts_experimental_outcome_without_repeating_qualifier() ->
     assert finding.outcome == "yield strength experiment"
 
 
-def test_synthesis_requires_prediction_qualifier_in_statement() -> None:
+def test_synthesis_preserves_prediction_qualifier_in_backend_statement() -> None:
     extractor = _Extractor(
         [
             _candidate(
@@ -1621,7 +2011,7 @@ def test_synthesis_requires_prediction_qualifier_in_statement() -> None:
     )
     service = FindingSynthesisService(finding_extractor=extractor)
 
-    findings = service.synthesize(
+    finding = service.synthesize(
         collection_id="col-1",
         objective=_objective(
             variables=["laser power"],
@@ -1637,9 +2027,10 @@ def test_synthesis_requires_prediction_qualifier_in_statement() -> None:
                 outcome="yield strength prediction",
             ),
         ),
-    )
+    )[0]
 
-    assert findings == ()
+    assert finding.outcome == "yield strength prediction"
+    assert "yield strength prediction" in finding.statement
 
 
 def test_synthesis_rejects_causal_joint_factor_candidate() -> None:
@@ -1813,24 +2204,14 @@ def test_synthesis_continues_after_one_result_set_provider_failure() -> None:
     assert [finding.outcome for finding in findings] == ["relative density"]
 
 
-def test_synthesis_repairs_semantically_rejected_production_candidate_once() -> None:
+def test_synthesis_repairs_unavailable_context_reference_once() -> None:
     extractor = _Extractor(
         [
             _candidate(
-                result_set_id="model-invented-result-set",
-                statement=(
-                    "energy density: low -> high results in low densification "
-                    "levels, higher porosity"
-                ),
-                direction="decrease",
                 assertion_strength="descriptive",
+                context_evidence_ids=["missing-context"],
             ),
             _candidate(
-                statement=(
-                    "Energy density showed an increase in densification under "
-                    "the reported comparison."
-                ),
-                direction="increase",
                 assertion_strength="descriptive",
             ),
         ]
@@ -1867,18 +2248,17 @@ def test_synthesis_repairs_semantically_rejected_production_candidate_once() -> 
     assert findings[0].direction == "increase"
     assert len(extractor.payloads) == 2
     repair = extractor.payloads[1]["candidate_rejection"]
-    assert repair["reason"] == (
-        "candidate direction decrease has no supporting result Evidence"
-    )
-    assert repair["previous_candidate"]["result_set_id"].startswith("result_set_")
-    assert repair["previous_candidate"]["result_set_id"] != (
-        "model-invented-result-set"
-    )
+    assert repair["reason"] == "candidate references unavailable context Evidence"
+    assert repair["previous_candidate"] == {
+        "assertion_strength": "descriptive",
+        "context_evidence_ids": ["missing-context"],
+        "mechanisms": [],
+    }
 
 
 def test_synthesis_stops_after_one_semantic_repair(caplog) -> None:
     rejected = _candidate(
-        statement="Laser power was associated with relative density.",
+        context_evidence_ids=["missing-context"],
     )
     extractor = _Extractor([rejected, rejected])
     service = FindingSynthesisService(finding_extractor=extractor)

@@ -477,5 +477,5 @@ support it.
 - [Research View Aggregation Contract](../contracts/research-view-aggregation-contract.md)
 - [RFC Paper-Facts Primary Domain Model and Derived Comparison Views](rfc-paper-facts-primary-domain-model.md)
 - [RFC Comparison-Result-Document Product Flow](rfc-comparison-result-document-product-flow.md)
-- [Backend Research View Aggregation Plan](../../backend/docs/plans/backend-wide/research-view-aggregation/README.md)
+- [Backend API Contract](../../backend/docs/specs/api.md)
 - [Frontend Research View Aggregation Plan](../../frontend/docs/research-view-aggregation/README.md)

@@ -44,6 +44,12 @@ _J_PER_CUBIC_MM_RE = re.compile(
 )
 
 
+def directions_contradict(direction: str, observed_direction: str) -> bool:
+    """Return whether two reported-result directions explicitly oppose."""
+
+    return observed_direction in _CONTRADICTING_DIRECTIONS.get(direction, ())
+
+
 @dataclass(frozen=True)
 class FindingMechanismRelation:
     source_term: str
@@ -502,8 +508,9 @@ class Finding:
                 raise ValueError("finding support direction differs from Finding")
         for evidence in contradicting:
             self._validate_direct_evidence(evidence)
-            if evidence.reported_result.direction not in _CONTRADICTING_DIRECTIONS.get(
-                self.direction, ()
+            if not directions_contradict(
+                self.direction,
+                evidence.reported_result.direction,
             ):
                 raise ValueError("finding contradiction does not oppose its direction")
         for evidence_id in self.context_evidence_ids:
@@ -535,6 +542,7 @@ class Finding:
             raise ValueError("finding cannot use non-attributable direct evidence")
         if evidence.reported_result is None:
             raise ValueError("finding direct evidence requires reported result")
+
         evidence_factors = tuple(
             sorted(
                 (_normalize_term(item.name) for item in evidence.changed_variables),

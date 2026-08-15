@@ -5,7 +5,7 @@ import math
 from typing import Any, Iterable, Mapping
 
 from domain.ports import SourceArtifactRepository
-from domain.source import SourceArtifactSet, SourceDocumentTree
+from domain.source import SourceDocument, SourceDocumentTree
 
 
 SourceRecord = dict[str, Any]
@@ -17,11 +17,15 @@ def load_collection_inputs(
     *,
     build_id: str | None = None,
 ) -> tuple[tuple[SourceRecord, ...], tuple[SourceRecord, ...] | None]:
-    artifacts = _load_source_artifacts(
+    source_documents = _load_source_documents(
         collection_id, source_artifact_repository, build_id=build_id
     )
-    documents = _records(document.to_record() for document in artifacts.documents)
-    text_units = _records(text_unit.to_record() for text_unit in artifacts.text_units)
+    documents = _records(document.to_record() for document in source_documents)
+    text_units = _records(
+        text_unit.to_record()
+        for document in source_documents
+        for text_unit in document.text_units
+    )
     return documents, text_units or None
 
 
@@ -31,10 +35,14 @@ def load_blocks_artifact(
     *,
     build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
-    artifacts = _load_source_artifacts(
+    source_documents = _load_source_documents(
         collection_id, source_artifact_repository, build_id=build_id
     )
-    return _records(block.to_record() for block in artifacts.blocks)
+    return _records(
+        block.to_record()
+        for document in source_documents
+        for block in document.blocks
+    )
 
 
 def load_table_rows_artifact(
@@ -43,10 +51,14 @@ def load_table_rows_artifact(
     *,
     build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
-    artifacts = _load_source_artifacts(
+    source_documents = _load_source_documents(
         collection_id, source_artifact_repository, build_id=build_id
     )
-    return _records(row.to_record() for row in artifacts.table_rows)
+    return _records(
+        row.to_record()
+        for document in source_documents
+        for row in document.table_rows
+    )
 
 
 def load_table_cells_artifact(
@@ -55,10 +67,14 @@ def load_table_cells_artifact(
     *,
     build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
-    artifacts = _load_source_artifacts(
+    source_documents = _load_source_documents(
         collection_id, source_artifact_repository, build_id=build_id
     )
-    return _records(cell.to_record() for cell in artifacts.table_cells)
+    return _records(
+        cell.to_record()
+        for document in source_documents
+        for cell in document.table_cells
+    )
 
 
 def load_figures_artifact(
@@ -77,10 +93,14 @@ def load_tables_artifact(
     *,
     build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
-    artifacts = _load_source_artifacts(
+    source_documents = _load_source_documents(
         collection_id, source_artifact_repository, build_id=build_id
     )
-    return _records(table.to_record() for table in artifacts.tables)
+    return _records(
+        table.to_record()
+        for document in source_documents
+        for table in document.tables
+    )
 
 
 def load_document_tree(
@@ -102,23 +122,23 @@ def load_document_tree(
     )
 
 
-def _load_source_artifacts(
+def _load_source_documents(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
     *,
     build_id: str | None = None,
-) -> SourceArtifactSet:
-    artifacts = (
-        source_artifact_repository.read_collection_artifacts(
+) -> tuple[SourceDocument, ...]:
+    documents = (
+        source_artifact_repository.read_collection_documents(
             collection_id,
             build_id=build_id,
         )
         if build_id is not None
-        else source_artifact_repository.read_collection_artifacts(collection_id)
+        else source_artifact_repository.read_collection_documents(collection_id)
     )
-    if not artifacts.documents:
+    if not documents:
         raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
-    return artifacts
+    return documents
 
 
 def _records(records: Iterable[Mapping[str, Any]]) -> tuple[SourceRecord, ...]:

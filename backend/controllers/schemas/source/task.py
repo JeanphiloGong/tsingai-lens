@@ -4,8 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 TaskStatus = Literal["queued", "running", "completed", "partial_success", "failed"]
+PipelineMode = Literal["standard", "fast"]
 TaskStage = Literal[
     "queued",
     "source_artifacts_started",
@@ -26,6 +26,10 @@ class BuildTaskCreateRequest(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    mode: PipelineMode = Field(
+        default="standard",
+        description="Collection build pipeline mode.",
+    )
     verbose: bool = Field(default=False, description="是否输出详细日志")
     additional_context: dict[str, Any] | None = Field(
         default=None,

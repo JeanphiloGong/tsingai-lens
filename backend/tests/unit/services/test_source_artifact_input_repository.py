@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from domain.source import (
-    SourceArtifactSet,
     SourceBlock,
     SourceDocument,
     SourceReferenceEntry,
@@ -10,6 +9,7 @@ from domain.source import (
     SourceTableCell,
     SourceTableRow,
     SourceTextUnit,
+    assemble_source_documents,
     build_source_document_tree,
 )
 from application.source import artifact_input_service
@@ -18,18 +18,18 @@ from application.source import artifact_input_service
 class _SourceRepository:
     def __init__(
         self,
-        artifacts: SourceArtifactSet,
+        documents: tuple[SourceDocument, ...],
         references: SourceReferenceSet = SourceReferenceSet(),
     ) -> None:
-        self.artifacts = artifacts
+        self.documents = documents
         self.references = references
 
-    def read_collection_artifacts(
+    def read_collection_documents(
         self,
         collection_id: str,
         build_id: str | None = None,
-    ) -> SourceArtifactSet:
-        return self.artifacts
+    ) -> tuple[SourceDocument, ...]:
+        return self.documents
 
     def read_document_tree(
         self,
@@ -38,46 +38,33 @@ class _SourceRepository:
         build_id: str | None = None,
     ):
         document = next(
-            item for item in self.artifacts.documents if item.document_id == document_id
+            item for item in self.documents if item.document_id == document_id
         )
         return build_source_document_tree(
             collection_id=collection_id,
             document=document,
-            blocks=tuple(
-                item
-                for item in self.artifacts.blocks
-                if item.document_id == document_id
-            ),
-            tables=tuple(
-                item
-                for item in self.artifacts.tables
-                if item.document_id == document_id
-            ),
-            figures=tuple(
-                item
-                for item in self.artifacts.figures
-                if item.document_id == document_id
-            ),
+            blocks=document.blocks,
+            tables=document.tables,
+            figures=document.figures,
             references=self.references,
         )
 
 
 def test_artifact_input_service_uses_explicit_source_repository():
     repository = _SourceRepository(
-        SourceArtifactSet(
+        assemble_source_documents(
             documents=(
                 SourceDocument(
                     document_id="doc-1",
-                    human_readable_id=0,
+                    document_order=0,
                     title="Paper",
                     text="Methods",
-                    text_unit_ids=("tu-1",),
                 ),
             ),
             text_units=(
                 SourceTextUnit(
                     text_unit_id="tu-1",
-                    human_readable_id=0,
+                    text_unit_order=0,
                     text="Methods",
                     n_tokens=3,
                     document_ids=("doc-1",),
@@ -103,7 +90,6 @@ def test_artifact_input_service_uses_explicit_source_repository():
                     caption_text="Table 1",
                     caption_block_id=None,
                     page=1,
-                    bbox=None,
                     heading_path="Methods",
                     column_headers=("Sample", "Value"),
                     table_matrix=(("Sample", "Value"), ("A", "1")),
@@ -154,11 +140,11 @@ def test_artifact_input_service_uses_explicit_source_repository():
 
 def test_artifact_input_service_loads_document_tree():
     source_repository = _SourceRepository(
-        SourceArtifactSet(
+        assemble_source_documents(
             documents=(
                 SourceDocument(
                     document_id="doc-1",
-                    human_readable_id=0,
+                    document_order=0,
                     title="Paper",
                     text="Methods\nEvidence text",
                 ),

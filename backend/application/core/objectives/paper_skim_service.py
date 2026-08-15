@@ -1,29 +1,109 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from typing import Any
 
-from application.core.objectives.extraction import ObjectiveExtractor
-from domain.core import PaperSkim
-from domain.source import SourceArtifactSet, SourceDocumentTree
+from application.core.objectives import property_matching
+from application.core.objectives.extraction import (
+    ObjectiveExtractor,
+    PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT,
+    PAPER_SKIM_PROMPT_TOKEN_LIMIT,
+    PaperSkimOutputSaturatedError,
+)
+from application.core.objectives.schemas import (
+    PAPER_SKIM_SOURCE_UNIT_LIMIT,
+    StructuredPaperStudy,
+    StructuredPaperSignalReconciliation,
+    StructuredPaperSkim,
+)
+from domain.core import (
+    PaperSkim,
+    PaperSourceUnitCoverage,
+    PaperSourceUnitCoverageStatus,
+    PaperStudy,
+    PaperStudyRelationship,
+    PaperStudySignal,
+)
+from domain.source import SourceDocument, SourceDocumentTree
 
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
-_SKIM_TEXT_PREVIEW_CHARS = 4000
+_SKIM_WINDOW_CHARS = 4000
 _SKIM_HEADING_LIMIT = 16
+_SKIM_WARNING_LIMIT = 2
+_SKIM_WINDOW_ROLES = ("overview", "methods", "results", "conclusion", "unknown")
+_SKIM_ROLE_BY_SEMANTIC_ROLE = {
+    "abstract": "overview",
+    "introduction": "overview",
+    "methods": "methods",
+    "results": "results",
+    "conclusion": "conclusion",
+}
+_EVIDENCE_DENSITY_RANK = {"unknown": 0, "low": 1, "medium": 2, "high": 3}
+_SIGNAL_RECONCILIATION_SIGNAL_LIMIT = 12
+_SIGNAL_RECONCILIATION_NEARBY_SOURCE_UNIT_DISTANCE = 12
+
+
+@dataclass(frozen=True)
+class _SkimSourceItem:
+    role: str
+    order: int
+    source_kind: str
+    source_ref: str
+    content: Any
+    section_path: str
+    source_unit_id: str = ""
+
+    @property
+    def size(self) -> int:
+        if isinstance(self.content, str):
+            return len(self.content)
+        return len(
+            json.dumps(
+                self.content,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+
+
+@dataclass(frozen=True)
+class _PaperSignalInput:
+    signal: PaperStudySignal
+    source_contexts: tuple[dict[str, Any], ...]
+
+    def to_payload(self) -> dict[str, Any]:
+        signal_record = self.signal.to_record()
+        return {
+            **{
+                key: value
+                for key, value in signal_record.items()
+                if key not in {"source_refs", "reason"}
+            },
+            "sources": [
+                {
+                    "source_unit_id": source.get("source_unit_id"),
+                    "section_path": source.get("section_path"),
+                    "excerpt": source.get("excerpt"),
+                }
+                for source in self.source_contexts
+            ],
+        }
 
 
 class PaperSkimService:
-    """Build one bounded research map for every document in a collection build."""
+    """Screen every paper through bounded source windows and consolidate its map."""
 
     def build_collection_paper_skims(
         self,
         collection_id: str,
         *,
-        artifacts: SourceArtifactSet,
+        documents: tuple[SourceDocument, ...],
         profiles_by_document_id: Mapping[str, Any],
         document_trees_by_document_id: Mapping[
             str,
@@ -32,33 +112,19 @@ class PaperSkimService:
         extractor: ObjectiveExtractor,
         progress_callback: ProgressCallback | None = None,
     ) -> tuple[PaperSkim, ...]:
-        blocks_by_document_id = self._group_by_document_id(artifacts.blocks)
-        tables_by_document_id = self._group_by_document_id(artifacts.tables)
-        figures_by_document_id = self._group_by_document_id(artifacts.figures)
-
         logger.info(
             "Research objective paper skim started collection_id=%s document_count=%s",
             collection_id,
-            len(artifacts.documents),
+            len(documents),
         )
         paper_skims: list[PaperSkim] = []
-        document_count = len(artifacts.documents)
-        for document_position, document in enumerate(artifacts.documents, start=1):
+        document_count = len(documents)
+        for document_position, document in enumerate(documents, start=1):
             source_filename = self._resolve_source_filename(document)
-            self._notify_progress(
-                progress_callback,
-                phase="objective_paper_skim_started",
-                current=document_position,
-                total=document_count,
-                unit="documents",
-                message="Scanning papers for candidate research objectives.",
-                active_document_id=document.document_id,
-                active_document_title=getattr(document, "title", None),
-                active_source_filename=source_filename,
-            )
-            document_blocks = blocks_by_document_id.get(document.document_id, [])
-            document_tables = tables_by_document_id.get(document.document_id, [])
-            document_figures = figures_by_document_id.get(document.document_id, [])
+            document_blocks = list(document.blocks)
+            document_tables = list(document.tables)
+            document_table_rows = list(document.table_rows)
+            document_figures = list(document.figures)
             logger.info(
                 "Research objective paper skim document started collection_id=%s document_id=%s document_position=%s document_count=%s block_count=%s table_count=%s figure_count=%s",
                 collection_id,
@@ -69,42 +135,76 @@ class PaperSkimService:
                 len(document_tables),
                 len(document_figures),
             )
-            payload = self._build_paper_skim_payload(
+            payloads = self._build_paper_skim_payloads(
                 collection_id=collection_id,
                 document=document,
                 profile=profiles_by_document_id.get(document.document_id),
                 blocks=document_blocks,
                 tables=document_tables,
+                table_rows=document_table_rows,
                 figures=document_figures,
                 document_tree=document_trees_by_document_id.get(document.document_id),
+                extractor=extractor,
             )
-            parsed = extractor.extract_paper_skim(payload)
-            paper_skim = PaperSkim.from_mapping(
-                {
-                    **parsed.model_dump(),
-                    "document_id": document.document_id,
-                    "title": document.title,
-                    "source_filename": source_filename,
-                }
+            window_skims: list[PaperSkim] = []
+            paper_signals: list[_PaperSignalInput] = []
+            window_count = len(payloads)
+            for window_position, payload in enumerate(payloads, start=1):
+                self._notify_progress(
+                    progress_callback,
+                    phase="objective_paper_skim_started",
+                    current=document_position,
+                    total=document_count,
+                    unit="documents",
+                    message="Scanning papers for candidate research objectives.",
+                    active_document_id=document.document_id,
+                    active_document_title=getattr(document, "title", None),
+                    active_source_filename=source_filename,
+                    active_window_position=window_position,
+                    active_window_count=window_count,
+                    active_window_role=payload["window_role"],
+                )
+                batch_skims, batch_signals = self._extract_window_batch(
+                    collection_id=collection_id,
+                    document_id=document.document_id,
+                    payload=payload,
+                    extractor=extractor,
+                )
+                window_skims.extend(batch_skims)
+                paper_signals.extend(batch_signals)
+            paper_skim = self._consolidate_window_skims(
+                document.document_id,
+                window_skims,
+                profile=profiles_by_document_id.get(document.document_id),
+            )
+            paper_skim = self._reconcile_paper_signals(
+                paper_skim,
+                paper_signals,
+                extractor=extractor,
+                progress_callback=progress_callback,
+                document_position=document_position,
+                document_count=document_count,
+                document_title=getattr(document, "title", None),
+                source_filename=source_filename,
             )
             paper_skims.append(paper_skim)
             logger.info(
-                "Research objective paper skim document finished collection_id=%s document_id=%s document_position=%s document_count=%s doc_role=%s candidate_materials=%s candidate_processes=%s candidate_properties=%s possible_objectives=%s completed_documents=%s remaining_documents=%s",
+                "Research objective paper skim document finished collection_id=%s document_id=%s document_position=%s document_count=%s window_count=%s doc_role=%s study_count=%s relationship_count=%s unresolved_signal_count=%s completed_documents=%s remaining_documents=%s",
                 collection_id,
                 document.document_id,
                 document_position,
                 document_count,
+                window_count,
                 paper_skim.doc_role,
-                len(paper_skim.candidate_materials),
-                len(paper_skim.candidate_processes),
-                len(paper_skim.candidate_properties),
-                len(paper_skim.possible_objectives),
+                len(paper_skim.studies),
+                sum(len(study.relationships) for study in paper_skim.studies),
+                len(paper_skim.unresolved_signals),
                 document_position,
                 max(document_count - document_position, 0),
             )
         return tuple(paper_skims)
 
-    def _build_paper_skim_payload(
+    def _build_paper_skim_payloads(
         self,
         *,
         collection_id: str,
@@ -112,23 +212,548 @@ class PaperSkimService:
         profile: Any,
         blocks: list[Any],
         tables: list[Any],
+        table_rows: list[Any],
         figures: list[Any],
         document_tree: SourceDocumentTree | None = None,
-    ) -> dict[str, Any]:
-        ordered_blocks = sorted(
+        extractor: ObjectiveExtractor,
+    ) -> list[dict[str, Any]]:
+        source_items = self._build_source_items(
+            document=document,
+            blocks=blocks,
+            tables=tables,
+            table_rows=table_rows,
+            figures=figures,
+            document_tree=document_tree,
+        )
+        bounded_items = [
+            bounded_item
+            for item in source_items
+            for bounded_item in self._split_oversized_source_item(item)
+        ]
+        items = [
+            replace(
+                bounded_item,
+                source_unit_id=f"source-unit-{position:06d}",
+            )
+            for position, bounded_item in enumerate(bounded_items, start=1)
+        ]
+        payloads: list[dict[str, Any]] = []
+        role_window_positions = {role: 0 for role in _SKIM_WINDOW_ROLES}
+        for section_items in self._section_item_groups(items):
+            role = section_items[0].role
+            for window_items in self._pack_source_items(list(section_items)):
+                role_window_positions[role] += 1
+                payload = self._build_window_payload(
+                    collection_id=collection_id,
+                    document=document,
+                    profile=profile,
+                    role=role,
+                    role_window_position=role_window_positions[role],
+                    items=window_items,
+                )
+                payloads.extend(
+                    self._fit_payload_to_prompt_limit(
+                        payload,
+                        extractor=extractor,
+                    )
+                )
+        if payloads:
+            return payloads
+        empty_payload = self._build_window_payload(
+            collection_id=collection_id,
+            document=document,
+            profile=profile,
+            role="unknown",
+            role_window_position=1,
+            items=(),
+        )
+        return list(
+            self._fit_payload_to_prompt_limit(
+                empty_payload,
+                extractor=extractor,
+            )
+        )
+
+    @staticmethod
+    def _section_item_groups(
+        items: list[_SkimSourceItem],
+    ) -> tuple[tuple[_SkimSourceItem, ...], ...]:
+        groups: dict[str, list[_SkimSourceItem]] = {}
+        for item in items:
+            section_key = item.section_path.strip().casefold() or "unsectioned"
+            groups.setdefault(section_key, []).append(item)
+        return tuple(tuple(group) for group in groups.values())
+
+    def _build_source_items(
+        self,
+        *,
+        document: Any,
+        blocks: list[Any],
+        tables: list[Any],
+        table_rows: list[Any],
+        figures: list[Any],
+        document_tree: SourceDocumentTree | None,
+    ) -> list[_SkimSourceItem]:
+        items = (
+            self._text_items_from_tree(document_tree)
+            if document_tree is not None
+            else self._text_items_from_blocks(blocks)
+        )
+        if not items and str(getattr(document, "text", "") or "").strip():
+            items = [
+                _SkimSourceItem(
+                    role="unknown",
+                    order=0,
+                    source_kind="document",
+                    source_ref=document.document_id,
+                    content=str(document.text).strip(),
+                    section_path="Unsectioned",
+                )
+            ]
+        items.extend(self._table_items(tables, table_rows, document_tree))
+        items.extend(self._figure_items(figures, document_tree))
+        return sorted(items, key=lambda item: (item.order, item.source_kind))
+
+    def _text_items_from_tree(
+        self,
+        document_tree: SourceDocumentTree,
+    ) -> list[_SkimSourceItem]:
+        return [
+            _SkimSourceItem(
+                role=self._tree_node_window_role(document_tree, node),
+                order=int(getattr(node, "order", 0) or 0),
+                source_kind=str(node.source_ref_kind or "block"),
+                source_ref=str(node.source_ref_id or node.node_id),
+                content=str(node.text or "").strip(),
+                section_path=self._tree_section_label(node),
+            )
+            for node in self._document_tree_nodes_in_order(document_tree)
+            if node.node_type in {"paragraph", "list_item"}
+            and not self._tree_node_in_reference_branch(document_tree, node)
+            and str(node.text or "").strip()
+        ]
+
+    def _text_items_from_blocks(self, blocks: list[Any]) -> list[_SkimSourceItem]:
+        items: list[_SkimSourceItem] = []
+        for block in sorted(
             blocks,
             key=lambda item: int(getattr(item, "block_order", 0) or 0),
+        ):
+            if getattr(block, "block_type", "") not in {"paragraph", "list_item"}:
+                continue
+            text = str(getattr(block, "text", "") or "").strip()
+            section_path = str(getattr(block, "heading_path", "") or "").strip()
+            role = self._window_role_from_text(section_path)
+            if not text or role == "references":
+                continue
+            items.append(
+                _SkimSourceItem(
+                    role=role,
+                    order=int(getattr(block, "block_order", 0) or 0),
+                    source_kind="block",
+                    source_ref=str(getattr(block, "block_id", "") or ""),
+                    content=text,
+                    section_path=section_path or "Unsectioned",
+                )
+            )
+        return items
+
+    def _table_items(
+        self,
+        tables: list[Any],
+        table_rows: list[Any],
+        document_tree: SourceDocumentTree | None,
+    ) -> list[_SkimSourceItem]:
+        items: list[_SkimSourceItem] = []
+        rows_by_table_id: dict[str, list[Any]] = {}
+        for row in table_rows:
+            rows_by_table_id.setdefault(str(row.table_id), []).append(row)
+        for table in sorted(tables, key=lambda item: item.table_order):
+            role = self._source_ref_window_role(
+                document_tree,
+                source_ref_kind="table",
+                source_ref_id=table.table_id,
+                heading_path=table.heading_path,
+            )
+            if role == "references":
+                continue
+            table_context = {
+                "table_id": table.table_id,
+                "caption_text": str(table.caption_text or ""),
+                "heading_path": str(table.heading_path or ""),
+                "column_headers": [str(value) for value in table.column_headers],
+            }
+            items.append(
+                _SkimSourceItem(
+                    role=role,
+                    order=200_000 + int(table.table_order or 0) * 10_000,
+                    source_kind="table",
+                    source_ref=table.table_id,
+                    content=table_context,
+                    section_path=str(table.heading_path or "").strip()
+                    or "Unsectioned",
+                )
+            )
+            explicit_rows = sorted(
+                rows_by_table_id.get(str(table.table_id), ()),
+                key=lambda row: int(row.row_index),
+            )
+            row_records = (
+                [
+                    (
+                        "table_row",
+                        str(row.row_id),
+                        {
+                            "table_context": table_context,
+                            "row_id": str(row.row_id),
+                            "row_index": int(row.row_index),
+                            "row_text": str(row.row_text or ""),
+                        },
+                    )
+                    for row in explicit_rows
+                    if str(row.row_text or "").strip()
+                ]
+                if explicit_rows
+                else [
+                    (
+                        "table",
+                        table.table_id,
+                        {
+                            "table_context": table_context,
+                            "row_index": row_index,
+                            "row_text": " | ".join(str(value) for value in row),
+                        },
+                    )
+                    for row_index, row in enumerate(table.table_matrix)
+                    if any(str(value).strip() for value in row)
+                ]
+            )
+            items.extend(
+                _SkimSourceItem(
+                    role=role,
+                    order=(
+                        200_000
+                        + int(table.table_order or 0) * 10_000
+                        + row_position
+                        + 1
+                    ),
+                    source_kind=source_kind,
+                    source_ref=source_ref,
+                    content=row_record,
+                    section_path=str(table.heading_path or "").strip()
+                    or "Unsectioned",
+                )
+                for row_position, (source_kind, source_ref, row_record) in enumerate(
+                    row_records
+                )
+            )
+        return items
+
+    def _figure_items(
+        self,
+        figures: list[Any],
+        document_tree: SourceDocumentTree | None,
+    ) -> list[_SkimSourceItem]:
+        items: list[_SkimSourceItem] = []
+        for figure in sorted(figures, key=lambda item: item.figure_order):
+            role = self._source_ref_window_role(
+                document_tree,
+                source_ref_kind="figure",
+                source_ref_id=figure.figure_id,
+                heading_path=figure.heading_path,
+            )
+            if role == "references":
+                continue
+            items.append(
+                _SkimSourceItem(
+                    role=role,
+                    order=300_000 + int(figure.figure_order or 0) * 10,
+                    source_kind="figure",
+                    source_ref=figure.figure_id,
+                    content={
+                        "figure_id": figure.figure_id,
+                        "caption_text": str(figure.caption_text or ""),
+                        "heading_path": str(figure.heading_path or ""),
+                    },
+                    section_path=str(figure.heading_path or "").strip()
+                    or "Unsectioned",
+                )
+            )
+        return items
+
+    @staticmethod
+    def _pack_source_items(
+        items: list[_SkimSourceItem],
+    ) -> list[tuple[_SkimSourceItem, ...]]:
+        windows: list[tuple[_SkimSourceItem, ...]] = []
+        current: list[_SkimSourceItem] = []
+        current_size = 0
+        for item in items:
+            separator_size = 2 if current else 0
+            if current and (
+                len(current) >= PAPER_SKIM_SOURCE_UNIT_LIMIT
+                or current_size + separator_size + item.size > _SKIM_WINDOW_CHARS
+            ):
+                windows.append(tuple(current))
+                current = []
+                current_size = 0
+                separator_size = 0
+            current.append(item)
+            current_size += separator_size + item.size
+        if current:
+            windows.append(tuple(current))
+        return windows
+
+    @staticmethod
+    def _split_oversized_source_item(
+        item: _SkimSourceItem,
+    ) -> tuple[_SkimSourceItem, ...]:
+        if item.size <= _SKIM_WINDOW_CHARS:
+            return (item,)
+        if isinstance(item.content, Mapping):
+            if "row_text" in item.content:
+                return PaperSkimService._split_table_row_source_item(item)
+            return PaperSkimService._split_structured_source_item(item)
+        if not isinstance(item.content, str):
+            raise ValueError(
+                "paper skim Source item cannot fit in a bounded window"
+            )
+        text = str(item.content)
+        chunks: list[str] = []
+        start = 0
+        while len(text) - start > _SKIM_WINDOW_CHARS:
+            hard_end = start + _SKIM_WINDOW_CHARS
+            split_at = PaperSkimService._natural_text_split(text, start, hard_end)
+            chunks.append(text[start:split_at])
+            start = split_at
+        chunks.append(text[start:])
+        return tuple(
+            _SkimSourceItem(
+                role=item.role,
+                order=item.order + position,
+                source_kind=item.source_kind,
+                source_ref=item.source_ref,
+                content=chunk,
+                section_path=item.section_path,
+            )
+            for position, chunk in enumerate(chunks)
         )
-        headings = self._extract_headings_from_tree(document_tree)
-        if not headings:
-            headings = self._extract_headings(ordered_blocks)
-        text_preview = self._build_text_preview_from_tree(document_tree)
-        if not text_preview:
-            text_preview = self._build_text_preview(document, ordered_blocks)
+
+    @staticmethod
+    def _split_table_row_source_item(
+        item: _SkimSourceItem,
+    ) -> tuple[_SkimSourceItem, ...]:
+        content = dict(item.content)
+        row_text = str(content.pop("row_text", ""))
+        chunks: list[_SkimSourceItem] = []
+        start = 0
+        while start < len(row_text):
+            low = start + 1
+            high = len(row_text)
+            end = start
+            while low <= high:
+                candidate_end = (low + high) // 2
+                candidate = replace(
+                    item,
+                    content={
+                        **content,
+                        "structured_path": ["row_text"],
+                        "fragment_start": start,
+                        "fragment": row_text[start:candidate_end],
+                    },
+                )
+                if candidate.size <= _SKIM_WINDOW_CHARS:
+                    end = candidate_end
+                    low = candidate_end + 1
+                else:
+                    high = candidate_end - 1
+            if end == start:
+                raise ValueError(
+                    "paper skim table context cannot fit in a bounded window"
+                )
+            if end < len(row_text):
+                end = PaperSkimService._natural_text_split(row_text, start, end)
+            chunks.append(
+                replace(
+                    item,
+                    content={
+                        **content,
+                        "structured_path": ["row_text"],
+                        "fragment_start": start,
+                        "fragment": row_text[start:end],
+                    },
+                )
+            )
+            start = end
+        return tuple(chunks)
+
+    @staticmethod
+    def _split_structured_source_item(
+        item: _SkimSourceItem,
+    ) -> tuple[_SkimSourceItem, ...]:
+        chunks: list[_SkimSourceItem] = []
+        for path, value in PaperSkimService._structured_source_leaves(item.content):
+            if isinstance(value, str):
+                chunks.extend(
+                    PaperSkimService._split_structured_text_value(
+                        item,
+                        path=path,
+                        value=value,
+                    )
+                )
+                continue
+            chunk = replace(
+                item,
+                content={
+                    "structured_path": list(path),
+                    "value": value,
+                },
+            )
+            if chunk.size > _SKIM_WINDOW_CHARS:
+                raise ValueError(
+                    "paper skim structured Source value cannot fit in a bounded "
+                    "window"
+                )
+            chunks.append(chunk)
+        return tuple(chunks)
+
+    @staticmethod
+    def _structured_source_leaves(
+        value: Any,
+        path: tuple[str | int, ...] = (),
+    ) -> tuple[tuple[tuple[str | int, ...], Any], ...]:
+        if isinstance(value, Mapping):
+            if not value:
+                return ((path, {}),)
+            return tuple(
+                leaf
+                for key, child in value.items()
+                for leaf in PaperSkimService._structured_source_leaves(
+                    child,
+                    (*path, str(key)),
+                )
+            )
+        if isinstance(value, (list, tuple)):
+            if not value:
+                return ((path, []),)
+            return tuple(
+                leaf
+                for position, child in enumerate(value)
+                for leaf in PaperSkimService._structured_source_leaves(
+                    child,
+                    (*path, position),
+                )
+            )
+        return ((path, value),)
+
+    @staticmethod
+    def _split_structured_text_value(
+        item: _SkimSourceItem,
+        *,
+        path: tuple[str | int, ...],
+        value: str,
+    ) -> tuple[_SkimSourceItem, ...]:
+        if not value:
+            return (
+                replace(
+                    item,
+                    content={
+                        "structured_path": list(path),
+                        "fragment_start": 0,
+                        "fragment": "",
+                    },
+                ),
+            )
+
+        chunks: list[_SkimSourceItem] = []
+        start = 0
+        while start < len(value):
+            low = start + 1
+            high = len(value)
+            end = start
+            while low <= high:
+                candidate_end = (low + high) // 2
+                candidate = replace(
+                    item,
+                    content={
+                        "structured_path": list(path),
+                        "fragment_start": start,
+                        "fragment": value[start:candidate_end],
+                    },
+                )
+                if candidate.size <= _SKIM_WINDOW_CHARS:
+                    end = candidate_end
+                    low = candidate_end + 1
+                else:
+                    high = candidate_end - 1
+            if end == start:
+                raise ValueError(
+                    "paper skim structured Source path cannot fit in a bounded "
+                    "window"
+                )
+            if end < len(value):
+                end = PaperSkimService._natural_text_split(value, start, end)
+            chunks.append(
+                replace(
+                    item,
+                    content={
+                        "structured_path": list(path),
+                        "fragment_start": start,
+                        "fragment": value[start:end],
+                    },
+                )
+            )
+            start = end
+        return tuple(chunks)
+
+    @staticmethod
+    def _natural_text_split(text: str, start: int, hard_end: int) -> int:
+        chunk = text[start:hard_end]
+        minimum = len(chunk) // 2
+        for boundary in ("\n\n", ". ", "? ", "! ", "\n"):
+            position = chunk.rfind(boundary, minimum)
+            if position >= 0:
+                return start + position + len(boundary)
+        for position in range(len(chunk) - 1, minimum - 1, -1):
+            if chunk[position].isspace():
+                return start + position + 1
+        return hard_end
+
+    def _build_window_payload(
+        self,
+        *,
+        collection_id: str,
+        document: Any,
+        profile: Any,
+        role: str,
+        role_window_position: int,
+        items: tuple[_SkimSourceItem, ...],
+    ) -> dict[str, Any]:
+        section_paths = self._unique_text_values(
+            item.section_path for item in items if item.section_path
+        )
+        source_unit_ids = [item.source_unit_id for item in items]
+        if not all(source_unit_ids) or len(source_unit_ids) != len(
+            set(source_unit_ids)
+        ):
+            raise ValueError("paper skim Source-unit ids must be non-empty and unique")
+        source_units = [
+            {
+                "source_unit_id": item.source_unit_id,
+                "source_kind": item.source_kind,
+                "source_ref": item.source_ref,
+                "section_path": item.section_path,
+                "content": item.content,
+            }
+            for item in items
+        ]
         return {
             "collection_id": collection_id,
             "document_id": document.document_id,
             "title": str(document.title or "")[:160],
+            "window_id": f"{role}-{role_window_position}",
+            "window_role": role,
+            "section_paths": list(section_paths[:_SKIM_HEADING_LIMIT]),
             "document_profile": (
                 {
                     "doc_type": profile.doc_type,
@@ -138,100 +763,1301 @@ class PaperSkimService:
                 if profile
                 else {}
             ),
-            "text_preview": text_preview[:_SKIM_TEXT_PREVIEW_CHARS],
-            "headings": headings[:4],
-            "table_captions": [
+            "source_units": source_units,
+        }
+
+    def _extract_window_batch(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        payload: Mapping[str, Any],
+        extractor: ObjectiveExtractor,
+        attempt: int = 1,
+    ) -> tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]]:
+        try:
+            parsed = extractor.extract_paper_skim(dict(payload))
+            window_skim, window_signals = self._resolve_window_result(
+                document_id=document_id,
+                payload=payload,
+                parsed=parsed,
+            )
+            return (window_skim,), window_signals
+        except Exception as exc:  # noqa: BLE001
+            source_units = tuple(
+                unit
+                for unit in payload.get("source_units") or ()
+                if isinstance(unit, Mapping)
+            )
+            if len(source_units) > 1:
+                logger.warning(
+                    "Paper skim batch failed; splitting retry "
+                    "collection_id=%s document_id=%s window_id=%s attempt=%s "
+                    "source_unit_count=%s error=%s",
+                    collection_id,
+                    document_id,
+                    payload.get("window_id"),
+                    attempt,
+                    len(source_units),
+                    exc,
+                )
+                midpoint = len(source_units) // 2
+                child_skims: list[PaperSkim] = []
+                child_signals: list[_PaperSignalInput] = []
+                for branch, child_units in (
+                    ("left", source_units[:midpoint]),
+                    ("right", source_units[midpoint:]),
+                ):
+                    retry_skims, retry_signals = self._extract_window_batch(
+                        collection_id=collection_id,
+                        document_id=document_id,
+                        payload=self._payload_with_source_units(
+                            payload,
+                            source_units=child_units,
+                            suffix=f"retry-{branch}",
+                        ),
+                        extractor=extractor,
+                        attempt=attempt + 1,
+                    )
+                    child_skims.extend(retry_skims)
+                    child_signals.extend(retry_signals)
+                return tuple(child_skims), tuple(child_signals)
+
+            logger.warning(
+                "Paper skim Source-unit extraction failed permanently "
+                "collection_id=%s document_id=%s window_id=%s attempt=%s "
+                "source_unit_count=%s error=%s",
+                collection_id,
+                document_id,
+                payload.get("window_id"),
+                attempt,
+                len(source_units),
+                exc,
+            )
+            return (
+                (
+                    self._failed_source_unit_skim(
+                        document_id=document_id,
+                        payload=payload,
+                    ),
+                ),
+                (),
+            )
+
+    @staticmethod
+    def _payload_with_source_units(
+        payload: Mapping[str, Any],
+        *,
+        source_units: tuple[Mapping[str, Any], ...],
+        suffix: str,
+    ) -> dict[str, Any]:
+        child_payload = dict(payload)
+        child_payload["window_id"] = f"{payload.get('window_id')}.{suffix}"
+        child_payload["section_paths"] = list(
+            dict.fromkeys(
+                str(unit.get("section_path") or "").strip()
+                for unit in source_units
+                if str(unit.get("section_path") or "").strip()
+            )
+        )
+        child_payload["source_units"] = [dict(unit) for unit in source_units]
+        return child_payload
+
+    def _fit_payload_to_prompt_limit(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        extractor: ObjectiveExtractor,
+    ) -> tuple[dict[str, Any], ...]:
+        candidate = dict(payload)
+        prompt_tokens = extractor.estimate_paper_skim_prompt_tokens(candidate)
+        if prompt_tokens <= PAPER_SKIM_PROMPT_TOKEN_LIMIT:
+            return (candidate,)
+
+        source_units = tuple(
+            unit
+            for unit in candidate.get("source_units") or ()
+            if isinstance(unit, Mapping)
+        )
+        if len(source_units) <= 1:
+            raise ValueError(
+                "one PaperSkim Source unit exceeds the complete prompt-token limit: "
+                f"window_id={candidate.get('window_id')} "
+                f"prompt_tokens={prompt_tokens} "
+                f"limit={PAPER_SKIM_PROMPT_TOKEN_LIMIT}"
+            )
+
+        logger.info(
+            "Paper skim prompt exceeds token limit; splitting before extraction "
+            "window_id=%s source_unit_count=%s prompt_tokens=%s limit=%s",
+            candidate.get("window_id"),
+            len(source_units),
+            prompt_tokens,
+            PAPER_SKIM_PROMPT_TOKEN_LIMIT,
+        )
+        midpoint = len(source_units) // 2
+        children: list[dict[str, Any]] = []
+        for suffix, child_units in (
+            ("prompt-left", source_units[:midpoint]),
+            ("prompt-right", source_units[midpoint:]),
+        ):
+            children.extend(
+                self._fit_payload_to_prompt_limit(
+                    self._payload_with_source_units(
+                        candidate,
+                        source_units=child_units,
+                        suffix=suffix,
+                    ),
+                    extractor=extractor,
+                )
+            )
+        return tuple(children)
+
+    def _resolve_window_result(
+        self,
+        *,
+        document_id: str,
+        payload: Mapping[str, Any],
+        parsed: StructuredPaperSkim,
+    ) -> tuple[PaperSkim, tuple[_PaperSignalInput, ...]]:
+        if parsed.output_saturated:
+            raise PaperSkimOutputSaturatedError(
+                "PaperSkim model reported that the bounded output omitted visible facts"
+            )
+        source_units = {
+            str(unit.get("source_unit_id") or ""): unit
+            for unit in payload.get("source_units") or ()
+            if isinstance(unit, Mapping) and str(unit.get("source_unit_id") or "")
+        }
+        study_identities = [study.identity_key() for study in parsed.studies]
+        if len(study_identities) != len(set(study_identities)):
+            raise ValueError("paper skim response contains duplicate study identities")
+        studies = tuple(
+            self._study_from_window_result(
+                item,
+                document_id=document_id,
+                source_units=source_units,
+            )
+            for item in parsed.studies
+        )
+        signals = tuple(
+            self._signal_from_window_result(
+                item.model_dump(),
+                document_id=document_id,
+                source_units=source_units,
+            )
+            for item in parsed.unresolved_signals
+        )
+        source_unit_coverage = self._derive_source_unit_coverage(
+            payload=payload,
+            parsed=parsed,
+            source_units=source_units,
+        )
+        return (
+            PaperSkim.from_mapping(
                 {
-                    "table_id": table.table_id,
-                    "caption_text": str(table.caption_text or "")[:160],
-                    "heading_path": str(table.heading_path or "")[:120],
-                    "column_headers": [
-                        str(value)[:80] for value in table.column_headers[:4]
+                    "document_id": document_id,
+                    "doc_role": parsed.doc_role,
+                    "studies": [item.to_record() for item in studies],
+                    "evidence_density": parsed.evidence_density,
+                    "confidence": parsed.confidence,
+                    "warnings": parsed.warnings,
+                    "source_unit_coverage": [
+                        item.to_record() for item in source_unit_coverage
                     ],
                 }
-                for table in sorted(tables, key=lambda item: item.table_order)[:2]
-            ],
-            "figure_captions": [
+            ),
+            signals,
+        )
+
+    @staticmethod
+    def _derive_source_unit_coverage(
+        *,
+        payload: Mapping[str, Any],
+        parsed: StructuredPaperSkim,
+        source_units: Mapping[str, Mapping[str, Any]],
+    ) -> tuple[PaperSourceUnitCoverage, ...]:
+        input_ids = tuple(source_units)
+        if len(input_ids) != len(payload.get("source_units") or ()):
+            raise ValueError("paper skim window contains duplicate Source-unit ids")
+
+        relationship_ids = {
+            str(source_unit_id).strip()
+            for study in parsed.studies
+            for relationship in study.relationships
+            for source_unit_id in relationship.source_unit_ids
+        }
+        signal_ids = {
+            str(source_unit_id).strip()
+            for signal in parsed.unresolved_signals
+            for source_unit_id in signal.source_unit_ids
+        }
+        unknown_ids = (relationship_ids | signal_ids) - set(input_ids)
+        if unknown_ids:
+            raise ValueError(
+                "paper skim response contains unknown Source-unit ids: "
+                + ", ".join(sorted(unknown_ids))
+            )
+        coverage: list[PaperSourceUnitCoverage] = []
+        for source_unit_id in input_ids:
+            expected_status = (
+                PaperSourceUnitCoverageStatus.RELATIONSHIP_EMITTED
+                if source_unit_id in relationship_ids
+                else (
+                    PaperSourceUnitCoverageStatus.UNRESOLVED_SIGNAL_EMITTED
+                    if source_unit_id in signal_ids
+                    else PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL
+                )
+            )
+            source_unit = source_units[source_unit_id]
+            coverage.append(
+                PaperSourceUnitCoverage.from_mapping(
+                    {
+                        "source_unit_id": source_unit_id,
+                        "window_id": payload.get("window_id"),
+                        "source_kind": source_unit.get("source_kind"),
+                        "source_ref": source_unit.get("source_ref"),
+                        "status": expected_status.value,
+                        "reason": (
+                            "No study relationship or unresolved signal was emitted "
+                            "for this Source unit."
+                            if expected_status
+                            == PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL
+                            else None
+                        ),
+                    }
+                )
+            )
+        return tuple(coverage)
+
+    @staticmethod
+    def _failed_source_unit_skim(
+        *,
+        document_id: str,
+        payload: Mapping[str, Any],
+    ) -> PaperSkim:
+        reason = "Paper skim Source-unit extraction failed after batch splitting."
+        return PaperSkim.from_mapping(
+            {
+                "document_id": document_id,
+                "source_unit_coverage": [
+                    {
+                        "source_unit_id": unit.get("source_unit_id"),
+                        "window_id": payload.get("window_id"),
+                        "source_kind": unit.get("source_kind"),
+                        "source_ref": unit.get("source_ref"),
+                        "status": "extraction_failed",
+                        "reason": reason,
+                    }
+                    for unit in payload.get("source_units") or ()
+                    if isinstance(unit, Mapping)
+                ],
+                "warnings": [reason],
+            }
+        )
+
+    @staticmethod
+    def _resolved_source_units(
+        source_unit_ids: list[str],
+        *,
+        source_units: Mapping[str, Mapping[str, Any]],
+    ) -> tuple[Mapping[str, Any], ...] | None:
+        ids = tuple(str(value or "").strip() for value in source_unit_ids)
+        if not ids or any(not value or value not in source_units for value in ids):
+            return None
+        return tuple(source_units[value] for value in dict.fromkeys(ids))
+
+    @classmethod
+    def _study_from_window_result(
+        cls,
+        study: StructuredPaperStudy,
+        *,
+        document_id: str,
+        source_units: Mapping[str, Mapping[str, Any]],
+    ) -> PaperStudy:
+        relationships: list[dict[str, Any]] = []
+        for relationship in study.relationships:
+            resolved = cls._resolved_source_units(
+                relationship.source_unit_ids,
+                source_units=source_units,
+            )
+            if resolved is None:
+                raise ValueError(
+                    "paper study relationship contains an unknown Source-unit id"
+                )
+            relationships.append(
                 {
-                    "figure_id": figure.figure_id,
-                    "caption_text": str(figure.caption_text or "")[:160],
-                    "heading_path": str(figure.heading_path or "")[:120],
+                    **relationship.model_dump(exclude={"source_unit_ids"}),
+                    "source_refs": cls._source_refs_from_units(resolved),
                 }
-                for figure in sorted(figures, key=lambda item: item.figure_order)[:2]
-            ],
+            )
+        return PaperStudy.from_mapping(
+            {
+                **study.model_dump(exclude={"relationships"}),
+                "document_id": document_id,
+                "relationships": relationships,
+            }
+        )
+
+    @classmethod
+    def _signal_from_window_result(
+        cls,
+        signal: Mapping[str, Any],
+        *,
+        document_id: str,
+        source_units: Mapping[str, Mapping[str, Any]],
+    ) -> _PaperSignalInput:
+        source_unit_ids = signal.get("source_unit_ids")
+        if not isinstance(source_unit_ids, list):
+            raise ValueError("paper study signal requires Source-unit ids")
+        resolved = cls._resolved_source_units(
+            source_unit_ids,
+            source_units=source_units,
+        )
+        if resolved is None:
+            raise ValueError("paper study signal contains an unknown Source-unit id")
+        domain_signal = PaperStudySignal.from_mapping(
+            {
+                **dict(signal),
+                "document_id": document_id,
+                "source_refs": cls._source_refs_from_units(resolved),
+            }
+        )
+        return _PaperSignalInput(
+            signal=domain_signal,
+            source_contexts=tuple(
+                {
+                    "source_unit_id": str(unit.get("source_unit_id") or ""),
+                    "source_kind": str(unit.get("source_kind") or ""),
+                    "source_ref": str(unit.get("source_ref") or ""),
+                    "section_path": str(unit.get("section_path") or ""),
+                    "excerpt": cls._source_excerpt(unit.get("content")),
+                }
+                for unit in resolved
+            ),
+        )
+
+    @staticmethod
+    def _source_refs_from_units(
+        source_units: tuple[Mapping[str, Any], ...],
+    ) -> list[dict[str, str]]:
+        refs: list[dict[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for unit in source_units:
+            source_kind = str(unit.get("source_kind") or "").strip()
+            source_ref = str(unit.get("source_ref") or "").strip()
+            key = (source_kind, source_ref)
+            if not source_kind or not source_ref or key in seen:
+                continue
+            seen.add(key)
+            refs.append({"source_kind": source_kind, "source_ref": source_ref})
+        return refs
+
+    @staticmethod
+    def _source_excerpt(content: Any) -> str:
+        if isinstance(content, str):
+            return content[:800]
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )[:800]
+
+    def _reconcile_paper_signals(
+        self,
+        paper_skim: PaperSkim,
+        signal_inputs: list[_PaperSignalInput],
+        *,
+        extractor: ObjectiveExtractor,
+        progress_callback: ProgressCallback | None,
+        document_position: int,
+        document_count: int,
+        document_title: str | None,
+        source_filename: str | None,
+    ) -> PaperSkim:
+        unique_inputs = self._unique_signal_inputs(signal_inputs)
+        if not unique_inputs:
+            return paper_skim
+
+        signal_types = {item.signal.signal_type for item in unique_inputs}
+        if len(signal_types) == 1:
+            missing_role = "outcome" if "variable" in signal_types else "variable"
+            reason = f"no {missing_role} signal was found in this paper"
+            return replace(
+                paper_skim,
+                unresolved_signals=tuple(
+                    replace(item.signal, reason=reason) for item in unique_inputs
+                ),
+            )
+
+        batches = self._build_signal_reconciliation_batches(
+            paper_skim.document_id,
+            unique_inputs,
+            extractor=extractor,
+        )
+        if not batches:
+            return replace(
+                paper_skim,
+                unresolved_signals=tuple(
+                    replace(
+                        item.signal,
+                        reason="no experiment-evidence bridge was found in this paper",
+                    )
+                    for item in unique_inputs
+                ),
+            )
+
+        self._notify_progress(
+            progress_callback,
+            phase="objective_paper_skim_started",
+            current=document_position,
+            total=document_count,
+            unit="documents",
+            message="Reconciling source-linked signals within one paper.",
+            active_document_id=paper_skim.document_id,
+            active_document_title=document_title,
+            active_source_filename=source_filename,
+            active_operation="paper_reconciliation",
+        )
+        reconciled_studies: list[PaperStudy] = []
+        linked_signal_ids: set[str] = set()
+        unresolved_reasons: dict[str, str] = {}
+        for batch_position, batch in enumerate(batches, start=1):
+            batch_studies, batch_unresolved = self._reconcile_signal_batch(
+                batch,
+                extractor=extractor,
+                document_id=paper_skim.document_id,
+                batch_position=batch_position,
+                batch_count=len(batches),
+            )
+            reconciled_studies.extend(batch_studies)
+            batch_unresolved_ids = {
+                signal.signal_id for signal in batch_unresolved
+            }
+            linked_signal_ids.update(
+                item.signal.signal_id
+                for item in batch
+                if item.signal.signal_id not in batch_unresolved_ids
+            )
+            for signal in batch_unresolved:
+                reason = signal.reason or "paper signal reconciliation failed"
+                current_reason = unresolved_reasons.get(signal.signal_id)
+                if current_reason is None or current_reason == (
+                    "paper signal reconciliation failed"
+                ):
+                    unresolved_reasons[signal.signal_id] = reason
+
+        unresolved_signals: list[PaperStudySignal] = []
+        for item in unique_inputs:
+            signal_id = item.signal.signal_id
+            if signal_id in linked_signal_ids:
+                continue
+            reason = unresolved_reasons.get(signal_id)
+            if reason is None:
+                opposite_signals = (
+                    other.signal
+                    for other in unique_inputs
+                    if other.signal.signal_type != item.signal.signal_type
+                )
+                conflicting_fields = self._unique_text_values(
+                    field
+                    for opposite in opposite_signals
+                    for field in property_matching.paper_signal_context_conflicts(
+                        (item.signal.to_record(), opposite.to_record())
+                    )
+                )
+                reason = (
+                    "Conflicting reconciliation context: "
+                    f"{', '.join(conflicting_fields)}."
+                    if conflicting_fields
+                    else "no experiment-evidence bridge was found in this paper"
+                )
+            unresolved_signals.append(replace(item.signal, reason=reason))
+
+        return replace(
+            paper_skim,
+            studies=self._consolidate_studies(
+                (*paper_skim.studies, *reconciled_studies),
+                document_id=paper_skim.document_id,
+            ),
+            unresolved_signals=tuple(unresolved_signals),
+        )
+
+    @staticmethod
+    def _signal_inputs_share_experiment_evidence(
+        left: _PaperSignalInput,
+        right: _PaperSignalInput,
+    ) -> bool:
+        if property_matching.paper_signal_context_conflicts(
+            (left.signal.to_record(), right.signal.to_record())
+        ):
+            return False
+
+        left_source_keys = {
+            (source.source_kind, source.source_ref)
+            for source in left.signal.source_refs
+        }
+        right_source_keys = {
+            (source.source_kind, source.source_ref)
+            for source in right.signal.source_refs
+        }
+        if left_source_keys & right_source_keys:
+            return True
+
+        def source_positions(item: _PaperSignalInput) -> tuple[int, ...]:
+            positions: list[int] = []
+            for source in item.source_contexts:
+                source_unit_id = str(source.get("source_unit_id") or "")
+                position = source_unit_id.rsplit("-", maxsplit=1)[-1]
+                if position.isdigit():
+                    positions.append(int(position))
+            return tuple(positions)
+
+        left_positions = source_positions(left)
+        right_positions = source_positions(right)
+        if any(
+            abs(left_position - right_position)
+            <= _SIGNAL_RECONCILIATION_NEARBY_SOURCE_UNIT_DISTANCE
+            for left_position in left_positions
+            for right_position in right_positions
+        ):
+            return True
+
+        placeholder_experiment_labels = {
+            "n a",
+            "none",
+            "not reported",
+            "not specified",
+            "unknown",
+            "uncertain",
+        }
+        left_experiment = property_matching.axis_key(left.signal.experiment_label)
+        right_experiment = property_matching.axis_key(right.signal.experiment_label)
+        if (
+            left_experiment
+            and right_experiment
+            and left_experiment not in placeholder_experiment_labels
+            and right_experiment not in placeholder_experiment_labels
+            and property_matching.axis_values_match(
+                left_experiment,
+                right_experiment,
+            )
+        ):
+            return True
+
+        for field_name in (
+            "process_context",
+            "sample_context",
+            "test_context",
+            "fixed_conditions",
+        ):
+            if any(
+                property_matching.axis_values_match(left_value, right_value)
+                for left_value in getattr(left.signal, field_name)
+                for right_value in getattr(right.signal, field_name)
+            ):
+                return True
+        return bool(
+            left.signal.comparator
+            and right.signal.comparator
+            and property_matching.axis_values_match(
+                left.signal.comparator,
+                right.signal.comparator,
+            )
+        )
+
+    def _build_signal_reconciliation_batches(
+        self,
+        document_id: str,
+        signal_inputs: tuple[_PaperSignalInput, ...],
+        *,
+        extractor: ObjectiveExtractor,
+    ) -> tuple[tuple[_PaperSignalInput, ...], ...]:
+        variables = tuple(
+            item for item in signal_inputs if item.signal.signal_type == "variable"
+        )
+        outcomes = tuple(
+            item for item in signal_inputs if item.signal.signal_type == "outcome"
+        )
+        batches: list[tuple[_PaperSignalInput, ...]] = []
+        for outcome in outcomes:
+            candidates = tuple(
+                variable
+                for variable in variables
+                if self._signal_inputs_share_experiment_evidence(variable, outcome)
+            )
+            current_variables: list[_PaperSignalInput] = []
+            for variable in candidates:
+                candidate = (outcome, *current_variables, variable)
+                payload = {
+                    "document_id": document_id,
+                    "signals": [item.to_payload() for item in candidate],
+                }
+                prompt_tokens = (
+                    extractor.estimate_paper_signal_reconciliation_prompt_tokens(
+                        payload
+                    )
+                )
+                if (
+                    len(candidate) <= _SIGNAL_RECONCILIATION_SIGNAL_LIMIT
+                    and prompt_tokens
+                    <= PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT
+                ):
+                    current_variables.append(variable)
+                    continue
+                if current_variables:
+                    batches.append((outcome, *current_variables))
+                    current_variables = []
+
+                pair = (outcome, variable)
+                pair_payload = {
+                    "document_id": document_id,
+                    "signals": [item.to_payload() for item in pair],
+                }
+                pair_prompt_tokens = (
+                    extractor.estimate_paper_signal_reconciliation_prompt_tokens(
+                        pair_payload
+                    )
+                )
+                if (
+                    pair_prompt_tokens
+                    <= PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT
+                ):
+                    current_variables.append(variable)
+                    continue
+                logger.warning(
+                    "Paper signal pair exceeds reconciliation prompt limit; "
+                    "retaining signals as unresolved document_id=%s outcome_signal_id=%s "
+                    "variable_signal_id=%s prompt_tokens=%s limit=%s",
+                    document_id,
+                    outcome.signal.signal_id,
+                    variable.signal.signal_id,
+                    pair_prompt_tokens,
+                    PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT,
+                )
+            if current_variables:
+                batches.append((outcome, *current_variables))
+        return tuple(batches)
+
+    def _reconcile_signal_batch(
+        self,
+        signal_inputs: tuple[_PaperSignalInput, ...],
+        *,
+        extractor: ObjectiveExtractor,
+        document_id: str,
+        batch_position: int,
+        batch_count: int,
+    ) -> tuple[tuple[PaperStudy, ...], tuple[PaperStudySignal, ...]]:
+        try:
+            parsed = extractor.reconcile_paper_signals(
+                {
+                    "document_id": document_id,
+                    "signals": [item.to_payload() for item in signal_inputs],
+                }
+            )
+            return self._validate_signal_reconciliation(
+                parsed,
+                signal_inputs,
+                document_id=document_id,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Paper study signal reconciliation batch failed; retaining batch "
+                "signals document_id=%s batch_position=%s batch_count=%s "
+                "signal_count=%s",
+                document_id,
+                batch_position,
+                batch_count,
+                len(signal_inputs),
+                exc_info=True,
+            )
+            return (
+                (),
+                tuple(
+                    replace(
+                        item.signal,
+                        reason="paper signal reconciliation failed",
+                    )
+                    for item in signal_inputs
+                ),
+            )
+
+    @staticmethod
+    def _unique_signal_inputs(
+        signal_inputs: list[_PaperSignalInput],
+    ) -> tuple[_PaperSignalInput, ...]:
+        unique: list[_PaperSignalInput] = []
+        seen: set[str] = set()
+        for item in signal_inputs:
+            if item.signal.signal_id in seen:
+                continue
+            seen.add(item.signal.signal_id)
+            unique.append(item)
+        return tuple(unique)
+
+    @classmethod
+    def _validate_signal_reconciliation(
+        cls,
+        parsed: StructuredPaperSignalReconciliation,
+        signal_inputs: tuple[_PaperSignalInput, ...],
+        *,
+        document_id: str,
+    ) -> tuple[tuple[PaperStudy, ...], tuple[PaperStudySignal, ...]]:
+        signals_by_id = {item.signal.signal_id: item.signal for item in signal_inputs}
+        if len(signals_by_id) != len(signal_inputs):
+            raise ValueError("paper signals do not have unique ids")
+
+        linked_ids: set[str] = set()
+        rejected_reasons_by_id: dict[str, str] = {}
+        studies: list[PaperStudy] = []
+        for parsed_study in parsed.studies:
+            study_groups: list[
+                tuple[
+                    list[dict[str, Any]],
+                    set[str],
+                    dict[tuple[object, ...], int],
+                ]
+            ] = []
+            for relationship in parsed_study.relationships:
+                raw_signal_ids = tuple(
+                    str(value).strip() for value in relationship.signal_ids
+                )
+                signal_ids = tuple(dict.fromkeys(raw_signal_ids))
+                if any(signal_id not in signals_by_id for signal_id in signal_ids):
+                    for signal_id in signals_by_id:
+                        rejected_reasons_by_id.setdefault(
+                            signal_id,
+                            "paper signal reconciliation failed",
+                        )
+                    continue
+                signals = tuple(signals_by_id[signal_id] for signal_id in signal_ids)
+                variables = cls._unique_text_values(
+                    signal.label
+                    for signal in signals
+                    if signal.signal_type == "variable"
+                )
+                outcomes = cls._unique_text_values(
+                    signal.label
+                    for signal in signals
+                    if signal.signal_type == "outcome"
+                )
+                if not variables or len(outcomes) != 1:
+                    for signal_id in signal_ids:
+                        rejected_reasons_by_id.setdefault(
+                            signal_id,
+                            "paper signal relationship requires variables and one outcome",
+                        )
+                    continue
+                context_conflicts = property_matching.paper_signal_context_conflicts(
+                    signal.to_record() for signal in signals
+                )
+                if context_conflicts:
+                    reason = (
+                        "Conflicting reconciliation context: "
+                        f"{', '.join(context_conflicts)}."
+                    )
+                    for signal_id in signal_ids:
+                        rejected_reasons_by_id.setdefault(signal_id, reason)
+                    continue
+                relationship_record = {
+                    "document_id": document_id,
+                    "varied_factors": variables,
+                    "outcome": outcomes[0],
+                    "confidence": min(
+                        relationship.confidence,
+                        *(signal.confidence for signal in signals),
+                    ),
+                    "source_refs": [
+                        ref.to_record()
+                        for ref in cls._unique_source_refs(
+                            ref for signal in signals for ref in signal.source_refs
+                        )
+                    ],
+                }
+                relationship_key = (
+                    tuple(sorted(value.casefold() for value in variables)),
+                    outcomes[0].casefold(),
+                    tuple(
+                        sorted(
+                            (ref["source_kind"], ref["source_ref"])
+                            for ref in relationship_record["source_refs"]
+                        )
+                    ),
+                )
+                compatible_group = next(
+                    (
+                        group
+                        for group in study_groups
+                        if cls._signal_contexts_are_compatible(
+                            tuple(
+                                signals_by_id[signal_id]
+                                for signal_id in group[1] | set(signal_ids)
+                            )
+                        )
+                    ),
+                    None,
+                )
+                if compatible_group is None:
+                    compatible_group = ([], set(), {})
+                    study_groups.append(compatible_group)
+                existing_position = compatible_group[2].get(relationship_key)
+                if existing_position is None:
+                    compatible_group[2][relationship_key] = len(compatible_group[0])
+                    compatible_group[0].append(relationship_record)
+                else:
+                    existing_record = compatible_group[0][existing_position]
+                    existing_record["confidence"] = min(
+                        existing_record["confidence"],
+                        relationship_record["confidence"],
+                    )
+                compatible_group[1].update(signal_ids)
+
+            for (
+                study_relationships,
+                study_signal_ids,
+                _relationship_positions,
+            ) in study_groups:
+                repeated_signal_ids = study_signal_ids & linked_ids
+                if any(
+                    signals_by_id[signal_id].signal_type != "outcome"
+                    for signal_id in repeated_signal_ids
+                ):
+                    for signal_id in study_signal_ids - linked_ids:
+                        rejected_reasons_by_id.setdefault(
+                            signal_id,
+                            "paper variable signal cannot belong to multiple studies",
+                        )
+                    continue
+                study_signals = tuple(
+                    signals_by_id[signal_id] for signal_id in study_signal_ids
+                )
+                studies.append(
+                    PaperStudy.from_mapping(
+                        {
+                            "document_id": document_id,
+                            **cls._shared_signal_study_context(study_signals),
+                            "relationships": study_relationships,
+                            "confidence": min(
+                                signal.confidence for signal in study_signals
+                            ),
+                        }
+                    )
+                )
+                linked_ids.update(study_signal_ids)
+
+        unresolved_by_id: dict[str, str] = {}
+        for unresolved in parsed.unresolved_signals:
+            signal_id = str(unresolved.signal_id).strip()
+            if signal_id not in signals_by_id:
+                continue
+            if signal_id in linked_ids or signal_id in unresolved_by_id:
+                continue
+            unresolved_by_id[signal_id] = str(unresolved.reason).strip()
+        for signal_id, reason in rejected_reasons_by_id.items():
+            if signal_id in linked_ids or signal_id in unresolved_by_id:
+                continue
+            unresolved_by_id[signal_id] = reason
+        for signal_id in signals_by_id:
+            if signal_id in linked_ids or signal_id in unresolved_by_id:
+                continue
+            unresolved_by_id[signal_id] = "not linked in this candidate batch"
+        return (
+            tuple(studies),
+            tuple(
+                replace(signals_by_id[signal_id], reason=reason)
+                for signal_id, reason in unresolved_by_id.items()
+            ),
+        )
+
+    @classmethod
+    def _signal_contexts_are_compatible(
+        cls,
+        signals: tuple[PaperStudySignal, ...],
+    ) -> bool:
+        return not property_matching.paper_signal_context_conflicts(
+            signal.to_record() for signal in signals
+        )
+
+    @classmethod
+    def _shared_signal_study_context(
+        cls,
+        signals: tuple[PaperStudySignal, ...],
+    ) -> dict[str, Any]:
+        if not cls._signal_contexts_are_compatible(signals):
+            raise ValueError("paper study signals have conflicting contexts")
+
+        def known_scalar(field_name: str, unknown_value: str | None = None) -> str | None:
+            return next(
+                (
+                    str(value)
+                    for signal in signals
+                    if (value := getattr(signal, field_name))
+                    and value != unknown_value
+                ),
+                None,
+            )
+
+        return {
+            "experiment_label": known_scalar("experiment_label"),
+            "design_type": known_scalar("design_type", "uncertain") or "uncertain",
+            "claim_scope": known_scalar("claim_scope", "uncertain") or "uncertain",
+            "material_scope": cls._unique_text_values(
+                value for signal in signals for value in signal.material_scope
+            ),
+            "process_context": cls._unique_text_values(
+                value for signal in signals for value in signal.process_context
+            ),
+            "sample_context": cls._unique_text_values(
+                value for signal in signals for value in signal.sample_context
+            ),
+            "test_context": cls._unique_text_values(
+                value for signal in signals for value in signal.test_context
+            ),
+            "comparator": known_scalar("comparator"),
+            "fixed_conditions": cls._unique_text_values(
+                value for signal in signals for value in signal.fixed_conditions
+            ),
+        }
+
+    def _consolidate_window_skims(
+        self,
+        document_id: str,
+        window_skims: list[PaperSkim],
+        *,
+        profile: Any,
+    ) -> PaperSkim:
+        studies = self._consolidate_studies(
+            tuple(
+                study
+                for skim in window_skims
+                for study in skim.studies
+            ),
+            document_id=document_id,
+        )
+        return PaperSkim(
+            document_id=document_id,
+            doc_role=self._consolidate_doc_role(window_skims, profile=profile),
+            studies=studies,
+            evidence_density=max(
+                (skim.evidence_density for skim in window_skims),
+                key=lambda value: _EVIDENCE_DENSITY_RANK.get(value, 0),
+                default="unknown",
+            ),
+            confidence=max((skim.confidence for skim in window_skims), default=0.0),
+            warnings=self._unique_text_values(
+                warning for skim in window_skims for warning in skim.warnings
+            )[:_SKIM_WARNING_LIMIT],
+            source_unit_coverage=tuple(
+                item
+                for skim in window_skims
+                for item in skim.source_unit_coverage
+            ),
+        )
+
+    @classmethod
+    def _consolidate_studies(
+        cls,
+        studies: tuple[PaperStudy, ...],
+        *,
+        document_id: str,
+    ) -> tuple[PaperStudy, ...]:
+        consolidated: list[PaperStudy] = []
+        for study in studies:
+            duplicate_position = next(
+                (
+                    position
+                    for position, existing in enumerate(consolidated)
+                    if cls._studies_are_duplicates(existing, study)
+                ),
+                None,
+            )
+            if duplicate_position is None:
+                consolidated.append(study)
+                continue
+            consolidated[duplicate_position] = cls._merge_studies(
+                consolidated[duplicate_position],
+                study,
+                document_id=document_id,
+            )
+        return tuple(consolidated)
+
+    @classmethod
+    def _studies_are_duplicates(
+        cls,
+        left: PaperStudy,
+        right: PaperStudy,
+    ) -> bool:
+        return (
+            cls._study_identity_matches(left, right)
+            and cls._relationship_sets_overlap(left.relationships, right.relationships)
+        )
+
+    @classmethod
+    def _study_identity_matches(cls, left: PaperStudy, right: PaperStudy) -> bool:
+        for field_name in ("design_type", "claim_scope"):
+            left_value = getattr(left, field_name)
+            right_value = getattr(right, field_name)
+            if (
+                left_value != "uncertain"
+                and right_value != "uncertain"
+                and left_value != right_value
+            ):
+                return False
+        for field_name in ("experiment_label", "comparator"):
+            left_value = getattr(left, field_name)
+            right_value = getattr(right, field_name)
+            if (
+                left_value
+                and right_value
+                and property_matching.axis_key(left_value)
+                != property_matching.axis_key(right_value)
+            ):
+                return False
+        for field_name in (
+            "material_scope",
+            "process_context",
+            "sample_context",
+            "test_context",
+            "fixed_conditions",
+        ):
+            left_values = getattr(left, field_name)
+            right_values = getattr(right, field_name)
+            if (
+                left_values
+                and right_values
+                and not cls._axis_collections_do_not_conflict(
+                    left_values,
+                    right_values,
+                )
+            ):
+                return False
+
+        if left.experiment_label and right.experiment_label:
+            return True
+        return bool(cls._study_source_keys(left) & cls._study_source_keys(right))
+
+    @classmethod
+    def _relationship_sets_overlap(
+        cls,
+        left: tuple[PaperStudyRelationship, ...],
+        right: tuple[PaperStudyRelationship, ...],
+    ) -> bool:
+        return any(
+            cls._relationships_are_duplicates(left_item, right_item)
+            for left_item in left
+            for right_item in right
+        )
+
+    @classmethod
+    def _relationships_are_duplicates(
+        cls,
+        left: PaperStudyRelationship,
+        right: PaperStudyRelationship,
+    ) -> bool:
+        return cls._axis_collections_are_equivalent(
+            left.varied_factors,
+            right.varied_factors,
+        ) and property_matching.axis_values_match(left.outcome, right.outcome)
+
+    @staticmethod
+    def _axis_collections_do_not_conflict(
+        left: tuple[str, ...],
+        right: tuple[str, ...],
+    ) -> bool:
+        smaller, larger = sorted((left, right), key=len)
+        return all(
+            any(
+                property_matching.axis_values_match(smaller_axis, larger_axis)
+                for larger_axis in larger
+            )
+            for smaller_axis in smaller
+        )
+
+    @staticmethod
+    def _study_source_keys(study: PaperStudy) -> set[tuple[str, str]]:
+        return {
+            (source_ref.source_kind, source_ref.source_ref)
+            for relationship in study.relationships
+            for source_ref in relationship.source_refs
         }
 
     @staticmethod
-    def _extract_headings(blocks: list[Any]) -> list[str]:
-        headings: list[str] = []
-        seen: set[str] = set()
-        for block in blocks:
-            heading = ""
-            if getattr(block, "block_type", "") == "heading":
-                heading = str(getattr(block, "text", "") or "").strip()
-            if not heading:
-                heading = str(getattr(block, "heading_path", "") or "").strip()
-            if not heading:
-                continue
-            key = heading.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            headings.append(heading)
-            if len(headings) >= _SKIM_HEADING_LIMIT:
-                break
-        return headings
+    def _axis_collections_are_equivalent(
+        left: tuple[str, ...],
+        right: tuple[str, ...],
+    ) -> bool:
+        return property_matching.axis_collections_are_equivalent(left, right)
 
-    def _extract_headings_from_tree(
-        self,
-        document_tree: SourceDocumentTree | None,
-    ) -> list[str]:
-        if document_tree is None:
-            return []
-        headings: list[str] = []
-        seen: set[str] = set()
-        for node in self._document_tree_nodes_in_order(document_tree):
-            if node.node_type not in {"section", "references_section"}:
+    @classmethod
+    def _merge_studies(
+        cls,
+        existing: PaperStudy,
+        duplicate: PaperStudy,
+        *,
+        document_id: str,
+    ) -> PaperStudy:
+        relationships: list[PaperStudyRelationship] = list(existing.relationships)
+        for relationship in duplicate.relationships:
+            duplicate_position = next(
+                (
+                    position
+                    for position, current in enumerate(relationships)
+                    if cls._relationships_are_duplicates(current, relationship)
+                ),
+                None,
+            )
+            if duplicate_position is None:
+                relationships.append(relationship)
                 continue
-            heading = self._tree_section_label(node)
-            if not heading:
-                continue
-            key = heading.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            headings.append(heading)
-            if len(headings) >= _SKIM_HEADING_LIMIT:
-                break
-        return headings
+            current = relationships[duplicate_position]
+            relationships[duplicate_position] = PaperStudyRelationship.from_mapping(
+                {
+                    "document_id": document_id,
+                    "varied_factors": current.varied_factors,
+                    "outcome": current.outcome,
+                    "source_refs": [
+                        source_ref.to_record()
+                        for source_ref in cls._unique_source_refs(
+                            (*current.source_refs, *relationship.source_refs)
+                        )
+                    ],
+                    "confidence": max(current.confidence, relationship.confidence),
+                }
+            )
+        return PaperStudy.from_mapping(
+            {
+                "document_id": document_id,
+                "experiment_label": existing.experiment_label
+                or duplicate.experiment_label,
+                "design_type": (
+                    existing.design_type
+                    if existing.design_type != "uncertain"
+                    else duplicate.design_type
+                ),
+                "claim_scope": (
+                    existing.claim_scope
+                    if existing.claim_scope != "uncertain"
+                    else duplicate.claim_scope
+                ),
+                "material_scope": cls._unique_text_values(
+                    (*existing.material_scope, *duplicate.material_scope)
+                ),
+                "process_context": cls._unique_text_values(
+                    (*existing.process_context, *duplicate.process_context)
+                ),
+                "sample_context": cls._unique_text_values(
+                    (*existing.sample_context, *duplicate.sample_context)
+                ),
+                "test_context": cls._unique_text_values(
+                    (*existing.test_context, *duplicate.test_context)
+                ),
+                "comparator": existing.comparator or duplicate.comparator,
+                "fixed_conditions": cls._unique_text_values(
+                    (*existing.fixed_conditions, *duplicate.fixed_conditions)
+                ),
+                "relationships": [
+                    {
+                        key: value
+                        for key, value in item.to_record().items()
+                        if key != "relationship_id"
+                    }
+                    for item in relationships
+                ],
+                "confidence": max(existing.confidence, duplicate.confidence),
+            },
+        )
 
     @staticmethod
-    def _build_text_preview(document: Any, blocks: list[Any]) -> str:
-        parts = [
-            str(getattr(block, "text", "") or "").strip()
-            for block in blocks
-            if str(getattr(block, "text", "") or "").strip()
-            and getattr(block, "block_type", "") in {"paragraph", "list_item"}
-        ]
-        text = "\n\n".join(parts).strip()
-        if not text:
-            text = str(document.text or "").strip()
-        return text[:_SKIM_TEXT_PREVIEW_CHARS]
+    def _unique_source_refs(values: Any) -> tuple[Any, ...]:
+        unique: list[Any] = []
+        seen: set[tuple[str, str]] = set()
+        for value in values:
+            key = (value.source_kind, value.source_ref)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(value)
+        return tuple(unique)
 
-    def _build_text_preview_from_tree(
+    @staticmethod
+    def _consolidate_doc_role(window_skims: list[PaperSkim], *, profile: Any) -> str:
+        profile_role = str(getattr(profile, "doc_type", "") or "").strip()
+        if profile_role in {"experimental", "review", "mixed", "uncertain"}:
+            return profile_role
+        roles = {
+            skim.doc_role for skim in window_skims if skim.doc_role != "uncertain"
+        }
+        if not roles:
+            return "uncertain"
+        if len(roles) == 1:
+            return next(iter(roles))
+        return "mixed"
+
+    def _source_ref_window_role(
         self,
         document_tree: SourceDocumentTree | None,
+        *,
+        source_ref_kind: str,
+        source_ref_id: str,
+        heading_path: str | None,
     ) -> str:
-        if document_tree is None:
-            return ""
-        parts = [
-            str(node.text or "").strip()
-            for node in self._document_tree_nodes_in_order(document_tree)
-            if node.node_type in {"paragraph", "list_item"}
-            and not self._tree_node_in_reference_branch(document_tree, node)
-            and str(node.text or "").strip()
-        ]
-        return "\n\n".join(parts).strip()[:_SKIM_TEXT_PREVIEW_CHARS]
+        heading_role = self._window_role_from_text(heading_path)
+        if heading_role != "unknown":
+            return heading_role
+        if document_tree is not None:
+            node = document_tree.node_for_source_ref(source_ref_kind, source_ref_id)
+            if node is not None:
+                return self._tree_node_window_role(document_tree, node)
+        return "unknown"
+
+    def _tree_node_window_role(
+        self,
+        document_tree: SourceDocumentTree,
+        node: Any,
+    ) -> str:
+        current = node
+        while current is not None:
+            semantic_role = str(getattr(current, "semantic_role", "") or "")
+            if semantic_role == "references":
+                return "references"
+            mapped_role = _SKIM_ROLE_BY_SEMANTIC_ROLE.get(semantic_role)
+            if mapped_role is not None:
+                return mapped_role
+            parent_id = getattr(current, "parent_id", None)
+            current = document_tree.nodes.get(parent_id) if parent_id else None
+        return self._window_role_from_text(self._tree_section_label(node))
+
+    @staticmethod
+    def _window_role_from_text(value: Any) -> str:
+        text = " ".join(
+            "".join(character if character.isalpha() else " " for character in str(value))
+            .lower()
+            .split()
+        )
+        if "reference" in text:
+            return "references"
+        if "abstract" in text or "introduction" in text:
+            return "overview"
+        if any(token in text for token in ("method", "material", "experimental")):
+            return "methods"
+        if any(token in text for token in ("result", "discussion")):
+            return "results"
+        if "conclusion" in text:
+            return "conclusion"
+        return "unknown"
+
+    @staticmethod
+    def _unique_text_values(values: Any) -> tuple[str, ...]:
+        unique: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            text = str(value or "").strip()
+            key = text.casefold()
+            if not text or key in seen:
+                continue
+            seen.add(key)
+            unique.append(text)
+        return tuple(unique)
 
     @staticmethod
     def _document_tree_nodes_in_order(
@@ -272,15 +2098,6 @@ class PaperSkimService:
             if value:
                 return value
         return None
-
-    @staticmethod
-    def _group_by_document_id(values: tuple[Any, ...]) -> dict[str, list[Any]]:
-        grouped: dict[str, list[Any]] = {}
-        for value in values:
-            document_id = str(getattr(value, "document_id", "") or "")
-            if document_id:
-                grouped.setdefault(document_id, []).append(value)
-        return grouped
 
     @staticmethod
     def _notify_progress(

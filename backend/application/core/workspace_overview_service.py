@@ -38,7 +38,7 @@ class WorkspaceService:
         self.document_profile_service = document_profile_service
 
     def _build_artifacts(self, collection_id: str, collection: dict) -> dict:
-        source_artifacts = self.source_artifact_repository.read_collection_artifacts(
+        source_documents = self.source_artifact_repository.read_collection_documents(
             collection_id
         )
         paper_facts = self.paper_fact_repository.read(collection_id)
@@ -65,11 +65,11 @@ class WorkspaceService:
                 or comparison_facts.collection_comparable_results
             )
         )
-        source_artifacts_generated = not source_artifacts.is_empty()
+        source_artifacts_generated = bool(source_documents)
         return {
             "collection_id": collection_id,
-            "documents_generated": bool(source_artifacts.documents),
-            "documents_ready": bool(source_artifacts.documents),
+            "documents_generated": bool(source_documents),
+            "documents_ready": bool(source_documents),
             "document_profiles_generated": bool(paper_facts.document_profiles),
             "document_profiles_ready": bool(paper_facts.document_profiles),
             "evidence_anchors_generated": paper_facts.paper_facts_generated,
@@ -110,13 +110,17 @@ class WorkspaceService:
             "graph_ready": graph_ready,
             "graph_stale": False,
             "blocks_generated": source_artifacts_generated,
-            "blocks_ready": bool(source_artifacts.blocks),
+            "blocks_ready": any(document.blocks for document in source_documents),
             "figures_generated": source_artifacts_generated,
-            "figures_ready": bool(source_artifacts.figures),
+            "figures_ready": any(document.figures for document in source_documents),
             "table_rows_generated": source_artifacts_generated,
-            "table_rows_ready": bool(source_artifacts.table_rows),
+            "table_rows_ready": any(
+                document.table_rows for document in source_documents
+            ),
             "table_cells_generated": source_artifacts_generated,
-            "table_cells_ready": bool(source_artifacts.table_cells),
+            "table_cells_ready": any(
+                document.table_cells for document in source_documents
+            ),
             "updated_at": collection["updated_at"],
         }
 

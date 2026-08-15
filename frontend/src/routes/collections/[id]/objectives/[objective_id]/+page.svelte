@@ -1,16 +1,17 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { onDestroy } from 'svelte';
 	import FindingWorkbench from '../../_components/FindingWorkbench.svelte';
 	import { errorMessage } from '../../../../_shared/api';
+	import { fetchDocumentProfiles } from '../../../../_shared/documents';
 	import {
 		confirmObjective,
 		fetchObjective,
 		fetchObjectiveAnalysis,
 		fetchObjectiveEvidence,
-		fetchObjectiveFinding,
 		fetchObjectiveFindings,
 		runObjectiveAnalysis,
 		type ObjectiveAnalysis,
@@ -22,6 +23,7 @@
 	let analysis: ObjectiveAnalysis | null = null;
 	let findings: ObjectiveFinding[] = [];
 	let evidence: ObjectiveEvidence[] = [];
+	let documentTitles: Record<string, string> = {};
 	let selectedFinding: ObjectiveFinding | null = null;
 	let selectedFindingId = '';
 	let loading = false;
@@ -29,6 +31,7 @@
 	let actionRunning = false;
 	let error = '';
 	let actionError = '';
+	let findingError = '';
 	let loadedKey = '';
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 	let findingRequestSequence = 0;
@@ -53,7 +56,21 @@
 		error = '';
 		clearPoll();
 		try {
-			analysis = await fetchObjective(collectionId, objectiveId);
+			const [objectiveResult, profilesResult] = await Promise.allSettled([
+				fetchObjective(collectionId, objectiveId),
+				fetchDocumentProfiles(collectionId)
+			]);
+			if (objectiveResult.status === 'rejected') throw objectiveResult.reason;
+			analysis = objectiveResult.value;
+			documentTitles =
+				profilesResult.status === 'fulfilled'
+					? Object.fromEntries(
+							profilesResult.value.items.map((item) => [
+								item.document_id,
+								item.title || item.source_filename || ''
+							])
+						)
+					: {};
 			await loadFindings();
 			schedulePoll();
 		} catch (err) {
@@ -62,6 +79,7 @@
 			findings = [];
 			evidence = [];
 			selectedFinding = null;
+			documentTitles = {};
 		} finally {
 			loading = false;
 		}
@@ -103,52 +121,43 @@
 	async function selectFinding(findingId: string, updateUrl = true) {
 		const requestSequence = ++findingRequestSequence;
 		selectedFindingId = findingId;
-		selectedFinding = null;
+		selectedFinding = findings.find((item) => item.finding_id === findingId) ?? null;
 		evidence = [];
+		findingError = '';
 		if (!findingId || !analysis?.objective.published_analysis_version) return;
 		const analysisVersion = analysis.objective.published_analysis_version;
 		const requestKey = `${collectionId}:${objectiveId}:${analysisVersion}:${findingId}`;
 		findingLoading = true;
-		actionError = '';
 		try {
-			const detailPromise = fetchObjectiveFinding(
-				collectionId,
-				objectiveId,
-				analysisVersion,
-				findingId
-			);
-			const evidencePromise = (async () => {
-				const loadedEvidence: ObjectiveEvidence[] = [];
-				while (true) {
-					const page = await fetchObjectiveEvidence(
-						collectionId,
-						objectiveId,
-						analysisVersion,
-						findingId,
-						loadedEvidence.length,
-						500
-					);
-					loadedEvidence.push(...page.items);
-					if (loadedEvidence.length >= page.total) return loadedEvidence;
-					if (!page.items.length) throw new Error('Evidence 分页结果不完整。');
-				}
-			})();
-			const [detail, loadedEvidence] = await Promise.all([detailPromise, evidencePromise]);
+			const loadedEvidence: ObjectiveEvidence[] = [];
+			while (true) {
+				const page = await fetchObjectiveEvidence(
+					collectionId,
+					objectiveId,
+					analysisVersion,
+					findingId,
+					loadedEvidence.length,
+					500
+				);
+				loadedEvidence.push(...page.items);
+				if (loadedEvidence.length >= page.total) break;
+				if (!page.items.length) throw new Error('Evidence 分页结果不完整。');
+			}
 			const currentRequestKey = `${collectionId}:${objectiveId}:${analysis?.objective.published_analysis_version ?? ''}:${selectedFindingId}`;
 			if (requestSequence !== findingRequestSequence || requestKey !== currentRequestKey) return;
-			selectedFinding = detail.finding;
 			evidence = loadedEvidence;
 			if (updateUrl) {
 				const url = new URL(currentUrl);
 				url.searchParams.set('finding_id', findingId);
-				await goto(`${url.pathname}${url.search}`, {
+				const objectiveHref: `/collections/${string}/objectives/${string}` = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}${url.search}`;
+				await goto(resolve(objectiveHref), {
 					replaceState: true,
 					noScroll: true,
 					keepFocus: true
 				});
 			}
 		} catch (err) {
-			if (requestSequence === findingRequestSequence) actionError = errorMessage(err);
+			if (requestSequence === findingRequestSequence) findingError = errorMessage(err);
 		} finally {
 			if (requestSequence === findingRequestSequence) findingLoading = false;
 		}
@@ -167,6 +176,12 @@
 			condition_dependent: '条件依赖',
 			insufficient_confirmation: '证据待确认'
 		}[value];
+	}
+
+	function certaintyLabel(value: number) {
+		if (value >= 0.8) return '较高确定性';
+		if (value >= 0.6) return '中等确定性';
+		return '较低确定性';
 	}
 
 	async function startAnalysis() {
@@ -246,12 +261,11 @@
 	<section class="objective-page">
 		<header class="objective-header">
 			<div>
-				<a href={`/collections/${collectionId}/objectives`}>研究目标</a>
+				<a href={resolve('/collections/[id]/objectives', { id: collectionId })}>研究目标</a>
 				<h1>{analysis.objective.question}</h1>
 				<p>{analysis.objective.requested_comparator || '尚未设置比较意图'}</p>
 			</div>
 			<div class="header-actions">
-				<a class="btn btn--ghost btn--small" href={datasetUrl()}>导出训练数据</a>
 				{#if !isProcessing}
 					<button
 						class="btn btn--primary btn--small"
@@ -285,6 +299,11 @@
 								: '正在分析'}</strong
 					>
 					<span>{active.progress_message || active.error_message || active.phase}</span>
+					{#if active.status === 'failed' && published && active.analysis_version !== published.analysis_version}
+						<span class="version-note"
+							>正在显示已发布的 v{published.analysis_version}；重试 v{active.analysis_version} 失败。</span
+						>
+					{/if}
 				</div>
 				{#if active.total_document_count > 0}
 					<span>{active.processed_document_count}/{active.total_document_count} 篇文献</span>
@@ -294,42 +313,61 @@
 		{#if actionError}<p class="action-error" role="alert">{actionError}</p>{/if}
 
 		{#if published && findings.length}
-			<section class="findings-section">
-				<div class="findings-heading">
-					<div>
-						<h2>Findings</h2>
-						<p>选择一条研究发现查看关系、适用条件和原文证据。</p>
+			<section class="findings-workspace" aria-label="Finding 审阅工作区">
+				<aside class="findings-sidebar" aria-label="Finding 列表">
+					<div class="findings-heading">
+						<div>
+							<h2>Findings</h2>
+							<p>选择一条发现进行证据审阅。</p>
+						</div>
+						<span>{findings.length} 条 · v{published.analysis_version}</span>
 					</div>
-					<span>{findings.length} 条 · v{published.analysis_version}</span>
-				</div>
-				<ul class="finding-list">
-					{#each findings as item (item.finding_id)}
-						<li>
-							<button
-								type="button"
-								aria-pressed={item.finding_id === selectedFindingId}
-								class:selected={item.finding_id === selectedFindingId}
-								on:click={() => selectFinding(item.finding_id)}
-							>
-								<span>{item.statement}</span>
-								<small>{joined(item.factors)} → {item.outcome}</small>
-								<em
-									>{synthesisLabel(item.synthesis_status)} · {Math.round(item.certainty * 100)}% · {directPaperCount(
-										item
-									)} 篇</em
+					<ul class="finding-list">
+						{#each findings as item (item.finding_id)}
+							<li>
+								<button
+									type="button"
+									aria-pressed={item.finding_id === selectedFindingId}
+									class:selected={item.finding_id === selectedFindingId}
+									on:click={() => selectFinding(item.finding_id)}
 								>
-							</button>
-						</li>
-					{/each}
-				</ul>
-			</section>
+									<span>{item.statement}</span>
+									<small
+										>{synthesisLabel(item.synthesis_status)} · {certaintyLabel(item.certainty)} · {directPaperCount(
+											item
+										)} 篇直接文献</small
+									>
+								</button>
+							</li>
+						{/each}
+					</ul>
+					<details class="secondary-actions">
+						<summary>更多</summary>
+						<a href={datasetUrl()} rel="external">导出训练数据</a>
+					</details>
+				</aside>
 
-			<section class="finding-workspace">
-				{#if findingLoading}
-					<p class="page-state" aria-busy="true">正在加载原文证据...</p>
-				{:else if selectedFinding}
-					<FindingWorkbench finding={selectedFinding} {evidence} {collectionId} />
-				{/if}
+				<section class="finding-workspace" aria-label="Finding 详情" aria-busy={findingLoading}>
+					{#if findingLoading}
+						<p class="page-state">正在加载原文证据...</p>
+					{:else if findingError}
+						<div class="finding-error" role="alert">
+							<p>{findingError}</p>
+							<button
+								class="btn btn--ghost btn--small"
+								type="button"
+								on:click={() => selectFinding(selectedFindingId, false)}>重试加载证据</button
+							>
+						</div>
+					{:else if selectedFinding}
+						<FindingWorkbench
+							finding={selectedFinding}
+							{evidence}
+							{collectionId}
+							{documentTitles}
+						/>
+					{/if}
+				</section>
 			</section>
 		{:else if published}
 			<p class="page-state">该版本没有可展示的 Findings。</p>
@@ -341,7 +379,7 @@
 
 <style>
 	.objective-page {
-		width: min(1160px, 100%);
+		width: min(1360px, 100%);
 		margin: 0 auto;
 		display: grid;
 		gap: 22px;
@@ -417,19 +455,34 @@
 	.analysis-state.failed {
 		border-color: #b42318;
 	}
+	.analysis-state .version-note {
+		color: var(--text-primary);
+		font-weight: 600;
+	}
 	.action-error,
 	.page-state--error {
 		color: var(--danger, #b42318);
 	}
-	.findings-section {
+	.findings-workspace {
 		display: grid;
-		gap: 12px;
+		grid-template-columns: minmax(260px, 0.34fr) minmax(0, 1fr);
+		gap: 28px;
+		align-items: start;
+	}
+	.findings-sidebar {
+		position: sticky;
+		top: 16px;
+		max-height: calc(100vh - 32px);
+		overflow-y: auto;
+		padding-right: 24px;
+		border-right: 1px solid var(--border-default);
 	}
 	.findings-heading {
 		display: flex;
 		justify-content: space-between;
-		gap: 16px;
-		align-items: flex-end;
+		gap: 10px;
+		align-items: flex-start;
+		margin-bottom: 12px;
 	}
 	.findings-heading > span {
 		color: var(--text-secondary);
@@ -448,11 +501,10 @@
 		background: transparent;
 		color: inherit;
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) 220px 130px;
-		gap: 14px;
+		gap: 7px;
 		text-align: left;
 		align-items: center;
-		padding: 13px 10px;
+		padding: 13px 10px 13px 12px;
 		cursor: pointer;
 	}
 	.finding-list button:hover,
@@ -462,21 +514,51 @@
 	.finding-list button.selected {
 		box-shadow: inset 3px 0 #3a7d5d;
 	}
-	.finding-list small,
-	.finding-list em {
+	.finding-list small {
 		color: var(--text-secondary);
 		font-style: normal;
+		line-height: 1.45;
 	}
-	.finding-list em {
-		text-align: right;
+	.secondary-actions {
+		margin-top: 12px;
+		color: var(--text-secondary);
+		font-size: 12px;
 	}
 	.finding-workspace {
-		border-top: 1px solid var(--border-default);
-		padding-top: 22px;
+		min-width: 0;
+	}
+	.secondary-actions summary {
+		cursor: pointer;
+	}
+	.secondary-actions a {
+		display: inline-block;
+		margin-top: 8px;
+		color: var(--accent);
+	}
+	.finding-error {
+		display: grid;
+		justify-items: start;
+		gap: 12px;
+		padding: 20px 0;
+		color: var(--danger, #b42318);
 	}
 	.page-state {
 		padding: 30px 0;
 		color: var(--text-secondary);
+	}
+	@media (max-width: 1000px) {
+		.findings-workspace {
+			grid-template-columns: 1fr;
+			gap: 24px;
+		}
+		.findings-sidebar {
+			position: static;
+			max-height: none;
+			overflow: visible;
+			padding: 0 0 20px;
+			border-right: 0;
+			border-bottom: 1px solid var(--border-default);
+		}
 	}
 	@media (max-width: 820px) {
 		.objective-header,
@@ -486,13 +568,6 @@
 		}
 		.scope-strip {
 			grid-template-columns: 1fr 1fr;
-		}
-		.finding-list button {
-			grid-template-columns: 1fr;
-			gap: 5px;
-		}
-		.finding-list em {
-			text-align: left;
 		}
 	}
 </style>

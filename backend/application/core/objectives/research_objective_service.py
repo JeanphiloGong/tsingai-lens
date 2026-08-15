@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha1
 import json
 import logging
 import re
 from typing import Any, Callable, Iterable, Mapping
 
-from openai import OpenAIError
+from openai import APIConnectionError, APIStatusError
 
 from application.core.document_profiles.service import (
     DocumentProfileService,
@@ -17,6 +17,7 @@ from application.core.objectives import property_matching
 from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
 from application.core.objectives.evidence_routing import EvidenceCandidate
 from application.core.objectives.extraction import (
+    OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
     ObjectiveExtractor,
     build_default_objective_extractor,
 )
@@ -40,6 +41,8 @@ from domain.core import (
     ObjectiveFactSet,
     PaperContribution,
     PaperSkim,
+    PaperStudyDisposition,
+    PaperStudyDispositionStatus,
     ResearchObjective,
     normalize_objective_terms,
 )
@@ -48,7 +51,7 @@ from domain.ports import (
     PaperFactRepository,
     SourceArtifactRepository,
 )
-from domain.source import SourceArtifactSet, SourceDocumentTree
+from domain.source import SourceDocument, SourceDocumentTree
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +105,65 @@ class SourceSelectionHint:
 
 
 @dataclass(frozen=True)
+class PaperFrameSourceDisposition:
+    """Final framing decision and provenance for one transient Source unit."""
+
+    source_unit_id: str
+    source_kind: str
+    source_ref: str
+    disposition: str
+    accounting_errors: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.source_unit_id or not self.source_kind or not self.source_ref:
+            raise ValueError("paper frame Source disposition requires complete lineage")
+        if self.disposition not in {
+            "model_relevant",
+            "model_excluded",
+            "repaired_relevant",
+            "repaired_excluded",
+            "fallback_relevant",
+        }:
+            raise ValueError(
+                f"unsupported paper frame Source disposition: {self.disposition}"
+            )
+        object.__setattr__(self, "accounting_errors", tuple(self.accounting_errors))
+        if self.disposition.startswith(("repaired_", "fallback_")) and not (
+            self.accounting_errors
+        ):
+            raise ValueError(
+                "repaired or fallback paper frame disposition requires accounting errors"
+            )
+
+    @property
+    def is_relevant(self) -> bool:
+        return self.disposition not in {"model_excluded", "repaired_excluded"}
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperFrameSourceDisposition":
+        return cls(
+            source_unit_id=_transient_text(payload.get("source_unit_id")),
+            source_kind=_transient_text(payload.get("source_kind")),
+            source_ref=_transient_text(payload.get("source_ref")),
+            disposition=_transient_text(payload.get("disposition")),
+            accounting_errors=tuple(
+                str(error).strip()
+                for error in payload.get("accounting_errors") or ()
+                if str(error).strip()
+            ),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "source_unit_id": self.source_unit_id,
+            "source_kind": self.source_kind,
+            "source_ref": self.source_ref,
+            "disposition": self.disposition,
+            "accounting_errors": list(self.accounting_errors),
+        }
+
+
+@dataclass(frozen=True)
 class PaperAnalysisFrame:
     """Transient paper traversal state; never persisted or exposed by the API."""
 
@@ -115,8 +177,10 @@ class PaperAnalysisFrame:
     measured_property_scope: tuple[str, ...]
     test_environment_scope: tuple[str, ...]
     relevant_sections: tuple[str, ...]
+    relevant_text_source_refs: tuple[str, ...]
     relevant_tables: tuple[str, ...]
     excluded_tables: tuple[str, ...]
+    source_dispositions: tuple[PaperFrameSourceDisposition, ...] = ()
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperAnalysisFrame":
@@ -139,8 +203,16 @@ class PaperAnalysisFrame:
             relevant_sections=normalize_objective_terms(
                 payload.get("relevant_sections")
             ),
+            relevant_text_source_refs=normalize_objective_terms(
+                payload.get("relevant_text_source_refs")
+            ),
             relevant_tables=normalize_objective_terms(payload.get("relevant_tables")),
             excluded_tables=normalize_objective_terms(payload.get("excluded_tables")),
+            source_dispositions=tuple(
+                PaperFrameSourceDisposition.from_mapping(item)
+                for item in payload.get("source_dispositions") or ()
+                if isinstance(item, Mapping)
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -155,8 +227,12 @@ class PaperAnalysisFrame:
             "measured_property_scope": list(self.measured_property_scope),
             "test_environment_scope": list(self.test_environment_scope),
             "relevant_sections": list(self.relevant_sections),
+            "relevant_text_source_refs": list(self.relevant_text_source_refs),
             "relevant_tables": list(self.relevant_tables),
             "excluded_tables": list(self.excluded_tables),
+            "source_dispositions": [
+                disposition.to_record() for disposition in self.source_dispositions
+            ],
         }
 
 
@@ -169,10 +245,22 @@ def _transient_optional_text(value: Any) -> str | None:
     return text or None
 
 
-_FRAME_SECTION_SNIPPET_LIMIT = 12
-_FRAME_SECTION_TEXT_CHARS = 420
-_FRAME_TABLE_LIMIT = 10
+def _provider_is_temporarily_unavailable(error: Exception) -> bool:
+    if isinstance(error, APIConnectionError):
+        return True
+    if not isinstance(error, APIStatusError):
+        return False
+    status_code = int(error.status_code)
+    return status_code in {408, 409, 429} or status_code >= 500
+
+
 _FRAME_TABLE_ROW_LIMIT = 3
+_FRAME_SOURCE_UNIT_LIMIT = 8
+_FRAME_SECTION_CHUNK_CHARS = 2_400
+_FRAME_PRIOR_STUDY_LIMIT = 8
+_FRAME_PRIOR_RELATIONSHIP_LIMIT = 12
+_FRAME_TABLE_TEXT_CHARS = 800
+_FRAME_TABLE_VALUE_CHARS = 240
 _ROUTE_TEXT_CHARS = 900
 _ROUTE_PROMPT_TEXT_CHARS = 320
 _ROUTE_PROMPT_HEADER_LIMIT = 8
@@ -260,11 +348,11 @@ class ResearchObjectiveService:
             collection_id,
             build_id=build_id,
         )
-        artifacts = source_inputs["artifacts"]
+        documents = source_inputs["documents"]
         extractor = source_inputs["extractor"]
         paper_skims = self.paper_skim_service.build_collection_paper_skims(
             collection_id,
-            artifacts=artifacts,
+            documents=documents,
             profiles_by_document_id=source_inputs["profiles_by_document_id"],
             document_trees_by_document_id=source_inputs[
                 "document_trees_by_document_id"
@@ -272,22 +360,37 @@ class ResearchObjectiveService:
             extractor=extractor,
             progress_callback=progress_callback,
         )
-        research_objectives = self.objective_candidate_service.discover_candidates(
+        self.objective_repository.replace(
+            collection_id,
+            build_id,
+            ObjectiveFactSet(
+                research_objectives_ready=False,
+                paper_skims=paper_skims,
+                study_dispositions=tuple(
+                    PaperStudyDisposition(
+                        document_id=skim.document_id,
+                        study_id=study.study_id,
+                        relationship_id=relationship.relationship_id,
+                        status=PaperStudyDispositionStatus.PENDING,
+                    )
+                    for skim in paper_skims
+                    for study in skim.studies
+                    for relationship in study.relationships
+                ),
+            ),
+        )
+        candidate_facts = self.objective_candidate_service.discover_candidate_facts(
             collection_id,
             paper_skims=paper_skims,
-            documents=artifacts.documents,
             extractor=extractor,
             progress_callback=progress_callback,
         )
         self.objective_repository.replace(
             collection_id,
             build_id,
-            ObjectiveFactSet(
-                research_objectives_ready=True,
-                paper_skims=paper_skims,
-                research_objectives=research_objectives,
-            ),
+            candidate_facts,
         )
+        research_objectives = candidate_facts.research_objectives
         logger.info(
             "Research objective candidates finished collection_id=%s paper_skim_count=%s objective_count=%s",
             collection_id,
@@ -304,23 +407,41 @@ class ResearchObjectiveService:
     ) -> ObjectiveAnalysisArtifacts:
         if analysis.collection_id != collection_id:
             raise ValueError("analysis belongs to another collection")
-        objective = self.objective_repository.read_objective(
+        active_objective = self.objective_repository.read_objective(
             collection_id, analysis.objective_id
         )
-        if objective is None:
+        if active_objective is None:
             raise ResearchObjectiveNotFoundError(collection_id, analysis.objective_id)
-        if objective.active_analysis_version != analysis.analysis_version:
+        if active_objective.active_analysis_version != analysis.analysis_version:
             raise ValueError("analysis is not the active objective version")
         objective_inputs = self._build_objective_analysis_inputs(
             collection_id,
             build_id=analysis.source_build_id,
+        )
+        source_objective = next(
+            (
+                item
+                for item in objective_inputs["research_objectives"]
+                if item.objective_id == analysis.objective_id
+            ),
+            None,
+        )
+        if source_objective is None:
+            raise ResearchObjectiveNotFoundError(collection_id, analysis.objective_id)
+        objective = replace(
+            source_objective,
+            confirmation_status=active_objective.confirmation_status,
+            active_analysis_version=active_objective.active_analysis_version,
+            published_analysis_version=active_objective.published_analysis_version,
+            created_at=active_objective.created_at,
+            updated_at=active_objective.updated_at,
         )
         paper_frames = self._build_objective_paper_frames(
             collection_id=collection_id,
             extractor=objective_inputs["extractor"],
             objectives=(objective,),
             paper_skims=objective_inputs["paper_skims"],
-            documents=objective_inputs["artifacts"].documents,
+            documents=objective_inputs["documents"],
             profiles_by_document_id=objective_inputs["profiles_by_document_id"],
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
@@ -362,18 +483,22 @@ class ResearchObjectiveService:
             evidence_drafts,
             objective_context=objective,
         )
-        contributions = self._analysis_contributions(
-            collection_id=collection_id,
-            analysis=analysis,
-            frames=paper_frames,
-        )
         evidence_records = self._analysis_evidence_records(
             collection_id=collection_id,
             analysis=analysis,
+            objective=objective,
             drafts=evidence_drafts,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
             figures_by_document_id=objective_inputs["figures_by_document_id"],
+        )
+        contributions = self._analysis_contributions(
+            collection_id=collection_id,
+            analysis=analysis,
+            objective=objective,
+            frames=paper_frames,
+            routes=evidence_candidates,
+            evidence_records=evidence_records,
         )
         findings = self.finding_synthesis_service.synthesize(
             collection_id=collection_id,
@@ -393,18 +518,103 @@ class ResearchObjectiveService:
         *,
         collection_id: str,
         analysis: ObjectiveAnalysis,
+        objective: ResearchObjective,
         frames: tuple[PaperAnalysisFrame, ...],
+        routes: tuple[EvidenceCandidate, ...],
+        evidence_records: tuple[ObjectiveEvidence, ...],
     ) -> tuple[PaperContribution, ...]:
+        routed_sources_by_document: dict[str, set[tuple[str, str]]] = {}
+        for route in routes:
+            if not route.extractable or route.role == "low_value_or_irrelevant":
+                continue
+            routed_sources_by_document.setdefault(route.document_id, set()).add(
+                (route.source_kind, route.source_ref)
+            )
+        evidence_by_document: dict[str, list[ObjectiveEvidence]] = {}
+        for evidence in evidence_records:
+            evidence_by_document.setdefault(evidence.document_id, []).append(evidence)
+            routed_sources_by_document.setdefault(evidence.document_id, set()).add(
+                (evidence.source_kind, evidence.source_ref)
+            )
+
         contributions: list[PaperContribution] = []
         for frame in frames:
             excluded = frame.relevance == "irrelevant" or frame.paper_role == "irrelevant"
+            document_evidence = tuple(
+                evidence_by_document.get(frame.document_id, ())
+            )
+            routed_sources = routed_sources_by_document.get(frame.document_id, set())
+            extracted_sources = {
+                (evidence.source_kind, evidence.source_ref)
+                for evidence in document_evidence
+                if evidence.selection_status == "extracted"
+            }
+            failed_sources = {
+                (evidence.source_kind, evidence.source_ref)
+                for evidence in document_evidence
+                if evidence.selection_status == "failed"
+            }
+            comparable_evidence_count = sum(
+                self.finding_synthesis_service.is_comparable_result_evidence(
+                    objective,
+                    evidence,
+                )
+                for evidence in document_evidence
+            )
+            if excluded:
+                analysis_status = "excluded"
+                evidence_disposition = "excluded"
+                routed_source_count = 0
+                extracted_source_count = 0
+                comparable_evidence_count = 0
+                failed_source_count = 0
+                evidence_reason = frame.background or (
+                    "Paper is not relevant to this objective."
+                )
+            else:
+                routed_source_count = len(routed_sources)
+                extracted_source_count = len(extracted_sources)
+                failed_source_count = len(failed_sources)
+                if routed_source_count == 0:
+                    analysis_status = "analyzed"
+                    evidence_disposition = "no_routable_evidence"
+                    evidence_reason = (
+                        "No source in this paper was selected for Objective extraction."
+                    )
+                elif extracted_source_count == 0 and failed_source_count > 0:
+                    analysis_status = "failed"
+                    evidence_disposition = "extraction_failed"
+                    evidence_reason = (
+                        f"{failed_source_count} selected source(s) failed extraction."
+                    )
+                elif comparable_evidence_count == 0:
+                    analysis_status = "analyzed"
+                    evidence_disposition = "no_comparable_evidence"
+                    evidence_reason = (
+                        "Selected sources produced no comparable direct result for "
+                        "this Objective."
+                    )
+                else:
+                    analysis_status = "analyzed"
+                    evidence_disposition = "comparable_evidence"
+                    evidence_reason = (
+                        f"{failed_source_count} selected source(s) failed extraction; "
+                        "comparable Evidence survived."
+                        if failed_source_count
+                        else None
+                    )
+            warnings = (
+                (f"{failed_source_count} selected source(s) failed extraction.",)
+                if failed_source_count
+                else ()
+            )
             contributions.append(
                 PaperContribution(
                     collection_id=collection_id,
                     objective_id=analysis.objective_id,
                     analysis_version=analysis.analysis_version,
                     document_id=frame.document_id,
-                    analysis_status="excluded" if excluded else "analyzed",
+                    analysis_status=analysis_status,
                     relevance=frame.relevance,
                     paper_role=frame.paper_role,
                     contribution_summary=frame.background,
@@ -412,13 +622,15 @@ class ResearchObjectiveService:
                     changed_variables=frame.changed_variables,
                     measured_property_scope=frame.measured_property_scope,
                     test_environment_scope=frame.test_environment_scope,
-                    exclusion_reason=(
-                        frame.background or "Paper is not relevant to this objective."
-                        if excluded
-                        else None
-                    ),
-                    warnings=(),
+                    exclusion_reason=evidence_reason if excluded else None,
+                    warnings=warnings,
                     confidence=1.0 if frame.relevance == "high" else 0.7,
+                    evidence_disposition=evidence_disposition,
+                    routed_source_count=routed_source_count,
+                    extracted_source_count=extracted_source_count,
+                    comparable_evidence_count=comparable_evidence_count,
+                    failed_source_count=failed_source_count,
+                    evidence_disposition_reason=evidence_reason,
                 )
             )
         return tuple(contributions)
@@ -428,55 +640,222 @@ class ResearchObjectiveService:
         *,
         collection_id: str,
         analysis: ObjectiveAnalysis,
+        objective: ResearchObjective,
         drafts: tuple[ExtractedEvidenceDraft, ...],
         blocks_by_document_id: Mapping[str, list[Any]],
         tables_by_document_id: Mapping[str, list[Any]],
         figures_by_document_id: Mapping[str, list[Any]],
     ) -> tuple[ObjectiveEvidence, ...]:
         records: list[ObjectiveEvidence] = []
-        seen: set[str] = set()
-        for draft in drafts:
+        seen_evidence_ids: set[str] = set()
+        record_index_by_source: dict[tuple[str, str, str, str], int] = {}
+        for source_draft in drafts:
+            try:
+                draft = self._canonical_objective_evidence_axes(
+                    source_draft,
+                    objective=objective,
+                )
+            except ValueError as exc:
+                payload = source_draft.to_record()
+                payload.update(
+                    {
+                        "evidence_role": "irrelevant",
+                        "selection_status": "failed",
+                        "changed_variables": [],
+                        "comparison": None,
+                        "reported_result": None,
+                        "attribution_scope": "not_attributable",
+                        "resolution_status": "unknown",
+                        "failure_reason": f"ValueError: {exc}"[:1000],
+                        "confidence": 0.0,
+                    }
+                )
+                draft = ExtractedEvidenceDraft.from_mapping(payload)
             source = self._canonical_evidence_source(
                 draft,
                 blocks_by_document_id=blocks_by_document_id,
                 tables_by_document_id=tables_by_document_id,
                 figures_by_document_id=figures_by_document_id,
             )
-            if source is None or draft.evidence_id in seen:
+            if source is None:
+                raise RuntimeError(
+                    "Evidence Source cannot be resolved: "
+                    f"evidence_id={draft.evidence_id} "
+                    f"document_id={draft.document_id} "
+                    f"source_kind={draft.source_kind} "
+                    f"source_ref={draft.source_ref}"
+                )
+            if draft.evidence_id in seen_evidence_ids:
                 continue
-            seen.add(draft.evidence_id)
+            seen_evidence_ids.add(draft.evidence_id)
             evidence_role = self._canonical_evidence_role(draft)
-            records.append(
-                ObjectiveEvidence(
-                    collection_id=collection_id,
-                    objective_id=analysis.objective_id,
-                    analysis_version=analysis.analysis_version,
-                    evidence_id=draft.evidence_id[:128],
-                    document_id=draft.document_id,
-                    source_kind=source["source_kind"],
-                    source_ref=source["source_ref"],
-                    source_excerpt=source["source_excerpt"],
-                    page_numbers=source["page_numbers"],
-                    related_source_refs=source["related_source_refs"],
-                    evidence_role=evidence_role,
-                    selection_status="extracted",
-                    selection_reason=draft.selection_reason,
-                    changed_variables=draft.changed_variables,
-                    comparison=draft.comparison,
-                    reported_result=draft.reported_result,
-                    attribution_scope=draft.attribution_scope,
-                    scientific_context=draft.scientific_context,
-                    anchor_ids=draft.evidence_anchor_ids,
-                    resolution_status=(
+            candidate = ObjectiveEvidence(
+                collection_id=collection_id,
+                objective_id=analysis.objective_id,
+                analysis_version=analysis.analysis_version,
+                evidence_id=draft.evidence_id[:128],
+                document_id=draft.document_id,
+                source_kind=source["source_kind"],
+                source_ref=source["source_ref"],
+                source_excerpt=source["source_excerpt"],
+                page_numbers=source["page_numbers"],
+                related_source_refs=source["related_source_refs"],
+                evidence_role=evidence_role,
+                selection_status=draft.selection_status,
+                selection_reason=draft.selection_reason,
+                changed_variables=draft.changed_variables,
+                comparison=draft.comparison,
+                reported_result=draft.reported_result,
+                attribution_scope=draft.attribution_scope,
+                scientific_context=draft.scientific_context,
+                anchor_ids=draft.evidence_anchor_ids,
+                resolution_status=(
+                    draft.resolution_status
+                    if draft.selection_status == "failed"
+                    else (
                         draft.resolution_status
                         if draft.resolution_status in {"resolved", "partial"}
                         else "partial"
-                    ),
-                    failure_reason=None,
-                    confidence=draft.confidence,
-                )
+                    )
+                ),
+                failure_reason=draft.failure_reason,
+                confidence=draft.confidence,
+            )
+            source_key = (
+                candidate.objective_id,
+                candidate.document_id,
+                candidate.source_kind,
+                candidate.source_ref,
+            )
+            existing_index = record_index_by_source.get(source_key)
+            if existing_index is None:
+                record_index_by_source[source_key] = len(records)
+                records.append(candidate)
+                continue
+            existing = records[existing_index]
+            if self._objective_evidence_source_preference(
+                candidate
+            ) > self._objective_evidence_source_preference(existing):
+                records[existing_index] = candidate
+                kept, discarded = candidate, existing
+            else:
+                kept, discarded = existing, candidate
+            logger.warning(
+                "Duplicate Objective Evidence Source resolved "
+                "objective_id=%s document_id=%s source_kind=%s source_ref=%s "
+                "kept_evidence_id=%s discarded_evidence_id=%s",
+                candidate.objective_id,
+                candidate.document_id,
+                candidate.source_kind,
+                candidate.source_ref,
+                kept.evidence_id,
+                discarded.evidence_id,
             )
         return tuple(records)
+
+    @staticmethod
+    def _objective_evidence_source_preference(
+        evidence: ObjectiveEvidence,
+    ) -> tuple[int, int, int, int, int, int, int, int, float]:
+        role_rank = {
+            "direct_result": 6,
+            "contradictory_result": 6,
+            "mechanism_context": 5,
+            "condition_context": 4,
+            "characterization_context": 3,
+            "background_context": 2,
+            "irrelevant": 1,
+        }
+        context_count = sum(
+            len(getattr(evidence.scientific_context, group))
+            for group in ("material", "sample", "process", "test")
+        )
+        resolution_rank = {
+            "resolved": 3,
+            "partial": 2,
+            "unknown": 1,
+            "unresolved": 1,
+            "skipped": 0,
+        }
+        return (
+            1 if evidence.selection_status == "extracted" else 0,
+            role_rank.get(evidence.evidence_role, 0),
+            1 if evidence.reported_result is not None else 0,
+            1 if evidence.comparison is not None else 0,
+            len(evidence.changed_variables),
+            context_count,
+            resolution_rank.get(evidence.resolution_status, 0),
+            len(evidence.failure_reason or ""),
+            evidence.confidence,
+        )
+
+    @staticmethod
+    def _canonical_objective_evidence_axes(
+        draft: ExtractedEvidenceDraft,
+        *,
+        objective: ResearchObjective,
+    ) -> ExtractedEvidenceDraft:
+        if draft.selection_status == "failed":
+            return draft
+
+        payload = draft.to_record()
+
+        def canonical(value: Any, axes: tuple[str, ...]) -> tuple[str, str | None]:
+            resolved = property_matching.resolve_objective_axis(value, axes)
+            return resolved or str(value or "").strip(), resolved
+
+        canonical_variables: list[dict[str, Any]] = []
+        objective_variable_indexes: dict[str, int] = {}
+        for variable in payload["changed_variables"]:
+            variable = dict(variable)
+            variable["name"], resolved = canonical(
+                variable.get("name"),
+                objective.variables,
+            )
+            if resolved is None:
+                canonical_variables.append(variable)
+                continue
+            axis_key = property_matching.axis_key(resolved)
+            existing_index = objective_variable_indexes.get(axis_key)
+            if existing_index is None:
+                objective_variable_indexes[axis_key] = len(canonical_variables)
+                canonical_variables.append(variable)
+                continue
+            existing = canonical_variables[existing_index]
+            for field in ("baseline_value", "target_value", "unit"):
+                current = existing.get(field)
+                candidate = variable.get(field)
+                if current in (None, ""):
+                    if candidate not in (None, ""):
+                        existing[field] = candidate
+                    continue
+                if candidate in (None, ""):
+                    continue
+                if str(current).strip().casefold() != str(candidate).strip().casefold():
+                    raise ValueError(
+                        f"conflicting values for Objective axis {resolved}: {field}"
+                    )
+        payload["changed_variables"] = canonical_variables
+        comparison = payload.get("comparison")
+        if isinstance(comparison, dict):
+            comparison["axis_names"] = list(
+                dict.fromkeys(
+                    canonical(axis, objective.variables)[0]
+                    for axis in comparison.get("axis_names") or ()
+                )
+            )
+        result = payload.get("reported_result")
+        if isinstance(result, dict):
+            result["outcome"] = canonical(
+                result.get("outcome"),
+                objective.outcomes,
+            )[0]
+        if (
+            payload.get("attribution_scope") == "joint_effect"
+            and len(canonical_variables) == 1
+        ):
+            payload["attribution_scope"] = "isolated_effect"
+        return ExtractedEvidenceDraft.from_mapping(payload)
 
     def _canonical_evidence_source(
         self,
@@ -653,7 +1032,9 @@ class ResearchObjectiveService:
     ) -> dict[str, Any]:
         self.collection_service.get_collection(collection_id)
         try:
-            artifacts = self._load_source_artifacts(collection_id, build_id=build_id)
+            documents = self._load_source_documents(
+                collection_id, build_id=build_id
+            )
             profiles = self.document_profile_service.read_document_profiles(
                 collection_id,
                 build_id=build_id,
@@ -662,17 +1043,27 @@ class ResearchObjectiveService:
             raise ResearchObjectivesNotReadyError(collection_id) from exc
 
         return {
-            "artifacts": artifacts,
+            "documents": documents,
             "profiles_by_document_id": {
                 profile.document_id: profile
                 for profile in profiles
             },
-            "blocks_by_document_id": self._group_by_document_id(artifacts.blocks),
-            "tables_by_document_id": self._group_by_document_id(artifacts.tables),
-            "table_cells_by_document_id": self._group_by_document_id(
-                artifacts.table_cells
-            ),
-            "figures_by_document_id": self._group_by_document_id(artifacts.figures),
+            "blocks_by_document_id": {
+                document.document_id: list(document.blocks)
+                for document in documents
+            },
+            "tables_by_document_id": {
+                document.document_id: list(document.tables)
+                for document in documents
+            },
+            "table_cells_by_document_id": {
+                document.document_id: list(document.table_cells)
+                for document in documents
+            },
+            "figures_by_document_id": {
+                document.document_id: list(document.figures)
+                for document in documents
+            },
             "document_trees_by_document_id": {
                 document.document_id: load_document_tree(
                     collection_id,
@@ -680,7 +1071,7 @@ class ResearchObjectiveService:
                     self.source_artifact_repository,
                     build_id=build_id,
                 )
-                for document in artifacts.documents
+                for document in documents
             },
             "extractor": self._get_objective_extractor(),
         }
@@ -716,20 +1107,26 @@ class ResearchObjectiveService:
         if not target_axes:
             return evidence_items
 
+        failed_units = tuple(
+            unit for unit in evidence_items if unit.selection_status == "failed"
+        )
         target_units = tuple(
             unit
             for unit in evidence_items
+            if unit.selection_status != "failed"
             if self._objective_evidence_matches_target_property(
                 unit,
                 target_axes=target_axes,
             )
         )
         if not target_units:
-            return target_units
+            return failed_units
 
         target_document_ids = {unit.document_id for unit in target_units}
-        selected_ids = {unit.evidence_id for unit in target_units}
-        selected = list(target_units)
+        selected_ids = {
+            unit.evidence_id for unit in (*failed_units, *target_units)
+        }
+        selected = [*failed_units, *target_units]
         for unit in evidence_items:
             if unit.evidence_id in selected_ids or unit.reported_result is not None:
                 continue
@@ -813,11 +1210,6 @@ class ResearchObjectiveService:
                     active_objective_id=objective.objective_id,
                 )
                 tables = tables_by_document_id.get(document_id, [])
-                known_table_ids = {
-                    str(getattr(table, "table_id", "") or "")
-                    for table in tables
-                    if str(getattr(table, "table_id", "") or "")
-                }
                 logger.info(
                     "Research objective paper framing document started collection_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s table_count=%s",
                     collection_id,
@@ -832,6 +1224,31 @@ class ResearchObjectiveService:
                     max(total_frame_requests - completed_frame_requests + 1, 0),
                     len(tables),
                 )
+                if document_id in set(objective.excluded_document_ids):
+                    frames.append(
+                        PaperAnalysisFrame.from_mapping(
+                            {
+                                "objective_id": objective.objective_id,
+                                "document_id": document_id,
+                                "relevance": "irrelevant",
+                                "paper_role": "irrelevant",
+                                "background": (
+                                    "Paper was explicitly excluded from this research "
+                                    "objective."
+                                ),
+                            }
+                        )
+                    )
+                    logger.info(
+                        "Research objective paper framing skipped explicitly excluded document collection_id=%s objective_id=%s document_id=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s",
+                        collection_id,
+                        objective.objective_id,
+                        document_id,
+                        completed_frame_requests,
+                        total_frame_requests,
+                        max(total_frame_requests - completed_frame_requests, 0),
+                    )
+                    continue
                 payload = self._build_objective_paper_frame_payload(
                     collection_id=collection_id,
                     objective=objective,
@@ -842,55 +1259,89 @@ class ResearchObjectiveService:
                     tables=tables,
                     document_tree=document_trees_by_document_id.get(document_id),
                 )
-                try:
-                    parsed = extractor.assess_objective_paper(payload)
-                    record = parsed.model_dump()
-                except Exception as exc:  # noqa: BLE001
+                batches = self._build_objective_paper_frame_batches(
+                    extractor=extractor,
+                    payload=payload,
+                )
+                batch_results: list[
+                    tuple[Mapping[str, Any], str, tuple[str, ...]]
+                ] = []
+                fallback_batch_count = 0
+                for batch_position, (batch_payload, prompt_tokens) in enumerate(
+                    batches,
+                    start=1,
+                ):
+                    fallback_reason: str | None = None
+                    fallback_errors: tuple[str, ...] = ()
+                    if (
+                        prompt_tokens is None
+                        or prompt_tokens > OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT
+                    ):
+                        fallback_reason = "prompt_token_preflight_failed"
+                        fallback_errors = (
+                            "objective paper framing prompt token preflight failed; "
+                            f"prompt_tokens={prompt_tokens}",
+                        )
+                    else:
+                        try:
+                            parsed = extractor.assess_objective_paper(batch_payload)
+                            batch_results.append(
+                                (
+                                    parsed.model_dump(),
+                                    parsed.source_accounting_origin,
+                                    parsed.source_accounting_errors,
+                                )
+                            )
+                            continue
+                        except Exception as exc:  # noqa: BLE001
+                            fallback_reason = "model_call_failed"
+                            fallback_errors = (
+                                f"{type(exc).__name__}: {str(exc).strip()}",
+                            )
+                            logger.warning(
+                                "Research objective paper framing batch model failed; preserving batch sources collection_id=%s objective_id=%s document_id=%s batch_position=%s batch_count=%s prompt_tokens=%s",
+                                collection_id,
+                                objective.objective_id,
+                                document_id,
+                                batch_position,
+                                len(batches),
+                                prompt_tokens,
+                                exc_info=True,
+                            )
+
+                    fallback_batch_count += 1
                     logger.warning(
-                        "Research objective paper framing model failed; using deterministic frame collection_id=%s objective_id=%s document_id=%s",
+                        "Research objective paper framing batch used conservative fallback collection_id=%s objective_id=%s document_id=%s batch_position=%s batch_count=%s source_unit_count=%s reason=%s prompt_tokens=%s",
                         collection_id,
                         objective.objective_id,
                         document_id,
-                        exc_info=True,
+                        batch_position,
+                        len(batches),
+                        len(batch_payload["source_units"]),
+                        fallback_reason,
+                        prompt_tokens,
                     )
-                    record = self._build_deterministic_objective_paper_frame_record(
-                        objective=objective,
-                        paper_skim=skim_by_document_id.get(document_id),
-                        payload=payload,
+                    batch_results.append(
+                        (
+                            self._build_conservative_objective_paper_frame_batch(
+                                payload=batch_payload,
+                                paper_skim=skim_by_document_id.get(document_id),
+                            ),
+                            "fallback",
+                            fallback_errors,
+                        )
                     )
-                relevant_tables = self._filter_known_values(
-                    record.get("relevant_tables"),
-                    known_values=known_table_ids,
+
+                frame = self._aggregate_objective_paper_frame_batches(
+                    objective_id=objective.objective_id,
+                    document_id=document_id,
+                    source_units=payload["source_units"],
+                    batch_results=batch_results,
+                    paper_skim=skim_by_document_id.get(document_id),
                 )
-                excluded_tables = tuple(
-                    table_id
-                    for table_id in self._filter_known_values(
-                        record.get("excluded_tables"),
-                        known_values=known_table_ids,
-                    )
-                    if table_id not in set(relevant_tables)
-                )
-                section_labels = {
-                    str(item.get("section_label") or "")
-                    for item in payload["section_snippets"]
-                    if str(item.get("section_label") or "")
-                }
-                record.update(
-                    {
-                        "objective_id": objective.objective_id,
-                        "document_id": document_id,
-                        "relevant_sections": self._filter_known_values(
-                            record.get("relevant_sections"),
-                            known_values=section_labels,
-                        ),
-                        "relevant_tables": relevant_tables,
-                        "excluded_tables": excluded_tables,
-                    }
-                )
-                frame = PaperAnalysisFrame.from_mapping(record)
                 frames.append(frame)
                 logger.info(
-                    "Research objective paper framing document finished collection_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s relevance=%s paper_role=%s relevant_tables=%s excluded_tables=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s",
+                    "Research objective paper framing document finished collection_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s relevance=%s paper_role=%s relevant_tables=%s excluded_tables=%s batch_count=%s fallback_batch_count=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s",
                     collection_id,
                     objective.objective_id,
                     objective_position,
@@ -902,6 +1353,8 @@ class ResearchObjectiveService:
                     frame.paper_role,
                     len(frame.relevant_tables),
                     len(frame.excluded_tables),
+                    len(batches),
+                    fallback_batch_count,
                     completed_frame_requests,
                     total_frame_requests,
                     max(total_frame_requests - completed_frame_requests, 0),
@@ -1734,7 +2187,7 @@ class ResearchObjectiveService:
             (frame.objective_id, frame.document_id): frame
             for frame in objective_paper_frames
         }
-        extractable_routes = self._tree_order_objective_routes(
+        extractable_routes = self._document_round_robin_objective_routes(
             tuple(
                 route
                 for route in objective_evidence_routes
@@ -1751,12 +2204,13 @@ class ResearchObjectiveService:
         units: list[ExtractedEvidenceDraft] = []
         seen: set[str] = set()
         document_state_units: dict[tuple[str, str], list[ExtractedEvidenceDraft]] = {}
-        llm_evidence_unavailable = False
-        llm_table_repair_unavailable = False
+        llm_evidence_unavailable: dict[tuple[str, str], Exception] = {}
+        llm_table_repair_unavailable: dict[tuple[str, str], Exception] = {}
         document_metadata = self._progress_document_metadata(
             document_trees_by_document_id=document_trees_by_document_id,
         )
         for route_position, route in enumerate(extractable_routes, start=1):
+            document_key = (route.objective_id, route.document_id)
             route_document_metadata = document_metadata.get(route.document_id, {})
             self._notify_progress(
                 progress_callback,
@@ -1791,18 +2245,13 @@ class ResearchObjectiveService:
                 ),
             )
             if not source:
-                logger.info(
-                    "Research objective evidence extraction route skipped collection_id=%s source_ref=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s reason=missing_source route_position=%s route_count=%s",
-                    collection_id,
-                    route.source_ref,
-                    route.objective_id,
-                    route.document_id,
-                    route.source_kind,
-                    route.source_ref,
-                    route_position,
-                    len(extractable_routes),
+                raise RuntimeError(
+                    "selected Evidence Source is missing: "
+                    f"objective_id={route.objective_id} "
+                    f"document_id={route.document_id} "
+                    f"source_kind={route.source_kind} "
+                    f"source_ref={route.source_ref}"
                 )
-                continue
             objective_context = objective_by_id.get(route.objective_id)
             tree_position = self._route_tree_position(
                 self._source_candidate_from_route(
@@ -1827,17 +2276,37 @@ class ResearchObjectiveService:
                 "document_state": prior_document_state,
                 "source": self._objective_evidence_prompt_source(source),
             }
-            source, table_repair_failed = self._repair_objective_table_source_if_needed(
+            source, table_repair_error = self._repair_objective_table_source_if_needed(
                 collection_id=collection_id,
                 route=route,
                 source=source,
-                llm_unavailable=llm_table_repair_unavailable,
+                unavailable_error=llm_table_repair_unavailable.get(document_key),
             )
-            llm_table_repair_unavailable = (
-                llm_table_repair_unavailable or table_repair_failed
-            )
+            if (
+                table_repair_error is not None
+                and _provider_is_temporarily_unavailable(table_repair_error)
+            ):
+                llm_table_repair_unavailable.setdefault(
+                    document_key,
+                    table_repair_error,
+                )
             payload["source"] = self._objective_evidence_prompt_source(source)
             route_unit_start = len(units)
+            if (
+                table_repair_error is not None
+                and self._objective_table_source_needs_llm_structural_repair(
+                    route=route,
+                    source=source,
+                )
+            ):
+                failed_unit = self._failed_objective_evidence_draft(
+                    route=route,
+                    error=table_repair_error,
+                )
+                if failed_unit.evidence_id not in seen:
+                    seen.add(failed_unit.evidence_id)
+                    units.append(failed_unit)
+                continue
             route_records = self._objective_table_matrix_evidence_records(
                 route=route,
                 source=source,
@@ -1853,46 +2322,92 @@ class ResearchObjectiveService:
                     and route_records
                 )
             )
-            if (
+            needs_model_extraction = (
                 (not route_records or needs_structural_repair)
                 and not self._objective_table_route_should_skip_llm_fallback(route)
-                and not llm_evidence_unavailable
-            ):
-                try:
-                    parsed = extractor.extract_objective_evidence(payload)
-                except Exception as exc:
-                    llm_evidence_unavailable = isinstance(exc, OpenAIError)
-                    logger.exception(
-                        "Research objective evidence extraction route failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s completed_routes=%s remaining_routes=%s provider_unavailable=%s",
-                        collection_id,
-                        route.source_ref,
-                        route.objective_id,
-                        route.document_id,
-                        route.source_kind,
-                        route.source_ref,
-                        route_position,
-                        len(extractable_routes),
-                        route_position - 1,
-                        max(len(extractable_routes) - route_position, 0),
-                        llm_evidence_unavailable,
+            )
+            if needs_model_extraction:
+                extraction_error = llm_evidence_unavailable.get(document_key)
+                if extraction_error is None:
+                    try:
+                        parsed = extractor.extract_objective_evidence(payload)
+                        try:
+                            llm_route_records = tuple(
+                                record
+                                for item in parsed.extractions
+                                for record in self._objective_evidence_records_from_extracted(
+                                    route=route,
+                                    source=source,
+                                    objective_context=objective_context,
+                                    extracted_record=item.model_dump(),
+                                    raise_on_grounding_error=True,
+                                )
+                            )
+                        except ValueError as grounding_error:
+                            invalid_extraction = parsed.extractions[0].model_dump()
+                            repaired = extractor.extract_objective_evidence(
+                                payload,
+                                invalid_extraction=invalid_extraction,
+                                validation_errors=tuple(
+                                    str(error) for error in grounding_error.args
+                                ),
+                            )
+                            if not repaired.extractions:
+                                raise grounding_error
+                            llm_route_records = tuple(
+                                record
+                                for item in repaired.extractions
+                                for record in self._objective_evidence_records_from_extracted(
+                                    route=route,
+                                    source=source,
+                                    objective_context=objective_context,
+                                    extracted_record=item.model_dump(),
+                                    raise_on_grounding_error=True,
+                                )
+                            )
+                    except Exception as exc:
+                        extraction_error = exc
+                        provider_unavailable = _provider_is_temporarily_unavailable(exc)
+                        if provider_unavailable:
+                            llm_evidence_unavailable[document_key] = exc
+                        logger.exception(
+                            "Research objective evidence extraction route failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s completed_routes=%s remaining_routes=%s provider_unavailable=%s",
+                            collection_id,
+                            route.source_ref,
+                            route.objective_id,
+                            route.document_id,
+                            route.source_kind,
+                            route.source_ref,
+                            route_position,
+                            len(extractable_routes),
+                            route_position - 1,
+                            max(len(extractable_routes) - route_position, 0),
+                            provider_unavailable,
+                        )
+                    else:
+                        if (
+                            parsed.extractions
+                            and not llm_route_records
+                            and not route_records
+                        ):
+                            extraction_error = ValueError(
+                                "model evidence was rejected because it was not "
+                                "grounded in the selected Source"
+                            )
+                        route_records = self._objective_merge_table_repair_records(
+                            deterministic_records=route_records,
+                            llm_records=llm_route_records,
+                        )
+                if extraction_error is not None:
+                    failed_unit = self._failed_objective_evidence_draft(
+                        route=route,
+                        error=extraction_error,
                     )
+                    if failed_unit.evidence_id not in seen:
+                        seen.add(failed_unit.evidence_id)
+                        units.append(failed_unit)
                     if not route_records:
                         continue
-                else:
-                    llm_route_records = tuple(
-                        record
-                        for item in parsed.extractions
-                        for record in self._objective_evidence_records_from_extracted(
-                            route=route,
-                            source=source,
-                            objective_context=objective_context,
-                            extracted_record=item.model_dump(),
-                        )
-                    )
-                    route_records = self._objective_merge_table_repair_records(
-                        deterministic_records=route_records,
-                        llm_records=llm_route_records,
-                    )
             for record in route_records:
                 unit = ExtractedEvidenceDraft.from_mapping(record)
                 if not self._objective_evidence_has_payload(unit):
@@ -1953,6 +2468,47 @@ class ResearchObjectiveService:
         return (*bound_units, *comparison_units)
 
     @staticmethod
+    def _failed_objective_evidence_draft(
+        *,
+        route: EvidenceCandidate,
+        error: Exception,
+    ) -> ExtractedEvidenceDraft:
+        identity = "|".join(
+            (
+                route.objective_id,
+                route.document_id,
+                route.source_kind,
+                route.source_ref,
+                "failed",
+            )
+        )
+        reason = f"{error.__class__.__name__}: {str(error) or 'extraction failed'}"
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": (
+                    f"oev_failed_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
+                ),
+                "objective_id": route.objective_id,
+                "document_id": route.document_id,
+                "source_kind": route.source_kind,
+                "source_ref": route.source_ref,
+                "evidence_role": "irrelevant",
+                "selection_status": "failed",
+                "selection_reason": route.reason,
+                "attribution_scope": "not_attributable",
+                "source_refs": [
+                    {
+                        "source_kind": route.source_kind,
+                        "source_ref": route.source_ref,
+                    }
+                ],
+                "resolution_status": "unknown",
+                "failure_reason": reason[:1000],
+                "confidence": 0.0,
+            }
+        )
+
+    @staticmethod
     def _enrich_objective_scope_context(
         units: tuple[ExtractedEvidenceDraft, ...],
         *,
@@ -1961,19 +2517,25 @@ class ResearchObjectiveService:
         skim_by_document_id = {item.document_id: item for item in paper_skims}
         enriched: list[ExtractedEvidenceDraft] = []
         for unit in units:
+            if unit.selection_status == "failed":
+                enriched.append(unit)
+                continue
             paper_skim = skim_by_document_id.get(unit.document_id)
             context = unit.scientific_context.to_record()
             if not context["material"]:
-                material_values = (
-                    paper_skim.candidate_materials
-                    if paper_skim and paper_skim.candidate_materials
-                    else ()
+                material_values = ResearchObjectiveService._paper_skim_study_values(
+                    paper_skim,
+                    "material_scope",
                 )
                 context["material"] = [
                     {"name": "material", "value": value, "unit": None}
                     for value in material_values
                 ]
-            if paper_skim and paper_skim.candidate_processes:
+            process_values = ResearchObjectiveService._paper_skim_study_values(
+                paper_skim,
+                "process_context",
+            )
+            if process_values:
                 process_identity_names = {
                     "fabrication process",
                     "manufacturing process",
@@ -2000,7 +2562,7 @@ class ResearchObjectiveService:
                                 "value": value,
                                 "unit": None,
                             }
-                            for value in paper_skim.candidate_processes
+                            for value in process_values
                         ),
                     ]
             if context == unit.scientific_context.to_record():
@@ -2023,15 +2585,15 @@ class ResearchObjectiveService:
         collection_id: str,
         route: EvidenceCandidate,
         source: dict[str, Any],
-        llm_unavailable: bool = False,
-    ) -> tuple[dict[str, Any], bool]:
-        if llm_unavailable:
-            return source, False
+        unavailable_error: Exception | None = None,
+    ) -> tuple[dict[str, Any], Exception | None]:
         if not self._objective_table_source_needs_llm_structural_repair(
             route=route,
             source=source,
         ):
-            return source, False
+            return source, None
+        if unavailable_error is not None:
+            return source, unavailable_error
         repair_payload = self._build_objective_table_matrix_repair_payload(
             route=route,
             source=source,
@@ -2040,7 +2602,7 @@ class ResearchObjectiveService:
             parsed = self._get_paper_facts_extractor().repair_table_matrix(
                 repair_payload
             )
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Research objective table matrix repair failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_ref=%s",
                 collection_id,
@@ -2049,13 +2611,15 @@ class ResearchObjectiveService:
                 route.document_id,
                 route.source_ref,
             )
-            return source, True
+            return source, exc
         repaired_matrix = self._validated_objective_repaired_table_matrix(
             source=source,
             repaired_table_matrix=getattr(parsed, "repaired_table_matrix", None),
         )
         if not repaired_matrix:
-            return source, False
+            return source, ValueError(
+                "table matrix repair returned no usable matrix"
+            )
         original_matrix = self._normalized_objective_table_matrix(
             source.get("table_matrix")
         )
@@ -2066,16 +2630,23 @@ class ResearchObjectiveService:
                 column_headers=source.get("column_headers", ()),
             )
         )
-        if repaired_matrix == original_matrix:
-            return source, False
+        if (
+            repaired_matrix == original_matrix
+            and self._objective_table_matrix_has_structural_fragments(
+                original_matrix
+            )
+        ):
+            return source, ValueError(
+                "table matrix repair left the fragmented matrix unchanged"
+            )
+        if self._objective_table_matrix_has_structural_fragments(repaired_matrix):
+            return source, ValueError(
+                "table matrix repair returned a structurally fragmented matrix"
+            )
         repaired_source = dict(source)
         repaired_source["raw_table_matrix"] = source.get("table_matrix", [])
         repaired_source["table_matrix"] = repaired_matrix
-        repaired_source["table_matrix_structural_repair_applied"] = (
-            not self._objective_table_matrix_has_structural_fragments(
-                repaired_matrix
-            )
-        )
+        repaired_source["table_matrix_structural_repair_applied"] = True
         repairs = getattr(parsed, "repairs", None)
         repair_records = []
         if repairs:
@@ -2095,7 +2666,7 @@ class ResearchObjectiveService:
                 for warning in warnings
                 if str(warning).strip()
             ]
-        return repaired_source, False
+        return repaired_source, None
 
     def _build_objective_table_matrix_repair_payload(
         self,
@@ -4125,6 +4696,7 @@ class ResearchObjectiveService:
         source: dict[str, Any],
         objective_context: ResearchObjective | None,
         extracted_record: dict[str, Any],
+        raise_on_grounding_error: bool = False,
     ) -> tuple[dict[str, Any], ...]:
         record = self._objective_complete_extracted_variable_endpoints(
             extracted_record,
@@ -4210,10 +4782,13 @@ class ResearchObjectiveService:
             record["changed_variables"] = []
             record["comparison"] = None
         if isinstance(reported_result, Mapping):
-            if not self._objective_extracted_result_is_source_grounded(
+            grounding_errors = self._objective_evidence_grounding_errors(
                 record,
                 source=source,
-            ):
+            )
+            if grounding_errors:
+                if raise_on_grounding_error:
+                    raise ValueError(*grounding_errors)
                 return ()
             outcome = property_matching.normalize_objective_unit_property(
                 reported_result.get("outcome"),
@@ -4250,7 +4825,7 @@ class ResearchObjectiveService:
                 ),
             }
         )
-        if not record.get("confidence"):
+        if record.get("confidence") is None:
             record["confidence"] = route.confidence
         return (record,)
 
@@ -4333,52 +4908,70 @@ class ResearchObjectiveService:
         *,
         source: Mapping[str, Any],
     ) -> bool:
+        return not self._objective_evidence_grounding_errors(record, source=source)
+
+    def _objective_evidence_grounding_errors(
+        self,
+        record: Mapping[str, Any],
+        *,
+        source: Mapping[str, Any],
+    ) -> tuple[str, ...]:
         source_text = self._objective_source_grounding_text(source)
         if not source_text:
-            return False
-        for variable in record.get("changed_variables") or ():
+            return ("source has no text or table content for grounding",)
+        errors: list[str] = []
+        for position, variable in enumerate(record.get("changed_variables") or ()):
+            path = f"changed_variables[{position}]"
             if not isinstance(variable, Mapping):
-                return False
+                errors.append(f"{path} is not a structured variable")
+                continue
             if not self._objective_axis_is_source_grounded(
                 variable.get("name"),
                 source=source,
                 source_text=source_text,
             ):
-                return False
-            if any(
-                not self._objective_value_is_source_grounded(
-                    variable.get(field), source_text
+                errors.append(
+                    f"{path}.name={variable.get('name')!r} is not grounded in SOURCE"
                 )
-                for field in ("baseline_value", "target_value")
-            ):
-                return False
+            for field in ("baseline_value", "target_value"):
+                value = variable.get(field)
+                if not self._objective_value_is_source_grounded(value, source_text):
+                    errors.append(
+                        f"{path}.{field}={value!r} is not grounded in SOURCE"
+                    )
             variable_unit = str(variable.get("unit") or "").strip()
             if variable_unit and self._objective_column_key(
                 variable_unit
             ) not in self._objective_column_key(source_text):
-                return False
+                errors.append(
+                    f"{path}.unit={variable_unit!r} is not grounded in SOURCE"
+                )
         reported_result = record.get("reported_result")
         if not isinstance(reported_result, Mapping):
-            return True
+            return tuple(errors)
         outcome = reported_result.get("outcome")
         if not self._objective_axis_is_source_grounded(
             outcome,
             source=source,
             source_text=source_text,
         ):
-            return False
+            errors.append(
+                f"reported_result.outcome={outcome!r} is not grounded in SOURCE"
+            )
         unit = str(reported_result.get("unit") or "").strip()
         if unit and self._objective_column_key(unit) not in self._objective_column_key(
             source_text
         ):
-            return False
+            errors.append(f"reported_result.unit={unit!r} is not grounded in SOURCE")
         result_value = reported_result.get("value")
         result_text = str(reported_result.get("result_text") or "").strip()
         if result_value not in (None, "") and not self._objective_value_is_source_grounded(
             result_value,
             source_text,
         ):
-            return False
+            errors.append(
+                f"reported_result.value={result_value!r} is not grounded in SOURCE"
+            )
         if _NUMBER_PATTERN.search(result_text):
             result_text_is_grounded = self._objective_value_is_source_grounded(
                 result_text,
@@ -4390,13 +4983,24 @@ class ResearchObjectiveService:
                 result_text,
             )
         if not result_text_is_grounded:
-            return False
-        if source.get("source_kind") == "table" and source.get("table_matrix"):
-            return self._objective_extracted_table_result_is_row_grounded(
+            errors.append(
+                "reported_result.result_text="
+                f"{result_text!r} is not grounded in SOURCE"
+            )
+        if (
+            not errors
+            and source.get("source_kind") == "table"
+            and source.get("table_matrix")
+            and not self._objective_extracted_table_result_is_row_grounded(
                 record,
                 source=source,
             )
-        return True
+        ):
+            errors.append(
+                "table_rows do not bind the reported result to the selected "
+                "comparison endpoints in SOURCE"
+            )
+        return tuple(errors)
 
     def _objective_extracted_table_result_is_row_grounded(
         self,
@@ -5115,23 +5719,42 @@ class ResearchObjectiveService:
             if part.strip()
         ]
 
-    def _tree_order_objective_routes(
+    def _document_round_robin_objective_routes(
         self,
         routes: tuple[EvidenceCandidate, ...],
         *,
         document_trees_by_document_id: dict[str, SourceDocumentTree],
     ) -> tuple[EvidenceCandidate, ...]:
-        return tuple(
-            sorted(
-                routes,
-                key=lambda route: (
-                    self._route_tree_order(
-                        route,
-                        document_trees_by_document_id=document_trees_by_document_id,
+        routes_by_document: dict[tuple[str, str], list[EvidenceCandidate]] = {}
+        for route in routes:
+            routes_by_document.setdefault(
+                (route.objective_id, route.document_id),
+                [],
+            ).append(route)
+        ordered_groups = tuple(
+            tuple(
+                sorted(
+                    document_routes,
+                    key=lambda route: (
+                        self._route_tree_order(
+                            route,
+                            document_trees_by_document_id=(
+                                document_trees_by_document_id
+                            ),
+                        ),
+                        route.source_ref,
                     ),
-                    route.source_ref,
-                ),
+                )
             )
+            for _key, document_routes in sorted(routes_by_document.items())
+        )
+        return tuple(
+            group[position]
+            for position in range(
+                max((len(group) for group in ordered_groups), default=0)
+            )
+            for group in ordered_groups
+            if position < len(group)
         )
 
     def _route_tree_order(
@@ -5332,6 +5955,7 @@ class ResearchObjectiveService:
         if limit <= 0:
             return []
         scored_candidates: list[tuple[int, int, dict[str, Any]]] = []
+        selected_source_refs = set(frame.relevant_text_source_refs)
         for block in sorted(
             blocks,
             key=lambda item: int(getattr(item, "block_order", 0) or 0),
@@ -5347,6 +5971,8 @@ class ResearchObjectiveService:
                 or block_type
                 not in {"paragraph", "list_item", "figure_caption"}
             ):
+                continue
+            if selected_source_refs and block_id not in selected_source_refs:
                 continue
             score = self._route_text_candidate_score(
                 frame=frame,
@@ -5418,11 +6044,19 @@ class ResearchObjectiveService:
                 node=node,
                 block=block,
             )
-            if restrict_to_frame_sections and not self._route_section_matches_frame(
-                section_label=section_label,
-                frame=frame,
-            ):
-                continue
+            if restrict_to_frame_sections:
+                if frame.relevant_text_source_refs:
+                    if not self._route_tree_source_matches_frame(
+                        document_tree=document_tree,
+                        node=node,
+                        frame=frame,
+                    ):
+                        continue
+                elif not self._route_section_matches_frame(
+                    section_label=section_label,
+                    frame=frame,
+                ):
+                    continue
             score = self._route_text_candidate_score(
                 frame=frame,
                 objective_context=objective_context,
@@ -5648,11 +6282,35 @@ class ResearchObjectiveService:
         self,
         frame: PaperAnalysisFrame,
     ) -> bool:
+        if frame.relevant_text_source_refs:
+            return True
         if not frame.relevant_sections:
             return False
         if frame.relevance == "high" and frame.paper_role == "primary_experiment":
             return False
         return True
+
+    def _route_tree_source_matches_frame(
+        self,
+        *,
+        document_tree: SourceDocumentTree,
+        node: Any,
+        frame: PaperAnalysisFrame,
+    ) -> bool:
+        selected_source_refs = set(frame.relevant_text_source_refs)
+        current = node
+        while current is not None:
+            if any(
+                str(value or "").strip() in selected_source_refs
+                for value in (
+                    getattr(current, "node_id", None),
+                    getattr(current, "source_ref_id", None),
+                )
+            ):
+                return True
+            parent_id = getattr(current, "parent_id", None)
+            current = document_tree.nodes.get(parent_id) if parent_id else None
+        return False
 
     def _route_section_matches_frame(
         self,
@@ -5852,122 +6510,626 @@ class ResearchObjectiveService:
         tables: list[Any],
         document_tree: SourceDocumentTree | None,
     ) -> dict[str, Any]:
+        section_units = self._build_frame_section_source_units(
+            blocks,
+            document_tree=document_tree,
+        )
+        table_units = self._build_frame_table_source_units(tables)
+        source_units = [*section_units, *table_units]
+        source_unit_ids = [
+            str(item.get("source_unit_id") or "")
+            for item in source_units
+        ]
+        if (
+            any(not source_unit_id for source_unit_id in source_unit_ids)
+            or len(source_unit_ids) != len(set(source_unit_ids))
+        ):
+            raise ValueError(
+                "objective paper framing requires unique backend source-unit ids"
+            )
         return {
             "collection_id": collection_id,
-            "objective": objective.to_record(),
-            "paper_skim": paper_skim.to_record() if paper_skim is not None else {},
+            "objective": self._route_prompt_objective_record(objective),
+            "paper_prior": self._build_objective_paper_frame_prior(
+                objective=objective,
+                paper_skim=paper_skim,
+            ),
             "document": {
                 "document_id": getattr(document, "document_id", None),
                 "title": getattr(document, "title", None),
                 "source_filename": self._resolve_source_filename(document),
             },
             "document_profile": profile.to_record() if profile else {},
-            "section_snippets": self._build_frame_section_snippets(
-                blocks,
-                objective=objective,
-                paper_skim=paper_skim,
-                profile=profile,
-                document_tree=document_tree,
-            ),
-            "table_summaries": self._build_frame_table_summaries(
-                tables,
-                objective=objective,
-                paper_skim=paper_skim,
-                profile=profile,
-            ),
+            "source_units": source_units,
         }
 
-    def _build_frame_section_snippets(
+    def _build_objective_paper_frame_batches(
         self,
-        blocks: list[Any],
+        *,
+        extractor: ObjectiveExtractor,
+        payload: Mapping[str, Any],
+    ) -> tuple[tuple[dict[str, Any], int | None], ...]:
+        base_payload = {
+            key: value
+            for key, value in payload.items()
+            if key != "source_units"
+        }
+        source_units = [
+            dict(item)
+            for item in payload.get("source_units") or ()
+            if isinstance(item, Mapping)
+        ]
+        batches: list[tuple[dict[str, Any], int | None]] = []
+        current_units: list[dict[str, Any]] = []
+        current_tokens: int | None = None
+
+        def batch_payload(units: list[dict[str, Any]]) -> dict[str, Any]:
+            return {**base_payload, "source_units": list(units)}
+
+        def estimate(candidate: dict[str, Any]) -> int | None:
+            try:
+                return extractor.estimate_objective_paper_frame_prompt_tokens(
+                    candidate
+                )
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Research objective paper framing token preflight failed",
+                    exc_info=True,
+                )
+                return None
+
+        for source_unit in source_units:
+            if len(current_units) >= _FRAME_SOURCE_UNIT_LIMIT:
+                batches.append((batch_payload(current_units), current_tokens))
+                current_units = []
+                current_tokens = None
+
+            candidate_units = [*current_units, source_unit]
+            candidate_payload = batch_payload(candidate_units)
+            candidate_tokens = estimate(candidate_payload)
+            if (
+                candidate_tokens is not None
+                and candidate_tokens <= OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT
+            ):
+                current_units = candidate_units
+                current_tokens = candidate_tokens
+                continue
+
+            if current_units:
+                batches.append((batch_payload(current_units), current_tokens))
+                singleton_payload = batch_payload([source_unit])
+                singleton_tokens = estimate(singleton_payload)
+            else:
+                singleton_payload = candidate_payload
+                singleton_tokens = candidate_tokens
+
+            if (
+                singleton_tokens is not None
+                and singleton_tokens <= OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT
+            ):
+                current_units = [source_unit]
+                current_tokens = singleton_tokens
+            else:
+                batches.append((singleton_payload, singleton_tokens))
+                current_units = []
+                current_tokens = None
+
+        if current_units:
+            batches.append((batch_payload(current_units), current_tokens))
+        return tuple(batches)
+
+    def _build_conservative_objective_paper_frame_batch(
+        self,
+        *,
+        payload: Mapping[str, Any],
+        paper_skim: PaperSkim | None,
+    ) -> dict[str, Any]:
+        return {
+            "relevance": "uncertain",
+            "paper_role": self._deterministic_frame_paper_role(paper_skim),
+            "background": None,
+            "material_match": [],
+            "changed_variables": [],
+            "measured_property_scope": [],
+            "test_environment_scope": [],
+            "relevant_source_unit_ids": [
+                str(item.get("source_unit_id") or "")
+                for item in payload.get("source_units") or ()
+                if isinstance(item, Mapping)
+                and str(item.get("source_unit_id") or "")
+            ],
+            "excluded_source_unit_ids": [],
+        }
+
+    def _aggregate_objective_paper_frame_batches(
+        self,
+        *,
+        objective_id: str,
+        document_id: str,
+        source_units: Iterable[Mapping[str, Any]],
+        batch_results: Iterable[
+            tuple[Mapping[str, Any], str, tuple[str, ...]]
+        ],
+        paper_skim: PaperSkim | None,
+    ) -> PaperAnalysisFrame:
+        units = tuple(source_units)
+        results = tuple(batch_results)
+        source_unit_ids = tuple(
+            str(unit.get("source_unit_id") or "").strip() for unit in units
+        )
+        if (
+            not all(source_unit_ids)
+            or len(source_unit_ids) != len(set(source_unit_ids))
+        ):
+            raise ValueError(
+                "objective paper frame aggregation requires unique Source-unit ids"
+            )
+        units_by_id = dict(zip(source_unit_ids, units, strict=True))
+        dispositions_by_id: dict[str, PaperFrameSourceDisposition] = {}
+        for record, decision_origin, accounting_errors in results:
+            if decision_origin not in {"model", "repair", "fallback"}:
+                raise ValueError(
+                    "objective paper frame aggregation received unsupported decision "
+                    f"origin: {decision_origin}"
+                )
+            relevant_batch_ids = tuple(
+                str(value).strip()
+                for value in record.get("relevant_source_unit_ids") or ()
+                if str(value).strip()
+            )
+            excluded_batch_ids = tuple(
+                str(value).strip()
+                for value in record.get("excluded_source_unit_ids") or ()
+                if str(value).strip()
+            )
+            returned_ids = (*relevant_batch_ids, *excluded_batch_ids)
+            if len(returned_ids) != len(set(returned_ids)):
+                raise ValueError(
+                    "objective paper frame aggregation received duplicate Source-unit "
+                    "dispositions"
+                )
+            normalized_errors = tuple(
+                str(error).strip()
+                for error in accounting_errors
+                if str(error).strip()
+            )
+            for source_unit_id in returned_ids:
+                unit = units_by_id.get(source_unit_id)
+                if unit is None:
+                    raise ValueError(
+                        "objective paper frame aggregation received unknown Source-unit "
+                        f"id: {source_unit_id}"
+                    )
+                if source_unit_id in dispositions_by_id:
+                    raise ValueError(
+                        "objective paper frame aggregation received more than one "
+                        f"disposition for Source-unit id: {source_unit_id}"
+                    )
+                is_relevant = source_unit_id in relevant_batch_ids
+                if decision_origin == "fallback":
+                    if not is_relevant:
+                        raise ValueError(
+                            "objective paper frame fallback cannot exclude a Source unit"
+                        )
+                    disposition = "fallback_relevant"
+                elif decision_origin == "repair":
+                    disposition = (
+                        "repaired_relevant" if is_relevant else "repaired_excluded"
+                    )
+                else:
+                    disposition = "model_relevant" if is_relevant else "model_excluded"
+                dispositions_by_id[source_unit_id] = PaperFrameSourceDisposition(
+                    source_unit_id=source_unit_id,
+                    source_kind=str(unit.get("source_kind") or "").strip(),
+                    source_ref=str(unit.get("source_ref") or "").strip(),
+                    disposition=disposition,
+                    accounting_errors=normalized_errors,
+                )
+
+        missing_ids = [
+            source_unit_id
+            for source_unit_id in source_unit_ids
+            if source_unit_id not in dispositions_by_id
+        ]
+        if missing_ids:
+            raise ValueError(
+                "objective paper frame aggregation is missing Source-unit "
+                f"dispositions: {missing_ids}"
+            )
+        source_dispositions = tuple(
+            dispositions_by_id[source_unit_id]
+            for source_unit_id in source_unit_ids
+        )
+        relevant_ids = {
+            disposition.source_unit_id
+            for disposition in source_dispositions
+            if disposition.is_relevant
+        }
+        excluded_ids = set(source_unit_ids) - relevant_ids
+        all_sources_excluded = bool(units_by_id) and not relevant_ids
+
+        relevance_rank = {
+            "irrelevant": 0,
+            "uncertain": 1,
+            "low": 2,
+            "medium": 3,
+            "high": 4,
+        }
+
+        def record_relevance(record: Mapping[str, Any]) -> str:
+            value = str(record.get("relevance") or "uncertain")
+            return value if value in relevance_rank else "uncertain"
+
+        ranked_results = sorted(
+            enumerate(results),
+            key=lambda item: (
+                relevance_rank[record_relevance(item[1][0])],
+                -item[0],
+            ),
+            reverse=True,
+        )
+        relevance = (
+            "irrelevant"
+            if all_sources_excluded
+            else (
+                record_relevance(ranked_results[0][1][0])
+                if ranked_results
+                else "uncertain"
+            )
+        )
+        if relevant_ids and relevance == "irrelevant":
+            relevance = "uncertain"
+
+        representative_results = ranked_results
+        representative = (
+            representative_results[0][1][0]
+            if representative_results
+            else {}
+        )
+        background_record = next(
+            (
+                record
+                for _position, (record, decision_origin, _errors) in representative_results
+                if decision_origin != "fallback"
+                and record_relevance(record) != "irrelevant"
+                and str(record.get("background") or "").strip()
+            ),
+            {},
+        )
+
+        def values(field: str) -> list[str]:
+            return list(
+                dict.fromkeys(
+                    text
+                    for record, _decision_origin, _errors in results
+                    for value in record.get(field) or ()
+                    if (text := str(value).strip())
+                )
+            )
+
+        relevant_sections: list[str] = []
+        relevant_text_source_refs: list[str] = []
+        relevant_tables: list[str] = []
+        excluded_tables: list[str] = []
+        for unit in units:
+            source_unit_id = str(unit.get("source_unit_id") or "")
+            source_kind = str(unit.get("source_kind") or "")
+            if source_kind == "section" and source_unit_id in relevant_ids:
+                label = str(unit.get("section_label") or "").strip()
+                if label and label not in relevant_sections:
+                    relevant_sections.append(label)
+                source_ref = str(unit.get("source_ref") or "").strip()
+                if (
+                    source_ref
+                    and source_ref not in relevant_text_source_refs
+                ):
+                    relevant_text_source_refs.append(source_ref)
+            if source_kind != "table":
+                continue
+            table_id = str(unit.get("source_ref") or "").strip()
+            if not table_id:
+                continue
+            if source_unit_id in relevant_ids and table_id not in relevant_tables:
+                relevant_tables.append(table_id)
+            elif source_unit_id in excluded_ids and table_id not in excluded_tables:
+                excluded_tables.append(table_id)
+        excluded_tables = [
+            table_id
+            for table_id in excluded_tables
+            if table_id not in set(relevant_tables)
+        ]
+
+        paper_role = (
+            str(representative.get("paper_role") or "").strip()
+            or self._deterministic_frame_paper_role(paper_skim)
+        )
+        if relevance != "irrelevant" and paper_role == "irrelevant":
+            paper_role = self._deterministic_frame_paper_role(paper_skim)
+
+        return PaperAnalysisFrame.from_mapping(
+            {
+                "objective_id": objective_id,
+                "document_id": document_id,
+                "relevance": relevance,
+                "paper_role": paper_role,
+                "background": background_record.get("background"),
+                "material_match": values("material_match"),
+                "changed_variables": values("changed_variables"),
+                "measured_property_scope": values("measured_property_scope"),
+                "test_environment_scope": values("test_environment_scope"),
+                "relevant_sections": relevant_sections,
+                "relevant_text_source_refs": relevant_text_source_refs,
+                "relevant_tables": relevant_tables,
+                "excluded_tables": excluded_tables,
+                "source_dispositions": [
+                    disposition.to_record()
+                    for disposition in source_dispositions
+                ],
+            }
+        )
+
+    def _build_objective_paper_frame_prior(
+        self,
         *,
         objective: ResearchObjective,
         paper_skim: PaperSkim | None,
-        profile: Any,
-        document_tree: SourceDocumentTree | None = None,
-    ) -> list[dict[str, Any]]:
-        frame_terms = self._frame_relevance_terms(
-            objective=objective,
-            paper_skim=paper_skim,
-            profile=profile,
-        )
-        if document_tree is not None:
-            snippets = self._build_frame_section_snippets_from_tree(document_tree)
-            if snippets:
-                return self._prioritize_frame_items(snippets, frame_terms=frame_terms)
+    ) -> dict[str, Any]:
+        if paper_skim is None:
+            return {}
 
-        snippets: list[dict[str, Any]] = []
+        lineage_relationship_ids = set(objective.source_relationship_ids)
+        studies: list[dict[str, Any]] = []
+        relationship_count = 0
+        for study in paper_skim.studies:
+            selected_relationships = []
+            for relationship in study.relationships:
+                if lineage_relationship_ids:
+                    selected = relationship.relationship_id in lineage_relationship_ids
+                else:
+                    selected = self._frame_relationship_supports_objective(
+                        relationship=relationship,
+                        objective=objective,
+                    )
+                if not selected:
+                    continue
+                selected_relationships.append(
+                    {
+                        "varied_factors": list(relationship.varied_factors),
+                        "outcome": relationship.outcome,
+                    }
+                )
+                relationship_count += 1
+                if relationship_count >= _FRAME_PRIOR_RELATIONSHIP_LIMIT:
+                    break
+            if selected_relationships:
+                studies.append(
+                    {
+                        "experiment_label": study.experiment_label,
+                        "design_type": study.design_type,
+                        "claim_scope": study.claim_scope,
+                        "material_scope": list(study.material_scope),
+                        "process_context": list(study.process_context),
+                        "sample_context": list(study.sample_context),
+                        "test_context": list(study.test_context),
+                        "comparator": study.comparator,
+                        "fixed_conditions": list(study.fixed_conditions),
+                        "relationships": selected_relationships,
+                    }
+                )
+            if (
+                len(studies) >= _FRAME_PRIOR_STUDY_LIMIT
+                or relationship_count >= _FRAME_PRIOR_RELATIONSHIP_LIMIT
+            ):
+                break
+        return {
+            "doc_role": paper_skim.doc_role,
+            "evidence_density": paper_skim.evidence_density,
+            "studies": studies,
+        }
+
+    @staticmethod
+    def _frame_relationship_supports_objective(
+        *,
+        relationship: Any,
+        objective: ResearchObjective,
+    ) -> bool:
+        variable_supported = any(
+            property_matching.axis_values_match(factor, variable)
+            for factor in relationship.varied_factors
+            for variable in objective.variables
+        )
+        outcome_supported = any(
+            property_matching.axis_values_match(relationship.outcome, outcome)
+            for outcome in objective.outcomes
+        )
+        return variable_supported and outcome_supported
+
+    @staticmethod
+    def _frame_source_unit_id(
+        *,
+        source_kind: str,
+        source_ref: str,
+        chunk_position: int,
+    ) -> str:
+        identity = json.dumps(
+            [source_kind, source_ref, chunk_position],
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
+        return f"frame:{source_kind}:{sha1(identity.encode('utf-8')).hexdigest()}"
+
+    def _build_frame_section_source_units(
+        self,
+        blocks: list[Any],
+        *,
+        document_tree: SourceDocumentTree | None,
+    ) -> list[dict[str, Any]]:
+        if document_tree is not None:
+            units = self._build_frame_tree_section_source_units(document_tree)
+            if units:
+                return units
+
+        units: list[dict[str, Any]] = []
         for block in sorted(
             blocks,
             key=lambda item: int(getattr(item, "block_order", 0) or 0),
         ):
             text = str(getattr(block, "text", "") or "").strip()
-            if not text:
-                continue
             block_type = str(getattr(block, "block_type", "") or "")
-            if block_type not in {"heading", "paragraph", "list_item"}:
+            if not text or block_type not in {"heading", "paragraph", "list_item"}:
                 continue
+            source_ref = str(getattr(block, "block_id", "") or "").strip()
+            if not source_ref:
+                source_ref = f"block-order-{int(getattr(block, 'block_order', 0) or 0)}"
             section_label = str(getattr(block, "heading_path", "") or "").strip()
             if block_type == "heading":
                 section_label = text
-            if not section_label:
-                section_label = "Unsectioned"
-            snippets.append(
-                {
-                    "section_label": section_label,
-                    "block_type": block_type,
-                    "text": text[:_FRAME_SECTION_TEXT_CHARS],
-                }
-            )
-        return self._prioritize_frame_items(snippets, frame_terms=frame_terms)
+            section_label = section_label or "Unsectioned"
+            for chunk_position, chunk in enumerate(
+                self._split_frame_section_text(text),
+                start=1,
+            ):
+                units.append(
+                    {
+                        "source_unit_id": self._frame_source_unit_id(
+                            source_kind="section",
+                            source_ref=source_ref,
+                            chunk_position=chunk_position,
+                        ),
+                        "source_kind": "section",
+                        "source_ref": source_ref,
+                        "section_label": section_label,
+                        "text": chunk,
+                    }
+                )
+        return units
 
-    def _build_frame_section_snippets_from_tree(
+    def _build_frame_tree_section_source_units(
         self,
         document_tree: SourceDocumentTree,
     ) -> list[dict[str, Any]]:
-        snippets: list[dict[str, Any]] = []
-        nodes = self._document_tree_nodes_in_order(document_tree)
-        section_nodes = [
-            node
-            for node in nodes
-            if node.node_type == "section"
-            and not self._tree_node_in_reference_branch(document_tree, node)
-        ]
-        for node in section_nodes:
-            text = self._section_text_from_tree_node(document_tree, node)
-            if not text and node.title:
-                text = node.title
+        units: list[dict[str, Any]] = []
+        for node in self._document_tree_nodes_in_order(document_tree):
+            is_section = node.node_type == "section"
+            is_root_text = (
+                node.parent_id == document_tree.root_node_id
+                and node.node_type in {"paragraph", "list_item"}
+            )
+            if (
+                not (is_section or is_root_text)
+                or self._tree_node_in_reference_branch(document_tree, node)
+            ):
+                continue
+            text = (
+                self._section_text_from_tree_node(document_tree, node)
+                if is_section
+                else str(node.text or "").strip()
+            )
+            if not text and is_section and node.title:
+                text = str(node.title)
             if not text:
                 continue
-            snippets.append(
-                {
-                    "section_label": self._tree_section_label(node),
-                    "block_type": "section",
-                    "text": text[:_FRAME_SECTION_TEXT_CHARS],
-                }
+            for chunk_position, chunk in enumerate(
+                self._split_frame_section_text(text),
+                start=1,
+            ):
+                units.append(
+                    {
+                        "source_unit_id": self._frame_source_unit_id(
+                            source_kind="section",
+                            source_ref=node.node_id,
+                            chunk_position=chunk_position,
+                        ),
+                        "source_kind": "section",
+                        "source_ref": node.node_id,
+                        "section_label": (
+                            self._tree_section_label(node)
+                            if is_section
+                            else "Unsectioned"
+                        ),
+                        "text": chunk,
+                    }
+                )
+        return units
+
+    @staticmethod
+    def _split_frame_section_text(text: str) -> tuple[str, ...]:
+        remaining = str(text or "").strip()
+        chunks: list[str] = []
+        while remaining:
+            if len(remaining) <= _FRAME_SECTION_CHUNK_CHARS:
+                chunks.append(remaining)
+                break
+            split_at = max(
+                remaining.rfind("\n\n", 0, _FRAME_SECTION_CHUNK_CHARS + 1),
+                remaining.rfind(". ", 0, _FRAME_SECTION_CHUNK_CHARS + 1),
+                remaining.rfind(" ", 0, _FRAME_SECTION_CHUNK_CHARS + 1),
             )
+            if split_at < _FRAME_SECTION_CHUNK_CHARS // 2:
+                split_at = _FRAME_SECTION_CHUNK_CHARS
+            elif remaining[split_at : split_at + 2] == ". ":
+                split_at += 1
+            chunk = remaining[:split_at].strip()
+            if chunk:
+                chunks.append(chunk)
+            remaining = remaining[split_at:].strip()
+        return tuple(chunks)
 
-        if snippets:
-            return snippets
-
-        unsectioned_texts = [
-            str(node.text or "").strip()
-            for node in nodes
-            if node.node_type in {"paragraph", "list_item"}
-            and node.parent_id == document_tree.root_node_id
-            and not self._tree_node_in_reference_branch(document_tree, node)
-            and str(node.text or "").strip()
-        ]
-        text = "\n\n".join(unsectioned_texts).strip()
-        if not text:
-            return []
-        return [
-            {
-                "section_label": "Unsectioned",
-                "block_type": "section",
-                "text": text[:_FRAME_SECTION_TEXT_CHARS],
-            }
-        ]
+    def _build_frame_table_source_units(
+        self,
+        tables: list[Any],
+    ) -> list[dict[str, Any]]:
+        units: list[dict[str, Any]] = []
+        for table in sorted(
+            tables,
+            key=lambda item: int(getattr(item, "table_order", 0) or 0),
+        ):
+            table_id = str(getattr(table, "table_id", "") or "").strip()
+            if not table_id:
+                continue
+            matrix = tuple(getattr(table, "table_matrix", ()) or ())
+            serialized_rows = [
+                [
+                    str(cell)[:_FRAME_TABLE_VALUE_CHARS]
+                    for cell in (
+                        row if isinstance(row, (list, tuple)) else (row,)
+                    )
+                ]
+                for row in matrix
+            ]
+            row_chunks = [
+                serialized_rows[position : position + _FRAME_TABLE_ROW_LIMIT]
+                for position in range(0, len(serialized_rows), _FRAME_TABLE_ROW_LIMIT)
+            ] or [[]]
+            for chunk_position, rows in enumerate(row_chunks, start=1):
+                row_start = (chunk_position - 1) * _FRAME_TABLE_ROW_LIMIT
+                units.append(
+                    {
+                        "source_unit_id": self._frame_source_unit_id(
+                            source_kind="table",
+                            source_ref=table_id,
+                            chunk_position=chunk_position,
+                        ),
+                        "source_kind": "table",
+                        "source_ref": table_id,
+                        "caption_text": str(
+                            getattr(table, "caption_text", None) or ""
+                        )[:_FRAME_TABLE_TEXT_CHARS],
+                        "heading_path": str(
+                            getattr(table, "heading_path", None) or ""
+                        )[:_FRAME_TABLE_TEXT_CHARS],
+                        "column_headers": [
+                            str(value)[:_FRAME_TABLE_VALUE_CHARS]
+                            for value in getattr(table, "column_headers", ()) or ()
+                        ],
+                        "row_count": int(getattr(table, "row_count", 0) or 0),
+                        "col_count": int(getattr(table, "col_count", 0) or 0),
+                        "row_start": row_start,
+                        "row_end": row_start + len(rows),
+                        "sample_rows": rows,
+                    }
+                )
+        return units
 
     def _section_text_from_tree_node(
         self,
@@ -5992,219 +7154,6 @@ class ResearchObjectiveService:
         title = str(getattr(node, "title", "") or "").strip()
         return title or "Unsectioned"
 
-    def _build_frame_table_summaries(
-        self,
-        tables: list[Any],
-        *,
-        objective: ResearchObjective,
-        paper_skim: PaperSkim | None,
-        profile: Any,
-    ) -> list[dict[str, Any]]:
-        frame_terms = self._frame_relevance_terms(
-            objective=objective,
-            paper_skim=paper_skim,
-            profile=profile,
-        )
-        summaries: list[dict[str, Any]] = []
-        for table in sorted(
-            tables,
-            key=lambda item: int(getattr(item, "table_order", 0) or 0),
-        ):
-            matrix = tuple(getattr(table, "table_matrix", ()) or ())
-            sample_rows = [
-                [str(cell) for cell in row]
-                for row in matrix[:_FRAME_TABLE_ROW_LIMIT]
-                if isinstance(row, (list, tuple))
-            ]
-            summaries.append(
-                {
-                    "table_id": str(getattr(table, "table_id", "") or ""),
-                    "caption_text": getattr(table, "caption_text", None),
-                    "heading_path": getattr(table, "heading_path", None),
-                    "column_headers": [
-                        str(value)
-                        for value in getattr(table, "column_headers", ()) or ()
-                    ],
-                    "row_count": int(getattr(table, "row_count", 0) or 0),
-                    "col_count": int(getattr(table, "col_count", 0) or 0),
-                    "sample_rows": sample_rows,
-                }
-            )
-        return self._prioritize_frame_items(
-            summaries,
-            frame_terms=frame_terms,
-            limit=_FRAME_TABLE_LIMIT,
-        )
-
-    def _build_deterministic_objective_paper_frame_record(
-        self,
-        *,
-        objective: ResearchObjective,
-        paper_skim: PaperSkim | None,
-        payload: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        frame_terms = self._frame_relevance_terms(
-            objective=objective,
-            paper_skim=paper_skim,
-            profile=None,
-        )
-        sections = [
-            str(item.get("section_label") or "").strip()
-            for item in self._frame_relevant_items(
-                payload.get("section_snippets"),
-                frame_terms=frame_terms,
-            )
-            if str(item.get("section_label") or "").strip()
-        ]
-        tables = [
-            str(item.get("table_id") or "").strip()
-            for item in self._frame_relevant_items(
-                payload.get("table_summaries"),
-                frame_terms=frame_terms,
-            )
-            if str(item.get("table_id") or "").strip()
-        ]
-        visible_table_ids = [
-            str(item.get("table_id") or "").strip()
-            for item in payload.get("table_summaries") or ()
-            if isinstance(item, Mapping) and str(item.get("table_id") or "").strip()
-        ]
-        excluded_tables = [table_id for table_id in visible_table_ids if table_id not in tables]
-        evidence_density = str(getattr(paper_skim, "evidence_density", "") or "")
-        has_relevant_content = bool(sections or tables)
-        axis_coverage = self._deterministic_frame_axis_coverage(
-            objective=objective,
-            paper_skim=paper_skim,
-            items=[*sections, *tables],
-            payload=payload,
-        )
-        has_axis_coverage = (
-            axis_coverage["variable"] and axis_coverage["target_property"]
-        )
-        is_seed_document = bool(
-            getattr(paper_skim, "document_id", None)
-            and getattr(paper_skim, "document_id", None)
-            in set(objective.seed_document_ids)
-        )
-        relevance = "medium" if has_relevant_content and has_axis_coverage else "low"
-        if has_relevant_content and is_seed_document:
-            relevance = "medium"
-        if (
-            not has_relevant_content
-            or (not has_axis_coverage and not is_seed_document)
-        ) and evidence_density == "low":
-            relevance = "irrelevant"
-        if not has_axis_coverage and not is_seed_document:
-            sections = []
-            tables = []
-            excluded_tables = visible_table_ids
-        return {
-            "relevance": relevance,
-            "paper_role": self._deterministic_frame_paper_role(paper_skim),
-            "background": "Deterministic frame built after model framing failed.",
-            "material_match": list(objective.material_scope),
-            "changed_variables": self._deterministic_frame_variables(
-                objective=objective,
-                paper_skim=paper_skim,
-            ),
-            "measured_property_scope": self._deterministic_frame_target_properties(
-                objective=objective,
-                paper_skim=paper_skim,
-            ),
-            "test_environment_scope": [],
-            "relevant_sections": sections[:_FRAME_SECTION_SNIPPET_LIMIT],
-            "relevant_tables": tables[:_FRAME_TABLE_LIMIT],
-            "excluded_tables": excluded_tables,
-        }
-
-    def _deterministic_frame_axis_coverage(
-        self,
-        *,
-        objective: ResearchObjective,
-        paper_skim: PaperSkim | None,
-        items: list[str],
-        payload: Mapping[str, Any],
-    ) -> dict[str, bool]:
-        text = property_matching.axis_key(
-            " ".join(
-                [
-                    *items,
-                    str(getattr(paper_skim, "doc_role", "") or ""),
-                    " ".join(getattr(paper_skim, "changed_variables", ()) or ()),
-                    " ".join(getattr(paper_skim, "candidate_properties", ()) or ()),
-                    " ".join(getattr(paper_skim, "candidate_processes", ()) or ()),
-                    str(payload.get("document") or ""),
-                ]
-            )
-        )
-        variable_axes = tuple(objective.variables)
-        target_axes = tuple(objective.outcomes)
-        return {
-            "variable": self._frame_mentions_any_axis(text, variable_axes),
-            "target_property": self._frame_mentions_any_axis(text, target_axes),
-        }
-
-    def _frame_mentions_any_axis(self, text_key: str, axes: Iterable[Any]) -> bool:
-        text_tokens = property_matching.axis_tokens(text_key)
-        for axis in axes:
-            axis_text = str(axis or "").strip()
-            if not axis_text:
-                continue
-            axis_key = property_matching.axis_key(axis_text)
-            axis_tokens = property_matching.axis_tokens(axis_key)
-            if not axis_tokens:
-                continue
-            if axis_key in text_key or property_matching.source_text_mentions_axis(
-                text_key,
-                axis_text,
-            ):
-                return True
-            meaningful_tokens = {
-                token
-                for token in axis_tokens
-                if token
-                not in {
-                    "additive",
-                    "affect",
-                    "alloy",
-                    "laser",
-                    "lpbf",
-                    "manufacturing",
-                    "melting",
-                    "powder",
-                    "process",
-                    "selective",
-                    "slm",
-                    "steel",
-                }
-            }
-            if meaningful_tokens and meaningful_tokens.issubset(text_tokens):
-                return True
-        return False
-
-    def _frame_relevant_items(
-        self,
-        raw_items: Any,
-        *,
-        frame_terms: tuple[tuple[str, int], ...],
-    ) -> list[Mapping[str, Any]]:
-        if not isinstance(raw_items, list):
-            return []
-        scored: list[tuple[int, int, Mapping[str, Any]]] = []
-        for index, item in enumerate(raw_items):
-            if not isinstance(item, Mapping):
-                continue
-            score = self._frame_item_relevance_score(item, frame_terms=frame_terms)
-            if score > 0:
-                scored.append((score, index, item))
-        return [
-            item
-            for _score, _index, item in sorted(
-                scored,
-                key=lambda value: (-value[0], value[1]),
-            )
-        ]
-
     def _deterministic_frame_paper_role(self, paper_skim: PaperSkim | None) -> str:
         doc_role = str(getattr(paper_skim, "doc_role", "") or "")
         if doc_role == "experimental":
@@ -6213,157 +7162,23 @@ class ResearchObjectiveService:
             return "review"
         return "uncertain"
 
-    def _deterministic_frame_variables(
-        self,
-        *,
-        objective: ResearchObjective,
+    @staticmethod
+    def _paper_skim_study_values(
         paper_skim: PaperSkim | None,
-    ) -> list[str]:
+        field_name: str,
+    ) -> tuple[str, ...]:
+        if paper_skim is None:
+            return ()
         values: list[str] = []
         seen: set[str] = set()
-        for candidate in (
-            *objective.variables,
-            *(getattr(paper_skim, "changed_variables", ()) if paper_skim else ()),
-        ):
-            self._append_unique_axis(values, seen, candidate)
-        return values
-
-    def _deterministic_frame_target_properties(
-        self,
-        *,
-        objective: ResearchObjective,
-        paper_skim: PaperSkim | None,
-    ) -> list[str]:
-        values: list[str] = []
-        seen: set[str] = set()
-        for candidate in (
-            *objective.outcomes,
-            *(getattr(paper_skim, "candidate_properties", ()) if paper_skim else ()),
-        ):
-            self._append_unique_axis(values, seen, candidate)
-        return values
-
-    def _frame_relevance_terms(
-        self,
-        *,
-        objective: ResearchObjective,
-        paper_skim: PaperSkim | None,
-        profile: Any,
-    ) -> tuple[tuple[str, int], ...]:
-        terms: list[tuple[str, int]] = []
-
-        def append_many(values: Iterable[Any], weight: int) -> None:
-            for value in values:
+        for study in paper_skim.studies:
+            for value in getattr(study, field_name):
                 text = str(value or "").strip()
-                if text:
-                    terms.append((text, weight))
-
-        append_many(objective.variables, 6)
-        append_many(objective.outcomes, 6)
-        append_many(objective.mechanisms, 3)
-        append_many(objective.constraints, 3)
-        append_many(objective.material_scope, 1)
-        if paper_skim is not None:
-            append_many(paper_skim.changed_variables, 3)
-            append_many(paper_skim.candidate_properties, 3)
-            append_many(paper_skim.candidate_processes, 2)
-        if profile is not None:
-            record = profile.to_record() if hasattr(profile, "to_record") else {}
-            if isinstance(record, Mapping):
-                append_many(record.get("materials") or (), 1)
-                append_many(record.get("processes") or (), 2)
-                append_many(record.get("properties") or (), 2)
-
-        unique: list[tuple[str, int]] = []
-        seen: set[str] = set()
-        for term, weight in terms:
-            key = property_matching.axis_key(term)
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            unique.append((term, weight))
-        return tuple(unique)
-
-    def _prioritize_frame_items(
-        self,
-        items: list[dict[str, Any]],
-        *,
-        frame_terms: tuple[tuple[str, int], ...],
-        limit: int = _FRAME_SECTION_SNIPPET_LIMIT,
-    ) -> list[dict[str, Any]]:
-        scored = [
-            (
-                self._frame_item_relevance_score(item, frame_terms=frame_terms),
-                index,
-                item,
-            )
-            for index, item in enumerate(items)
-        ]
-        selected_indexes: set[int] = set()
-        for score, index, _item in sorted(scored, key=lambda item: (-item[0], item[1])):
-            if len(selected_indexes) >= limit:
-                break
-            if score <= 0:
-                continue
-            selected_indexes.add(index)
-        if selected_indexes:
-            return [dict(items[index]) for index in sorted(selected_indexes)]
-        if len(selected_indexes) < limit:
-            for _score, index, _item in scored:
-                selected_indexes.add(index)
-                if len(selected_indexes) >= limit:
-                    break
-        return [dict(items[index]) for index in sorted(selected_indexes)]
-
-    def _frame_item_relevance_score(
-        self,
-        item: Mapping[str, Any],
-        *,
-        frame_terms: tuple[tuple[str, int], ...],
-    ) -> int:
-        text = self._frame_item_search_text(item)
-        if not text:
-            return 0
-        axis_score = 0
-        text_tokens = property_matching.axis_tokens(property_matching.axis_key(text))
-        for term, weight in frame_terms:
-            term_key = property_matching.axis_key(term)
-            term_tokens = property_matching.axis_tokens(term_key)
-            if not term_tokens:
-                continue
-            if property_matching.source_text_mentions_axis(text, term):
-                axis_score += weight * max(2, len(term_tokens))
-                continue
-            overlap = text_tokens & term_tokens
-            if overlap:
-                axis_score += weight * len(overlap)
-        if axis_score <= 0:
-            return 0
-        return axis_score + self._frame_section_kind_score(text)
-
-    def _frame_item_search_text(self, item: Mapping[str, Any]) -> str:
-        pieces = [
-            str(item.get("section_label") or ""),
-            str(item.get("block_type") or ""),
-            str(item.get("text") or ""),
-            str(item.get("caption_text") or ""),
-            str(item.get("heading_path") or ""),
-            " ".join(str(value) for value in item.get("column_headers") or ()),
-        ]
-        for row in item.get("sample_rows") or ():
-            if isinstance(row, (list, tuple)):
-                pieces.append(" ".join(str(cell) for cell in row))
-        return " ".join(piece for piece in pieces if piece.strip())
-
-    def _frame_section_kind_score(self, text: str) -> int:
-        lowered = text.casefold()
-        if any(term in lowered for term in ("result", "discussion", "conclusion")):
-            return 3
-        if any(term in lowered for term in ("method", "experiment", "material")):
-            return 2
-        if "abstract" in lowered:
-            return 1
-        return 0
+                key = text.casefold()
+                if text and key not in seen:
+                    seen.add(key)
+                    values.append(text)
+        return tuple(values)
 
     def _block_section_label(self, block: Any) -> str:
         block_type = str(getattr(block, "block_type", "") or "")
@@ -6497,31 +7312,23 @@ class ResearchObjectiveService:
             self._paper_facts_extractor = build_default_paper_facts_extractor()
         return self._paper_facts_extractor
 
-    def _load_source_artifacts(
+    def _load_source_documents(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
-    ) -> SourceArtifactSet:
-        artifacts = (
-            self.source_artifact_repository.read_collection_artifacts(
+    ) -> tuple[SourceDocument, ...]:
+        documents = (
+            self.source_artifact_repository.read_collection_documents(
                 collection_id,
                 build_id=build_id,
             )
             if build_id is not None
-            else self.source_artifact_repository.read_collection_artifacts(collection_id)
+            else self.source_artifact_repository.read_collection_documents(collection_id)
         )
-        if not artifacts.documents:
+        if not documents:
             raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
-        return SourceArtifactSet(
-            documents=artifacts.documents,
-            text_units=artifacts.text_units,
-            blocks=artifacts.blocks,
-            tables=artifacts.tables,
-            table_rows=artifacts.table_rows,
-            table_cells=artifacts.table_cells,
-            figures=artifacts.figures,
-        )
+        return documents
 
     def _document_tree_nodes_in_order(
         self,

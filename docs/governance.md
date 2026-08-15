@@ -32,8 +32,6 @@ The root shared docs tree stays intentionally small:
 - `docs/decisions/`
 - `docs/research/`
 
-Supporting research binaries belong under `docs/research/assets/`.
-
 ## Document Types
 
 | Type | Purpose | Source of truth |
@@ -118,7 +116,6 @@ Replacement rule:
 | `docs/contracts/` | shared product and artifact contracts | stable shared source of truth |
 | `docs/decisions/` | shared RFCs, ADRs, and postmortems | use filename prefixes such as `rfc-`, `adr-`, or `postmortem-` |
 | `docs/research/` | external research notes and curated references | not authoritative for implementation |
-| `docs/research/assets/` | supporting research binaries | asset storage only, never source of truth |
 | `backend/README.md` | backend module purpose, boundary, and navigation | primary backend entry page |
 | `frontend/README.md` | frontend module purpose, boundary, and navigation | primary frontend entry page |
 | `<owned-node>/README.md` | local node purpose, boundary, and navigation | only for real code-owned seams |
@@ -144,7 +141,6 @@ Replacement rule:
 - New backend-only formal docs belong in `backend/docs/`.
 - New frontend-only formal docs belong in `frontend/docs/`.
 - New external domain notes belong in `docs/research/`.
-- Supporting research binaries belong in `docs/research/assets/`.
 - Shared operational procedures should stay with the owning module unless they
   are truly cross-module and durable enough to justify their own shared shelf.
 - New files should not be added to ad hoc root-level buckets without first
@@ -178,10 +174,11 @@ Replacement rule:
 
 ### Asset rules
 
-- Do not place binary research assets directly in `docs/` root.
-- If a binary reference must live in the repo, store it in
-  `docs/research/assets/` and make its purpose explicit.
-- If the asset is large or replaceable, prefer external storage plus a link.
+- Do not commit raw research binaries to the docs tree.
+- Reference replaceable source material by DOI or another stable external link
+  and explain its relevance in a research note.
+- A binary that cannot be referenced externally requires explicit maintainer
+  approval and a documented ownership and retention reason.
 
 ### Sensitive content rule
 

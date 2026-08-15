@@ -59,10 +59,9 @@ def build_pdf_bundle(
         [
             SourceDocument(
                 document_id=document_id,
-                human_readable_id=0,
+                document_order=0,
                 title=title,
                 text=str(document.export_to_text() or "").strip(),
-                text_unit_ids=tuple(text_units["id"].tolist()),
                 creation_date=row.get("creation_date"),
                 metadata=build_source_metadata(row, parser_name="docling"),
             ).to_record()
@@ -157,7 +156,7 @@ def build_pdf_text_units(
         rows.append(
             SourceTextUnit(
                 text_unit_id=row_id,
-                human_readable_id=len(rows),
+                text_unit_order=len(rows),
                 text=text,
                 n_tokens=len(encode(text)),
                 document_ids=(document_id,),

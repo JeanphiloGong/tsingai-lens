@@ -10,6 +10,9 @@ from openai import OpenAI
 from pydantic import BaseModel, ValidationError
 
 from application.core.paper_facts.prompts import (
+    PAPER_FACT_TABLE_BATCH_PROMPT_VERSION,
+    PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION,
+    PAPER_FACT_TEXT_WINDOW_PROMPT_VERSION,
     build_table_batch_mentions_prompt,
     build_table_matrix_repair_prompt,
     build_text_window_extraction_prompt,
@@ -26,6 +29,7 @@ from application.core.structured_extraction.json_support import (
     trace_json,
     trace_text,
 )
+from infra.llm.usage import record_llm_completion, record_llm_prompt_version
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +76,8 @@ class PaperFactsExtractor:
     ) -> StructuredTextWindowMentions:
         system_prompt, user_prompt = build_text_window_extraction_prompt(payload)
         return self._extract(
+            task_type="paper_fact_text_window",
+            prompt_version=PAPER_FACT_TEXT_WINDOW_PROMPT_VERSION,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredTextWindowMentions,
@@ -83,6 +89,8 @@ class PaperFactsExtractor:
     ) -> StructuredTableBatchMentions:
         system_prompt, user_prompt = build_table_batch_mentions_prompt(payload)
         return self._extract(
+            task_type="paper_fact_table_batch",
+            prompt_version=PAPER_FACT_TABLE_BATCH_PROMPT_VERSION,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredTableBatchMentions,
@@ -97,6 +105,8 @@ class PaperFactsExtractor:
     ) -> StructuredTableMatrixRepair:
         system_prompt, user_prompt = build_table_matrix_repair_prompt(payload)
         return self._extract(
+            task_type="paper_fact_table_matrix_repair",
+            prompt_version=PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredTableMatrixRepair,
@@ -105,11 +115,14 @@ class PaperFactsExtractor:
     def _extract(
         self,
         *,
+        task_type: str,
+        prompt_version: str,
         system_prompt: str,
         user_prompt: str,
         response_model: type[ResponseModel],
         provider_max_completion_tokens: int | None = None,
     ) -> ResponseModel:
+        record_llm_prompt_version(task_type, prompt_version)
         messages = self._build_messages(
             system_prompt,
             user_prompt,
@@ -155,6 +168,8 @@ class PaperFactsExtractor:
             elapsed_s = perf_counter() - started_at
             self.last_trace = self._build_trace(
                 response_model=response_model,
+                task_type=task_type,
+                prompt_version=prompt_version,
                 messages=messages,
                 extraction_mode=trace_mode,
                 trace_status="failed",
@@ -173,6 +188,8 @@ class PaperFactsExtractor:
         elapsed_s = perf_counter() - started_at
         self.last_trace = self._build_trace(
             response_model=response_model,
+            task_type=task_type,
+            prompt_version=prompt_version,
             messages=messages,
             extraction_mode=trace_mode,
             trace_status="available",
@@ -217,7 +234,15 @@ class PaperFactsExtractor:
             attempt_kwargs = dict(request_kwargs)
             attempt_kwargs["messages"] = attempt_messages
             try:
-                completion = self.client.chat.completions.create(**attempt_kwargs)
+                try:
+                    completion = self.client.chat.completions.create(**attempt_kwargs)
+                except Exception as exc:
+                    record_llm_completion(
+                        getattr(exc, "completion", None),
+                        requested_model=self.model,
+                    )
+                    raise
+                record_llm_completion(completion, requested_model=self.model)
                 raw_content = coerce_message_content(
                     completion.choices[0].message.content
                     if completion.choices
@@ -274,7 +299,15 @@ class PaperFactsExtractor:
         }
         if max_completion_tokens is not None:
             request_kwargs["max_completion_tokens"] = max_completion_tokens
-        completion = self.client.beta.chat.completions.parse(**request_kwargs)
+        try:
+            completion = self.client.beta.chat.completions.parse(**request_kwargs)
+        except Exception as exc:
+            record_llm_completion(
+                getattr(exc, "completion", None),
+                requested_model=self.model,
+            )
+            raise
+        record_llm_completion(completion, requested_model=self.model)
         if not completion.choices:
             raise RuntimeError("structured extraction returned no completion choices")
         message = completion.choices[0].message
@@ -336,6 +369,8 @@ class PaperFactsExtractor:
         self,
         *,
         response_model: type[BaseModel],
+        task_type: str,
+        prompt_version: str,
         messages: list[dict[str, str]],
         extraction_mode: str,
         trace_status: str,
@@ -345,8 +380,8 @@ class PaperFactsExtractor:
         error: str | None = None,
     ) -> dict[str, Any]:
         return {
-            "task_type": None,
-            "prompt_version": None,
+            "task_type": task_type,
+            "prompt_version": prompt_version,
             "model": self.model,
             "response_model": response_model.__name__,
             "extraction_mode": extraction_mode,

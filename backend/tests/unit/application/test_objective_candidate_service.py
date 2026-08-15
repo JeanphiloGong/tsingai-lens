@@ -164,13 +164,155 @@ def test_missing_material_and_one_known_anchor_build_cross_paper_objective():
 
     assert len(facts.research_objectives) == 1
     objective = facts.research_objectives[0]
-    assert objective.material_scope == ()
+    assert objective.material_scope == ("316L stainless steel",)
     assert set(objective.seed_document_ids) == {"paper-known", "paper-missing"}
     assert set(objective.source_relationship_ids) == {
         "relationship-known",
         "relationship-missing",
     }
     assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
+
+
+def test_missing_material_does_not_inherit_an_ambiguous_multi_material_scope():
+    skims = (
+        _paper_skim(
+            document_id="paper-multi-material",
+            relationship_id="relationship-known",
+            material_scope=("316L stainless steel", "Ti-6Al-4V"),
+        ),
+        _paper_skim(
+            document_id="paper-missing",
+            relationship_id="relationship-missing",
+            material_scope=(),
+        ),
+    )
+
+    facts = ObjectiveCandidateService().discover_candidate_facts(
+        "collection-test",
+        paper_skims=skims,
+        extractor=_GroupingExtractor(),
+    )
+
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert objective.material_scope == ()
+    assert objective.reason is not None
+    assert (
+        "No unambiguous shared material scope was available" in objective.reason
+    )
+
+
+def test_missing_confidence_does_not_erase_supported_objective_confidence():
+    skims = (
+        _paper_skim(
+            document_id="paper-study-confidence-missing",
+            relationship_id="relationship-known",
+            study_confidence=0.0,
+            relationship_confidence=0.86,
+        ),
+        _paper_skim(
+            document_id="paper-relationship-confidence-missing",
+            relationship_id="relationship-missing",
+            study_confidence=0.82,
+            relationship_confidence=0.0,
+        ),
+    )
+
+    facts = ObjectiveCandidateService().discover_candidate_facts(
+        "collection-test",
+        paper_skims=skims,
+        extractor=_GroupingExtractor(),
+    )
+
+    assert len(facts.research_objectives) == 1
+    assert facts.research_objectives[0].confidence == pytest.approx(0.82)
+
+
+def test_all_missing_confidence_remains_zero_with_an_explicit_reason():
+    skims = (
+        _paper_skim(
+            document_id="paper-a",
+            relationship_id="relationship-a",
+            study_confidence=0.0,
+            relationship_confidence=0.0,
+        ),
+        _paper_skim(
+            document_id="paper-b",
+            relationship_id="relationship-b",
+            study_confidence=0.0,
+            relationship_confidence=0.0,
+        ),
+    )
+
+    facts = ObjectiveCandidateService().discover_candidate_facts(
+        "collection-test",
+        paper_skims=skims,
+        extractor=_GroupingExtractor(),
+    )
+
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert objective.confidence == 0.0
+    assert objective.reason is not None
+    assert "No source supplied a non-zero confidence" in objective.reason
+
+
+def test_broad_outcome_group_is_rejected_until_the_outcome_is_specific():
+    skims = (
+        _paper_skim(
+            document_id="paper-a",
+            relationship_id="relationship-a",
+            outcome="mechanical properties",
+        ),
+        _paper_skim(
+            document_id="paper-b",
+            relationship_id="relationship-b",
+            outcome="mechanical properties",
+        ),
+    )
+
+    facts = ObjectiveCandidateService().discover_candidate_facts(
+        "collection-test",
+        paper_skims=skims,
+        extractor=_GroupingExtractor(),
+    )
+
+    assert facts.research_objectives == ()
+    assert {item.status.value for item in facts.study_dispositions} == {"rejected"}
+    assert all(
+        "requires a specific measurable outcome" in (item.reason or "")
+        for item in facts.study_dispositions
+    )
+
+
+def test_single_measurement_broad_outcome_is_refined_for_the_candidate():
+    skims = (
+        _paper_skim(
+            document_id="paper-a",
+            relationship_id="relationship-a",
+            outcome="densification",
+        ),
+        _paper_skim(
+            document_id="paper-b",
+            relationship_id="relationship-b",
+            outcome="densification",
+        ),
+    )
+
+    facts = ObjectiveCandidateService().discover_candidate_facts(
+        "collection-test",
+        paper_skims=skims,
+        extractor=_GroupingExtractor(),
+    )
+
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert objective.question == "How does laser power affect relative density?"
+    assert objective.outcomes == ("relative density",)
+    assert set(objective.source_relationship_ids) == {
+        "relationship-a",
+        "relationship-b",
+    }
 
 
 def test_material_grade_word_order_does_not_fragment_relationship_groups():
@@ -1174,6 +1316,8 @@ def _paper_skim(
     design_type: str = "experimental",
     claim_scope: str = "current_work",
     comparator: str | None = "low versus high setting",
+    study_confidence: float = 0.92,
+    relationship_confidence: float = 0.9,
     extra_relationships: tuple[dict[str, Any], ...] = (),
 ) -> PaperSkim:
     return PaperSkim.from_mapping(
@@ -1203,11 +1347,11 @@ def _paper_skim(
                                     "source_ref": f"{document_id}-results",
                                 }
                             ],
-                            "confidence": 0.9,
+                            "confidence": relationship_confidence,
                         },
                         *extra_relationships,
                     ],
-                    "confidence": 0.92,
+                    "confidence": study_confidence,
                 }
             ],
             "evidence_density": "high",

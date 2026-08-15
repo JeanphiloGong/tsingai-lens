@@ -217,7 +217,7 @@ def normalize_property_label(value: Any) -> str | None:
     return _PROPERTY_LABEL_ALIASES.get(normalized, normalized)
 
 
-def _expand_broad_outcome(value: Any) -> tuple[str, ...]:
+def broad_outcome_expansions(value: Any) -> tuple[str, ...]:
     normalized = normalize_property_label(value)
     if not normalized:
         return ()
@@ -231,7 +231,7 @@ def objective_outcomes(objective: ResearchObjective) -> tuple[str, ...]:
         normalized = normalize_property_label(axis)
         if normalized:
             _append_unique_axis(axes, seen, normalized)
-            for expanded in _expand_broad_outcome(normalized):
+            for expanded in broad_outcome_expansions(normalized):
                 _append_unique_axis(axes, seen, expanded)
         else:
             _append_unique_axis(axes, seen, axis)
@@ -250,7 +250,7 @@ def property_matches_target_axes(
         return True
     return any(
         property_label_matches_target(expanded_axis, target_axes=target_axes)
-        for expanded_axis in _expand_broad_outcome(normalized)
+        for expanded_axis in broad_outcome_expansions(normalized)
     )
 
 
@@ -308,7 +308,7 @@ def objective_method_families(
         normalized = normalize_property_label(axis)
         if not normalized:
             continue
-        for property_name in (normalized, *_expand_broad_outcome(normalized)):
+        for property_name in (normalized, *broad_outcome_expansions(normalized)):
             family = _method_family_for_property(property_name)
             if family is not None:
                 families.append(family)
@@ -359,7 +359,7 @@ def source_text_mentions_axis(text: str, axis: str) -> bool:
         return True
     return any(
         _source_text_mentions_single_axis(text, expanded_axis)
-        for expanded_axis in _expand_broad_outcome(axis)
+        for expanded_axis in broad_outcome_expansions(axis)
     )
 
 

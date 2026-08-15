@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from difflib import SequenceMatcher
 import re
 from typing import Any
@@ -415,6 +416,91 @@ def axis_values_match(left: str, right: str) -> bool:
     return right_key in _EXPLICIT_AXIS_SYNONYMS.get(left_key, ()) or (
         left_key in _EXPLICIT_AXIS_SYNONYMS.get(right_key, ())
     )
+
+
+def resolve_objective_axis(
+    value: Any,
+    objective_axes: Iterable[str],
+) -> str | None:
+    """Return the one confirmed Objective axis represented by a source label."""
+
+    source = str(value or "").strip()
+    if not source:
+        return None
+    axes = tuple(str(axis).strip() for axis in objective_axes if str(axis).strip())
+    source_key = axis_key(source)
+    exact_matches = tuple(axis for axis in axes if axis_key(axis) == source_key)
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    matches = tuple(axis for axis in axes if axis_values_match(source, axis))
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def axis_collections_are_equivalent(
+    left: Iterable[str],
+    right: Iterable[str],
+) -> bool:
+    unmatched = [str(value) for value in right]
+    left_values = [str(value) for value in left]
+    if len(left_values) != len(unmatched):
+        return False
+    for left_value in left_values:
+        match_position = next(
+            (
+                position
+                for position, right_value in enumerate(unmatched)
+                if axis_values_match(left_value, right_value)
+            ),
+            None,
+        )
+        if match_position is None:
+            return False
+        unmatched.pop(match_position)
+    return True
+
+
+def paper_signal_context_conflicts(
+    signals: Iterable[Mapping[str, Any]],
+) -> tuple[str, ...]:
+    signal_values = tuple(signals)
+    conflicts: list[str] = []
+    for field_name in (
+        "material_scope",
+        "process_context",
+        "sample_context",
+        "test_context",
+        "fixed_conditions",
+    ):
+        contexts = [
+            tuple(str(value) for value in signal.get(field_name) or ())
+            for signal in signal_values
+            if signal.get(field_name)
+        ]
+        if any(
+            not axis_collections_are_equivalent(left, right)
+            for position, left in enumerate(contexts)
+            for right in contexts[position + 1 :]
+        ):
+            conflicts.append(field_name)
+    for field_name in ("experiment_label", "comparator"):
+        values = {
+            axis_key(signal.get(field_name))
+            for signal in signal_values
+            if signal.get(field_name)
+        }
+        if len(values) > 1:
+            conflicts.append(field_name)
+    for field_name in ("design_type", "claim_scope"):
+        values = {
+            str(signal.get(field_name))
+            for signal in signal_values
+            if signal.get(field_name) not in (None, "", "uncertain")
+        }
+        if len(values) > 1:
+            conflicts.append(field_name)
+    return tuple(conflicts)
 
 
 def axis_label_is_mentioned(text: str, axis: str) -> bool:

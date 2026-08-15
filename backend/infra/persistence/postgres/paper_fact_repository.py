@@ -304,19 +304,12 @@ class PostgresPaperFactRepository:
                         {
                             "anchor_id": row.anchor_id,
                             "document_id": row.source_document_id,
-                            "locator_type": row.locator_type,
-                            "locator_confidence": row.locator_confidence,
+                            "source_kind": row.source_kind,
+                            "source_ref": row.source_ref,
                             "source_type": row.source_type,
-                            "section_id": row.section_id,
-                            "char_range": row.char_range_json,
-                            "bbox": row.bbox_json,
                             "page": row.page,
                             "quote": row.quote,
                             "deep_link": row.deep_link,
-                            "block_id": row.block_id,
-                            "snippet_id": row.snippet_id,
-                            "figure_or_table": row.figure_or_table,
-                            "quote_span": row.quote_span,
                         }
                     )
                     for row in self._ordered_rows(
@@ -543,19 +536,12 @@ class PostgresPaperFactRepository:
                 lineage, collection_id, item.document_id
             ),
             anchor_order=position,
-            locator_type=item.locator_type,
-            locator_confidence=item.locator_confidence,
+            source_kind=item.source_kind,
+            source_ref=item.source_ref,
             source_type=item.source_type,
-            section_id=item.section_id,
-            char_range_json=item.char_range,
-            bbox_json=item.bbox,
             page=item.page,
             quote=item.quote,
             deep_link=item.deep_link,
-            block_id=item.block_id,
-            snippet_id=item.snippet_id,
-            figure_or_table=item.figure_or_table,
-            quote_span=item.quote_span,
         )
 
     @staticmethod

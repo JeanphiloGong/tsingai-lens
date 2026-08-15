@@ -39,7 +39,7 @@ from domain.source import (
     CollectionFileRecord,
     CollectionImportDocumentRecord,
     CollectionImportRecord,
-    SourceArtifactSet,
+    source_documents_from_records,
 )
 from infra.source.ingestion.normalized_import import (
     NormalizedImportBatch,
@@ -389,7 +389,7 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
     assert payload.doc_type == "experimental"
 
 
-def test_document_content_route_includes_source_locators(
+def test_document_content_route_uses_stable_block_locator(
     document_services,
 ):
     (
@@ -400,9 +400,9 @@ def test_document_content_route_includes_source_locators(
     ) = document_services
     record = collection_service.create_collection(name="Document Locator Collection")
     collection_id = record["collection_id"]
-    document_profile_service.source_artifact_repository.replace_collection_artifacts(
+    document_profile_service.source_artifact_repository.replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[
                 {
                     "id": "paper-1",
@@ -422,14 +422,6 @@ def test_document_content_route_includes_source_locators(
                     "text": "The optimized sample reached 940 MPa.",
                     "text_unit_ids": [],
                     "page": 6,
-                    "bbox": {
-                        "l": 72.4,
-                        "t": 182.1,
-                        "r": 512.8,
-                        "b": 228.6,
-                        "coord_origin": "top_left",
-                    },
-                    "char_range": {"start": 0, "end": 37},
                 },
             ],
         ),
@@ -458,16 +450,18 @@ def test_document_content_route_includes_source_locators(
     )
 
     first = payload.blocks[0]
+    assert first.block_id == "blk-result"
     assert first.page == 6
-    assert first.bbox is not None
-    assert first.bbox.x0 == 72.4
-    assert first.bbox.y0 == 182.1
-    assert first.bbox.x1 == 512.8
-    assert first.bbox.y1 == 228.6
-    assert first.bbox.coord_origin == "top_left"
-    assert first.char_range is not None
-    assert first.char_range.start == 0
-    assert first.char_range.end == 37
+    assert set(first.model_dump()) == {
+        "block_id",
+        "block_type",
+        "heading_path",
+        "heading_level",
+        "order",
+        "text",
+        "text_unit_ids",
+        "page",
+    }
 
 
 def test_document_markdown_route_returns_markdown_projection(document_services):
@@ -479,9 +473,9 @@ def test_document_markdown_route_returns_markdown_projection(document_services):
     ) = document_services
     record = collection_service.create_collection(name="Markdown Route Collection")
     collection_id = record["collection_id"]
-    markdown_service.source_artifact_repository.replace_collection_artifacts(
+    markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[
                 {
                     "id": "paper-1",
@@ -845,9 +839,9 @@ def test_document_figure_image_route_streams_extracted_asset(document_services):
         content,
         asset_sha256,
     )
-    markdown_service.source_artifact_repository.replace_collection_artifacts(
+    markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -892,9 +886,9 @@ def test_document_figure_image_route_rejects_figure_from_other_document(
         name="Cross Document Figure Collection"
     )
     collection_id = record["collection_id"]
-    markdown_service.source_artifact_repository.replace_collection_artifacts(
+    markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[
                 {"id": "paper-1", "title": "Paper 1", "text": ""},
                 {"id": "paper-2", "title": "Paper 2", "text": ""},
@@ -942,9 +936,9 @@ def test_document_figure_image_route_rejects_path_outside_collection(
     collection_id = record["collection_id"]
     outside_path = tmp_path / "outside.png"
     outside_path.write_bytes(b"outside")
-    markdown_service.source_artifact_repository.replace_collection_artifacts(
+    markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -994,9 +988,9 @@ def test_document_figure_image_route_rejects_another_collections_object_key(
         content,
         digest,
     )
-    markdown_service.source_artifact_repository.replace_collection_artifacts(
+    markdown_service.source_artifact_repository.replace_collection_documents(
         first["collection_id"],
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {
@@ -1052,9 +1046,9 @@ def test_document_figure_image_route_reports_unavailable_object_bytes(
         collection_service.object_store.delete(storage_key)
     else:
         (collection_service.root_dir / storage_key).write_bytes(b"corrupt")
-    markdown_service.source_artifact_repository.replace_collection_artifacts(
+    markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
                 {

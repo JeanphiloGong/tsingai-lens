@@ -105,23 +105,12 @@ class PaperFactEvidenceAnchor(Base):
         index=True,
     )
     anchor_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    locator_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    locator_confidence: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(), nullable=False)
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    section_id: Mapped[str | None] = mapped_column(Text, nullable=True)
-    char_range_json: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
-    bbox_json: Mapped[dict[str, Any] | None] = mapped_column(
-        _JSON_DOCUMENT, nullable=True
-    )
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     quote: Mapped[str | None] = mapped_column(Text, nullable=True)
     deep_link: Mapped[str | None] = mapped_column(Text, nullable=True)
-    block_id: Mapped[str | None] = mapped_column(String(), nullable=True)
-    snippet_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    figure_or_table: Mapped[str | None] = mapped_column(String(), nullable=True)
-    quote_span: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class PaperFactMethod(Base):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -39,11 +39,33 @@ class ObjectiveSummaryResponse(BaseModel):
     excluded_document_ids: list[str] = Field(default_factory=list)
     confidence: float = 0.0
     reason: str | None = None
+    source_relationship_ids: list[str] = Field(default_factory=list)
     confirmation_status: ConfirmationStatus
     active_analysis_version: int | None = None
     published_analysis_version: int | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+
+class TokenUsageResponse(BaseModel):
+    input_tokens: int = Field(..., ge=0)
+    output_tokens: int = Field(..., ge=0)
+    total_tokens: int = Field(..., ge=0)
+
+
+class ModelUsageResponse(BaseModel):
+    model_name: str
+    request_count: int = Field(..., ge=0)
+    token_usage: TokenUsageResponse | None = None
+    unreported_request_count: int = Field(default=0, ge=0)
+
+
+class ExecutionStatsResponse(BaseModel):
+    duration_ms: int | None = Field(default=None, ge=0)
+    token_usage: TokenUsageResponse | None = None
+    model_usage: list[ModelUsageResponse] = Field(default_factory=list)
+    unreported_request_count: int = Field(default=0, ge=0)
+    prompt_versions: dict[str, str] = Field(default_factory=dict)
 
 
 class ObjectiveAnalysisStateResponse(BaseModel):
@@ -54,6 +76,7 @@ class ObjectiveAnalysisStateResponse(BaseModel):
     pipeline_version: str
     model_name: str | None = None
     prompt_versions: dict[str, str] = Field(default_factory=dict)
+    stats: ExecutionStatsResponse = Field(default_factory=ExecutionStatsResponse)
     status: AnalysisStatus
     phase: str
     processed_document_count: int = 0
@@ -65,6 +88,127 @@ class ObjectiveAnalysisStateResponse(BaseModel):
     created_at: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
+
+
+class PaperStudySourceRefResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_kind: Literal["document", "block", "table", "table_row", "figure"]
+    source_ref: str
+
+
+class PaperStudyDispositionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["pending", "promoted", "rejected"]
+    objective_id: str | None = None
+    reason: str | None = None
+
+
+class PaperStudyRelationshipResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    relationship_id: str
+    varied_factors: list[str] = Field(min_length=1)
+    outcome: str
+    source_refs: list[PaperStudySourceRefResponse] = Field(min_length=1)
+    confidence: float = Field(..., ge=0, le=1)
+    disposition: PaperStudyDispositionResponse
+
+
+class PaperStudyInventoryItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_type: Literal["paper_study"] = "paper_study"
+    document_id: str
+    doc_role: str
+    study_id: str
+    design_type: Literal[
+        "experimental", "observational", "modeling", "mixed", "uncertain"
+    ]
+    claim_scope: Literal["current_work", "synthesis", "background", "uncertain"]
+    experiment_label: str | None = None
+    material_scope: list[str] = Field(default_factory=list)
+    process_context: list[str] = Field(default_factory=list)
+    sample_context: list[str] = Field(default_factory=list)
+    test_context: list[str] = Field(default_factory=list)
+    comparator: str | None = None
+    fixed_conditions: list[str] = Field(default_factory=list)
+    relationships: list[PaperStudyRelationshipResponse] = Field(min_length=1)
+    confidence: float = Field(..., ge=0, le=1)
+
+
+class UnresolvedPaperStudySignalResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_type: Literal["unresolved_signal"] = "unresolved_signal"
+    document_id: str
+    doc_role: str
+    signal_id: str
+    signal_type: Literal["variable", "outcome"]
+    label: str
+    design_type: Literal[
+        "experimental", "observational", "modeling", "mixed", "uncertain"
+    ]
+    claim_scope: Literal["current_work", "synthesis", "background", "uncertain"]
+    experiment_label: str | None = None
+    material_scope: list[str] = Field(default_factory=list)
+    process_context: list[str] = Field(default_factory=list)
+    sample_context: list[str] = Field(default_factory=list)
+    test_context: list[str] = Field(default_factory=list)
+    comparator: str | None = None
+    fixed_conditions: list[str] = Field(default_factory=list)
+    source_refs: list[PaperStudySourceRefResponse] = Field(min_length=1)
+    confidence: float = Field(..., ge=0, le=1)
+    reason: str | None = None
+
+
+class PaperSourceUnitCoverageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_type: Literal["source_unit_coverage"] = "source_unit_coverage"
+    document_id: str
+    doc_role: str
+    source_unit_id: str
+    window_id: str
+    source_kind: Literal["document", "block", "table", "table_row", "figure"]
+    source_ref: str
+    status: Literal[
+        "relationship_emitted",
+        "unresolved_signal_emitted",
+        "no_study_signal",
+        "extraction_failed",
+    ]
+    reason: str | None = None
+
+
+PaperStudyInventoryEntryResponse = Annotated[
+    PaperStudyInventoryItemResponse
+    | UnresolvedPaperStudySignalResponse
+    | PaperSourceUnitCoverageResponse,
+    Field(discriminator="item_type"),
+]
+
+
+class PaperStudyInventoryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collection_id: str
+    research_objectives_ready: bool
+    coverage_complete: bool
+    source_unit_coverage_counts: dict[
+        Literal[
+            "relationship_emitted",
+            "unresolved_signal_emitted",
+            "no_study_signal",
+            "extraction_failed",
+        ],
+        int,
+    ]
+    items: list[PaperStudyInventoryEntryResponse] = Field(default_factory=list)
+    offset: int = Field(..., ge=0)
+    limit: int = Field(..., ge=1)
+    total: int = Field(..., ge=0)
 
 
 class FindingMechanismResponse(BaseModel):
@@ -203,11 +347,55 @@ class ObjectiveListResponse(BaseModel):
     objectives: list[ObjectiveSummaryResponse] = Field(default_factory=list)
 
 
+class PaperContributionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collection_id: str
+    objective_id: str
+    analysis_version: int = Field(..., ge=1)
+    document_id: str
+    analysis_status: Literal["pending", "analyzed", "excluded", "failed"]
+    relevance: Literal["high", "medium", "low", "irrelevant", "uncertain"]
+    paper_role: Literal[
+        "primary_experiment",
+        "supporting_method",
+        "supporting_background",
+        "review",
+        "modeling_only",
+        "irrelevant",
+        "mixed",
+        "uncertain",
+    ]
+    contribution_summary: str | None = None
+    material_match: list[str] = Field(default_factory=list)
+    changed_variables: list[str] = Field(default_factory=list)
+    measured_property_scope: list[str] = Field(default_factory=list)
+    test_environment_scope: list[str] = Field(default_factory=list)
+    exclusion_reason: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    confidence: float = Field(..., ge=0, le=1)
+    evidence_disposition: Literal[
+        "excluded",
+        "no_routable_evidence",
+        "extraction_failed",
+        "no_comparable_evidence",
+        "comparable_evidence",
+    ] | None = None
+    routed_source_count: int | None = Field(default=None, ge=0)
+    extracted_source_count: int | None = Field(default=None, ge=0)
+    comparable_evidence_count: int | None = Field(default=None, ge=0)
+    failed_source_count: int | None = Field(default=None, ge=0)
+    evidence_disposition_reason: str | None = None
+
+
 class ObjectiveAnalysisResponse(BaseModel):
     collection_id: str
     objective: ObjectiveSummaryResponse
     active_analysis: ObjectiveAnalysisStateResponse | None = None
     published_analysis: ObjectiveAnalysisStateResponse | None = None
+    paper_contributions: list[PaperContributionResponse] = Field(
+        default_factory=list
+    )
     warnings: list[str] = Field(default_factory=list)
 
 

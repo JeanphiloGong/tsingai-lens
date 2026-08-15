@@ -41,10 +41,10 @@ Out of scope:
 
 ## Companion Docs
 
-- [`../../../../backend/docs/plans/core/core-comparable-result-phase1-read-path-cutover-plan.md`](../../../../backend/docs/plans/core/core-comparable-result-phase1-read-path-cutover-plan.md)
-  Backend-owned Phase 1 read-path plan for semantic and scope artifacts
-- [`../../../../backend/docs/plans/core/core-comparable-result-phase1-service-boundary-plan.md`](../../../../backend/docs/plans/core/core-comparable-result-phase1-service-boundary-plan.md)
-  Backend-owned Phase 1 service-boundary plan for `ComparisonService`
+- [`../../../../backend/docs/architecture/core-comparison/current-state.md`](../../../../backend/docs/architecture/core-comparison/current-state.md)
+  Backend authority for current semantic, scope, and read-path behavior
+- [`../../../../backend/docs/architecture/core-comparison/decision.md`](../../../../backend/docs/architecture/core-comparison/decision.md)
+  Accepted semantic boundary for `ComparisonService` consumers
 - [`comparable-result-stale-semantics-frontend-correctness-plan.md`](comparable-result-stale-semantics-frontend-correctness-plan.md)
   Frontend-local child plan for stale artifact preservation and fallback
   correctness after backend staleness semantics landed

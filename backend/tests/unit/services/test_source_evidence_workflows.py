@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pandas as pd
 from PIL import Image
 
-from domain.source import resolve_heading_path_for_target
+from domain.source import resolve_heading_path_for_page
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.mapping.block_artifacts import collect_pdf_text_items
 from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
@@ -81,7 +81,7 @@ def test_build_blocks_emits_structure_first_blocks_with_heading_context():
     methods_blocks = blocks[blocks["heading_path"].astype(str).str.contains("Experimental Section", na=False)]
     assert not methods_blocks.empty
     assert methods_blocks["page"].isna().all()
-    assert methods_blocks["char_range"].notna().any()
+    assert "char_range" not in methods_blocks
 
 
 def test_build_table_cells_extracts_pipe_delimited_rows():
@@ -461,37 +461,29 @@ def _pdf_pipeline_device(converter) -> str:  # noqa: ANN001
     return str(converter.format_to_options[InputFormat.PDF].pipeline_options.accelerator_options.device)
 
 
-def test_heading_path_binding_prefers_same_page_bbox_heading_above_target():
-    target_bbox = '{"b": 360.0, "coord_origin": "TOPLEFT", "l": 0.0, "r": 100.0, "t": 300.0}'
+def test_heading_path_binding_uses_last_heading_at_or_before_page():
     heading_blocks = [
         {
             "page": 1,
             "heading_path": "Introduction",
             "block_order": 1,
             "block_type": "heading",
-            "bbox": '{"b": 120.0, "coord_origin": "TOPLEFT", "l": 0.0, "r": 100.0, "t": 100.0}',
         },
         {
             "page": 1,
             "heading_path": "Results > Mechanical Properties",
             "block_order": 2,
             "block_type": "heading",
-            "bbox": '{"b": 290.0, "coord_origin": "TOPLEFT", "l": 0.0, "r": 100.0, "t": 270.0}',
         },
         {
             "page": 1,
             "heading_path": "Appendix",
             "block_order": 3,
             "block_type": "heading",
-            "bbox": '{"b": 430.0, "coord_origin": "TOPLEFT", "l": 0.0, "r": 100.0, "t": 400.0}',
         },
     ]
 
     assert (
-        resolve_heading_path_for_target(
-            page=1,
-            target_bbox=target_bbox,
-            heading_blocks=heading_blocks,
-        )
-        == "Results > Mechanical Properties"
+        resolve_heading_path_for_page(1, heading_blocks)
+        == "Appendix"
     )

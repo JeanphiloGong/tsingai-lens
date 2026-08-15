@@ -4,7 +4,6 @@ from typing import Any
 
 from application.core.document_profiles.schemas import StructuredDocumentProfile
 from application.core.objectives.schemas import (
-    StructuredAxisCanonicalizationGroup,
     StructuredAxisCanonicalizationPlan,
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
@@ -12,25 +11,71 @@ from application.core.objectives.schemas import (
     StructuredEvidenceSelections,
     StructuredFindingSynthesis,
     StructuredFindingSynthesisItem,
-    StructuredObjectiveMergeGroup,
-    StructuredObjectiveMergePlan,
-    StructuredPaperContributionDraft,
+    StructuredPaperFrameBatch,
     StructuredPaperSkim,
-    StructuredResearchObjective,
-    StructuredResearchObjectives,
 )
+
+
+def source_unit_ids_from_payload(payload: dict[str, Any]) -> list[str]:
+    source_unit_ids: list[str] = []
+    for unit in payload.get("source_units") or ():
+        if not isinstance(unit, dict):
+            continue
+        source_unit_id = str(unit.get("source_unit_id") or "").strip()
+        if source_unit_id and source_unit_id not in source_unit_ids:
+            source_unit_ids.append(source_unit_id)
+    return source_unit_ids[:12]
+
+
+def studies_with_source_units(
+    payload: dict[str, Any],
+    studies: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    source_unit_ids = source_unit_ids_from_payload(payload)
+    if not source_unit_ids:
+        return []
+    return [
+        {
+            **study,
+            "relationships": [
+                {**relationship, "source_unit_ids": source_unit_ids}
+                for relationship in study.get("relationships") or ()
+            ],
+        }
+        for study in studies
+    ]
+
+
+def paper_skim_study_outputs(
+    payload: dict[str, Any],
+    studies: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    return {"studies": studies_with_source_units(payload, studies)}
 
 
 class FakeObjectiveExtractor:
     def __init__(self) -> None:
         self.skim_payloads: list[dict[str, Any]] = []
-        self.discovery_payloads: list[dict[str, Any]] = []
         self.canonicalization_payloads: list[dict[str, Any]] = []
-        self.merge_payloads: list[dict[str, Any]] = []
         self.frame_payloads: list[dict[str, Any]] = []
         self.route_payloads: list[dict[str, Any]] = []
         self.unit_payloads: list[dict[str, Any]] = []
         self.finding_payloads: list[dict[str, Any]] = []
+
+    def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
+        return 0
+
+    def estimate_paper_signal_reconciliation_prompt_tokens(
+        self,
+        payload: dict[str, Any],
+    ) -> int:
+        return 0
+
+    def estimate_objective_paper_frame_prompt_tokens(
+        self,
+        payload: dict[str, Any],
+    ) -> int:
+        return 0
 
     def extract_document_profile(
         self,
@@ -49,50 +94,39 @@ class FakeObjectiveExtractor:
         if "Review" in title:
             return StructuredPaperSkim(
                 doc_role="review",
-                candidate_materials=["316L stainless steel"],
-                candidate_processes=[],
-                candidate_properties=[],
-                changed_variables=[],
-                possible_objectives=[],
+                studies=[],
+                unresolved_signals=[],
                 evidence_density="low",
                 confidence=0.72,
                 warnings=[],
             )
+        studies = studies_with_source_units(
+            payload,
+            [
+                    {
+                        "experiment_label": "LPBF heat-treatment study",
+                        "design_type": "experimental",
+                        "claim_scope": "current_work",
+                        "material_scope": ["316L stainless steel"],
+                        "process_context": ["LPBF", "heat treatment"],
+                        "relationships": [
+                            {
+                                "varied_factors": ["heat treatment temperature"],
+                                "outcome": "corrosion resistance",
+                                "confidence": 0.91,
+                            }
+                        ],
+                        "confidence": 0.91,
+                    }
+            ],
+        )
         return StructuredPaperSkim(
             doc_role="experimental",
-            candidate_materials=["316L stainless steel"],
-            candidate_processes=["LPBF", "heat treatment"],
-            candidate_properties=["corrosion"],
-            changed_variables=["heat treatment temperature"],
-            possible_objectives=[
-                "How does heat treatment affect corrosion resistance of LPBF 316L "
-                "stainless steel?"
-            ],
+            studies=studies,
+            unresolved_signals=[],
             evidence_density="high",
             confidence=0.91,
             warnings=[],
-        )
-
-    def discover_research_objectives(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredResearchObjectives:
-        self.discovery_payloads.append(payload)
-        return StructuredResearchObjectives(
-            objectives=[
-                StructuredResearchObjective(
-                    question="How does heat treatment affect corrosion resistance?",
-                    material_scope=["316L stainless steel"],
-                    variables=["heat treatment"],
-                    outcomes=["corrosion resistance"],
-                    constraints=["LPBF"],
-                    requested_comparator="compare as-built and heat-treated corrosion behavior",
-                    seed_document_ids=["paper-1"],
-                    excluded_document_ids=["paper-2"],
-                    confidence=0.88,
-                    reason="paper skims share a clear material-process-property axis",
-                ),
-            ]
         )
 
     def canonicalize_research_objective_axes(
@@ -101,52 +135,29 @@ class FakeObjectiveExtractor:
     ) -> StructuredAxisCanonicalizationPlan:
         self.canonicalization_payloads.append(payload)
         return StructuredAxisCanonicalizationPlan(
-            axis_groups=[
-                StructuredAxisCanonicalizationGroup(
-                    axis_type=axis_type,
-                    canonical=value,
-                    aliases=[value],
-                    confidence=1.0,
-                    reason="kept separate",
-                )
-                for axis_type, values in payload["axis_candidates"].items()
-                for value in values
-            ]
-        )
-
-    def merge_research_objectives(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredObjectiveMergePlan:
-        self.merge_payloads.append(payload)
-        return StructuredObjectiveMergePlan(
-            merged_objectives=[
-                StructuredObjectiveMergeGroup(
-                    source_objective_ids=[candidate["objective_id"]],
-                    question=candidate["question"],
-                    material_scope=candidate["material_scope"],
-                    variables=candidate["variables"],
-                    outcomes=candidate["outcomes"],
-                    requested_comparator=candidate["requested_comparator"],
-                    confidence=candidate["confidence"],
-                    reason=candidate["reason"],
-                )
-                for candidate in payload["candidate_objectives"]
+            decisions=[
+                {"pair_id": pair["pair_id"], "equivalent": True}
+                for pair in payload.get("axis_pairs", ())
             ]
         )
 
     def assess_objective_paper(
         self,
         payload: dict[str, Any],
-    ) -> StructuredPaperContributionDraft:
+    ) -> StructuredPaperFrameBatch:
         self.frame_payloads.append(payload)
         objective = payload["objective"]
         document = payload["document"]
-        paper_skim = payload["paper_skim"]
+        paper_prior = payload["paper_prior"]
         document_id = str(document.get("document_id") or "")
-        table_summaries = payload["table_summaries"]
+        source_units = payload["source_units"]
+        source_unit_ids = [
+            str(unit["source_unit_id"])
+            for unit in source_units
+            if unit.get("source_unit_id")
+        ]
         if document_id in objective.get("excluded_document_ids", ()):
-            return StructuredPaperContributionDraft(
+            return StructuredPaperFrameBatch(
                 relevance="irrelevant",
                 paper_role="review",
                 background="Excluded by objective discovery.",
@@ -154,62 +165,59 @@ class FakeObjectiveExtractor:
                 changed_variables=[],
                 measured_property_scope=[],
                 test_environment_scope=[],
-                relevant_sections=[],
-                relevant_tables=[],
-                excluded_tables=[
-                    table["table_id"]
-                    for table in table_summaries
-                    if table.get("table_id")
-                ],
+                relevant_source_unit_ids=[],
+                excluded_source_unit_ids=source_unit_ids,
             )
-        relevant_tables = self._matching_frame_table_ids(
-            table_summaries,
+        relevant_source_unit_ids = self._matching_frame_source_unit_ids(
+            source_units,
             axes=(
                 *objective.get("variables", ()),
                 *objective.get("outcomes", ()),
             ),
         )
-        section_labels = [
-            item["section_label"]
-            for item in payload["section_snippets"]
-            if item.get("section_label")
-        ]
-        return StructuredPaperContributionDraft(
+        relevant_source_unit_ids.extend(
+            source_unit_id
+            for source_unit_id, unit in zip(source_unit_ids, source_units, strict=True)
+            if unit.get("source_kind") == "section"
+            and source_unit_id not in relevant_source_unit_ids
+        )
+        return StructuredPaperFrameBatch(
             relevance="high",
             paper_role="primary_experiment",
             background="Paper directly supports the active research objective.",
-            material_match=list(paper_skim.get("candidate_materials") or []),
-            changed_variables=list(paper_skim.get("changed_variables") or []),
+            material_match=list(objective.get("material_scope") or []),
+            changed_variables=list(objective.get("variables") or []),
             measured_property_scope=list(objective.get("outcomes") or []),
             test_environment_scope=[],
-            relevant_sections=section_labels[:2],
-            relevant_tables=relevant_tables,
-            excluded_tables=[
-                table["table_id"]
-                for table in table_summaries
-                if table.get("table_id") and table["table_id"] not in relevant_tables
+            relevant_source_unit_ids=relevant_source_unit_ids,
+            excluded_source_unit_ids=[
+                source_unit_id
+                for source_unit_id in source_unit_ids
+                if source_unit_id not in relevant_source_unit_ids
             ],
         )
 
-    def _matching_frame_table_ids(
+    def _matching_frame_source_unit_ids(
         self,
-        table_summaries: list[dict[str, Any]],
+        source_units: list[dict[str, Any]],
         *,
         axes: tuple[str, ...],
     ) -> list[str]:
-        table_ids: list[str] = []
-        for table in table_summaries:
+        source_unit_ids: list[str] = []
+        for unit in source_units:
+            if unit.get("source_kind") != "table":
+                continue
             text = " ".join(
                 str(value or "")
                 for value in (
-                    table.get("caption_text"),
-                    table.get("heading_path"),
-                    " ".join(table.get("column_headers") or []),
+                    unit.get("caption_text"),
+                    unit.get("heading_path"),
+                    " ".join(unit.get("column_headers") or []),
                 )
             ).lower()
             if any(str(axis or "").lower() in text for axis in axes):
-                table_ids.append(str(table["table_id"]))
-        return table_ids
+                source_unit_ids.append(str(unit["source_unit_id"]))
+        return source_unit_ids
 
     def select_objective_evidence(
         self,
@@ -376,36 +384,14 @@ class FakeObjectiveExtractor:
         ]
         outcome = str(result_set.get("outcome") or "").strip()
         result_evidence = result_set.get("result_evidence", [])
-        supporting_ids = [
-            str(item["evidence_id"])
-            for item in result_evidence
-            if item.get("evidence_role") == "direct_result"
-        ]
-        contradicting_ids = [
-            str(item["evidence_id"])
-            for item in result_evidence
-            if item.get("evidence_role") == "contradictory_result"
-        ]
-        if not factors or not outcome or not supporting_ids:
+        if not factors or not outcome or not result_evidence:
             return StructuredFindingSynthesis()
-        direction = next(
-            (
-                str(item.get("reported_result", {}).get("direction") or "unknown")
-                for item in result_evidence
-                if item.get("evidence_id") == supporting_ids[0]
-            ),
-            "unknown",
-        )
-        factor_text = " + ".join(factors)
         return StructuredFindingSynthesis(
             findings=[
                 StructuredFindingSynthesisItem(
-                    result_set_id=str(result_set["result_set_id"]),
-                    statement=f"{factor_text} changes {outcome}.",
-                    direction=direction,
                     assertion_strength="associative",
-                    supporting_evidence_ids=supporting_ids,
-                    contradicting_evidence_ids=contradicting_ids,
+                    context_evidence_ids=[],
+                    mechanisms=[],
                 )
             ]
         )

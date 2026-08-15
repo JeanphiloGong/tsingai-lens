@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha1
 from typing import Any, Mapping
 
+from application.core.objectives import property_matching
 from application.core.objectives.extraction import ObjectiveExtractor
 from domain.core import (
     Finding,
@@ -16,10 +17,12 @@ from domain.core import (
     ObjectiveEvidence,
     PaperContribution,
     ResearchObjective,
+    directions_contradict,
 )
 
 
 _MAX_CONTEXT_EVIDENCE_PER_SET = 8
+_MAX_RESULT_EVIDENCE_REPRESENTATIVES = 16
 _MAX_EXCERPT_CHARS = 320
 _CONTEXT_ROLES = {
     "condition_context",
@@ -27,10 +30,15 @@ _CONTEXT_ROLES = {
     "baseline_context",
     "comparison_context",
 }
-logger = logging.getLogger(__name__)
-_NUMBER_RE = re.compile(
-    r"(?<![\w.])[-+]?(?:\d+(?:[.,]\d*)?|\.\d+)(?:[eE][-+]?\d+)?(?![\w.])"
+_DIRECTION_PRIORITY = (
+    "increase",
+    "decrease",
+    "improve",
+    "worsen",
+    "no_change",
+    "mixed",
 )
+logger = logging.getLogger(__name__)
 _J_PER_CUBIC_MM_RE = re.compile(
     r"\bj\s*/\s*mm\s*(?:\^\s*)?(?:3|\u00b3)\b",
     re.IGNORECASE,
@@ -176,21 +184,16 @@ class FindingSynthesisService:
                         ],
                     )
                     break
-                candidate = {
-                    **candidates[0],
-                    "result_set_id": expected_result_set_id,
-                }
+                candidate = candidates[0]
                 logger.debug(
                     "Inspecting Finding synthesis candidate result_set_id=%s "
-                    "result_evidence_count=%s direction=%s assertion_strength=%s "
-                    "factors=%s outcome=%s statement=%r",
+                    "result_evidence_count=%s assertion_strength=%s factors=%s "
+                    "outcome=%s",
                     expected_result_set_id,
                     len(_mapping_list(result_set.get("result_evidence"))),
-                    _text(candidate.get("direction")),
                     _text(candidate.get("assertion_strength")),
                     _strings(result_set.get("factors")),
                     _text(result_set.get("outcome")),
-                    _text(candidate.get("statement")),
                 )
                 try:
                     finding = self._finding_from_candidate(
@@ -266,23 +269,26 @@ class FindingSynthesisService:
         factor_labels: dict[tuple[str, ...], tuple[str, ...]] = {}
         outcome_labels: dict[str, str] = {}
         for evidence in evidence_records:
-            if not self._eligible_result_evidence(evidence):
+            if not self.is_comparable_result_evidence(objective, evidence):
                 continue
             factors = tuple(
                 sorted(
-                    (item.name for item in evidence.changed_variables),
+                    (
+                        self._canonical_objective_axis(
+                            item.name,
+                            objective.variables,
+                        )
+                        for item in evidence.changed_variables
+                    ),
                     key=lambda value: _normalize_term(value),
                 )
             )
-            factor_key = tuple(_normalize_term(value) for value in factors)
-            outcome = evidence.reported_result.outcome
-            outcome_key = _normalize_term(outcome)
-            if not self._within_objective_scope(
-                factors=factors,
-                outcome=outcome,
-                objective=objective,
-            ):
-                continue
+            factor_key = tuple(property_matching.axis_key(value) for value in factors)
+            outcome = self._canonical_objective_axis(
+                evidence.reported_result.outcome,
+                objective.outcomes,
+            )
+            outcome_key = property_matching.axis_key(outcome)
             grouped[(factor_key, outcome_key)].append(evidence)
             factor_labels.setdefault(
                 factor_key,
@@ -292,9 +298,76 @@ class FindingSynthesisService:
 
         result_sets: list[dict[str, Any]] = []
         for factor_key, outcome_key in sorted(grouped):
-            evidence_items = tuple(
+            factors = factor_labels[factor_key]
+            outcome = outcome_labels[outcome_key]
+            for primary_direction, evidence_items in self._direction_result_groups(
+                tuple(grouped[(factor_key, outcome_key)])
+            ):
+                result_sets.append(
+                    {
+                        "result_set_id": self._result_set_id(
+                            factors,
+                            outcome,
+                            primary_direction,
+                        ),
+                        "factors": list(factors),
+                        "outcome": outcome,
+                        "primary_direction": primary_direction,
+                        "result_evidence": [
+                            self._evidence_payload(evidence)
+                            for evidence in evidence_items
+                        ],
+                    }
+                )
+        return tuple(result_sets)
+
+    @staticmethod
+    def _direction_result_groups(
+        evidence_items: tuple[ObjectiveEvidence, ...],
+    ) -> tuple[tuple[str, tuple[ObjectiveEvidence, ...]], ...]:
+        by_direction: dict[str, list[ObjectiveEvidence]] = defaultdict(list)
+        for evidence in evidence_items:
+            assert evidence.reported_result is not None
+            by_direction[evidence.reported_result.direction].append(evidence)
+
+        priority = {
+            direction: position
+            for position, direction in enumerate(_DIRECTION_PRIORITY)
+        }
+        groups: list[tuple[str, tuple[ObjectiveEvidence, ...]]] = []
+        remaining = set(by_direction)
+        while remaining:
+            primary_direction = min(
+                remaining,
+                key=lambda direction: (
+                    -len(
+                        {
+                            evidence.document_id
+                            for evidence in by_direction[direction]
+                        }
+                    ),
+                    -len(by_direction[direction]),
+                    -max(
+                        evidence.confidence
+                        for evidence in by_direction[direction]
+                    ),
+                    priority.get(direction, len(priority)),
+                    direction,
+                ),
+            )
+            grouped_directions = {
+                direction
+                for direction in remaining
+                if direction == primary_direction
+                or directions_contradict(primary_direction, direction)
+            }
+            grouped_evidence = tuple(
                 sorted(
-                    grouped[(factor_key, outcome_key)],
+                    (
+                        evidence
+                        for direction in grouped_directions
+                        for evidence in by_direction[direction]
+                    ),
                     key=lambda item: (
                         -item.confidence,
                         item.document_id,
@@ -302,30 +375,37 @@ class FindingSynthesisService:
                     ),
                 )
             )
-            factors = factor_labels[factor_key]
-            outcome = outcome_labels[outcome_key]
-            result_sets.append(
-                {
-                    "result_set_id": self._result_set_id(factors, outcome),
-                    "factors": list(factors),
-                    "outcome": outcome,
-                    "result_evidence": [
-                        self._evidence_payload(evidence) for evidence in evidence_items
-                    ],
-                }
-            )
-        return tuple(result_sets)
+            groups.append((primary_direction, grouped_evidence))
+            remaining -= grouped_directions
+        return tuple(groups)
+
+    @staticmethod
+    def _canonical_objective_axis(
+        value: str,
+        objective_axes: tuple[str, ...],
+    ) -> str:
+        resolved = property_matching.resolve_objective_axis(value, objective_axes)
+        if resolved is not None:
+            return resolved
+        return _normalize_scientific_typography(value)
 
     @staticmethod
     def _result_set_prompt_payload(
         result_set: Mapping[str, Any],
     ) -> dict[str, Any]:
         result_evidence = _mapping_list(result_set.get("result_evidence"))
-        if not FindingSynthesisService._result_set_is_condition_series(result_set):
-            return dict(result_set)
-
+        representatives = FindingSynthesisService._document_balanced_evidence(
+            result_evidence,
+            limit=_MAX_RESULT_EVIDENCE_REPRESENTATIVES,
+        )
+        is_condition_series = FindingSynthesisService._result_set_is_condition_series(
+            result_set
+        )
         compact_evidence: list[dict[str, Any]] = []
-        for item in result_evidence:
+        for item in representatives:
+            if not is_condition_series and len(result_evidence) == 1:
+                compact_evidence.append(dict(item))
+                continue
             reported_result = (
                 item.get("reported_result")
                 if isinstance(item.get("reported_result"), Mapping)
@@ -345,12 +425,97 @@ class FindingSynthesisService:
                     "attribution_scope": item.get("attribution_scope"),
                 }
             )
+        evidence_by_document: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for item in result_evidence:
+            evidence_by_document[str(item.get("document_id") or "")].append(item)
+        document_summaries: list[dict[str, Any]] = []
+        for document_id, items in sorted(evidence_by_document.items()):
+            direction_counts: dict[str, int] = defaultdict(int)
+            attribution_scope_counts: dict[str, int] = defaultdict(int)
+            for item in items:
+                result = (
+                    item.get("reported_result")
+                    if isinstance(item.get("reported_result"), Mapping)
+                    else {}
+                )
+                direction = str(result.get("direction") or "").strip()
+                if direction:
+                    direction_counts[direction] += 1
+                attribution_scope = str(item.get("attribution_scope") or "").strip()
+                if attribution_scope:
+                    attribution_scope_counts[attribution_scope] += 1
+            document_summaries.append(
+                {
+                    "document_id": document_id,
+                    "evidence_count": len(items),
+                    "direction_counts": dict(sorted(direction_counts.items())),
+                    "attribution_scope_counts": dict(
+                        sorted(attribution_scope_counts.items())
+                    ),
+                }
+            )
         return {
-            "result_set_id": result_set.get("result_set_id"),
             "factors": result_set.get("factors") or [],
             "outcome": result_set.get("outcome"),
+            "primary_direction": result_set.get("primary_direction"),
+            "total_evidence_count": len(result_evidence),
+            "is_condition_series": is_condition_series,
             "result_evidence": compact_evidence,
+            "document_evidence_summaries": document_summaries,
         }
+
+    @staticmethod
+    def _document_balanced_evidence(
+        evidence_items: list[dict[str, Any]],
+        *,
+        limit: int,
+    ) -> tuple[dict[str, Any], ...]:
+        by_document_and_direction: dict[
+            str,
+            dict[str, list[dict[str, Any]]],
+        ] = defaultdict(lambda: defaultdict(list))
+        for item in evidence_items:
+            result = (
+                item.get("reported_result")
+                if isinstance(item.get("reported_result"), Mapping)
+                else {}
+            )
+            by_document_and_direction[str(item.get("document_id") or "")][
+                str(result.get("direction") or "")
+            ].append(item)
+
+        document_sequences: list[list[dict[str, Any]]] = []
+        for document_id in sorted(by_document_and_direction):
+            direction_groups = by_document_and_direction[document_id]
+            for items in direction_groups.values():
+                items.sort(
+                    key=lambda item: (
+                        -float(item.get("confidence") or 0.0),
+                        str(item.get("evidence_id") or ""),
+                    )
+                )
+            direction_names = sorted(direction_groups)
+            sequence = [
+                direction_groups[direction][position]
+                for position in range(
+                    max(
+                        (len(direction_groups[name]) for name in direction_names),
+                        default=0,
+                    )
+                )
+                for direction in direction_names
+                if position < len(direction_groups[direction])
+            ]
+            document_sequences.append(sequence)
+
+        return tuple(
+            sequence[position]
+            for position in range(
+                max((len(sequence) for sequence in document_sequences), default=0)
+            )
+            for sequence in document_sequences
+            if position < len(sequence)
+        )[:limit]
 
     @staticmethod
     def _result_set_is_condition_series(result_set: Mapping[str, Any]) -> bool:
@@ -376,8 +541,24 @@ class FindingSynthesisService:
             evidence.supports_finding
             and evidence.evidence_role in {"direct_result", "contradictory_result"}
             and evidence.reported_result is not None
+            and evidence.reported_result.direction != "unknown"
             and evidence.changed_variables
             and evidence.attribution_scope != "not_attributable"
+        )
+
+    @classmethod
+    def is_comparable_result_evidence(
+        cls,
+        objective: ResearchObjective,
+        evidence: ObjectiveEvidence,
+    ) -> bool:
+        if not cls._eligible_result_evidence(evidence):
+            return False
+        assert evidence.reported_result is not None
+        return cls._within_objective_scope(
+            factors=tuple(item.name for item in evidence.changed_variables),
+            outcome=evidence.reported_result.outcome,
+            objective=objective,
         )
 
     @staticmethod
@@ -454,7 +635,7 @@ class FindingSynthesisService:
             for item in _mapping_list(result_set.get("result_evidence"))
             if (evidence_id := _text(item.get("evidence_id")))
         )
-        direction = _text(candidate.get("direction")) or "unknown"
+        direction = _text(result_set.get("primary_direction")) or "unknown"
         if not result_ids or any(
             evidence_by_id[evidence_id].reported_result is None
             for evidence_id in result_ids
@@ -468,8 +649,17 @@ class FindingSynthesisService:
         contradicting_ids = tuple(
             evidence_id
             for evidence_id in result_ids
-            if evidence_by_id[evidence_id].reported_result.direction != direction
+            if directions_contradict(
+                direction,
+                evidence_by_id[evidence_id].reported_result.direction,
+            )
         )
+        classified_ids = {*supporting_ids, *contradicting_ids}
+        if classified_ids != set(result_ids):
+            raise ValueError(
+                "result set contains a direction that is neither support nor an "
+                "explicit contradiction"
+            )
         if not supporting_ids:
             raise ValueError(
                 f"candidate direction {direction} has no supporting result Evidence"
@@ -508,60 +698,30 @@ class FindingSynthesisService:
 
         factors = _strings(result_set.get("factors"))
         outcome = _text(result_set.get("outcome"))
-        statement = _text(candidate.get("statement"))
-        if not factors or not outcome or not statement:
-            raise ValueError("candidate lacks factors, outcome, or statement")
-        if not self._statement_covers_atomic_result(statement, factors, outcome):
-            raise ValueError(
-                "candidate statement does not contain the complete factor tuple "
-                "and outcome"
-            )
-        if self._result_set_is_condition_series(
-            result_set
-        ) and _statement_contains_numeric_endpoint(statement, factors, outcome):
-            raise ValueError(
-                "condition-series statement contains a numeric endpoint"
-            )
-        if self._statement_mentions_unbound_objective_factor(
-            statement,
-            factors,
-            objective.variables,
-        ):
-            raise ValueError(
-                "candidate statement introduces an Objective factor absent from "
-                "the result set"
-            )
+        if not factors or not outcome:
+            raise ValueError("result set lacks factors or outcome")
         supporting_evidence = tuple(
             evidence_by_id[evidence_id] for evidence_id in supporting_ids
         )
-        if not self._statement_numbers_bind_to_one_source(
-            statement,
-            supporting_evidence,
-        ):
-            raise ValueError(
-                "candidate statement combines numeric values not bound to one "
-                "supporting Evidence record"
-            )
         contradicting_evidence = tuple(
             evidence_by_id[evidence_id] for evidence_id in contradicting_ids
-        )
-        if contradicting_evidence and not _statement_acknowledges_heterogeneity(
-            statement
-        ):
-            raise ValueError(
-                "candidate statement does not foreground opposing directions "
-                "across the reported conditions"
-            )
-        boundary_ids = self._condition_boundary_evidence_ids(
-            supporting_evidence,
-            contradicting_evidence,
         )
         expected_direction = self._direction_for(supporting_evidence)
         if expected_direction is None or direction != expected_direction:
             raise ValueError(
-                "candidate direction does not match one consistent supporting "
+                "backend primary direction does not match one consistent supporting "
                 "Evidence direction"
             )
+        statement = self._finding_statement(
+            factors=factors,
+            outcome=outcome,
+            direction=direction,
+            contradicting_evidence=contradicting_evidence,
+        )
+        boundary_ids = self._condition_boundary_evidence_ids(
+            supporting_evidence,
+            contradicting_evidence,
+        )
 
         paper_bindings = self._paper_bindings(
             contributions=contributions,
@@ -609,7 +769,6 @@ class FindingSynthesisService:
         direct_evidence = supporting_evidence + contradicting_evidence
         certainty = Finding.certainty_for(synthesis_status, direct_evidence)
         limitations = self._limitations(
-            candidate=candidate,
             factors=factors,
             synthesis_status=synthesis_status,
             attribution_scope=attribution_scope,
@@ -656,6 +815,52 @@ class FindingSynthesisService:
         return finding
 
     @staticmethod
+    def _finding_statement(
+        *,
+        factors: tuple[str, ...],
+        outcome: str,
+        direction: str,
+        contradicting_evidence: tuple[ObjectiveEvidence, ...],
+    ) -> str:
+        factor_phrase = (
+            factors[0]
+            if len(factors) == 1
+            else f"{', '.join(factors[:-1])} and {factors[-1]}"
+        )
+        subject = (
+            f"Changes in {factor_phrase}"
+            if len(factors) == 1
+            else f"Joint changes in {factor_phrase}"
+        )
+        direction_phrases = {
+            "increase": "an increase",
+            "decrease": "a decrease",
+            "improve": "an improvement",
+            "worsen": "a worsening",
+            "no_change": "no reported change",
+            "mixed": "a source-reported mixed change",
+        }
+        primary_phrase = direction_phrases[direction]
+        if not contradicting_evidence:
+            return f"{subject} were associated with {primary_phrase} in {outcome}."
+
+        opposing_directions = tuple(
+            dict.fromkeys(
+                evidence.reported_result.direction
+                for evidence in contradicting_evidence
+                if evidence.reported_result is not None
+            )
+        )
+        opposing_phrases = " and ".join(
+            direction_phrases[item] for item in opposing_directions
+        )
+        return (
+            f"Across the reported comparisons, {subject[:1].lower() + subject[1:]} "
+            "showed opposing "
+            f"directions in {outcome}: {primary_phrase} versus {opposing_phrases}."
+        )
+
+    @staticmethod
     def _candidate_evidence_ids(
         candidate: Mapping[str, Any], field: str
     ) -> tuple[str, ...] | None:
@@ -671,60 +876,6 @@ class FindingSynthesisService:
                 return None
             values.append(evidence_id)
         return tuple(values)
-
-    @staticmethod
-    def _statement_covers_atomic_result(
-        statement: str,
-        factors: tuple[str, ...],
-        outcome: str,
-    ) -> bool:
-        statement_term = _normalize_term(statement)
-        outcome_term = _normalize_term(outcome)
-        outcome_covered = outcome_term in statement_term
-        if not outcome_covered:
-            outcome_tokens = outcome_term.split()
-            experimental_tokens = {"experiment", "experimental"}
-            qualifiers = [
-                token for token in outcome_tokens if token in experimental_tokens
-            ]
-            base_outcome = " ".join(
-                token for token in outcome_tokens if token not in experimental_tokens
-            )
-            outcome_covered = bool(qualifiers and base_outcome in statement_term)
-        return bool(
-            outcome_covered
-            and all(_normalize_term(factor) in statement_term for factor in factors)
-        )
-
-    @staticmethod
-    def _statement_numbers_bind_to_one_source(
-        statement: str,
-        supporting_evidence: tuple[ObjectiveEvidence, ...],
-    ) -> bool:
-        statement_numbers = _numbers(statement)
-        return not statement_numbers or any(
-            set(statement_numbers) <= set(_numbers(_evidence_result_values(evidence)))
-            for evidence in supporting_evidence
-        )
-
-    @staticmethod
-    def _statement_mentions_unbound_objective_factor(
-        statement: str,
-        factors: tuple[str, ...],
-        objective_variables: tuple[str, ...],
-    ) -> bool:
-        for variable in objective_variables:
-            if not _statement_mentions_axis(statement, variable):
-                continue
-            matching_factors = tuple(
-                factor for factor in factors if _axis_matches(variable, factor)
-            )
-            if not matching_factors or all(
-                _axis_is_strictly_broader(factor, variable)
-                for factor in matching_factors
-            ):
-                return True
-        return False
 
     @staticmethod
     def _direction_for(
@@ -831,7 +982,6 @@ class FindingSynthesisService:
     @staticmethod
     def _limitations(
         *,
-        candidate: Mapping[str, Any],
         factors: tuple[str, ...],
         synthesis_status: str,
         attribution_scope: str,
@@ -867,7 +1017,7 @@ class FindingSynthesisService:
             deterministic.append(
                 "The available evidence supports association, not isolated causation."
             )
-        return _strings([*_strings(candidate.get("limitations")), *deterministic])
+        return _strings(deterministic)
 
     @staticmethod
     def _contribution_payload(contribution: PaperContribution) -> dict[str, Any]:
@@ -916,9 +1066,10 @@ class FindingSynthesisService:
     def _result_set_id(
         factors: tuple[str, ...],
         outcome: str,
+        primary_direction: str,
     ) -> str:
         identity = json.dumps(
-            [factors, outcome],
+            [factors, outcome, primary_direction],
             ensure_ascii=True,
             separators=(",", ":"),
         )
@@ -995,39 +1146,6 @@ def _normalize_scientific_typography(value: Any) -> str:
     return re.sub(r"\s+([)\]])", r"\1", text)
 
 
-def _statement_acknowledges_heterogeneity(statement: str) -> bool:
-    normalized = _normalize_term(statement)
-    return any(
-        marker in normalized
-        for marker in (
-            "heterogeneous",
-            "opposing",
-            "mixed",
-            "varied by condition",
-            "varies by condition",
-            "not uniform",
-            "inconsistent",
-            "condition dependent",
-        )
-    )
-
-
-def _statement_contains_numeric_endpoint(
-    statement: str,
-    factors: tuple[str, ...],
-    outcome: str,
-) -> bool:
-    label_numbers = {
-        number
-        for label in (*factors, outcome)
-        for number in _numbers(_normalize_scientific_typography(label))
-    }
-    return any(
-        number not in label_numbers
-        for number in _numbers(_normalize_scientific_typography(statement))
-    )
-
-
 def _scalar_key(value: Any) -> str:
     if value is None:
         return ""
@@ -1038,30 +1156,9 @@ def _scalar_key(value: Any) -> str:
     return str(number.normalize())
 
 
-def _numbers(value: Any) -> tuple[Decimal, ...]:
-    numbers: list[Decimal] = []
-    for token in _NUMBER_RE.findall((_text(value) or "").replace("−", "-")):
-        try:
-            number = Decimal(token.replace(",", ""))
-        except InvalidOperation:
-            continue
-        if number not in numbers:
-            numbers.append(number)
-    return tuple(numbers)
-
-
-def _evidence_result_values(evidence: ObjectiveEvidence) -> str:
-    result = evidence.reported_result
-    values = [
-        *(str(variable.baseline_value or "") for variable in evidence.changed_variables),
-        *(str(variable.target_value or "") for variable in evidence.changed_variables),
-    ]
-    if result is not None:
-        values.extend((str(result.value or ""), result.result_text))
-    return "\n".join(values)
-
-
 def _axis_matches(left: Any, right: Any) -> bool:
+    if property_matching.axis_values_match(str(left or ""), str(right or "")):
+        return True
     left_term = _normalize_term(left)
     right_term = _normalize_term(right)
     if not left_term or not right_term:
@@ -1082,32 +1179,8 @@ def _axis_matches(left: Any, right: Any) -> bool:
     )
 
 
-def _axis_is_strictly_broader(candidate: Any, expected: Any) -> bool:
-    candidate_tokens = {
-        _singular_axis_token(token) for token in _normalize_term(candidate).split()
-    }
-    expected_tokens = {
-        _singular_axis_token(token) for token in _normalize_term(expected).split()
-    }
-    return len(candidate_tokens) >= 2 and candidate_tokens < expected_tokens
-
-
 def _axis_acronym(value: str) -> str:
     return "".join(token[0] for token in value.split() if token)
-
-
-def _statement_mentions_axis(statement: str, axis: str) -> bool:
-    statement_term = _normalize_term(statement)
-    axis_term = _normalize_term(axis)
-    if not statement_term or not axis_term:
-        return False
-    statement_tokens = {
-        _singular_axis_token(token) for token in statement_term.split()
-    }
-    axis_tokens = {_singular_axis_token(token) for token in axis_term.split()}
-    return axis_tokens <= statement_tokens or _axis_acronym(axis_term) in (
-        statement_term.split()
-    )
 
 
 def _singular_axis_token(value: str) -> str:

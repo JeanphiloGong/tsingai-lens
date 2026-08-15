@@ -17,6 +17,8 @@ from domain.core import (
     ObjectiveEvidence,
     ObjectiveFactSet,
     PaperContribution,
+    PaperSkim,
+    PaperStudyDisposition,
     ResearchObjective,
 )
 from domain.core.paper_fact import PaperFactSet
@@ -25,6 +27,12 @@ from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
 from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
+
+
+_TEMPERATURE_STRENGTH_RELATIONSHIP_ID = (
+    "relationship-doc-1-temperature-strength"
+)
+_TEMPERATURE_STRENGTH_STUDY_ID = "study-doc-1-temperature-strength"
 
 
 class FakeCollectionService:
@@ -268,6 +276,41 @@ def _published_objective_repository() -> MemoryObjectiveRepository:
             "outcomes": ["strength"],
             "seed_document_ids": ["doc-1"],
             "confidence": 0.9,
+            "source_relationship_ids": [_TEMPERATURE_STRENGTH_RELATIONSHIP_ID],
+            "rank": 1,
+        }
+    )
+    skim = PaperSkim.from_mapping(
+        {
+            "document_id": "doc-1",
+            "doc_role": "experimental",
+            "studies": [
+                {
+                    "study_id": _TEMPERATURE_STRENGTH_STUDY_ID,
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "material_scope": list(objective.material_scope),
+                    "relationships": [
+                        {
+                            "relationship_id": (
+                                _TEMPERATURE_STRENGTH_RELATIONSHIP_ID
+                            ),
+                            "varied_factors": list(objective.variables),
+                            "outcome": objective.outcomes[0],
+                            "source_refs": [
+                                {
+                                    "source_kind": "block",
+                                    "source_ref": "block-7",
+                                }
+                            ],
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "confidence": 0.9,
+                }
+            ],
+            "evidence_density": "high",
+            "confidence": 0.9,
         }
     )
     repository.replace(
@@ -275,7 +318,19 @@ def _published_objective_repository() -> MemoryObjectiveRepository:
         "build_test",
         ObjectiveFactSet(
             research_objectives_ready=True,
+            paper_skims=(skim,),
             research_objectives=(objective,),
+            study_dispositions=(
+                PaperStudyDisposition.from_mapping(
+                    {
+                        "document_id": "doc-1",
+                        "study_id": _TEMPERATURE_STRENGTH_STUDY_ID,
+                        "relationship_id": _TEMPERATURE_STRENGTH_RELATIONSHIP_ID,
+                        "status": "promoted",
+                        "objective_id": objective.objective_id,
+                    }
+                ),
+            ),
         ),
     )
     repository.confirm_objective("col-gold", "obj-1")
@@ -451,7 +506,7 @@ def test_prediction_snapshot_exports_published_findings_with_exact_evidence() ->
     )
 
 
-def test_prediction_snapshot_rejects_unpublished_objective_candidates() -> None:
+def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
     objective = ResearchObjective.from_mapping(
         {
             "collection_id": "col-gold",
@@ -462,13 +517,60 @@ def test_prediction_snapshot_rejects_unpublished_objective_candidates() -> None:
             "outcomes": ["strength"],
             "seed_document_ids": ["doc-1"],
             "confidence": 0.9,
+            "source_relationship_ids": [_TEMPERATURE_STRENGTH_RELATIONSHIP_ID],
+            "rank": 1,
+        }
+    )
+    skim = PaperSkim.from_mapping(
+        {
+            "document_id": "doc-1",
+            "doc_role": "experimental",
+            "studies": [
+                {
+                    "study_id": _TEMPERATURE_STRENGTH_STUDY_ID,
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "material_scope": list(objective.material_scope),
+                    "relationships": [
+                        {
+                            "relationship_id": (
+                                _TEMPERATURE_STRENGTH_RELATIONSHIP_ID
+                            ),
+                            "varied_factors": list(objective.variables),
+                            "outcome": objective.outcomes[0],
+                            "source_refs": [
+                                {
+                                    "source_kind": "block",
+                                    "source_ref": "block-7",
+                                }
+                            ],
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "confidence": 0.9,
+                }
+            ],
+            "evidence_density": "high",
+            "confidence": 0.9,
         }
     )
     repository = MemoryObjectiveRepository.from_facts(
         "col-gold",
         ObjectiveFactSet(
             research_objectives_ready=True,
+            paper_skims=(skim,),
             research_objectives=(objective,),
+            study_dispositions=(
+                PaperStudyDisposition.from_mapping(
+                    {
+                        "document_id": "doc-1",
+                        "study_id": _TEMPERATURE_STRENGTH_STUDY_ID,
+                        "relationship_id": _TEMPERATURE_STRENGTH_RELATIONSHIP_ID,
+                        "status": "promoted",
+                        "objective_id": objective.objective_id,
+                    }
+                ),
+            ),
         ),
     )
     service, _evaluation_repository = _prediction_snapshot_service(repository)

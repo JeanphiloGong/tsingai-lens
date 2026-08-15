@@ -12,6 +12,8 @@ from domain.core import (
     EvidenceAnchor,
     MeasurementResult,
     ObjectiveFactSet,
+    PaperSkim,
+    PaperStudyDisposition,
     ResearchObjective,
     SampleVariant,
     TestCondition as DomainTestCondition,
@@ -21,6 +23,12 @@ from tests.support.collection_service import build_test_collection_service
 from tests.support.comparison_repository import MemoryComparisonRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+
+
+_SCAN_SPEED_STRENGTH_RELATIONSHIP_ID = (
+    "relationship-paper-1-scan-speed-yield-strength"
+)
+_SCAN_SPEED_STRENGTH_STUDY_ID = "study-paper-1-scan-speed-yield-strength"
 
 
 def _objective(collection_id: str) -> ResearchObjective:
@@ -36,6 +44,8 @@ def _objective(collection_id: str) -> ResearchObjective:
             "constraints": ["LPBF"],
             "seed_document_ids": ["paper-1"],
             "confidence": 0.9,
+            "source_relationship_ids": [_SCAN_SPEED_STRENGTH_RELATIONSHIP_ID],
+            "rank": 1,
         }
     )
 
@@ -58,9 +68,9 @@ def _paper_facts(collection_id: str) -> PaperFactSet:
                 {
                     "anchor_id": "anchor-1",
                     "document_id": "paper-1",
-                    "locator_type": "table",
+                    "source_kind": "table",
+                    "source_ref": "table-1",
                     "source_type": "table",
-                    "table_id": "table-1",
                     "quote": "The yield strength was 365.6 MPa.",
                 }
             ),
@@ -174,12 +184,57 @@ def test_graph_serves_paper_fact_projection_with_objective_definition(tmp_path):
     )
     paper_repository.replace_paper_facts(collection_id, "build_test", facts)
     objective_repository = MemoryObjectiveRepository()
+    objective = _objective(collection_id)
+    skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "doc_role": "experimental",
+            "studies": [
+                {
+                    "study_id": _SCAN_SPEED_STRENGTH_STUDY_ID,
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "material_scope": list(objective.material_scope),
+                    "process_context": list(objective.constraints),
+                    "relationships": [
+                        {
+                            "relationship_id": _SCAN_SPEED_STRENGTH_RELATIONSHIP_ID,
+                            "varied_factors": list(objective.variables),
+                            "outcome": objective.outcomes[0],
+                            "source_refs": [
+                                {
+                                    "source_kind": "table",
+                                    "source_ref": "table-1",
+                                }
+                            ],
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "confidence": 0.9,
+                }
+            ],
+            "evidence_density": "high",
+            "confidence": 0.9,
+        }
+    )
     objective_repository.replace(
         collection_id,
         "build_test",
         ObjectiveFactSet(
             research_objectives_ready=True,
-            research_objectives=(_objective(collection_id),),
+            paper_skims=(skim,),
+            research_objectives=(objective,),
+            study_dispositions=(
+                PaperStudyDisposition.from_mapping(
+                    {
+                        "document_id": "paper-1",
+                        "study_id": _SCAN_SPEED_STRENGTH_STUDY_ID,
+                        "relationship_id": _SCAN_SPEED_STRENGTH_RELATIONSHIP_ID,
+                        "status": "promoted",
+                        "objective_id": objective.objective_id,
+                    }
+                ),
+            ),
         ),
     )
     comparison_repository = MemoryComparisonRepository()

@@ -14,6 +14,13 @@ from sqlalchemy import URL, create_engine, event
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
+from domain.pipeline import (
+    ExecutionStats,
+    ExecutionTimestamps,
+    ModelUsage,
+    PipelineNodeRun,
+    TokenUsage,
+)
 from domain.source import (
     ArtifactVersionRecord,
     BuildStageRecord,
@@ -55,15 +62,18 @@ def _stage(build_id: str, stage_kind: str, stage_order: int) -> BuildStageRecord
     return BuildStageRecord(
         stage_id=f"stage_{stage_order}",
         build_id=build_id,
-        stage_kind=stage_kind,
-        stage_version=1,
         stage_order=stage_order,
-        status="succeeded",
-        started_at="2026-07-19T10:01:00+00:00",
-        finished_at="2026-07-19T10:02:00+00:00",
-        errors=(),
-        warnings=(),
-        skip_reason=None,
+        node=PipelineNodeRun(
+            name=stage_kind,
+            dependencies=("source_artifacts",)
+            if stage_kind == "artifact_registry"
+            else (),
+            status="succeeded",
+            timestamps=ExecutionTimestamps(
+                started_at="2026-07-19T10:01:00+00:00",
+                finished_at="2026-07-19T10:02:00+00:00",
+            ),
+        ),
     )
 
 
@@ -133,8 +143,27 @@ def test_build_repository_round_trips_ordered_task_stage_and_artifact_lineage(
     assert build_repository.read_build(first.task_id) == first_build
     assert build_repository.list_tasks(collection_id="col_builds", limit=1) == (second,)
 
+    source_stage = _stage(first_build.build_id, "source_artifacts", 0)
     stages = (
-        _stage(first_build.build_id, "source_artifacts", 0),
+        replace(
+            source_stage,
+            node=replace(
+                source_stage.node,
+                stats=ExecutionStats(
+                    duration_ms=60000,
+                    model_usage=(
+                        ModelUsage(
+                            "merged-qwen",
+                            2,
+                            TokenUsage(1800, 240, 2040),
+                        ),
+                    ),
+                    prompt_versions={
+                        "document_profile": "document_profile.v1"
+                    },
+                ),
+            ),
+        ),
         _stage(first_build.build_id, "artifact_registry", 1),
     )
     running = replace(

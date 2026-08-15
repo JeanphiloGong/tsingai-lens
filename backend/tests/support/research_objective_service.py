@@ -79,9 +79,7 @@ def seed_document_profiles(
     service: ResearchObjectiveService,
     collection_id: str,
 ) -> None:
-    documents = service.source_artifact_repository.read_collection_artifacts(
-        collection_id
-    ).documents
+    documents = service.source_artifact_repository.read_collection_documents(collection_id)
     profiles: list[DocumentProfile] = []
     for document in documents:
         metadata = dict(document.metadata)

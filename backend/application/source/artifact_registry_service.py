@@ -122,13 +122,13 @@ class ArtifactRegistryService:
         build_id: str | None = None,
     ) -> dict:
         base_dir = Path(output_dir).expanduser().resolve()
-        source_artifacts = (
-            self.source_artifact_repository.read_collection_artifacts(
+        source_documents = (
+            self.source_artifact_repository.read_collection_documents(
                 collection_id,
                 build_id=build_id,
             )
             if build_id is not None
-            else self.source_artifact_repository.read_collection_artifacts(
+            else self.source_artifact_repository.read_collection_documents(
                 collection_id
             )
         )
@@ -149,12 +149,12 @@ class ArtifactRegistryService:
                 for result in comparison_facts.collection_comparable_results
             )
         )
-        source_artifacts_generated = not source_artifacts.is_empty()
+        source_artifacts_generated = bool(source_documents)
         payload = ArtifactStatusRecord.build(
             collection_id=collection_id,
             output_path=str(base_dir),
-            documents_generated=bool(source_artifacts.documents),
-            documents_ready=bool(source_artifacts.documents),
+            documents_generated=bool(source_documents),
+            documents_ready=bool(source_documents),
             document_profiles_generated=bool(paper_facts.document_profiles),
             document_profiles_ready=bool(paper_facts.document_profiles),
             evidence_anchors_generated=paper_facts.paper_facts_generated,
@@ -191,13 +191,17 @@ class ArtifactRegistryService:
             comparison_rows_stale=False,
             graph_stale=False,
             blocks_generated=source_artifacts_generated,
-            blocks_ready=bool(source_artifacts.blocks),
+            blocks_ready=any(document.blocks for document in source_documents),
             figures_generated=source_artifacts_generated,
-            figures_ready=bool(source_artifacts.figures),
+            figures_ready=any(document.figures for document in source_documents),
             table_rows_generated=source_artifacts_generated,
-            table_rows_ready=bool(source_artifacts.table_rows),
+            table_rows_ready=any(
+                document.table_rows for document in source_documents
+            ),
             table_cells_generated=source_artifacts_generated,
-            table_cells_ready=bool(source_artifacts.table_cells),
+            table_cells_ready=any(
+                document.table_cells for document in source_documents
+            ),
             updated_at=_now_iso(),
         ).to_record()
         return payload
@@ -214,7 +218,7 @@ class ArtifactRegistryService:
             (
                 item
                 for item in self.repository.list_stages(task_id)
-                if item.stage_kind == "artifact_registry"
+                if item.node.name == "artifact_registry"
             ),
             None,
         )

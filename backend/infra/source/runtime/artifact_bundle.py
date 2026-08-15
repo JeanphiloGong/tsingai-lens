@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from domain.source import SourceArtifactSet
+from domain.source import SourceDocument, source_documents_from_records
 
 
 @dataclass(frozen=True)
@@ -18,8 +18,8 @@ class SourceArtifactBundle:
     table_cells: pd.DataFrame
     figure_assets: dict[str, bytes]
 
-    def to_artifact_set(self) -> SourceArtifactSet:
-        return SourceArtifactSet.from_records(
+    def to_documents(self) -> tuple[SourceDocument, ...]:
+        return source_documents_from_records(
             documents=_records(self.documents),
             text_units=_records(self.text_units),
             blocks=_records(self.blocks),

@@ -5,8 +5,8 @@ from collections import defaultdict
 from typing import Iterable
 
 from domain.source import (
-    SourceArtifactSet,
     SourceBlock,
+    SourceDocument,
     SourceReferenceCandidate,
     SourceReferenceEntry,
     SourceReferenceMention,
@@ -31,9 +31,10 @@ _SPACE_PATTERN = re.compile(r"\s+")
 class SourceReferenceExtractionService:
     """Extract citation metadata from Source structure artifacts."""
 
-    def extract(self, artifacts: SourceArtifactSet) -> SourceReferenceSet:
-        entries = self._extract_entries(artifacts.blocks)
-        mentions = self._extract_mentions(artifacts.blocks, entries)
+    def extract(self, documents: tuple[SourceDocument, ...]) -> SourceReferenceSet:
+        blocks = tuple(block for document in documents for block in document.blocks)
+        entries = self._extract_entries(blocks)
+        mentions = self._extract_mentions(blocks, entries)
         return SourceReferenceSet(
             entries=tuple(entries),
             mentions=tuple(mentions),
@@ -113,8 +114,6 @@ class SourceReferenceExtractionService:
                                 context_text=_context_window(block.text, match.start()),
                                 source_block_id=block.block_id,
                                 page=block.page,
-                                char_start=match.start(),
-                                char_end=match.end(),
                                 confidence=0.9 if entry else 0.6,
                                 metadata={"raw_marker": match.group(0)},
                             )

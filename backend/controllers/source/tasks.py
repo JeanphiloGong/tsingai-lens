@@ -47,12 +47,14 @@ async def create_build_task(
     task = request.app.state.task_service.create_task(
         collection_id=collection_id,
         task_type="build",
+        mode=payload.mode,
     )
     request_id = getattr(request.state, "request_id", None)
     logger.info(
-        "Queued build task task_id=%s collection_id=%s verbose=%s",
+        "Queued build task task_id=%s collection_id=%s mode=%s verbose=%s",
         task["task_id"],
         collection_id,
+        payload.mode,
         payload.verbose,
     )
     future = _build_executor.submit(

@@ -17,7 +17,7 @@ if str(SCRIPT_DIR) not in sys.path:
 import validate_expert_gold as validator
 
 
-SCHEMA_VERSION = "expert-gold-bundle-v0.1"
+SCHEMA_VERSION = "expert-gold-bundle-v0.2"
 
 CLAIM_SCOPE_MAP = {
     "本文实验": "current_work",
@@ -335,8 +335,8 @@ def _convert_evidence(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
                 "evidence_id": row["证据编号"],
                 "evidence_type": row["证据类型"],
                 "page": row["页码"],
-                "section": row["章节"],
-                "figure_or_table": row["表格或图号"],
+                "source_kind": row["证据类型"],
+                "source_ref": row["表格或图号"] or row["章节"],
                 "quote_or_cell": row["原文短句或单元格"],
                 "supports": row["支持什么"],
                 "notes": row["备注"],

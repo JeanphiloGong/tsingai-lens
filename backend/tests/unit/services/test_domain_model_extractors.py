@@ -4,15 +4,22 @@ import json
 from types import SimpleNamespace
 
 import pytest
+import tiktoken
+from openai import LengthFinishReasonError
 from pydantic import ValidationError
 
 from application.core.document_profiles.extraction import DocumentProfileExtractor
-from application.core.objectives.extraction import ObjectiveExtractor
+from application.core.objectives.extraction import (
+    ObjectiveExtractor,
+    PaperSkimOutputSaturatedError,
+)
 from application.core.paper_facts.extraction import PaperFactsExtractor
 from application.core.objectives.prompts import (
     build_objective_evidence_prompt,
+    build_objective_paper_frame_prompt,
     build_paper_skim_prompt,
-    build_research_objective_discovery_prompt,
+    build_paper_signal_reconciliation_prompt,
+    build_research_axis_canonicalization_prompt,
     build_finding_synthesis_prompt,
 )
 from application.core.document_profiles.schemas import StructuredDocumentProfile
@@ -22,12 +29,9 @@ from application.core.objectives.schemas import (
     StructuredEvidenceExtraction,
     StructuredEvidenceSelections,
     StructuredEvidenceExtractions,
-    StructuredObjectiveMergeGroup,
-    StructuredObjectiveMergePlan,
-    StructuredPaperContributionDraft,
+    StructuredPaperFrameBatch,
+    StructuredPaperSignalReconciliation,
     StructuredPaperSkim,
-    StructuredResearchObjective,
-    StructuredResearchObjectives,
     StructuredFindingMechanism,
     StructuredFindingSynthesis,
 )
@@ -36,445 +40,95 @@ from application.core.paper_facts.schemas import (
     StructuredTableBatchMentions,
     StructuredTextWindowMentions,
 )
-
-
-@pytest.mark.parametrize("field", ["variables", "outcomes"])
-def test_structured_research_objective_requires_primary_scientific_axes(field):
-    payload = {
-        "question": "How does heat treatment affect yield strength?",
-        "variables": ["heat treatment"],
-        "outcomes": ["yield strength"],
-    }
-    payload[field] = []
-
-    with pytest.raises(ValidationError):
-        StructuredResearchObjective.model_validate(payload)
-
-
-@pytest.mark.parametrize(
-    ("question", "variables", "outcomes"),
-    [
-        (
-            "How does porosity affect mechanical properties?",
-            ["Laser power", "Scan speed"],
-            ["Porosity"],
-        ),
-        (
-            "How does heat treatment affect yield strength?",
-            ["yield strength"],
-            ["heat treatment"],
-        ),
-        (
-            "How do heat treatment and temperature affect yield strength?",
-            ["heat treatment", "duration"],
-            ["yield strength"],
-        ),
-        (
-            "How does heat treatment affect yield strength?",
-            ["heat treatment"],
-            ["yield strength", "elongation"],
-        ),
-        (
-            "How is fracture toughness affected by impact energy?",
-            ["impact energy"],
-            ["fracture toughness"],
-        ),
-        (
-            "How does low porosity affect density?",
-            ["LP"],
-            ["density"],
-        ),
-        (
-            "How does hip affect porosity?",
-            ["hot isostatic pressing"],
-            ["porosity"],
-        ),
-        (
-            "How does laser power affect porosity while scanning speed influences density?",
-            ["laser power"],
-            ["density"],
-        ),
-        (
-            "How does energy density affect relative density?",
-            ["density"],
-            ["relative density"],
-        ),
-        (
-            "How does energy density affect relative density?",
-            ["energy density"],
-            ["density"],
-        ),
-        (
-            "How does energy density affect porosity, and porosity affect strength?",
-            ["energy density"],
-            ["strength"],
-        ),
-        (
-            "How do laser power and scan speed affect density?",
-            ["laser power"],
-            ["density"],
-        ),
-        (
-            "How does temperature affect yield strength and elongation?",
-            ["temperature"],
-            ["yield strength"],
-        ),
-        (
-            "How does temperature affect the relationship between porosity and density?",
-            ["porosity"],
-            ["density"],
-        ),
-        (
-            "How does temperature affect the effects of porosity on density?",
-            ["porosity"],
-            ["density"],
-        ),
-        (
-            "What is the relationship between laser power and scan speed and density?",
-            ["laser power"],
-            ["scan speed"],
-        ),
-        (
-            "How does high impact pressure affect porosity?",
-            ["HIP"],
-            ["porosity"],
-        ),
-        (
-            "How does aged condition affect hardness?",
-            ["aging condition"],
-            ["hardness"],
-        ),
-    ],
-)
-def test_structured_research_objective_rejects_misaligned_question_roles(
-    question,
-    variables,
-    outcomes,
-):
-    with pytest.raises(ValidationError, match="question roles"):
-        StructuredResearchObjective.model_validate(
-            {
-                "question": question,
-                "variables": variables,
-                "outcomes": outcomes,
-            }
-        )
-
-
-@pytest.mark.parametrize(
-    ("question", "variables", "outcomes"),
-    [
-        (
-            "How does porosity affect mechanical properties?",
-            ["porosity"],
-            ["mechanical property"],
-        ),
-        (
-            "What are the effects of volumetric energy density on densities?",
-            ["volumetric energy density"],
-            ["density"],
-        ),
-        (
-            "How does scanning strategy influence porosity?",
-            ["scanning strategy"],
-            ["porosity"],
-        ),
-        (
-            "What is the relationship between laser power and scanning speed "
-            "and relative density?",
-            ["laser power", "scanning speed"],
-            ["relative density"],
-        ),
-        (
-            "What is the relationship between energy density and relative density "
-            "and porosity?",
-            ["energy density"],
-            ["relative density", "porosity"],
-        ),
-        (
-            "How does impact energy affect fracture toughness?",
-            ["impact energy"],
-            ["fracture toughness"],
-        ),
-        (
-            "How does the rotation axis affect residual stresses?",
-            ["rotation axes"],
-            ["residual stress"],
-        ),
-        (
-            "How does cafe\u0301 temperature affect gas analysis?",
-            ["caf\u00e9 temperature"],
-            ["gases analyses"],
-        ),
-        (
-            "How does VED affect density?",
-            ["volumetric energy density"],
-            ["density"],
-        ),
-        (
-            "How does HIP affect porosity?",
-            ["hot isostatic pressing"],
-            ["porosity"],
-        ),
-        (
-            "How does a scanned surface affect roughness?",
-            ["scanned surface"],
-            ["roughness"],
-        ),
-        (
-            "How do processing parameters affect pressed surface roughness?",
-            ["processing parameters"],
-            ["pressed surface roughness"],
-        ),
-        (
-            "How does AM affect density?",
-            ["additive manufacturing"],
-            ["density"],
-        ),
-    ],
-)
-def test_structured_research_objective_accepts_aligned_question_roles(
-    question,
-    variables,
-    outcomes,
-):
-    objective = StructuredResearchObjective.model_validate(
-        {
-            "question": question,
-            "variables": variables,
-            "outcomes": outcomes,
-        }
-    )
-
-    assert objective.variables == variables
-    assert objective.outcomes == outcomes
-
-
-@pytest.mark.parametrize(
-    ("question", "material_scope", "variables", "outcomes", "constraints"),
-    [
-        (
-            "How does porosity affect the mechanical properties of SLM 316L "
-            "stainless steel?",
-            ["316L stainless steel"],
-            ["porosity"],
-            ["mechanical properties"],
-            ["Selective laser melting (SLM)"],
-        ),
-        (
-            "How does volumetric energy density affect defect structure in powder "
-            "bed fusion 316L stainless steel?",
-            ["316L stainless steel"],
-            ["volumetric energy density"],
-            ["defect structure"],
-            ["Powder bed fusion"],
-        ),
-        (
-            "How does heat treatment affect microstructure of SLM-processed SS316L?",
-            ["SS316L"],
-            ["heat treatment"],
-            ["microstructure"],
-            ["Selective laser melting (SLM)"],
-        ),
-        (
-            "How does energy density affect relative density in 316L stainless "
-            "steel processed via selective laser melting?",
-            ["316L stainless steel"],
-            ["energy density"],
-            ["relative density"],
-            ["Selective laser melting (SLM)"],
-        ),
-    ],
-)
-def test_structured_research_objective_allows_declared_result_scope(
-    question,
-    material_scope,
-    variables,
-    outcomes,
-    constraints,
-):
-    objective = StructuredResearchObjective.model_validate(
-        {
-            "question": question,
-            "material_scope": material_scope,
-            "variables": variables,
-            "outcomes": outcomes,
-            "constraints": constraints,
-        }
-    )
-
-    assert objective.material_scope == material_scope
-    assert objective.constraints == constraints
-
-
-def test_structured_research_objective_does_not_hide_source_axis_as_scope():
-    with pytest.raises(ValidationError, match="source side"):
-        StructuredResearchObjective.model_validate(
-            {
-                "question": "How do laser power and scan speed affect density?",
-                "variables": ["laser power"],
-                "outcomes": ["density"],
-                "constraints": ["scan speed"],
-            }
-        )
-
-
-def test_structured_research_objective_does_not_hide_result_axis_as_scope():
-    with pytest.raises(ValidationError, match="result side"):
-        StructuredResearchObjective.model_validate(
-            {
-                "question": (
-                    "How does heat treatment affect yield strength and elongation?"
-                ),
-                "variables": ["heat treatment"],
-                "outcomes": ["yield strength"],
-                "constraints": ["elongation"],
-            }
-        )
-
-
-@pytest.mark.parametrize(
-    ("question", "constraint"),
-    [
-        (
-            "How does aging affect yield strength at room temperature?",
-            "room temperature",
-        ),
-        (
-            "How does aging affect yield strength under tensile testing?",
-            "tensile testing",
-        ),
-        (
-            "How does aging affect yield strength after solution treatment?",
-            "solution treatment",
-        ),
-        (
-            "How does aging affect yield strength during tensile testing?",
-            "tensile testing",
-        ),
-        (
-            "How does aging affect yield strength with argon shielding?",
-            "argon shielding",
-        ),
-        (
-            "How does aging affect yield strength using ASTM E8 testing?",
-            "ASTM E8 testing",
-        ),
-        (
-            "How does aging affect yield strength for room temperature testing?",
-            "room temperature testing",
-        ),
-        (
-            "How does aging affect yield strength via tensile testing?",
-            "tensile testing",
-        ),
-        (
-            "How does aging affect yield strength by tensile testing?",
-            "tensile testing",
-        ),
-        (
-            "How does aging affect yield strength through tensile testing?",
-            "tensile testing",
-        ),
-    ],
-)
-def test_structured_research_objective_allows_trailing_declared_test_scope(
-    question,
-    constraint,
-):
-    objective = StructuredResearchObjective.model_validate(
-        {
-            "question": question,
-            "variables": ["aging"],
-            "outcomes": ["yield strength"],
-            "constraints": [constraint],
-        }
-    )
-
-    assert objective.constraints == [constraint]
-
-
-def test_structured_research_objective_rejects_axis_in_both_roles():
-    with pytest.raises(ValidationError, match="both variables and outcomes"):
-        StructuredResearchObjective.model_validate(
-            {
-                "question": (
-                    "How do porosity and density affect density and roughness "
-                    "and porosity?"
-                ),
-                "variables": ["porosity", "density"],
-                "outcomes": ["density", "roughness", "porosity"],
-            }
-        )
-
-
-def test_structured_research_objective_rejects_duplicate_axes_before_assignment():
-    with pytest.raises(ValidationError, match="duplicate axis"):
-        StructuredResearchObjective.model_validate(
-            {
-                "question": "How do porosity and porosity affect density?",
-                "variables": ["porosity", "porosity"],
-                "outcomes": ["density"],
-            }
-        )
-
-
-def test_research_objective_discovery_contract_bounds_model_output():
-    objective = {
-        "question": "How does heat treatment affect yield strength?",
-        "variables": ["heat treatment"],
-        "outcomes": ["yield strength"],
-    }
-
-    with pytest.raises(ValidationError):
-        StructuredResearchObjectives.model_validate(
-            {"objectives": [objective for _ in range(7)]}
-        )
-
-    schema = StructuredResearchObjectives.model_json_schema()
-    objective_schema = schema["$defs"]["StructuredResearchObjective"]["properties"]
-    assert schema["properties"]["objectives"]["maxItems"] == 6
-    assert objective_schema["question"]["maxLength"] == 180
-    assert objective_schema["requested_comparator"]["anyOf"][0]["maxLength"] == 160
-    assert objective_schema["reason"]["anyOf"][0]["maxLength"] == 120
+from domain.pipeline import ModelUsage, TokenUsage
+from infra.llm.usage import capture_llm_usage
 
 
 def test_paper_skim_contract_bounds_model_output():
-    schema = StructuredPaperSkim.model_json_schema()["properties"]
+    model_schema = StructuredPaperSkim.model_json_schema()
+    schema = model_schema["properties"]
 
-    expected_limits = {
-        "candidate_materials": 8,
-        "candidate_processes": 4,
-        "candidate_properties": 8,
-        "changed_variables": 8,
-        "possible_objectives": 3,
-        "warnings": 2,
-    }
-    for field, max_items in expected_limits.items():
-        assert schema[field]["maxItems"] == max_items
-
-    for field in (
-        "candidate_materials",
-        "candidate_processes",
-        "candidate_properties",
-        "changed_variables",
-    ):
-        assert schema[field]["items"]["maxLength"] == 80
-    assert schema["possible_objectives"]["items"]["maxLength"] == 320
+    assert schema["studies"]["maxItems"] == 8
+    assert schema["unresolved_signals"]["maxItems"] == 12
+    assert schema["output_saturated"]["type"] == "boolean"
+    study_schema = model_schema["$defs"]["StructuredPaperStudy"]["properties"]
+    relationship_schema = model_schema["$defs"][
+        "StructuredPaperStudyRelationship"
+    ]["properties"]
+    assert study_schema["material_scope"]["maxItems"] == 8
+    assert study_schema["process_context"]["maxItems"] == 4
+    assert study_schema["sample_context"]["maxItems"] == 4
+    assert study_schema["test_context"]["maxItems"] == 4
+    assert study_schema["fixed_conditions"]["maxItems"] == 12
+    assert study_schema["relationships"]["maxItems"] == 8
+    assert relationship_schema["varied_factors"]["maxItems"] == 8
+    assert relationship_schema["source_unit_ids"]["minItems"] == 1
+    assert relationship_schema["source_unit_ids"]["maxItems"] == 12
+    signal_schema = model_schema["$defs"]["StructuredPaperStudySignal"][
+        "properties"
+    ]
+    assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
+    assert signal_schema["source_unit_ids"]["minItems"] == 1
+    assert signal_schema["source_unit_ids"]["maxItems"] == 12
+    assert "source_unit_coverage" not in schema
+    assert "StructuredPaperSourceUnitCoverage" not in model_schema.get("$defs", {})
     assert schema["warnings"]["items"]["maxLength"] == 240
+
+
+def test_paper_signal_reconciliation_contract_requires_source_signal_ids():
+    parsed = StructuredPaperSignalReconciliation.model_validate(
+        {
+            "studies": [
+                {
+                    "relationships": [
+                        {
+                            "signal_ids": ["signal-variable", "signal-outcome"],
+                            "confidence": 0.88,
+                        }
+                    ]
+                }
+            ],
+            "unresolved_signals": [
+                {
+                    "signal_id": "signal-unlinked",
+                    "reason": "The result belongs to a different experiment.",
+                }
+            ],
+        }
+    )
+
+    assert parsed.studies[0].relationships[0].signal_ids == [
+        "signal-variable",
+        "signal-outcome",
+    ]
+    with pytest.raises(ValidationError):
+        StructuredPaperSignalReconciliation.model_validate(
+            {
+                "studies": [
+                    {
+                        "relationships": [
+                            {"signal_ids": ["signal-variable"]}
+                        ]
+                    }
+                ]
+            }
+        )
+
+
+def test_paper_signal_reconciliation_contract_is_bounded_to_one_neighborhood():
+    model_schema = StructuredPaperSignalReconciliation.model_json_schema()
+    response_schema = model_schema["properties"]
+    study_schema = model_schema["$defs"]["StructuredPaperSignalStudy"]["properties"]
+
+    assert response_schema["studies"]["maxItems"] == 1
+    assert response_schema["unresolved_signals"]["maxItems"] == 12
+    assert study_schema["relationships"]["maxItems"] == 11
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("candidate_materials", [f"material-{index}" for index in range(9)]),
-        ("candidate_processes", [f"process-{index}" for index in range(5)]),
-        ("candidate_properties", [f"property-{index}" for index in range(9)]),
-        ("changed_variables", [f"variable-{index}" for index in range(9)]),
-        ("possible_objectives", [f"objective-{index}" for index in range(4)]),
         ("warnings", ["warning-1", "warning-2", "warning-3"]),
-        ("candidate_properties", ["p" * 81]),
-        ("possible_objectives", ["o" * 321]),
         ("warnings", ["w" * 241]),
     ],
 )
@@ -483,79 +137,194 @@ def test_paper_skim_contract_rejects_oversized_values(field, value):
         StructuredPaperSkim.model_validate({field: value})
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "studies": [
+                {
+                    "relationships": [
+                        {
+                            "varied_factors": ["laser power"],
+                            "outcome": "relative density",
+                            "source_unit_ids": ["source-1", "source-1"],
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "unresolved_signals": [
+                {
+                    "signal_type": "variable",
+                    "label": "laser power",
+                    "source_unit_ids": ["source-1", "source-1"],
+                }
+            ]
+        },
+    ],
+)
+def test_paper_skim_contract_rejects_duplicate_source_unit_ids(payload):
+    with pytest.raises(ValidationError, match="source-unit ids must be unique"):
+        StructuredPaperSkim.model_validate(payload)
+
+
 def test_paper_skim_prompt_defines_structured_research_map_contract():
     _, user_prompt = build_paper_skim_prompt(
         {
             "document_id": "paper-1",
             "title": "Density study",
-            "text_preview": "Laser power was varied and relative density was measured.",
+            "window_id": "results-1",
+            "window_role": "results",
+            "source_units": [
+                {
+                    "source_unit_id": "results-1-source-1",
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "section_path": "Results",
+                    "content": (
+                        "Laser power was varied and relative density was measured."
+                    ),
+                }
+            ],
         }
     )
 
     assert "TASK MODEL" in user_prompt
-    assert "`changed_variables` contains factors explicitly varied or compared" in user_prompt
-    assert "`candidate_properties` contains measured outcomes" in user_prompt
-    assert "Create a `possible_objectives` question only when" in user_prompt
+    assert "Extract source-supported paper studies" in user_prompt
+    assert "`window_id` is this bounded window's identity" in user_prompt
+    assert "absence from this window is not evidence of absence elsewhere" in user_prompt
+    assert "return one relationship per outcome" in user_prompt
+    assert "full jointly varied, compared, or modeled factor set" in user_prompt
     assert "Return empty arrays rather than guessing" in user_prompt
-    assert "up to 8 `candidate_materials`" in user_prompt
-    assert "up to 3 `possible_objectives`, each at most 320 characters" in user_prompt
+    assert "Return every distinct, explicitly supported study and relationship" in user_prompt
+    assert "Return `studies=[]`; do not" in user_prompt
+    assert "Return the explicit axis in `unresolved_signals`" in user_prompt
+    assert "copy `source_unit_ids`" in user_prompt
+    assert "at most 12 unique `source_unit_ids`" in user_prompt
+    assert "Return two studies" in user_prompt
     assert "up to 2 `warnings`, each at most 240 characters" in user_prompt
+    assert "up to 8 studies" in user_prompt
+    assert "up to 8 relationships per study" in user_prompt
+    assert "up to 12 unresolved signals" in user_prompt
+    assert "output_saturated=true" in user_prompt
+    assert "neutral scientific axis" in user_prompt
+    assert "L-VED, M-VED, and H-VED" in user_prompt
+    assert "varied_factors=['volumetric energy density']" in user_prompt
+    assert "outcome='fatigue strength'" in user_prompt
+    assert "result direction, value, or comparison sentence" in user_prompt
+    assert "source_unit_coverage" not in user_prompt
 
 
-def test_research_objective_discovery_prompt_requires_focused_concise_objectives():
-    _, user_prompt = build_research_objective_discovery_prompt(
-        {"collection_id": "col-1", "paper_skims": []}
+def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
+    _, user_prompt = build_research_axis_canonicalization_prompt(
+        {
+            "collection_id": "collection-test",
+            "axis_pairs": [
+                {
+                    "pair_id": "axis_pair_0001",
+                    "axis_type": "material",
+                    "left": "SS316L",
+                    "right": "316L stainless steel",
+                },
+                {
+                    "pair_id": "axis_pair_0002",
+                    "axis_type": "outcome",
+                    "left": "porosity",
+                    "right": "relative density",
+                },
+            ],
+        }
     )
 
-    assert "at most six objectives" in user_prompt
-    assert "six highest-signal objectives total" in user_prompt
-    assert "never emit a seventh objective" in user_prompt
-    assert "exactly one key: `objectives`" in user_prompt
-    assert "Return fewer than six" in user_prompt
-    assert "only tightly related outcomes" in user_prompt
-    assert "variable-to-outcome" in user_prompt
-    assert "separate exact role regions" in user_prompt
-    assert "`changed_variables` are candidate comparison factors" in user_prompt
-    assert "`candidate_properties` are candidate measured outcomes" in user_prompt
-    assert "Treat `possible_objectives` as a noisy hint" in user_prompt
-    assert "Group compatible skims by aligned variable and outcome axes" in user_prompt
-    assert "Prefer candidates supported by at least two experimental skims" in user_prompt
-    assert "Every `seed_document_ids` value must identify a skim" in user_prompt
-    assert "Put common material identities in `material_scope`" in user_prompt
-    assert "Every seed must support every returned material" in user_prompt
-    assert '"material_scope":["316L stainless steel"]' in user_prompt
-    assert "fixed process, sample, and test scope in `constraints`" in user_prompt
-    assert "`paper_skims` is the list of bounded per-paper research maps" in user_prompt
-    assert '"seed_document_ids":["paper-a","paper-b"]' in user_prompt
-    assert 'return exactly `{"objectives":[]}`' in user_prompt
-    assert "variables precede the active relation" in user_prompt
-    assert "variables occur between `of` and `on`" in user_prompt
-    assert "use one separating `and`" in user_prompt
-    assert "Passive forms are invalid" in user_prompt
-    assert "same variable-outcome combination" in user_prompt
-    assert "Omit optional fields" in user_prompt
-    assert "compact JSON" in user_prompt
-    assert "Do not put another measured property in `mechanisms`" in user_prompt
+    assert "before collection objective grouping" in user_prompt
+    assert "pair classification" in user_prompt
+    assert "`decisions` array" in user_prompt
+    assert "every input pair" in user_prompt
+    assert "boolean `equivalent`" in user_prompt
+    assert "SS316L and 316L stainless steel" in user_prompt
+    assert "SS316 and 316L stainless steel are different grades" in user_prompt
+    assert "porosity" in user_prompt
+    assert "relative density" in user_prompt
+    assert "reject" in user_prompt
+    assert "tensile strength and ultimate tensile strength" in user_prompt
+    assert "surface hardness and hardness" in user_prompt
+
+
+def test_paper_signal_reconciliation_prompt_defines_backend_owned_accounting():
+    _, user_prompt = build_paper_signal_reconciliation_prompt(
+        {
+            "document_id": "paper-1",
+            "signals": [
+                {
+                    "signal_id": "signal-variable",
+                    "signal_type": "variable",
+                    "label": "laser power",
+                    "sources": [
+                        {
+                            "source_kind": "block",
+                            "source_ref": "methods-1",
+                            "section_path": "Methods",
+                            "excerpt": "Laser power was varied from 150 to 250 W.",
+                        }
+                    ],
+                },
+                {
+                    "signal_id": "signal-outcome",
+                    "signal_type": "outcome",
+                    "label": "relative density",
+                    "sources": [
+                        {
+                            "source_kind": "block",
+                            "source_ref": "results-1",
+                            "section_path": "Results",
+                            "excerpt": "Relative density was recorded for each condition.",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    assert "membership adjudication" in user_prompt
+    assert "one bounded candidate neighborhood" in user_prompt
+    assert "exactly one outcome anchor" in user_prompt
+    assert "omitted paper signals are outside this batch" in user_prompt
+    assert "backend derives final whole-paper accounting" in user_prompt
+    assert "Do not link signals merely because they occur in the same paper" in user_prompt
+    assert "backend treats every omitted input signal as unresolved" in user_prompt
+    assert "never invent a reason merely to repeat an ID" in user_prompt
+    assert "copy only input `signal_id` values" in user_prompt
+    assert "same signal membership more than once" in user_prompt
+    assert "Methods variable and Results outcome" in user_prompt
+    assert "different experiments" in user_prompt.lower()
 
 
 class _FakeCompletions:
-    def __init__(self, content: str) -> None:
-        self._content = content
+    def __init__(self, content: str | list[str]) -> None:
+        self._contents = [content] if isinstance(content, str) else list(content)
         self.calls: list[dict[str, object]] = []
 
     def create(self, **kwargs):  # noqa: ANN003, ARG002
         self.calls.append(kwargs)
+        content = self._contents[min(len(self.calls) - 1, len(self._contents) - 1)]
         return SimpleNamespace(
+            model="fake-model",
+            usage=SimpleNamespace(
+                prompt_tokens=100,
+                completion_tokens=20,
+                total_tokens=120,
+            ),
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content=self._content),
+                    message=SimpleNamespace(content=content),
                 )
             ]
         )
 
 
 class _FakeChat:
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str | list[str]) -> None:
         self.completions = _FakeCompletions(content)
 
 
@@ -570,6 +339,12 @@ class _FakeBetaCompletions:
         if self._error is not None:
             raise self._error
         return SimpleNamespace(
+            model="fake-model",
+            usage=SimpleNamespace(
+                prompt_tokens=100,
+                completion_tokens=20,
+                total_tokens=120,
+            ),
             choices=[
                 SimpleNamespace(
                     message=SimpleNamespace(parsed=self._parsed, content=None),
@@ -591,7 +366,7 @@ class _FakeBeta:
 class _FakeOpenAIClient:
     def __init__(
         self,
-        content: str,
+        content: str | list[str],
         *,
         parsed: object | None = None,
         parse_error: Exception | None = None,
@@ -659,6 +434,50 @@ def test_domain_model_extractors_validate_json_text_response():
     }
     assert client.chat.completions.calls[0]["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
+    }
+
+
+def test_domain_model_extractors_record_provider_reported_usage() -> None:
+    document_client = _FakeOpenAIClient(
+        '{"doc_type":"experimental","confidence":0.9,"parsing_warnings":[]}'
+    )
+    facts_client = _FakeOpenAIClient(
+        '{"method_mentions":[],"material_mentions":[],"variant_mentions":[],'
+        '"condition_mentions":[],"baseline_mentions":[],"result_claims":[]}'
+    )
+    objective_client = _FakeOpenAIClient(
+        "unused",
+        parsed=StructuredFindingSynthesis(findings=[]),
+    )
+
+    with capture_llm_usage() as usage:
+        _document_profile_extractor(document_client).extract_document_profile(
+            {"title": "Paper", "abstract_or_lead_text": "Experimental study."}
+        )
+        _paper_facts_extractor(facts_client).extract_text_window_mentions(
+            {
+                "document_title": "Paper",
+                "document_profile": {"doc_type": "experimental"},
+                "text_window": {"text": "Laser power was 200 W."},
+            }
+        )
+        ObjectiveExtractor(
+            client=objective_client,
+            model="fake-model",
+        ).synthesize_findings(
+            {
+                "objective": {"question": "How does power affect density?"},
+                "result_set": {},
+            }
+        )
+
+    assert usage.execution_stats().model_usage == (
+        ModelUsage("fake-model", 3, TokenUsage(300, 60, 360)),
+    )
+    assert usage.prompt_versions == {
+        "document_profile": "document_profile.v1",
+        "finding_synthesis": "finding_synthesis.v12",
+        "paper_fact_text_window": "paper_fact_text_window.v1",
     }
 
 
@@ -735,70 +554,144 @@ def test_domain_model_extractors_defaults_to_provider_parse_mode(monkeypatch):
     }
 
 
-def test_domain_model_extractors_uses_provider_parse_for_research_objectives(
-    monkeypatch,
-):
-    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
-    parsed_objectives = StructuredResearchObjectives(
-        objectives=[
-            StructuredResearchObjective(
-                question="How does heat treatment affect yield strength?",
-                variables=["heat treatment"],
-                outcomes=["yield strength"],
-            )
-        ]
-    )
-    client = _FakeOpenAIClient("unused", parsed=parsed_objectives)
-    extractor = ObjectiveExtractor(client=client, model="fake-model")
+def test_objective_extractor_does_not_generate_backend_owned_objective_lineage():
+    assert not hasattr(ObjectiveExtractor, "discover_research_objectives")
 
-    objectives = extractor.discover_research_objectives(
-        {"collection_id": "col-1", "paper_skims": []}
-    )
 
-    assert objectives == parsed_objectives
+def test_paper_skim_prompt_token_estimate_counts_complete_schema_prompt():
+    client = _FakeOpenAIClient("unused")
+    extractor = ObjectiveExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="provider_parse",
+    )
+    payload = {
+        "document_id": "paper-1",
+        "title": "Density study",
+        "window_id": "results-1",
+        "window_role": "results",
+        "source_units": [
+            {
+                "source_unit_id": "source-unit-1",
+                "source_kind": "block",
+                "source_ref": "block-1",
+                "section_path": "Results",
+                "content": "Laser power was varied.",
+            }
+        ],
+    }
+
+    estimated_tokens = extractor.estimate_paper_skim_prompt_tokens(payload)
+
+    assert estimated_tokens > 1_000
+    assert client.beta.chat.completions.calls == []
     assert client.chat.completions.calls == []
-    assert len(client.beta.chat.completions.calls) == 1
-    parse_call = client.beta.chat.completions.calls[0]
-    assert parse_call["response_format"] is StructuredResearchObjectives
-    assert parse_call["max_completion_tokens"] == 2400
-    assert "JSON schema:" not in parse_call["messages"][1]["content"]
-    assert extractor.consume_last_trace()["extraction_mode"] == "provider_parse"
 
 
-def test_domain_model_extractors_falls_back_to_json_text_for_research_objectives(
-    monkeypatch,
-):
-    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
-    parsed_objectives = StructuredResearchObjectives(
-        objectives=[
-            StructuredResearchObjective(
-                question="How does heat treatment affect yield strength?",
-                variables=["heat treatment"],
-                outcomes=["yield strength"],
-            )
-        ]
+def test_signal_reconciliation_prompt_token_estimate_counts_complete_schema_prompt():
+    client = _FakeOpenAIClient("unused")
+    extractor = ObjectiveExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="provider_parse",
+    )
+    payload = {
+        "document_id": "paper-1",
+        "signals": [
+            {
+                "signal_id": "signal-variable",
+                "signal_type": "variable",
+                "label": "laser power",
+                "sources": [
+                    {
+                        "source_unit_id": "source-unit-000001",
+                        "section_path": "Methods",
+                        "excerpt": "Laser power was varied from 150 to 250 W.",
+                    }
+                ],
+            },
+            {
+                "signal_id": "signal-outcome",
+                "signal_type": "outcome",
+                "label": "relative density",
+                "sources": [
+                    {
+                        "source_unit_id": "source-unit-000010",
+                        "section_path": "Results",
+                        "excerpt": "Relative density was measured for each condition.",
+                    }
+                ],
+            },
+        ],
+    }
+
+    estimated_tokens = extractor.estimate_paper_signal_reconciliation_prompt_tokens(
+        payload
+    )
+
+    assert estimated_tokens > 500
+    assert client.beta.chat.completions.calls == []
+    assert client.chat.completions.calls == []
+
+
+def test_paper_skim_provider_length_finish_skips_whole_window_json_repair():
+    completion = SimpleNamespace(
+        usage=SimpleNamespace(completion_tokens=4096),
     )
     client = _FakeOpenAIClient(
-        parsed_objectives.model_dump_json(),
-        parse_error=RuntimeError("provider parse unavailable"),
+        '{"studies":[]}',
+        parse_error=LengthFinishReasonError(completion=completion),
     )
     extractor = ObjectiveExtractor(client=client, model="fake-model")
 
-    objectives = extractor.discover_research_objectives(
-        {"collection_id": "col-1", "paper_skims": []}
+    with pytest.raises(PaperSkimOutputSaturatedError):
+        extractor.extract_paper_skim(
+            {
+                "document_id": "paper-1",
+                "title": "Density study",
+                "window_id": "results-1",
+                "window_role": "results",
+                "source_units": [],
+            }
+        )
+
+    assert len(client.beta.chat.completions.calls) == 1
+    assert client.chat.completions.calls == []
+
+
+def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
+    client = _FakeOpenAIClient('{"studies":[]}')
+
+    def create_with_length_finish(**kwargs):  # noqa: ANN003
+        client.chat.completions.calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason="length",
+                    message=SimpleNamespace(content='{"studies":[]}'),
+                )
+            ]
+        )
+
+    client.chat.completions.create = create_with_length_finish
+    extractor = ObjectiveExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="json_text",
     )
 
-    assert objectives == parsed_objectives
-    assert len(client.beta.chat.completions.calls) == 1
+    with pytest.raises(PaperSkimOutputSaturatedError):
+        extractor.extract_paper_skim(
+            {
+                "document_id": "paper-1",
+                "title": "Density study",
+                "window_id": "results-1",
+                "window_role": "results",
+                "source_units": [],
+            }
+        )
+
     assert len(client.chat.completions.calls) == 1
-    text_call = client.chat.completions.calls[0]
-    assert text_call["response_format"] == {"type": "json_object"}
-    assert text_call["max_completion_tokens"] == 2400
-    assert "JSON schema:" in text_call["messages"][1]["content"]
-    assert (
-        extractor.consume_last_trace()["extraction_mode"]
-        == "provider_parse->json_text"
-    )
 
 
 def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace():
@@ -824,7 +717,7 @@ def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace()
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v7"
+    assert trace["prompt_version"] == "finding_synthesis.v12"
     assert trace["parsed_output"] == {"findings": []}
 
 
@@ -843,30 +736,96 @@ def test_domain_model_extractors_bounds_json_text_finding_synthesis_output():
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
 
 
-def test_finding_synthesis_schema_rejects_model_owned_result_assignment():
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("result_set_id", "result-set-1"),
+        ("statement", "Energy density increases relative density."),
+        ("direction", "increase"),
+        ("condition_boundary_evidence_ids", ["evidence-1"]),
+        ("supporting_evidence_ids", ["evidence-1"]),
+        ("contradicting_evidence_ids", ["evidence-2"]),
+    ),
+)
+def test_finding_synthesis_schema_rejects_backend_owned_fields(
+    field: str,
+    value: object,
+) -> None:
     payload = {
-        "result_set_id": "result-set-1",
-        "statement": "Energy density increases relative density.",
-        "direction": "increase",
         "assertion_strength": "associative",
-        "supporting_evidence_ids": ["evidence-1", "evidence-1"],
+        "context_evidence_ids": [],
+        "mechanisms": [],
+        field: value,
     }
 
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         StructuredFindingSynthesis.model_validate({"findings": [payload]})
 
 
-def test_finding_synthesis_prompt_uses_atomic_evidence_contract():
+def test_finding_synthesis_schema_accepts_only_model_judgment_fields() -> None:
+    parsed = StructuredFindingSynthesis.model_validate(
+        {
+            "findings": [
+                {
+                    "assertion_strength": "associative",
+                    "context_evidence_ids": ["mechanism-1"],
+                    "mechanisms": [
+                        {
+                            "source_term": "melt-pool stability",
+                            "relation_type": "associated_with",
+                            "target_term": "relative density",
+                            "direction": "increase",
+                            "assertion_strength": "associative",
+                            "supporting_evidence_ids": ["mechanism-1"],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert parsed.model_dump() == {
+        "findings": [
+            {
+                "assertion_strength": "associative",
+                "context_evidence_ids": ["mechanism-1"],
+                "mechanisms": [
+                    {
+                        "source_term": "melt-pool stability",
+                        "relation_type": "associated_with",
+                        "target_term": "relative density",
+                        "direction": "increase",
+                        "assertion_strength": "associative",
+                        "supporting_evidence_ids": ["mechanism-1"],
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def test_finding_synthesis_prompt_assigns_backend_and_model_ownership():
     payload = {
         "objective": {"question": "How does energy density affect density?"},
         "result_set": {
             "result_set_id": "result-set-1",
             "factors": ["laser power", "scan speed", "energy density"],
             "outcome": "maximum defect length",
+            "primary_direction": "decrease",
+            "total_evidence_count": 21,
             "result_evidence": [
                 {
                     "evidence_id": "evidence-1",
+                    "document_id": "paper-1",
                     "attribution_scope": "joint_effect",
+                }
+            ],
+            "document_evidence_summaries": [
+                {
+                    "document_id": "paper-1",
+                    "evidence_count": 21,
+                    "direction_counts": {"decrease": 21},
+                    "attribution_scope_counts": {"joint_effect": 21},
                 }
             ],
         },
@@ -880,207 +839,26 @@ def test_finding_synthesis_prompt_uses_atomic_evidence_contract():
 
     assert "INPUT SCHEMA" in system_prompt
     assert "DECISION PROCESS" in system_prompt
+    assert "HARD RULES" in system_prompt
+    assert "BOUNDARY EXAMPLES" in system_prompt
+    assert "OUTPUT CONTRACT" in system_prompt
     normalized_system_prompt = " ".join(system_prompt.split())
-    assert "paper_contributions" in normalized_system_prompt
-    assert "cannot become Evidence" in normalized_system_prompt
-    assert "result_evidence" in normalized_system_prompt
-    assert "context_evidence" in normalized_system_prompt
-    assert "exactly one reported outcome" in normalized_system_prompt
-    assert "do not output support or contradiction ids" in normalized_system_prompt
-    assert "Do not output factors, outcome, paper count" in normalized_system_prompt
-    assert "Joint factors must remain the complete factor set" in normalized_system_prompt
-    assert "Mechanisms explain the main Finding" in normalized_system_prompt
-    assert "Choose one direction that accounts for every" in user_prompt
-    assert "`laser power`" in user_prompt
-    assert "`scan speed`" in user_prompt
-    assert "`energy density`" in user_prompt
-    assert "`maximum defect length`" in user_prompt
-    assert "assertion_strength` must be `associative`" in user_prompt
-    assert "Joint changes in laser power, scan speed, and energy density" in user_prompt
+    assert "backend owns" in normalized_system_prompt
+    assert "primary_direction" in normalized_system_prompt
+    assert "model decides only" in normalized_system_prompt
+    assert "assertion_strength" in normalized_system_prompt
+    assert "context_evidence_ids" in normalized_system_prompt
+    assert "mechanisms" in normalized_system_prompt
+    assert "result_set_id" not in user_prompt
+    assert "statement" not in user_prompt
+    assert "condition_boundary_evidence_ids" not in user_prompt
+    assert "21" in user_prompt
+    assert "paper-1" in user_prompt
     mechanism_schema = StructuredFindingMechanism.model_json_schema()
     assert "supporting_evidence_ids" in mechanism_schema["properties"]
-    assert json.dumps(payload, ensure_ascii=False, separators=(",", ":")) in user_prompt
 
 
-def test_finding_synthesis_prompt_requires_specific_single_factor_result():
-    payload = {
-        "objective": {
-            "question": "How does build platform preheating affect microstructure?"
-        },
-        "result_set": {
-            "result_set_id": "result-set-preheating",
-            "factors": ["preheating build platform temperature"],
-            "outcome": "microstructure",
-            "result_evidence": [
-                {
-                    "evidence_id": "evidence-preheating",
-                    "changed_variables": [
-                        {
-                            "name": "preheating build platform temperature",
-                            "baseline_value": "P150",
-                            "target_value": "NP",
-                            "unit": None,
-                        }
-                    ],
-                    "reported_result": {
-                        "outcome": "microstructure",
-                        "value": "cellular structure",
-                        "unit": None,
-                        "direction": "mixed",
-                        "result_text": (
-                            "Comparing P150 with NP, cellular structure was seen "
-                            "in P150."
-                        ),
-                    },
-                    "attribution_scope": "isolated_effect",
-                }
-            ],
-        },
-        "paper_contributions": [],
-        "context_evidence": [],
-    }
-
-    _system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
-
-    assert (
-        "`preheating build platform temperature: P150 -> NP`" in user_prompt
-    )
-    assert "source-reported result detail `cellular structure`" in user_prompt
-    assert (
-        "For preheating build platform temperature, P150 versus NP showed a "
-        "difference in microstructure:" in user_prompt
-    )
-    assert "Never return a generic restatement" in user_prompt
-
-
-def test_finding_synthesis_prompt_excludes_excerpt_only_numbers_during_repair():
-    payload = {
-        "objective": {
-            "question": "How does laser power affect relative density?",
-            "variables": ["laser power"],
-            "outcomes": ["relative density"],
-        },
-        "result_set": {
-            "result_set_id": "result-set-density",
-            "factors": ["laser power"],
-            "outcome": "relative density",
-            "result_evidence": [
-                {
-                    "evidence_id": "density-160-200",
-                    "source_excerpt": (
-                        "At 160 W relative density was 96.1%, while at 200 W "
-                        "it reached 98.7%."
-                    ),
-                    "changed_variables": [
-                        {
-                            "name": "laser power",
-                            "baseline_value": 160,
-                            "target_value": 200,
-                            "unit": "W",
-                        }
-                    ],
-                    "reported_result": {
-                        "outcome": "relative density",
-                        "value": 98.7,
-                        "unit": "%",
-                        "direction": "increase",
-                        "result_text": "it reached 98.7%",
-                    },
-                    "attribution_scope": "isolated_effect",
-                }
-            ],
-        },
-        "paper_contributions": [],
-        "context_evidence": [],
-        "candidate_rejection": {
-            "reason": (
-                "candidate statement combines numeric values not bound to one "
-                "supporting Evidence record"
-            ),
-            "previous_candidate": {
-                "statement": (
-                    "Increasing laser power from 160 W to 200 W increased "
-                    "relative density from 96.1% to 98.7%."
-                )
-            },
-        },
-    }
-
-    system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
-    contract = f"{system_prompt}\n{user_prompt}"
-
-    assert "Numbers present only in `source_excerpt` are not allowed" in contract
-    assert "remove every number available only in `source_excerpt`" in user_prompt
-    assert "`changed_variables` endpoints" in user_prompt
-    assert "`reported_result.value` or `reported_result.result_text`" in user_prompt
-    assert "96.1" not in user_prompt
-    assert "previous_candidate" not in user_prompt
-    assert "98.7" in user_prompt
-
-
-def test_finding_synthesis_prompt_treats_multiple_intervals_as_condition_series():
-    payload = {
-        "objective": {
-            "question": "How does scan rotation affect yield strength?"
-        },
-        "result_set": {
-            "result_set_id": "result-set-rotation",
-            "factors": ["scan rotation"],
-            "outcome": "yield strength",
-            "result_evidence": [
-                {
-                    "evidence_id": "rotation-0-30",
-                    "changed_variables": [
-                        {
-                            "name": "scan rotation",
-                            "baseline_value": 0,
-                            "target_value": 30,
-                            "unit": "degree",
-                        }
-                    ],
-                    "reported_result": {
-                        "outcome": "yield strength",
-                        "value": 515,
-                        "unit": "MPa",
-                        "direction": "decrease",
-                    },
-                },
-                {
-                    "evidence_id": "rotation-30-45",
-                    "changed_variables": [
-                        {
-                            "name": "scan rotation",
-                            "baseline_value": 30,
-                            "target_value": 45,
-                            "unit": "degree",
-                        }
-                    ],
-                    "reported_result": {
-                        "outcome": "yield strength",
-                        "value": 545,
-                        "unit": "MPa",
-                        "direction": "increase",
-                    },
-                },
-            ],
-        },
-        "paper_contributions": [],
-        "context_evidence": [],
-    }
-
-    _system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
-
-    assert "one reported condition series" in user_prompt
-    assert (
-        "Across the reported condition series, scan rotation showed "
-        "heterogeneous or opposing responses in yield strength"
-    ) in user_prompt
-    assert "Do not include numeric values in the statement" in user_prompt
-    assert "heterogeneous or opposing across conditions" in user_prompt
-    assert "source-reported result detail `515`" not in user_prompt
-
-
-def test_finding_synthesis_prompt_carries_backend_semantic_rejection():
+def test_finding_synthesis_prompt_carries_bounded_semantic_repair():
     payload = {
         "objective": {"question": "How does energy density affect density?"},
         "result_set": {
@@ -1090,11 +868,11 @@ def test_finding_synthesis_prompt_carries_backend_semantic_rejection():
             "result_evidence": [],
         },
         "candidate_rejection": {
-            "reason": "candidate direction decrease has no supporting result Evidence",
+            "reason": "candidate references unavailable context Evidence",
             "previous_candidate": {
-                "result_set_id": "result-set-1",
-                "statement": "Energy density decreased density.",
-                "direction": "decrease",
+                "assertion_strength": "associative",
+                "context_evidence_ids": ["missing-context"],
+                "mechanisms": [],
             },
         },
     }
@@ -1105,7 +883,8 @@ def test_finding_synthesis_prompt_carries_backend_semantic_rejection():
     assert "correction guidance, not Evidence" in system_prompt
     assert "Semantic repair required:" in user_prompt
     assert payload["candidate_rejection"]["reason"] in user_prompt
-    assert "Re-read result_evidence for its exact direction" in user_prompt
+    assert "previous_candidate" not in user_prompt
+    assert "Return only ids present in `context_evidence`" in user_prompt
 
 
 def test_domain_model_extractors_allows_explicit_json_text_mode(monkeypatch):
@@ -1142,13 +921,25 @@ def test_domain_model_extractors_validates_paper_skim_response():
         """
         {
           "doc_role": "experimental",
-          "candidate_materials": ["316L stainless steel"],
-          "candidate_processes": ["LPBF", "heat treatment"],
-          "candidate_properties": ["corrosion"],
-          "changed_variables": ["temperature"],
-          "possible_objectives": [
-            "How does heat treatment affect corrosion resistance of LPBF 316L stainless steel?"
+          "studies": [
+            {
+              "experiment_label": "LPBF heat-treatment study",
+              "design_type": "experimental",
+              "claim_scope": "current_work",
+              "material_scope": ["316L stainless steel"],
+              "process_context": ["LPBF", "heat treatment"],
+              "relationships": [
+                {
+                  "varied_factors": ["heat treatment"],
+                  "outcome": "corrosion resistance",
+                  "source_unit_ids": ["window-source-1"],
+                  "confidence": 0.91
+                }
+              ],
+              "confidence": 0.91
+            }
           ],
+          "unresolved_signals": [],
           "evidence_density": "high",
           "confidence": 0.91,
           "warnings": []
@@ -1161,42 +952,249 @@ def test_domain_model_extractors_validates_paper_skim_response():
         {
             "document_id": "paper-1",
             "title": "LPBF 316L corrosion study",
-            "text_preview": "LPBF 316L was heat treated.",
-            "table_captions": [],
+            "source_units": [
+                {
+                    "source_unit_id": "window-source-1",
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "content": "LPBF 316L was heat treated.",
+                }
+            ],
         }
     )
 
     assert isinstance(skim, StructuredPaperSkim)
     assert skim.doc_role == "experimental"
-    assert skim.candidate_materials == ["316L stainless steel"]
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
+    assert skim.studies[0].material_scope == ["316L stainless steel"]
+    assert skim.studies[0].relationships[0].outcome == "corrosion resistance"
+    assert client.chat.completions.calls[0]["max_completion_tokens"] == 4096
 
 
-def test_paper_skim_preserves_real_multi_material_scope():
+def test_structured_paper_skim_rejects_duplicate_study_identities():
+    study = {
+        "experiment_label": "LPBF parameter study",
+        "design_type": "experimental",
+        "claim_scope": "current_work",
+        "material_scope": ["316L stainless steel"],
+        "process_context": ["LPBF"],
+        "relationships": [
+            {
+                "varied_factors": ["laser power"],
+                "outcome": "porosity",
+                "source_unit_ids": ["window-source-1"],
+            }
+        ],
+    }
+
+    with pytest.raises(ValidationError, match="duplicate study identities"):
+        StructuredPaperSkim.model_validate(
+            {
+                "studies": [study, study],
+            }
+        )
+
+
+def test_paper_skim_retries_duplicate_study_identities_before_returning():
+    first_study = {
+        "experiment_label": "LPBF parameter study",
+        "design_type": "experimental",
+        "claim_scope": "current_work",
+        "material_scope": ["316L stainless steel"],
+        "process_context": ["LPBF"],
+        "relationships": [
+            {
+                "varied_factors": ["laser power"],
+                "outcome": "porosity",
+                "source_unit_ids": ["window-source-1"],
+            }
+        ],
+    }
+    second_study = {
+        **first_study,
+        "relationships": [
+            {
+                **first_study["relationships"][0],
+                "source_unit_ids": ["window-source-2"],
+            }
+        ],
+    }
+    invalid = {
+        "doc_role": "experimental",
+        "studies": [first_study, second_study],
+        "unresolved_signals": [],
+        "evidence_density": "high",
+        "confidence": 0.9,
+        "warnings": [],
+    }
+    valid = {
+        **invalid,
+        "studies": [
+            {
+                **first_study,
+                "relationships": [
+                    {
+                        **first_study["relationships"][0],
+                        "source_unit_ids": [
+                            "window-source-1",
+                            "window-source-2",
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
+    extractor = _objective_extractor(client)
+
+    skim = extractor.extract_paper_skim(
+        {
+            "document_id": "paper-1",
+            "title": "LPBF parameter study",
+            "source_units": [
+                {
+                    "source_unit_id": "window-source-1",
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "content": "Laser power was varied and porosity was measured.",
+                },
+                {
+                    "source_unit_id": "window-source-2",
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "content": "Porosity results for the laser-power series.",
+                },
+            ],
+        }
+    )
+
+    assert len(skim.studies) == 1
+    assert len(client.chat.completions.calls) == 2
+    assert "duplicate study identities" in client.chat.completions.calls[1][
+        "messages"
+    ][-1]["content"]
+    assert "at most 12 IDs" in client.chat.completions.calls[1]["messages"][-1][
+        "content"
+    ]
+
+
+def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypatch):
+    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
+    first_study = {
+        "experiment_label": "LPBF parameter study",
+        "design_type": "experimental",
+        "claim_scope": "current_work",
+        "material_scope": ["316L stainless steel"],
+        "process_context": ["LPBF"],
+        "relationships": [
+            {
+                "varied_factors": ["laser power"],
+                "outcome": "porosity",
+                "source_unit_ids": ["window-source-1"],
+            }
+        ],
+    }
+    second_study = {
+        **first_study,
+        "relationships": [
+            {
+                **first_study["relationships"][0],
+                "source_unit_ids": ["window-source-2"],
+            }
+        ],
+    }
+    invalid = {
+        "doc_role": "experimental",
+        "studies": [first_study, second_study],
+    }
+    valid = {
+        **invalid,
+        "studies": [
+            {
+                **first_study,
+                "relationships": [
+                    {
+                        **first_study["relationships"][0],
+                        "source_unit_ids": [
+                            "window-source-1",
+                            "window-source-2",
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    client = _FakeOpenAIClient(
+        json.dumps(valid),
+        parsed=StructuredPaperSkim.model_validate(invalid),
+    )
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
+
+    skim = extractor.extract_paper_skim(
+        {
+            "document_id": "paper-1",
+            "title": "LPBF parameter study",
+            "source_units": [
+                {
+                    "source_unit_id": source_unit_id,
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "content": content,
+                }
+                for source_unit_id, content in (
+                    ("window-source-1", "Laser power was varied."),
+                    ("window-source-2", "Porosity was measured."),
+                )
+            ],
+        }
+    )
+
+    assert len(skim.studies) == 1
+    assert len(client.beta.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 1
+    assert (
+        extractor.consume_last_trace()["extraction_mode"]
+        == "provider_parse->json_text"
+    )
+
+
+def test_paper_skim_preserves_multi_material_multi_outcome_study():
     client = _FakeOpenAIClient(
         json.dumps(
             {
                 "doc_role": "experimental",
-                "candidate_materials": [
-                    "Al7075",
-                    "Hastelloy X",
-                    "H13 tool steel",
-                    "CoCr",
+                "studies": [
+                    {
+                        "experiment_label": "base plate preheating study",
+                        "design_type": "experimental",
+                        "claim_scope": "current_work",
+                        "material_scope": [
+                            "Al7075",
+                            "Hastelloy X",
+                            "H13 tool steel",
+                            "CoCr",
+                        ],
+                        "process_context": ["selective laser melting"],
+                        "relationships": [
+                            {
+                                "varied_factors": [
+                                    "base plate preheating temperature"
+                                ],
+                                "outcome": outcome,
+                                "source_unit_ids": ["window-source-1"],
+                                "confidence": 0.92,
+                            }
+                            for outcome in (
+                                "part density",
+                                "crack formation",
+                                "internal stresses",
+                                "microstructure",
+                                "mechanical properties",
+                            )
+                        ],
+                        "confidence": 0.92,
+                    }
                 ],
-                "candidate_processes": ["selective laser melting"],
-                "candidate_properties": [
-                    "part density",
-                    "crack formation",
-                    "internal stresses",
-                    "microstructure",
-                    "mechanical properties",
-                ],
-                "changed_variables": ["base plate preheating temperature"],
-                "possible_objectives": [
-                    "How does base plate preheating temperature affect part density, "
-                    "crack formation, internal stresses, microstructure, and mechanical "
-                    "properties across Al7075, Hastelloy X, H13 tool steel, and CoCr?"
-                ],
+                "unresolved_signals": [],
                 "evidence_density": "high",
                 "confidence": 0.92,
                 "warnings": [
@@ -1212,39 +1210,85 @@ def test_paper_skim_preserves_real_multi_material_scope():
         {
             "document_id": "paper-1",
             "title": "Application of base plate preheating during selective laser melting",
-            "text_preview": "Base plate preheating was applied to four materials.",
+            "source_units": [
+                {
+                    "source_unit_id": "window-source-1",
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "content": "Base plate preheating was applied to four materials.",
+                }
+            ],
         }
     )
 
-    assert skim.candidate_materials == [
+    study = skim.studies[0]
+    assert study.material_scope == [
         "Al7075",
         "Hastelloy X",
         "H13 tool steel",
         "CoCr",
     ]
-    assert len(skim.possible_objectives[0]) <= 320
+    assert [relationship.outcome for relationship in study.relationships] == [
+        "part density",
+        "crack formation",
+        "internal stresses",
+        "microstructure",
+        "mechanical properties",
+    ]
     assert len(skim.warnings[0]) <= 240
 
 
-def test_paper_skim_bounds_recoverable_model_verbosity_before_validation():
-    client = _FakeOpenAIClient(
-        json.dumps(
+def test_paper_skim_retries_oversized_study_without_truncating_relationships():
+    invalid = {
+        "doc_role": "experimental",
+        "studies": [
             {
-                "doc_role": "experimental",
-                "candidate_materials": [f"material-{index}" for index in range(10)],
-                "candidate_processes": ["selective laser melting"],
-                "candidate_properties": ["density"],
-                "changed_variables": ["preheating temperature"],
-                "possible_objectives": [
-                    "How does preheating temperature affect density under the reported "
-                    + "material and process conditions " * 20
-                    + "?"
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "material_scope": [f"material-{index}" for index in range(9)],
+                "process_context": ["selective laser melting"],
+                "relationships": [
+                    {
+                        "varied_factors": ["preheating temperature"],
+                        "outcome": "density",
+                        "source_unit_ids": ["window-source-1"],
+                        "confidence": 0.8,
+                    }
                 ],
-                "evidence_density": "medium",
                 "confidence": 0.8,
-                "warnings": ["bounded warning " * 30],
             }
-        )
+        ],
+        "unresolved_signals": [],
+        "evidence_density": "medium",
+        "confidence": 0.8,
+        "warnings": [],
+    }
+    valid = {
+        **invalid,
+        "studies": [
+            {
+                **invalid["studies"][0],
+                "material_scope": [f"material-{index}" for index in range(8)],
+            },
+            {
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "material_scope": ["material-9"],
+                "process_context": ["selective laser melting"],
+                "relationships": [
+                    {
+                        "varied_factors": ["scan speed"],
+                        "outcome": "porosity",
+                        "source_unit_ids": ["window-source-1"],
+                        "confidence": 0.75,
+                    }
+                ],
+                "confidence": 0.75,
+            },
+        ],
+    }
+    client = _FakeOpenAIClient(
+        [json.dumps(invalid), json.dumps(valid)]
     )
     extractor = _objective_extractor(client)
 
@@ -1252,219 +1296,250 @@ def test_paper_skim_bounds_recoverable_model_verbosity_before_validation():
         {
             "document_id": "paper-1",
             "title": "Multi-material preheating study",
-            "text_preview": "Preheating was evaluated across several materials.",
+            "source_units": [
+                {
+                    "source_unit_id": "window-source-1",
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "content": "Preheating was evaluated across several materials.",
+                }
+            ],
         }
     )
 
-    assert skim.candidate_materials == [f"material-{index}" for index in range(8)]
-    assert len(skim.possible_objectives) == 1
-    assert len(skim.possible_objectives[0]) <= 320
-    assert skim.possible_objectives[0].endswith("?")
-    assert len(skim.warnings[0]) <= 240
-    assert len(client.chat.completions.calls) == 1
+    assert len(skim.studies) == 2
+    assert skim.studies[0].material_scope == [
+        f"material-{index}" for index in range(8)
+    ]
+    assert skim.studies[1].relationships[0].varied_factors == ["scan speed"]
+    assert len(client.chat.completions.calls) == 2
 
 
-def test_domain_model_extractors_validates_research_objective_response():
+def test_domain_model_extractors_validates_paper_signal_reconciliation():
     client = _FakeOpenAIClient(
-        """
-        {
-          "objectives": [
+        json.dumps(
             {
-              "question": "How does heat treatment affect corrosion resistance?",
-              "material_scope": ["316L stainless steel"],
-              "variables": ["heat treatment"],
-              "outcomes": ["corrosion resistance"],
-              "constraints": ["LPBF"],
-              "requested_comparator": "compare as-built and heat-treated corrosion behavior",
-              "seed_document_ids": ["paper-1"],
-              "excluded_document_ids": [],
-              "confidence": 0.88,
-              "reason": "paper skims share the same comparison axis"
+                "studies": [
+                    {
+                        "relationships": [
+                            {
+                                "signal_ids": [
+                                    "signal-variable",
+                                    "signal-outcome",
+                                ],
+                                "confidence": 0.89,
+                            }
+                        ]
+                    }
+                ],
+                "unresolved_signals": [],
             }
-          ]
-        }
-        """
-    )
-    extractor = _objective_extractor(client)
-
-    objectives = extractor.discover_research_objectives(
-        {
-            "collection_id": "col-1",
-            "paper_skims": [],
-        }
-    )
-
-    assert isinstance(objectives, StructuredResearchObjectives)
-    assert objectives.objectives[0].question.startswith("How does heat treatment")
-    text_call = client.chat.completions.calls[0]
-    assert text_call["max_completion_tokens"] == 2400
-    assert text_call["response_format"] == {"type": "json_object"}
-
-
-def test_domain_model_extractors_retries_reversed_research_objective_roles():
-    invalid = json.dumps(
-        {
-            "objectives": [
-                {
-                    "question": "How does porosity affect mechanical properties?",
-                    "variables": ["Laser power", "Scan speed"],
-                    "outcomes": ["Porosity"],
-                }
-            ]
-        }
-    )
-    valid = json.dumps(
-        {
-            "objectives": [
-                {
-                    "question": "How does porosity affect mechanical properties?",
-                    "variables": ["Porosity"],
-                    "outcomes": ["Mechanical properties"],
-                }
-            ]
-        }
-    )
-    client = _FakeOpenAIClient(invalid)
-    responses = iter((invalid, valid))
-
-    def create(**kwargs):  # noqa: ANN003
-        client.chat.completions.calls.append(kwargs)
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=next(responses)),
-                )
-            ]
         )
-
-    client.chat.completions.create = create
+    )
     extractor = _objective_extractor(client)
 
-    objectives = extractor.discover_research_objectives(
-        {"collection_id": "col-1", "paper_skims": []}
+    reconciliation = extractor.reconcile_paper_signals(
+        {
+            "document_id": "paper-1",
+            "signals": [
+                {"signal_id": "signal-variable", "signal_type": "variable"},
+                {"signal_id": "signal-outcome", "signal_type": "outcome"},
+            ],
+        }
     )
 
-    assert objectives.objectives[0].variables == ["Porosity"]
-    assert objectives.objectives[0].outcomes == ["Mechanical properties"]
+    assert isinstance(reconciliation, StructuredPaperSignalReconciliation)
+    assert reconciliation.studies[0].relationships[0].signal_ids == [
+        "signal-variable",
+        "signal-outcome",
+    ]
+    assert client.chat.completions.calls[0]["max_completion_tokens"] == 4096
+
+
+@pytest.mark.parametrize(
+    ("context_field", "variable_context", "outcome_context"),
+    [
+        ("material_scope", ["316L stainless steel"], ["Ti-6Al-4V"]),
+        ("process_context", ["laser powder bed fusion"], ["heat treatment"]),
+        ("sample_context", ["as-built specimen"], ["annealed specimen"]),
+        ("test_context", ["tensile test"], ["corrosion test"]),
+    ],
+)
+def test_paper_signal_reconciliation_repairs_conflicting_contexts(
+    context_field,
+    variable_context,
+    outcome_context,
+):
+    invalid = {
+        "studies": [
+            {
+                "relationships": [
+                    {
+                        "signal_ids": ["signal-variable", "signal-outcome"],
+                        "confidence": 0.89,
+                    }
+                ]
+            }
+        ],
+        "unresolved_signals": [],
+    }
+    repaired = {
+        "studies": [],
+        "unresolved_signals": [
+            {
+                "signal_id": "signal-variable",
+                "reason": "The signals describe different experimental contexts.",
+            },
+            {
+                "signal_id": "signal-outcome",
+                "reason": "The signals describe different experimental contexts.",
+            },
+        ],
+    }
+    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(repaired)])
+    extractor = _objective_extractor(client)
+
+    reconciliation = extractor.reconcile_paper_signals(
+        {
+            "document_id": "paper-1",
+            "signals": [
+                {
+                    "signal_id": "signal-variable",
+                    "signal_type": "variable",
+                    context_field: variable_context,
+                },
+                {
+                    "signal_id": "signal-outcome",
+                    "signal_type": "outcome",
+                    context_field: outcome_context,
+                },
+            ],
+        }
+    )
+
+    assert reconciliation.studies == []
+    assert len(reconciliation.unresolved_signals) == 2
     assert len(client.chat.completions.calls) == 2
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
-    assert "question roles" in repair_prompt
-    assert "delete the missing label from the list" in repair_prompt
-    assert "put the full missing label verbatim" in repair_prompt
+    assert "context-compatible" in repair_prompt
+    assert context_field in repair_prompt
 
 
-def test_domain_model_extractors_preserves_valid_objectives_during_role_repair():
-    valid_objective = {
-        "question": "How does heat treatment affect yield strength?",
-        "variables": ["heat treatment"],
-        "outcomes": ["yield strength"],
-    }
-    invalid_objective = {
-        "question": "How does porosity affect mechanical properties?",
-        "variables": ["laser power"],
-        "outcomes": ["porosity"],
-    }
-    repaired_objective = {
-        "question": "How does porosity affect mechanical properties?",
-        "variables": ["porosity"],
-        "outcomes": ["mechanical properties"],
-    }
-    first_response = json.dumps(
-        {"objectives": [valid_objective, invalid_objective]}
-    )
-    second_response = json.dumps(
+def test_provider_parsed_signal_reconciliation_repairs_conflicting_contexts(
+    monkeypatch,
+):
+    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
+    invalid = StructuredPaperSignalReconciliation.model_validate(
         {
-            "objectives": [
-                valid_objective,
-                invalid_objective,
-                repaired_objective,
-            ],
-            "`objectives.1`": "still invalid",
+            "studies": [
+                {
+                    "relationships": [
+                        {
+                            "signal_ids": ["signal-variable", "signal-outcome"],
+                            "confidence": 0.89,
+                        }
+                    ]
+                }
+            ]
         }
     )
-    client = _FakeOpenAIClient(first_response)
-    responses = iter((first_response, second_response))
+    repaired = {
+        "studies": [],
+        "unresolved_signals": [
+            {
+                "signal_id": signal_id,
+                "reason": "The signals describe different material contexts.",
+            }
+            for signal_id in ("signal-variable", "signal-outcome")
+        ],
+    }
+    client = _FakeOpenAIClient(json.dumps(repaired), parsed=invalid)
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
 
-    def create(**kwargs):  # noqa: ANN003
-        client.chat.completions.calls.append(kwargs)
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(message=SimpleNamespace(content=next(responses)))
-            ]
-        )
-
-    client.chat.completions.create = create
-    extractor = _objective_extractor(client)
-
-    objectives = extractor.discover_research_objectives(
-        {"collection_id": "col-1", "paper_skims": []}
-    )
-
-    assert [objective.model_dump() for objective in objectives.objectives] == [
-        StructuredResearchObjective.model_validate(valid_objective).model_dump(),
-        StructuredResearchObjective.model_validate(repaired_objective).model_dump(),
-    ]
-    retry_messages = client.chat.completions.calls[1]["messages"]
-    assert retry_messages[-2] == {"role": "assistant", "content": first_response}
-    assert "Return corrections only for invalid objectives" in retry_messages[-1][
-        "content"
-    ]
-
-
-def test_domain_model_extractors_repairs_repeated_trailing_scope_role_errors():
-    invalid = json.dumps(
+    reconciliation = extractor.reconcile_paper_signals(
         {
-            "objectives": [
+            "document_id": "paper-1",
+            "signals": [
                 {
-                    "question": (
-                        "How does energy density affect the relative density of "
-                        "316L stainless steel processed via selective laser melting?"
-                    ),
-                    "variables": ["energy density"],
-                    "outcomes": ["relative density"],
+                    "signal_id": "signal-variable",
+                    "signal_type": "variable",
                     "material_scope": ["316L stainless steel"],
-                    "process_scope": ["Selective laser melting (SLM)"],
-                    "constraints": ["document_id: paper-1"],
-                    "seed_document_ids": ["paper-1"],
-                }
-            ]
-        }
-    )
-    client = _FakeOpenAIClient(invalid)
-    extractor = _objective_extractor(client)
-
-    objectives = extractor.discover_research_objectives(
-        {"collection_id": "col-1", "paper_skims": []}
-    )
-
-    assert len(client.chat.completions.calls) == 2
-    assert len(objectives.objectives) == 1
-    repaired = objectives.objectives[0]
-    assert repaired.question == "How does energy density affect relative density?"
-    assert repaired.variables == ["energy density"]
-    assert repaired.outcomes == ["relative density"]
-
-
-def test_domain_model_extractors_rejects_repeated_reversed_research_objective_roles():
-    invalid = json.dumps(
-        {
-            "objectives": [
+                },
                 {
-                    "question": "How does porosity affect mechanical properties?",
-                    "variables": ["Laser power", "Scan speed"],
-                    "outcomes": ["Porosity"],
-                }
-            ]
+                    "signal_id": "signal-outcome",
+                    "signal_type": "outcome",
+                    "material_scope": ["Ti-6Al-4V"],
+                },
+            ],
         }
     )
-    client = _FakeOpenAIClient(invalid)
+
+    assert reconciliation.studies == []
+    assert len(reconciliation.unresolved_signals) == 2
+    assert len(client.beta.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 1
+    repair_prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
+    assert "context-compatible" in repair_prompt
+    assert "material_scope" in repair_prompt
+
+
+def test_unrepaired_signal_context_conflict_keeps_valid_relationships():
+    invalid = {
+        "studies": [
+            {
+                "relationships": [
+                    {
+                        "signal_ids": ["signal-variable", "signal-outcome"],
+                        "confidence": 0.9,
+                    },
+                    {
+                        "signal_ids": [
+                            "signal-conflicting-variable",
+                            "signal-outcome",
+                        ],
+                        "confidence": 0.8,
+                    },
+                ]
+            }
+        ],
+        "unresolved_signals": [],
+    }
+    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(invalid)])
     extractor = _objective_extractor(client)
 
-    with pytest.raises(ValidationError, match="question roles"):
-        extractor.discover_research_objectives(
-            {"collection_id": "col-1", "paper_skims": []}
-        )
+    reconciliation = extractor.reconcile_paper_signals(
+        {
+            "document_id": "paper-1",
+            "signals": [
+                {
+                    "signal_id": "signal-variable",
+                    "signal_type": "variable",
+                    "process_context": ["laser powder bed fusion"],
+                },
+                {
+                    "signal_id": "signal-conflicting-variable",
+                    "signal_type": "variable",
+                    "process_context": ["heat treatment"],
+                },
+                {
+                    "signal_id": "signal-outcome",
+                    "signal_type": "outcome",
+                    "process_context": ["laser powder bed fusion"],
+                },
+            ],
+        }
+    )
 
+    assert len(reconciliation.studies) == 1
+    assert len(reconciliation.studies[0].relationships) == 1
+    assert reconciliation.studies[0].relationships[0].signal_ids == [
+        "signal-variable",
+        "signal-outcome",
+    ]
+    assert [
+        signal.signal_id for signal in reconciliation.unresolved_signals
+    ] == ["signal-conflicting-variable"]
+    assert "process_context" in reconciliation.unresolved_signals[0].reason
     assert len(client.chat.completions.calls) == 2
 
 
@@ -1472,14 +1547,8 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
     client = _FakeOpenAIClient(
         """
         {
-          "axis_groups": [
-            {
-              "axis_type": "variable",
-              "canonical": "scanning strategy",
-              "aliases": ["scanning strategy", "scan strategy"],
-              "confidence": 0.95,
-              "reason": "same process variable phrased two ways"
-            }
+          "decisions": [
+            {"pair_id": "axis_pair_0001", "equivalent": true}
           ]
         }
         """
@@ -1489,142 +1558,71 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
     canonicalization_plan = extractor.canonicalize_research_objective_axes(
         {
             "collection_id": "col-1",
-            "paper_skims": [],
-            "axis_candidates": {
-                "material": [],
-                "variable": ["scanning strategy", "scan strategy"],
-                "outcome": [],
-            },
+            "axis_pairs": [
+                {
+                    "pair_id": "axis_pair_0001",
+                    "axis_type": "variable",
+                    "left": "scanning strategy",
+                    "right": "scan strategy",
+                }
+            ],
         }
     )
 
     assert isinstance(canonicalization_plan, StructuredAxisCanonicalizationPlan)
-    assert canonicalization_plan.axis_groups[0].canonical == "scanning strategy"
+    assert [item.model_dump() for item in canonicalization_plan.decisions] == [
+        {"pair_id": "axis_pair_0001", "equivalent": True}
+    ]
 
 
-def test_domain_model_extractors_validates_research_objective_merge_response():
-    client = _FakeOpenAIClient(
-        """
+def test_axis_canonicalization_repairs_ungrounded_and_overlapping_groups():
+    invalid = json.dumps(
         {
-          "merged_objectives": [
-            {
-              "source_objective_ids": ["obj-1", "obj-2"],
-              "question": "How does energy density affect yield strength and elongation?",
-              "material_scope": ["316L stainless steel"],
-              "variables": ["energy density"],
-              "outcomes": ["yield strength", "elongation"],
-              "constraints": ["Selective Laser Melting"],
-              "requested_comparator": "compare SLM parameter effects on mechanical properties",
-              "confidence": 0.88,
-              "reason": "the source objectives describe the same mechanical comparison"
-            }
-          ]
+            "decisions": [
+                {"pair_id": "axis_pair_9999", "equivalent": True},
+                {"pair_id": "axis_pair_9999", "equivalent": False},
+            ]
         }
-        """
     )
+    repaired = json.dumps(
+        {
+            "decisions": [
+                {"pair_id": "axis_pair_0001", "equivalent": True},
+                {"pair_id": "axis_pair_0002", "equivalent": False},
+            ]
+        }
+    )
+    client = _FakeOpenAIClient([invalid, repaired])
     extractor = _objective_extractor(client)
 
-    merge_plan = extractor.merge_research_objectives(
+    plan = extractor.canonicalize_research_objective_axes(
         {
             "collection_id": "col-1",
-            "paper_skims": [],
-            "candidate_objectives": [],
-        }
-    )
-
-    assert isinstance(merge_plan, StructuredObjectiveMergePlan)
-    assert merge_plan.merged_objectives[0].source_objective_ids == ["obj-1", "obj-2"]
-
-
-def test_structured_objective_merge_group_rejects_reversed_question_roles():
-    with pytest.raises(ValidationError, match="question roles"):
-        StructuredObjectiveMergeGroup.model_validate(
-            {
-                "source_objective_ids": ["obj-1"],
-                "question": "How does porosity affect laser power?",
-                "variables": ["laser power"],
-                "outcomes": ["porosity"],
-                "reason": "kept separate",
-            }
-        )
-
-
-def test_domain_model_extractors_retries_reversed_objective_merge_roles():
-    invalid = json.dumps(
-        {
-            "merged_objectives": [
+            "axis_pairs": [
                 {
-                    "source_objective_ids": ["obj-1"],
-                    "question": "How does porosity affect laser power?",
-                    "variables": ["laser power"],
-                    "outcomes": ["porosity"],
-                    "reason": "kept separate",
-                }
-            ]
-        }
-    )
-    valid = json.dumps(
-        {
-            "merged_objectives": [
+                    "pair_id": "axis_pair_0001",
+                    "axis_type": "material",
+                    "left": "316L stainless steel",
+                    "right": "SS316L",
+                },
                 {
-                    "source_objective_ids": ["obj-1"],
-                    "question": "How does laser power affect porosity?",
-                    "variables": ["laser power"],
-                    "outcomes": ["porosity"],
-                    "reason": "kept separate",
-                }
-            ]
+                    "pair_id": "axis_pair_0002",
+                    "axis_type": "variable",
+                    "left": "scan speed",
+                    "right": "scanning speed",
+                },
+            ],
         }
     )
-    client = _FakeOpenAIClient(invalid)
-    responses = iter((invalid, valid))
 
-    def create(**kwargs):  # noqa: ANN003
-        client.chat.completions.calls.append(kwargs)
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=next(responses)))]
-        )
-
-    client.chat.completions.create = create
-    extractor = _objective_extractor(client)
-
-    merge_plan = extractor.merge_research_objectives(
-        {"collection_id": "col-1", "paper_skims": [], "candidate_objectives": []}
-    )
-
-    assert merge_plan.merged_objectives[0].variables == ["laser power"]
     assert len(client.chat.completions.calls) == 2
+    assert [item.model_dump() for item in plan.decisions] == [
+        {"pair_id": "axis_pair_0001", "equivalent": True},
+        {"pair_id": "axis_pair_0002", "equivalent": False},
+    ]
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
-    assert "question roles" in repair_prompt
-
-
-def test_domain_model_extractors_rejects_repeated_reversed_objective_merge_roles():
-    invalid = json.dumps(
-        {
-            "merged_objectives": [
-                {
-                    "source_objective_ids": ["obj-1"],
-                    "question": "How does porosity affect laser power?",
-                    "variables": ["laser power"],
-                    "outcomes": ["porosity"],
-                    "reason": "kept separate",
-                }
-            ]
-        }
-    )
-    client = _FakeOpenAIClient(invalid)
-    extractor = _objective_extractor(client)
-
-    with pytest.raises(ValidationError, match="question roles"):
-        extractor.merge_research_objectives(
-            {
-                "collection_id": "col-1",
-                "paper_skims": [],
-                "candidate_objectives": [],
-            }
-        )
-
-    assert len(client.chat.completions.calls) == 2
+    assert "axis pair classification" in repair_prompt
+    assert "equivalent=false" in repair_prompt
 
 
 def test_domain_model_extractors_validates_objective_paper_frame_response():
@@ -1638,9 +1636,8 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
           "changed_variables": ["heat treatment"],
           "measured_property_scope": ["corrosion"],
           "test_environment_scope": ["3.5 wt.% NaCl"],
-          "relevant_sections": ["Results"],
-          "relevant_tables": ["table-1"],
-          "excluded_tables": ["table-2"]
+          "relevant_source_unit_ids": ["frame-section-results"],
+          "excluded_source_unit_ids": ["frame-table-2"]
         }
         """
     )
@@ -1650,15 +1647,406 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
         {
             "collection_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
-            "paper_skim": {"document_id": "paper-1"},
-            "section_snippets": [{"section_label": "Results"}],
-            "table_summaries": [{"table_id": "table-1"}, {"table_id": "table-2"}],
+            "paper_prior": {"doc_role": "experimental"},
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "results",
+                    "section_label": "Results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                },
+                {
+                    "source_unit_id": "frame-table-2",
+                    "source_kind": "table",
+                    "source_ref": "table-2",
+                    "caption_text": "Composition only.",
+                },
+            ],
         }
     )
 
-    assert isinstance(frame, StructuredPaperContributionDraft)
+    assert isinstance(frame, StructuredPaperFrameBatch)
     assert frame.relevance == "high"
-    assert frame.relevant_tables == ["table-1"]
+    assert frame.relevant_source_unit_ids == ["frame-section-results"]
+    assert frame.excluded_source_unit_ids == ["frame-table-2"]
+    assert frame.source_accounting_origin == "model"
+    assert frame.source_accounting_errors == ()
+    frame_schema = StructuredPaperFrameBatch.model_json_schema()
+    assert "source_accounting_origin" not in frame_schema["properties"]
+    assert "source_accounting_errors" not in frame_schema["properties"]
+    assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
+
+
+def test_objective_paper_frame_json_repair_rejects_unknown_source_id():
+    invalid = json.dumps(
+        {
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "relevant_source_unit_ids": ["frame-section-results"],
+            "excluded_source_unit_ids": ["frame-unknown"],
+        }
+    )
+    repaired = json.dumps(
+        {
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "relevant_source_unit_ids": ["frame-section-results"],
+            "excluded_source_unit_ids": ["frame-table-background"],
+        }
+    )
+    client = _FakeOpenAIClient([invalid, repaired])
+    extractor = _objective_extractor(client)
+
+    frame = extractor.assess_objective_paper(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                },
+                {
+                    "source_unit_id": "frame-table-background",
+                    "source_kind": "table",
+                    "source_ref": "table-background",
+                    "caption_text": "Nominal composition.",
+                },
+            ],
+        }
+    )
+
+    assert frame.relevant_source_unit_ids == ["frame-section-results"]
+    assert frame.excluded_source_unit_ids == ["frame-table-background"]
+    assert frame.source_accounting_origin == "repair"
+    assert "unknown_source_unit_ids=['frame-unknown']" in (
+        frame.source_accounting_errors[0]
+    )
+    assert len(client.chat.completions.calls) == 2
+    assert "account for every source-unit id" in client.chat.completions.calls[1][
+        "messages"
+    ][-1]["content"]
+    assert "frame-section-results" in client.chat.completions.calls[1]["messages"][-1][
+        "content"
+    ]
+    assert "frame-table-background" in client.chat.completions.calls[1]["messages"][
+        -1
+    ]["content"]
+    assert "frame-unknown" in client.chat.completions.calls[1]["messages"][-1][
+        "content"
+    ]
+
+
+def test_objective_paper_frame_repairs_omitted_source_unit():
+    incomplete = json.dumps(
+        {
+            "relevance": "irrelevant",
+            "paper_role": "irrelevant",
+            "relevant_source_unit_ids": [
+                "frame-section-1",
+                "frame-section-2",
+                "frame-section-3",
+                "frame-section-4",
+                "frame-section-5",
+                "frame-section-6",
+                "frame-section-7",
+            ],
+            "excluded_source_unit_ids": [],
+        }
+    )
+    repaired = json.dumps(
+        {
+            "relevance": "uncertain",
+            "paper_role": "uncertain",
+            "relevant_source_unit_ids": [
+                "frame-section-1",
+                "frame-section-2",
+                "frame-section-3",
+                "frame-section-4",
+                "frame-section-5",
+                "frame-section-6",
+                "frame-section-7",
+            ],
+            "excluded_source_unit_ids": ["frame-section-8"],
+        }
+    )
+    client = _FakeOpenAIClient([incomplete, repaired])
+    extractor = _objective_extractor(client)
+    source_unit_ids = [f"frame-section-{position}" for position in range(1, 9)]
+
+    frame = extractor.assess_objective_paper(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "source_units": [
+                {
+                    "source_unit_id": source_unit_id,
+                    "source_kind": "section",
+                    "source_ref": f"section-{position}",
+                    "text": "Potentially relevant scientific evidence.",
+                }
+                for position, source_unit_id in enumerate(source_unit_ids, start=1)
+            ],
+        }
+    )
+
+    assert frame.relevance == "uncertain"
+    assert frame.relevant_source_unit_ids == source_unit_ids[:-1]
+    assert frame.excluded_source_unit_ids == [source_unit_ids[-1]]
+    assert frame.source_accounting_origin == "repair"
+    assert "missing_source_unit_ids=['frame-section-8']" in (
+        frame.source_accounting_errors[0]
+    )
+    assert len(client.chat.completions.calls) == 2
+    repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "missing_source_unit_ids=['frame-section-8']" in repair_prompt
+
+
+@pytest.mark.parametrize(
+    "invalid_partition",
+    [
+        {
+            "relevant_source_unit_ids": ["frame-section-results"],
+            "excluded_source_unit_ids": ["frame-unknown"],
+        },
+        {
+            "relevant_source_unit_ids": [
+                "frame-section-results",
+                "frame-section-results",
+            ],
+            "excluded_source_unit_ids": ["frame-table-background"],
+        },
+        {
+            "relevant_source_unit_ids": ["frame-section-results"],
+            "excluded_source_unit_ids": [
+                "frame-section-results",
+                "frame-table-background",
+            ],
+        },
+    ],
+    ids=["unknown", "duplicate", "overlap"],
+)
+def test_objective_paper_frame_still_rejects_invalid_ids_after_repair(
+    invalid_partition,
+):
+    response = json.dumps(
+        {
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            **invalid_partition,
+        }
+    )
+    client = _FakeOpenAIClient([response, response])
+    extractor = _objective_extractor(client)
+
+    with pytest.raises((ValueError, ValidationError)):
+        extractor.assess_objective_paper(
+            {
+                "collection_id": "col-1",
+                "objective": {
+                    "question": "How does heat treatment affect corrosion?"
+                },
+                "source_units": [
+                    {
+                        "source_unit_id": "frame-section-results",
+                        "source_kind": "section",
+                        "source_ref": "results",
+                        "text": "Heat treatment changed corrosion resistance.",
+                    },
+                    {
+                        "source_unit_id": "frame-table-background",
+                        "source_kind": "table",
+                        "source_ref": "table-background",
+                        "caption_text": "Nominal composition.",
+                    },
+                ],
+            }
+        )
+
+    assert len(client.chat.completions.calls) == 2
+
+
+def test_provider_parsed_objective_paper_frame_repairs_omission(
+    monkeypatch,
+):
+    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
+    incomplete = StructuredPaperFrameBatch.model_validate(
+        {
+            "relevance": "irrelevant",
+            "paper_role": "irrelevant",
+            "relevant_source_unit_ids": ["frame-section-results"],
+            "excluded_source_unit_ids": [],
+        }
+    )
+    repaired = json.dumps(
+        {
+            "relevance": "low",
+            "paper_role": "supporting_background",
+            "relevant_source_unit_ids": ["frame-section-results"],
+            "excluded_source_unit_ids": ["frame-table-background"],
+        }
+    )
+    client = _FakeOpenAIClient(repaired, parsed=incomplete)
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
+
+    frame = extractor.assess_objective_paper(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                },
+                {
+                    "source_unit_id": "frame-table-background",
+                    "source_kind": "table",
+                    "source_ref": "table-background",
+                    "caption_text": "Nominal composition.",
+                },
+            ],
+        }
+    )
+
+    assert frame.relevance == "low"
+    assert frame.relevant_source_unit_ids == ["frame-section-results"]
+    assert frame.excluded_source_unit_ids == ["frame-table-background"]
+    assert frame.source_accounting_origin == "repair"
+    assert "missing_source_unit_ids=['frame-table-background']" in (
+        frame.source_accounting_errors[0]
+    )
+    assert len(client.beta.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 1
+
+
+def test_provider_parsed_objective_paper_frame_repairs_source_accounting(
+    monkeypatch,
+):
+    monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
+    invalid = StructuredPaperFrameBatch.model_validate(
+        {
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "relevant_source_unit_ids": ["frame-section-results"],
+            "excluded_source_unit_ids": ["frame-unknown"],
+        }
+    )
+    repaired = {
+        "relevance": "high",
+        "paper_role": "primary_experiment",
+        "relevant_source_unit_ids": ["frame-section-results"],
+        "excluded_source_unit_ids": ["frame-table-background"],
+    }
+    client = _FakeOpenAIClient(json.dumps(repaired), parsed=invalid)
+    extractor = ObjectiveExtractor(client=client, model="fake-model")
+
+    frame = extractor.assess_objective_paper(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                },
+                {
+                    "source_unit_id": "frame-table-background",
+                    "source_kind": "table",
+                    "source_ref": "table-background",
+                    "caption_text": "Nominal composition.",
+                },
+            ],
+        }
+    )
+
+    assert frame.excluded_source_unit_ids == ["frame-table-background"]
+    assert frame.source_accounting_origin == "repair"
+    assert "unknown_source_unit_ids=['frame-unknown']" in (
+        frame.source_accounting_errors[0]
+    )
+    assert len(client.beta.chat.completions.calls) == 1
+    assert len(client.chat.completions.calls) == 1
+    repair_prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
+    assert "account for every source-unit id" in repair_prompt
+    assert "frame-section-results" in repair_prompt
+    assert "frame-table-background" in repair_prompt
+    assert (
+        extractor.consume_last_trace()["extraction_mode"]
+        == "provider_parse->json_text"
+    )
+
+
+def test_objective_paper_frame_prompt_defines_bounded_source_accounting():
+    _, user_prompt = build_objective_paper_frame_prompt(
+        {
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "paper_prior": {"doc_role": "experimental"},
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "results",
+                    "section_label": "Results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                }
+            ],
+        }
+    )
+
+    assert "bounded source-candidate classification" in user_prompt
+    assert "one partial neighborhood" in user_prompt
+    assert "`collection_id`: backend scope identity" in user_prompt
+    assert "`document_profile`: backend document-type metadata" in user_prompt
+    assert "table-row chunks" in user_prompt
+    assert "Every input `source_unit_id`" in user_prompt
+    assert "relevant_source_unit_ids" in user_prompt
+    assert "excluded_source_unit_ids" in user_prompt
+    assert "Do not infer whole-paper irrelevance" in user_prompt
+    assert '"relevant_source_unit_ids":["unit-methods"]' in user_prompt
+    assert '"excluded_source_unit_ids":["unit-composition"]' in user_prompt
+
+
+def test_objective_paper_frame_prompt_token_estimate_counts_complete_schema():
+    client = _FakeOpenAIClient("unused")
+    extractor = _objective_extractor(client)
+    payload = {
+        "objective": {"question": "How does heat treatment affect corrosion?"},
+        "paper_prior": {"doc_role": "experimental"},
+        "source_units": [
+            {
+                "source_unit_id": "frame-section-results",
+                "source_kind": "section",
+                "source_ref": "results",
+                "section_label": "Results",
+                "text": "Heat treatment changed corrosion resistance.",
+            }
+        ],
+    }
+
+    estimated_tokens = extractor.estimate_objective_paper_frame_prompt_tokens(payload)
+    system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
+    prompt_without_schema = json.dumps(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    prompt_tokens_without_schema = len(
+        tiktoken.get_encoding("cl100k_base").encode(prompt_without_schema)
+    )
+
+    assert estimated_tokens > prompt_tokens_without_schema + 100
+    assert client.beta.chat.completions.calls == []
+    assert client.chat.completions.calls == []
 
 
 def test_domain_model_extractors_validates_objective_evidence_routes_response():
@@ -1843,6 +2231,90 @@ def test_domain_model_extractors_validates_objective_evidence_response():
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
 
 
+def test_objective_evidence_grounding_repair_keeps_original_source_prompt():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "extractions": [
+            {
+              "evidence_role": "direct_result",
+              "changed_variables": [
+                {
+                  "name": "laser power",
+                  "baseline_value": 100,
+                  "target_value": 140,
+                  "unit": "W"
+                }
+              ],
+              "comparison": {
+                "baseline_label": "100 W",
+                "target_label": "140 W",
+                "axis_names": ["laser power"],
+                "comparable": true,
+                "incomparability_reasons": []
+              },
+              "reported_result": {
+                "outcome": "relative density",
+                "value": 98.05,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": "Relative density increased to 98.05%."
+              },
+              "attribution_scope": "isolated_effect",
+              "scientific_context": {},
+              "resolution_status": "resolved",
+              "confidence": 0.9
+            }
+          ]
+        }
+        """
+    )
+    extractor = _objective_extractor(client)
+    payload = {
+        "collection_id": "col-1",
+        "objective": {"question": "How does laser power affect density?"},
+        "evidence_route": {
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+        },
+        "source": {
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "text": (
+                "At laser powers of 100 W and 140 W, relative density "
+                "increased to 98.05%."
+            ),
+        },
+    }
+    invalid_extraction = {
+        "changed_variables": [
+            {
+                "name": "laser power",
+                "baseline_value": 100,
+                "target_value": 160,
+                "unit": "W",
+            }
+        ]
+    }
+
+    parsed = extractor.extract_objective_evidence(
+        payload,
+        invalid_extraction=invalid_extraction,
+        validation_errors=(
+            "changed_variables[0].target_value=160 is not grounded in SOURCE",
+        ),
+    )
+
+    assert parsed.extractions[0].changed_variables[0].target_value == 140
+    assert len(client.chat.completions.calls) == 1
+    user_prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
+    assert payload["source"]["text"] in user_prompt
+    assert "TASK\nRepair one invalid Evidence extraction" in user_prompt
+    assert "changed_variables[0].target_value=160" in user_prompt
+    assert '"target_value":160' in user_prompt
+    assert "Correct only values supported by SOURCE" in user_prompt
+
+
 def test_structured_objective_evidence_normalizes_compact_context_attributes():
     context = StructuredEvidenceContext.model_validate(
         {
@@ -1883,39 +2355,41 @@ def test_structured_objective_evidence_normalizes_compact_context_attributes():
     assert json.loads(str(context.test[0].value)) == {"method": "Archimedes"}
 
 
-def test_structured_objective_evidence_repairs_single_variable_joint_effect():
-    extraction = StructuredEvidenceExtraction.model_validate(
-        {
-            "evidence_role": "direct_result",
-            "changed_variables": [
-                {
-                    "name": "energy density",
-                    "baseline_value": 70,
-                    "target_value": 150,
-                    "unit": "J/mm3",
-                }
-            ],
-            "comparison": {
-                "baseline_label": "70 J/mm3",
-                "target_label": "150 J/mm3",
-                "axis_names": ["energy density"],
-                "comparable": True,
-            },
-            "reported_result": {
-                "outcome": "relative density",
-                "value": 99.5,
-                "unit": "%",
-                "direction": "increase",
-                "result_text": "Relative density increased to 99.5%.",
-            },
-            "attribution_scope": "joint_effect",
-            "scientific_context": {},
-            "resolution_status": "resolved",
-            "confidence": 0.9,
-        }
-    )
-
-    assert extraction.attribution_scope == "isolated_effect"
+def test_structured_objective_evidence_rejects_single_variable_joint_effect():
+    with pytest.raises(
+        ValidationError,
+        match="joint effect requires multiple changed variables",
+    ):
+        StructuredEvidenceExtraction.model_validate(
+            {
+                "evidence_role": "direct_result",
+                "changed_variables": [
+                    {
+                        "name": "energy density",
+                        "baseline_value": 70,
+                        "target_value": 150,
+                        "unit": "J/mm3",
+                    }
+                ],
+                "comparison": {
+                    "baseline_label": "70 J/mm3",
+                    "target_label": "150 J/mm3",
+                    "axis_names": ["energy density"],
+                    "comparable": True,
+                },
+                "reported_result": {
+                    "outcome": "relative density",
+                    "value": 99.5,
+                    "unit": "%",
+                    "direction": "increase",
+                    "result_text": "Relative density increased to 99.5%.",
+                },
+                "attribution_scope": "joint_effect",
+                "scientific_context": {},
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
 
 
 def test_structured_objective_evidence_rejects_repeated_variable_intervals():
@@ -1961,39 +2435,41 @@ def test_structured_objective_evidence_rejects_repeated_variable_intervals():
         )
 
 
-def test_structured_objective_evidence_downgrades_unbound_experimental_attribution():
-    extraction = StructuredEvidenceExtraction.model_validate(
-        {
-            "evidence_role": "direct_result",
-            "changed_variables": [
-                {
-                    "name": "energy density",
-                    "baseline_value": None,
-                    "target_value": 150,
-                    "unit": "J/mm3",
-                }
-            ],
-            "comparison": {
-                "baseline_label": "lower energy density",
-                "target_label": "150 J/mm3",
-                "axis_names": ["energy density"],
-                "comparable": True,
-            },
-            "reported_result": {
-                "outcome": "relative density",
-                "value": 99.5,
-                "unit": "%",
-                "direction": "increase",
-                "result_text": "Relative density increased to 99.5%.",
-            },
-            "attribution_scope": "isolated_effect",
-            "scientific_context": {},
-            "resolution_status": "partial",
-            "confidence": 0.8,
-        }
-    )
-
-    assert extraction.attribution_scope == "association_only"
+def test_structured_objective_evidence_rejects_unbound_experimental_attribution():
+    with pytest.raises(
+        ValidationError,
+        match="experimental attribution requires baseline and target values",
+    ):
+        StructuredEvidenceExtraction.model_validate(
+            {
+                "evidence_role": "direct_result",
+                "changed_variables": [
+                    {
+                        "name": "energy density",
+                        "baseline_value": None,
+                        "target_value": 150,
+                        "unit": "J/mm3",
+                    }
+                ],
+                "comparison": {
+                    "baseline_label": "lower energy density",
+                    "target_label": "150 J/mm3",
+                    "axis_names": ["energy density"],
+                    "comparable": True,
+                },
+                "reported_result": {
+                    "outcome": "relative density",
+                    "value": 99.5,
+                    "unit": "%",
+                    "direction": "increase",
+                    "result_text": "Relative density increased to 99.5%.",
+                },
+                "attribution_scope": "isolated_effect",
+                "scientific_context": {},
+                "resolution_status": "partial",
+                "confidence": 0.8,
+            }
+        )
 
 
 def test_domain_model_extractors_ignores_top_level_prompt_echo_for_evidence():
@@ -2073,7 +2549,7 @@ def test_domain_model_extractors_rejects_unknown_top_level_evidence_fields():
             }
         )
 
-    assert len(client.chat.completions.calls) == 2
+    assert len(client.chat.completions.calls) == 3
 
 
 def test_domain_model_extractors_rejects_prompt_only_evidence_echo():
@@ -2110,14 +2586,23 @@ def test_domain_model_extractors_rejects_prompt_only_evidence_echo():
             }
         )
 
-    assert len(client.chat.completions.calls) == 2
+    assert len(client.chat.completions.calls) == 3
     assert "only echoed the input fields" in client.chat.completions.calls[1][
         "messages"
     ][-1]["content"]
 
 
-def test_structured_objective_evidence_rejects_effect_without_variable_change():
-    with pytest.raises(ValidationError, match="requires changed variable values"):
+@pytest.mark.parametrize(
+    "attribution_scope",
+    ("isolated_effect", "association_only"),
+)
+def test_structured_objective_evidence_rejects_unchanged_factor_as_changed_variable(
+    attribution_scope,
+):
+    with pytest.raises(
+        ValidationError,
+        match="changed variables require distinct baseline and target values",
+    ):
         StructuredEvidenceExtraction.model_validate(
             {
                 "evidence_role": "direct_result",
@@ -2141,7 +2626,7 @@ def test_structured_objective_evidence_rejects_effect_without_variable_change():
                     "direction": "no_change",
                     "result_text": "Density was 98.9% in condition B.",
                 },
-                "attribution_scope": "isolated_effect",
+                "attribution_scope": attribution_scope,
                 "scientific_context": {},
                 "resolution_status": "resolved",
                 "confidence": 0.9,
@@ -2205,11 +2690,12 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
             },
         }
     )
+    contract = " ".join(system_prompt.split())
 
-    assert "Extract at most one objective-relevant fact" in system_prompt
-    assert "`SOURCE` is the only scientific authority" in system_prompt
-    assert "Return at most one extraction" in system_prompt
-    assert "one top-level key: `extractions`" in system_prompt
+    assert "Extract at most one objective-relevant fact" in contract
+    assert "`SOURCE` is the only scientific authority" in contract
+    assert "Return at most one extraction" in contract
+    assert "one top-level key: `extractions`" in contract
     assert "1.43x10^6 C/s for P150" in prompt
     assert "1.65x10^6 C/s for NP" in prompt
     assert "OUTPUT JSON:" in prompt
@@ -2218,16 +2704,16 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     assert "document_state" not in prompt
     assert "must not become evidence" not in prompt
     assert "must not be copied" not in prompt
-    assert "Identify every changed" in system_prompt
-    assert "exact source group labels" in system_prompt
-    assert "absent, off, or without condition to numeric 0" in system_prompt
-    assert "one baseline-to-target comparison interval" in system_prompt
-    assert "Never repeat a changed-variable name" in system_prompt
-    assert "choose one complete source-supported pair" in system_prompt
-    assert "Context source" in system_prompt
-    assert "numeric `confidence` for every extraction" in system_prompt
-    assert "Generic composition or background" in system_prompt
-    assert "Unrelated composition example" in system_prompt
+    assert "Identify every changed" in contract
+    assert "exact source group labels" in contract
+    assert "absent, off, or without condition to numeric 0" in contract
+    assert "one baseline-to-target comparison interval" in contract
+    assert "Never repeat a changed-variable name" in contract
+    assert "choose one complete source-supported pair" in contract
+    assert "Context source" in contract
+    assert "numeric `confidence` for every extraction" in contract
+    assert "Generic composition or background" in contract
+    assert "Unrelated composition example" in contract
 
 
 def test_domain_model_extractors_rejects_backend_bound_objective_evidence_fields():
@@ -2541,6 +3027,7 @@ def test_objective_evidence_prompt_requires_verbatim_outcome_bound_result_text()
     assert "mixes current work with cited literature" in contract
     assert "`incomparability_reasons` must be empty" in contract
     assert "Conditions from cited literature" in contract
+    assert "identical baseline and target values are fixed context" in contract
     assert "TASK MODEL" in system_prompt
     assert "INPUT SCHEMA" in system_prompt
     assert "DECISION PROCESS" in system_prompt
@@ -2550,7 +3037,9 @@ def test_objective_evidence_prompt_requires_verbatim_outcome_bound_result_text()
     assert "Do not output source excerpts" not in system_prompt
 
 
-def test_domain_model_extractors_retries_with_structured_validation_error(monkeypatch):
+def test_domain_model_extractors_repairs_layered_structured_validation_errors(
+    monkeypatch,
+):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     invalid = json.dumps(
         {
@@ -2613,8 +3102,15 @@ def test_domain_model_extractors_retries_with_structured_validation_error(monkey
             ]
         }
     )
+    still_invalid_payload = json.loads(valid)
+    still_invalid_comparison = still_invalid_payload["extractions"][0]["comparison"]
+    still_invalid_comparison["comparable"] = False
+    still_invalid_comparison["incomparability_reasons"] = [
+        "comparison conditions are incomplete"
+    ]
+    still_invalid = json.dumps(still_invalid_payload)
     client = _FakeOpenAIClient(invalid)
-    responses = iter((invalid, valid))
+    responses = iter((invalid, still_invalid, valid))
 
     def create(**kwargs):  # noqa: ANN003
         client.chat.completions.calls.append(kwargs)
@@ -2627,7 +3123,11 @@ def test_domain_model_extractors_retries_with_structured_validation_error(monkey
         )
 
     client.chat.completions.create = create
-    extractor = ObjectiveExtractor(client=client, model="fake-model")
+    extractor = ObjectiveExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="json_text",
+    )
 
     parsed = extractor.extract_objective_evidence(
         {
@@ -2647,15 +3147,195 @@ def test_domain_model_extractors_retries_with_structured_validation_error(monkey
     )
 
     assert parsed.extractions[0].comparison is not None
-    assert len(client.chat.completions.calls) == 2
+    assert len(client.chat.completions.calls) == 3
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
     assert "experimental attribution requires comparison" in repair_prompt
-    assert "Return at most one schema-valid extraction" in repair_prompt
-    assert "distinct changed-variable name" in repair_prompt
-    assert "Never repeat a changed-variable name" in repair_prompt
-    assert "one complete source-supported pair" in repair_prompt
+    invalid_item = json.dumps(
+        json.loads(invalid)["extractions"][0],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    assert "INVALID EXTRACTION" in repair_prompt
+    assert invalid_item in repair_prompt
+    assert "Correct only values supported by SOURCE" in repair_prompt
+    assert "do not invent comparison endpoints" in repair_prompt
+    assert "Return only {\"extractions\":[<one corrected extraction>]}" in repair_prompt
+    assert "fixed context, not a changed variable" in repair_prompt
+    assert "choose one complete source-supported interval" in repair_prompt
+    assert "never merge separate intervals" in repair_prompt
     assert "For finding synthesis" not in repair_prompt
+    second_repair_prompt = client.chat.completions.calls[2]["messages"][-1][
+        "content"
+    ]
+    assert "incomparable evidence cannot be attributed" in second_repair_prompt
+    still_invalid_item = json.dumps(
+        json.loads(still_invalid)["extractions"][0],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    assert still_invalid_item in second_repair_prompt
 
+
+def test_objective_evidence_normalizes_fixed_endpoint_and_joint_scope_without_repair():
+    invalid = json.dumps(
+        {
+            "extractions": [
+                {
+                    "evidence_role": "direct_result",
+                    "changed_variables": [
+                        {
+                            "name": "laser power",
+                            "baseline_value": 100,
+                            "target_value": 140,
+                            "unit": "W",
+                        },
+                        {
+                            "name": "scan speed",
+                            "baseline_value": 100,
+                            "target_value": 100,
+                            "unit": "mm/s",
+                        },
+                    ],
+                    "comparison": {
+                        "baseline_label": "100 W at 100 mm/s",
+                        "target_label": "140 W at 100 mm/s",
+                        "axis_names": ["laser power", "scan speed"],
+                        "comparable": True,
+                    },
+                    "reported_result": {
+                        "outcome": "density",
+                        "value": 98.05,
+                        "unit": "%",
+                        "direction": "increase",
+                        "result_text": "the average density was found to be 98.05%",
+                    },
+                    "attribution_scope": "joint_effect",
+                    "scientific_context": {},
+                    "resolution_status": "resolved",
+                    "confidence": 0.9,
+                }
+            ]
+        }
+    )
+    client = _FakeOpenAIClient(invalid)
+    extractor = ObjectiveExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="json_text",
+    )
+
+    parsed = extractor.extract_objective_evidence(
+        {
+            "objective": {
+                "question": "How do laser power and scan speed affect density?"
+            },
+            "evidence_route": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+            },
+            "source": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "text": (
+                    "At 100 and 140 W with scan speed fixed at 100 mm/s, "
+                    "the average density was found to be 98.05%."
+                ),
+            },
+        }
+    )
+
+    assert [item.name for item in parsed.extractions[0].changed_variables] == [
+        "laser power"
+    ]
+    assert parsed.extractions[0].attribution_scope == "isolated_effect"
+    assert parsed.extractions[0].comparison is not None
+    assert parsed.extractions[0].comparison.axis_names == ["laser power"]
+    assert len(client.chat.completions.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("variable_name", "endpoint"),
+    (
+        ("scan speed", ""),
+        ("scan speed", []),
+        ("scan speed", {}),
+        ("", "fixed"),
+    ),
+)
+def test_objective_evidence_does_not_normalize_invalid_fixed_endpoints(
+    variable_name,
+    endpoint,
+):
+    payload = {
+        "extractions": [
+            {
+                "changed_variables": [
+                    {
+                        "name": variable_name,
+                        "baseline_value": endpoint,
+                        "target_value": endpoint,
+                    }
+                ],
+                "comparison": {"axis_names": [variable_name]},
+                "attribution_scope": "joint_effect",
+            }
+        ]
+    }
+
+    normalized = ObjectiveExtractor._normalize_fixed_objective_evidence_conditions(
+        payload
+    )
+
+    assert normalized == payload
+
+
+def test_objective_evidence_repair_prompt_requires_role_result_consistency():
+    repair_prompt = ObjectiveExtractor._objective_evidence_repair_instruction(
+        repair_detail=(
+            "extractions.0: Value error, context evidence cannot report an "
+            "experimental result"
+        ),
+        invalid_extraction={
+            "evidence_role": "mechanism_context",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "density",
+                "value": 98.05,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": "the average density was found to be 98.05%",
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {},
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+    )
+
+    assert (
+        "If `reported_result` is non-null, use `direct_result` or "
+        "`contradictory_result` as `evidence_role`" in repair_prompt
+    )
+    assert (
+        "If keeping a context role, set `reported_result` to null" in repair_prompt
+    )
+    assert (
+        "`isolated_effect` and `joint_effect` require distinct baseline and target "
+        "values" in repair_prompt
+    )
+    assert (
+        "`comparison.axis_names` must exactly match the distinct "
+        "`changed_variables` names" in repair_prompt
+    )
+    assert (
+        "If `comparison.comparable` is false, use `not_attributable`" in repair_prompt
+    )
+    assert (
+        "Remove each fixed parameter from `changed_variables` and "
+        "`comparison.axis_names`" in repair_prompt
+    )
+    assert "A fixed control does not make the comparison incomparable" in repair_prompt
 
 
 def test_domain_model_extractors_validates_lightweight_table_batch_mentions():

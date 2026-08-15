@@ -1,1 +1,1 @@
-"""Application-level workflow orchestration."""
+"""Application-level pipeline execution."""

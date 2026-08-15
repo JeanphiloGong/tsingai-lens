@@ -186,7 +186,7 @@ At the shared architecture level:
   decisions
 
 The shared system should keep its stable meaning in root docs and leave
-execution detail to module-owned plans.
+execution detail to GitHub issues and pull requests.
 
 ## Related Docs
 
@@ -196,4 +196,4 @@ execution detail to module-owned plans.
 - [RFC Paper-Facts Primary Domain Model and Derived Comparison Views](../decisions/rfc-paper-facts-primary-domain-model.md)
 - [Lens Evidence-First Direction and Conditional Protocol Generation](../decisions/rfc-evidence-first-literature-parsing.md)
 - [System Overview](../overview/system-overview.md)
-- [Backend Evidence-First Parsing Refactor Plan](../../backend/docs/plans/historical/evidence-first-parsing-plan.md)
+- [Backend Architecture Overview](../../backend/docs/architecture/overview.md)

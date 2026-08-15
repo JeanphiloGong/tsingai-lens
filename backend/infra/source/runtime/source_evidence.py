@@ -8,7 +8,6 @@ import pandas as pd
 
 from domain.source import (
     SourceBlock,
-    SourceCharRange,
     SourceTableCell,
     SourceTableRow,
     extract_unit_hint,
@@ -76,8 +75,6 @@ def build_blocks(
             "block_order",
             "text_unit_ids",
             "page",
-            "bbox",
-            "char_range",
             "heading_path",
             "heading_level",
         ],
@@ -105,7 +102,6 @@ def build_table_rows(
             "row_index",
             "row_text",
             "page",
-            "bbox",
             "heading_path",
         ],
     )
@@ -134,8 +130,6 @@ def build_table_cells(
             "cell_text",
             "header_path",
             "page",
-            "bbox",
-            "char_range",
             "unit_hint",
         ],
     )
@@ -158,7 +152,6 @@ def _extract_blocks_from_text(
     rows: list[dict[str, Any]] = []
     heading_stack: list[str] = []
     block_order = 1
-    search_start = 0
     normalized_title = _normalize_line(title)
     normalized_first_line = _normalize_line(lines[0]) if lines else None
 
@@ -171,8 +164,6 @@ def _extract_blocks_from_text(
                 text=title,
                 text_unit_ids=[],
                 page=None,
-                bbox=None,
-                char_range=None,
                 heading_path=title,
                 heading_level=0,
             )
@@ -181,7 +172,6 @@ def _extract_blocks_from_text(
 
     for line in lines:
         if _FIGURE_TITLE_PATTERN.match(line):
-            char_range, search_start = _find_char_range(text, line, search_start)
             rows.append(
                 _build_block_row(
                     paper_id=paper_id,
@@ -190,8 +180,6 @@ def _extract_blocks_from_text(
                     text=line,
                     text_unit_ids=[],
                     page=None,
-                    bbox=None,
-                    char_range=char_range,
                     heading_path=_serialize_heading_path(heading_stack),
                     heading_level=None,
                 )
@@ -200,7 +188,6 @@ def _extract_blocks_from_text(
             continue
 
         if _TABLE_TITLE_PATTERN.match(line):
-            char_range, search_start = _find_char_range(text, line, search_start)
             rows.append(
                 _build_block_row(
                     paper_id=paper_id,
@@ -209,8 +196,6 @@ def _extract_blocks_from_text(
                     text=line,
                     text_unit_ids=[],
                     page=None,
-                    bbox=None,
-                    char_range=char_range,
                     heading_path=_serialize_heading_path(heading_stack),
                     heading_level=None,
                 )
@@ -219,7 +204,6 @@ def _extract_blocks_from_text(
             continue
 
         if _split_table_line(line) is not None:
-            _, search_start = _find_char_range(text, line, search_start)
             continue
 
         heading_path = _serialize_heading_path(heading_stack)
@@ -232,7 +216,6 @@ def _extract_blocks_from_text(
         else:
             block_type = _classify_text_block_type(line)
 
-        char_range, search_start = _find_char_range(text, line, search_start)
         rows.append(
             _build_block_row(
                 paper_id=paper_id,
@@ -241,8 +224,6 @@ def _extract_blocks_from_text(
                 text=line,
                 text_unit_ids=text_unit_ids if block_type != "title" else [],
                 page=None,
-                bbox=None,
-                char_range=char_range,
                 heading_path=heading_path,
                 heading_level=heading_level,
             )
@@ -312,8 +293,6 @@ def _build_block_row(
     text: str,
     text_unit_ids: list[str],
     page: int | None,
-    bbox: str | None,
-    char_range: str | None,
     heading_path: str | None,
     heading_level: int | None,
 ) -> dict[str, Any]:
@@ -325,33 +304,9 @@ def _build_block_row(
         block_order=block_order,
         text_unit_ids=tuple(text_unit_ids),
         page=page,
-        bbox=None,
-        char_range=SourceCharRange.from_value(char_range),
         heading_path=heading_path,
         heading_level=heading_level,
     ).to_record()
-
-
-def _find_char_range(
-    source_text: str,
-    fragment: str,
-    start_index: int,
-) -> tuple[str | None, int]:
-    if not source_text or not fragment:
-        return (None, start_index)
-
-    index = source_text.find(fragment, max(start_index, 0))
-    if index < 0 and start_index > 0:
-        index = source_text.find(fragment)
-    if index < 0:
-        return (None, start_index)
-
-    end_index = index + len(fragment)
-    return (
-        SourceCharRange(index, end_index).to_json(),
-        end_index,
-    )
-
 
 def _looks_like_structural_heading(line: str) -> bool:
     compact = " ".join(str(line or "").split())

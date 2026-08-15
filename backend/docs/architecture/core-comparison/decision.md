@@ -93,12 +93,8 @@ only durable comparison truth.
 - no hidden semantic rebuild inside graph, report, or export readers
 - no generic service layer added only to rename existing ownership
 
-## Historical Lineage
-
-This page replaces the old plan page as the current semantic authority.
-
-Use [`../../plans/historical/comparable-result/core-comparable-result-domain-model-plan.md`](../../plans/historical/comparable-result/core-comparable-result-domain-model-plan.md)
-only when you need the original decision narrative and rollout context.
+This page is the current semantic authority. Earlier rollout details remain
+available in Git history when they are needed for archaeology.
 
 ## Related Docs
 

@@ -447,7 +447,6 @@ function normalizeListItem(value: unknown): ResultListItem | null {
 				record.evidence_quote ??
 				record.source_quote ??
 				record.quote ??
-				record.quote_span ??
 				provenanceRecord?.source_value_text
 		),
 		source_type: toOptionalText(

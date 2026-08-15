@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+DOCUMENT_PROFILE_PROMPT_VERSION = "document_profile.v1"
+
 _DOCUMENT_PROFILE_SYSTEM_PROMPT = """
 You are doing document triage for a materials-literature backend.
 

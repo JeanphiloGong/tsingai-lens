@@ -76,17 +76,183 @@ class ObjectivePaperSkim(Base):
     source_document_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     skim_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    source_filename: Mapped[str | None] = mapped_column(Text, nullable=True)
     doc_role: Mapped[str] = mapped_column(String(64), nullable=False)
-    candidate_materials: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    candidate_processes: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    candidate_properties: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    changed_variables: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
-    possible_objectives: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     evidence_density: Mapped[str] = mapped_column(String(64), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     warnings: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+
+
+class ObjectivePaperSourceUnitCoverage(Base):
+    __tablename__ = "objective_paper_source_unit_coverage"
+    __table_args__ = (
+        CheckConstraint(
+            "source_kind IN ('document', 'block', 'table', 'table_row', 'figure')",
+            name="source_kind_valid",
+        ),
+        CheckConstraint(
+            "status IN ('relationship_emitted', 'unresolved_signal_emitted', "
+            "'no_study_signal', 'extraction_failed')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "(status IN ('relationship_emitted', 'unresolved_signal_emitted') "
+            "AND reason IS NULL) OR "
+            "(status IN ('no_study_signal', 'extraction_failed') "
+            "AND reason IS NOT NULL)",
+            name="reason_valid",
+        ),
+        ForeignKeyConstraint(
+            ["build_id", "source_document_id"],
+            [
+                "objective_paper_skims.build_id",
+                "objective_paper_skims.source_document_id",
+            ],
+            name="fk_objective_paper_source_unit_coverage_skim",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["collection_id", "build_id", "source_document_id"],
+            [
+                "source_documents.collection_id",
+                "source_documents.build_id",
+                "source_documents.source_document_id",
+            ],
+            name="fk_objective_paper_source_unit_coverage_source_document",
+            ondelete="CASCADE",
+        ),
+    )
+
+    build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_document_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    source_unit_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    coverage_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    window_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ObjectivePaperStudy(Base):
+    __tablename__ = "objective_paper_studies"
+    __table_args__ = (
+        CheckConstraint(
+            "design_type IN ('experimental', 'modeling', 'observational', "
+            "'mixed', 'uncertain')",
+            name="design_type_valid",
+        ),
+        CheckConstraint(
+            "claim_scope IN ('current_work', 'synthesis', 'background', 'uncertain')",
+            name="claim_scope_valid",
+        ),
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
+        ForeignKeyConstraint(
+            ["build_id", "source_document_id"],
+            [
+                "objective_paper_skims.build_id",
+                "objective_paper_skims.source_document_id",
+            ],
+            name="fk_objective_paper_studies_skim",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["collection_id", "build_id", "source_document_id"],
+            [
+                "source_documents.collection_id",
+                "source_documents.build_id",
+                "source_documents.source_document_id",
+            ],
+            name="fk_objective_paper_studies_source_document",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "collection_id",
+            "build_id",
+            "source_document_id",
+            "study_id",
+            name="uq_objective_paper_studies_collection_identity",
+        ),
+    )
+
+    build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_document_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    study_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    collection_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    study_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    design_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    claim_scope: Mapped[str] = mapped_column(String(32), nullable=False)
+    experiment_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    material_scope: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    process_context: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    sample_context: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    test_context: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    comparator: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fixed_conditions: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False
+    )
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class ObjectivePaperStudyRelationship(Base):
+    __tablename__ = "objective_paper_study_relationships"
+    __table_args__ = (
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
+        ForeignKeyConstraint(
+            ["collection_id", "build_id", "source_document_id", "study_id"],
+            [
+                "objective_paper_studies.collection_id",
+                "objective_paper_studies.build_id",
+                "objective_paper_studies.source_document_id",
+                "objective_paper_studies.study_id",
+            ],
+            name="fk_objective_paper_study_relationships_study",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "collection_id",
+            "build_id",
+            "source_document_id",
+            "study_id",
+            "relationship_id",
+            name="uq_objective_paper_study_relationships_collection_identity",
+        ),
+    )
+
+    build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_document_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    study_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    relationship_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    collection_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    relationship_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    varied_factors: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    source_refs: Mapped[list[dict[str, str]]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False
+    )
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class ObjectivePaperStudySignal(Base):
+    __tablename__ = "objective_paper_study_signals"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["build_id", "source_document_id"],
+            [
+                "objective_paper_skims.build_id",
+                "objective_paper_skims.source_document_id",
+            ],
+            name="fk_objective_paper_study_signals_skim",
+            ondelete="CASCADE",
+        ),
+    )
+
+    build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_document_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    signal_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    collection_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    signal_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
 
 
 class ObjectiveResearchRecord(Base):
@@ -161,9 +327,107 @@ objective_build_candidates = Table(
 )
 
 
+class ObjectivePaperStudyDisposition(Base):
+    __tablename__ = "objective_paper_study_dispositions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'promoted', 'rejected')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "(status = 'pending' AND objective_id IS NULL AND reason IS NULL) OR "
+            "(status = 'promoted' AND objective_id IS NOT NULL AND reason IS NULL) OR "
+            "(status = 'rejected' AND objective_id IS NULL AND reason IS NOT NULL)",
+            name="result_valid",
+        ),
+        ForeignKeyConstraint(
+            [
+                "collection_id",
+                "build_id",
+                "source_document_id",
+                "study_id",
+                "relationship_id",
+            ],
+            [
+                "objective_paper_study_relationships.collection_id",
+                "objective_paper_study_relationships.build_id",
+                "objective_paper_study_relationships.source_document_id",
+                "objective_paper_study_relationships.study_id",
+                "objective_paper_study_relationships.relationship_id",
+            ],
+            name="fk_objective_paper_study_dispositions_relationship",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["collection_id", "objective_id"],
+            ["research_objectives.collection_id", "research_objectives.objective_id"],
+            name="fk_objective_paper_study_dispositions_objective",
+            ondelete="CASCADE",
+        ),
+    )
+
+    build_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source_document_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    study_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    relationship_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    collection_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    objective_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+objective_build_relationship_links = Table(
+    "objective_build_relationship_links",
+    Base.metadata,
+    Column("build_id", String(64), primary_key=True),
+    Column("collection_id", String(64), primary_key=True),
+    Column("objective_id", String(128), primary_key=True),
+    Column("source_document_id", String(128), primary_key=True),
+    Column("study_id", String(128), primary_key=True),
+    Column("relationship_id", String(128), primary_key=True),
+    Column("link_order", Integer, nullable=False),
+    ForeignKeyConstraint(
+        ["build_id", "collection_id", "objective_id"],
+        [
+            "objective_build_candidates.build_id",
+            "objective_build_candidates.collection_id",
+            "objective_build_candidates.objective_id",
+        ],
+        name="fk_objective_build_relationship_links_objective",
+        ondelete="CASCADE",
+    ),
+    ForeignKeyConstraint(
+        [
+            "collection_id",
+            "build_id",
+            "source_document_id",
+            "study_id",
+            "relationship_id",
+        ],
+        [
+            "objective_paper_study_relationships.collection_id",
+            "objective_paper_study_relationships.build_id",
+            "objective_paper_study_relationships.source_document_id",
+            "objective_paper_study_relationships.study_id",
+            "objective_paper_study_relationships.relationship_id",
+        ],
+        name="fk_objective_build_relationship_links_relationship",
+        ondelete="CASCADE",
+    ),
+    UniqueConstraint(
+        "build_id",
+        "source_document_id",
+        "study_id",
+        "relationship_id",
+        name="uq_objective_build_relationship_links_accounting",
+    ),
+)
+
+
 objective_document_scope = Table(
     "objective_document_scope",
     Base.metadata,
+    Column("build_id", String(64), primary_key=True),
     Column("collection_id", String(64), primary_key=True),
     Column("objective_id", String(128), primary_key=True),
     Column("scope_kind", String(16), primary_key=True),
@@ -171,9 +435,13 @@ objective_document_scope = Table(
     Column("position", Integer, nullable=False),
     CheckConstraint("scope_kind IN ('seed', 'excluded')", name="scope_kind_valid"),
     ForeignKeyConstraint(
-        ["collection_id", "objective_id"],
-        ["research_objectives.collection_id", "research_objectives.objective_id"],
-        name="fk_objective_document_scope_objective",
+        ["build_id", "collection_id", "objective_id"],
+        [
+            "objective_build_candidates.build_id",
+            "objective_build_candidates.collection_id",
+            "objective_build_candidates.objective_id",
+        ],
+        name="fk_objective_document_scope_build_objective",
         ondelete="CASCADE",
     ),
 )
@@ -219,6 +487,7 @@ class ObjectiveAnalysisRecord(Base):
     prompt_versions: Mapped[dict[str, str]] = mapped_column(
         _JSON_DOCUMENT, nullable=False
     )
+    stats: Mapped[dict[str, Any]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     phase: Mapped[str] = mapped_column(String(64), nullable=False)
     processed_document_count: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -242,6 +511,28 @@ class ObjectivePaperContributionRecord(Base):
         CheckConstraint(
             "analysis_status IN ('pending', 'analyzed', 'excluded', 'failed')",
             name="analysis_status_valid",
+        ),
+        CheckConstraint(
+            "evidence_disposition IS NULL OR evidence_disposition IN "
+            "('excluded', 'no_routable_evidence', 'extraction_failed', "
+            "'no_comparable_evidence', 'comparable_evidence')",
+            name="evidence_disposition_valid",
+        ),
+        CheckConstraint(
+            "(routed_source_count IS NULL OR routed_source_count >= 0) AND "
+            "(extracted_source_count IS NULL OR extracted_source_count >= 0) AND "
+            "(comparable_evidence_count IS NULL OR comparable_evidence_count >= 0) AND "
+            "(failed_source_count IS NULL OR failed_source_count >= 0)",
+            name="evidence_counts_non_negative",
+        ),
+        CheckConstraint(
+            "(evidence_disposition IS NULL AND routed_source_count IS NULL AND "
+            "extracted_source_count IS NULL AND comparable_evidence_count IS NULL AND "
+            "failed_source_count IS NULL) OR "
+            "(evidence_disposition IS NOT NULL AND routed_source_count IS NOT NULL AND "
+            "extracted_source_count IS NOT NULL AND comparable_evidence_count IS NOT NULL AND "
+            "failed_source_count IS NOT NULL)",
+            name="evidence_accounting_complete",
         ),
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
         ForeignKeyConstraint(
@@ -290,6 +581,18 @@ class ObjectivePaperContributionRecord(Base):
     exclusion_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     warnings: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    evidence_disposition: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    routed_source_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    extracted_source_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    comparable_evidence_count: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    failed_source_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    evidence_disposition_reason: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
 
 
 class ObjectiveEvidenceRecord(Base):
@@ -654,9 +957,15 @@ __all__ = [
     "ObjectiveFindingRecord",
     "ObjectiveFindingRelationRecord",
     "ObjectivePaperContributionRecord",
+    "ObjectivePaperSourceUnitCoverage",
     "ObjectivePaperSkim",
+    "ObjectivePaperStudy",
+    "ObjectivePaperStudyDisposition",
+    "ObjectivePaperStudyRelationship",
+    "ObjectivePaperStudySignal",
     "ObjectiveResearchRecord",
     "objective_build_candidates",
+    "objective_build_relationship_links",
     "objective_document_scope",
     "objective_finding_evidence_links",
     "objective_finding_relation_evidence_links",

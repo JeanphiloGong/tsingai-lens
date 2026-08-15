@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -27,16 +28,18 @@ from application.pipeline.collection_build.context import (
 )
 from application.pipeline.collection_build.definitions import (
     ARTIFACT_REGISTRY,
+    COLLECTION_BUILD_NODE_DEFINITIONS,
     DOCUMENT_PROFILES,
-    FINALIZE,
     OBJECTIVE_CANDIDATES,
     SOURCE_ARTIFACTS,
+    dependency_graph_for_mode,
 )
 from application.pipeline.collection_build import nodes
 from application.pipeline.collection_build.runner import CollectionBuildPipelineRunner
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.task_service import TaskService
+from domain.pipeline import PipelineNodeStatus, PipelineRun, PipelineRunStatus
 from domain.ports import SourceArtifactRepository
 from utils.logger import bind_request_id, clear_request_id
 
@@ -89,7 +92,7 @@ class CollectionBuildPipelineService:
         self,
         collection_id: str,
         *,
-        method: IndexingMethod | str = IndexingMethod.Standard,
+        mode: IndexingMethod | str = IndexingMethod.Standard,
         verbose: bool = False,
         source_additional_context: dict[str, Any] | None = None,
     ) -> CollectionBuildPipelineConfig:
@@ -106,7 +109,7 @@ class CollectionBuildPipelineService:
                 output=StorageConfig(base_dir=str(paths.output_dir)),
                 cache=CacheConfig(base_dir="../cache"),
             ),
-            method=method or IndexingMethod.Standard,
+            mode=mode or IndexingMethod.Standard,
             verbose=verbose,
             source_additional_context=source_additional_context,
         )
@@ -115,7 +118,6 @@ class CollectionBuildPipelineService:
         self,
         task_id: str,
         collection_id: str,
-        method: IndexingMethod | str = IndexingMethod.Standard,
         verbose: bool = False,
         additional_context: dict | None = None,
         request_id: str | None = None,
@@ -124,7 +126,6 @@ class CollectionBuildPipelineService:
             self.run_task(
                 task_id,
                 collection_id,
-                method=method,
                 verbose=verbose,
                 additional_context=additional_context,
                 request_id=request_id,
@@ -135,27 +136,24 @@ class CollectionBuildPipelineService:
         self,
         task_id: str,
         collection_id: str,
-        method: IndexingMethod | str = IndexingMethod.Standard,
         verbose: bool = False,
         additional_context: dict | None = None,
         request_id: str | None = None,
     ) -> dict:
         request_token = bind_request_id(request_id) if request_id else None
         try:
+            build = self.task_service.repository.read_build(task_id)
+            if build is None or build.collection_id != collection_id:
+                raise RuntimeError(f"build not found for task: {task_id}")
+            task = self.task_service.get_task(task_id)
             config = self._build_pipeline_config(
                 collection_id,
-                method=method,
+                mode=build.mode,
                 verbose=verbose,
                 source_additional_context=additional_context,
             )
             output_dir = Path(config.source.output.base_dir)
             self.collection_service.update_collection(collection_id, status="running")
-            task = self.task_service.get_task(task_id)
-            build = self.task_service.repository.read_build(task_id)
-            if build is None or build.collection_id != collection_id:
-                raise RuntimeError(f"build not found for task: {task_id}")
-            if not task.get("started_at"):
-                self.task_service.update_task(task_id, started_at=task["updated_at"])
 
             context = CollectionBuildContext(
                 task_id=task_id,
@@ -173,15 +171,33 @@ class CollectionBuildPipelineService:
                     collection_id,
                 ),
             )
-            result = await self._build_runner().run(context, config)
-            final_status = self._resolve_final_status(context, result)
+            pipeline_run = PipelineRun.create(
+                pipeline_name="collection_build",
+                mode=build.mode,
+                run_id=task_id,
+                scope_type="collection",
+                scope_id=collection_id,
+                node_dependencies=dependency_graph_for_mode(build.mode),
+                created_at=str(task["created_at"]),
+                output_build_id=build.build_id,
+            )
+            pipeline_run = await self._build_runner().run(
+                context,
+                config,
+                pipeline_run,
+            )
+            final_status = self._resolve_final_status(context, pipeline_run)
+            pipeline_run = pipeline_run.finish(
+                PipelineRunStatus(final_status),
+                datetime.now(timezone.utc).isoformat(),
+            )
             artifacts = context.state.get("artifacts")
             output_path = (
                 artifacts.get("output_path")
                 if isinstance(artifacts, dict)
                 else str(output_dir)
             )
-            self.task_service.finish_task(
+            final_task = self.task_service.finish_task(
                 task_id,
                 status=final_status,
                 current_stage="artifacts_ready"
@@ -200,8 +216,15 @@ class CollectionBuildPipelineService:
                     ),
                 },
                 output_path=output_path,
-                errors=result["errors"],
-                warnings=result["warnings"],
+                pipeline_run=pipeline_run,
+            )
+            logger.info(
+                "Build task progress task_id=%s collection_id=%s stage=%s progress_percent=%s status=%s",
+                task_id,
+                collection_id,
+                final_task.get("current_stage"),
+                final_task.get("progress_percent"),
+                final_task.get("status"),
             )
             self.collection_service.update_collection(
                 collection_id, status=final_status
@@ -241,26 +264,28 @@ class CollectionBuildPipelineService:
                 SOURCE_ARTIFACTS: nodes.build_source_artifacts,
                 ARTIFACT_REGISTRY: nodes.register_artifacts,
                 DOCUMENT_PROFILES: nodes.build_document_profiles,
-                OBJECTIVE_CANDIDATES: nodes.build_objective_candidates,
-                FINALIZE: nodes.finalize,
-            }
+                OBJECTIVE_CANDIDATES: nodes.discover_and_replace_objective_candidates,
+            },
+            definitions=COLLECTION_BUILD_NODE_DEFINITIONS,
         )
 
     def _resolve_final_status(
-        self, context: CollectionBuildContext, result: dict
+        self,
+        context: CollectionBuildContext,
+        pipeline_run: PipelineRun,
     ) -> str:
-        if context.state.get("final_status"):
-            return str(context.state["final_status"])
-        node_states = result.get("pipeline_nodes", {})
-        if node_states.get(SOURCE_ARTIFACTS, {}).get("status") != "succeeded":
+        if (
+            pipeline_run.node(SOURCE_ARTIFACTS).status
+            is not PipelineNodeStatus.SUCCEEDED
+        ):
             return "failed"
-        if result.get("errors"):
+        if pipeline_run.errors:
             return "partial_success"
         return "completed"
 
     def _build_objective_progress_callback(self, task_id: str, collection_id: str):
-        last_update: dict[str, tuple[str, int | None, int | None]] = {
-            "value": ("", None, None),
+        last_update: dict[str, tuple[str, int | None, int | None, int | None]] = {
+            "value": ("", None, None, None),
         }
 
         def callback(progress_detail: dict[str, Any]) -> None:
@@ -269,10 +294,16 @@ class CollectionBuildPipelineService:
                 return
             current = self._safe_int(progress_detail.get("current"))
             total = self._safe_int(progress_detail.get("total"))
-            previous_phase, previous_current, previous_total = last_update["value"]
+            window_position = self._safe_int(
+                progress_detail.get("active_window_position")
+            )
+            previous_phase, previous_current, previous_total, previous_window = (
+                last_update["value"]
+            )
             should_update = (
                 phase != previous_phase
                 or total != previous_total
+                or window_position != previous_window
                 or current is None
                 or total is None
                 or current == 1
@@ -282,7 +313,7 @@ class CollectionBuildPipelineService:
             )
             if not should_update:
                 return
-            last_update["value"] = (phase, current, total)
+            last_update["value"] = (phase, current, total, window_position)
             record = self.task_service.update_task(
                 task_id,
                 current_stage=phase,

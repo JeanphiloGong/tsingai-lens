@@ -8,17 +8,17 @@ from application.source.reference_workflow_service import (
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
-from domain.source import SourceArtifactSet, SourceBlock, SourceDocument
+from domain.source import SourceBlock, SourceDocument, assemble_source_documents
 from infra.persistence.sqlite import SqliteSourceArtifactRepository
 
 
 def test_source_reference_workflow_builds_and_persists_refs(tmp_path):
     repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
-    artifacts = SourceArtifactSet(
+    artifacts = assemble_source_documents(
         documents=(
             SourceDocument(
                 document_id="doc-1",
-                human_readable_id=0,
+                document_order=0,
                 title="Paper",
                 text="Prior work [1] matters.\nReferences\n[1] Smith A. Paper. Journal. 2024.",
             ),
@@ -47,7 +47,7 @@ def test_source_reference_workflow_builds_and_persists_refs(tmp_path):
             ),
         ),
     )
-    repository.replace_collection_artifacts("col_refs", artifacts)
+    repository.replace_collection_documents("col_refs", artifacts)
     repository.replace_collection_references(
         "col_refs",
         SourceReferenceExtractionService().extract(artifacts),

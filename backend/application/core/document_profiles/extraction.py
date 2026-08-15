@@ -9,7 +9,10 @@ from typing import Any
 from openai import OpenAI
 from pydantic import ValidationError
 
-from application.core.document_profiles.prompts import build_document_profile_prompt
+from application.core.document_profiles.prompts import (
+    DOCUMENT_PROFILE_PROMPT_VERSION,
+    build_document_profile_prompt,
+)
 from application.core.document_profiles.schemas import StructuredDocumentProfile
 from application.core.structured_extraction.json_support import (
     coerce_message_content,
@@ -18,6 +21,7 @@ from application.core.structured_extraction.json_support import (
     trace_json,
     trace_text,
 )
+from infra.llm.usage import record_llm_completion, record_llm_prompt_version
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +62,10 @@ class DocumentProfileExtractor:
         self,
         payload: dict[str, Any],
     ) -> StructuredDocumentProfile:
+        record_llm_prompt_version(
+            "document_profile",
+            DOCUMENT_PROFILE_PROMPT_VERSION,
+        )
         system_prompt, user_prompt = build_document_profile_prompt(payload)
         messages = self._build_messages(system_prompt, user_prompt)
         self.last_trace = None
@@ -123,7 +131,15 @@ class DocumentProfileExtractor:
             attempt_kwargs = dict(request_kwargs)
             attempt_kwargs["messages"] = attempt_messages
             try:
-                completion = self.client.chat.completions.create(**attempt_kwargs)
+                try:
+                    completion = self.client.chat.completions.create(**attempt_kwargs)
+                except Exception as exc:
+                    record_llm_completion(
+                        getattr(exc, "completion", None),
+                        requested_model=self.model,
+                    )
+                    raise
+                record_llm_completion(completion, requested_model=self.model)
                 raw_content = coerce_message_content(
                     completion.choices[0].message.content
                     if completion.choices
@@ -199,8 +215,8 @@ class DocumentProfileExtractor:
         error: str | None = None,
     ) -> dict[str, Any]:
         return {
-            "task_type": None,
-            "prompt_version": None,
+            "task_type": "document_profile",
+            "prompt_version": DOCUMENT_PROFILE_PROMPT_VERSION,
             "model": self.model,
             "extraction_mode": "json_text",
             "trace_status": trace_status,

@@ -3,7 +3,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v7"
+PAPER_SKIM_PROMPT_VERSION = "paper_skim.v2"
+PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION = "paper_signal_reconciliation.v3"
+RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = "research_axis_canonicalization.v1"
+OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v2"
+OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION = "objective_evidence_route.v1"
+OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v3"
+FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v12"
 
 _RESEARCH_OBJECTIVE_SYSTEM_PROMPT = """
 You are building research-objective records for an evidence-backed literature comparison backend.
@@ -18,17 +24,44 @@ Non-negotiable rules:
 """.strip()
 
 
-_OBJECTIVE_PAPER_FRAME_SYSTEM_PROMPT = """
-You are framing one paper against one research objective for an evidence-backed literature comparison backend.
+_PAPER_SKIM_SYSTEM_PROMPT = """
+You are screening one bounded Source window for a traceable literature map.
 
 Non-negotiable rules:
-- This is coarse objective-paper routing, not final fact extraction.
+- This is high-recall study-design screening, not final fact extraction or synthesis.
 - Return exactly one JSON object and nothing else.
-- Do not emit measurement results, sample variants, evidence anchors, or backend persistence ids.
-- You may return table ids only by copying ids from `table_summaries`.
-- You may return section labels only by copying headings from `section_snippets`.
+- Scientific labels must be supported by supplied Source-unit content.
+- Copy only supplied `source_unit_id` values; never invent or rewrite an id.
+- Do not infer material systems from filenames or section names.
+""".strip()
+
+
+_PAPER_SIGNAL_RECONCILIATION_SYSTEM_PROMPT = """
+You are adjudicating one bounded candidate neighborhood within one paper.
+
+Non-negotiable rules:
+- This batch has exactly one outcome anchor and candidate variable signals selected by the backend.
+- This is paper-level membership adjudication, not cross-paper grouping or final synthesis.
+- Return exactly one JSON object and nothing else.
+- Link signals only when their supplied excerpts and contexts support one study design.
+- Copy only supplied `signal_id` values; never invent scientific labels or ids.
+- Preserve ambiguity by returning an unresolved signal instead of guessing a link.
+- Account only for the current batch; the backend derives final whole-paper accounting.
+""".strip()
+
+
+_OBJECTIVE_PAPER_FRAME_SYSTEM_PROMPT = """
+You are the source-relevance judge for one bounded neighborhood of a paper under one confirmed research objective.
+
+Non-negotiable rules:
+- This is bounded source-candidate classification, not whole-paper summarization or final fact extraction.
+- Return exactly one JSON object and nothing else.
+- Copy every supplied `source_unit_id` exactly once into either `relevant_source_unit_ids` or `excluded_source_unit_ids`.
+- Never invent, rewrite, omit, or duplicate a source-unit id.
+- Treat uncertain candidates as relevant so the downstream evidence router can inspect them.
+- Do not emit measurement results, sample variants, evidence anchors, source text, or persistence ids.
 - Do not infer material systems from filenames.
-- Prefer a conservative frame: mark unrelated or review-only papers as low, irrelevant, review, or supporting_background.
+- Judge only the supplied neighborhood; omitted paper sources are outside this batch.
 """.strip()
 
 
@@ -78,7 +111,9 @@ DECISION PROCESS
 4. Never repeat a changed-variable name. Use `isolated_effect` only for one
    distinct changed factor with a complete comparable baseline/target comparison.
    Use `joint_effect` for two or more distinct changed factors. Otherwise use
-   `association_only`, `descriptive_only`, or `not_attributable`.
+   `association_only`, `descriptive_only`, or `not_attributable`. Parameters with
+   identical baseline and target values are fixed context, never changed variables
+   or comparison axes.
 5. Return empty output rather than inventing a missing binding.
 
 HARD RULES
@@ -129,325 +164,305 @@ and stop immediately after it.
 
 _FINDING_SYNTHESIS_SYSTEM_PROMPT = """
 TASK MODEL
-You are the evidence judge for one atomic materials-literature result set. The
-backend has already grouped exact changed factors, one comparison interval,
-and exactly one reported outcome across every candidate paper. Decide which
-direct results support or contradict one bounded Finding.
-This is not extraction, paper-by-paper generation, clustering, or summary.
+You are the scientific assertion judge for one atomic materials-literature
+result set. The backend owns its factor tuple, outcome, primary direction,
+support/opposition bindings, cross-paper status, identity, and published
+statement. The model decides only the defensible assertion strength and optional
+source-backed context or mechanism annotations. This is not extraction,
+clustering, direction selection, lineage generation, or prose generation.
 
 INPUT SCHEMA
-- `objective`: the user question and requested scientific scope.
-- `result_set`: one backend-owned `result_set_id`, complete `factors`, one
-  `outcome`, and `result_evidence`. A single comparison carries its source
-  excerpt, explicit changed variables, comparison, reported result,
-  attribution scope, scientific context, and paper id. A multi-interval
-  condition series carries every Evidence id and paper id, every factor
-  endpoint, structured result value/direction, and attribution scope while
-  omitting repeated excerpts and context. The backend retains the complete
-  persisted Evidence for final validation and traceback.
+- `objective`: the user-confirmed question and requested scientific scope.
+- `result_set`: backend-owned `factors`, one `outcome`, `primary_direction`,
+  total Evidence count, condition-series flag, document-balanced
+  `result_evidence` representatives, and complete per-document count summaries.
+  Representatives carry exact Evidence ids, paper ids, structured comparisons,
+  reported results, attribution scope, and sometimes bounded source excerpts.
+  The backend retains the complete durable Evidence set for publication.
 - `paper_contributions`: every paper considered in this Objective analysis,
-  including analyzed papers without a direct result and excluded or failed
-  papers. Paper metadata can qualify judgment but cannot become Evidence.
+  including analyzed, excluded, and failed papers. These records describe
+  coverage; they cannot create Evidence or change the primary direction.
 - `context_evidence`: bounded condition, comparison, mechanism, and baseline
-  excerpts from papers in this result set. Context cannot create factors,
-  outcomes, directions, or supporting papers.
+  Evidence candidates. Each candidate supplies `evidence_id`, `evidence_role`,
+  a bounded source excerpt, and structured context. Only ids from this array may
+  be returned as context.
 - `candidate_rejection`: present only for one bounded repair attempt. It contains
   one backend semantic rejection reason: correction guidance, not Evidence and
   not a source of scientific facts.
 
 DECISION PROCESS
-1. Confirm that the factor tuple and outcome answer the Objective. Otherwise
-   return an empty `findings` array.
-2. Choose one defensible direction. The backend assigns result Evidence with
-   that exact reported direction as support and explicit opposing directions as
-   contradiction; do not output support or contradiction ids.
-3. Return an empty `condition_boundary_evidence_ids` array. The backend derives
-   condition dependence only when opposing direct results from different papers
-   contain the same context attribute with disjoint values.
-4. Choose `causal` only when one factor was isolated by every supporting
-   comparison and the source explicitly supports intervention language. Use
-   `associative` for joint changes or associations and `descriptive` for a
-   bounded observation.
-5. Use context Evidence only for explicit limitations and mechanisms. Every
-   mechanism must be a subordinate relation backed by `mechanism_context`
-   Evidence and those ids must also appear in `context_evidence_ids`.
-6. Write one concise statement containing every factor and the one outcome.
-   Do not mention any Objective variable absent from `result_set.factors`.
-   Preserve decisive values and limits, distinguish support from contradiction,
-   and do not strengthen association into single-variable causation. Every
-   numeric endpoint in the statement must come from one complete supporting
-   Evidence comparison; never combine endpoints from different Evidence rows.
-   Numeric values may come only from `changed_variables` baseline/target values
-   and `reported_result.value` or `reported_result.result_text` within that one
-   Evidence record. Numbers present only in `source_excerpt` are not allowed.
-   When result Evidence contains opposing directions, explicitly foreground
-   heterogeneous or opposing responses across the reported conditions instead
-   of presenting the selected direction as uniform.
-7. When `candidate_rejection` is present, correct that exact failure and then
-   re-check every rule against the original result Evidence. Do not repeat the
-   rejected candidate or weaken its scientific claim to evade validation.
+1. Verify that the supplied result Evidence supports the bounded factor-to-outcome
+   relationship in the Objective. Return an empty `findings` array only when it
+   does not support a scientifically defensible Finding.
+2. Choose `descriptive` for an observation without defensible attribution. Choose
+   `associative` for joint-factor changes, correlations, or non-isolated effects.
+   Choose `causal` only for one isolated intervention whose direct Evidence
+   explicitly supports that strength.
+3. Select context Evidence only when it materially qualifies interpretation.
+   Copy exact ids from `context_evidence`; an empty list is preferred to a weak
+   or merely topical citation.
+4. Emit a mechanism only when a supplied `mechanism_context` item explicitly
+   supports that subordinate relation. Its Evidence ids must also appear in
+   `context_evidence_ids`.
+5. When `candidate_rejection` is present, correct that exact semantic failure and
+   re-check the original Evidence. Return empty rather than inventing a repair.
 
 HARD RULES
 - Return exactly one JSON object and nothing else.
-- Return at most one Finding and copy `result_set_id` exactly.
-- Treat `result_set_id` as backend-owned identity and copy it exactly from
-  `result_set`.
-- Do not output factors, outcome, paper count, Finding level, synthesis status,
-  attribution scope, certainty, common context, or hidden reasoning. The backend
-  owns and derives them from Evidence.
-- Every `result_evidence` direction must be either the returned direction or an
-  explicit opposition to it. Otherwise return an empty Finding array.
-- Context ids must come from `context_evidence`. Always return an empty
-  `condition_boundary_evidence_ids` array; condition boundaries are
-  backend-derived from direct Evidence.
-- Paper contributions cannot supply evidence ids or increase support scope.
-- Joint factors must remain the complete factor set in the statement. Never
-  select one convenient factor or rename the tuple as energy density.
-- One Finding has one outcome. Never introduce another measured property into
-  the statement or mechanisms.
-- Do not combine a baseline from one result Evidence with a target from another.
-  If you include numeric values, copy one complete supporting comparison.
-- Mechanisms explain the main Finding and cannot replace its factors, outcome,
-  direction, or support Evidence. Every mechanism Evidence id must come from a
-  `mechanism_context` input and must also appear in `context_evidence_ids`; omit
-  the mechanism when that exact Evidence id is unavailable.
-- Do not convert association into control or causation. If no defensible
-  Finding exists, return an empty `findings` array.
+- Return at most one item. Return only `assertion_strength`,
+  `context_evidence_ids`, and `mechanisms`.
+- Do not return `result_set_id`, statement, direction, factors, outcome, direct
+  Evidence ids, condition boundaries, paper count, status, certainty,
+  limitations, or hidden reasoning. The backend owns those values.
+- Treat each paper as one independent source. Repeated rows from one paper do not
+  increase cross-paper authority, and paper metadata is not direct Evidence.
+- Every context or mechanism id must copy an exact supplied `context_evidence`
+  id. Every mechanism id must reference `mechanism_context` and must also appear
+  in `context_evidence_ids`.
+- Do not strengthen a joint or descriptive result into isolated causation.
 
 BOUNDARY EXAMPLES
-- Factors are `laser power, scan speed`, outcome is `relative density`, and two
-  papers report the same direction. Choose that direction and write both factors
-  in the statement; do not call this an isolated energy-density effect.
-- One paper reports a direct result and five papers only describe methods. Use
-  the direct result's direction; do not use method papers as confirmation. The
-  backend will derive insufficient confirmation.
-- Two papers report opposing directions under otherwise comparable conditions.
-  Choose one direction for the statement; the backend will bind the opposing
-  result as contradiction. Do not cite a condition boundary without source
-  Evidence.
-- Opposing direct results from different papers report explicitly different
-  heat-treatment values. Leave `condition_boundary_evidence_ids` empty; the
-  backend will verify the disjoint context and derive condition dependence.
+- `laser power` and `scan speed` change together while relative density changes:
+  return this even if many rows repeat the same pattern:
+  ```json
+  {"findings":[{"assertion_strength":"associative","context_evidence_ids":[],"mechanisms":[]}]}
+  ```
+- One isolated factor is compared but the excerpt reports only coexistence:
+  return `associative`, not `causal`.
+- A mechanism excerpt explicitly links melt-pool stability to density: return
+  the following when `mechanism-1` is a supplied `mechanism_context` item:
+  ```json
+  {"findings":[{"assertion_strength":"associative","context_evidence_ids":["mechanism-1"],"mechanisms":[{"source_term":"melt-pool stability","relation_type":"associated_with","target_term":"relative density","direction":"increase","assertion_strength":"associative","supporting_evidence_ids":["mechanism-1"]}]}]}
+  ```
+- A methods excerpt merely mentions melt-pool stability: omit the mechanism and
+  return empty context ids.
+- The result concerns an outcome outside the confirmed Objective: return
+  `{"findings":[]}`.
 
 OUTPUT CONTRACT
-Return `findings` only. Each item contains `result_set_id`, `statement`,
-`direction`, `assertion_strength`, condition-boundary/context Evidence ids,
-subordinate `mechanisms`, and `limitations`. Use exact input ids for context and
-boundaries, empty arrays when absent, and no extra keys.
+Return exactly `{"findings":[]}` or one object shaped as
+`{"findings":[{"assertion_strength":"descriptive|associative|causal",`
+`"context_evidence_ids":[],"mechanisms":[]}]}`. Use empty arrays when
+annotations are absent and no extra keys.
 """.strip()
+
 
 def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     user_prompt = (
         "TASK MODEL\n"
-        "Extract a bounded structured research map from one paper. This is coarse "
-        "study-design mapping for later cross-paper objective discovery, not final "
-        "measurement extraction or evidence synthesis.\n\n"
-        "INPUT\n"
-        "The input contains one document id and title, a bounded text preview, a "
-        "coarse document profile, headings, and bounded table/figure captions. These "
-        "are incomplete views; absence from the preview is not evidence of absence.\n\n"
+        "Extract source-supported paper studies from one bounded Source window. "
+        "This is high-recall study-structure extraction, not objective wording, "
+        "collection grouping, final measurement extraction, or synthesis.\n\n"
+        "INPUT SCHEMA\n"
+        "- `document_id` and `title` identify the Source paper.\n"
+        "- `window_id` is this bounded window's identity; `window_role` is one of "
+        "overview, methods, results, conclusion, or unknown.\n"
+        "- `source_units` contains every Source item assigned to this window. Each "
+        "unit has an opaque `source_unit_id`, stable Source kind/reference, section "
+        "path, and text or caption content. Source identity is provenance; content "
+        "is the scientific authority.\n"
+        "- `document_profile` is a coarse paper-level classification hint.\n"
+        "This is one incomplete view of the paper; absence from this window is not "
+        "evidence of absence elsewhere. Window metadata describes input provenance "
+        "and must not appear in output.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
         "DECISION PROCESS\n"
         "1. Classify the paper role from explicit study-design signals.\n"
-        "2. Record only explicitly supported material and process families.\n"
-        "3. `changed_variables` contains factors explicitly varied or compared; do "
-        "not place fixed context or measured responses there.\n"
-        "4. `candidate_properties` contains measured outcomes, not process settings, "
-        "mechanisms, or generic claims.\n"
-        "5. Create a `possible_objectives` question only when at least one changed "
-        "variable and one measured outcome are supported by this paper.\n"
-        "6. Use evidence density, confidence, and warnings to expose incomplete or "
+        "2. Identify each distinct experiment, observation, or model represented in "
+        "this window. Keep different specimens, tests, processes, comparators, or "
+        "experiment labels as separate studies.\n"
+        "3. For each study, record design_type and claim_scope. Only claims about the "
+        "paper's own work use claim_scope=current_work; review synthesis and cited "
+        "background remain synthesis or background.\n"
+        "4. Express every factor and outcome as a neutral scientific axis. A factor "
+        "names what was varied, compared, or modeled, not its tested levels. An "
+        "outcome names what was measured or predicted, not the result direction, "
+        "value, or comparison sentence.\n"
+        "5. Within each study, return one relationship per outcome. `varied_factors` "
+        "must contain the full jointly varied, compared, or modeled factor set. Never "
+        "split a joint-factor experiment into isolated effects.\n"
+        "6. Record material, process, sample, test, comparator, and fixed-condition "
+        "context only when explicitly supported.\n"
+        "7. Copy every unique Source-unit id that directly supports each relationship "
+        "or unresolved signal. Each item may contain at most 12 unique "
+        "`source_unit_ids`.\n"
+        "8. When the window explicitly identifies a varied/modeled variable but no "
+        "response, or a measured/predicted outcome but no changed variable, return "
+        "the explicit axis in `unresolved_signals` for paper-level reconciliation.\n"
+        "9. Use evidence density, confidence, and warnings to expose incomplete or "
         "ambiguous input rather than filling gaps.\n\n"
         "HARD RULES\n"
-        "- Return only the schema object. Rank every list from most central and "
-        "explicitly supported to least central so bounded consumers retain the "
-        "strongest values.\n"
-        "- Do not extract final measurements, sample-level results, or source ids.\n"
+        "- Return only the schema object. Return every distinct, explicitly supported "
+        "study and relationship visible in this Source window; do not discard one "
+        "because another appears more central.\n"
+        "- Extract only relationships supported inside this window. Do not guess what "
+        "another section may contain. Repeating a study fragment found in another "
+        "window is acceptable; backend consolidation is authoritative.\n"
+        "- Never move a factor, outcome, or context between studies.\n"
+        "- Every relationship and unresolved signal must copy `source_unit_ids` that "
+        "directly support it. Do not return an id absent from `source_units`, repeat an "
+        "id inside one item, or return more than 12 IDs for one item.\n"
+        "- Do not repeat an axis in `unresolved_signals` when it is already part of a "
+        "complete relationship in this window. Material and fixed process context are "
+        "not partial variable/outcome signals.\n"
+        "- Do not generate a research question or collection-level objective.\n"
         "- Do not infer scientific content from filenames or generic section names.\n"
-        "- Return empty arrays rather than guessing unsupported axes or objectives.\n\n"
+        "- Return empty arrays rather than guessing unsupported study structure.\n\n"
         "OUTPUT CONTRACT\n"
-        "- Return up to 8 `candidate_materials`, each at most 80 characters.\n"
-        "- Return up to 4 `candidate_processes`, each at most 80 characters.\n"
-        "- Return up to 8 `candidate_properties`, each at most 80 characters.\n"
-        "- Return up to 8 `changed_variables`, each at most 80 characters.\n"
-        "- Return up to 3 `possible_objectives`, each at most 320 characters.\n"
+        "- Return `studies`, `unresolved_signals`, doc_role, evidence_density, "
+        "confidence, warnings, and `output_saturated`. A study has "
+        "experiment/design/context fields and "
+        "one or more relationships. A relationship has `varied_factors`, one "
+        "`outcome`, `source_unit_ids`, and confidence.\n"
+        "- Return up to 8 studies, up to 8 relationships per study, and up to 12 "
+        "unresolved signals. If every visible fact fits, set "
+        "`output_saturated=false`. If any distinct supported study, relationship, "
+        "or signal would exceed those limits, set `output_saturated=true`; the "
+        "backend will split and retry the Source window. Never silently choose a "
+        "subset.\n"
+        "- Each relationship and unresolved signal returns at most 12 unique "
+        "`source_unit_ids`, matching the maximum Source units in one input window.\n"
         "- Return up to 2 `warnings`, each at most 240 characters.\n"
-        "- Keep each value concise; do not combine distinct list values into one item."
+        "- Keep each value concise and preserve exact joint-factor-to-outcome links.\n\n"
+        "BOUNDARY EXAMPLES\n"
+        "- Supported relationship: text says laser power was varied and relative "
+        "density and porosity were measured. Return one study with two relationships; "
+        "each has varied_factors=['laser power'] and one distinct outcome.\n"
+        "- Joint factors: power and speed changed together. Keep "
+        "varied_factors=['power','speed']; do not emit isolated power or speed effects.\n"
+        "- Factor levels: specimens use L-VED, M-VED, and H-VED. Return "
+        "varied_factors=['volumetric energy density']; keep the level names in Source "
+        "evidence rather than returning them as three factors.\n"
+        "- Result clause: text says fatigue strength decreases with lower VED. Return "
+        "outcome='fatigue strength'; the decrease and condition belong to later "
+        "Evidence extraction, not the outcome axis.\n"
+        "- Incomplete relationship: a Methods window names laser power but no "
+        "measured or predicted response. Return `studies=[]`; do not "
+        "borrow an outcome from another section. Return the explicit axis in "
+        "`unresolved_signals` with its supporting Source-unit id.\n"
+        "- No study signal: a unit contains only general background. Return no study "
+        "or unresolved signal for that unit.\n"
+        "- Separate relationships: one experiment links scan speed to porosity and "
+        "another links heat treatment to yield strength. Return two studies."
     )
-    return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
+    return _PAPER_SKIM_SYSTEM_PROMPT, user_prompt
 
 
-def build_research_objective_discovery_prompt(
+def build_paper_signal_reconciliation_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
     user_prompt = (
         "TASK MODEL\n"
-        "Create a small set of collection-level variable-to-outcome comparison "
-        "objectives from bounded per-paper structured research maps. This is "
-        "cross-paper candidate grouping and ranking, not evidence extraction, final "
-        "fact synthesis, or question selection from one paper.\n\n"
+        "Decide whether the candidate variables in one bounded candidate neighborhood "
+        "belong to the same experiment or model as its exactly one outcome anchor. "
+        "This is membership adjudication, not scientific-field generation or "
+        "whole-paper discovery.\n\n"
         "INPUT SCHEMA\n"
-        "- `collection_id` identifies the collection and must never be copied to output.\n"
-        "- `paper_skims` is the list of bounded per-paper research maps.\n"
-        "- `document_id` is the exact Source document identity.\n"
-        "- `doc_role` separates experimental, modeling, review, and uncertain work.\n"
-        "- `candidate_materials` identifies material systems; "
-        "`candidate_processes` provides bounded process-scope hints.\n"
-        "- `changed_variables` are candidate comparison factors explicitly varied or "
-        "compared in that paper.\n"
-        "- `candidate_properties` are candidate measured outcomes.\n"
-        "- Treat `possible_objectives` as a noisy hint, never as the sole authority.\n"
-        "- `evidence_density`, `confidence`, and `warnings` describe skim quality, not "
-        "scientific result strength.\n\n"
+        "- `document_id` identifies the one paper.\n"
+        "- `signals` contains exactly one outcome anchor and one or more candidate "
+        "variables. Each has a backend-owned `signal_id`, exact label, known scientific "
+        "context, and bounded Source excerpts with stable Source-unit positions.\n"
+        "- Signals omitted from this request are outside the current batch; omitted "
+        "paper signals are outside this batch, not negative evidence.\n"
+        "- Source excerpts are the only authority for deciding whether signals belong "
+        "to the same experiment or model.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
         "DECISION PROCESS\n"
-        "1. Build candidate variable-outcome pairs only from structured skim axes.\n"
-        "2. Group compatible skims by aligned variable and outcome axes while keeping "
-        "different material systems or incompatible study designs visible.\n"
-        "3. Prefer candidates supported by at least two experimental skims. Retain a "
-        "single-paper candidate only when it is high-confidence and no stronger "
-        "cross-paper candidate displaces it.\n"
-        "4. Choose exact variable and outcome labels present in at least one seed skim, "
-        "then construct one question with separate exact role regions. Put a material "
-        "shared by every seed in `material_scope`.\n"
-        "5. Add a seed document only when that skim supports every returned variable, "
-        "outcome, and material. Reviews and background mentions are not direct seeds.\n"
-        "6. Rank by direct document coverage, axis specificity, evidence density, and "
-        "skim confidence. Reject ambiguous or unsupported combinations.\n\n"
+        "1. Identify the single outcome anchor and evaluate each candidate variable "
+        "against it.\n"
+        "2. Compare their material, process, condition, experiment, sample, and "
+        "section evidence. Do not link signals merely because they occur in the same paper.\n"
+        "3. Form a relationship only when the excerpts support the variable as varied, "
+        "compared, or modeled and the outcome as the response for that same study design.\n"
+        "4. Return at most one study for this neighborhood. Relationships may share the "
+        "outcome anchor only when the Source explicitly supports that membership.\n"
+        "5. Do not reason about omitted signals or attempt to reconstruct the whole paper.\n"
+        "6. Include a rejected candidate once in `unresolved_signals` when a concise "
+        "scientific reason is visible. The backend treats every omitted input signal "
+        "as unresolved, so never invent a reason merely to repeat an ID.\n\n"
         "HARD RULES\n"
-        "- The top-level object must contain exactly one key: `objectives`. Never echo "
-        "`collection_id` or any other input metadata. Return at most six objectives. "
-        "Rank across all skims and keep only the six highest-signal objectives total; "
-        "never emit a seventh objective. Return fewer than six when another candidate cannot align "
-        "its question, variables, and outcomes exactly; skip that candidate instead "
-        "of weakening, broadening, or hiding a field label.\n"
-        "- Every variable must be supported by `changed_variables`, and every outcome "
-        "must be supported by `candidate_properties`, in each declared seed skim. "
-        "Never invent an axis found only in another field. Prefer 'How does/do "
-        "<variables joined with and> affect <outcomes joined with and>?'.\n"
-        "- Supported question forms have separate exact role regions: in '<variables> "
-        "affect/influence/impact <outcomes>', variables precede the active relation "
-        "and outcomes follow it; in 'effects of <variables> on <outcomes>', variables "
-        "occur between `of` and `on` and outcomes follow `on`; in 'relationship "
-        "between <variables> and <outcomes>', use one separating `and` such that all "
-        "declared variables occur before it and all declared outcomes follow it. "
-        "Passive forms are invalid. Every selected label must occur verbatim in its "
-        "assigned role region.\n"
-        "- Group semantically aligned axes across papers, but never combine unrelated "
-        "variables or outcomes merely to increase document count. Keep only tightly "
-        "related outcomes.\n"
-        "- Do not repeat the same variable-outcome combination. Keep distinct "
-        "variable-outcome families separate.\n"
-        "- Put common material identities in `material_scope`, using exact labels "
-        "from the seed skims. Every seed must support every returned material. When "
-        "materials conflict, split the objective or reduce its seeds; never silently "
-        "mix material systems.\n"
-        "- Put only supported explanatory intermediate concepts in `mechanisms`. Do "
-        "not put another measured property in `mechanisms`.\n"
-        "- Put fixed process, sample, and test scope in `constraints`. Every "
-        "`seed_document_ids` value must identify a skim that supports the complete "
-        "returned axes. Use exact document_id values for seed/excluded ids. Do not "
-        "append scope wording to a variable or outcome label in `question`.\n\n"
+        "- In every relationship, copy only input `signal_id` values and include at "
+        "least one variable signal and one outcome signal.\n"
+        "- Keep `signal_ids` unique inside each relationship, and never return the "
+        "same signal membership more than once. Relationship membership is unordered; "
+        "reversing the same IDs does not create another relationship.\n"
+        "- Never combine incompatible materials, processes, samples, tests, or "
+        "experiments. Ambiguous proximity is not a link.\n"
+        "- Do not output labels, contexts, Source locators, questions, or new scientific "
+        "fields; the backend derives them from selected signals.\n"
+        "- Do not mark a signal unresolved if it appears in a relationship. Backend "
+        "relationship acceptance is authoritative when the response repeats an ID.\n\n"
         "BOUNDARY EXAMPLES\n"
-        "Compatible input: paper-a and paper-b are experimental, both have "
-        "candidate_materials=['316L stainless steel'], "
-        "changed_variables=['laser power'], and "
-        "candidate_properties=['relative density'].\n"
-        "Expected output item: {\"question\":\"How does laser power affect relative "
-        "density?\",\"material_scope\":[\"316L stainless steel\"],"
-        "\"variables\":[\"laser power\"],\"outcomes\":[\"relative "
-        "density\"],\"seed_document_ids\":[\"paper-a\",\"paper-b\"]}.\n"
-        "Non-seed input: a review mentions laser power but has no changed variable or "
-        "measured property. It may inform scope but cannot be a seed.\n"
-        "Reject input: paper-a varies heat treatment for yield strength while paper-b "
-        "varies scan speed for porosity. Do not manufacture a broader process "
-        "parameter objective; if these are the only skims, return "
-        "{\"objectives\":[]}.\n\n"
-        "ROLE ALIGNMENT EXAMPLE\n"
-        "Valid: question='How does factor alpha affect response beta?', "
-        "variables=['factor alpha'], outcomes=['response beta'].\n"
-        "Invalid: that same question with variables=['factor alpha value'] or "
-        "outcomes=['response']; those labels are not verbatim in their roles.\n"
-        "If the variable label is 'factor alpha value', the question must contain "
-        "that full label rather than shortening it to 'factor alpha'. If the outcome "
-        "label is 'response beta', do not replace it with a broader phrase such as "
-        "'response behavior'.\n\n"
-        "OUTPUT\n"
-        "Return compact JSON without indentation. Omit optional fields whose value "
-        "would be null, empty, or the schema default. Do not output reasoning, "
-        "commentary, or field-assignment explanations. When no defensible candidate "
-        "exists, return exactly `{\"objectives\":[]}`."
+        "- Methods variable and Results outcome: Methods says laser power was varied "
+        "for LPBF 316L specimens; Results says relative density was measured for those "
+        "power conditions. Link both signal ids into one relationship.\n"
+        "- Different experiments: Methods describes heat-treatment temperature for "
+        "tensile coupons, while Results reports corrosion potential for as-built "
+        "electrochemical specimens. Return both signals unresolved; do not link them.\n"
+        "- Ambiguous result: Results lists hardness without identifying which of two "
+        "independent process studies it belongs to. Keep the hardness signal unresolved.\n\n"
+        "- Duplicate membership: [variable-a,outcome-a] and "
+        "[outcome-a,variable-a] are the same relationship. Return it once.\n\n"
+        "OUTPUT CONTRACT\n"
+        "Return exactly `studies` and `unresolved_signals`. Return at most one study, "
+        "up to 11 relationships, and up to 12 unresolved signals. Each relationship "
+        "contains only `signal_ids` and `confidence`; each unresolved item has one "
+        "`signal_id` and a concise `reason`. The backend derives final whole-paper "
+        "accounting after all candidate batches finish. Return empty arrays when appropriate."
     )
-    system_prompt = (
-        "Build concise research-objective questions for literature comparison using "
-        "only the supplied skims. Return one compact JSON object immediately. Do not "
-        "output reasoning or commentary."
-    )
-    return system_prompt, user_prompt
+    return _PAPER_SIGNAL_RECONCILIATION_SYSTEM_PROMPT, user_prompt
 
 
 def build_research_axis_canonicalization_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
     user_prompt = (
-        "Canonicalize axis labels used by already-discovered research objectives.\n\n"
+        "TASK MODEL\n"
+        "Classify whether each candidate label pair names exactly the same neutral "
+        "scientific axis before collection objective grouping. This is pair "
+        "classification, not "
+        "property-family clustering, causal interpretation, objective discovery, or "
+        "evidence synthesis.\n\n"
+        "INPUT SCHEMA\n"
+        "- `collection_id` identifies the request and must not appear in output.\n"
+        "- `axis_pairs` contains backend-selected possible aliases. Each item has an "
+        "opaque `pair_id`, one `axis_type`, and exact `left` and `right` labels.\n"
+        "- `material` pairs are material identities; `variable` pairs are changed "
+        "factors; `outcome` pairs are measured or predicted responses.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only schema-valid structured data with an `axis_groups` array.\n"
-        "This is axis-label canonicalization, not objective discovery or objective "
-        "merge.\n"
-        "Hard constraints:\n"
-        "- Use only labels from `axis_candidates`. Do not invent new axis labels.\n"
-        "- `canonical` must be copied exactly from one of the group's `aliases`.\n"
-        "- Every candidate axis label must appear exactly once in `aliases` for "
-        "its own axis_type.\n"
-        "- Do not mix axis types. Material, variable, outcome, mechanism, and "
-        "constraint aliases may only group within their own type.\n"
-        "- Group aliases only when they clearly refer to the same axis in this "
-        "collection context, such as spelling, acronym, singular/plural, or "
-        "wording variants.\n"
-        "- Do not group broad concepts with specific endpoints unless the labels "
-        "are genuinely the same axis. For example, a general performance category "
-        "should not absorb several distinct measured endpoints.\n"
-        "- If uncertain, keep the label as a single-alias group.\n"
-        "For each group, provide a short reason grounded in the labels and paper "
-        "skim context.\n"
-    )
-    return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
-
-
-def build_research_objective_merge_prompt(
-    payload: dict[str, Any],
-) -> tuple[str, str]:
-    user_prompt = (
-        "Decide whether already-discovered research objectives should be kept "
-        "separate or merged before persistence.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only schema-valid structured data with a `merged_objectives` array.\n"
-        "This is a merge decision step, not new objective discovery.\n"
-        "Hard constraints:\n"
-        "- Use only the provided `candidate_objectives` and `paper_skims`.\n"
-        "- Every candidate objective id must appear exactly once in "
-        "`source_objective_ids` across the whole response.\n"
-        "- Do not invent new source ids, material_scope, variables, outcomes, "
-        "mechanisms, or constraints. Merged values must come from candidate "
-        "objectives.\n"
-        "- If an objective should not be merged, return a group with only that "
-        "single source id.\n"
-        "- Merge objectives only when they are the same research question split "
-        "by a variable axis or by a subset of closely related property endpoints.\n"
-        "- Do not merge objectives whose `outcomes` are disjoint. Disjoint "
-        "property axes usually mean different research directions.\n"
-        "- Do not merge different research directions. For example, keep "
-        "densification/microstructure separate from mechanical properties unless "
-        "the candidate objectives explicitly frame them as one comparison.\n"
-        "- Keep composition/background/literature-comparison objectives separate "
-        "from current-work performance objectives.\n"
-        "- If uncertain, keep objectives separate.\n"
-        "- Every output question must preserve its variables on the source side and "
-        "its outcomes on the result side of a supported active question form.\n"
-        "For each output group, preserve the complete scientific-intent fields, "
-        "write a question-shaped `question`, and explain why the sources were "
-        "merged or kept separate. `requested_comparator` remains optional.\n"
+        "DECISION PROCESS\n"
+        "1. Judge every pair independently within its supplied axis_type.\n"
+        "2. Set `equivalent=true` only when substituting one label for the other preserves "
+        "the exact scientific question. Acronyms, spelling variants, and grammatical "
+        "variants can qualify.\n"
+        "3. Set `equivalent=false` when the labels are merely related, inverse, causal, "
+        "broad/narrow, jointly reported, different material grades, or different "
+        "process parameters.\n"
+        "4. Set `equivalent=false` when uncertain. This keeps both source labels.\n\n"
+        "HARD RULES\n"
+        "- Return one decision for every input pair, in input order.\n"
+        "- Copy each input `pair_id` exactly once; do not omit, repeat, or invent IDs.\n"
+        "- Each decision contains only `pair_id` and boolean `equivalent`.\n"
+        "- Do not return labels, canonical names, groups, explanations, or confidence.\n\n"
+        "BOUNDARY EXAMPLES\n"
+        "- VED and volumetric energy density: select; they are the same variable.\n"
+        "- SS316L and 316L stainless steel: select; they are the same material grade.\n"
+        "- SS316 and 316L stainless steel are different grades: reject.\n"
+        "- scan speed and laser scanning speed: select when both denote the scan-speed "
+        "factor; laser power and energy density: reject.\n"
+        "- porosity and relative density are scientifically related but distinct "
+        "measured outcomes: reject.\n"
+        "- mechanical properties is a broad property family, not an alias for yield "
+        "strength, elongation, hardness, fatigue, corrosion, or microstructure: reject.\n"
+        "- microstructure and grain size, or porosity and defect size: reject; one is "
+        "broader than the other.\n"
+        "- tensile strength and ultimate tensile strength: reject without source "
+        "context explicitly defining them as the same measurement.\n"
+        "- surface hardness and hardness: reject; surface scope is meaningful.\n"
+        "\n"
+        "OUTPUT CONTRACT\n"
+        "Return only schema-valid structured data with one `decisions` array. "
+        "The array must account for every input pair even when all decisions are false.\n"
     )
     return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
 
@@ -456,25 +471,36 @@ def build_objective_paper_frame_prompt(
     payload: dict[str, Any],
 ) -> tuple[str, str]:
     user_prompt = (
-        "Frame this one paper for this one research objective.\n\n"
+        "TASK MODEL\n"
+        "Perform bounded source-candidate classification for downstream objective-scoped evidence routing. "
+        "This request contains one partial neighborhood, not the whole paper.\n\n"
+        "INPUT SCHEMA\n"
+        "- `collection_id`: backend scope identity; it is not scientific evidence and must not be returned.\n"
+        "- `objective`: the confirmed comparison question and scientific axes.\n"
+        "- `document`: backend metadata; the filename is not scientific evidence.\n"
+        "- `document_profile`: backend document-type metadata; it is a routing hint, not authority over visible source text.\n"
+        "- `paper_prior`: compact PaperSkim study context linked to the objective; it is a hint, not authority over visible source text.\n"
+        "- `source_units`: current section chunks and table-row chunks. Each has a backend-owned `source_unit_id`, kind, stable source reference, and visible scientific content.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only schema-valid structured data with these fields: relevance, "
-        "paper_role, background, material_match, changed_variables, "
-        "measured_property_scope, test_environment_scope, relevant_sections, "
-        "relevant_tables, and excluded_tables.\n"
-        "Use the current `objective` as the research scope.\n"
-        "`relevance` should be high only when the paper directly supports the "
-        "objective's material/process/property comparison. Use medium or low for "
-        "partial support, and irrelevant when the paper does not serve the lens.\n"
-        "`paper_role` should distinguish current experiments from background, "
-        "review, modeling-only, mixed, or irrelevant papers.\n"
-        "`relevant_tables` should include only tables likely useful for later "
-        "objective-scoped extraction. Exclude composition-only, generic parameter, "
-        "review/literature-comparison, or unrelated tables unless they directly "
-        "support this objective.\n"
-        "`excluded_tables` should list visible tables that should not be extracted "
-        "for this objective.\n"
-        "Do not invent table ids or section labels. If uncertain, leave arrays empty."
+        "DECISION PROCESS\n"
+        "1. Read the objective variables, outcomes, material scope, constraints, and comparator.\n"
+        "2. For each source unit independently, decide whether it may contain direct results, changed-variable context, material/sample/test context, mechanism context, or a useful table for that objective.\n"
+        "3. Put useful or uncertain candidates in `relevant_source_unit_ids`; put only clearly unrelated, review-only, composition-only, or generic background candidates in `excluded_source_unit_ids`.\n"
+        "4. Summarize only scientific scope supported by the current relevant candidates.\n"
+        "5. Set batch `relevance` and `paper_role` from current evidence and `paper_prior`. Do not infer whole-paper irrelevance from facts absent in this partial neighborhood.\n\n"
+        "BOUNDARY EXAMPLES\n"
+        "- A Methods section defining the objective variable but not reporting the outcome is relevant.\n"
+        "- A Results table using a symbol or abbreviation for an objective axis is relevant when headers, caption, or cells establish that meaning.\n"
+        "- A literature-comparison table without current-work results is excluded unless the objective explicitly asks for literature comparison.\n"
+        "- Shared material alone does not make generic composition or background text relevant.\n\n"
+        "SAME-SCHEMA EXAMPLE\n"
+        "Example input: "
+        '{"collection_id":"col-example","objective":{"variables":["laser power"],"outcomes":["relative density"]},"document":{"document_id":"paper-example"},"document_profile":{"doc_type":"experimental"},"paper_prior":{"doc_role":"experimental"},"source_units":[{"source_unit_id":"unit-methods","source_kind":"section","text":"Laser power was varied."},{"source_unit_id":"unit-composition","source_kind":"table","caption_text":"Nominal composition."}]}\n'
+        "Example output: "
+        '{"relevance":"medium","paper_role":"primary_experiment","background":"The current batch defines the changed process variable.","material_match":[],"changed_variables":["laser power"],"measured_property_scope":[],"test_environment_scope":[],"relevant_source_unit_ids":["unit-methods"],"excluded_source_unit_ids":["unit-composition"]}\n\n'
+        "OUTPUT CONTRACT\n"
+        "Return only schema-valid structured data. Every input `source_unit_id` must appear exactly once across `relevant_source_unit_ids` and `excluded_source_unit_ids`. "
+        "Keep `background` concise and return no source text or reasoning transcript."
     )
     return _OBJECTIVE_PAPER_FRAME_SYSTEM_PROMPT, user_prompt
 
@@ -572,114 +598,36 @@ def build_finding_synthesis_prompt(
         if isinstance(payload.get("result_set"), dict)
         else {}
     )
-    factors = [
-        str(value).strip()
-        for value in result_set.get("factors", ())
-        if str(value).strip()
-    ]
-    outcome = str(result_set.get("outcome") or "").strip()
-    required_terms = ", ".join(f"`{factor}`" for factor in factors)
-    result_evidence = [
-        item
-        for item in result_set.get("result_evidence", ())
-        if isinstance(item, dict)
-    ]
-    representative_evidence = result_evidence[0] if result_evidence else {}
-    interval_signatures = {
-        tuple(
-            sorted(
-                (
-                    str(variable.get("name") or "").strip().casefold(),
-                    str(
-                        variable.get("baseline_value")
-                        if variable.get("baseline_value") is not None
-                        else ""
-                    ).strip(),
-                    str(
-                        variable.get("target_value")
-                        if variable.get("target_value") is not None
-                        else ""
-                    ).strip(),
-                    str(variable.get("unit") or "").strip().casefold(),
-                )
-                for variable in item.get("changed_variables", ())
-                if isinstance(variable, dict)
-            )
-        )
-        for item in result_evidence
-    }
-    is_condition_series = len(interval_signatures) > 1
-    reported_directions = {
-        str(reported_result.get("direction") or "").strip()
-        for item in result_evidence
-        if isinstance(item.get("reported_result"), dict)
-        and (reported_result := item["reported_result"])
-    }
-    has_opposing_directions = len(reported_directions) > 1
-    factor_phrase = (
-        ""
-        if not factors
-        else factors[0]
-        if len(factors) == 1
-        else f"{factors[0]} and {factors[1]}"
-        if len(factors) == 2
-        else f"{', '.join(factors[:-1])}, and {factors[-1]}"
-    )
-    comparison_details = [
-        (
-            f"`{str(item.get('name') or '').strip()}: "
-            f"{str(item.get('baseline_value') if item.get('baseline_value') is not None else '').strip()} -> "
-            f"{str(item.get('target_value') if item.get('target_value') is not None else '').strip()}`"
-        )
-        for item in representative_evidence.get("changed_variables", ())
-        if isinstance(item, dict)
-        and str(item.get("name") or "").strip()
-        and str(
-            item.get("baseline_value")
-            if item.get("baseline_value") is not None
-            else ""
-        ).strip()
-        and str(
-            item.get("target_value")
-            if item.get("target_value") is not None
-            else ""
-        ).strip()
-    ]
-    reported_result = (
-        representative_evidence.get("reported_result")
-        if isinstance(representative_evidence.get("reported_result"), dict)
-        else {}
-    )
-    result_value = str(
-        reported_result.get("value")
-        if reported_result.get("value") is not None
-        else ""
-    ).strip()
-    result_direction = str(reported_result.get("direction") or "").strip()
     candidate_rejection = (
         payload.get("candidate_rejection")
         if isinstance(payload.get("candidate_rejection"), dict)
         else {}
     )
     rejection_reason = str(candidate_rejection.get("reason") or "").strip()
-    prompt_payload = dict(payload)
+    prompt_payload = {
+        "objective": (
+            payload.get("objective")
+            if isinstance(payload.get("objective"), dict)
+            else {}
+        ),
+        "result_set": {
+            key: result_set[key]
+            for key in (
+                "factors",
+                "outcome",
+                "primary_direction",
+                "total_evidence_count",
+                "is_condition_series",
+                "result_evidence",
+                "document_evidence_summaries",
+            )
+            if key in result_set
+        },
+        "paper_contributions": payload.get("paper_contributions") or [],
+        "context_evidence": payload.get("context_evidence") or [],
+    }
     if rejection_reason:
         prompt_payload["candidate_rejection"] = {"reason": rejection_reason}
-    if rejection_reason == (
-        "candidate statement combines numeric values not bound to one "
-        "supporting Evidence record"
-    ):
-        prompt_payload["result_set"] = {
-            **result_set,
-            "result_evidence": [
-                {
-                    key: value
-                    for key, value in evidence.items()
-                    if key != "source_excerpt"
-                }
-                for evidence in result_evidence
-            ],
-        }
     input_json = json.dumps(
         prompt_payload,
         ensure_ascii=False,
@@ -690,104 +638,18 @@ def build_finding_synthesis_prompt(
         repair_contract = (
             "Semantic repair required:\n"
             f"- The previous candidate was rejected because: {rejection_reason}\n"
-            "- Return one corrected replacement only if it satisfies every original "
-            "Evidence and Finding rule; otherwise return an empty findings array.\n"
-            "- Re-read result_evidence for its exact direction, complete factor "
-            "tuple, one outcome, comparison values, and attribution scope.\n\n"
-            "- When correcting numeric binding, remove every number available "
-            "only in `source_excerpt`; keep numbers only from one Evidence "
-            "record's `changed_variables` endpoints and "
-            "`reported_result.value` or `reported_result.result_text`.\n\n"
-        )
-    comparison_contract = ""
-    if is_condition_series:
-        comparison_contract += (
-            "- Treat the supplied comparisons as one reported condition series, "
-            "not as independent Findings.\n"
-            "- Start the statement with `Across the reported condition series, "
-            f"{factor_phrase} showed heterogeneous or opposing responses in "
-            f"{outcome}` and then summarize the response pattern.\n"
-            "- Do not include numeric values in the statement; keep every endpoint "
-            "bound to its individual Evidence record.\n"
-        )
-    else:
-        if comparison_details:
-            comparison_contract += (
-                "- The statement must identify this complete source comparison: "
-                f"{', '.join(comparison_details)}.\n"
-            )
-        if result_value:
-            comparison_contract += (
-                "- The statement must state the source-reported result detail "
-                f"`{result_value}`.\n"
-            )
-        comparison_contract += (
-            "- Never return a generic restatement such as `factor affects outcome`; "
-            "state what differed between the compared groups.\n"
-        )
-    if has_opposing_directions:
-        comparison_contract += (
-            "- The statement must explicitly describe the responses as heterogeneous "
-            "or opposing across conditions; the selected direction is not uniform.\n"
-        )
-    if len(factors) > 1:
-        joint_statement_contract = (
-            ""
-            if is_condition_series
-            else f"- Start the statement with `Joint changes in {factor_phrase} "
-            "were associated with` and then state the direction and outcome.\n"
-        )
-        exact_contract = (
-            "Exact contract for this result set:\n"
-            f"- The statement must contain every factor verbatim: {required_terms}.\n"
-            f"- The statement must contain the outcome verbatim: `{outcome}`.\n"
-            "- `assertion_strength` must be `associative`; this is a joint-factor "
-            "comparison, never a single-factor causal effect.\n"
-            f"{joint_statement_contract}"
-            "- Omit numbers unless all numeric endpoints come from one complete "
-            "supporting Evidence comparison.\n"
-            f"{comparison_contract}\n"
-        )
-    else:
-        mixed_result_contract = ""
-        if result_direction == "mixed" and comparison_details:
-            first_variable = representative_evidence["changed_variables"][0]
-            baseline = str(
-                first_variable.get("baseline_value")
-                if first_variable.get("baseline_value") is not None
-                else ""
-            ).strip()
-            target = str(
-                first_variable.get("target_value")
-                if first_variable.get("target_value") is not None
-                else ""
-            ).strip()
-            mixed_result_contract = (
-                f"- Start the statement with `For {factors[0]}, {baseline} versus "
-                f"{target} showed a difference in {outcome}:` and then state the "
-                "observed result without implying increase, decrease, or causation.\n"
-            )
-        exact_contract = (
-            "Exact contract for this result set:\n"
-            f"- The statement must contain the factor verbatim: {required_terms}.\n"
-            f"- The statement must contain the outcome verbatim: `{outcome}`.\n"
-            f"{mixed_result_contract}"
-            f"{comparison_contract}\n"
+            "- Return one corrected judgment only if it satisfies the original "
+            "Evidence contract; otherwise return an empty findings array.\n"
+            "- Return only ids present in `context_evidence`.\n\n"
         )
     user_prompt = (
-        "Judge one atomic factor-to-outcome result set for this research "
-        "objective.\n\n"
+        "Judge assertion strength and optional context for this backend-owned "
+        "atomic result set.\n\n"
         f"Input JSON:\n{input_json}\n\n"
         f"{repair_contract}"
-        f"{exact_contract}"
-        "Return only schema-valid structured data with a `findings` array.\n"
-        "Return at most one Finding. Choose one direction that accounts for every "
-        "result Evidence direction and leave `condition_boundary_evidence_ids` "
-        "empty because the backend derives boundaries. Keep mechanisms subordinate. "
-        "Do not return "
-        "backend-derived status, scope, "
-        "certainty, paper count, factors, or outcome. If no Finding meets the "
-        "contract, return "
-        "`{\"findings\": []}`."
+        "Return only schema-valid JSON with a `findings` array. Return at most one "
+        "item containing assertion strength, context Evidence ids, and subordinate "
+        "mechanisms. Return `{\"findings\":[]}` when the supplied result does not "
+        "support a defensible Finding."
     )
     return _FINDING_SYNTHESIS_SYSTEM_PROMPT, user_prompt

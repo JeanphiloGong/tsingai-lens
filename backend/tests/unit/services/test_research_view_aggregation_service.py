@@ -43,9 +43,9 @@ def _paper_facts() -> PaperFactSet:
                 {
                     "anchor_id": "anchor-1",
                     "document_id": "paper-1",
-                    "locator_type": "table",
+                    "source_kind": "table",
+                    "source_ref": "table-1",
                     "source_type": "table",
-                    "table_id": "table-1",
                     "quote": "The yield strength was 520 MPa.",
                 }
             ),

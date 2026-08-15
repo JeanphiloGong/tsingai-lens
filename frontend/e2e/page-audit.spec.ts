@@ -880,11 +880,8 @@ function documentContent() {
 				heading_level: 1,
 				order: 1,
 				text: 'Conductivity improved to 12 mS/cm.',
-				start_offset: 9,
-				end_offset: 43,
 				text_unit_ids: [],
 				page: 1,
-				bbox: null
 			},
 			{
 				block_id: 'results',
@@ -893,11 +890,8 @@ function documentContent() {
 				heading_level: 1,
 				order: 2,
 				text: 'Conductivity improved to 12 mS/cm under EIS.',
-				start_offset: 52,
-				end_offset: 97,
 				text_unit_ids: [],
 				page: 3,
-				bbox: null
 			}
 		],
 		warnings: []
@@ -1117,19 +1111,12 @@ function evidence() {
 			{
 				anchor_id: 'anc_1',
 				document_id: documentId,
-				locator_type: 'section',
-				locator_confidence: 'medium',
+				source_kind: 'block',
+				source_ref: 'results',
 				source_type: 'table',
-				section_id: 'results',
-				char_range: null,
-				bbox: null,
 				page: 3,
 				quote: 'Conductivity improved to 12 mS/cm under EIS.',
 				deep_link: null,
-				block_id: 'results',
-				snippet_id: null,
-				figure_or_table: 'Table 2',
-				quote_span: null,
 				anchor_type: 'direct',
 				label: 'Table 2'
 			}

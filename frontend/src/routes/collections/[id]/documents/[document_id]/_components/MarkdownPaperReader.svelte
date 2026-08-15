@@ -282,7 +282,7 @@
 			.map(normalizeMatchKey)
 			.filter(Boolean);
 		const sectionTargetKeys = [
-			sourceSpan?.target.sectionId,
+			sourceSpan?.target.sourceRef,
 			sourceSpan?.target.headingPath,
 			sourceSpan?.target.label
 		]

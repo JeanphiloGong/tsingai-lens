@@ -20,11 +20,22 @@ beforeEach(() => {
 });
 
 vi.mock('$app/paths', () => ({
-	resolve: (route: string, params: Record<string, string>) =>
-		route.includes('/documents/')
-			? `/collections/${params.id}/documents/${params.document_id}`
-			: `/collections/${params.id}/objectives/${params.objective_id}`
+	resolve: (route: string, params?: Record<string, string>) =>
+		!route.includes('[')
+			? route
+			: route.includes('/documents/')
+				? `/collections/${params!.id}/documents/${params!.document_id}`
+				: `/collections/${params!.id}/objectives/${params!.objective_id}`
 }));
+
+const mechanism = {
+	source_term: 'temperature',
+	relation_type: 'associated_with',
+	target_term: 'strength',
+	direction: 'increase' as const,
+	assertion_strength: 'associative' as const,
+	supporting_evidence_ids: ['evidence-mechanism']
+};
 
 const finding = {
 	collection_id: 'col-1',
@@ -40,16 +51,7 @@ const finding = {
 	synthesis_status: 'insufficient_confirmation' as const,
 	certainty: 0.8,
 	display_rank: 0,
-	mechanisms: [
-		{
-			source_term: 'temperature',
-			relation_type: 'associated_with',
-			target_term: 'strength',
-			direction: 'increase' as const,
-			assertion_strength: 'associative' as const,
-			supporting_evidence_ids: ['evidence-1']
-		}
-	],
+	mechanisms: [],
 	scientific_context: {
 		material: [{ name: 'alloy', value: 'Alloy A', unit: null }],
 		sample: [],
@@ -114,25 +116,143 @@ const evidence = [
 ];
 
 describe('single Finding workbench', () => {
-	it('shows relation, scope, and exact source evidence', async () => {
-		render(Workbench, { finding, evidence, collectionId: 'col-1' });
+	it('shows scope and exact source evidence', async () => {
+		render(Workbench, {
+			finding,
+			evidence,
+			collectionId: 'col-1',
+			documentTitles: { 'paper-1': 'Thermal treatment of Alloy A' }
+		});
 
 		await expect.element(browserPage.getByText(finding.statement)).toBeInTheDocument();
-		await expect.element(browserPage.getByText('associated_with')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('支持结果')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('associated_with')).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('heading', { name: '证据对比' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('columnheader', { name: '参照条件' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('columnheader', { name: '比较条件' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('400 C')).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('cell', { name: '500 C' })).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('cell', { name: '支持结果' })).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('cell', { name: '增加' })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('strength: 620 MPa')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('1 条结构化 Evidence')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('样品状态')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('工艺条件')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('测试条件')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('分析边界')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('上下文')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('条件边界')).toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('link', { name: '文献 1 · p.7' }))
+			.element(browserPage.getByRole('link', { name: 'Thermal treatment of Alloy A · p.7' }))
 			.toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('blockquote'))
 			.toHaveTextContent(evidence[0].source_excerpt);
+		expect(document.body.textContent?.split(evidence[0].source_excerpt).length).toBe(2);
 		await expect
 			.element(browserPage.getByRole('link', { name: '打开原文' }))
 			.toHaveAttribute(
 				'href',
 				'/collections/col-1/documents/paper-1?view=parsed-paper&evidence_id=evidence-1&source_ref=block-7&quote=At+500+C%2C+tensile+strength+increased+to+620+MPa.&return_to=%2Fcollections%2Fcol-1%2Fobjectives%2Fobj-1%3Ffinding_id%3Dfinding-1&page=7'
+			);
+	});
+
+	it('keeps jointly changed variables in one comparison row', async () => {
+		const jointEvidence = {
+			...evidence[0],
+			evidence_id: 'evidence-joint',
+			source_ref: 'table-2',
+			source_excerpt:
+				'Laser power and scan speed changed together, increasing relative density to 99.1%.',
+			changed_variables: [
+				{ name: 'laser power', baseline_value: 180, target_value: 220, unit: 'W' },
+				{ name: 'scan speed', baseline_value: 800, target_value: 1000, unit: 'mm/s' }
+			],
+			comparison: {
+				baseline_label: '180 W / 800 mm/s',
+				target_label: '220 W / 1000 mm/s',
+				axis_names: ['laser power', 'scan speed'],
+				comparable: true,
+				incomparability_reasons: []
+			},
+			reported_result: {
+				outcome: 'relative density',
+				value: 99.1,
+				unit: '%',
+				direction: 'increase' as const,
+				result_text: 'Relative density increased to 99.1%.'
+			},
+			attribution_scope: 'joint_effect' as const
+		};
+		render(Workbench, {
+			finding: {
+				...finding,
+				factors: ['laser power', 'scan speed'],
+				outcome: 'relative density',
+				attribution_scope: 'joint_effect' as const,
+				mechanisms: [],
+				paper_contributions: [
+					{
+						...finding.paper_contributions[0],
+						supporting_evidence_ids: ['evidence-joint'],
+						context_evidence_ids: [],
+						condition_boundary_evidence_ids: []
+					}
+				]
+			},
+			evidence: [jointEvidence],
+			collectionId: 'col-1',
+			documentTitles: { 'paper-1': 'Joint LPBF parameter study' }
+		});
+
+		expect(browserPage.getByRole('row').length).toBe(2);
+		const comparisonRow = browserPage.getByRole('row').nth(1);
+		await expect.element(comparisonRow).toHaveTextContent('laser power');
+		await expect.element(comparisonRow).toHaveTextContent('scan speed');
+		await expect.element(browserPage.getByText('relative density: 99.1 %')).toBeInTheDocument();
+	});
+
+	it('links each mechanism to its exact supporting Evidence', async () => {
+		const mechanismEvidence = {
+			...evidence[0],
+			evidence_id: 'evidence-mechanism',
+			source_ref: 'block-8',
+			source_excerpt: 'Precipitate evolution was associated with increased strength.',
+			page_numbers: [8],
+			evidence_role: 'mechanism_context',
+			changed_variables: [],
+			comparison: null,
+			reported_result: null,
+			attribution_scope: 'not_attributable' as const
+		};
+		render(Workbench, {
+			finding: {
+				...finding,
+				mechanisms: [mechanism],
+				paper_contributions: [
+					{
+						...finding.paper_contributions[0],
+						context_evidence_ids: ['evidence-mechanism'],
+						condition_boundary_evidence_ids: []
+					}
+				]
+			},
+			evidence: [evidence[0], mechanismEvidence],
+			collectionId: 'col-1',
+			documentTitles: { 'paper-1': 'Thermal treatment of Alloy A' }
+		});
+
+		await expect.element(browserPage.getByText('相关联', { exact: true })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Thermal treatment of Alloy A · p.8' }))
+			.toHaveAttribute(
+				'href',
+				'/collections/col-1/documents/paper-1?view=parsed-paper&evidence_id=evidence-mechanism&source_ref=block-8&quote=Precipitate+evolution+was+associated+with+increased+strength.&return_to=%2Fcollections%2Fcol-1%2Fobjectives%2Fobj-1%3Ffinding_id%3Dfinding-1&page=8'
 			);
 	});
 
@@ -149,7 +269,92 @@ describe('single Finding workbench', () => {
 		await expect
 			.element(browserPage.getByText('未报告可由原文证据支持的作用机制。'))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('未报告额外限制。')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('未识别额外分析边界。')).toBeInTheDocument();
+	});
+
+	it('hides paper groups without Evidence and summarizes their analysis states', async () => {
+		const emptyContributions = [
+			{
+				document_id: 'paper-empty-analyzed',
+				analysis_status: 'analyzed' as const,
+				supporting_evidence_ids: [],
+				contradicting_evidence_ids: [],
+				context_evidence_ids: [],
+				condition_boundary_evidence_ids: []
+			},
+			{
+				document_id: 'paper-excluded',
+				analysis_status: 'excluded' as const,
+				supporting_evidence_ids: [],
+				contradicting_evidence_ids: [],
+				context_evidence_ids: [],
+				condition_boundary_evidence_ids: []
+			},
+			{
+				document_id: 'paper-failed',
+				analysis_status: 'failed' as const,
+				supporting_evidence_ids: [],
+				contradicting_evidence_ids: [],
+				context_evidence_ids: [],
+				condition_boundary_evidence_ids: []
+			}
+		];
+		render(Workbench, {
+			finding: {
+				...finding,
+				paper_contributions: [...finding.paper_contributions, ...emptyContributions]
+			},
+			evidence,
+			collectionId: 'col-1',
+			documentTitles: {
+				'paper-1': 'Thermal treatment of Alloy A',
+				'paper-empty-analyzed': 'Paper without extracted Evidence',
+				'paper-excluded': 'Excluded paper',
+				'paper-failed': 'Failed paper'
+			}
+		});
+
+		await expect.element(browserPage.getByText('1 条证据 · 1 篇文献')).toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'另有 3 篇文献未形成可审计 Evidence：已分析但无 Evidence 1 篇，已排除 1 篇，分析失败 1 篇。'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Paper without extracted Evidence'))
+			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Excluded paper')).not.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Failed paper')).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('该文献未绑定到此 Finding 的可审计证据。'))
+			.not.toBeInTheDocument();
+	});
+
+	it('shows one collection-level empty state when no paper has Evidence', async () => {
+		const emptyContribution = {
+			document_id: 'paper-failed',
+			analysis_status: 'failed' as const,
+			supporting_evidence_ids: [],
+			contradicting_evidence_ids: [],
+			context_evidence_ids: [],
+			condition_boundary_evidence_ids: []
+		};
+		render(Workbench, {
+			finding: { ...finding, paper_contributions: [emptyContribution] },
+			evidence: [],
+			collectionId: 'col-1',
+			documentTitles: { 'paper-failed': 'Failed paper' }
+		});
+
+		await expect
+			.element(browserPage.getByText('当前 Finding 没有可审计的原文 Evidence。'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Failed paper')).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('另有 1 篇文献未形成可审计 Evidence：分析失败 1 篇。'))
+			.toBeInTheDocument();
 	});
 
 	it('keeps feedback behind an explicit action', async () => {

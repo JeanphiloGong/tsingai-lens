@@ -16,6 +16,7 @@ from domain.core.research_objective import (
     PaperContribution,
     ResearchObjective,
 )
+from domain.pipeline import ExecutionStats
 from domain.core.finding import Finding
 from domain.source import (
     ArtifactVersionRecord,
@@ -28,7 +29,6 @@ from domain.source import (
     CollectionDocumentRecord,
     DocumentRecord,
     DocumentVersionRecord,
-    SourceArtifactSet,
     SourceBlock,
     SourceDocument,
     SourceDocumentTree,
@@ -115,6 +115,7 @@ class BuildRepository(Protocol):
         record: TaskRecord,
         *,
         build_id: str,
+        mode: str = "standard",
     ) -> CollectionBuildRecord: ...
 
     def read_task(self, task_id: str) -> TaskRecord | None: ...
@@ -202,18 +203,18 @@ class ExperimentPlanRepository(Protocol):
 class SourceArtifactRepository(Protocol):
     backend_name: str
 
-    def replace_collection_artifacts(
+    def replace_collection_documents(
         self,
         collection_id: str,
         build_id: str,
-        artifacts: SourceArtifactSet,
+        documents: tuple[SourceDocument, ...],
     ) -> None: ...
 
-    def read_collection_artifacts(
+    def read_collection_documents(
         self,
         collection_id: str,
         build_id: str | None = None,
-    ) -> SourceArtifactSet: ...
+    ) -> tuple[SourceDocument, ...]: ...
 
     def read_document_tree(
         self,
@@ -379,6 +380,17 @@ class ObjectiveRepository(Protocol):
         total_document_count: int,
         current_document_id: str | None,
         progress_message: str | None,
+    ) -> ObjectiveAnalysis: ...
+
+    def update_analysis_execution_stats(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+        *,
+        stats: ExecutionStats,
+        model_name: str | None,
+        prompt_versions: dict[str, str],
     ) -> ObjectiveAnalysis: ...
 
     def fail_analysis(

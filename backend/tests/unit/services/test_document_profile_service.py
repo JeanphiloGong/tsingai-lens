@@ -11,7 +11,7 @@ from application.core.document_profiles.service import (
 )
 from tests.support.collection_service import build_test_collection_service
 from domain.core.document_profile import DocumentProfile
-from domain.source import SourceArtifactSet
+from domain.source import source_documents_from_records
 from infra.source.runtime.source_evidence import build_blocks
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.source_artifact_repository import MemorySourceArtifactRepository
@@ -33,10 +33,10 @@ def _write_source_artifacts(
     text_units: pd.DataFrame | None = None,
 ) -> None:
     blocks = build_blocks(documents, text_units)
-    profile_service.source_artifact_repository.replace_collection_artifacts(
+    profile_service.source_artifact_repository.replace_collection_documents(
         collection_id,
         "build_test",
-        SourceArtifactSet.from_records(
+        source_documents_from_records(
             documents=documents.to_dict(orient="records"),
             text_units=(
                 [] if text_units is None else text_units.to_dict(orient="records")

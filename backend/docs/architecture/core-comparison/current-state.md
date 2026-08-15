@@ -95,20 +95,11 @@ current collection overlays only when scope-sensitive judgment is needed.
 - do not reintroduce row-first semantic assembly
 - do not add collection identity to the base comparable-result object
 - do not let downstream readers become private semantic builders
-- keep current and historical docs separate: architecture pages own current
-  truth, historical plan pages retain rollout lineage
-
-## Historical Lineage
-
-Historical origin and phase plans now live in
-[`../../plans/historical/comparable-result/README.md`](../../plans/historical/comparable-result/README.md).
-
-Use those pages for migration rationale, not for the current authoritative
-reading path.
+- keep architecture pages as current truth; use Git history for rollout
+  archaeology
 
 ## Related Docs
 
 - [`decision.md`](decision.md)
 - [`../../specs/api.md`](../../specs/api.md)
 - [`../overview.md`](../overview.md)
-- [`../../plans/backend-wide/api-surface-migration/current-state.md`](../../plans/backend-wide/api-surface-migration/current-state.md)

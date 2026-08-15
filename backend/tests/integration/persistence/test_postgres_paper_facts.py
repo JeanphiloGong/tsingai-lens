@@ -57,15 +57,12 @@ def _paper_facts(title: str = "Profiled paper") -> PaperFactSet:
         {
             "anchor_id": "anchor-1",
             "document_id": "srcdoc_runtime",
-            "locator_type": "block",
-            "locator_confidence": "high",
+            "source_kind": "block",
+            "source_ref": "block-1",
             "source_type": "text",
-            "section_id": "Methods",
-            "char_range": {"start": 8, "end": 14},
             "page": 1,
             "quote": "Result",
             "deep_link": "#block-1",
-            "block_id": "block-1",
         }
     )
     variant = SampleVariant.from_mapping(
@@ -221,7 +218,7 @@ def test_paper_fact_repository_round_trips_build_and_document_lineage(
     repository = PostgresPaperFactRepository(source_repository.session_factory)
     task = _task("task_paper_facts")
     builds.add_task(task, build_id="build_paper_facts")
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source", "build_paper_facts", _artifacts()
     )
     expected = _paper_facts()
@@ -250,7 +247,7 @@ def test_failed_paper_fact_build_cannot_replace_active_facts(
     repository = PostgresPaperFactRepository(source_repository.session_factory)
     first_task = _task("task_facts_first")
     builds.add_task(first_task, build_id="build_facts_first")
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source", "build_facts_first", _artifacts("First")
     )
     first = _paper_facts("First")
@@ -262,7 +259,7 @@ def test_failed_paper_fact_build_cannot_replace_active_facts(
 
     failed_task = _task("task_facts_failed")
     builds.add_task(failed_task, build_id="build_facts_failed")
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source", "build_facts_failed", _artifacts("Failed")
     )
     failed = _paper_facts("Failed")
@@ -283,7 +280,7 @@ def test_paper_fact_repository_preserves_entity_and_link_order(
     repository = PostgresPaperFactRepository(source_repository.session_factory)
     task = _task("task_facts_order")
     builds.add_task(task, build_id="build_facts_order")
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source", "build_facts_order", _artifacts()
     )
     facts = _paper_facts()
@@ -368,7 +365,7 @@ def test_paper_fact_replacement_is_atomic_and_keeps_profiles_separate(
     repository = PostgresPaperFactRepository(source_repository.session_factory)
     task = _task("task_facts_replace")
     builds.add_task(task, build_id="build_facts_replace")
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source", "build_facts_replace", _artifacts()
     )
     original = _paper_facts("Original profile")
@@ -404,7 +401,7 @@ def test_paper_fact_repository_rejects_wrong_source_lineage_and_completed_builds
     repository = PostgresPaperFactRepository(source_repository.session_factory)
     task = _task("task_facts_lineage")
     builds.add_task(task, build_id="build_facts_lineage")
-    source_repository.replace_collection_artifacts(
+    source_repository.replace_collection_documents(
         "col_source", "build_facts_lineage", _artifacts()
     )
     facts = _paper_facts()
@@ -493,7 +490,7 @@ def test_postgresql_enforces_paper_fact_contract() -> None:
         repository = PostgresPaperFactRepository(sessions)
         task = _task("task_facts_postgresql")
         builds.add_task(task, build_id="build_facts_postgresql")
-        source_repository.replace_collection_artifacts(
+        source_repository.replace_collection_documents(
             "col_source", "build_facts_postgresql", _real_shape_artifacts()
         )
         facts = _paper_facts()
@@ -507,8 +504,8 @@ def test_postgresql_enforces_paper_fact_contract() -> None:
                 replace(
                     item,
                     document_id=REAL_SOURCE_DOCUMENT_ID,
-                    block_id=REAL_SOURCE_BLOCK_ID,
-                    figure_or_table=REAL_SOURCE_TABLE_ID,
+                    source_kind="block",
+                    source_ref=REAL_SOURCE_BLOCK_ID,
                 )
                 for item in facts.evidence_anchors
             ),

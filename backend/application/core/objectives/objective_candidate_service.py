@@ -2,738 +2,1039 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import replace
+from difflib import SequenceMatcher
+from enum import StrEnum
+from itertools import combinations
+import re
 from typing import Any
 
-from pydantic import ValidationError
-
-from application.core.objectives import property_matching
 from application.core.objectives.extraction import ObjectiveExtractor
-from application.core.objectives.schemas import (
-    StructuredAxisCanonicalizationPlan,
-    StructuredObjectiveMergePlan,
-    StructuredResearchObjective,
-)
+from application.core.objectives import property_matching
+from application.core.objectives.schemas import StructuredAxisCanonicalizationPlan
 from domain.core import (
+    ObjectiveFactSet,
     PaperSkim,
+    PaperStudy,
+    PaperStudyDisposition,
+    PaperStudyDispositionStatus,
+    PaperStudyRelationship,
     ResearchObjective,
-    is_question_shaped_objective,
 )
 
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
+RelationshipInventory = Mapping[
+    str,
+    tuple[str, PaperStudy, PaperStudyRelationship],
+]
+AxisMapping = Mapping[str, Mapping[str, str]]
+AxisPair = tuple[str, str, str]
 
-_DISCOVERY_SCOPE_VALUE_LIMIT = 2
-_DISCOVERY_AXIS_VALUE_LIMIT = 6
-_DISCOVERY_OBJECTIVE_LIMIT = 3
-_DISCOVERY_WARNING_LIMIT = 2
-_DISCOVERY_TEXT_VALUE_CHARS = 80
-_DISCOVERY_OBJECTIVE_TEXT_CHARS = 180
+_AXIS_PAIR_LIMIT_PER_TYPE = 96
+_AXIS_PAIR_BATCH_SIZE = 16
+_MISSING_CONTEXT_VALUES = frozenset(
+    {"", "missing", "not reported", "not specified", "unknown", "uncertain"}
+)
+_VERIFIED_AXIS_SYNONYM_CANONICAL = {
+    "base plate preheating": "base plate preheating temperature",
+    "baseplate preheating": "base plate preheating temperature",
+    "baseplate preheating temperature": "base plate preheating temperature",
+    "build platform preheating temperature": "base plate preheating temperature",
+    "preheating": "base plate preheating temperature",
+    "preheating temperature": "base plate preheating temperature",
+    "cracking": "crack formation",
+    "cracking behavior": "crack formation",
+    "microcrack formation": "crack formation",
+    "scanning strategy": "scan strategy",
+    "uts": "ultimate tensile strength",
+}
+
+
+class _Compatibility(StrEnum):
+    COMPATIBLE = "compatible"
+    POSSIBLE = "possible"
+    INCOMPATIBLE = "incompatible"
 
 
 class ObjectiveCandidateService:
-    """Discover and validate collection-level Objectives from PaperSkims."""
+    """Promote paper-study relationships into collection research objectives."""
 
-    def discover_candidates(
+    def discover_candidate_facts(
         self,
         collection_id: str,
         *,
         paper_skims: tuple[PaperSkim, ...],
-        documents: tuple[Any, ...],
         extractor: ObjectiveExtractor,
         progress_callback: ProgressCallback | None = None,
-    ) -> tuple[ResearchObjective, ...]:
-        objective_payload = {
-            "collection_id": collection_id,
-            "paper_skims": [
-                self._build_objective_discovery_skim(skim)
-                for skim in paper_skims
-            ],
+    ) -> ObjectiveFactSet:
+        source_relationship_inventory = self._relationship_inventory(paper_skims)
+        relationship_inventory = self._canonicalize_relationship_inventory_axes(
+            collection_id=collection_id,
+            extractor=extractor,
+            relationship_inventory=source_relationship_inventory,
+        )
+        terminal_rejections = {
+            relationship_id: rejection_reason
+            for relationship_id, (_document_id, study, _relationship) in (
+                relationship_inventory.items()
+            )
+            if (rejection_reason := self._objective_seed_rejection_reason(study))
+            is not None
         }
+        relationship_groups = self._build_relationship_groups(
+            paper_skims,
+            relationship_inventory=relationship_inventory,
+        )
         self._notify_progress(
             progress_callback,
             phase="objective_discovery_started",
             current=0,
-            total=1,
-            unit="steps",
-            message="Merging paper skims into collection research objectives.",
+            total=len(relationship_groups),
+            unit="groups",
+            message="Promoting compatible paper-study relationships to objectives.",
         )
-        parsed_objectives = extractor.discover_research_objectives(objective_payload)
-        discovered_objective_count = len(parsed_objectives.objectives)
-        discovery_skims: dict[str, dict[str, Any]] = {
-            str(skim["document_id"]): skim for skim in objective_payload["paper_skims"]
-        }
-        accepted_objectives: list[ResearchObjective] = []
-        for item in parsed_objectives.objectives:
-            objective = self._canonicalize_objective_document_ids(
-                ResearchObjective.from_mapping(
-                    {
-                        **item.model_dump(),
-                        "collection_id": collection_id,
-                    }
-                ),
-                documents=documents,
-            )
-            if not is_question_shaped_objective(objective):
-                continue
-            matching_document_ids = {
-                document_id
-                for document_id, skim in discovery_skims.items()
-                if self._discovery_skim_supports_objective(skim, objective)
-            }
-            seed_document_ids = set(objective.seed_document_ids)
-            if not seed_document_ids and len(matching_document_ids) == 1:
-                payload = objective.to_record()
-                payload["seed_document_ids"] = sorted(matching_document_ids)
-                objective = ResearchObjective.from_mapping(payload)
-                seed_document_ids = set(objective.seed_document_ids)
-                logger.info(
-                    "Research objective recovered one missing seed document "
-                    "collection_id=%s question=%s seed_document_id=%s",
-                    collection_id,
-                    objective.question,
-                    next(iter(seed_document_ids)),
-                )
-            if not seed_document_ids or not seed_document_ids.issubset(
-                matching_document_ids
-            ):
-                logger.warning(
-                    "Research objective rejected because axes do not come from one "
-                    "seed candidate collection_id=%s question=%s seed_document_ids=%s",
-                    collection_id,
-                    objective.question,
-                    sorted(seed_document_ids),
-                )
-                continue
-            objective = self._recover_shared_seed_material_scope(
-                objective,
-                discovery_skims=discovery_skims,
-            )
-            accepted_objectives.append(objective)
 
-        research_objectives = tuple(accepted_objectives)
-        research_objectives = self._canonicalize_research_objective_axes_with_llm(
-            collection_id=collection_id,
-            extractor=extractor,
-            paper_skims=paper_skims,
-            objectives=research_objectives,
-        )
-        research_objectives = self._merge_research_objectives_with_llm(
-            collection_id=collection_id,
-            extractor=extractor,
-            paper_skims=paper_skims,
-            objectives=research_objectives,
-        )
-        for objective in research_objectives:
-            StructuredResearchObjective.model_validate(
-                {
-                    key: value
-                    for key, value in objective.to_record().items()
-                    if key in StructuredResearchObjective.model_fields
-                }
+        accepted_objectives: list[ResearchObjective] = []
+        require_cross_paper_support = len(
+            {skim.document_id for skim in paper_skims}
+        ) > 1
+        for group_number, group in enumerate(relationship_groups, start=1):
+            relationship_ids = tuple(
+                str(record["relationship"]["relationship_id"])
+                for record in group
             )
-        research_objectives = self._dedupe_research_objectives(research_objectives)
+            objective, rejection_reason = self._objective_from_relationship_group(
+                collection_id,
+                relationship_ids=relationship_ids,
+                relationship_inventory=relationship_inventory,
+            )
+            if (
+                objective is not None
+                and require_cross_paper_support
+                and len(objective.seed_document_ids) < 2
+            ):
+                rejection_reason = (
+                    "Relationship is not supported by multiple collection papers."
+                )
+                objective = None
+            if objective is not None:
+                accepted_objectives.append(objective)
+            else:
+                for relationship_id in relationship_ids:
+                    terminal_rejections[relationship_id] = rejection_reason or (
+                        "Study relationship could not form a schema-valid objective."
+                    )
+
+            self._notify_progress(
+                progress_callback,
+                phase="objective_discovery_batch_finished",
+                current=group_number,
+                total=len(relationship_groups),
+                unit="groups",
+                message="Promoted one compatible study-relationship group.",
+            )
+
+        research_objectives = self._rank_objectives(
+            tuple(accepted_objectives),
+            relationship_inventory=relationship_inventory,
+        )
+        research_objectives = tuple(
+            ResearchObjective.from_mapping(
+                {**objective.to_record(), "rank": rank}
+            )
+            for rank, objective in enumerate(research_objectives, start=1)
+        )
+        dispositions = self._study_dispositions(
+            research_objectives,
+            relationship_inventory=relationship_inventory,
+            terminal_rejections=terminal_rejections,
+        )
+        facts = ObjectiveFactSet(
+            research_objectives_ready=True,
+            paper_skims=paper_skims,
+            research_objectives=research_objectives,
+            study_dispositions=dispositions,
+        )
         logger.info(
-            "Research objective discovery finished collection_id=%s paper_skim_count=%s discovered_objective_count=%s accepted_objective_count=%s",
+            "Research objective discovery finished collection_id=%s "
+            "paper_skim_count=%s relationship_count=%s group_count=%s "
+            "objective_count=%s rejected_relationship_count=%s",
             collection_id,
             len(paper_skims),
-            discovered_objective_count,
+            len(relationship_inventory),
+            len(relationship_groups),
             len(research_objectives),
+            sum(
+                disposition.status is PaperStudyDispositionStatus.REJECTED
+                for disposition in dispositions
+            ),
         )
-        return research_objectives
+        return facts
 
     @staticmethod
-    def _build_objective_discovery_skim(skim: PaperSkim) -> dict[str, Any]:
-        """Keep collection-level discovery input within the model context budget."""
+    def _relationship_inventory(
+        paper_skims: tuple[PaperSkim, ...],
+    ) -> dict[str, tuple[str, PaperStudy, PaperStudyRelationship]]:
+        inventory: dict[str, tuple[str, PaperStudy, PaperStudyRelationship]] = {}
+        for skim in paper_skims:
+            for study in skim.studies:
+                if study.document_id != skim.document_id:
+                    raise ValueError("paper study belongs to another skim document")
+                for relationship in study.relationships:
+                    if relationship.relationship_id in inventory:
+                        raise ValueError(
+                            "paper study relationship ids must be collection-unique"
+                        )
+                    inventory[relationship.relationship_id] = (
+                        skim.document_id,
+                        study,
+                        relationship,
+                    )
+        return inventory
 
-        def values(
-            items: tuple[str, ...],
-            limit: int,
-        ) -> list[str]:
-            return [
-                str(item).strip()[:_DISCOVERY_TEXT_VALUE_CHARS]
-                for item in items[:limit]
-                if str(item).strip()
+    def _build_relationship_groups(
+        self,
+        paper_skims: tuple[PaperSkim, ...],
+        *,
+        relationship_inventory: RelationshipInventory | None = None,
+    ) -> list[list[dict[str, Any]]]:
+        inventory = relationship_inventory or self._relationship_inventory(paper_skims)
+        skims_by_document_id = {skim.document_id: skim for skim in paper_skims}
+        records = sorted(
+            (
+                self._relationship_record(
+                    skims_by_document_id[document_id],
+                    study,
+                    relationship,
+                )
+                for document_id, study, relationship in inventory.values()
+                if self._objective_seed_rejection_reason(study) is None
+            ),
+            key=self._record_relationship_id,
+        )
+        records_by_id = {
+            self._record_relationship_id(record): record for record in records
+        }
+        base_groups: list[list[str]] = []
+        for record in records:
+            relationship_id = self._record_relationship_id(record)
+            compatible_group = next(
+                (
+                    group
+                    for group in base_groups
+                    if all(
+                        self._record_compatibility(
+                            record,
+                            records_by_id[other_id],
+                        )
+                        is _Compatibility.COMPATIBLE
+                        for other_id in group
+                    )
+                ),
+                None,
+            )
+            if compatible_group is None:
+                base_groups.append([relationship_id])
+            else:
+                compatible_group.append(relationship_id)
+
+        base_groups = self._attach_unambiguous_missing_material_groups(
+            base_groups,
+            relationship_inventory=inventory,
+        )
+
+        return [
+            [records_by_id[relationship_id] for relationship_id in group]
+            for group in sorted(base_groups, key=lambda group: tuple(group))
+        ]
+
+    @classmethod
+    def _attach_unambiguous_missing_material_groups(
+        cls,
+        groups: list[list[str]],
+        *,
+        relationship_inventory: RelationshipInventory,
+    ) -> list[list[str]]:
+        def has_known_material(group: Iterable[str]) -> bool:
+            return any(
+                cls._known_material_keys(
+                    relationship_inventory[relationship_id][1].material_scope
+                )
+                for relationship_id in group
+            )
+
+        anchored_groups = [
+            group for group in groups if has_known_material(group)
+        ]
+        unanchored_groups = [
+            group for group in groups if not has_known_material(group)
+        ]
+        retained_unanchored: list[list[str]] = []
+        for group in unanchored_groups:
+            candidates = [
+                anchor
+                for anchor in anchored_groups
+                if all(
+                    cls._relationship_compatibility(
+                        relationship_inventory[relationship_id][1],
+                        relationship_inventory[relationship_id][2],
+                        relationship_inventory[anchor_id][1],
+                        relationship_inventory[anchor_id][2],
+                    )
+                    is _Compatibility.POSSIBLE
+                    for relationship_id in group
+                    for anchor_id in anchor
+                )
             ]
+            if len(candidates) != 1:
+                retained_unanchored.append(group)
+                continue
+            candidates[0].extend(group)
+            candidates[0].sort()
+        return [*anchored_groups, *retained_unanchored]
 
-        possible_objectives = [
-            text
-            for item in skim.possible_objectives
-            if (text := str(item).strip())
-            and len(text) <= _DISCOVERY_OBJECTIVE_TEXT_CHARS
-        ][:_DISCOVERY_OBJECTIVE_LIMIT]
-
+    @staticmethod
+    def _relationship_record(
+        skim: PaperSkim,
+        study: PaperStudy,
+        relationship: PaperStudyRelationship,
+    ) -> dict[str, Any]:
+        study_record = study.to_record()
+        study_record.pop("relationships", None)
         return {
             "document_id": skim.document_id,
             "doc_role": skim.doc_role,
-            "candidate_materials": values(
-                skim.candidate_materials,
-                _DISCOVERY_SCOPE_VALUE_LIMIT,
-            ),
-            "candidate_processes": values(
-                skim.candidate_processes,
-                _DISCOVERY_SCOPE_VALUE_LIMIT,
-            ),
-            "candidate_properties": values(
-                skim.candidate_properties,
-                _DISCOVERY_AXIS_VALUE_LIMIT,
-            ),
-            "changed_variables": values(
-                skim.changed_variables,
-                _DISCOVERY_AXIS_VALUE_LIMIT,
-            ),
-            "possible_objectives": possible_objectives,
+            "study": study_record,
+            "relationship": relationship.to_record(),
             "evidence_density": skim.evidence_density,
-            "confidence": skim.confidence,
-            "warnings": values(skim.warnings, _DISCOVERY_WARNING_LIMIT),
+            "paper_confidence": skim.confidence,
+            "warnings": list(skim.warnings),
         }
 
     @staticmethod
-    def _discovery_skim_supports_objective(
-        skim: Mapping[str, Any],
-        objective: ResearchObjective,
-    ) -> bool:
-        question_hints = tuple(
-            str(value).strip()
-            for value in skim.get("possible_objectives", ())
-            if str(value).strip()
-        )
+    def _record_relationship_id(record: Mapping[str, Any]) -> str:
+        relationship = record.get("relationship")
+        if not isinstance(relationship, Mapping):
+            return ""
+        return str(relationship.get("relationship_id") or "")
 
-        def supports(axis: str, field: str) -> bool:
-            structured_values = tuple(
-                str(value).strip()
-                for value in skim.get(field, ())
-                if str(value).strip()
+    @classmethod
+    def _record_compatibility(
+        cls,
+        left: Mapping[str, Any],
+        right: Mapping[str, Any],
+    ) -> _Compatibility:
+        left_study = left.get("study")
+        right_study = right.get("study")
+        left_relationship = left.get("relationship")
+        right_relationship = right.get("relationship")
+        if not all(
+            isinstance(item, Mapping)
+            for item in (
+                left_study,
+                right_study,
+                left_relationship,
+                right_relationship,
             )
-            return any(
-                property_matching.axis_values_match(axis, value)
-                or property_matching.source_text_mentions_axis(value, axis)
-                or property_matching.source_text_mentions_axis(axis, value)
-                for value in structured_values
+        ):
+            return _Compatibility.INCOMPATIBLE
+        return cls._relationship_compatibility(
+            PaperStudy.from_mapping(
+                {**dict(left_study), "relationships": [dict(left_relationship)]}
+            ),
+            PaperStudyRelationship.from_mapping(left_relationship),
+            PaperStudy.from_mapping(
+                {**dict(right_study), "relationships": [dict(right_relationship)]}
+            ),
+            PaperStudyRelationship.from_mapping(right_relationship),
+        )
+
+    @classmethod
+    def _relationship_compatibility(
+        cls,
+        left_study: PaperStudy,
+        left: PaperStudyRelationship,
+        right_study: PaperStudy,
+        right: PaperStudyRelationship,
+    ) -> _Compatibility:
+        if not cls._axis_collections_are_equivalent(
+            left.varied_factors,
+            right.varied_factors,
+        ) or not cls._axis_values_are_equivalent(left.outcome, right.outcome):
+            return _Compatibility.INCOMPATIBLE
+        return cls._context_collection_compatibility(
+            left_study.material_scope,
+            right_study.material_scope,
+        )
+
+    @classmethod
+    def _context_collection_compatibility(
+        cls,
+        left: Iterable[str],
+        right: Iterable[str],
+    ) -> _Compatibility:
+        left_keys = cls._known_material_keys(left)
+        right_keys = cls._known_material_keys(right)
+        if not left_keys and not right_keys:
+            return _Compatibility.COMPATIBLE
+        if not left_keys or not right_keys:
+            return _Compatibility.POSSIBLE
+        if left_keys == right_keys:
+            return _Compatibility.COMPATIBLE
+        if left_keys < right_keys or right_keys < left_keys:
+            return _Compatibility.POSSIBLE
+        return _Compatibility.INCOMPATIBLE
+
+    @classmethod
+    def _known_material_keys(cls, values: Iterable[str]) -> frozenset[str]:
+        return frozenset(
+            key
+            for value in values
+            if (key := cls._known_material_scalar(value)) is not None
+        )
+
+    @classmethod
+    def _known_material_scalar(cls, value: Any) -> str | None:
+        key = cls._axis_record_key(value)
+        if not key or key in _MISSING_CONTEXT_VALUES:
+            return None
+        material_grades = cls._material_grade_keys(key)
+        if len(material_grades) == 1:
+            remainder = re.sub(
+                r"(?<![a-z0-9])(?:aisi[\s-]*|ss[\s-]*)?"
+                r"\d{3,4}[a-z]{0,2}(?![a-z0-9])",
+                " ",
+                key,
             )
+            remaining_words = frozenset(re.findall(r"[a-z]+", remainder))
+            if remaining_words <= {"stainless", "steel"}:
+                return f"stainless-steel:{next(iter(material_grades))}"
+        return cls._axis_identity(key)
 
-        variables_supported = all(
-            supports(variable, "changed_variables")
-            for variable in objective.variables
-        )
-        outcomes_supported = all(
-            supports(outcome, "candidate_properties")
-            for outcome in objective.outcomes
-        )
-        if not question_hints:
-            return variables_supported and outcomes_supported
+    @classmethod
+    def _known_context_scalar(cls, value: Any) -> str | None:
+        key = cls._axis_identity(value)
+        if not key or key in _MISSING_CONTEXT_VALUES:
+            return None
+        return key
 
-        question_supports_axes = any(
-            all(
-                property_matching.source_text_mentions_axis(question, axis)
-                for axis in (*objective.variables, *objective.outcomes)
-            )
-            for question in question_hints
-        )
-        structured_variables = skim.get("changed_variables") or ()
-        structured_outcomes = skim.get("candidate_properties") or ()
-        return bool(
-            question_supports_axes
-            and (not structured_variables or variables_supported)
-            and (not structured_outcomes or outcomes_supported)
-        )
-
-    def _recover_shared_seed_material_scope(
-        self,
-        objective: ResearchObjective,
-        *,
-        discovery_skims: Mapping[str, Mapping[str, Any]],
-    ) -> ResearchObjective:
-        if objective.material_scope:
-            return objective
-
-        materials_by_seed: list[tuple[str, ...]] = []
-        for document_id in objective.seed_document_ids:
-            skim = discovery_skims.get(document_id)
-            materials = tuple(
-                str(value).strip()
-                for value in (skim or {}).get("candidate_materials", ())
-                if str(value).strip()
-            )
-            if not materials:
-                return objective
-            materials_by_seed.append(materials)
-
-        if not materials_by_seed:
-            return objective
-        shared_materials = self._unique_axis_values(
-            material
-            for material in materials_by_seed[0]
-            if all(
-                any(
-                    property_matching.axis_values_match(material, candidate)
-                    for candidate in seed_materials
-                )
-                for seed_materials in materials_by_seed[1:]
-            )
-        )
-        if not shared_materials:
-            return objective
-
-        payload = objective.to_record()
-        payload["material_scope"] = shared_materials
-        recovered = ResearchObjective.from_mapping(payload)
-        logger.info(
-            "Research objective recovered shared seed material scope "
-            "collection_id=%s objective_id=%s material_scope=%s",
-            objective.collection_id,
-            objective.objective_id,
-            shared_materials,
-        )
-        return recovered
+    @classmethod
+    def _axis_identity(cls, value: Any) -> str:
+        literal_key = cls._axis_record_key(value)
+        if not literal_key:
+            return ""
+        if any(character in literal_key for character in "()[]"):
+            return literal_key
+        return cls._verified_axis_synonym_canonical(literal_key)
 
     @staticmethod
-    def _canonicalize_objective_document_ids(
-        objective: ResearchObjective,
-        *,
-        documents: Iterable[Any],
-    ) -> ResearchObjective:
-        """Keep model-produced document references within the current build."""
-        aliases: dict[str, str] = {}
-        canonical_ids: set[str] = set()
-        for document in documents:
-            document_id = str(getattr(document, "document_id", "") or "").strip()
-            if not document_id:
-                continue
-            canonical_ids.add(document_id)
-            metadata = getattr(document, "metadata", {}) or {}
-            for key in (
-                "source_filename",
-                "original_filename",
-                "stored_filename",
-                "source_path",
-            ):
-                value = str(metadata.get(key) or "").strip()
-                if value:
-                    aliases[value] = document_id
-                    aliases[value.rsplit("/", 1)[-1]] = document_id
+    def _axis_record_key(value: Any) -> str:
+        return " ".join(str(value or "").strip().casefold().split())
 
-        def canonicalize(values: Iterable[str]) -> list[str]:
-            result: list[str] = []
-            seen: set[str] = set()
-            for value in values:
-                normalized = str(value or "").strip()
-                document_id = (
-                    normalized
-                    if normalized in canonical_ids
-                    else aliases.get(normalized)
-                    or aliases.get(normalized.rsplit("/", 1)[-1])
+    @staticmethod
+    def _verified_axis_synonym_canonical(value: str) -> str:
+        return _VERIFIED_AXIS_SYNONYM_CANONICAL.get(value, value)
+
+    @classmethod
+    def _axis_values_are_equivalent(cls, left: Any, right: Any) -> bool:
+        left_identity = cls._axis_identity(left)
+        return bool(
+            left_identity
+            and left_identity == cls._axis_identity(right)
+        )
+
+    @classmethod
+    def _axis_collections_are_equivalent(
+        cls,
+        left: Iterable[str],
+        right: Iterable[str],
+    ) -> bool:
+        left_values = tuple(left)
+        remaining_right = list(right)
+        if len(left_values) != len(remaining_right):
+            return False
+        for left_value in left_values:
+            matching_position = next(
+                (
+                    position
+                    for position, right_value in enumerate(remaining_right)
+                    if cls._axis_values_are_equivalent(left_value, right_value)
+                ),
+                None,
+            )
+            if matching_position is None:
+                return False
+            remaining_right.pop(matching_position)
+        return True
+
+    def _objective_from_relationship_group(
+        self,
+        collection_id: str,
+        *,
+        relationship_ids: tuple[str, ...],
+        relationship_inventory: RelationshipInventory,
+    ) -> tuple[ResearchObjective | None, str | None]:
+        if not relationship_ids or not self._relationships_are_compatible(
+            relationship_ids,
+            relationship_inventory=relationship_inventory,
+        ):
+            return None, "Study relationships do not form one compatible objective."
+        seed_document_ids = self._unique_text_values(
+            relationship_inventory[relationship_id][0]
+            for relationship_id in relationship_ids
+        )
+        studies = tuple(
+            relationship_inventory[relationship_id][1]
+            for relationship_id in relationship_ids
+        )
+        relationships = tuple(
+            relationship_inventory[relationship_id][2]
+            for relationship_id in relationship_ids
+        )
+        variables = relationships[0].varied_factors
+        outcome = relationships[0].outcome
+        objective_payload = {
+            "collection_id": collection_id,
+            "question": self._objective_question(variables, outcome),
+            "variables": list(variables),
+            "outcomes": [outcome],
+            "material_scope": self._shared_study_values(
+                studies,
+                "material_scope",
+            ),
+            "mechanisms": [],
+            "constraints": self._shared_study_constraints(
+                studies,
+                excluded_axes=(*variables, outcome),
+            ),
+            "requested_comparator": self._shared_study_scalar(
+                studies,
+                "comparator",
+            ),
+            "seed_document_ids": seed_document_ids,
+            "source_relationship_ids": list(relationship_ids),
+            "confidence": min(
+                min(study.confidence for study in studies),
+                min(relationship.confidence for relationship in relationships),
+            ),
+            "reason": "Supported by one backend-compatible relationship group.",
+        }
+        try:
+            return ResearchObjective.from_mapping(objective_payload), None
+        except (TypeError, ValueError) as exc:
+            return None, f"Study relationship group cannot form a valid objective: {exc}"
+
+    @staticmethod
+    def _objective_question(
+        varied_factors: tuple[str, ...],
+        outcome: str,
+    ) -> str:
+        auxiliary = "does" if len(varied_factors) == 1 else "do"
+        return f"How {auxiliary} {' and '.join(varied_factors)} affect {outcome}?"
+
+    def _relationships_are_compatible(
+        self,
+        relationship_ids: Iterable[str],
+        *,
+        relationship_inventory: RelationshipInventory,
+    ) -> bool:
+        ids = tuple(relationship_ids)
+        for position, left_id in enumerate(ids):
+            _left_document_id, left_study, left_relationship = (
+                relationship_inventory[left_id]
+            )
+            for right_id in ids[position + 1 :]:
+                _right_document_id, right_study, right_relationship = (
+                    relationship_inventory[right_id]
                 )
                 if (
-                    not document_id
-                    and len(normalized) >= 32
-                    and all(
-                        character in "0123456789abcdefABCDEF"
-                        for character in normalized
+                    self._relationship_compatibility(
+                        left_study,
+                        left_relationship,
+                        right_study,
+                        right_relationship,
                     )
+                    is _Compatibility.INCOMPATIBLE
                 ):
-                    truncated_matches = [
-                        candidate
-                        for candidate in canonical_ids
-                        if len(candidate) == len(normalized) + 1
-                        and candidate.startswith(normalized)
-                    ]
-                    if len(truncated_matches) == 1:
-                        document_id = truncated_matches[0]
-                if document_id and document_id not in seen:
-                    seen.add(document_id)
-                    result.append(document_id)
-            return result
+                    return False
+        return True
 
-        payload = objective.to_record()
-        payload["seed_document_ids"] = canonicalize(objective.seed_document_ids)
-        payload["excluded_document_ids"] = canonicalize(
-            objective.excluded_document_ids
+    @staticmethod
+    def _objective_seed_rejection_reason(study: PaperStudy) -> str | None:
+        if study.claim_scope not in {"synthesis", "background"}:
+            return None
+        return (
+            f"Study relationship has claim_scope={study.claim_scope} and cannot "
+            "directly seed a research objective."
         )
-        return ResearchObjective.from_mapping(payload)
 
-    def _canonicalize_research_objective_axes_with_llm(
+    def _shared_study_values(
+        self,
+        studies: tuple[PaperStudy, ...],
+        field_name: str,
+    ) -> list[str]:
+        values_by_study = [
+            tuple(getattr(study, field_name))
+            for study in studies
+        ]
+        if not values_by_study or any(not values for values in values_by_study):
+            return []
+
+        def values_match(left: str, right: str) -> bool:
+            if field_name != "material_scope":
+                return self._axis_values_are_equivalent(left, right)
+            left_key = self._known_material_scalar(left)
+            return left_key is not None and left_key == self._known_material_scalar(
+                right
+            )
+
+        first, *remaining = values_by_study
+        return self._unique_axis_values(
+            value
+            for value in first
+            if all(
+                any(
+                    values_match(value, candidate)
+                    for candidate in values
+                )
+                for values in remaining
+            )
+        )
+
+    def _shared_study_constraints(
+        self,
+        studies: tuple[PaperStudy, ...],
+        *,
+        excluded_axes: Iterable[str] = (),
+    ) -> list[str]:
+        constraints: list[str] = []
+        for field_name in (
+            "process_context",
+            "sample_context",
+            "test_context",
+            "fixed_conditions",
+        ):
+            constraints.extend(self._shared_study_values(studies, field_name))
+        for field_name in ("design_type", "claim_scope"):
+            if value := self._shared_study_scalar(studies, field_name):
+                constraints.append(value)
+        excluded = tuple(excluded_axes)
+        return self._unique_axis_values(
+            value
+            for value in constraints
+            if not any(
+                self._axis_values_are_equivalent(value, axis)
+                for axis in excluded
+            )
+        )
+
+    @classmethod
+    def _shared_study_scalar(
+        cls,
+        studies: tuple[PaperStudy, ...],
+        field_name: str,
+    ) -> str | None:
+        values = tuple(getattr(study, field_name) for study in studies)
+        keys = tuple(cls._known_context_scalar(value) for value in values)
+        if not keys or any(key is None for key in keys) or len(set(keys)) != 1:
+            return None
+        return str(values[0])
+
+    def _canonicalize_relationship_inventory_axes(
         self,
         *,
         collection_id: str,
         extractor: ObjectiveExtractor,
-        paper_skims: tuple[PaperSkim, ...],
-        objectives: tuple[ResearchObjective, ...],
-    ) -> tuple[ResearchObjective, ...]:
-        axis_candidates = self._build_axis_canonicalization_candidates(objectives)
-        if sum(len(values) for values in axis_candidates.values()) <= 1:
-            return objectives
-        payload = {
-            "collection_id": collection_id,
-            "paper_skims": [skim.to_record() for skim in paper_skims],
-            "axis_candidates": axis_candidates,
-        }
+        relationship_inventory: RelationshipInventory,
+    ) -> dict[str, tuple[str, PaperStudy, PaperStudyRelationship]]:
+        axis_candidates = self._build_relationship_axis_candidates(
+            relationship_inventory
+        )
+        axis_pairs = self._build_axis_candidate_pairs(axis_candidates)
+        if not axis_pairs:
+            return dict(relationship_inventory)
+        pair_records = [
+            {
+                "pair_id": pair_id,
+                "axis_type": axis_type,
+                "left": left,
+                "right": right,
+            }
+            for pair_id, (axis_type, left, right) in axis_pairs.items()
+        ]
+        decisions: list[dict[str, Any]] = []
         try:
-            canonicalization_plan = extractor.canonicalize_research_objective_axes(
-                payload
+            for start in range(0, len(pair_records), _AXIS_PAIR_BATCH_SIZE):
+                plan = extractor.canonicalize_research_objective_axes(
+                    {
+                        "collection_id": collection_id,
+                        "axis_pairs": pair_records[
+                            start : start + _AXIS_PAIR_BATCH_SIZE
+                        ],
+                    }
+                )
+                decisions.extend(
+                    decision.model_dump() for decision in plan.decisions
+                )
+            canonicalization_plan = StructuredAxisCanonicalizationPlan(
+                decisions=decisions
             )
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.warning(
-                "Research objective axis canonicalization failed; using normalized axes collection_id=%s",
+                "Research relationship axis canonicalization failed; using source axes "
+                "collection_id=%s",
                 collection_id,
                 exc_info=True,
             )
-            return objectives
+            return dict(relationship_inventory)
 
-        axis_mapping = self._validate_axis_canonicalization_plan(
+        axis_mapping = self._axis_mapping_from_plan(
             canonicalization_plan,
             axis_candidates=axis_candidates,
+            axis_pairs=axis_pairs,
+            relationship_inventory=relationship_inventory,
         )
         if axis_mapping is None:
             logger.warning(
-                "Research objective axis canonicalization rejected; using normalized axes collection_id=%s",
+                "Research relationship axis canonicalization rejected; using source "
+                "axes "
+                "collection_id=%s",
                 collection_id,
             )
-            return objectives
-        canonicalized = tuple(
-            self._apply_axis_canonicalization(objective, axis_mapping)
-            for objective in objectives
-        )
-        try:
-            for objective in canonicalized:
-                StructuredResearchObjective.model_validate(
-                    {
-                        key: value
-                        for key, value in objective.to_record().items()
-                        if key in StructuredResearchObjective.model_fields
-                    }
-                )
-        except ValidationError:
-            logger.warning(
-                "Research objective axis canonicalization broke question roles; "
-                "using original axes collection_id=%s",
-                collection_id,
+            return dict(relationship_inventory)
+        canonicalized_inventory = {
+            relationship_id: (
+                document_id,
+                replace(
+                    study,
+                    material_scope=tuple(
+                        self._canonicalize_axis_values(
+                            study.material_scope,
+                            axis_type="material",
+                            axis_mapping=axis_mapping,
+                        )
+                    ),
+                ),
+                replace(
+                    relationship,
+                    varied_factors=tuple(
+                        self._canonicalize_axis_values(
+                            relationship.varied_factors,
+                            axis_type="variable",
+                            axis_mapping=axis_mapping,
+                        )
+                    ),
+                    outcome=self._canonicalize_axis_values(
+                        (relationship.outcome,),
+                        axis_type="outcome",
+                        axis_mapping=axis_mapping,
+                    )[0],
+                ),
             )
-            return objectives
-        return canonicalized
+            for relationship_id, (
+                document_id,
+                study,
+                relationship,
+            ) in relationship_inventory.items()
+        }
+        return canonicalized_inventory
 
-    def _build_axis_canonicalization_candidates(
+    def _build_relationship_axis_candidates(
         self,
-        objectives: tuple[ResearchObjective, ...],
+        relationship_inventory: RelationshipInventory,
     ) -> dict[str, list[str]]:
         return {
             "material": self._unique_axis_values(
-                value
-                for objective in objectives
-                for value in objective.material_scope
+                material
+                for _document_id, study, _relationship in (
+                    relationship_inventory.values()
+                )
+                for material in study.material_scope
             ),
             "variable": self._unique_axis_values(
-                value for objective in objectives for value in objective.variables
+                factor
+                for _document_id, _study, relationship in (
+                    relationship_inventory.values()
+                )
+                for factor in relationship.varied_factors
             ),
             "outcome": self._unique_axis_values(
-                value for objective in objectives for value in objective.outcomes
-            ),
-            "mechanism": self._unique_axis_values(
-                value for objective in objectives for value in objective.mechanisms
-            ),
-            "constraint": self._unique_axis_values(
-                value for objective in objectives for value in objective.constraints
+                relationship.outcome
+                for _document_id, _study, relationship in (
+                    relationship_inventory.values()
+                )
             ),
         }
 
+    @classmethod
+    def _build_axis_candidate_pairs(
+        cls,
+        axis_candidates: dict[str, list[str]],
+    ) -> dict[str, AxisPair]:
+        pairs: dict[str, AxisPair] = {}
+        for axis_type, values in axis_candidates.items():
+            candidates = [
+                (left, right)
+                for left, right in combinations(values, 2)
+                if cls._axis_pair_might_be_equivalent(axis_type, left, right)
+            ]
+            candidates.sort(
+                key=lambda pair: (
+                    -int(cls._axis_values_are_equivalent(*pair)),
+                    -SequenceMatcher(
+                        a=cls._axis_record_key(pair[0]),
+                        b=cls._axis_record_key(pair[1]),
+                    ).ratio(),
+                    cls._axis_record_key(pair[0]),
+                    cls._axis_record_key(pair[1]),
+                )
+            )
+            for left, right in candidates[:_AXIS_PAIR_LIMIT_PER_TYPE]:
+                pair_id = f"axis_pair_{len(pairs) + 1:04d}"
+                pairs[pair_id] = (axis_type, left, right)
+        return pairs
+
+    @classmethod
+    def _axis_pair_might_be_equivalent(
+        cls,
+        axis_type: str,
+        left: str,
+        right: str,
+    ) -> bool:
+        if cls._axis_values_are_equivalent(left, right):
+            return True
+        if axis_type == "material":
+            return bool(
+                cls._material_grade_keys(left) & cls._material_grade_keys(right)
+            )
+        if (
+            property_matching.source_text_mentions_axis(left, right)
+            or property_matching.source_text_mentions_axis(right, left)
+        ):
+            return True
+        left_key = cls._axis_record_key(left)
+        right_key = cls._axis_record_key(right)
+        return SequenceMatcher(a=left_key, b=right_key).ratio() >= 0.78
+
     @staticmethod
-    def _validate_axis_canonicalization_plan(
+    def _material_grade_keys(value: str) -> frozenset[str]:
+        return frozenset(
+            match.group(1)
+            for match in re.finditer(
+                r"(?<![a-z0-9])(?:aisi[\s-]*|ss[\s-]*)?"
+                r"(\d{3,4}[a-z]{0,2})(?![a-z0-9])",
+                value.casefold(),
+            )
+        )
+
+    @classmethod
+    def _axis_mapping_from_plan(
+        cls,
         canonicalization_plan: StructuredAxisCanonicalizationPlan,
         *,
         axis_candidates: dict[str, list[str]],
+        axis_pairs: Mapping[str, AxisPair],
+        relationship_inventory: RelationshipInventory,
     ) -> dict[str, dict[str, str]] | None:
-        expected_keys = {
-            axis_type: {
-                property_matching.axis_key(value)
-                for value in values
-                if property_matching.axis_key(value)
-            }
-            for axis_type, values in axis_candidates.items()
+        decision_ids = tuple(
+            decision.pair_id for decision in canonicalization_plan.decisions
+        )
+        selected_ids = tuple(
+            decision.pair_id
+            for decision in canonicalization_plan.decisions
+            if decision.equivalent
+        )
+        if (
+            decision_ids != tuple(axis_pairs)
+            or len(decision_ids) != len(set(decision_ids))
+        ):
+            return None
+        selected_edges = {
+            (
+                axis_type,
+                frozenset(
+                    (cls._axis_record_key(left), cls._axis_record_key(right))
+                ),
+            )
+            for pair_id in selected_ids
+            for axis_type, left, right in (axis_pairs[pair_id],)
         }
-        seen_keys: dict[str, set[str]] = {
-            axis_type: set() for axis_type in expected_keys
-        }
+        label_counts = cls._axis_label_counts(relationship_inventory)
         axis_mapping: dict[str, dict[str, str]] = {
-            axis_type: {} for axis_type in expected_keys
+            axis_type: {
+                cls._axis_record_key(value): value
+                for value in axis_candidates[axis_type]
+                if cls._axis_record_key(value)
+            }
+            for axis_type in axis_candidates
         }
-
-        for group in canonicalization_plan.axis_groups:
-            axis_type = group.axis_type
-            if axis_type not in expected_keys:
-                return None
-            aliases = tuple(str(value or "").strip() for value in group.aliases)
-            canonical = str(group.canonical or "").strip()
-            canonical_key = property_matching.axis_key(canonical)
-            alias_keys = tuple(property_matching.axis_key(alias) for alias in aliases)
-            if not aliases or not canonical or not canonical_key:
-                return None
-            if canonical_key not in alias_keys:
-                return None
-            for alias, alias_key in zip(aliases, alias_keys, strict=True):
-                if not alias_key:
-                    return None
-                if not property_matching.axis_alias_matches_canonical(alias, canonical):
-                    return None
-                if alias_key not in expected_keys[axis_type]:
-                    return None
-                if alias_key in seen_keys[axis_type]:
-                    return None
-                seen_keys[axis_type].add(alias_key)
-                axis_mapping[axis_type][alias_key] = canonical
-
-        for axis_type, expected in expected_keys.items():
-            if seen_keys[axis_type] != expected:
-                return None
+        for axis_type, values in axis_candidates.items():
+            groups: list[list[str]] = []
+            for value in sorted(
+                values,
+                key=lambda item: (
+                    -label_counts.get(axis_type, {}).get(
+                        cls._axis_record_key(item), 0
+                    ),
+                    cls._axis_record_key(item),
+                ),
+            ):
+                compatible_group = next(
+                    (
+                        group
+                        for group in groups
+                        if all(
+                            (
+                                axis_type,
+                                frozenset(
+                                    (
+                                        cls._axis_record_key(value),
+                                        cls._axis_record_key(other),
+                                    )
+                                ),
+                            )
+                            in selected_edges
+                            for other in group
+                        )
+                    ),
+                    None,
+                )
+                if compatible_group is None:
+                    groups.append([value])
+                else:
+                    compatible_group.append(value)
+            for group in groups:
+                canonical = max(
+                    group,
+                    key=lambda value: (
+                        label_counts.get(axis_type, {}).get(
+                            cls._axis_record_key(value), 0
+                        ),
+                        len(value.split()) > 1,
+                        -len(value),
+                        cls._axis_record_key(value),
+                    ),
+                )
+                for value in group:
+                    axis_mapping[axis_type][cls._axis_record_key(value)] = canonical
         return axis_mapping
 
-    def _apply_axis_canonicalization(
-        self,
-        objective: ResearchObjective,
-        axis_mapping: dict[str, dict[str, str]],
-    ) -> ResearchObjective:
-        payload = objective.to_record()
-        payload["material_scope"] = self._canonicalize_axis_values(
-            objective.material_scope,
-            axis_type="material",
-            axis_mapping=axis_mapping,
-        )
-        payload["variables"] = self._canonicalize_axis_values(
-            objective.variables,
-            axis_type="variable",
-            axis_mapping=axis_mapping,
-        )
-        payload["outcomes"] = self._canonicalize_axis_values(
-            objective.outcomes,
-            axis_type="outcome",
-            axis_mapping=axis_mapping,
-        )
-        payload["mechanisms"] = self._canonicalize_axis_values(
-            objective.mechanisms,
-            axis_type="mechanism",
-            axis_mapping=axis_mapping,
-        )
-        payload["constraints"] = self._canonicalize_axis_values(
-            objective.constraints,
-            axis_type="constraint",
-            axis_mapping=axis_mapping,
-        )
-        return ResearchObjective.from_mapping(payload)
+    @classmethod
+    def _axis_label_counts(
+        cls,
+        relationship_inventory: RelationshipInventory,
+    ) -> dict[str, dict[str, int]]:
+        counts: dict[str, dict[str, int]] = {
+            "material": {},
+            "variable": {},
+            "outcome": {},
+        }
+
+        def count(axis_type: str, value: str) -> None:
+            key = cls._axis_record_key(value)
+            counts[axis_type][key] = counts[axis_type].get(key, 0) + 1
+
+        for _document_id, study, relationship in relationship_inventory.values():
+            for material in study.material_scope:
+                count("material", material)
+            for factor in relationship.varied_factors:
+                count("variable", factor)
+            count("outcome", relationship.outcome)
+        return counts
 
     def _canonicalize_axis_values(
         self,
         values: tuple[str, ...],
         *,
         axis_type: str,
-        axis_mapping: dict[str, dict[str, str]],
+        axis_mapping: AxisMapping,
     ) -> list[str]:
         merged: list[str] = []
         seen: set[str] = set()
         mapping = axis_mapping.get(axis_type, {})
         for value in values:
-            canonical = mapping.get(property_matching.axis_key(value), value)
+            canonical = mapping.get(self._axis_record_key(value), value)
             self._append_unique_axis(merged, seen, canonical)
         return merged
 
-    def _merge_research_objectives_with_llm(
-        self,
-        *,
-        collection_id: str,
-        extractor: ObjectiveExtractor,
-        paper_skims: tuple[PaperSkim, ...],
+    @staticmethod
+    def _rank_objectives(
         objectives: tuple[ResearchObjective, ...],
+        *,
+        relationship_inventory: RelationshipInventory,
     ) -> tuple[ResearchObjective, ...]:
-        if len(objectives) <= 1:
-            return objectives
-        payload = {
-            "collection_id": collection_id,
-            "paper_skims": [skim.to_record() for skim in paper_skims],
-            "candidate_objectives": [
-                objective.to_record() for objective in objectives
-            ],
-        }
-        try:
-            merge_plan = extractor.merge_research_objectives(payload)
-        except Exception:
-            logger.warning(
-                "Research objective merge decision failed; using normalized objectives collection_id=%s",
-                collection_id,
-                exc_info=True,
+        def rank(objective: ResearchObjective) -> tuple[float, float, float, str]:
+            supporting_relationships = [
+                relationship_inventory[relationship_id][2]
+                for relationship_id in objective.source_relationship_ids
+            ]
+            mean_confidence = (
+                sum(item.confidence for item in supporting_relationships)
+                / len(supporting_relationships)
+                if supporting_relationships
+                else 0.0
             )
-            return objectives
+            return (
+                -float(len(objective.seed_document_ids)),
+                -float(len(objective.source_relationship_ids)),
+                -mean_confidence,
+                objective.objective_id,
+            )
 
-        merged = self._validate_objective_merge_plan(
-            merge_plan,
-            objectives=objectives,
-        )
-        if merged is None:
-            logger.warning(
-                "Research objective merge decision rejected; using normalized objectives collection_id=%s",
-                collection_id,
-            )
-            return objectives
-        return merged
-
-    def _validate_objective_merge_plan(
-        self,
-        merge_plan: StructuredObjectiveMergePlan,
-        *,
-        objectives: tuple[ResearchObjective, ...],
-    ) -> tuple[ResearchObjective, ...] | None:
-        objective_by_id = {objective.objective_id: objective for objective in objectives}
-        used_source_ids: set[str] = set()
-        merged_objectives: list[ResearchObjective] = []
-
-        for group in merge_plan.merged_objectives:
-            source_ids = tuple(
-                str(value or "").strip() for value in group.source_objective_ids
-            )
-            if not source_ids:
-                return None
-            if any(source_id not in objective_by_id for source_id in source_ids):
-                return None
-            if any(source_id in used_source_ids for source_id in source_ids):
-                return None
-            used_source_ids.update(source_ids)
-            source_objectives = tuple(
-                objective_by_id[source_id] for source_id in source_ids
-            )
-            if len(source_objectives) > 1:
-                shared_outcome_keys = set.intersection(
-                    *(
-                        property_matching.axis_key_set(*objective.outcomes)
-                        for objective in source_objectives
-                    )
-                )
-                if not shared_outcome_keys:
-                    return None
-            material_scope = self._validated_merge_axes(
-                tuple(group.material_scope),
-                source_objectives=source_objectives,
-                source_field="material_scope",
-            )
-            variables = self._validated_merge_axes(
-                tuple(group.variables),
-                source_objectives=source_objectives,
-                source_field="variables",
-            )
-            outcomes = self._validated_merge_axes(
-                tuple(group.outcomes),
-                source_objectives=source_objectives,
-                source_field="outcomes",
-            )
-            mechanisms = self._validated_merge_axes(
-                tuple(group.mechanisms),
-                source_objectives=source_objectives,
-                source_field="mechanisms",
-            )
-            constraints = self._validated_merge_axes(
-                tuple(group.constraints),
-                source_objectives=source_objectives,
-                source_field="constraints",
-            )
-            if any(
-                values is None
-                for values in (
-                    material_scope,
-                    variables,
-                    outcomes,
-                    mechanisms,
-                    constraints,
-                )
-            ):
-                return None
-
-            if len(source_objectives) == 1:
-                source = source_objectives[0]
-                if str(group.question or "").strip() != source.question:
-                    return None
-                if group.requested_comparator != source.requested_comparator:
-                    return None
-            objective_payload = {
-                "question": group.question,
-                "material_scope": material_scope,
-                "variables": variables,
-                "outcomes": outcomes,
-                "mechanisms": mechanisms,
-                "constraints": constraints,
-                "requested_comparator": group.requested_comparator,
-                "seed_document_ids": self._merge_objective_axes(
-                    source_objectives,
-                    "seed_document_ids",
-                ),
-                "excluded_document_ids": self._merge_objective_axes(
-                    source_objectives,
-                    "excluded_document_ids",
-                ),
-                "confidence": group.confidence,
-                "reason": group.reason,
-            }
-            try:
-                StructuredResearchObjective.model_validate(objective_payload)
-            except ValidationError:
-                return None
-            objective = ResearchObjective.from_mapping(
-                {
-                    "collection_id": source_objectives[0].collection_id,
-                    **objective_payload,
-                }
-            )
-            if not is_question_shaped_objective(objective):
-                return None
-            merged_objectives.append(objective)
-
-        if used_source_ids != set(objective_by_id):
-            return None
-        return tuple(merged_objectives)
+        return tuple(sorted(objectives, key=rank))
 
     @staticmethod
-    def _dedupe_research_objectives(
+    def _study_dispositions(
         objectives: tuple[ResearchObjective, ...],
-    ) -> tuple[ResearchObjective, ...]:
-        unique_objectives: list[ResearchObjective] = []
-        objective_by_id: dict[str, ResearchObjective] = {}
-        for objective in objectives:
-            existing = objective_by_id.get(objective.objective_id)
-            if existing is not None:
-                if existing.to_record() != objective.to_record():
-                    raise ValueError(
-                        "conflicting research objectives share objective_id: "
-                        f"{objective.objective_id}"
-                    )
-                continue
-            objective_by_id[objective.objective_id] = objective
-            unique_objectives.append(objective)
-        return tuple(unique_objectives)
-
-    def _validated_merge_axes(
-        self,
-        values: tuple[str, ...],
         *,
-        source_objectives: tuple[ResearchObjective, ...],
-        source_field: str,
-    ) -> list[str] | None:
-        allowed_axes = property_matching.axis_key_set(
-            *(
-                value
-                for objective in source_objectives
-                for value in getattr(objective, source_field)
+        relationship_inventory: RelationshipInventory,
+        terminal_rejections: Mapping[str, str],
+    ) -> tuple[PaperStudyDisposition, ...]:
+        objective_by_relationship_id = {
+            relationship_id: objective
+            for objective in objectives
+            for relationship_id in objective.source_relationship_ids
+        }
+        dispositions: list[PaperStudyDisposition] = []
+        for relationship_id, (document_id, study, _relationship) in sorted(
+            relationship_inventory.items()
+        ):
+            objective = objective_by_relationship_id.get(relationship_id)
+            if objective is None:
+                dispositions.append(
+                    PaperStudyDisposition(
+                        document_id=document_id,
+                        study_id=study.study_id,
+                        relationship_id=relationship_id,
+                        status=PaperStudyDispositionStatus.REJECTED,
+                        reason=terminal_rejections.get(relationship_id)
+                        or "Study relationship could not form a valid objective.",
+                    )
+                )
+                continue
+            dispositions.append(
+                PaperStudyDisposition(
+                    document_id=document_id,
+                    study_id=study.study_id,
+                    relationship_id=relationship_id,
+                    status=PaperStudyDispositionStatus.PROMOTED,
+                    objective_id=objective.objective_id,
+                )
             )
-        )
-        if not values:
-            return self._merge_objective_axes(source_objectives, source_field)
-        merged: list[str] = []
+        return tuple(dispositions)
+
+    @staticmethod
+    def _unique_text_values(values: Iterable[str]) -> list[str]:
+        result: list[str] = []
         seen: set[str] = set()
         for value in values:
-            key = property_matching.axis_key(value)
-            if not key:
-                continue
-            if key not in allowed_axes:
-                return None
-            self._append_unique_axis(merged, seen, value)
-        for objective in source_objectives:
-            for value in getattr(objective, source_field):
-                self._append_unique_axis(merged, seen, value)
-        return merged
+            text = str(value or "").strip()
+            if text and text not in seen:
+                seen.add(text)
+                result.append(text)
+        return result
 
     def _unique_axis_values(self, values: Iterable[Any]) -> list[str]:
         merged: list[str] = []
@@ -742,29 +1043,16 @@ class ObjectiveCandidateService:
             self._append_unique_axis(merged, seen, value)
         return merged
 
-    def _merge_objective_axes(
-        self,
-        objectives: tuple[ResearchObjective, ...],
-        field_name: str,
-    ) -> list[str]:
-        merged: list[str] = []
-        seen: set[str] = set()
-        for objective in objectives:
-            for value in getattr(objective, field_name):
-                self._append_unique_axis(merged, seen, value)
-        return merged
-
-    @staticmethod
+    @classmethod
     def _append_unique_axis(
+        cls,
         target: list[str],
         seen: set[str],
         value: Any,
     ) -> None:
         text = str(value or "").strip()
-        if not text:
-            return
-        key = property_matching.axis_key(text)
-        if key in seen:
+        key = cls._axis_record_key(text)
+        if not text or not key or key in seen:
             return
         seen.add(key)
         target.append(text)
@@ -772,17 +1060,21 @@ class ObjectiveCandidateService:
     @staticmethod
     def _notify_progress(
         progress_callback: ProgressCallback | None,
-        **progress_detail: Any,
+        *,
+        phase: str,
+        current: int,
+        total: int,
+        unit: str,
+        message: str,
     ) -> None:
         if progress_callback is None:
             return
-        try:
-            progress_callback(progress_detail)
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "Research objective progress callback failed phase=%s",
-                progress_detail.get("phase"),
-            )
-
-
-__all__ = ["ObjectiveCandidateService"]
+        progress_callback(
+            {
+                "phase": phase,
+                "current": current,
+                "total": total,
+                "unit": unit,
+                "message": message,
+            }
+        )

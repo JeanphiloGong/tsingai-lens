@@ -1,6 +1,6 @@
 # Core LLM Structured Extraction
 
-This topic family keeps the live model-specific plan lineage for the Core
+This topic family keeps the model-specific implementation history for the Core
 structured-extraction contract under
 `application/core/structured_extraction/`.
 
@@ -31,9 +31,7 @@ extractor boundary for this package, not a repo-wide planning bucket.
 
 ## Related Docs
 
-- [`../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md`](../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md)
-  Parent Core quality wave
-- [`../../../../../docs/plans/core/core-text-window-atomic-mentions-plan.md`](../../../../../docs/plans/core/core-text-window-atomic-mentions-plan.md)
-  Later text-window narrowing plan that extends this family
-- [`../../../../../docs/plans/core/core-benchmark-script-consolidation-plan.md`](../../../../../docs/plans/core/core-benchmark-script-consolidation-plan.md)
-  Canonical benchmark surface used to evaluate this extraction contract
+- [`../../../../../docs/architecture/overview.md`](../../../../../docs/architecture/overview.md)
+  Maintained backend architecture and ownership boundaries
+- [`../../../objectives/README.md`](../../../objectives/README.md)
+  Current Objective extraction ownership and flow

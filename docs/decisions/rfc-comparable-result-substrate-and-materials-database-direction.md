@@ -35,7 +35,7 @@ This RFC should be read with:
 The backend-owned implementation companions are:
 
 - [`../../backend/docs/architecture/core-comparison/decision.md`](../../backend/docs/architecture/core-comparison/decision.md)
-- [`../../backend/docs/plans/historical/comparable-result/core-comparable-result-evolution-roadmap-plan.md`](../../backend/docs/plans/historical/comparable-result/core-comparable-result-evolution-roadmap-plan.md)
+- [`../../backend/docs/architecture/core-comparison/current-state.md`](../../backend/docs/architecture/core-comparison/current-state.md)
 
 This RFC should not be treated as a backend implementation plan or as an
 immediate API contract update.

@@ -10,6 +10,6 @@ from infra.source.config.source_runtime_config import SourceRuntimeConfig
 @dataclass(frozen=True)
 class CollectionBuildPipelineConfig:
     source: SourceRuntimeConfig
-    method: IndexingMethod | str
+    mode: IndexingMethod | str
     verbose: bool = False
     source_additional_context: dict[str, Any] | None = None

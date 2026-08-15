@@ -9,13 +9,12 @@ from typing import Any
 import pandas as pd
 
 from domain.source import (
-    SourceBoundingBox,
     SourceFigure,
     build_figure_caption_blocks,
     build_heading_blocks,
     find_nearest_caption_block,
     normalize_optional_text,
-    resolve_heading_path_for_target,
+    resolve_heading_path_for_page,
 )
 from infra.source.contracts.artifact_schemas import FIGURES_FINAL_COLUMNS
 from infra.source.runtime.hashing import gen_sha512_hash
@@ -56,8 +55,6 @@ def build_pdf_figures(
     try:
         for figure_order, picture in enumerate(pictures, start=1):
             page = first_page(getattr(picture, "prov", None))
-            bbox_obj = first_bbox(getattr(picture, "prov", None))
-            bbox = SourceBoundingBox.from_value(bbox_obj)
             caption_text, caption_ref, linkage_method = _extract_picture_caption(
                 picture=picture,
                 document=document,
@@ -70,7 +67,6 @@ def build_pdf_figures(
             if caption_block_id is None:
                 fallback_block = find_nearest_caption_block(
                     page=page,
-                    target_bbox=bbox,
                     caption_blocks=figure_caption_blocks,
                     used_block_ids=used_caption_block_ids,
                 )
@@ -103,10 +99,9 @@ def build_pdf_figures(
                     "document_id": document_id,
                     "figure_order": figure_order,
                     "page": page,
-                    "bbox": bbox.to_json() if bbox else None,
                     "caption_text": caption_text,
                 },
-                ["document_id", "figure_order", "page", "bbox", "caption_text"],
+                ["document_id", "figure_order", "page", "caption_text"],
             )
             image_path = None
             if image_bytes is not None:
@@ -122,12 +117,7 @@ def build_pdf_figures(
                     caption_text=caption_text,
                     caption_block_id=caption_block_id,
                     page=page,
-                    bbox=bbox,
-                    heading_path=resolve_heading_path_for_target(
-                        page=page,
-                        target_bbox=bbox,
-                        heading_blocks=heading_blocks,
-                    ),
+                    heading_path=resolve_heading_path_for_page(page, heading_blocks),
                     image_path=image_path,
                     image_mime_type=image_mime_type,
                     image_width=image_width,

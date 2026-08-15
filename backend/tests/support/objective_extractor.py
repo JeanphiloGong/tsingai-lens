@@ -384,36 +384,14 @@ class FakeObjectiveExtractor:
         ]
         outcome = str(result_set.get("outcome") or "").strip()
         result_evidence = result_set.get("result_evidence", [])
-        supporting_ids = [
-            str(item["evidence_id"])
-            for item in result_evidence
-            if item.get("evidence_role") == "direct_result"
-        ]
-        contradicting_ids = [
-            str(item["evidence_id"])
-            for item in result_evidence
-            if item.get("evidence_role") == "contradictory_result"
-        ]
-        if not factors or not outcome or not supporting_ids:
+        if not factors or not outcome or not result_evidence:
             return StructuredFindingSynthesis()
-        direction = next(
-            (
-                str(item.get("reported_result", {}).get("direction") or "unknown")
-                for item in result_evidence
-                if item.get("evidence_id") == supporting_ids[0]
-            ),
-            "unknown",
-        )
-        factor_text = " + ".join(factors)
         return StructuredFindingSynthesis(
             findings=[
                 StructuredFindingSynthesisItem(
-                    result_set_id=str(result_set["result_set_id"]),
-                    statement=f"{factor_text} changes {outcome}.",
-                    direction=direction,
                     assertion_strength="associative",
-                    supporting_evidence_ids=supporting_ids,
-                    contradicting_evidence_ids=contradicting_ids,
+                    context_evidence_ids=[],
+                    mechanisms=[],
                 )
             ]
         )

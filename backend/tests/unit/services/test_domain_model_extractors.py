@@ -440,7 +440,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
     )
     assert usage.prompt_versions == {
         "document_profile": "document_profile.v1",
-        "finding_synthesis": "finding_synthesis.v8",
+        "finding_synthesis": "finding_synthesis.v12",
         "paper_fact_text_window": "paper_fact_text_window.v1",
     }
 
@@ -681,7 +681,7 @@ def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace()
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v8"
+    assert trace["prompt_version"] == "finding_synthesis.v12"
     assert trace["parsed_output"] == {"findings": []}
 
 
@@ -700,30 +700,96 @@ def test_domain_model_extractors_bounds_json_text_finding_synthesis_output():
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
 
 
-def test_finding_synthesis_schema_rejects_model_owned_result_assignment():
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("result_set_id", "result-set-1"),
+        ("statement", "Energy density increases relative density."),
+        ("direction", "increase"),
+        ("condition_boundary_evidence_ids", ["evidence-1"]),
+        ("supporting_evidence_ids", ["evidence-1"]),
+        ("contradicting_evidence_ids", ["evidence-2"]),
+    ),
+)
+def test_finding_synthesis_schema_rejects_backend_owned_fields(
+    field: str,
+    value: object,
+) -> None:
     payload = {
-        "result_set_id": "result-set-1",
-        "statement": "Energy density increases relative density.",
-        "direction": "increase",
         "assertion_strength": "associative",
-        "supporting_evidence_ids": ["evidence-1", "evidence-1"],
+        "context_evidence_ids": [],
+        "mechanisms": [],
+        field: value,
     }
 
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         StructuredFindingSynthesis.model_validate({"findings": [payload]})
 
 
-def test_finding_synthesis_prompt_uses_atomic_evidence_contract():
+def test_finding_synthesis_schema_accepts_only_model_judgment_fields() -> None:
+    parsed = StructuredFindingSynthesis.model_validate(
+        {
+            "findings": [
+                {
+                    "assertion_strength": "associative",
+                    "context_evidence_ids": ["mechanism-1"],
+                    "mechanisms": [
+                        {
+                            "source_term": "melt-pool stability",
+                            "relation_type": "associated_with",
+                            "target_term": "relative density",
+                            "direction": "increase",
+                            "assertion_strength": "associative",
+                            "supporting_evidence_ids": ["mechanism-1"],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert parsed.model_dump() == {
+        "findings": [
+            {
+                "assertion_strength": "associative",
+                "context_evidence_ids": ["mechanism-1"],
+                "mechanisms": [
+                    {
+                        "source_term": "melt-pool stability",
+                        "relation_type": "associated_with",
+                        "target_term": "relative density",
+                        "direction": "increase",
+                        "assertion_strength": "associative",
+                        "supporting_evidence_ids": ["mechanism-1"],
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def test_finding_synthesis_prompt_assigns_backend_and_model_ownership():
     payload = {
         "objective": {"question": "How does energy density affect density?"},
         "result_set": {
             "result_set_id": "result-set-1",
             "factors": ["laser power", "scan speed", "energy density"],
             "outcome": "maximum defect length",
+            "primary_direction": "decrease",
+            "total_evidence_count": 21,
             "result_evidence": [
                 {
                     "evidence_id": "evidence-1",
+                    "document_id": "paper-1",
                     "attribution_scope": "joint_effect",
+                }
+            ],
+            "document_evidence_summaries": [
+                {
+                    "document_id": "paper-1",
+                    "evidence_count": 21,
+                    "direction_counts": {"decrease": 21},
+                    "attribution_scope_counts": {"joint_effect": 21},
                 }
             ],
         },
@@ -737,208 +803,26 @@ def test_finding_synthesis_prompt_uses_atomic_evidence_contract():
 
     assert "INPUT SCHEMA" in system_prompt
     assert "DECISION PROCESS" in system_prompt
+    assert "HARD RULES" in system_prompt
+    assert "BOUNDARY EXAMPLES" in system_prompt
+    assert "OUTPUT CONTRACT" in system_prompt
     normalized_system_prompt = " ".join(system_prompt.split())
-    assert "paper_contributions" in normalized_system_prompt
-    assert "cannot become Evidence" in normalized_system_prompt
-    assert "result_evidence" in normalized_system_prompt
-    assert "context_evidence" in normalized_system_prompt
-    assert "exactly one reported outcome" in normalized_system_prompt
-    assert "do not output support or contradiction ids" in normalized_system_prompt
-    assert "Do not output factors, outcome, paper count" in normalized_system_prompt
-    assert "Joint factors must remain the complete factor set" in normalized_system_prompt
-    assert "Mechanisms explain the main Finding" in normalized_system_prompt
-    assert "Do not output limitations" in normalized_system_prompt
-    assert "Choose one direction that accounts for every" in user_prompt
-    assert "`laser power`" in user_prompt
-    assert "`scan speed`" in user_prompt
-    assert "`energy density`" in user_prompt
-    assert "`maximum defect length`" in user_prompt
-    assert "assertion_strength` must be `associative`" in user_prompt
-    assert "Joint changes in laser power, scan speed, and energy density" in user_prompt
+    assert "backend owns" in normalized_system_prompt
+    assert "primary_direction" in normalized_system_prompt
+    assert "model decides only" in normalized_system_prompt
+    assert "assertion_strength" in normalized_system_prompt
+    assert "context_evidence_ids" in normalized_system_prompt
+    assert "mechanisms" in normalized_system_prompt
+    assert "result_set_id" not in user_prompt
+    assert "statement" not in user_prompt
+    assert "condition_boundary_evidence_ids" not in user_prompt
+    assert "21" in user_prompt
+    assert "paper-1" in user_prompt
     mechanism_schema = StructuredFindingMechanism.model_json_schema()
     assert "supporting_evidence_ids" in mechanism_schema["properties"]
-    assert json.dumps(payload, ensure_ascii=False, separators=(",", ":")) in user_prompt
 
 
-def test_finding_synthesis_prompt_requires_specific_single_factor_result():
-    payload = {
-        "objective": {
-            "question": "How does build platform preheating affect microstructure?"
-        },
-        "result_set": {
-            "result_set_id": "result-set-preheating",
-            "factors": ["preheating build platform temperature"],
-            "outcome": "microstructure",
-            "result_evidence": [
-                {
-                    "evidence_id": "evidence-preheating",
-                    "changed_variables": [
-                        {
-                            "name": "preheating build platform temperature",
-                            "baseline_value": "P150",
-                            "target_value": "NP",
-                            "unit": None,
-                        }
-                    ],
-                    "reported_result": {
-                        "outcome": "microstructure",
-                        "value": "cellular structure",
-                        "unit": None,
-                        "direction": "mixed",
-                        "result_text": (
-                            "Comparing P150 with NP, cellular structure was seen "
-                            "in P150."
-                        ),
-                    },
-                    "attribution_scope": "isolated_effect",
-                }
-            ],
-        },
-        "paper_contributions": [],
-        "context_evidence": [],
-    }
-
-    _system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
-
-    assert (
-        "`preheating build platform temperature: P150 -> NP`" in user_prompt
-    )
-    assert "source-reported result detail `cellular structure`" in user_prompt
-    assert (
-        "For preheating build platform temperature, P150 versus NP showed a "
-        "difference in microstructure:" in user_prompt
-    )
-    assert "Never return a generic restatement" in user_prompt
-
-
-def test_finding_synthesis_prompt_excludes_excerpt_only_numbers_during_repair():
-    payload = {
-        "objective": {
-            "question": "How does laser power affect relative density?",
-            "variables": ["laser power"],
-            "outcomes": ["relative density"],
-        },
-        "result_set": {
-            "result_set_id": "result-set-density",
-            "factors": ["laser power"],
-            "outcome": "relative density",
-            "result_evidence": [
-                {
-                    "evidence_id": "density-160-200",
-                    "source_excerpt": (
-                        "At 160 W relative density was 96.1%, while at 200 W "
-                        "it reached 98.7%."
-                    ),
-                    "changed_variables": [
-                        {
-                            "name": "laser power",
-                            "baseline_value": 160,
-                            "target_value": 200,
-                            "unit": "W",
-                        }
-                    ],
-                    "reported_result": {
-                        "outcome": "relative density",
-                        "value": 98.7,
-                        "unit": "%",
-                        "direction": "increase",
-                        "result_text": "it reached 98.7%",
-                    },
-                    "attribution_scope": "isolated_effect",
-                }
-            ],
-        },
-        "paper_contributions": [],
-        "context_evidence": [],
-        "candidate_rejection": {
-            "reason": (
-                "candidate statement combines numeric values not bound to one "
-                "supporting Evidence record"
-            ),
-            "previous_candidate": {
-                "statement": (
-                    "Increasing laser power from 160 W to 200 W increased "
-                    "relative density from 96.1% to 98.7%."
-                )
-            },
-        },
-    }
-
-    system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
-    contract = f"{system_prompt}\n{user_prompt}"
-
-    assert "Numbers present only in `source_excerpt` are not allowed" in contract
-    assert "remove every number available only in `source_excerpt`" in user_prompt
-    assert "`changed_variables` endpoints" in user_prompt
-    assert "`reported_result.value` or `reported_result.result_text`" in user_prompt
-    assert "96.1" not in user_prompt
-    assert "previous_candidate" not in user_prompt
-    assert "98.7" in user_prompt
-
-
-def test_finding_synthesis_prompt_treats_multiple_intervals_as_condition_series():
-    payload = {
-        "objective": {
-            "question": "How does scan rotation affect yield strength?"
-        },
-        "result_set": {
-            "result_set_id": "result-set-rotation",
-            "factors": ["scan rotation"],
-            "outcome": "yield strength",
-            "result_evidence": [
-                {
-                    "evidence_id": "rotation-0-30",
-                    "changed_variables": [
-                        {
-                            "name": "scan rotation",
-                            "baseline_value": 0,
-                            "target_value": 30,
-                            "unit": "degree",
-                        }
-                    ],
-                    "reported_result": {
-                        "outcome": "yield strength",
-                        "value": 515,
-                        "unit": "MPa",
-                        "direction": "decrease",
-                    },
-                },
-                {
-                    "evidence_id": "rotation-30-45",
-                    "changed_variables": [
-                        {
-                            "name": "scan rotation",
-                            "baseline_value": 30,
-                            "target_value": 45,
-                            "unit": "degree",
-                        }
-                    ],
-                    "reported_result": {
-                        "outcome": "yield strength",
-                        "value": 545,
-                        "unit": "MPa",
-                        "direction": "increase",
-                    },
-                },
-            ],
-        },
-        "paper_contributions": [],
-        "context_evidence": [],
-    }
-
-    _system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
-
-    assert "one reported condition series" in user_prompt
-    assert (
-        "Across the reported condition series, scan rotation showed "
-        "heterogeneous or opposing responses in yield strength"
-    ) in user_prompt
-    assert "Do not include numeric values in the statement" in user_prompt
-    assert "heterogeneous or opposing across conditions" in user_prompt
-    assert "source-reported result detail `515`" not in user_prompt
-
-
-def test_finding_synthesis_prompt_carries_backend_semantic_rejection():
+def test_finding_synthesis_prompt_carries_bounded_semantic_repair():
     payload = {
         "objective": {"question": "How does energy density affect density?"},
         "result_set": {
@@ -948,11 +832,11 @@ def test_finding_synthesis_prompt_carries_backend_semantic_rejection():
             "result_evidence": [],
         },
         "candidate_rejection": {
-            "reason": "candidate direction decrease has no supporting result Evidence",
+            "reason": "candidate references unavailable context Evidence",
             "previous_candidate": {
-                "result_set_id": "result-set-1",
-                "statement": "Energy density decreased density.",
-                "direction": "decrease",
+                "assertion_strength": "associative",
+                "context_evidence_ids": ["missing-context"],
+                "mechanisms": [],
             },
         },
     }
@@ -963,7 +847,8 @@ def test_finding_synthesis_prompt_carries_backend_semantic_rejection():
     assert "correction guidance, not Evidence" in system_prompt
     assert "Semantic repair required:" in user_prompt
     assert payload["candidate_rejection"]["reason"] in user_prompt
-    assert "Re-read result_evidence for its exact direction" in user_prompt
+    assert "previous_candidate" not in user_prompt
+    assert "Return only ids present in `context_evidence`" in user_prompt
 
 
 def test_domain_model_extractors_allows_explicit_json_text_mode(monkeypatch):

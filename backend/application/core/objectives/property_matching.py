@@ -418,6 +418,26 @@ def axis_values_match(left: str, right: str) -> bool:
     )
 
 
+def resolve_objective_axis(
+    value: Any,
+    objective_axes: Iterable[str],
+) -> str | None:
+    """Return the one confirmed Objective axis represented by a source label."""
+
+    source = str(value or "").strip()
+    if not source:
+        return None
+    axes = tuple(str(axis).strip() for axis in objective_axes if str(axis).strip())
+    source_key = axis_key(source)
+    exact_matches = tuple(axis for axis in axes if axis_key(axis) == source_key)
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    matches = tuple(axis for axis in axes if axis_values_match(source, axis))
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
 def axis_collections_are_equivalent(
     left: Iterable[str],
     right: Iterable[str],

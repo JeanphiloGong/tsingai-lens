@@ -94,6 +94,7 @@ from domain.core.finding import (
     Finding,
     FindingMechanismRelation,
     FindingPaperContribution,
+    directions_contradict,
 )
 
 __all__ = [
@@ -132,6 +133,7 @@ __all__ = [
     "Finding",
     "FindingMechanismRelation",
     "FindingPaperContribution",
+    "directions_contradict",
     "OBJECTIVE_ANALYSIS_STATUSES",
     "OBJECTIVE_ANALYSIS_STATUS_TRANSITIONS",
     "OBJECTIVE_CONFIRMATION_STATUSES",

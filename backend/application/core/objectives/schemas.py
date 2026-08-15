@@ -858,36 +858,13 @@ class StructuredFindingMechanism(_StrictModel):
 
 
 class StructuredFindingSynthesisItem(_StrictModel):
-    result_set_id: str = Field(min_length=1)
-    statement: str = Field(min_length=1)
-    direction: Literal[
-        "increase",
-        "decrease",
-        "improve",
-        "worsen",
-        "no_change",
-        "mixed",
-        "unknown",
-    ] = "unknown"
     assertion_strength: Literal["causal", "associative", "descriptive"] = (
         "descriptive"
-    )
-    condition_boundary_evidence_ids: list[str] = Field(
-        default_factory=list, max_length=24
     )
     context_evidence_ids: list[str] = Field(default_factory=list, max_length=24)
     mechanisms: list[StructuredFindingMechanism] = Field(
         default_factory=list, max_length=8
     )
-
-    @field_validator("direction", mode="before")
-    @classmethod
-    def _normalize_direction(cls, value: object) -> str:
-        return _normalize_underscored_choice(
-            value,
-            allowed=_FINDING_DIRECTIONS,
-            default="unknown",
-        )
 
     @field_validator("assertion_strength", mode="before")
     @classmethod
@@ -898,10 +875,7 @@ class StructuredFindingSynthesisItem(_StrictModel):
             default="descriptive",
         )
 
-    @field_validator(
-        "condition_boundary_evidence_ids",
-        "context_evidence_ids",
-    )
+    @field_validator("context_evidence_ids")
     @classmethod
     def _require_unique_evidence(cls, value: list[str]) -> list[str]:
         if len(value) != len(set(value)):

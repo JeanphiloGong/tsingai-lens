@@ -1007,6 +1007,12 @@ class PostgresObjectiveRepository:
             exclusion_reason=item.exclusion_reason,
             warnings=list(item.warnings),
             confidence=item.confidence,
+            evidence_disposition=item.evidence_disposition,
+            routed_source_count=item.routed_source_count,
+            extracted_source_count=item.extracted_source_count,
+            comparable_evidence_count=item.comparable_evidence_count,
+            failed_source_count=item.failed_source_count,
+            evidence_disposition_reason=item.evidence_disposition_reason,
         )
 
     @staticmethod
@@ -1065,6 +1071,12 @@ class PostgresObjectiveRepository:
                 "exclusion_reason": row.exclusion_reason,
                 "warnings": row.warnings,
                 "confidence": row.confidence,
+                "evidence_disposition": row.evidence_disposition,
+                "routed_source_count": row.routed_source_count,
+                "extracted_source_count": row.extracted_source_count,
+                "comparable_evidence_count": row.comparable_evidence_count,
+                "failed_source_count": row.failed_source_count,
+                "evidence_disposition_reason": row.evidence_disposition_reason,
             }
         )
 

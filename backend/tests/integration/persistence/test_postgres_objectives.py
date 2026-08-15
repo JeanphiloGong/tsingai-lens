@@ -253,6 +253,17 @@ def _contribution(
                 else None
             ),
             "confidence": 0.9,
+            "evidence_disposition": (
+                "excluded"
+                if analysis_status == "excluded"
+                else "comparable_evidence"
+            ),
+            "routed_source_count": 0 if analysis_status == "excluded" else 1,
+            "extracted_source_count": 0 if analysis_status == "excluded" else 1,
+            "comparable_evidence_count": (
+                0 if analysis_status == "excluded" else 1
+            ),
+            "failed_source_count": 0,
         }
     )
 
@@ -1221,6 +1232,15 @@ def test_publish_is_atomic_and_reads_findings_and_exact_evidence(source_reposito
     assert findings == (_finding(version),)
     assert evidence_total == 5
     assert evidence == _analysis_evidence(version)
+    persisted_contributions = {
+        item.document_id: item
+        for item in repository.list_contributions(
+            "col_source", "objective-1", version
+        )
+    }
+    assert persisted_contributions == {
+        item.document_id: item for item in _analysis_contributions(version)
+    }
 
 
 def test_failed_retry_preserves_previous_published_version(source_repositories) -> None:

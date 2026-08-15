@@ -4,6 +4,10 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+from httpx import Request, Response
+from openai import BadRequestError
+
 from application.core.objectives import property_matching
 from application.core.objectives.extraction import (
     OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
@@ -16,8 +20,8 @@ from application.core.objectives.schemas import (
     StructuredPaperFrameBatch,
 )
 from application.core.paper_facts.schemas import StructuredTableMatrixRepair
-from domain.core import PaperSkim
-from domain.source import SourceDocumentNode, SourceDocumentTree
+from domain.core import ObjectiveAnalysis, PaperSkim
+from domain.source import SourceDocumentNode, SourceDocumentTree, SourceTable
 from tests.support.collection_service import build_test_collection_service
 from tests.support.research_objective_service import (
     build_research_objective_service as _build_research_objective_service,
@@ -2450,7 +2454,7 @@ def test_research_objective_repairs_fragmented_table_with_paper_facts_extractor(
         ],
     }
 
-    repaired_source, repair_failed = (
+    repaired_source, repair_error = (
         service._repair_objective_table_source_if_needed(
             collection_id="col-test",
             route=route,
@@ -2458,7 +2462,7 @@ def test_research_objective_repairs_fragmented_table_with_paper_facts_extractor(
         )
     )
 
-    assert repair_failed is False
+    assert repair_error is None
     assert len(extractor.payloads) == 1
     assert repaired_source["raw_table_matrix"] == source["table_matrix"]
     assert repaired_source["table_matrix"] == [
@@ -2466,6 +2470,328 @@ def test_research_objective_repairs_fragmented_table_with_paper_facts_extractor(
         ["HIP-SLM (100/100)", "98.15"],
     ]
     assert repaired_source["table_matrix_structural_repair_applied"] is True
+
+
+def test_research_objective_table_repair_bad_request_is_route_scoped(tmp_path):
+    class RouteScopedRepairExtractor:
+        def __init__(self) -> None:
+            self.source_refs: list[str] = []
+
+        def repair_table_matrix(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredTableMatrixRepair:
+            source_ref = str(payload["source"]["source_ref"])
+            self.source_refs.append(source_ref)
+            if source_ref == "table-a":
+                request = Request("POST", "http://llm.test/v1/chat/completions")
+                raise BadRequestError(
+                    "invalid table repair payload",
+                    response=Response(400, request=request),
+                    body=None,
+                )
+            return StructuredTableMatrixRepair(
+                repaired_table_matrix=[
+                    ["Specimens", "Density (%)"],
+                    ["HIP-SLM (100/100)", "98.25"],
+                ],
+                confidence=0.9,
+            )
+
+    class UnexpectedEvidenceExtractor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def extract_objective_evidence(self, _payload):
+            self.calls += 1
+            return StructuredEvidenceExtractions()
+
+    repair_extractor = RouteScopedRepairExtractor()
+    evidence_extractor = UnexpectedEvidenceExtractor()
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+        paper_facts_extractor=repair_extractor,
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["laser power"],
+            "outcomes": ["density"],
+        }
+    )
+    routes = tuple(
+        EvidenceCandidate.from_mapping(
+            {
+                "objective_id": objective.objective_id,
+                "document_id": "paper-1",
+                "source_kind": "table",
+                "source_ref": source_ref,
+                "role": "current_experimental_evidence",
+                "extractable": True,
+                "column_roles": {
+                    "Specimens": "process_variable",
+                    "Density (%)": "result_property",
+                },
+                "confidence": 0.9,
+            }
+        )
+        for source_ref in ("table-a", "table-b")
+    )
+    tables = [
+        SourceTable(
+            table_id=source_ref,
+            document_id="paper-1",
+            table_order=table_order,
+            caption_text="Laser-power conditions and density.",
+            caption_block_id=None,
+            page=4,
+            heading_path="Results",
+            column_headers=("Specimens", "Density (%)"),
+            table_matrix=(
+                ("Specimens", "Density (%)"),
+                (f"{table_order}) HIP-SLM (100/", "98.15"),
+            ),
+        )
+        for table_order, source_ref in enumerate(("table-a", "table-b"), start=1)
+    ]
+
+    units = service._build_objective_evidence(
+        collection_id="col-test",
+        extractor=evidence_extractor,
+        objectives=(objective,),
+        paper_skims=(),
+        objective_paper_frames=(),
+        objective_evidence_routes=routes,
+        blocks_by_document_id={},
+        tables_by_document_id={"paper-1": tables},
+        document_trees_by_document_id={},
+    )
+
+    assert repair_extractor.source_refs == ["table-a", "table-b"]
+    assert evidence_extractor.calls == 0
+    assert any(
+        unit.source_ref == "table-a"
+        and unit.selection_status == "failed"
+        and unit.failure_reason is not None
+        and unit.failure_reason.startswith("BadRequestError:")
+        for unit in units
+    )
+    assert any(
+        unit.source_ref == "table-b"
+        and unit.selection_status == "extracted"
+        and unit.reported_result is not None
+        and unit.reported_result.value == 98.25
+        for unit in units
+    )
+
+
+@pytest.mark.parametrize(
+    ("repaired_table_matrix", "expected_failure_reason"),
+    [
+        ([], "table matrix repair returned no usable matrix"),
+        (
+            [
+                ["Specimens", "Density (%)"],
+                ["100) HIP-SLM (100/", "98.15"],
+            ],
+            "table matrix repair left the fragmented matrix unchanged",
+        ),
+        (
+            [
+                ["Specimens", "Density (%)"],
+                ["HIP-SLM (100/", "98.15"],
+            ],
+            "table matrix repair returned a structurally fragmented matrix",
+        ),
+    ],
+    ids=("empty", "unchanged-fragment", "remaining-fragment"),
+)
+def test_research_objective_rejects_unusable_table_matrix_repair(
+    tmp_path,
+    repaired_table_matrix,
+    expected_failure_reason,
+):
+    class UnusableRepairExtractor:
+        def repair_table_matrix(self, _payload):
+            return StructuredTableMatrixRepair(
+                repaired_table_matrix=repaired_table_matrix,
+                confidence=0.9,
+            )
+
+    class UnexpectedEvidenceExtractor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def extract_objective_evidence(self, _payload):
+            self.calls += 1
+            return StructuredEvidenceExtractions()
+
+    evidence_extractor = UnexpectedEvidenceExtractor()
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+        paper_facts_extractor=UnusableRepairExtractor(),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["laser power"],
+            "outcomes": ["density"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Specimens": "process_variable",
+                "Density (%)": "result_property",
+            },
+            "confidence": 0.9,
+        }
+    )
+    table = SourceTable(
+        table_id="table-1",
+        document_id="paper-1",
+        table_order=1,
+        caption_text="Laser-power conditions and density.",
+        caption_block_id=None,
+        page=4,
+        heading_path="Results",
+        column_headers=("Specimens", "Density (%)"),
+        table_matrix=(
+            ("Specimens", "Density (%)"),
+            ("100) HIP-SLM (100/", "98.15"),
+        ),
+    )
+
+    units = service._build_objective_evidence(
+        collection_id="col-test",
+        extractor=evidence_extractor,
+        objectives=(objective,),
+        paper_skims=(),
+        objective_paper_frames=(),
+        objective_evidence_routes=(route,),
+        blocks_by_document_id={},
+        tables_by_document_id={"paper-1": [table]},
+        document_trees_by_document_id={},
+    )
+
+    assert evidence_extractor.calls == 0
+    assert len(units) == 1
+    assert units[0].selection_status == "failed"
+    assert units[0].source_ref == "table-1"
+    assert units[0].failure_reason == f"ValueError: {expected_failure_reason}"
+
+
+def test_research_objective_records_failed_evidence_when_table_repair_fails(
+    tmp_path,
+):
+    class FailingPaperFactsExtractor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def repair_table_matrix(self, _payload):
+            self.calls += 1
+            raise RuntimeError("table repair unavailable")
+
+    class UnexpectedEvidenceExtractor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def extract_objective_evidence(self, _payload):
+            self.calls += 1
+            return StructuredEvidenceExtractions()
+
+    repair_extractor = FailingPaperFactsExtractor()
+    evidence_extractor = UnexpectedEvidenceExtractor()
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+        paper_facts_extractor=repair_extractor,
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["laser power"],
+            "outcomes": ["density"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Specimens": "process_variable",
+                "Density (%)": "result_property",
+            },
+            "confidence": 0.9,
+        }
+    )
+    table = SourceTable(
+        table_id="table-1",
+        document_id="paper-1",
+        table_order=1,
+        caption_block_id=None,
+        page=4,
+        caption_text="Laser-power conditions and density.",
+        heading_path="Results",
+        column_headers=("Specimens", "Density (%)"),
+        table_matrix=(
+            ("Specimens", "Density (%)"),
+            ("100) HIP-SLM (100/", "98.15"),
+        ),
+    )
+
+    units = service._build_objective_evidence(
+        collection_id="col-test",
+        extractor=evidence_extractor,
+        objectives=(objective,),
+        paper_skims=(),
+        objective_paper_frames=(),
+        objective_evidence_routes=(route,),
+        blocks_by_document_id={},
+        tables_by_document_id={"paper-1": [table]},
+        document_trees_by_document_id={},
+    )
+
+    assert repair_extractor.calls == 1
+    assert evidence_extractor.calls == 0
+    assert len(units) == 1
+    assert units[0].selection_status == "failed"
+    assert units[0].source_ref == "table-1"
+    assert units[0].failure_reason == "RuntimeError: table repair unavailable"
+
+    analysis = ObjectiveAnalysis(
+        collection_id="col-test",
+        objective_id=objective.objective_id,
+        analysis_version=1,
+        source_build_id="build-1",
+        pipeline_version="test.v1",
+        model_name=None,
+        prompt_versions={},
+    )
+    evidence = service._analysis_evidence_records(
+        collection_id="col-test",
+        analysis=analysis,
+        objective=objective,
+        drafts=units,
+        blocks_by_document_id={},
+        tables_by_document_id={"paper-1": [table]},
+        figures_by_document_id={},
+    )[0]
+
+    assert evidence.selection_status == "failed"
+    assert evidence.failure_reason == "RuntimeError: table repair unavailable"
+    assert evidence.source_kind == "table"
+    assert evidence.source_ref == "table-1"
+    assert evidence.source_excerpt
 
 
 def test_research_objective_service_skips_matrix_test_condition_table_fallback(

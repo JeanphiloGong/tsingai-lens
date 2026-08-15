@@ -35,6 +35,7 @@ class ExtractedEvidenceDraft:
     source_refs: tuple[dict[str, Any], ...]
     evidence_anchor_ids: tuple[str, ...]
     resolution_status: str
+    failure_reason: str | None
     confidence: float
 
     @classmethod
@@ -110,6 +111,7 @@ class ExtractedEvidenceDraft:
                 payload.get("evidence_anchor_ids")
             ),
             resolution_status=_text(payload.get("resolution_status")) or "unknown",
+            failure_reason=_optional_text(payload.get("failure_reason")),
             confidence=normalize_objective_confidence(payload.get("confidence")),
         )
 
@@ -135,6 +137,7 @@ class ExtractedEvidenceDraft:
             "source_refs": [dict(item) for item in self.source_refs],
             "evidence_anchor_ids": list(self.evidence_anchor_ids),
             "resolution_status": self.resolution_status,
+            "failure_reason": self.failure_reason,
             "confidence": self.confidence,
         }
 

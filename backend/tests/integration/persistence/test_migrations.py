@@ -23,7 +23,7 @@ from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260814_0029"
+HEAD_REVISION = "20260814_0030"
 EXPECTED_TABLES = {
     "alembic_version",
     "artifact_versions",
@@ -398,6 +398,68 @@ def test_source_artifact_order_migration_preserves_sequence_values(tmp_path) -> 
                 column["name"]
                 for column in inspect(connection).get_columns("source_text_units")
             }
+    finally:
+        engine.dispose()
+
+
+def test_paper_evidence_disposition_migration_preserves_historical_unknowns(
+    tmp_path,
+) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "paper-evidence-disposition.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    try:
+        with engine.begin() as connection:
+            config.attributes["connection"] = connection
+            command.upgrade(config, "20260814_0029")
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO objective_paper_contributions (
+                        collection_id, objective_id, analysis_version,
+                        source_document_id, source_build_id, analysis_status,
+                        relevance, paper_role, contribution_summary,
+                        material_match, changed_variables,
+                        measured_property_scope, test_environment_scope,
+                        exclusion_reason, warnings, confidence
+                    ) VALUES (
+                        'collection-legacy', 'objective-legacy', 1,
+                        'document-legacy', 'build-legacy', 'analyzed',
+                        'high', 'primary_experiment', NULL,
+                        '[]', '[]', '[]', '[]', NULL, '[]', 0.9
+                    )
+                    """
+                )
+            )
+
+            command.upgrade(config, "head")
+
+            contribution = connection.execute(
+                text(
+                    """
+                    SELECT evidence_disposition, routed_source_count,
+                           extracted_source_count, comparable_evidence_count,
+                           failed_source_count, evidence_disposition_reason
+                    FROM objective_paper_contributions
+                    WHERE source_document_id = 'document-legacy'
+                    """
+                )
+            ).mappings().one()
+            assert set(contribution.values()) == {None}
+            constraints = {
+                item["name"]
+                for item in inspect(connection).get_check_constraints(
+                    "objective_paper_contributions"
+                )
+            }
+            assert {
+                "ck_objective_paper_contributions_evidence_disposition_valid",
+                "ck_objective_paper_contributions_evidence_counts_non_negative",
+            }.issubset(constraints)
     finally:
         engine.dispose()
 

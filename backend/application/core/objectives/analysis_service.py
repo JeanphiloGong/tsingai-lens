@@ -265,7 +265,13 @@ class ObjectiveAnalysisService:
             objective.objective_id,
         )
         findings = ()
+        paper_contributions = ()
         if published is not None:
+            paper_contributions = self.objective_repository.list_contributions(
+                collection_id,
+                objective.objective_id,
+                published.analysis_version,
+            )
             findings, _total = self.objective_repository.list_findings(
                 collection_id,
                 objective.objective_id,
@@ -279,6 +285,7 @@ class ObjectiveAnalysisService:
             "analysis": active,
             "published_analysis": published,
             "findings": findings,
+            "paper_contributions": paper_contributions,
             "warnings": [],
         }
 

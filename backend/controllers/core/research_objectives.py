@@ -389,6 +389,9 @@ def _to_objective_analysis_response(payload: dict) -> ObjectiveAnalysisResponse:
         objective=objective.to_record(),
         active_analysis=active.to_record() if active is not None else None,
         published_analysis=(published.to_record() if published is not None else None),
+        paper_contributions=[
+            item.to_record() for item in payload.get("paper_contributions") or ()
+        ],
         warnings=payload.get("warnings") or [],
     )
 

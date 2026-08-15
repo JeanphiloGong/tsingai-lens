@@ -10,6 +10,7 @@ from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
     ObjectiveFactSet,
+    PaperContribution,
     PaperStudyDisposition,
     PaperSkim,
     ResearchObjective,
@@ -150,6 +151,26 @@ def _evidence() -> ObjectiveEvidence:
     )
 
 
+def _paper_contribution() -> PaperContribution:
+    return PaperContribution.from_mapping(
+        {
+            "collection_id": "col-1",
+            "objective_id": "obj-1",
+            "analysis_version": 1,
+            "document_id": "paper-1",
+            "analysis_status": "analyzed",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "confidence": 0.9,
+            "evidence_disposition": "comparable_evidence",
+            "routed_source_count": 3,
+            "extracted_source_count": 2,
+            "comparable_evidence_count": 1,
+            "failed_source_count": 1,
+        }
+    )
+
+
 class _Repository:
     def __init__(self, facts: ObjectiveFactSet | None = None) -> None:
         self.facts = facts or _default_objective_facts()
@@ -186,6 +207,7 @@ class _Service:
             "objective": _objective(),
             "analysis": _analysis(status=self.analysis_status),
             "published_analysis": _analysis(),
+            "paper_contributions": (_paper_contribution(),),
             "warnings": [],
         }
 
@@ -659,6 +681,11 @@ def test_objective_api_exposes_definition_and_separate_analysis_state() -> None:
     assert payload["objective"]["confirmation_status"] == "confirmed"
     assert payload["active_analysis"]["status"] == "succeeded"
     assert payload["published_analysis"]["analysis_version"] == 1
+    assert payload["paper_contributions"] == [
+        {
+            **_paper_contribution().to_record(),
+        }
+    ]
     assert payload["active_analysis"]["stats"] == {
         "duration_ms": 1250,
         "token_usage": {

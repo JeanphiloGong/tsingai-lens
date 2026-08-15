@@ -153,6 +153,11 @@ def _artifacts(version: int) -> ObjectiveAnalysisArtifacts:
                     "relevance": "high",
                     "paper_role": "primary_experiment",
                     "confidence": 0.9,
+                    "evidence_disposition": "comparable_evidence",
+                    "routed_source_count": 1,
+                    "extracted_source_count": 1,
+                    "comparable_evidence_count": 1,
+                    "failed_source_count": 0,
                 }
             ),
         ),
@@ -175,6 +180,9 @@ class FakeObjectiveRepository:
             {1: _analysis(1, "succeeded")} if published else {}
         )
         self.findings = {1: (_finding(1),)} if published else {}
+        self.contributions = (
+            {1: _artifacts(1).contributions} if published else {}
+        )
         self.claimable = claimable
         self.claim_error = claim_error
         self.claim_before_fail = claim_before_fail
@@ -253,6 +261,7 @@ class FakeObjectiveRepository:
         self.analyses[analysis_version] = analysis
         self.objective = self.objective.publish_analysis(analysis)
         self.findings[analysis_version] = artifacts["findings"]
+        self.contributions[analysis_version] = artifacts["contributions"]
         self.published_calls += 1
         return self.objective, analysis
 
@@ -267,6 +276,9 @@ class FakeObjectiveRepository:
     def list_findings(self, collection_id, objective_id, analysis_version, **_kwargs):
         findings = self.findings.get(analysis_version, ())
         return findings, len(findings)
+
+    def list_contributions(self, collection_id, objective_id, analysis_version):
+        return self.contributions.get(analysis_version, ())
 
 
 class FakeResearchObjectiveService:
@@ -336,6 +348,7 @@ def test_objective_analysis_publishes_one_complete_version() -> None:
     assert result["analysis"].status == "succeeded"
     assert result["objective"].published_analysis_version == 1
     assert result["findings"] == (_finding(1),)
+    assert result["paper_contributions"] == _artifacts(1).contributions
     assert repository.published_calls == 1
 
 

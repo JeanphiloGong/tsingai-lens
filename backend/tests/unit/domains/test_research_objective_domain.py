@@ -343,6 +343,69 @@ def test_paper_contribution_uses_document_as_subordinate_identity() -> None:
     assert "frame_id" not in contribution.to_record()
 
 
+def test_paper_contribution_records_auditable_evidence_disposition() -> None:
+    contribution = PaperContribution.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 1,
+            "document_id": "paper-1",
+            "analysis_status": "analyzed",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "evidence_disposition": "comparable_evidence",
+            "routed_source_count": 3,
+            "extracted_source_count": 2,
+            "comparable_evidence_count": 7,
+            "failed_source_count": 1,
+            "evidence_disposition_reason": (
+                "One selected source failed; comparable evidence survived."
+            ),
+            "confidence": 0.9,
+        }
+    )
+
+    assert contribution.evidence_disposition == "comparable_evidence"
+    assert contribution.routed_source_count == 3
+    assert contribution.extracted_source_count == 2
+    assert contribution.comparable_evidence_count == 7
+    assert contribution.failed_source_count == 1
+    assert PaperContribution.from_mapping(contribution.to_record()) == contribution
+
+
+def test_paper_contribution_rejects_partial_or_inconsistent_evidence_accounting() -> None:
+    base = {
+        "collection_id": "collection-1",
+        "objective_id": "objective-1",
+        "analysis_version": 1,
+        "document_id": "paper-1",
+        "analysis_status": "analyzed",
+        "relevance": "high",
+        "paper_role": "primary_experiment",
+        "confidence": 0.9,
+    }
+
+    with pytest.raises(ValueError, match="all present or all absent"):
+        PaperContribution.from_mapping(
+            {
+                **base,
+                "evidence_disposition": "no_routable_evidence",
+                "routed_source_count": 0,
+            }
+        )
+    with pytest.raises(ValueError, match="requires comparable Evidence"):
+        PaperContribution.from_mapping(
+            {
+                **base,
+                "evidence_disposition": "comparable_evidence",
+                "routed_source_count": 1,
+                "extracted_source_count": 1,
+                "comparable_evidence_count": 0,
+                "failed_source_count": 0,
+            }
+        )
+
+
 def test_excluded_paper_contribution_requires_reason() -> None:
     with pytest.raises(ValueError, match="requires a reason"):
         PaperContribution.from_mapping(

@@ -7,7 +7,7 @@ import logging
 import re
 from typing import Any, Callable, Iterable, Mapping
 
-from openai import OpenAIError
+from openai import APIConnectionError, APIStatusError
 
 from application.core.document_profiles.service import (
     DocumentProfileService,
@@ -175,6 +175,15 @@ def _transient_text(value: Any) -> str:
 def _transient_optional_text(value: Any) -> str | None:
     text = _transient_text(value)
     return text or None
+
+
+def _provider_is_temporarily_unavailable(error: Exception) -> bool:
+    if isinstance(error, APIConnectionError):
+        return True
+    if not isinstance(error, APIStatusError):
+        return False
+    status_code = int(error.status_code)
+    return status_code in {408, 409, 429} or status_code >= 500
 
 
 _FRAME_TABLE_ROW_LIMIT = 3
@@ -406,18 +415,22 @@ class ResearchObjectiveService:
             evidence_drafts,
             objective_context=objective,
         )
-        contributions = self._analysis_contributions(
-            collection_id=collection_id,
-            analysis=analysis,
-            frames=paper_frames,
-        )
         evidence_records = self._analysis_evidence_records(
             collection_id=collection_id,
             analysis=analysis,
+            objective=objective,
             drafts=evidence_drafts,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
             figures_by_document_id=objective_inputs["figures_by_document_id"],
+        )
+        contributions = self._analysis_contributions(
+            collection_id=collection_id,
+            analysis=analysis,
+            objective=objective,
+            frames=paper_frames,
+            routes=evidence_candidates,
+            evidence_records=evidence_records,
         )
         findings = self.finding_synthesis_service.synthesize(
             collection_id=collection_id,
@@ -437,18 +450,103 @@ class ResearchObjectiveService:
         *,
         collection_id: str,
         analysis: ObjectiveAnalysis,
+        objective: ResearchObjective,
         frames: tuple[PaperAnalysisFrame, ...],
+        routes: tuple[EvidenceCandidate, ...],
+        evidence_records: tuple[ObjectiveEvidence, ...],
     ) -> tuple[PaperContribution, ...]:
+        routed_sources_by_document: dict[str, set[tuple[str, str]]] = {}
+        for route in routes:
+            if not route.extractable or route.role == "low_value_or_irrelevant":
+                continue
+            routed_sources_by_document.setdefault(route.document_id, set()).add(
+                (route.source_kind, route.source_ref)
+            )
+        evidence_by_document: dict[str, list[ObjectiveEvidence]] = {}
+        for evidence in evidence_records:
+            evidence_by_document.setdefault(evidence.document_id, []).append(evidence)
+            routed_sources_by_document.setdefault(evidence.document_id, set()).add(
+                (evidence.source_kind, evidence.source_ref)
+            )
+
         contributions: list[PaperContribution] = []
         for frame in frames:
             excluded = frame.relevance == "irrelevant" or frame.paper_role == "irrelevant"
+            document_evidence = tuple(
+                evidence_by_document.get(frame.document_id, ())
+            )
+            routed_sources = routed_sources_by_document.get(frame.document_id, set())
+            extracted_sources = {
+                (evidence.source_kind, evidence.source_ref)
+                for evidence in document_evidence
+                if evidence.selection_status == "extracted"
+            }
+            failed_sources = {
+                (evidence.source_kind, evidence.source_ref)
+                for evidence in document_evidence
+                if evidence.selection_status == "failed"
+            }
+            comparable_evidence_count = sum(
+                self.finding_synthesis_service.is_comparable_result_evidence(
+                    objective,
+                    evidence,
+                )
+                for evidence in document_evidence
+            )
+            if excluded:
+                analysis_status = "excluded"
+                evidence_disposition = "excluded"
+                routed_source_count = 0
+                extracted_source_count = 0
+                comparable_evidence_count = 0
+                failed_source_count = 0
+                evidence_reason = frame.background or (
+                    "Paper is not relevant to this objective."
+                )
+            else:
+                routed_source_count = len(routed_sources)
+                extracted_source_count = len(extracted_sources)
+                failed_source_count = len(failed_sources)
+                if routed_source_count == 0:
+                    analysis_status = "analyzed"
+                    evidence_disposition = "no_routable_evidence"
+                    evidence_reason = (
+                        "No source in this paper was selected for Objective extraction."
+                    )
+                elif extracted_source_count == 0 and failed_source_count > 0:
+                    analysis_status = "failed"
+                    evidence_disposition = "extraction_failed"
+                    evidence_reason = (
+                        f"{failed_source_count} selected source(s) failed extraction."
+                    )
+                elif comparable_evidence_count == 0:
+                    analysis_status = "analyzed"
+                    evidence_disposition = "no_comparable_evidence"
+                    evidence_reason = (
+                        "Selected sources produced no comparable direct result for "
+                        "this Objective."
+                    )
+                else:
+                    analysis_status = "analyzed"
+                    evidence_disposition = "comparable_evidence"
+                    evidence_reason = (
+                        f"{failed_source_count} selected source(s) failed extraction; "
+                        "comparable Evidence survived."
+                        if failed_source_count
+                        else None
+                    )
+            warnings = (
+                (f"{failed_source_count} selected source(s) failed extraction.",)
+                if failed_source_count
+                else ()
+            )
             contributions.append(
                 PaperContribution(
                     collection_id=collection_id,
                     objective_id=analysis.objective_id,
                     analysis_version=analysis.analysis_version,
                     document_id=frame.document_id,
-                    analysis_status="excluded" if excluded else "analyzed",
+                    analysis_status=analysis_status,
                     relevance=frame.relevance,
                     paper_role=frame.paper_role,
                     contribution_summary=frame.background,
@@ -456,13 +554,15 @@ class ResearchObjectiveService:
                     changed_variables=frame.changed_variables,
                     measured_property_scope=frame.measured_property_scope,
                     test_environment_scope=frame.test_environment_scope,
-                    exclusion_reason=(
-                        frame.background or "Paper is not relevant to this objective."
-                        if excluded
-                        else None
-                    ),
-                    warnings=(),
+                    exclusion_reason=evidence_reason if excluded else None,
+                    warnings=warnings,
                     confidence=1.0 if frame.relevance == "high" else 0.7,
+                    evidence_disposition=evidence_disposition,
+                    routed_source_count=routed_source_count,
+                    extracted_source_count=extracted_source_count,
+                    comparable_evidence_count=comparable_evidence_count,
+                    failed_source_count=failed_source_count,
+                    evidence_disposition_reason=evidence_reason,
                 )
             )
         return tuple(contributions)
@@ -472,6 +572,7 @@ class ResearchObjectiveService:
         *,
         collection_id: str,
         analysis: ObjectiveAnalysis,
+        objective: ResearchObjective,
         drafts: tuple[ExtractedEvidenceDraft, ...],
         blocks_by_document_id: Mapping[str, list[Any]],
         tables_by_document_id: Mapping[str, list[Any]],
@@ -479,14 +580,43 @@ class ResearchObjectiveService:
     ) -> tuple[ObjectiveEvidence, ...]:
         records: list[ObjectiveEvidence] = []
         seen: set[str] = set()
-        for draft in drafts:
+        for source_draft in drafts:
+            try:
+                draft = self._canonical_objective_evidence_axes(
+                    source_draft,
+                    objective=objective,
+                )
+            except ValueError as exc:
+                payload = source_draft.to_record()
+                payload.update(
+                    {
+                        "evidence_role": "irrelevant",
+                        "selection_status": "failed",
+                        "changed_variables": [],
+                        "comparison": None,
+                        "reported_result": None,
+                        "attribution_scope": "not_attributable",
+                        "resolution_status": "unknown",
+                        "failure_reason": f"ValueError: {exc}"[:1000],
+                        "confidence": 0.0,
+                    }
+                )
+                draft = ExtractedEvidenceDraft.from_mapping(payload)
             source = self._canonical_evidence_source(
                 draft,
                 blocks_by_document_id=blocks_by_document_id,
                 tables_by_document_id=tables_by_document_id,
                 figures_by_document_id=figures_by_document_id,
             )
-            if source is None or draft.evidence_id in seen:
+            if source is None:
+                raise RuntimeError(
+                    "Evidence Source cannot be resolved: "
+                    f"evidence_id={draft.evidence_id} "
+                    f"document_id={draft.document_id} "
+                    f"source_kind={draft.source_kind} "
+                    f"source_ref={draft.source_ref}"
+                )
+            if draft.evidence_id in seen:
                 continue
             seen.add(draft.evidence_id)
             evidence_role = self._canonical_evidence_role(draft)
@@ -503,7 +633,7 @@ class ResearchObjectiveService:
                     page_numbers=source["page_numbers"],
                     related_source_refs=source["related_source_refs"],
                     evidence_role=evidence_role,
-                    selection_status="extracted",
+                    selection_status=draft.selection_status,
                     selection_reason=draft.selection_reason,
                     changed_variables=draft.changed_variables,
                     comparison=draft.comparison,
@@ -513,14 +643,86 @@ class ResearchObjectiveService:
                     anchor_ids=draft.evidence_anchor_ids,
                     resolution_status=(
                         draft.resolution_status
-                        if draft.resolution_status in {"resolved", "partial"}
-                        else "partial"
+                        if draft.selection_status == "failed"
+                        else (
+                            draft.resolution_status
+                            if draft.resolution_status in {"resolved", "partial"}
+                            else "partial"
+                        )
                     ),
-                    failure_reason=None,
+                    failure_reason=draft.failure_reason,
                     confidence=draft.confidence,
                 )
             )
         return tuple(records)
+
+    @staticmethod
+    def _canonical_objective_evidence_axes(
+        draft: ExtractedEvidenceDraft,
+        *,
+        objective: ResearchObjective,
+    ) -> ExtractedEvidenceDraft:
+        if draft.selection_status == "failed":
+            return draft
+
+        payload = draft.to_record()
+
+        def canonical(value: Any, axes: tuple[str, ...]) -> tuple[str, str | None]:
+            resolved = property_matching.resolve_objective_axis(value, axes)
+            return resolved or str(value or "").strip(), resolved
+
+        canonical_variables: list[dict[str, Any]] = []
+        objective_variable_indexes: dict[str, int] = {}
+        for variable in payload["changed_variables"]:
+            variable = dict(variable)
+            variable["name"], resolved = canonical(
+                variable.get("name"),
+                objective.variables,
+            )
+            if resolved is None:
+                canonical_variables.append(variable)
+                continue
+            axis_key = property_matching.axis_key(resolved)
+            existing_index = objective_variable_indexes.get(axis_key)
+            if existing_index is None:
+                objective_variable_indexes[axis_key] = len(canonical_variables)
+                canonical_variables.append(variable)
+                continue
+            existing = canonical_variables[existing_index]
+            for field in ("baseline_value", "target_value", "unit"):
+                current = existing.get(field)
+                candidate = variable.get(field)
+                if current in (None, ""):
+                    if candidate not in (None, ""):
+                        existing[field] = candidate
+                    continue
+                if candidate in (None, ""):
+                    continue
+                if str(current).strip().casefold() != str(candidate).strip().casefold():
+                    raise ValueError(
+                        f"conflicting values for Objective axis {resolved}: {field}"
+                    )
+        payload["changed_variables"] = canonical_variables
+        comparison = payload.get("comparison")
+        if isinstance(comparison, dict):
+            comparison["axis_names"] = list(
+                dict.fromkeys(
+                    canonical(axis, objective.variables)[0]
+                    for axis in comparison.get("axis_names") or ()
+                )
+            )
+        result = payload.get("reported_result")
+        if isinstance(result, dict):
+            result["outcome"] = canonical(
+                result.get("outcome"),
+                objective.outcomes,
+            )[0]
+        if (
+            payload.get("attribution_scope") == "joint_effect"
+            and len(canonical_variables) == 1
+        ):
+            payload["attribution_scope"] = "isolated_effect"
+        return ExtractedEvidenceDraft.from_mapping(payload)
 
     def _canonical_evidence_source(
         self,
@@ -772,20 +974,26 @@ class ResearchObjectiveService:
         if not target_axes:
             return evidence_items
 
+        failed_units = tuple(
+            unit for unit in evidence_items if unit.selection_status == "failed"
+        )
         target_units = tuple(
             unit
             for unit in evidence_items
+            if unit.selection_status != "failed"
             if self._objective_evidence_matches_target_property(
                 unit,
                 target_axes=target_axes,
             )
         )
         if not target_units:
-            return target_units
+            return failed_units
 
         target_document_ids = {unit.document_id for unit in target_units}
-        selected_ids = {unit.evidence_id for unit in target_units}
-        selected = list(target_units)
+        selected_ids = {
+            unit.evidence_id for unit in (*failed_units, *target_units)
+        }
+        selected = [*failed_units, *target_units]
         for unit in evidence_items:
             if unit.evidence_id in selected_ids or unit.reported_result is not None:
                 continue
@@ -1829,7 +2037,7 @@ class ResearchObjectiveService:
             (frame.objective_id, frame.document_id): frame
             for frame in objective_paper_frames
         }
-        extractable_routes = self._tree_order_objective_routes(
+        extractable_routes = self._document_round_robin_objective_routes(
             tuple(
                 route
                 for route in objective_evidence_routes
@@ -1846,12 +2054,13 @@ class ResearchObjectiveService:
         units: list[ExtractedEvidenceDraft] = []
         seen: set[str] = set()
         document_state_units: dict[tuple[str, str], list[ExtractedEvidenceDraft]] = {}
-        llm_evidence_unavailable = False
-        llm_table_repair_unavailable = False
+        llm_evidence_unavailable: dict[tuple[str, str], Exception] = {}
+        llm_table_repair_unavailable: dict[tuple[str, str], Exception] = {}
         document_metadata = self._progress_document_metadata(
             document_trees_by_document_id=document_trees_by_document_id,
         )
         for route_position, route in enumerate(extractable_routes, start=1):
+            document_key = (route.objective_id, route.document_id)
             route_document_metadata = document_metadata.get(route.document_id, {})
             self._notify_progress(
                 progress_callback,
@@ -1886,18 +2095,13 @@ class ResearchObjectiveService:
                 ),
             )
             if not source:
-                logger.info(
-                    "Research objective evidence extraction route skipped collection_id=%s source_ref=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s reason=missing_source route_position=%s route_count=%s",
-                    collection_id,
-                    route.source_ref,
-                    route.objective_id,
-                    route.document_id,
-                    route.source_kind,
-                    route.source_ref,
-                    route_position,
-                    len(extractable_routes),
+                raise RuntimeError(
+                    "selected Evidence Source is missing: "
+                    f"objective_id={route.objective_id} "
+                    f"document_id={route.document_id} "
+                    f"source_kind={route.source_kind} "
+                    f"source_ref={route.source_ref}"
                 )
-                continue
             objective_context = objective_by_id.get(route.objective_id)
             tree_position = self._route_tree_position(
                 self._source_candidate_from_route(
@@ -1922,17 +2126,37 @@ class ResearchObjectiveService:
                 "document_state": prior_document_state,
                 "source": self._objective_evidence_prompt_source(source),
             }
-            source, table_repair_failed = self._repair_objective_table_source_if_needed(
+            source, table_repair_error = self._repair_objective_table_source_if_needed(
                 collection_id=collection_id,
                 route=route,
                 source=source,
-                llm_unavailable=llm_table_repair_unavailable,
+                unavailable_error=llm_table_repair_unavailable.get(document_key),
             )
-            llm_table_repair_unavailable = (
-                llm_table_repair_unavailable or table_repair_failed
-            )
+            if (
+                table_repair_error is not None
+                and _provider_is_temporarily_unavailable(table_repair_error)
+            ):
+                llm_table_repair_unavailable.setdefault(
+                    document_key,
+                    table_repair_error,
+                )
             payload["source"] = self._objective_evidence_prompt_source(source)
             route_unit_start = len(units)
+            if (
+                table_repair_error is not None
+                and self._objective_table_source_needs_llm_structural_repair(
+                    route=route,
+                    source=source,
+                )
+            ):
+                failed_unit = self._failed_objective_evidence_draft(
+                    route=route,
+                    error=table_repair_error,
+                )
+                if failed_unit.evidence_id not in seen:
+                    seen.add(failed_unit.evidence_id)
+                    units.append(failed_unit)
+                continue
             route_records = self._objective_table_matrix_evidence_records(
                 route=route,
                 source=source,
@@ -1948,46 +2172,59 @@ class ResearchObjectiveService:
                     and route_records
                 )
             )
-            if (
+            needs_model_extraction = (
                 (not route_records or needs_structural_repair)
                 and not self._objective_table_route_should_skip_llm_fallback(route)
-                and not llm_evidence_unavailable
-            ):
-                try:
-                    parsed = extractor.extract_objective_evidence(payload)
-                except Exception as exc:
-                    llm_evidence_unavailable = isinstance(exc, OpenAIError)
-                    logger.exception(
-                        "Research objective evidence extraction route failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s completed_routes=%s remaining_routes=%s provider_unavailable=%s",
-                        collection_id,
-                        route.source_ref,
-                        route.objective_id,
-                        route.document_id,
-                        route.source_kind,
-                        route.source_ref,
-                        route_position,
-                        len(extractable_routes),
-                        route_position - 1,
-                        max(len(extractable_routes) - route_position, 0),
-                        llm_evidence_unavailable,
+            )
+            if needs_model_extraction:
+                extraction_error = llm_evidence_unavailable.get(document_key)
+                if extraction_error is None:
+                    try:
+                        parsed = extractor.extract_objective_evidence(payload)
+                    except Exception as exc:
+                        extraction_error = exc
+                        provider_unavailable = _provider_is_temporarily_unavailable(exc)
+                        if provider_unavailable:
+                            llm_evidence_unavailable[document_key] = exc
+                        logger.exception(
+                            "Research objective evidence extraction route failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_kind=%s source_ref=%s route_position=%s route_count=%s completed_routes=%s remaining_routes=%s provider_unavailable=%s",
+                            collection_id,
+                            route.source_ref,
+                            route.objective_id,
+                            route.document_id,
+                            route.source_kind,
+                            route.source_ref,
+                            route_position,
+                            len(extractable_routes),
+                            route_position - 1,
+                            max(len(extractable_routes) - route_position, 0),
+                            provider_unavailable,
+                        )
+                    else:
+                        llm_route_records = tuple(
+                            record
+                            for item in parsed.extractions
+                            for record in self._objective_evidence_records_from_extracted(
+                                route=route,
+                                source=source,
+                                objective_context=objective_context,
+                                extracted_record=item.model_dump(),
+                            )
+                        )
+                        route_records = self._objective_merge_table_repair_records(
+                            deterministic_records=route_records,
+                            llm_records=llm_route_records,
+                        )
+                if extraction_error is not None:
+                    failed_unit = self._failed_objective_evidence_draft(
+                        route=route,
+                        error=extraction_error,
                     )
+                    if failed_unit.evidence_id not in seen:
+                        seen.add(failed_unit.evidence_id)
+                        units.append(failed_unit)
                     if not route_records:
                         continue
-                else:
-                    llm_route_records = tuple(
-                        record
-                        for item in parsed.extractions
-                        for record in self._objective_evidence_records_from_extracted(
-                            route=route,
-                            source=source,
-                            objective_context=objective_context,
-                            extracted_record=item.model_dump(),
-                        )
-                    )
-                    route_records = self._objective_merge_table_repair_records(
-                        deterministic_records=route_records,
-                        llm_records=llm_route_records,
-                    )
             for record in route_records:
                 unit = ExtractedEvidenceDraft.from_mapping(record)
                 if not self._objective_evidence_has_payload(unit):
@@ -2048,6 +2285,47 @@ class ResearchObjectiveService:
         return (*bound_units, *comparison_units)
 
     @staticmethod
+    def _failed_objective_evidence_draft(
+        *,
+        route: EvidenceCandidate,
+        error: Exception,
+    ) -> ExtractedEvidenceDraft:
+        identity = "|".join(
+            (
+                route.objective_id,
+                route.document_id,
+                route.source_kind,
+                route.source_ref,
+                "failed",
+            )
+        )
+        reason = f"{error.__class__.__name__}: {str(error) or 'extraction failed'}"
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": (
+                    f"oev_failed_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
+                ),
+                "objective_id": route.objective_id,
+                "document_id": route.document_id,
+                "source_kind": route.source_kind,
+                "source_ref": route.source_ref,
+                "evidence_role": "irrelevant",
+                "selection_status": "failed",
+                "selection_reason": route.reason,
+                "attribution_scope": "not_attributable",
+                "source_refs": [
+                    {
+                        "source_kind": route.source_kind,
+                        "source_ref": route.source_ref,
+                    }
+                ],
+                "resolution_status": "unknown",
+                "failure_reason": reason[:1000],
+                "confidence": 0.0,
+            }
+        )
+
+    @staticmethod
     def _enrich_objective_scope_context(
         units: tuple[ExtractedEvidenceDraft, ...],
         *,
@@ -2056,6 +2334,9 @@ class ResearchObjectiveService:
         skim_by_document_id = {item.document_id: item for item in paper_skims}
         enriched: list[ExtractedEvidenceDraft] = []
         for unit in units:
+            if unit.selection_status == "failed":
+                enriched.append(unit)
+                continue
             paper_skim = skim_by_document_id.get(unit.document_id)
             context = unit.scientific_context.to_record()
             if not context["material"]:
@@ -2121,15 +2402,15 @@ class ResearchObjectiveService:
         collection_id: str,
         route: EvidenceCandidate,
         source: dict[str, Any],
-        llm_unavailable: bool = False,
-    ) -> tuple[dict[str, Any], bool]:
-        if llm_unavailable:
-            return source, False
+        unavailable_error: Exception | None = None,
+    ) -> tuple[dict[str, Any], Exception | None]:
         if not self._objective_table_source_needs_llm_structural_repair(
             route=route,
             source=source,
         ):
-            return source, False
+            return source, None
+        if unavailable_error is not None:
+            return source, unavailable_error
         repair_payload = self._build_objective_table_matrix_repair_payload(
             route=route,
             source=source,
@@ -2138,7 +2419,7 @@ class ResearchObjectiveService:
             parsed = self._get_paper_facts_extractor().repair_table_matrix(
                 repair_payload
             )
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Research objective table matrix repair failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_ref=%s",
                 collection_id,
@@ -2147,13 +2428,15 @@ class ResearchObjectiveService:
                 route.document_id,
                 route.source_ref,
             )
-            return source, True
+            return source, exc
         repaired_matrix = self._validated_objective_repaired_table_matrix(
             source=source,
             repaired_table_matrix=getattr(parsed, "repaired_table_matrix", None),
         )
         if not repaired_matrix:
-            return source, False
+            return source, ValueError(
+                "table matrix repair returned no usable matrix"
+            )
         original_matrix = self._normalized_objective_table_matrix(
             source.get("table_matrix")
         )
@@ -2164,16 +2447,23 @@ class ResearchObjectiveService:
                 column_headers=source.get("column_headers", ()),
             )
         )
-        if repaired_matrix == original_matrix:
-            return source, False
+        if (
+            repaired_matrix == original_matrix
+            and self._objective_table_matrix_has_structural_fragments(
+                original_matrix
+            )
+        ):
+            return source, ValueError(
+                "table matrix repair left the fragmented matrix unchanged"
+            )
+        if self._objective_table_matrix_has_structural_fragments(repaired_matrix):
+            return source, ValueError(
+                "table matrix repair returned a structurally fragmented matrix"
+            )
         repaired_source = dict(source)
         repaired_source["raw_table_matrix"] = source.get("table_matrix", [])
         repaired_source["table_matrix"] = repaired_matrix
-        repaired_source["table_matrix_structural_repair_applied"] = (
-            not self._objective_table_matrix_has_structural_fragments(
-                repaired_matrix
-            )
-        )
+        repaired_source["table_matrix_structural_repair_applied"] = True
         repairs = getattr(parsed, "repairs", None)
         repair_records = []
         if repairs:
@@ -2193,7 +2483,7 @@ class ResearchObjectiveService:
                 for warning in warnings
                 if str(warning).strip()
             ]
-        return repaired_source, False
+        return repaired_source, None
 
     def _build_objective_table_matrix_repair_payload(
         self,
@@ -5213,23 +5503,42 @@ class ResearchObjectiveService:
             if part.strip()
         ]
 
-    def _tree_order_objective_routes(
+    def _document_round_robin_objective_routes(
         self,
         routes: tuple[EvidenceCandidate, ...],
         *,
         document_trees_by_document_id: dict[str, SourceDocumentTree],
     ) -> tuple[EvidenceCandidate, ...]:
-        return tuple(
-            sorted(
-                routes,
-                key=lambda route: (
-                    self._route_tree_order(
-                        route,
-                        document_trees_by_document_id=document_trees_by_document_id,
+        routes_by_document: dict[tuple[str, str], list[EvidenceCandidate]] = {}
+        for route in routes:
+            routes_by_document.setdefault(
+                (route.objective_id, route.document_id),
+                [],
+            ).append(route)
+        ordered_groups = tuple(
+            tuple(
+                sorted(
+                    document_routes,
+                    key=lambda route: (
+                        self._route_tree_order(
+                            route,
+                            document_trees_by_document_id=(
+                                document_trees_by_document_id
+                            ),
+                        ),
+                        route.source_ref,
                     ),
-                    route.source_ref,
-                ),
+                )
             )
+            for _key, document_routes in sorted(routes_by_document.items())
+        )
+        return tuple(
+            group[position]
+            for position in range(
+                max((len(group) for group in ordered_groups), default=0)
+            )
+            for group in ordered_groups
+            if position < len(group)
         )
 
     def _route_tree_order(

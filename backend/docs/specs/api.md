@@ -81,7 +81,8 @@ distinguishes collection-grounded, collection-limited, and general content.
 - `active_analysis_version` and `published_analysis_version`;
 - ordered `source_relationship_ids` linking the Objective to paper-study
   relationships;
-- `active_analysis`, `published_analysis`, and warnings on detail responses.
+- `active_analysis`, `published_analysis`, analysis-level
+  `paper_contributions`, and warnings on detail responses.
 
 The Objective list is ordered by the persisted collection-build rank and
 supports `offset` and optional `limit`. When `limit` is omitted, the response
@@ -155,6 +156,24 @@ rows, but an analysis from an older Source build is not exposed as active or
 published for the rebuilt Objective. It remains readable only by its explicit
 historical `analysis_version`.
 
+`ObjectiveAnalysisResponse.paper_contributions` reports framing, routing,
+extraction, and comparability for each paper in the published analysis version.
+It is empty until an analysis is published. If a newer active version is queued,
+running, or failed, the list still belongs to `published_analysis`, not that
+newer version. The Objective detail, confirm, start-analysis, and analysis-status
+routes share this response contract.
+
+Each analysis-level contribution exposes `evidence_disposition`,
+`routed_source_count`, `extracted_source_count`,
+`comparable_evidence_count`, `failed_source_count`, and an optional
+`evidence_disposition_reason`. The disposition is one of `excluded`,
+`no_routable_evidence`, `extraction_failed`, `no_comparable_evidence`, or
+`comparable_evidence`. The disposition and all four counts are either present
+together or all `null`. Historical analyses created before this accounting was
+persisted retain `null`, meaning unknown; clients must not interpret those
+values as zero. A successful `comparable_evidence` contribution with no partial
+failure may have no reason.
+
 ### Published Findings And Evidence
 
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`
@@ -174,8 +193,13 @@ A Finding contains:
   display rank;
 - subordinate mechanisms and typed material/sample/process/test scientific
   context;
-- deterministic analysis limitations and one PaperContribution binding for
-  every analyzed, excluded, or failed paper.
+- deterministic analysis limitations and one Finding-local PaperContribution
+  binding for every analyzed, excluded, or failed paper.
+
+The Finding-local `paper_contributions` bind supporting, contradicting,
+context, and boundary Evidence IDs for that Finding. They are distinct from
+`ObjectiveAnalysisResponse.paper_contributions`, which own paper-level framing,
+routing, extraction, and comparability accounting for the whole analysis.
 
 An Evidence record contains:
 
@@ -184,6 +208,13 @@ An Evidence record contains:
 - evidence role and selection/extraction state;
 - normalized material, sample, process, test, value, baseline, interpretation,
   and join fields.
+
+Failed extraction attempts remain Evidence with their exact Source locator,
+`selection_status=failed`, and a non-empty `failure_reason`. They do not
+participate in Findings. Finding-generation prompts may use a bounded,
+document-balanced representative subset, but backend validation, support and
+contradiction binding, paper counts, and traceback use the complete eligible
+Evidence set.
 
 The consumer identity is always:
 
@@ -195,7 +226,8 @@ Direct contributing paper count is computed from PaperContribution Evidence
 bindings rather than stored as a second declaration. `agreement`, `conflict`,
 and `condition_dependent` require direct results from at least two distinct
 papers; otherwise synthesis remains `insufficient_confirmation`. Context-only
-Evidence cannot establish an outcome.
+Evidence cannot establish an outcome, and repeated rows from one paper do not
+count as independent cross-paper confirmation.
 
 ### Finding Feedback, Curation, And Dataset Export
 

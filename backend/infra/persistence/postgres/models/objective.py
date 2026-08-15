@@ -512,6 +512,28 @@ class ObjectivePaperContributionRecord(Base):
             "analysis_status IN ('pending', 'analyzed', 'excluded', 'failed')",
             name="analysis_status_valid",
         ),
+        CheckConstraint(
+            "evidence_disposition IS NULL OR evidence_disposition IN "
+            "('excluded', 'no_routable_evidence', 'extraction_failed', "
+            "'no_comparable_evidence', 'comparable_evidence')",
+            name="evidence_disposition_valid",
+        ),
+        CheckConstraint(
+            "(routed_source_count IS NULL OR routed_source_count >= 0) AND "
+            "(extracted_source_count IS NULL OR extracted_source_count >= 0) AND "
+            "(comparable_evidence_count IS NULL OR comparable_evidence_count >= 0) AND "
+            "(failed_source_count IS NULL OR failed_source_count >= 0)",
+            name="evidence_counts_non_negative",
+        ),
+        CheckConstraint(
+            "(evidence_disposition IS NULL AND routed_source_count IS NULL AND "
+            "extracted_source_count IS NULL AND comparable_evidence_count IS NULL AND "
+            "failed_source_count IS NULL) OR "
+            "(evidence_disposition IS NOT NULL AND routed_source_count IS NOT NULL AND "
+            "extracted_source_count IS NOT NULL AND comparable_evidence_count IS NOT NULL AND "
+            "failed_source_count IS NOT NULL)",
+            name="evidence_accounting_complete",
+        ),
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
         ForeignKeyConstraint(
             ["collection_id", "objective_id", "analysis_version"],
@@ -559,6 +581,18 @@ class ObjectivePaperContributionRecord(Base):
     exclusion_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     warnings: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    evidence_disposition: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    routed_source_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    extracted_source_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    comparable_evidence_count: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    failed_source_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    evidence_disposition_reason: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
 
 
 class ObjectiveEvidenceRecord(Base):

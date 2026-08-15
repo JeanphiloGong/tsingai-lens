@@ -347,11 +347,55 @@ class ObjectiveListResponse(BaseModel):
     objectives: list[ObjectiveSummaryResponse] = Field(default_factory=list)
 
 
+class PaperContributionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collection_id: str
+    objective_id: str
+    analysis_version: int = Field(..., ge=1)
+    document_id: str
+    analysis_status: Literal["pending", "analyzed", "excluded", "failed"]
+    relevance: Literal["high", "medium", "low", "irrelevant", "uncertain"]
+    paper_role: Literal[
+        "primary_experiment",
+        "supporting_method",
+        "supporting_background",
+        "review",
+        "modeling_only",
+        "irrelevant",
+        "mixed",
+        "uncertain",
+    ]
+    contribution_summary: str | None = None
+    material_match: list[str] = Field(default_factory=list)
+    changed_variables: list[str] = Field(default_factory=list)
+    measured_property_scope: list[str] = Field(default_factory=list)
+    test_environment_scope: list[str] = Field(default_factory=list)
+    exclusion_reason: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    confidence: float = Field(..., ge=0, le=1)
+    evidence_disposition: Literal[
+        "excluded",
+        "no_routable_evidence",
+        "extraction_failed",
+        "no_comparable_evidence",
+        "comparable_evidence",
+    ] | None = None
+    routed_source_count: int | None = Field(default=None, ge=0)
+    extracted_source_count: int | None = Field(default=None, ge=0)
+    comparable_evidence_count: int | None = Field(default=None, ge=0)
+    failed_source_count: int | None = Field(default=None, ge=0)
+    evidence_disposition_reason: str | None = None
+
+
 class ObjectiveAnalysisResponse(BaseModel):
     collection_id: str
     objective: ObjectiveSummaryResponse
     active_analysis: ObjectiveAnalysisStateResponse | None = None
     published_analysis: ObjectiveAnalysisStateResponse | None = None
+    paper_contributions: list[PaperContributionResponse] = Field(
+        default_factory=list
+    )
     warnings: list[str] = Field(default_factory=list)
 
 

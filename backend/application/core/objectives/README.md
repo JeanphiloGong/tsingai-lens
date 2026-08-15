@@ -10,11 +10,14 @@ Objective analysis.
   analysis. It loads the immutable Source build, delegates candidate discovery
   to the two direct owners below, and atomically replaces the candidate fact
   set. Confirmed analysis traverses Source document trees with bounded
-  transient state, emits one `PaperContribution` per included document, and
-  emits `ObjectiveEvidence` records containing exact excerpts and typed Source
-  locators. Framing, routing, and extraction consume the persisted
-  ResearchObjective variables, outcomes, mechanisms, constraints, and
-  requested comparator directly. Table-selection hints remain transient
+  transient state, emits one `PaperContribution` for every framed document,
+  and emits `ObjectiveEvidence` records containing exact excerpts and typed
+  Source locators. Extractable routes retain tree order within each document
+  and run round-robin across documents. Provider suppression is scoped to one
+  Objective/document, and paper-level evidence accounting is derived only after
+  durable Evidence is constructed. Framing, routing, and extraction consume the
+  persisted ResearchObjective variables, outcomes, mechanisms, constraints,
+  and requested comparator directly. Table-selection hints remain transient
   service values.
 - `paper_skim_service.py`
   Owns the per-document discovery stage. It assigns every eligible
@@ -211,6 +214,15 @@ Source selection and extraction are one persisted Evidence lifecycle:
 `candidate -> selected -> extracted | rejected | failed`. Selection decisions
 may be transient, but only `ObjectiveEvidence` is durable.
 
+An extraction failure is also durable Evidence when the analysis can otherwise
+complete. It retains the exact `document_id + source_kind + source_ref` locator
+and Source excerpt, has `selection_status=failed`, requires a `failure_reason`,
+and is `not_attributable`. It remains visible beside successful Evidence through
+the Evidence API but cannot support a Finding. When one provider failure
+suppresses later calls for the same Objective/document, every affected routed
+Source receives its own failed Evidence record rather than disappearing from
+paper accounting.
+
 Each extracted Evidence record binds one exact Source excerpt to an explicit
 scientific attribution contract:
 
@@ -239,30 +251,69 @@ document. It carries only prior role/outcome coverage and Source positions
 between blocks, never prior scientific values or context. It is reset before
 the next document and never supplies a missing changed variable or outcome.
 
+Evidence extraction interleaves documents round-robin while preserving Source
+tree order inside each document. A provider-unavailable response suppresses
+later provider calls only for that Objective/document; routes from other papers
+continue. This prevents a paper with many table rows from consuming all useful
+attempts before another paper is examined.
+
 Deterministic table Evidence retains row and result-column coordinates in its
 related Source locators. Pairwise table results include both source rows, retain
 material differences, reject sparse comparison axes as non-attributable, and
 are bounded per Objective/document.
 
-Finding synthesis groups Evidence only by an exact normalized changed-factor
-tuple and one exact outcome. Multiple baseline-to-target intervals in that
-group form one condition series rather than separate Findings, and their exact
-endpoints remain on the individual Evidence records. For a condition series,
-the model-facing view retains every Evidence and paper id, factor endpoint,
-structured result, and attribution scope while omitting repeated excerpts and
-context; its Finding statement cannot publish numeric endpoints because they
-belong to individual comparisons. The backend keeps the complete persisted
-Evidence for validation and traceback. Each group can produce at most one
-Finding. The backend binds the result-set identity, assigns every direct result
-as supporting or
-contradicting, requires the statement to foreground heterogeneous responses
-when directions oppose, and derives condition boundaries, attribution scope,
-synthesis status, certainty, common scientific context, and one Finding-local
-binding for every PaperContribution in the analysis. The provider may identify
-only subordinate mechanisms backed by supplied context Evidence. Published
-analysis limitations are derived deterministically from validated factor
-coupling, direct-Evidence coverage, contradiction, condition boundaries, and
-attribution scope; provider-authored free-text limitations are not published.
+Before an Evidence draft becomes durable, each source variable, comparison
+axis, and outcome that resolves to exactly one confirmed Objective axis adopts
+that Objective label. Unit-qualified labels and approved Source aliases
+therefore share one runtime identity, while unmatched coupled factors remain
+verbatim. Exact Source wording is still retained in the excerpt, result text,
+and Source locators. Finding domain validation stays strict over these canonical
+Evidence identities and does not own application-level alias rules.
+
+After Evidence construction, each `PaperContribution` records one auditable
+paper outcome. `routed_source_count`, `extracted_source_count`, and
+`failed_source_count` count unique `(source_kind, source_ref)` locators;
+`comparable_evidence_count` counts eligible Evidence rows because multiple
+comparisons may legitimately come from one Source. A comparable row is inside
+the Objective axes, has a known direction, and can support a Finding. The
+terminal dispositions are:
+
+- `excluded`: framing excluded the paper and every count is zero;
+- `no_routable_evidence`: the paper was retained but no Source was selected;
+- `extraction_failed`: Sources were routed, none produced extracted Evidence,
+  and at least one failed;
+- `no_comparable_evidence`: extraction completed but produced no eligible
+  direct result for this Objective;
+- `comparable_evidence`: at least one eligible direct result survived, possibly
+  alongside partial Source failures.
+
+Finding synthesis first excludes Evidence that cannot support a Finding or has
+`direction=unknown`. A unit-qualified or noisy factor/outcome label is mapped to
+an Objective axis only when that match is unique; the canonical factor tuple
+and one outcome define the initial group. Explicitly opposing directions remain
+in one result set; non-opposing labels such as `mixed` form separate result sets
+instead of being mislabeled as contradictions. The primary direction is chosen
+first by independent document support, then by Evidence count, confidence, and
+a stable direction order. Multiple baseline-to-target intervals in one set form
+a condition series rather than separate Findings, and their exact endpoints
+remain on the individual Evidence records.
+
+The model sees at most 16 representatives selected round-robin across documents
+and directions. It also receives a complete per-document summary containing
+Evidence count, direction counts, and attribution-scope counts for the whole
+result set. This bound affects generation input only: no durable Evidence is
+deleted or sampled. The backend retains the complete result set to generate the
+statement, assign every supporting and contradicting Evidence ID, derive
+Finding-local paper bindings and synthesis status, and preserve Source
+traceback. Repeated rows from one paper therefore never count as independent
+cross-paper confirmation. Each result set can produce at most one Finding. The
+statement contains only the complete factor tuple, one outcome, backend-owned
+direction, and explicit opposing directions; it cannot copy model-authored
+numbers or silently omit a coupled factor. The model decides only assertion
+strength and optional context or subordinate mechanisms backed by supplied
+context Evidence. Published condition boundaries and analysis limitations are
+derived deterministically from validated factor coupling, direct-Evidence
+coverage, contradiction, condition state, and attribution scope.
 
 When a schema-valid candidate fails a backend semantic guard, synthesis records
 the concrete rejection reason and permits one bounded provider repair against

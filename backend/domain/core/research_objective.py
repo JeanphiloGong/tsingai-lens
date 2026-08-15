@@ -30,6 +30,15 @@ PAPER_ROLE_VALUES: Final[frozenset[str]] = frozenset(
 PAPER_CONTRIBUTION_STATUSES: Final[frozenset[str]] = frozenset(
     {"pending", "analyzed", "excluded", "failed"}
 )
+PAPER_EVIDENCE_DISPOSITIONS: Final[frozenset[str]] = frozenset(
+    {
+        "excluded",
+        "no_routable_evidence",
+        "extraction_failed",
+        "no_comparable_evidence",
+        "comparable_evidence",
+    }
+)
 SOURCE_KIND_VALUES: Final[frozenset[str]] = frozenset(
     {"text_window", "table", "figure"}
 )
@@ -1098,6 +1107,12 @@ class PaperContribution:
     exclusion_reason: str | None
     warnings: tuple[str, ...]
     confidence: float
+    evidence_disposition: str | None = None
+    routed_source_count: int | None = None
+    extracted_source_count: int | None = None
+    comparable_evidence_count: int | None = None
+    failed_source_count: int | None = None
+    evidence_disposition_reason: str | None = None
 
     def __post_init__(self) -> None:
         if not all(
@@ -1116,10 +1131,91 @@ class PaperContribution:
         if self.paper_role not in PAPER_ROLE_VALUES:
             raise ValueError(f"unsupported paper role: {self.paper_role}")
         if self.analysis_status in {"excluded", "failed"} and not (
-            self.exclusion_reason or self.warnings
+            self.exclusion_reason
+            or self.warnings
+            or self.evidence_disposition_reason
         ):
             raise ValueError(
                 "excluded or failed paper contribution requires a reason or warning"
+            )
+        self._validate_evidence_accounting()
+
+    def _validate_evidence_accounting(self) -> None:
+        values = (
+            self.evidence_disposition,
+            self.routed_source_count,
+            self.extracted_source_count,
+            self.comparable_evidence_count,
+            self.failed_source_count,
+        )
+        if not any(value is not None for value in values):
+            return
+        if not all(value is not None for value in values):
+            raise ValueError(
+                "paper evidence disposition and counts must be all present or all absent"
+            )
+        if self.evidence_disposition not in PAPER_EVIDENCE_DISPOSITIONS:
+            raise ValueError(
+                "unsupported paper evidence disposition: "
+                f"{self.evidence_disposition}"
+            )
+        counts = (
+            self.routed_source_count,
+            self.extracted_source_count,
+            self.comparable_evidence_count,
+            self.failed_source_count,
+        )
+        if any(count is None or count < 0 for count in counts):
+            raise ValueError("paper evidence counts cannot be negative")
+        routed = self.routed_source_count or 0
+        extracted = self.extracted_source_count or 0
+        comparable = self.comparable_evidence_count or 0
+        failed = self.failed_source_count or 0
+        if extracted > routed or failed > routed:
+            raise ValueError(
+                "extracted and failed source counts cannot exceed routed sources"
+            )
+        disposition = self.evidence_disposition
+        if disposition == "excluded":
+            if self.analysis_status != "excluded" or any(counts):
+                raise ValueError("excluded evidence disposition requires zero counts")
+            return
+        if disposition == "extraction_failed":
+            if (
+                self.analysis_status != "failed"
+                or routed == 0
+                or extracted != 0
+                or comparable != 0
+                or failed == 0
+            ):
+                raise ValueError(
+                    "extraction_failed disposition requires failed routed sources"
+                )
+        elif self.analysis_status != "analyzed":
+            raise ValueError(
+                "non-excluded evidence disposition requires analyzed paper status"
+            )
+        if disposition == "no_routable_evidence" and any(counts):
+            raise ValueError("no_routable_evidence disposition requires zero counts")
+        if disposition == "no_comparable_evidence" and (
+            routed == 0 or comparable != 0
+        ):
+            raise ValueError(
+                "no_comparable_evidence disposition requires routed sources"
+            )
+        if disposition == "comparable_evidence" and (
+            extracted == 0 or comparable == 0
+        ):
+            raise ValueError(
+                "comparable_evidence disposition requires comparable Evidence"
+            )
+        if disposition in {
+            "no_routable_evidence",
+            "extraction_failed",
+            "no_comparable_evidence",
+        } and not self.evidence_disposition_reason:
+            raise ValueError(
+                f"{disposition} disposition requires an evidence reason"
             )
 
     @property
@@ -1164,6 +1260,22 @@ class PaperContribution:
             exclusion_reason=_text(payload.get("exclusion_reason")),
             warnings=normalize_objective_terms(payload.get("warnings")),
             confidence=normalize_objective_confidence(payload.get("confidence")),
+            evidence_disposition=_text(payload.get("evidence_disposition")),
+            routed_source_count=_non_negative_int_or_none(
+                payload.get("routed_source_count")
+            ),
+            extracted_source_count=_non_negative_int_or_none(
+                payload.get("extracted_source_count")
+            ),
+            comparable_evidence_count=_non_negative_int_or_none(
+                payload.get("comparable_evidence_count")
+            ),
+            failed_source_count=_non_negative_int_or_none(
+                payload.get("failed_source_count")
+            ),
+            evidence_disposition_reason=_text(
+                payload.get("evidence_disposition_reason")
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -1183,6 +1295,12 @@ class PaperContribution:
             "exclusion_reason": self.exclusion_reason,
             "warnings": list(self.warnings),
             "confidence": self.confidence,
+            "evidence_disposition": self.evidence_disposition,
+            "routed_source_count": self.routed_source_count,
+            "extracted_source_count": self.extracted_source_count,
+            "comparable_evidence_count": self.comparable_evidence_count,
+            "failed_source_count": self.failed_source_count,
+            "evidence_disposition_reason": self.evidence_disposition_reason,
         }
 
 
@@ -1894,6 +2012,20 @@ def _positive_int_or_none(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
     return numeric if numeric > 0 else None
+
+
+def _non_negative_int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("paper evidence count must be an integer")
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("paper evidence count must be an integer") from exc
+    if numeric < 0:
+        raise ValueError("paper evidence count cannot be negative")
+    return numeric
 
 
 def _positive_ints(value: Any) -> tuple[int, ...]:

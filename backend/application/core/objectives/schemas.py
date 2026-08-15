@@ -694,40 +694,6 @@ class StructuredEvidenceExtraction(_StrictModel):
     ] = "partial"
     confidence: float = 0.0
 
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_attribution_cardinality(cls, value: object) -> object:
-        if not isinstance(value, dict):
-            return value
-        attribution_scope = _normalize_underscored_choice(
-            value.get("attribution_scope"),
-            allowed=_OBJECTIVE_EVIDENCE_ATTRIBUTION_SCOPES,
-            default="not_attributable",
-        )
-        changed_variables = value.get("changed_variables")
-        if (
-            attribution_scope == "joint_effect"
-            and isinstance(changed_variables, list)
-            and len(changed_variables) == 1
-        ):
-            attribution_scope = "isolated_effect"
-        if (
-            attribution_scope in {"isolated_effect", "joint_effect"}
-            and isinstance(changed_variables, list)
-            and any(
-                (
-                    item.get("baseline_value") is None
-                    or item.get("target_value") is None
-                )
-                for item in changed_variables
-                if isinstance(item, dict)
-            )
-        ):
-            attribution_scope = "association_only"
-        if attribution_scope != value.get("attribution_scope"):
-            return {**value, "attribution_scope": attribution_scope}
-        return value
-
     @field_validator("evidence_role", mode="before")
     @classmethod
     def _normalize_evidence_role(cls, value: object) -> str:
@@ -782,6 +748,15 @@ class StructuredEvidenceExtraction(_StrictModel):
             raise ValueError(
                 "changed variable names must be unique per extraction"
             )
+        if any(
+            item.baseline_value is not None
+            and item.target_value is not None
+            and item.baseline_value == item.target_value
+            for item in self.changed_variables
+        ):
+            raise ValueError(
+                "changed variables require distinct baseline and target values"
+            )
         if self.attribution_scope in {"isolated_effect", "joint_effect"}:
             if self.comparison is None or not self.comparison.comparable:
                 raise ValueError("experimental attribution requires comparison")
@@ -795,13 +770,6 @@ class StructuredEvidenceExtraction(_StrictModel):
             ):
                 raise ValueError(
                     "experimental attribution requires baseline and target values"
-                )
-            if any(
-                item.baseline_value == item.target_value
-                for item in self.changed_variables
-            ):
-                raise ValueError(
-                    "experimental attribution requires changed variable values"
                 )
             if self.attribution_scope == "isolated_effect" and len(variables) != 1:
                 raise ValueError("isolated effect requires one changed variable")

@@ -2188,39 +2188,41 @@ def test_structured_objective_evidence_normalizes_compact_context_attributes():
     assert json.loads(str(context.test[0].value)) == {"method": "Archimedes"}
 
 
-def test_structured_objective_evidence_repairs_single_variable_joint_effect():
-    extraction = StructuredEvidenceExtraction.model_validate(
-        {
-            "evidence_role": "direct_result",
-            "changed_variables": [
-                {
-                    "name": "energy density",
-                    "baseline_value": 70,
-                    "target_value": 150,
-                    "unit": "J/mm3",
-                }
-            ],
-            "comparison": {
-                "baseline_label": "70 J/mm3",
-                "target_label": "150 J/mm3",
-                "axis_names": ["energy density"],
-                "comparable": True,
-            },
-            "reported_result": {
-                "outcome": "relative density",
-                "value": 99.5,
-                "unit": "%",
-                "direction": "increase",
-                "result_text": "Relative density increased to 99.5%.",
-            },
-            "attribution_scope": "joint_effect",
-            "scientific_context": {},
-            "resolution_status": "resolved",
-            "confidence": 0.9,
-        }
-    )
-
-    assert extraction.attribution_scope == "isolated_effect"
+def test_structured_objective_evidence_rejects_single_variable_joint_effect():
+    with pytest.raises(
+        ValidationError,
+        match="joint effect requires multiple changed variables",
+    ):
+        StructuredEvidenceExtraction.model_validate(
+            {
+                "evidence_role": "direct_result",
+                "changed_variables": [
+                    {
+                        "name": "energy density",
+                        "baseline_value": 70,
+                        "target_value": 150,
+                        "unit": "J/mm3",
+                    }
+                ],
+                "comparison": {
+                    "baseline_label": "70 J/mm3",
+                    "target_label": "150 J/mm3",
+                    "axis_names": ["energy density"],
+                    "comparable": True,
+                },
+                "reported_result": {
+                    "outcome": "relative density",
+                    "value": 99.5,
+                    "unit": "%",
+                    "direction": "increase",
+                    "result_text": "Relative density increased to 99.5%.",
+                },
+                "attribution_scope": "joint_effect",
+                "scientific_context": {},
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
 
 
 def test_structured_objective_evidence_rejects_repeated_variable_intervals():
@@ -2266,39 +2268,41 @@ def test_structured_objective_evidence_rejects_repeated_variable_intervals():
         )
 
 
-def test_structured_objective_evidence_downgrades_unbound_experimental_attribution():
-    extraction = StructuredEvidenceExtraction.model_validate(
-        {
-            "evidence_role": "direct_result",
-            "changed_variables": [
-                {
-                    "name": "energy density",
-                    "baseline_value": None,
-                    "target_value": 150,
-                    "unit": "J/mm3",
-                }
-            ],
-            "comparison": {
-                "baseline_label": "lower energy density",
-                "target_label": "150 J/mm3",
-                "axis_names": ["energy density"],
-                "comparable": True,
-            },
-            "reported_result": {
-                "outcome": "relative density",
-                "value": 99.5,
-                "unit": "%",
-                "direction": "increase",
-                "result_text": "Relative density increased to 99.5%.",
-            },
-            "attribution_scope": "isolated_effect",
-            "scientific_context": {},
-            "resolution_status": "partial",
-            "confidence": 0.8,
-        }
-    )
-
-    assert extraction.attribution_scope == "association_only"
+def test_structured_objective_evidence_rejects_unbound_experimental_attribution():
+    with pytest.raises(
+        ValidationError,
+        match="experimental attribution requires baseline and target values",
+    ):
+        StructuredEvidenceExtraction.model_validate(
+            {
+                "evidence_role": "direct_result",
+                "changed_variables": [
+                    {
+                        "name": "energy density",
+                        "baseline_value": None,
+                        "target_value": 150,
+                        "unit": "J/mm3",
+                    }
+                ],
+                "comparison": {
+                    "baseline_label": "lower energy density",
+                    "target_label": "150 J/mm3",
+                    "axis_names": ["energy density"],
+                    "comparable": True,
+                },
+                "reported_result": {
+                    "outcome": "relative density",
+                    "value": 99.5,
+                    "unit": "%",
+                    "direction": "increase",
+                    "result_text": "Relative density increased to 99.5%.",
+                },
+                "attribution_scope": "isolated_effect",
+                "scientific_context": {},
+                "resolution_status": "partial",
+                "confidence": 0.8,
+            }
+        )
 
 
 def test_domain_model_extractors_ignores_top_level_prompt_echo_for_evidence():
@@ -2378,7 +2382,7 @@ def test_domain_model_extractors_rejects_unknown_top_level_evidence_fields():
             }
         )
 
-    assert len(client.chat.completions.calls) == 2
+    assert len(client.chat.completions.calls) == 3
 
 
 def test_domain_model_extractors_rejects_prompt_only_evidence_echo():
@@ -2415,14 +2419,23 @@ def test_domain_model_extractors_rejects_prompt_only_evidence_echo():
             }
         )
 
-    assert len(client.chat.completions.calls) == 2
+    assert len(client.chat.completions.calls) == 3
     assert "only echoed the input fields" in client.chat.completions.calls[1][
         "messages"
     ][-1]["content"]
 
 
-def test_structured_objective_evidence_rejects_effect_without_variable_change():
-    with pytest.raises(ValidationError, match="requires changed variable values"):
+@pytest.mark.parametrize(
+    "attribution_scope",
+    ("isolated_effect", "association_only"),
+)
+def test_structured_objective_evidence_rejects_unchanged_factor_as_changed_variable(
+    attribution_scope,
+):
+    with pytest.raises(
+        ValidationError,
+        match="changed variables require distinct baseline and target values",
+    ):
         StructuredEvidenceExtraction.model_validate(
             {
                 "evidence_role": "direct_result",
@@ -2446,7 +2459,7 @@ def test_structured_objective_evidence_rejects_effect_without_variable_change():
                     "direction": "no_change",
                     "result_text": "Density was 98.9% in condition B.",
                 },
-                "attribution_scope": "isolated_effect",
+                "attribution_scope": attribution_scope,
                 "scientific_context": {},
                 "resolution_status": "resolved",
                 "confidence": 0.9,
@@ -2510,11 +2523,12 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
             },
         }
     )
+    contract = " ".join(system_prompt.split())
 
-    assert "Extract at most one objective-relevant fact" in system_prompt
-    assert "`SOURCE` is the only scientific authority" in system_prompt
-    assert "Return at most one extraction" in system_prompt
-    assert "one top-level key: `extractions`" in system_prompt
+    assert "Extract at most one objective-relevant fact" in contract
+    assert "`SOURCE` is the only scientific authority" in contract
+    assert "Return at most one extraction" in contract
+    assert "one top-level key: `extractions`" in contract
     assert "1.43x10^6 C/s for P150" in prompt
     assert "1.65x10^6 C/s for NP" in prompt
     assert "OUTPUT JSON:" in prompt
@@ -2523,16 +2537,16 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     assert "document_state" not in prompt
     assert "must not become evidence" not in prompt
     assert "must not be copied" not in prompt
-    assert "Identify every changed" in system_prompt
-    assert "exact source group labels" in system_prompt
-    assert "absent, off, or without condition to numeric 0" in system_prompt
-    assert "one baseline-to-target comparison interval" in system_prompt
-    assert "Never repeat a changed-variable name" in system_prompt
-    assert "choose one complete source-supported pair" in system_prompt
-    assert "Context source" in system_prompt
-    assert "numeric `confidence` for every extraction" in system_prompt
-    assert "Generic composition or background" in system_prompt
-    assert "Unrelated composition example" in system_prompt
+    assert "Identify every changed" in contract
+    assert "exact source group labels" in contract
+    assert "absent, off, or without condition to numeric 0" in contract
+    assert "one baseline-to-target comparison interval" in contract
+    assert "Never repeat a changed-variable name" in contract
+    assert "choose one complete source-supported pair" in contract
+    assert "Context source" in contract
+    assert "numeric `confidence` for every extraction" in contract
+    assert "Generic composition or background" in contract
+    assert "Unrelated composition example" in contract
 
 
 def test_domain_model_extractors_rejects_backend_bound_objective_evidence_fields():
@@ -2846,6 +2860,7 @@ def test_objective_evidence_prompt_requires_verbatim_outcome_bound_result_text()
     assert "mixes current work with cited literature" in contract
     assert "`incomparability_reasons` must be empty" in contract
     assert "Conditions from cited literature" in contract
+    assert "identical baseline and target values are fixed context" in contract
     assert "TASK MODEL" in system_prompt
     assert "INPUT SCHEMA" in system_prompt
     assert "DECISION PROCESS" in system_prompt
@@ -2855,7 +2870,9 @@ def test_objective_evidence_prompt_requires_verbatim_outcome_bound_result_text()
     assert "Do not output source excerpts" not in system_prompt
 
 
-def test_domain_model_extractors_retries_with_structured_validation_error(monkeypatch):
+def test_domain_model_extractors_repairs_layered_structured_validation_errors(
+    monkeypatch,
+):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     invalid = json.dumps(
         {
@@ -2918,8 +2935,15 @@ def test_domain_model_extractors_retries_with_structured_validation_error(monkey
             ]
         }
     )
+    still_invalid_payload = json.loads(valid)
+    still_invalid_comparison = still_invalid_payload["extractions"][0]["comparison"]
+    still_invalid_comparison["comparable"] = False
+    still_invalid_comparison["incomparability_reasons"] = [
+        "comparison conditions are incomplete"
+    ]
+    still_invalid = json.dumps(still_invalid_payload)
     client = _FakeOpenAIClient(invalid)
-    responses = iter((invalid, valid))
+    responses = iter((invalid, still_invalid, valid))
 
     def create(**kwargs):  # noqa: ANN003
         client.chat.completions.calls.append(kwargs)
@@ -2932,7 +2956,11 @@ def test_domain_model_extractors_retries_with_structured_validation_error(monkey
         )
 
     client.chat.completions.create = create
-    extractor = ObjectiveExtractor(client=client, model="fake-model")
+    extractor = ObjectiveExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="json_text",
+    )
 
     parsed = extractor.extract_objective_evidence(
         {
@@ -2952,15 +2980,195 @@ def test_domain_model_extractors_retries_with_structured_validation_error(monkey
     )
 
     assert parsed.extractions[0].comparison is not None
-    assert len(client.chat.completions.calls) == 2
+    assert len(client.chat.completions.calls) == 3
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
     assert "experimental attribution requires comparison" in repair_prompt
-    assert "Return at most one schema-valid extraction" in repair_prompt
-    assert "distinct changed-variable name" in repair_prompt
-    assert "Never repeat a changed-variable name" in repair_prompt
-    assert "one complete source-supported pair" in repair_prompt
+    invalid_item = json.dumps(
+        json.loads(invalid)["extractions"][0],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    assert "INVALID EXTRACTION" in repair_prompt
+    assert invalid_item in repair_prompt
+    assert "Correct only values supported by SOURCE" in repair_prompt
+    assert "do not invent comparison endpoints" in repair_prompt
+    assert "Return only {\"extractions\":[<one corrected extraction>]}" in repair_prompt
+    assert "fixed context, not a changed variable" in repair_prompt
+    assert "choose one complete source-supported interval" in repair_prompt
+    assert "never merge separate intervals" in repair_prompt
     assert "For finding synthesis" not in repair_prompt
+    second_repair_prompt = client.chat.completions.calls[2]["messages"][-1][
+        "content"
+    ]
+    assert "incomparable evidence cannot be attributed" in second_repair_prompt
+    still_invalid_item = json.dumps(
+        json.loads(still_invalid)["extractions"][0],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    assert still_invalid_item in second_repair_prompt
 
+
+def test_objective_evidence_normalizes_fixed_endpoint_and_joint_scope_without_repair():
+    invalid = json.dumps(
+        {
+            "extractions": [
+                {
+                    "evidence_role": "direct_result",
+                    "changed_variables": [
+                        {
+                            "name": "laser power",
+                            "baseline_value": 100,
+                            "target_value": 140,
+                            "unit": "W",
+                        },
+                        {
+                            "name": "scan speed",
+                            "baseline_value": 100,
+                            "target_value": 100,
+                            "unit": "mm/s",
+                        },
+                    ],
+                    "comparison": {
+                        "baseline_label": "100 W at 100 mm/s",
+                        "target_label": "140 W at 100 mm/s",
+                        "axis_names": ["laser power", "scan speed"],
+                        "comparable": True,
+                    },
+                    "reported_result": {
+                        "outcome": "density",
+                        "value": 98.05,
+                        "unit": "%",
+                        "direction": "increase",
+                        "result_text": "the average density was found to be 98.05%",
+                    },
+                    "attribution_scope": "joint_effect",
+                    "scientific_context": {},
+                    "resolution_status": "resolved",
+                    "confidence": 0.9,
+                }
+            ]
+        }
+    )
+    client = _FakeOpenAIClient(invalid)
+    extractor = ObjectiveExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="json_text",
+    )
+
+    parsed = extractor.extract_objective_evidence(
+        {
+            "objective": {
+                "question": "How do laser power and scan speed affect density?"
+            },
+            "evidence_route": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+            },
+            "source": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "text": (
+                    "At 100 and 140 W with scan speed fixed at 100 mm/s, "
+                    "the average density was found to be 98.05%."
+                ),
+            },
+        }
+    )
+
+    assert [item.name for item in parsed.extractions[0].changed_variables] == [
+        "laser power"
+    ]
+    assert parsed.extractions[0].attribution_scope == "isolated_effect"
+    assert parsed.extractions[0].comparison is not None
+    assert parsed.extractions[0].comparison.axis_names == ["laser power"]
+    assert len(client.chat.completions.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("variable_name", "endpoint"),
+    (
+        ("scan speed", ""),
+        ("scan speed", []),
+        ("scan speed", {}),
+        ("", "fixed"),
+    ),
+)
+def test_objective_evidence_does_not_normalize_invalid_fixed_endpoints(
+    variable_name,
+    endpoint,
+):
+    payload = {
+        "extractions": [
+            {
+                "changed_variables": [
+                    {
+                        "name": variable_name,
+                        "baseline_value": endpoint,
+                        "target_value": endpoint,
+                    }
+                ],
+                "comparison": {"axis_names": [variable_name]},
+                "attribution_scope": "joint_effect",
+            }
+        ]
+    }
+
+    normalized = ObjectiveExtractor._normalize_fixed_objective_evidence_conditions(
+        payload
+    )
+
+    assert normalized == payload
+
+
+def test_objective_evidence_repair_prompt_requires_role_result_consistency():
+    repair_prompt = ObjectiveExtractor._objective_evidence_repair_instruction(
+        repair_detail=(
+            "extractions.0: Value error, context evidence cannot report an "
+            "experimental result"
+        ),
+        invalid_extraction={
+            "evidence_role": "mechanism_context",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "density",
+                "value": 98.05,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": "the average density was found to be 98.05%",
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {},
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        },
+    )
+
+    assert (
+        "If `reported_result` is non-null, use `direct_result` or "
+        "`contradictory_result` as `evidence_role`" in repair_prompt
+    )
+    assert (
+        "If keeping a context role, set `reported_result` to null" in repair_prompt
+    )
+    assert (
+        "`isolated_effect` and `joint_effect` require distinct baseline and target "
+        "values" in repair_prompt
+    )
+    assert (
+        "`comparison.axis_names` must exactly match the distinct "
+        "`changed_variables` names" in repair_prompt
+    )
+    assert (
+        "If `comparison.comparable` is false, use `not_attributable`" in repair_prompt
+    )
+    assert (
+        "Remove each fixed parameter from `changed_variables` and "
+        "`comparison.axis_names`" in repair_prompt
+    )
+    assert "A fixed control does not make the comparison incomparable" in repair_prompt
 
 
 def test_domain_model_extractors_validates_lightweight_table_batch_mentions():

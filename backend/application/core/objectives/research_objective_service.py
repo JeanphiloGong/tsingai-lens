@@ -2211,6 +2211,15 @@ class ResearchObjectiveService:
                                 extracted_record=item.model_dump(),
                             )
                         )
+                        if (
+                            parsed.extractions
+                            and not llm_route_records
+                            and not route_records
+                        ):
+                            extraction_error = ValueError(
+                                "model evidence was rejected because it was not "
+                                "grounded in the selected Source"
+                            )
                         route_records = self._objective_merge_table_repair_records(
                             deterministic_records=route_records,
                             llm_records=llm_route_records,
@@ -4638,7 +4647,7 @@ class ResearchObjectiveService:
                 ),
             }
         )
-        if not record.get("confidence"):
+        if record.get("confidence") is None:
             record["confidence"] = route.confidence
         return (record,)
 

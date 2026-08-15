@@ -8,7 +8,7 @@ PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION = "paper_signal_reconciliation.v2"
 RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = "research_axis_canonicalization.v1"
 OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v2"
 OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION = "objective_evidence_route.v1"
-OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v1"
+OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v2"
 FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v12"
 
 _RESEARCH_OBJECTIVE_SYSTEM_PROMPT = """
@@ -111,7 +111,9 @@ DECISION PROCESS
 4. Never repeat a changed-variable name. Use `isolated_effect` only for one
    distinct changed factor with a complete comparable baseline/target comparison.
    Use `joint_effect` for two or more distinct changed factors. Otherwise use
-   `association_only`, `descriptive_only`, or `not_attributable`.
+   `association_only`, `descriptive_only`, or `not_attributable`. Parameters with
+   identical baseline and target values are fixed context, never changed variables
+   or comparison axes.
 5. Return empty output rather than inventing a missing binding.
 
 HARD RULES

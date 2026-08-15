@@ -1437,6 +1437,166 @@ def test_llm_objective_evidence_rejects_values_and_axis_absent_from_source(tmp_p
     assert records == ()
 
 
+def test_research_objective_records_failed_evidence_when_model_item_is_ungrounded(
+    tmp_path,
+):
+    class UngroundedEvidenceExtractor:
+        def extract_objective_evidence(self, _payload):
+            return StructuredEvidenceExtractions.model_validate(
+                {
+                    "extractions": [
+                        {
+                            "evidence_role": "direct_result",
+                            "changed_variables": [
+                                {
+                                    "name": "laser power",
+                                    "baseline_value": 100,
+                                    "target_value": 140,
+                                    "unit": "W",
+                                }
+                            ],
+                            "comparison": {
+                                "baseline_label": "100 W",
+                                "target_label": "140 W",
+                                "axis_names": ["laser power"],
+                                "comparable": True,
+                            },
+                            "reported_result": {
+                                "outcome": "relative density",
+                                "value": 98.05,
+                                "unit": "%",
+                                "direction": "increase",
+                                "result_text": (
+                                    "Relative density increased from 97.83% to 98.05%."
+                                ),
+                            },
+                            "attribution_scope": "isolated_effect",
+                            "scientific_context": {},
+                            "resolution_status": "resolved",
+                            "confidence": 0.9,
+                        }
+                    ]
+                }
+            )
+
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    block = SimpleNamespace(
+        block_id="block-1",
+        document_id="paper-1",
+        page=3,
+        block_type="paragraph",
+        heading_path="Results",
+        text="The selected paragraph contains no reported density measurement.",
+    )
+
+    units = service._build_objective_evidence(
+        collection_id="col-test",
+        extractor=UngroundedEvidenceExtractor(),
+        objectives=(objective,),
+        paper_skims=(),
+        objective_paper_frames=(),
+        objective_evidence_routes=(route,),
+        blocks_by_document_id={"paper-1": [block]},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={},
+    )
+
+    assert len(units) == 1
+    assert units[0].source_ref == "block-1"
+    assert units[0].selection_status == "failed"
+    assert units[0].failure_reason is not None
+    assert "not grounded in the selected Source" in units[0].failure_reason
+
+
+def test_llm_objective_evidence_preserves_zero_extraction_confidence(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.95,
+        }
+    )
+
+    records = service._objective_evidence_records_from_extracted(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "text": (
+                "At a laser power of 100 W the relative density was 97.83%, "
+                "while at a laser power of 140 W the relative density was "
+                "98.05%."
+            ),
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "laser power",
+                    "baseline_value": 100,
+                    "target_value": 140,
+                    "unit": "W",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "100 W",
+                "target_label": "140 W",
+                "axis_names": ["laser power"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "relative density",
+                "value": 98.05,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": "relative density was 98.05%",
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {},
+            "resolution_status": "resolved",
+            "confidence": 0.0,
+        },
+    )
+
+    assert records[0]["confidence"] == 0.0
+
+
 def test_llm_objective_evidence_accepts_source_grounded_axis_and_values(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),

@@ -214,6 +214,24 @@ Source selection and extraction are one persisted Evidence lifecycle:
 `candidate -> selected -> extracted | rejected | failed`. Selection decisions
 may be transient, but only `ObjectiveEvidence` is durable.
 
+Each model call may return zero or one Evidence extraction for the selected
+Source. If that item fails structural or scientific-contract validation, the
+extractor permits at most two sequential bounded repairs against the same Source.
+Each repair includes the latest invalid item and its field-level validation
+errors, so a second repair can address a contract error exposed by the first.
+Repair may correct structure or abstain, but it must not invent endpoints,
+units, context, or comparison groups. The backend does not change comparability
+or attribution merely to make an item pass validation. A named parameter with
+identical, non-empty scalar baseline and target values is fixed scientific
+context, not a changed variable. At the model adapter boundary, the backend
+removes such a parameter from `changed_variables` and `comparison.axis_names`.
+When that removal leaves exactly one changed variable from a `joint_effect`
+draft, the backend derives `isolated_effect`; endpoint completeness, comparison
+parity, comparability, and Source grounding remain strict validation
+requirements. A non-empty model result that survives schema validation but
+fails Source grounding becomes explicit failed Evidence instead of disappearing
+from paper accounting.
+
 An extraction failure is also durable Evidence when the analysis can otherwise
 complete. It retains the exact `document_id + source_kind + source_ref` locator
 and Source excerpt, has `selection_status=failed`, requires a `failure_reason`,

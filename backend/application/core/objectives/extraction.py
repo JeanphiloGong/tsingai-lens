@@ -939,7 +939,9 @@ class ObjectiveExtractor:
             "SOURCE",
         }
         last_error: Exception | None = None
-        for attempt in range(2):
+        last_invalid_extraction: dict[str, Any] | None = None
+        max_attempts = 3
+        for attempt in range(max_attempts):
             attempt_kwargs = dict(request_kwargs)
             attempt_messages = [*messages]
             attempt_kwargs["messages"] = attempt_messages
@@ -966,25 +968,19 @@ class ObjectiveExtractor:
                         "that answers the objective."
                     )
                 else:
-                    retry_instruction = (
-                        "Previous evidence extraction output failed validation: "
-                        f"{repair_detail[:1000]}. Return at most one schema-valid "
-                        "extraction or {\"extractions\":[]}. Context evidence must "
-                        "use reported_result null, no changed variables, no "
-                        "comparison, and not_attributable. One extraction represents "
-                        "one comparison interval. isolated_effect requires exactly one "
-                        "distinct changed-variable name and a comparable comparison; "
-                        "joint_effect requires at least two distinct changed-variable "
-                        "names. Never repeat a changed-variable name; for a condition "
-                        "series choose one complete source-supported pair. Return only "
-                        "compact JSON."
+                    retry_instruction = self._objective_evidence_repair_instruction(
+                        repair_detail=repair_detail,
+                        invalid_extraction=last_invalid_extraction,
                     )
                 attempt_messages.append(
                     {"role": "user", "content": retry_instruction}
                 )
                 logger.warning(
-                    "Retrying objective evidence JSON response model=%s",
+                    "Retrying objective evidence JSON response model=%s "
+                    "repair_attempt=%s max_repair_attempts=%s",
                     self.model,
+                    attempt,
+                    max_attempts - 1,
                 )
             try:
                 try:
@@ -1003,13 +999,18 @@ class ObjectiveExtractor:
                     raise RuntimeError(
                         "structured extraction returned empty response content"
                     )
-                payload = load_json_payload(extract_json_object(raw_content))
+                payload = self._normalize_fixed_objective_evidence_conditions(
+                    load_json_payload(extract_json_object(raw_content))
+                )
                 try:
                     return (
                         StructuredEvidenceExtractions.model_validate(payload),
                         raw_content,
                     )
                 except ValidationError:
+                    last_invalid_extraction = (
+                        self._single_objective_evidence_extraction(payload)
+                    )
                     if (
                         isinstance(payload, dict)
                         and isinstance(payload.get("extractions"), list)
@@ -1056,10 +1057,152 @@ class ObjectiveExtractor:
                 json.JSONDecodeError,
             ) as exc:
                 last_error = exc
-                if attempt == 0:
+                if attempt < max_attempts - 1:
                     continue
                 raise
-        raise RuntimeError("structured extraction failed after retry") from last_error
+        raise RuntimeError("structured extraction failed after repairs") from last_error
+
+    @staticmethod
+    def _normalize_fixed_objective_evidence_conditions(payload: Any) -> Any:
+        def identical_nonempty_scalar(left: Any, right: Any) -> bool:
+            if isinstance(left, bool) or isinstance(right, bool):
+                return type(left) is type(right) and left == right
+            if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+                return left == right
+            if isinstance(left, str) and isinstance(right, str):
+                return bool(left.strip()) and left == right
+            return False
+
+        if not isinstance(payload, Mapping):
+            return payload
+        extractions = payload.get("extractions")
+        if not isinstance(extractions, list):
+            return payload
+
+        changed = False
+        normalized_extractions: list[Any] = []
+        for extraction in extractions:
+            if not isinstance(extraction, Mapping):
+                normalized_extractions.append(extraction)
+                continue
+            variables = extraction.get("changed_variables")
+            if not isinstance(variables, list):
+                normalized_extractions.append(extraction)
+                continue
+
+            fixed_names: set[str] = set()
+            changed_variables: list[Any] = []
+            for variable in variables:
+                if not isinstance(variable, Mapping):
+                    changed_variables.append(variable)
+                    continue
+                baseline = variable.get("baseline_value")
+                target = variable.get("target_value")
+                variable_name = str(variable.get("name") or "").strip().casefold()
+                if not variable_name or not identical_nonempty_scalar(
+                    baseline,
+                    target,
+                ):
+                    changed_variables.append(variable)
+                    continue
+                fixed_names.add(variable_name)
+                changed = True
+
+            if not fixed_names:
+                normalized_extractions.append(extraction)
+                continue
+            normalized_extraction = dict(extraction)
+            normalized_extraction["changed_variables"] = changed_variables
+            remaining_variable_names = {
+                str(variable.get("name") or "").strip().casefold()
+                for variable in changed_variables
+                if isinstance(variable, Mapping)
+                and str(variable.get("name") or "").strip()
+            }
+            comparison = extraction.get("comparison")
+            if isinstance(comparison, Mapping) and isinstance(
+                comparison.get("axis_names"), list
+            ):
+                normalized_comparison = dict(comparison)
+                normalized_comparison["axis_names"] = [
+                    axis
+                    for axis in comparison["axis_names"]
+                    if str(axis).strip().casefold() not in fixed_names
+                    or str(axis).strip().casefold() in remaining_variable_names
+                ]
+                normalized_extraction["comparison"] = normalized_comparison
+            if (
+                extraction.get("attribution_scope") == "joint_effect"
+                and len(changed_variables) == 1
+                and len(remaining_variable_names) == 1
+            ):
+                normalized_extraction["attribution_scope"] = "isolated_effect"
+            normalized_extractions.append(normalized_extraction)
+
+        if not changed:
+            return payload
+        normalized_payload = dict(payload)
+        normalized_payload["extractions"] = normalized_extractions
+        return normalized_payload
+
+    @staticmethod
+    def _single_objective_evidence_extraction(
+        payload: Any,
+    ) -> dict[str, Any] | None:
+        if not isinstance(payload, Mapping):
+            return None
+        extractions = payload.get("extractions")
+        if not isinstance(extractions, list) or len(extractions) != 1:
+            return None
+        item = extractions[0]
+        return dict(item) if isinstance(item, Mapping) else None
+
+    @staticmethod
+    def _objective_evidence_repair_instruction(
+        *,
+        repair_detail: str,
+        invalid_extraction: Mapping[str, Any] | None,
+    ) -> str:
+        invalid_json = (
+            json.dumps(
+                dict(invalid_extraction),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            if invalid_extraction is not None
+            else "null"
+        )
+        return (
+            "Repair exactly one invalid Evidence extraction against the original "
+            "SOURCE.\nDECISION PROCESS\n"
+            "1. If `reported_result` is non-null, use `direct_result` or "
+            "`contradictory_result` as `evidence_role`. If keeping a context role, "
+            "set `reported_result` to null, `changed_variables` to [], `comparison` "
+            "to null, and `attribution_scope` to `not_attributable`.\n"
+            "2. `isolated_effect` and `joint_effect` require distinct baseline and "
+            "target values for every changed variable. If SOURCE does not support "
+            "them, use `association_only` only for an explicit association; "
+            "otherwise use `descriptive_only` with no changed variables and no "
+            "comparison, or return {\"extractions\":[]}.\n"
+            "3. For experimental attribution, `comparison.axis_names` must exactly "
+            "match the distinct `changed_variables` names. If "
+            "`comparison.comparable` is false, use `not_attributable`; do not change "
+            "it to true unless SOURCE explicitly supports a complete comparison.\n"
+            "4. An identical parameter is fixed context, not a changed variable. "
+            "Remove each fixed parameter from `changed_variables` and "
+            "`comparison.axis_names` when its baseline and target values are "
+            "identical. Keep it only in source-supported comparison labels or "
+            "scientific context. A fixed control does not make the comparison "
+            "incomparable. For a condition series, choose one complete "
+            "source-supported interval and never merge separate intervals.\n"
+            "HARD RULES\nCorrect only values supported by SOURCE; do not invent "
+            "comparison endpoints or scientific context. Preserve every valid field "
+            "that does not need correction.\n"
+            f"VALIDATION ERRORS: {repair_detail[:1000]}\n"
+            f"INVALID EXTRACTION: {invalid_json}\n"
+            "Return only {\"extractions\":[<one corrected extraction>]} or "
+            "{\"extractions\":[]}."
+        )
 
     def _parse_provider_structured_response(
         self,

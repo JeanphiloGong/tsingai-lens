@@ -61,6 +61,9 @@ _METHODS = ("XRD", "SEM", "TEM", "XPS", "Raman", "FTIR", "DSC", "TGA", "DMA")
 class FakeDomainModelExtractor:
     """Deterministic test double for the three domain extraction contracts."""
 
+    def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
+        return 0
+
     def extract_document_profile(self, payload: dict[str, Any]) -> StructuredDocumentProfile:
         title = str(payload.get("title") or "").strip()
         source_filename = str(payload.get("source_filename") or "").strip()

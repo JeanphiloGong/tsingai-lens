@@ -105,6 +105,65 @@ class SourceSelectionHint:
 
 
 @dataclass(frozen=True)
+class PaperFrameSourceDisposition:
+    """Final framing decision and provenance for one transient Source unit."""
+
+    source_unit_id: str
+    source_kind: str
+    source_ref: str
+    disposition: str
+    accounting_errors: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.source_unit_id or not self.source_kind or not self.source_ref:
+            raise ValueError("paper frame Source disposition requires complete lineage")
+        if self.disposition not in {
+            "model_relevant",
+            "model_excluded",
+            "repaired_relevant",
+            "repaired_excluded",
+            "fallback_relevant",
+        }:
+            raise ValueError(
+                f"unsupported paper frame Source disposition: {self.disposition}"
+            )
+        object.__setattr__(self, "accounting_errors", tuple(self.accounting_errors))
+        if self.disposition.startswith(("repaired_", "fallback_")) and not (
+            self.accounting_errors
+        ):
+            raise ValueError(
+                "repaired or fallback paper frame disposition requires accounting errors"
+            )
+
+    @property
+    def is_relevant(self) -> bool:
+        return self.disposition not in {"model_excluded", "repaired_excluded"}
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperFrameSourceDisposition":
+        return cls(
+            source_unit_id=_transient_text(payload.get("source_unit_id")),
+            source_kind=_transient_text(payload.get("source_kind")),
+            source_ref=_transient_text(payload.get("source_ref")),
+            disposition=_transient_text(payload.get("disposition")),
+            accounting_errors=tuple(
+                str(error).strip()
+                for error in payload.get("accounting_errors") or ()
+                if str(error).strip()
+            ),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "source_unit_id": self.source_unit_id,
+            "source_kind": self.source_kind,
+            "source_ref": self.source_ref,
+            "disposition": self.disposition,
+            "accounting_errors": list(self.accounting_errors),
+        }
+
+
+@dataclass(frozen=True)
 class PaperAnalysisFrame:
     """Transient paper traversal state; never persisted or exposed by the API."""
 
@@ -121,6 +180,7 @@ class PaperAnalysisFrame:
     relevant_text_source_refs: tuple[str, ...]
     relevant_tables: tuple[str, ...]
     excluded_tables: tuple[str, ...]
+    source_dispositions: tuple[PaperFrameSourceDisposition, ...] = ()
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "PaperAnalysisFrame":
@@ -148,6 +208,11 @@ class PaperAnalysisFrame:
             ),
             relevant_tables=normalize_objective_terms(payload.get("relevant_tables")),
             excluded_tables=normalize_objective_terms(payload.get("excluded_tables")),
+            source_dispositions=tuple(
+                PaperFrameSourceDisposition.from_mapping(item)
+                for item in payload.get("source_dispositions") or ()
+                if isinstance(item, Mapping)
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -165,6 +230,9 @@ class PaperAnalysisFrame:
             "relevant_text_source_refs": list(self.relevant_text_source_refs),
             "relevant_tables": list(self.relevant_tables),
             "excluded_tables": list(self.excluded_tables),
+            "source_dispositions": [
+                disposition.to_record() for disposition in self.source_dispositions
+            ],
         }
 
 
@@ -1195,25 +1263,41 @@ class ResearchObjectiveService:
                     extractor=extractor,
                     payload=payload,
                 )
-                batch_results: list[tuple[Mapping[str, Any], bool]] = []
+                batch_results: list[
+                    tuple[Mapping[str, Any], str, tuple[str, ...]]
+                ] = []
                 fallback_batch_count = 0
                 for batch_position, (batch_payload, prompt_tokens) in enumerate(
                     batches,
                     start=1,
                 ):
                     fallback_reason: str | None = None
+                    fallback_errors: tuple[str, ...] = ()
                     if (
                         prompt_tokens is None
                         or prompt_tokens > OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT
                     ):
                         fallback_reason = "prompt_token_preflight_failed"
+                        fallback_errors = (
+                            "objective paper framing prompt token preflight failed; "
+                            f"prompt_tokens={prompt_tokens}",
+                        )
                     else:
                         try:
                             parsed = extractor.assess_objective_paper(batch_payload)
-                            batch_results.append((parsed.model_dump(), False))
+                            batch_results.append(
+                                (
+                                    parsed.model_dump(),
+                                    parsed.source_accounting_origin,
+                                    parsed.source_accounting_errors,
+                                )
+                            )
                             continue
-                        except Exception:  # noqa: BLE001
+                        except Exception as exc:  # noqa: BLE001
                             fallback_reason = "model_call_failed"
+                            fallback_errors = (
+                                f"{type(exc).__name__}: {str(exc).strip()}",
+                            )
                             logger.warning(
                                 "Research objective paper framing batch model failed; preserving batch sources collection_id=%s objective_id=%s document_id=%s batch_position=%s batch_count=%s prompt_tokens=%s",
                                 collection_id,
@@ -1243,7 +1327,8 @@ class ResearchObjectiveService:
                                 payload=batch_payload,
                                 paper_skim=skim_by_document_id.get(document_id),
                             ),
-                            True,
+                            "fallback",
+                            fallback_errors,
                         )
                     )
 
@@ -6562,32 +6647,105 @@ class ResearchObjectiveService:
         objective_id: str,
         document_id: str,
         source_units: Iterable[Mapping[str, Any]],
-        batch_results: Iterable[tuple[Mapping[str, Any], bool]],
+        batch_results: Iterable[
+            tuple[Mapping[str, Any], str, tuple[str, ...]]
+        ],
         paper_skim: PaperSkim | None,
     ) -> PaperAnalysisFrame:
         units = tuple(source_units)
         results = tuple(batch_results)
-        units_by_id = {
-            str(unit.get("source_unit_id") or ""): unit
-            for unit in units
-            if str(unit.get("source_unit_id") or "")
-        }
-        relevant_ids: set[str] = set()
-        excluded_ids: set[str] = set()
-        for record, _used_fallback in results:
-            relevant_ids.update(
-                str(value)
+        source_unit_ids = tuple(
+            str(unit.get("source_unit_id") or "").strip() for unit in units
+        )
+        if (
+            not all(source_unit_ids)
+            or len(source_unit_ids) != len(set(source_unit_ids))
+        ):
+            raise ValueError(
+                "objective paper frame aggregation requires unique Source-unit ids"
+            )
+        units_by_id = dict(zip(source_unit_ids, units, strict=True))
+        dispositions_by_id: dict[str, PaperFrameSourceDisposition] = {}
+        for record, decision_origin, accounting_errors in results:
+            if decision_origin not in {"model", "repair", "fallback"}:
+                raise ValueError(
+                    "objective paper frame aggregation received unsupported decision "
+                    f"origin: {decision_origin}"
+                )
+            relevant_batch_ids = tuple(
+                str(value).strip()
                 for value in record.get("relevant_source_unit_ids") or ()
-                if str(value) in units_by_id
+                if str(value).strip()
             )
-            excluded_ids.update(
-                str(value)
+            excluded_batch_ids = tuple(
+                str(value).strip()
                 for value in record.get("excluded_source_unit_ids") or ()
-                if str(value) in units_by_id
+                if str(value).strip()
             )
+            returned_ids = (*relevant_batch_ids, *excluded_batch_ids)
+            if len(returned_ids) != len(set(returned_ids)):
+                raise ValueError(
+                    "objective paper frame aggregation received duplicate Source-unit "
+                    "dispositions"
+                )
+            normalized_errors = tuple(
+                str(error).strip()
+                for error in accounting_errors
+                if str(error).strip()
+            )
+            for source_unit_id in returned_ids:
+                unit = units_by_id.get(source_unit_id)
+                if unit is None:
+                    raise ValueError(
+                        "objective paper frame aggregation received unknown Source-unit "
+                        f"id: {source_unit_id}"
+                    )
+                if source_unit_id in dispositions_by_id:
+                    raise ValueError(
+                        "objective paper frame aggregation received more than one "
+                        f"disposition for Source-unit id: {source_unit_id}"
+                    )
+                is_relevant = source_unit_id in relevant_batch_ids
+                if decision_origin == "fallback":
+                    if not is_relevant:
+                        raise ValueError(
+                            "objective paper frame fallback cannot exclude a Source unit"
+                        )
+                    disposition = "fallback_relevant"
+                elif decision_origin == "repair":
+                    disposition = (
+                        "repaired_relevant" if is_relevant else "repaired_excluded"
+                    )
+                else:
+                    disposition = "model_relevant" if is_relevant else "model_excluded"
+                dispositions_by_id[source_unit_id] = PaperFrameSourceDisposition(
+                    source_unit_id=source_unit_id,
+                    source_kind=str(unit.get("source_kind") or "").strip(),
+                    source_ref=str(unit.get("source_ref") or "").strip(),
+                    disposition=disposition,
+                    accounting_errors=normalized_errors,
+                )
 
-        relevant_ids.update(set(units_by_id) - relevant_ids - excluded_ids)
-        excluded_ids.difference_update(relevant_ids)
+        missing_ids = [
+            source_unit_id
+            for source_unit_id in source_unit_ids
+            if source_unit_id not in dispositions_by_id
+        ]
+        if missing_ids:
+            raise ValueError(
+                "objective paper frame aggregation is missing Source-unit "
+                f"dispositions: {missing_ids}"
+            )
+        source_dispositions = tuple(
+            dispositions_by_id[source_unit_id]
+            for source_unit_id in source_unit_ids
+        )
+        relevant_ids = {
+            disposition.source_unit_id
+            for disposition in source_dispositions
+            if disposition.is_relevant
+        }
+        excluded_ids = set(source_unit_ids) - relevant_ids
         all_sources_excluded = bool(units_by_id) and not relevant_ids
 
         relevance_rank = {
@@ -6631,8 +6789,8 @@ class ResearchObjectiveService:
         background_record = next(
             (
                 record
-                for _position, (record, used_fallback) in representative_results
-                if not used_fallback
+                for _position, (record, decision_origin, _errors) in representative_results
+                if decision_origin != "fallback"
                 and record_relevance(record) != "irrelevant"
                 and str(record.get("background") or "").strip()
             ),
@@ -6643,7 +6801,7 @@ class ResearchObjectiveService:
             return list(
                 dict.fromkeys(
                     text
-                    for record, _used_fallback in results
+                    for record, _decision_origin, _errors in results
                     for value in record.get(field) or ()
                     if (text := str(value).strip())
                 )
@@ -6703,6 +6861,10 @@ class ResearchObjectiveService:
                 "relevant_text_source_refs": relevant_text_source_refs,
                 "relevant_tables": relevant_tables,
                 "excluded_tables": excluded_tables,
+                "source_dispositions": [
+                    disposition.to_record()
+                    for disposition in source_dispositions
+                ],
             }
         )
 

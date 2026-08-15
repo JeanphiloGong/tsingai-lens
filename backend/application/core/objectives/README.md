@@ -181,17 +181,21 @@ traceability. The service packs at most eight
 source units per request and preflights the complete schema-bearing prompt
 against a 12,288-token input budget while reserving 1,024 completion tokens.
 The model is instructed to place every supplied source-unit ID exactly once in
-a relevant or excluded set. Unknown, duplicate, or overlapping IDs remain
-invalid and enter bounded repair. If a schema-valid response omits an input ID,
-the extractor logs that omission and conservatively adds the source to the
-relevant set; an omitted source can therefore never disappear or become negative
-evidence. The backend merges those decisions into the existing
-`PaperAnalysisFrame` while retaining selected section or block Source refs as
-transient routing lineage. Duplicate section headings therefore remain distinct
-when the downstream router traverses the document tree. A failed or irreducibly
-large batch keeps only its own sources routable and cannot erase successful
-sibling decisions or mark their paper role irrelevant. A paper becomes
-`irrelevant` only when every visible source unit was explicitly excluded.
+a relevant or excluded set. Missing, unknown, duplicate, or overlapping IDs
+are invalid and enter one bounded accounting repair. A repaired response retains
+the initial gap and marks every final batch decision as repaired. If repair,
+provider execution, or prompt preflight fails, only that batch receives explicit
+`fallback_relevant` dispositions with the failure reason; fallback is never
+presented as a model relevance judgment. The backend requires exactly one
+terminal disposition for every input ID before aggregation and records each
+decision, its Source kind and full Source ref, and its model/repair/fallback
+provenance in the transient `PaperAnalysisFrame`. It then derives selected
+section or block Source refs from those dispositions for routing. Duplicate
+section headings therefore remain distinct when the downstream router traverses
+the document tree. A failed or irreducibly large batch keeps only its own
+sources routable and cannot erase successful sibling decisions or mark their
+paper role irrelevant. A paper becomes `irrelevant` only when every visible
+source unit was explicitly excluded by a model or repaired decision.
 
 After screening, the backend persists extracted studies, relationships,
 unresolved signals, and Source-unit coverage before collection grouping. It

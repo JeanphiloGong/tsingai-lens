@@ -777,7 +777,8 @@ def test_objective_paper_frame_payload_keeps_every_table_row_in_stable_chunks(
                     "relevant_source_unit_ids": [],
                     "excluded_source_unit_ids": [units[0]["source_unit_id"]],
                 },
-                False,
+                "model",
+                (),
             ),
             (
                 {
@@ -786,7 +787,8 @@ def test_objective_paper_frame_payload_keeps_every_table_row_in_stable_chunks(
                     "relevant_source_unit_ids": [units[1]["source_unit_id"]],
                     "excluded_source_unit_ids": [],
                 },
-                False,
+                "model",
+                (),
             ),
             (
                 {
@@ -795,7 +797,8 @@ def test_objective_paper_frame_payload_keeps_every_table_row_in_stable_chunks(
                     "relevant_source_unit_ids": [],
                     "excluded_source_unit_ids": [units[2]["source_unit_id"]],
                 },
-                False,
+                "model",
+                (),
             ),
         ),
         paper_skim=None,
@@ -803,6 +806,45 @@ def test_objective_paper_frame_payload_keeps_every_table_row_in_stable_chunks(
 
     assert frame.relevant_tables == ("table-late-result",)
     assert frame.excluded_tables == ()
+    assert [item.disposition for item in frame.source_dispositions] == [
+        "model_excluded",
+        "model_relevant",
+        "model_excluded",
+    ]
+
+
+def test_objective_paper_frame_aggregation_rejects_missing_source_disposition(
+    tmp_path,
+):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    units = service._build_frame_tree_section_source_units(
+        _frame_test_tree(
+            ("methods", "Methods", "Laser power was varied."),
+            ("results", "Results", "Relative density increased."),
+        )
+    )
+
+    with pytest.raises(ValueError, match="missing Source-unit dispositions"):
+        service._aggregate_objective_paper_frame_batches(
+            objective_id="obj-density",
+            document_id="paper-1",
+            source_units=units,
+            batch_results=(
+                (
+                    {
+                        "relevance": "medium",
+                        "paper_role": "primary_experiment",
+                        "relevant_source_unit_ids": [units[0]["source_unit_id"]],
+                        "excluded_source_unit_ids": [],
+                    },
+                    "model",
+                    (),
+                ),
+            ),
+            paper_skim=None,
+        )
 
 
 def test_objective_paper_frame_payload_uses_compact_lineage_scientific_prior(
@@ -996,6 +1038,12 @@ def test_objective_paper_framing_batches_every_stable_source_once(tmp_path):
     )
     assert frames[0].relevant_tables == ("table-density",)
     assert frames[0].excluded_tables == ("table-background",)
+    assert len(frames[0].source_dispositions) == len(sent_ids)
+    assert all(
+        item.disposition in {"model_relevant", "model_excluded"}
+        and not item.accounting_errors
+        for item in frames[0].source_dispositions
+    )
 
 
 def test_objective_paper_frame_routes_duplicate_headings_by_selected_source_ref(
@@ -1155,6 +1203,14 @@ def test_objective_paper_framing_keeps_failed_batch_routable_when_sibling_is_irr
     assert frames[0].paper_role == "uncertain"
     assert frames[0].background is None
     assert frames[0].relevant_sections == ("Results",)
+    assert [
+        (item.source_ref, item.disposition)
+        for item in frames[0].source_dispositions
+    ] == [
+        ("background", "model_excluded"),
+        ("results", "fallback_relevant"),
+    ]
+    assert "frame batch unavailable" in frames[0].source_dispositions[1].accounting_errors[0]
 
 
 def test_objective_paper_framing_skips_explicitly_excluded_document(tmp_path):
@@ -1228,6 +1284,10 @@ def test_objective_paper_framing_does_not_send_over_budget_singleton(tmp_path):
     assert extractor.frame_payloads == []
     assert frames[0].relevance == "uncertain"
     assert frames[0].relevant_sections == ("Results",)
+    assert frames[0].source_dispositions[0].disposition == "fallback_relevant"
+    assert "prompt token preflight failed" in (
+        frames[0].source_dispositions[0].accounting_errors[0]
+    )
 
 
 def test_objective_symbol_axes_distinguish_scan_and_build_angles(tmp_path):

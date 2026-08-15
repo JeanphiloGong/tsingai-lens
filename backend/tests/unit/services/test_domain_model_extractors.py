@@ -1631,6 +1631,11 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
     assert frame.relevance == "high"
     assert frame.relevant_source_unit_ids == ["frame-section-results"]
     assert frame.excluded_source_unit_ids == ["frame-table-2"]
+    assert frame.source_accounting_origin == "model"
+    assert frame.source_accounting_errors == ()
+    frame_schema = StructuredPaperFrameBatch.model_json_schema()
+    assert "source_accounting_origin" not in frame_schema["properties"]
+    assert "source_accounting_errors" not in frame_schema["properties"]
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
 
 
@@ -1677,6 +1682,10 @@ def test_objective_paper_frame_json_repair_rejects_unknown_source_id():
 
     assert frame.relevant_source_unit_ids == ["frame-section-results"]
     assert frame.excluded_source_unit_ids == ["frame-table-background"]
+    assert frame.source_accounting_origin == "repair"
+    assert "unknown_source_unit_ids=['frame-unknown']" in (
+        frame.source_accounting_errors[0]
+    )
     assert len(client.chat.completions.calls) == 2
     assert "account for every source-unit id" in client.chat.completions.calls[1][
         "messages"
@@ -1692,7 +1701,7 @@ def test_objective_paper_frame_json_repair_rejects_unknown_source_id():
     ]
 
 
-def test_objective_paper_frame_conservatively_routes_omitted_source_unit(caplog):
+def test_objective_paper_frame_repairs_omitted_source_unit():
     incomplete = json.dumps(
         {
             "relevance": "irrelevant",
@@ -1709,7 +1718,23 @@ def test_objective_paper_frame_conservatively_routes_omitted_source_unit(caplog)
             "excluded_source_unit_ids": [],
         }
     )
-    client = _FakeOpenAIClient([incomplete, incomplete])
+    repaired = json.dumps(
+        {
+            "relevance": "uncertain",
+            "paper_role": "uncertain",
+            "relevant_source_unit_ids": [
+                "frame-section-1",
+                "frame-section-2",
+                "frame-section-3",
+                "frame-section-4",
+                "frame-section-5",
+                "frame-section-6",
+                "frame-section-7",
+            ],
+            "excluded_source_unit_ids": ["frame-section-8"],
+        }
+    )
+    client = _FakeOpenAIClient([incomplete, repaired])
     extractor = _objective_extractor(client)
     source_unit_ids = [f"frame-section-{position}" for position in range(1, 9)]
 
@@ -1730,10 +1755,15 @@ def test_objective_paper_frame_conservatively_routes_omitted_source_unit(caplog)
     )
 
     assert frame.relevance == "uncertain"
-    assert frame.relevant_source_unit_ids == source_unit_ids
-    assert frame.excluded_source_unit_ids == []
-    assert len(client.chat.completions.calls) == 1
-    assert "preserving them as relevant" in caplog.text
+    assert frame.relevant_source_unit_ids == source_unit_ids[:-1]
+    assert frame.excluded_source_unit_ids == [source_unit_ids[-1]]
+    assert frame.source_accounting_origin == "repair"
+    assert "missing_source_unit_ids=['frame-section-8']" in (
+        frame.source_accounting_errors[0]
+    )
+    assert len(client.chat.completions.calls) == 2
+    repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "missing_source_unit_ids=['frame-section-8']" in repair_prompt
 
 
 @pytest.mark.parametrize(
@@ -1800,7 +1830,7 @@ def test_objective_paper_frame_still_rejects_invalid_ids_after_repair(
     assert len(client.chat.completions.calls) == 2
 
 
-def test_provider_parsed_objective_paper_frame_conservatively_routes_omission(
+def test_provider_parsed_objective_paper_frame_repairs_omission(
     monkeypatch,
 ):
     monkeypatch.delenv("CORE_LLM_EXTRACTION_MODE", raising=False)
@@ -1812,7 +1842,15 @@ def test_provider_parsed_objective_paper_frame_conservatively_routes_omission(
             "excluded_source_unit_ids": [],
         }
     )
-    client = _FakeOpenAIClient("unused", parsed=incomplete)
+    repaired = json.dumps(
+        {
+            "relevance": "low",
+            "paper_role": "supporting_background",
+            "relevant_source_unit_ids": ["frame-section-results"],
+            "excluded_source_unit_ids": ["frame-table-background"],
+        }
+    )
+    client = _FakeOpenAIClient(repaired, parsed=incomplete)
     extractor = ObjectiveExtractor(client=client, model="fake-model")
 
     frame = extractor.assess_objective_paper(
@@ -1836,13 +1874,15 @@ def test_provider_parsed_objective_paper_frame_conservatively_routes_omission(
         }
     )
 
-    assert frame.relevance == "uncertain"
-    assert frame.relevant_source_unit_ids == [
-        "frame-section-results",
-        "frame-table-background",
-    ]
+    assert frame.relevance == "low"
+    assert frame.relevant_source_unit_ids == ["frame-section-results"]
+    assert frame.excluded_source_unit_ids == ["frame-table-background"]
+    assert frame.source_accounting_origin == "repair"
+    assert "missing_source_unit_ids=['frame-table-background']" in (
+        frame.source_accounting_errors[0]
+    )
     assert len(client.beta.chat.completions.calls) == 1
-    assert client.chat.completions.calls == []
+    assert len(client.chat.completions.calls) == 1
 
 
 def test_provider_parsed_objective_paper_frame_repairs_source_accounting(
@@ -1888,6 +1928,10 @@ def test_provider_parsed_objective_paper_frame_repairs_source_accounting(
     )
 
     assert frame.excluded_source_unit_ids == ["frame-table-background"]
+    assert frame.source_accounting_origin == "repair"
+    assert "unknown_source_unit_ids=['frame-unknown']" in (
+        frame.source_accounting_errors[0]
+    )
     assert len(client.beta.chat.completions.calls) == 1
     assert len(client.chat.completions.calls) == 1
     repair_prompt = client.chat.completions.calls[0]["messages"][-1]["content"]

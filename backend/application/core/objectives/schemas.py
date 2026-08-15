@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Literal, Mapping
+from typing import Annotated, Iterable, Literal, Mapping
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     ValidationInfo,
     field_validator,
     model_validator,
@@ -418,6 +419,11 @@ class StructuredAxisCanonicalizationPlan(_StrictModel):
 
 
 class StructuredPaperFrameBatch(_StrictModel):
+    _source_accounting_origin: Literal["model", "repair"] = PrivateAttr(
+        default="model"
+    )
+    _source_accounting_errors: tuple[str, ...] = PrivateAttr(default=())
+
     relevance: Literal["high", "medium", "low", "irrelevant", "uncertain"] = (
         "uncertain"
     )
@@ -479,6 +485,23 @@ class StructuredPaperFrameBatch(_StrictModel):
         if set(relevant) & set(excluded):
             raise ValueError("paper frame source-unit ids cannot be both relevant and excluded")
         return self
+
+    @property
+    def source_accounting_origin(self) -> Literal["model", "repair"]:
+        return self._source_accounting_origin
+
+    @property
+    def source_accounting_errors(self) -> tuple[str, ...]:
+        return self._source_accounting_errors
+
+    def record_source_accounting_repair(
+        self,
+        errors: Iterable[str],
+    ) -> None:
+        self._source_accounting_origin = "repair"
+        self._source_accounting_errors = tuple(
+            str(error).strip() for error in errors if str(error).strip()
+        )
 
     @field_validator("relevance", mode="before")
     @classmethod

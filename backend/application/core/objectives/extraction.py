@@ -414,6 +414,7 @@ class ObjectiveExtractor:
         payload: dict[str, Any],
     ) -> StructuredPaperFrameBatch:
         system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
+        source_accounting_errors: list[str] = []
 
         source_unit_ids = tuple(
             str(item.get("source_unit_id") or "").strip()
@@ -423,6 +424,19 @@ class ObjectiveExtractor:
         )
         if not source_unit_ids or len(source_unit_ids) != len(set(source_unit_ids)):
             raise ValueError("objective paper framing requires unique source-unit ids")
+
+        def record_source_accounting_error(error: Exception) -> None:
+            detail = str(error).strip()
+            if not detail or not any(
+                marker in detail
+                for marker in (
+                    "objective paper frame must account",
+                    "paper frame source-unit ids",
+                )
+            ):
+                return
+            if detail not in source_accounting_errors:
+                source_accounting_errors.append(detail)
 
         def validate_source_accounting(parsed: BaseModel) -> BaseModel:
             if not isinstance(parsed, StructuredPaperFrameBatch):
@@ -441,7 +455,7 @@ class ObjectiveExtractor:
                 for source_unit_id in returned_ids
                 if source_unit_id not in source_unit_ids
             ]
-            if unknown_ids:
+            if missing_ids or unknown_ids:
                 raise ValueError(
                     "objective paper frame must account for every source-unit id "
                     "exactly once; "
@@ -449,21 +463,6 @@ class ObjectiveExtractor:
                     f"missing_source_unit_ids={missing_ids}; "
                     f"unknown_source_unit_ids={unknown_ids}"
                 )
-            if missing_ids:
-                logger.warning(
-                    "Objective paper framing omitted source-unit ids; preserving "
-                    "them as relevant model=%s missing_source_unit_ids=%s",
-                    self.model,
-                    missing_ids,
-                )
-                payload = parsed.model_dump()
-                payload["relevant_source_unit_ids"] = [
-                    *parsed.relevant_source_unit_ids,
-                    *missing_ids,
-                ]
-                if parsed.relevance == "irrelevant":
-                    payload["relevance"] = "uncertain"
-                return StructuredPaperFrameBatch.model_validate(payload)
             return parsed
 
         def build_repair_instruction(repair_detail: str) -> str:
@@ -482,20 +481,32 @@ class ObjectiveExtractor:
                 **kwargs,
                 repair_instruction_builder=build_repair_instruction,
                 parsed_validator=validate_source_accounting,
+                validation_error_observer=record_source_accounting_error,
             )
 
-        response = self._parse_structured_response(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredPaperFrameBatch,
-            max_completion_tokens=_OBJECTIVE_PAPER_FRAME_MAX_COMPLETION_TOKENS,
-            json_text_parser=parse_json_text,
-            parsed_validator=validate_source_accounting,
-            task_type="objective_paper_frame",
-            prompt_version=OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
-        )
+        try:
+            response = self._parse_structured_response(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_model=StructuredPaperFrameBatch,
+                max_completion_tokens=_OBJECTIVE_PAPER_FRAME_MAX_COMPLETION_TOKENS,
+                json_text_parser=parse_json_text,
+                parsed_validator=validate_source_accounting,
+                validation_error_observer=record_source_accounting_error,
+                task_type="objective_paper_frame",
+                prompt_version=OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
+            )
+        except Exception as exc:
+            if not source_accounting_errors:
+                raise
+            raise ValueError(
+                "objective paper frame source accounting repair failed; "
+                f"initial_errors={source_accounting_errors}; final_error={exc}"
+            ) from exc
         if not isinstance(response, StructuredPaperFrameBatch):
             raise TypeError("unexpected objective paper frame response type")
+        if source_accounting_errors:
+            response.record_source_accounting_repair(source_accounting_errors)
         return response
 
     def estimate_objective_paper_frame_prompt_tokens(
@@ -610,6 +621,7 @@ class ObjectiveExtractor:
         include_schema_for_forced_json: bool = True,
         json_text_parser: Callable[..., tuple[BaseModel, str | None]] | None = None,
         parsed_validator: Callable[[BaseModel], BaseModel | None] | None = None,
+        validation_error_observer: Callable[[Exception], None] | None = None,
         task_type: str | None = None,
         prompt_version: str | None = None,
         fail_on_output_saturation: bool = False,
@@ -669,6 +681,8 @@ class ObjectiveExtractor:
                         f"{_EXTRACTION_MODE_PROVIDER_PARSE}->{_EXTRACTION_MODE_JSON_TEXT}"
                     )
                 except Exception as exc:
+                    if validation_error_observer is not None:
+                        validation_error_observer(exc)
                     logger.warning(
                         "Objective provider parse failed; retrying with json_text "
                         "model=%s response_model=%s",
@@ -793,6 +807,7 @@ class ObjectiveExtractor:
         repair_instruction_builder: Callable[[str], str] | None = None,
         payload_normalizer: Callable[[Any], Any] | None = None,
         parsed_validator: Callable[[BaseModel], BaseModel | None] | None = None,
+        validation_error_observer: Callable[[Exception], None] | None = None,
         fail_on_output_saturation: bool = False,
     ) -> tuple[BaseModel, str | None]:
         request_kwargs = {
@@ -897,6 +912,8 @@ class ObjectiveExtractor:
                 ValidationError,
                 json.JSONDecodeError,
             ) as exc:
+                if validation_error_observer is not None:
+                    validation_error_observer(exc)
                 last_error = exc
                 if attempt == 0:
                     continue

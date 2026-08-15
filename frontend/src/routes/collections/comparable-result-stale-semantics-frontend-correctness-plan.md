@@ -43,8 +43,8 @@ Out of scope:
   Collection route-family interface authority
 - [`../../../docs/frontend-plan.md`](../../../docs/frontend-plan.md)
   Frontend same-origin contract guide
-- [`../../../../backend/docs/plans/core/core-comparable-result-phase2-document-first-semantic-inspection-plan.md`](../../../../backend/docs/plans/core/core-comparable-result-phase2-document-first-semantic-inspection-plan.md)
-  Backend-owned Phase 2 document-first semantic inspection plan
+- [`../../../../backend/docs/architecture/core-comparison/current-state.md`](../../../../backend/docs/architecture/core-comparison/current-state.md)
+  Backend authority for document-first semantic inspection
 
 ## Why A Separate Child Plan Exists
 

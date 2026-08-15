@@ -35,8 +35,8 @@ Out of scope:
 
 ## Companion Docs
 
-- [`../../../../backend/docs/plans/derived/core-derived-graph-structure-and-drilldown-plan.md`](../../../../backend/docs/plans/derived/core-derived-graph-structure-and-drilldown-plan.md)
-  Backend-owned source plan for the lean graph contract and canonical drilldown
+- [`../../../../docs/architecture/graph-surface-current-state.md`](../../../../docs/architecture/graph-surface-current-state.md)
+  Shared authority for the graph surface and canonical drilldown
 - [`lens-v1-interface-spec.md`](lens-v1-interface-spec.md)
   Collection route-family interface authority for Lens v1
 - [`collection-ui-restructure-proposal.md`](collection-ui-restructure-proposal.md)

@@ -13,7 +13,6 @@ in the body instead of a YAML metadata block.
 - literature summaries
 - domain background notes
 - curated external references
-- small supporting assets when versioning them in git is intentional
 
 ## Not Allowed
 
@@ -21,10 +20,8 @@ in the body instead of a YAML metadata block.
 - implementation source-of-truth docs
 - random scratch notes without context or ownership
 
-## Migration Note
+## Reference Rule
 
-When touched, legacy research material from root-level `docs/` should move here
-or be replaced with an external link plus a short summary.
-
-Legacy PDFs that still live under `docs/research/assets/` should be treated as
-supporting assets only, not implementation source of truth.
+Reference papers and other replaceable source material by DOI or another
+stable external link, with a short note explaining why the source matters. Do
+not commit raw research binaries to this tree.

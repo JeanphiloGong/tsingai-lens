@@ -19,12 +19,6 @@ Use it when you need the current answer to:
   Current implemented substrate, artifact chain, route surfaces, and code
   ownership
 
-## Historical Lineage
-
-- [`../../plans/historical/comparable-result/README.md`](../../plans/historical/comparable-result/README.md)
-  Retained origin decision, roadmap, and phase-plan history behind the current
-  substrate
-
 ## Related Docs
 
 - [`../overview.md`](../overview.md)

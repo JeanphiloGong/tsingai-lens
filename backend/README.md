@@ -54,14 +54,13 @@ Operations:
 
 - [`docs/runbooks/backend-ops.md`](docs/runbooks/backend-ops.md)
   Local development and operations runbook
-- [`docs/plans/README.md`](docs/plans/README.md)
-  Backend plan-family landing page for active waves and retained lineage
+- [`application/pipeline/README.md`](application/pipeline/README.md)
+  Pipeline runtime, execution modes, and run-state model
+- [`application/pipeline/collection_build/README.md`](application/pipeline/collection_build/README.md)
+  Collection build graph and node order
 
-If you are already inside an active backend change wave, use
-[`docs/plans/backend-wide/api-surface-migration/current-state.md`](docs/plans/backend-wide/api-surface-migration/current-state.md)
-as the current-state page, then choose the owning plan family from
-[`docs/plans/README.md`](docs/plans/README.md) rather than starting from a
-flat file list.
+Proposed work and migration sequencing are tracked in GitHub issues and pull
+requests rather than in a parallel backend plan-doc tree.
 
 ## Code-Owned Entry Pages
 

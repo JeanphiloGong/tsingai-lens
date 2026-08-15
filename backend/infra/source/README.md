@@ -117,6 +117,9 @@ pipeline in `runtime/workflows/factory.py`.
 
 ## Related Docs
 
-- [`../../docs/plans/source/source-structure-first-substrate-plan.md`](../../docs/plans/source/source-structure-first-substrate-plan.md)
-- [`../../docs/plans/source/source-table-artifact-plan.md`](../../docs/plans/source/source-table-artifact-plan.md)
-- [`../../docs/plans/source/source-runtime-organization-plan.md`](../../docs/plans/source/source-runtime-organization-plan.md)
+- [`../../domain/source/README.md`](../../domain/source/README.md)
+  Source domain aggregates and stable artifact identities
+- [`../../application/pipeline/collection_build/README.md`](../../application/pipeline/collection_build/README.md)
+  Collection build ordering and Source handoff
+- [`../../docs/architecture/persistence-model.md`](../../docs/architecture/persistence-model.md)
+  Durable Source ownership and build lineage

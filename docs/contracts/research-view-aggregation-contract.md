@@ -583,5 +583,5 @@ Frontend verification should cover:
 - [RFC Research View Aggregation Layer](../decisions/rfc-research-view-aggregation-layer.md)
 - [Lens Core Artifact Contracts](lens-core-artifact-contracts.md)
 - [Lens V1 Definition](lens-v1-definition.md)
-- [Backend Research View Aggregation Plan](../../backend/docs/plans/backend-wide/research-view-aggregation/README.md)
+- [Backend API Contract](../../backend/docs/specs/api.md)
 - [Frontend Research View Aggregation Plan](../../frontend/docs/research-view-aggregation/README.md)

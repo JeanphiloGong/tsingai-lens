@@ -32,8 +32,7 @@ Read this with:
 
 - [`semantic-routing-targeted-extraction-plan.md`](semantic-routing-targeted-extraction-plan.md)
 - [`prompt-hardening-and-extraction-mode.md`](prompt-hardening-and-extraction-mode.md)
-- [`../../../../../docs/plans/source/source-table-artifact-plan.md`](../../../../../docs/plans/source/source-table-artifact-plan.md)
-- [`../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md`](../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md)
+- [`../../../../../infra/source/README.md`](../../../../../infra/source/README.md)
 
 ## Current Behavior
 

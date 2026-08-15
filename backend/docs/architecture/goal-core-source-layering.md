@@ -191,10 +191,6 @@ Readiness semantics remain Core-owned:
 - `*_generated`: stage generation attempt completed and artifact file exists
 - `*_ready`: artifact is consumable by collection-facing primary surfaces
 
-The active child execution plan for this freeze is:
-
-- [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/backend-wide/goal-source-core-layering/contract-follow-up.md)
-
 ## Current Backend Mapping
 
 ### Already Aligned
@@ -279,11 +275,9 @@ Controller implications:
 
 ## Related Docs
 
-- [`../plans/goal-core-source-implementation-plan.md`](../plans/backend-wide/goal-source-core-layering/implementation-plan.md)
-- [`../plans/goal-core-source-contract-follow-up-plan.md`](../plans/backend-wide/goal-source-core-layering/contract-follow-up.md)
 - [`overview.md`](overview.md)
 - [`domain-architecture.md`](domain-architecture.md)
 - [`core-comparison/README.md`](core-comparison/README.md)
-- [`../plans/v1-api-migration-notes.md`](../plans/historical/v1-api-migration-notes.md)
-- [`../plans/evidence-first-parsing-plan.md`](../plans/historical/evidence-first-parsing-plan.md)
 - [`../specs/api.md`](../specs/api.md)
+- [`../../application/pipeline/README.md`](../../application/pipeline/README.md)
+- [`../../../docs/architecture/lens-v1-architecture-boundary.md`](../../../docs/architecture/lens-v1-architecture-boundary.md)

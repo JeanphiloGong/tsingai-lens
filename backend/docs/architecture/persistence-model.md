@@ -388,9 +388,9 @@ reference reads, Markdown image links, or image delivery.
 The retrieval gate was completed and the human decision was `stop`: measured
 embedding recall did not meet the accepted threshold or outperform the keyword
 baseline. This revision therefore has no vector schema, dependency, indexing
-lifecycle, or runtime retrieval service. The accepted evidence and reasoning
-are recorded in the
-[Source text-unit retrieval decision](../plans/backend-wide/persistence-model-revision/retrieval-decision.md).
+lifecycle, or runtime retrieval service. That measured decision remains part
+of this maintained persistence boundary; its execution history is available in
+Git and the linked persistence issues.
 
 ## Repository And Model Boundaries
 
@@ -456,7 +456,6 @@ Anything that cannot answer one of those questions is not ready to persist.
 - [Backend architecture overview](overview.md)
 - [Persistence adapter boundary](../../infra/persistence/README.md)
 - [Public backend API contract](../specs/api.md)
-- [Accepted Source retrieval decision](../plans/backend-wide/persistence-model-revision/retrieval-decision.md)
 - [Lens core artifact contracts](../../../docs/contracts/lens-core-artifact-contracts.md)
 - [Comparable-result substrate direction](../../../docs/decisions/rfc-comparable-result-substrate-and-materials-database-direction.md)
 - [Research-objective-first product flow](../../../docs/decisions/rfc-research-objective-first-product-flow.md)

@@ -1,98 +1,57 @@
 # Backend Docs
 
-This directory is the documentation landing page for backend-wide formal docs.
+This directory contains the maintained backend-wide architecture, HTTP
+contract, and operations documentation. Use [../README.md](../README.md) for
+the module overview and local setup summary.
 
-Use [../README.md](../README.md) for the backend module entry page. Use this
-directory when the question is already backend-local and you need the right
-authority page, current-state page, or implementation lineage.
+Implementation tasks and migration sequencing are tracked in GitHub issues and
+pull requests. They are not maintained as a second source of truth here.
 
-## Docs Layout
+## Start Here
 
-- `architecture/`
-  Backend-wide architecture, ownership-boundary docs, and local ADRs
-- `specs/`
-  Backend-wide contracts, including the public API contract
-- `runbooks/`
-  Backend-local operational guidance
-- `plans/`
-  Backend implementation current-state and plan families organized as
-  `backend-wide/`, `source/`, `core/`, `derived/`, and `historical/`; this is
-  not the default start surface unless you are already inside backend change
-  work
-
-## Start Paths
-
-- Public API contract:
-  [`specs/api.md`](specs/api.md)
-- Backend architecture and ownership seams:
-  [`architecture/overview.md`](architecture/overview.md)
-- Persistence ownership, identities, and build lineage:
-  [`architecture/persistence-model.md`](architecture/persistence-model.md)
-- Local development and operations:
+- Runtime setup and recovery:
   [`runbooks/backend-ops.md`](runbooks/backend-ops.md)
-- Backend plan-family landing page:
-  [`plans/README.md`](plans/README.md)
-- Current backend migration and execution state:
-  [`plans/backend-wide/api-surface-migration/current-state.md`](plans/backend-wide/api-surface-migration/current-state.md)
+- Public HTTP contract:
+  [`specs/api.md`](specs/api.md)
+- Backend ownership and main flow:
+  [`architecture/overview.md`](architecture/overview.md)
+- Persistence identities and build lineage:
+  [`architecture/persistence-model.md`](architecture/persistence-model.md)
 
-## Backend-Wide Authority
+## Runtime Flow
 
-- [`specs/api.md`](specs/api.md)
-  Authoritative frontend/backend public API contract
+- General pipeline runtime and mode configuration:
+  [`../application/pipeline/README.md`](../application/pipeline/README.md)
+- Collection build graph, node order, and execution state:
+  [`../application/pipeline/collection_build/README.md`](../application/pipeline/collection_build/README.md)
+- Source parser/runtime ownership:
+  [`../infra/source/README.md`](../infra/source/README.md)
+- Podman deployment and service startup:
+  [`../../deploy/README.md`](../../deploy/README.md)
+
+## Architecture
+
 - [`architecture/overview.md`](architecture/overview.md)
-  Backend module overview, ownership seams, and local navigation
-- [`architecture/domain-architecture.md`](architecture/domain-architecture.md)
-  Target backend business-domain packaging and controller boundaries
-- [`architecture/goal-core-source-layering.md`](architecture/goal-core-source-layering.md)
-  Backend-local five-layer research architecture centered on the Core backbone
-- [`architecture/core-comparison/README.md`](architecture/core-comparison/README.md)
-  Current backend-local authority for the comparison-semantic center and
-  comparable-result substrate
-- [`architecture/application-layer-boundary.md`](architecture/application-layer-boundary.md)
-  Backend ADR for HTTP and application ownership separation
+  Backend-wide boundaries and runtime flow
 - [`architecture/persistence-model.md`](architecture/persistence-model.md)
   Implemented PostgreSQL, object-storage, scratch, identity, and build-lineage
-  authority
-- [`runbooks/backend-ops.md`](runbooks/backend-ops.md)
-  Local development and operations runbook
+  model
+- [`architecture/core-comparison/README.md`](architecture/core-comparison/README.md)
+  Comparison-semantic substrate and current read paths
+- [`architecture/goal-core-source-layering.md`](architecture/goal-core-source-layering.md)
+  Goal, Source, Core, consumer, and derived responsibility boundaries
+- [`architecture/domain-architecture.md`](architecture/domain-architecture.md)
+  Backend business-domain ownership map
+- [`architecture/application-layer-boundary.md`](architecture/application-layer-boundary.md)
+  Controller, application, domain, and infrastructure dependency direction
 
-## Current State And Plan Families
+## Scope
 
-Start with:
-
-- [`plans/README.md`](plans/README.md)
-  Backend-local plans landing page, reading paths, and placement rules
-- [`plans/backend-wide/api-surface-migration/current-state.md`](plans/backend-wide/api-surface-migration/current-state.md)
-  Canonical current-state page for backend API migration and local reading
-  order
-
-Then move to the owning plan family only when you are already inside that wave:
-
-- [`plans/backend-wide/README.md`](plans/backend-wide/README.md)
-  Cross-layer and backend-wide plan family
-- [`plans/source/README.md`](plans/source/README.md)
-  Source runtime, parser, and retirement plan family
-- [`plans/core/README.md`](plans/core/README.md)
-  Core backbone, quality, traceback, and domain-semantic plan family
-- [`plans/derived/README.md`](plans/derived/README.md)
-  Derived-surface and retirement-lineage plan family
-- [`plans/historical/README.md`](plans/historical/README.md)
-  Historical lineage family for retained non-current pages
-
-## What Does Not Belong Here
-
-- package-local purpose and boundary docs for `application/*`, `infra/*`, and
-  `tests/*`
-- route-family or package-family docs that belong at a narrower code-owned node
-- shared product, system, or cross-module docs that belong in root `docs/`
-
-## Placement Rules
-
-- Keep backend-wide formal docs in this subtree.
-- Keep narrower route- or package-local docs near the owning code node.
-- Use `plans/` for backend implementation current-state and retained lineage.
-- Put multi-family waves under `plans/backend-wide/`.
-- Put business-layer-local waves under `plans/source/`, `plans/core/`, or
-  `plans/derived/`.
-- Move superseded or origin-only lineage pages under `plans/historical/`.
-- Keep shared product, system, and cross-module docs in root `docs/`.
+- Keep backend-wide contracts, current architecture, and operations guidance in
+  this directory.
+- Keep package-local purpose and navigation beside the owning code in a local
+  `README.md`.
+- Keep shared product and cross-module contracts in the repository root
+  [`docs/`](../../docs/README.md).
+- Track proposed work, task breakdowns, and delivery history in GitHub issues
+  and pull requests.

@@ -24,12 +24,8 @@ This is a Core child plan under the active parsing-quality wave. It does not
 introduce a new runtime layer and it does not justify two parallel extractor
 implementations.
 
-For the parent quality wave, read
-[`../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md`](../../../../../docs/plans/core/core-parsing-quality-hardening-plan.md).
 For the earlier structured-extraction cutover direction, read
 [`hard-cutover.md`](hard-cutover.md).
-For the canonical benchmark surface used to justify this wave, read
-[`../../../../../docs/plans/core/core-benchmark-script-consolidation-plan.md`](../../../../../docs/plans/core/core-benchmark-script-consolidation-plan.md).
 
 ## Why This Child Plan Exists
 

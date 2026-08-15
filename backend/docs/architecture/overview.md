@@ -6,7 +6,7 @@ This document is the backend-wide architecture overview for the current module.
 
 It explains the main ownership seams, the current runtime shape, and the
 backend-local reading path for architecture questions. It does not own active
-delivery sequencing or plan-family routing.
+delivery sequencing.
 
 ## Backend Role In The System
 
@@ -113,14 +113,12 @@ larger flat service bag.
 - [`../specs/api.md`](../specs/api.md)
   Public backend contract reference
 
-## Current-State And Plan Entry
+## Current State And Work Tracking
 
-For active backend migration state, implementation sequencing, or retained plan
-lineage, go back to [`../README.md`](../README.md), then use
-[`../plans/README.md`](../plans/README.md) and start from
-[`../plans/backend-wide/api-surface-migration/current-state.md`](../plans/backend-wide/api-surface-migration/current-state.md)
-rather than treating this architecture page as a flat plan index.
+This architecture subtree owns maintained backend truth. Proposed changes,
+implementation sequencing, and migration history belong in GitHub issues and
+pull requests rather than in parallel plan documents.
 
 For the current comparison-semantic center and comparable-result substrate, use
 [`core-comparison/README.md`](core-comparison/README.md) before reading
-historical phase plans.
+implementation history in Git.

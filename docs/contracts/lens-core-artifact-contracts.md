@@ -426,4 +426,4 @@ not bypass this flow.
 - [Lens V1 Definition](lens-v1-definition.md)
 - [Lens V1 Architecture Boundary](../architecture/lens-v1-architecture-boundary.md)
 - [RFC Paper-Facts Primary Domain Model and Derived Comparison Views](../decisions/rfc-paper-facts-primary-domain-model.md)
-- [Backend Evidence-First Parsing Refactor Plan](../../backend/docs/plans/historical/evidence-first-parsing-plan.md)
+- [Backend Architecture Overview](../../backend/docs/architecture/overview.md)

@@ -36,8 +36,6 @@ docs/
 └─ research/
 ```
 
-Supporting research binaries live under `docs/research/assets/`.
-
 ## Start Here
 
 - [`overview/system-overview.md`](overview/system-overview.md)
@@ -64,10 +62,6 @@ Supporting research binaries live under `docs/research/assets/`.
   [`decisions/rfc-comparison-result-document-product-flow.md`](decisions/rfc-comparison-result-document-product-flow.md),
   then
   [`decisions/rfc-research-view-aggregation-layer.md`](decisions/rfc-research-view-aggregation-layer.md),
-  then
-  [`decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md`](decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md),
-  then
-  [`decisions/rfc-document-result-evidence-chain-contract-freeze.md`](decisions/rfc-document-result-evidence-chain-contract-freeze.md),
   then
   [`decisions/rfc-pdf-backed-document-workbench.md`](decisions/rfc-pdf-backed-document-workbench.md),
   then
@@ -118,7 +112,6 @@ Supporting research binaries live under `docs/research/assets/`.
 | `docs/contracts/` | Shared / project-wide | stable shared product and artifact contracts | Shared source of truth |
 | `docs/decisions/` | Shared / project-wide | RFCs, ADRs, and postmortems | Prefix filenames with `rfc-`, `adr-`, or `postmortem-` |
 | `docs/research/` | External domain context | research notes, literature summaries, curated references | Not implementation authority |
-| `docs/research/assets/` | Supporting assets | PDFs and other reference binaries | Asset-only, not source of truth |
 | `backend/README.md` | Backend module | backend purpose, boundaries, and doc navigation | Primary backend entry page |
 | `frontend/README.md` | Frontend module | frontend purpose, boundaries, and doc navigation | Primary frontend entry page |
 | `<node>/README.md` | Backend / frontend submodule | node purpose, boundary, and local navigation | Use only at real code-owned seams |
@@ -153,8 +146,6 @@ Decisions:
 - [`decisions/rfc-comparable-result-substrate-and-materials-database-direction.md`](decisions/rfc-comparable-result-substrate-and-materials-database-direction.md)
 - [`decisions/rfc-comparison-result-document-product-flow.md`](decisions/rfc-comparison-result-document-product-flow.md)
 - [`decisions/rfc-research-view-aggregation-layer.md`](decisions/rfc-research-view-aggregation-layer.md)
-- [`decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md`](decisions/rfc-evidence-chain-product-surface-delivery-roadmap.md)
-- [`decisions/rfc-document-result-evidence-chain-contract-freeze.md`](decisions/rfc-document-result-evidence-chain-contract-freeze.md)
 - [`decisions/rfc-pdf-backed-document-workbench.md`](decisions/rfc-pdf-backed-document-workbench.md)
 - [`decisions/rfc-collection-bound-goal-copilot.md`](decisions/rfc-collection-bound-goal-copilot.md)
 - [`decisions/rfc-research-objective-first-product-flow.md`](decisions/rfc-research-objective-first-product-flow.md)
@@ -162,7 +153,6 @@ Decisions:
 Research:
 
 - [`research/README.md`](research/README.md)
-- [`research/materials-optimize.md`](research/materials-optimize.md)
 
 ## Placement Rules
 

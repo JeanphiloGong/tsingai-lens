@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
+from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
+from application.core.objectives.research_objective_service import PaperAnalysisFrame
 from application.core.objectives.schemas import (
     StructuredEvidenceSelections,
     StructuredPaperFrameBatch,
 )
 from domain.core import (
+    ObjectiveAnalysis,
     ObjectiveFactSet,
     PaperSkim,
     PaperStudyDisposition,
@@ -165,6 +169,234 @@ def test_memory_objective_repository_requires_explicit_activation():
     repository.activate("build_pending")
 
     assert repository.read("col-1") == pending
+
+
+def test_objective_analysis_publishes_one_terminal_evidence_per_source(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "collection_id": "col-1",
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    analysis = ObjectiveAnalysis(
+        collection_id="col-1",
+        objective_id=objective.objective_id,
+        analysis_version=1,
+        source_build_id="build-1",
+        pipeline_version="test.v1",
+        model_name="test-model",
+        prompt_versions={},
+    )
+    source_refs = [
+        {"source_kind": "text_window", "source_ref": "block-1"}
+    ]
+    drafts = (
+        ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": "normal-context",
+                "objective_id": objective.objective_id,
+                "document_id": "paper-1",
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "evidence_role": "condition_context",
+                "selection_status": "extracted",
+                "attribution_scope": "not_attributable",
+                "scientific_context": {
+                    "process": [{"name": "process", "value": "LPBF"}]
+                },
+                "source_refs": source_refs,
+                "resolution_status": "resolved",
+                "confidence": 0.95,
+            }
+        ),
+        ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": "repair-result",
+                "objective_id": objective.objective_id,
+                "document_id": "paper-1",
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "evidence_role": "direct_result",
+                "selection_status": "extracted",
+                "changed_variables": [
+                    {
+                        "name": "laser power",
+                        "baseline_value": 100,
+                        "target_value": 140,
+                        "unit": "W",
+                    }
+                ],
+                "comparison": {
+                    "baseline_label": "100 W",
+                    "target_label": "140 W",
+                    "axis_names": ["laser power"],
+                    "comparable": True,
+                },
+                "reported_result": {
+                    "outcome": "relative density",
+                    "value": 98.05,
+                    "unit": "%",
+                    "direction": "increase",
+                    "result_text": "Relative density increased to 98.05%.",
+                },
+                "attribution_scope": "isolated_effect",
+                "source_refs": source_refs,
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            }
+        ),
+        ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": "replay-result",
+                "objective_id": objective.objective_id,
+                "document_id": "paper-1",
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "evidence_role": "direct_result",
+                "selection_status": "extracted",
+                "changed_variables": [
+                    {
+                        "name": "laser power",
+                        "baseline_value": 100,
+                        "target_value": 140,
+                        "unit": "W",
+                    }
+                ],
+                "comparison": {
+                    "baseline_label": "100 W",
+                    "target_label": "140 W",
+                    "axis_names": ["laser power"],
+                    "comparable": True,
+                },
+                "reported_result": {
+                    "outcome": "relative density",
+                    "value": 98.05,
+                    "unit": "%",
+                    "direction": "increase",
+                    "result_text": "Relative density increased to 98.05%.",
+                },
+                "attribution_scope": "isolated_effect",
+                "source_refs": source_refs,
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        ),
+        ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": "failed-repair",
+                "objective_id": objective.objective_id,
+                "document_id": "paper-1",
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "evidence_role": "irrelevant",
+                "selection_status": "failed",
+                "attribution_scope": "not_attributable",
+                "source_refs": source_refs,
+                "resolution_status": "unknown",
+                "failure_reason": "repair failed",
+                "confidence": 0.0,
+            }
+        ),
+        ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": "failed-short",
+                "objective_id": objective.objective_id,
+                "document_id": "paper-1",
+                "source_kind": "text_window",
+                "source_ref": "block-2",
+                "evidence_role": "irrelevant",
+                "selection_status": "failed",
+                "attribution_scope": "not_attributable",
+                "source_refs": [
+                    {"source_kind": "text_window", "source_ref": "block-2"}
+                ],
+                "resolution_status": "unknown",
+                "failure_reason": "invalid",
+                "confidence": 0.0,
+            }
+        ),
+        ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": "failed-detailed",
+                "objective_id": objective.objective_id,
+                "document_id": "paper-1",
+                "source_kind": "text_window",
+                "source_ref": "block-2",
+                "evidence_role": "irrelevant",
+                "selection_status": "failed",
+                "attribution_scope": "not_attributable",
+                "source_refs": [
+                    {"source_kind": "text_window", "source_ref": "block-2"}
+                ],
+                "resolution_status": "unknown",
+                "failure_reason": (
+                    "changed_variables[0].target_value=160 is not grounded in SOURCE"
+                ),
+                "confidence": 0.0,
+            }
+        ),
+    )
+    blocks = {
+        "paper-1": [
+            SimpleNamespace(
+                block_id="block-1",
+                text="Relative density increased to 98.05% at 140 W.",
+                page=3,
+            ),
+            SimpleNamespace(
+                block_id="block-2",
+                text="A second selected Source failed extraction.",
+                page=4,
+            ),
+        ]
+    }
+
+    evidence_records = service._analysis_evidence_records(
+        collection_id="col-1",
+        analysis=analysis,
+        objective=objective,
+        drafts=drafts,
+        blocks_by_document_id=blocks,
+        tables_by_document_id={},
+        figures_by_document_id={},
+    )
+
+    assert [record.evidence_id for record in evidence_records] == [
+        "replay-result",
+        "failed-detailed",
+    ]
+    assert len(
+        {
+            (record.document_id, record.source_kind, record.source_ref)
+            for record in evidence_records
+        }
+    ) == len(evidence_records)
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    contributions = service._analysis_contributions(
+        collection_id="col-1",
+        analysis=analysis,
+        objective=objective,
+        frames=(frame,),
+        routes=(),
+        evidence_records=evidence_records,
+    )
+
+    assert contributions[0].routed_source_count == 2
+    assert contributions[0].extracted_source_count == 1
+    assert contributions[0].failed_source_count == 1
 
 
 def test_objective_analysis_uses_conservative_frame_batch_when_model_fails(

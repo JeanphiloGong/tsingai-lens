@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from time import perf_counter
 from typing import Any
 
@@ -547,8 +547,25 @@ class ObjectiveExtractor:
     def extract_objective_evidence(
         self,
         payload: dict[str, Any],
+        *,
+        invalid_extraction: Mapping[str, Any] | None = None,
+        validation_errors: Iterable[str] = (),
     ) -> StructuredEvidenceExtractions:
         system_prompt, user_prompt = build_objective_evidence_prompt(payload)
+        repair_errors = tuple(
+            str(error).strip() for error in validation_errors if str(error).strip()
+        )
+        if invalid_extraction is not None:
+            user_prompt = (
+                f"{user_prompt}\n\n"
+                + self._objective_evidence_repair_instruction(
+                    repair_detail="; ".join(repair_errors)
+                    or "the extraction failed deterministic Source grounding",
+                    invalid_extraction=invalid_extraction,
+                )
+            )
+        elif repair_errors:
+            raise ValueError("Evidence repair errors require an invalid extraction")
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -1173,34 +1190,51 @@ class ObjectiveExtractor:
             else "null"
         )
         return (
-            "Repair exactly one invalid Evidence extraction against the original "
-            "SOURCE.\nDECISION PROCESS\n"
-            "1. If `reported_result` is non-null, use `direct_result` or "
+            "TASK\nRepair one invalid Evidence extraction against the original "
+            "SOURCE. This is correction of the supplied candidate, not a new Source "
+            "search or a new extraction task.\n"
+            "REPAIR INPUT\n"
+            f"- VALIDATION ERRORS: {repair_detail[:1000]}\n"
+            f"- INVALID EXTRACTION: {invalid_json}\n"
+            "DECISION PROCESS\n"
+            "1. Check each named invalid field against SOURCE and keep every valid "
+            "field unchanged.\n"
+            "2. Correct a field only when its replacement is explicit in SOURCE. "
+            "When SOURCE does not support a valid correction, remove the unsupported "
+            "claim only if the remaining item still has honest scientific meaning; "
+            "otherwise abstain with {\"extractions\":[]}.\n"
+            "3. If `reported_result` is non-null, use `direct_result` or "
             "`contradictory_result` as `evidence_role`. If keeping a context role, "
             "set `reported_result` to null, `changed_variables` to [], `comparison` "
             "to null, and `attribution_scope` to `not_attributable`.\n"
-            "2. `isolated_effect` and `joint_effect` require distinct baseline and "
-            "target values for every changed variable. If SOURCE does not support "
-            "them, use `association_only` only for an explicit association; "
-            "otherwise use `descriptive_only` with no changed variables and no "
-            "comparison, or return {\"extractions\":[]}.\n"
-            "3. For experimental attribution, `comparison.axis_names` must exactly "
-            "match the distinct `changed_variables` names. If "
-            "`comparison.comparable` is false, use `not_attributable`; do not change "
-            "it to true unless SOURCE explicitly supports a complete comparison.\n"
-            "4. An identical parameter is fixed context, not a changed variable. "
-            "Remove each fixed parameter from `changed_variables` and "
-            "`comparison.axis_names` when its baseline and target values are "
-            "identical. Keep it only in source-supported comparison labels or "
-            "scientific context. A fixed control does not make the comparison "
-            "incomparable. For a condition series, choose one complete "
-            "source-supported interval and never merge separate intervals.\n"
-            "HARD RULES\nCorrect only values supported by SOURCE; do not invent "
-            "comparison endpoints or scientific context. Preserve every valid field "
-            "that does not need correction.\n"
-            f"VALIDATION ERRORS: {repair_detail[:1000]}\n"
-            f"INVALID EXTRACTION: {invalid_json}\n"
-            "Return only {\"extractions\":[<one corrected extraction>]} or "
+            "4. `isolated_effect` and `joint_effect` require distinct baseline and "
+            "target values for every changed variable. `comparison.axis_names` must "
+            "exactly match the distinct `changed_variables` names. If SOURCE lacks "
+            "complete endpoints, use `association_only` only for an explicit "
+            "association; otherwise use `descriptive_only` or abstain.\n"
+            "5. If `comparison.comparable` is false, use `not_attributable`; do not "
+            "change it to true unless SOURCE explicitly supports a complete "
+            "comparison. Remove each fixed parameter from `changed_variables` and "
+            "`comparison.axis_names` when its endpoints are identical. A fixed "
+            "control does not make the comparison incomparable. For a condition "
+            "series, choose one complete Source-supported interval.\n"
+            "HARD RULES\n"
+            "- Correct only values supported by SOURCE; do not invent comparison "
+            "endpoints or scientific context, and never copy from outside SOURCE.\n"
+            "- A fixed parameter is fixed context, not a changed variable.\n"
+            "- For a condition series, choose one complete source-supported interval "
+            "and never merge separate intervals.\n"
+            "- Preserve valid fields that do not require correction.\n"
+            "BOUNDARY EXAMPLES\n"
+            "- If candidate target is 160 W but SOURCE explicitly compares 100 W "
+            "with 140 W, 140 W may replace 160 W; other grounded fields stay fixed.\n"
+            "- If candidate unit is MPa but SOURCE gives no unit, set that unit to "
+            "null only when the remaining result is still meaningful; never infer a "
+            "unit from domain knowledge.\n"
+            "- If SOURCE contains no complete comparison or attributable result, "
+            "return {\"extractions\":[]}.\n"
+            "OUTPUT SCHEMA\nReturn only "
+            "{\"extractions\":[<one corrected extraction>]} or "
             "{\"extractions\":[]}."
         )
 

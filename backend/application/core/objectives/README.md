@@ -238,8 +238,26 @@ When that removal leaves exactly one changed variable from a `joint_effect`
 draft, the backend derives `isolated_effect`; endpoint completeness, comparison
 parity, comparability, and Source grounding remain strict validation
 requirements. A non-empty model result that survives schema validation but
-fails Source grounding becomes explicit failed Evidence instead of disappearing
-from paper accounting.
+fails Source grounding receives deterministic field-path errors for unsupported
+variable names, endpoints, units, outcomes, values, result text, or table-row
+bindings. The service permits one additional repair call with the same Objective,
+route, Source, invalid item, and field errors. The model may correct only values
+explicitly present in that Source or abstain; the backend never deletes or
+substitutes scientific values merely to make the item pass. A repaired item goes
+through the complete contract and Source-grounding checks again. A failed repair
+or abstention becomes explicit failed Evidence with the final field-level reason
+instead of disappearing from paper accounting.
+
+Final Evidence materialization enforces zero or one durable record for each
+`objective_id + document_id + source_kind + source_ref`. This boundary covers
+normal extraction, repair output, deterministic derivation, and replayed drafts;
+`evidence_id` alone is not Source identity. When candidates conflict, extracted
+Evidence outranks failed attempts, result Evidence outranks context, richer
+validated scientific content outranks sparse content, and resolution then
+confidence break remaining ties. The service never merges scientific fields
+from competing candidates. If every candidate failed, one detailed failed
+record remains, so PaperContribution extracted/failed counts are derived from
+the same final Source-keyed Evidence set exposed to readers.
 
 An extraction failure is also durable Evidence when the analysis can otherwise
 complete. It retains the exact `document_id + source_kind + source_ref` locator

@@ -1441,7 +1441,24 @@ def test_research_objective_records_failed_evidence_when_model_item_is_ungrounde
     tmp_path,
 ):
     class UngroundedEvidenceExtractor:
-        def extract_objective_evidence(self, _payload):
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def extract_objective_evidence(
+            self,
+            payload,
+            *,
+            invalid_extraction=None,
+            validation_errors=(),
+        ):
+            self.calls.append(
+                {
+                    "payload": payload,
+                    "invalid_extraction": invalid_extraction,
+                    "validation_errors": validation_errors,
+                }
+            )
+            target_value = 160 if invalid_extraction is None else 180
             return StructuredEvidenceExtractions.model_validate(
                 {
                     "extractions": [
@@ -1451,13 +1468,13 @@ def test_research_objective_records_failed_evidence_when_model_item_is_ungrounde
                                 {
                                     "name": "laser power",
                                     "baseline_value": 100,
-                                    "target_value": 140,
+                                    "target_value": target_value,
                                     "unit": "W",
                                 }
                             ],
                             "comparison": {
                                 "baseline_label": "100 W",
-                                "target_label": "140 W",
+                                "target_label": f"{target_value} W",
                                 "axis_names": ["laser power"],
                                 "comparable": True,
                             },
@@ -1506,12 +1523,16 @@ def test_research_objective_records_failed_evidence_when_model_item_is_ungrounde
         page=3,
         block_type="paragraph",
         heading_path="Results",
-        text="The selected paragraph contains no reported density measurement.",
+        text=(
+            "At laser powers of 100 W and 140 W, relative density increased "
+            "from 97.83% to 98.05%."
+        ),
     )
+    extractor = UngroundedEvidenceExtractor()
 
     units = service._build_objective_evidence(
         collection_id="col-test",
-        extractor=UngroundedEvidenceExtractor(),
+        extractor=extractor,
         objectives=(objective,),
         paper_skims=(),
         objective_paper_frames=(),
@@ -1525,7 +1546,139 @@ def test_research_objective_records_failed_evidence_when_model_item_is_ungrounde
     assert units[0].source_ref == "block-1"
     assert units[0].selection_status == "failed"
     assert units[0].failure_reason is not None
-    assert "not grounded in the selected Source" in units[0].failure_reason
+    assert "changed_variables[0].target_value=180" in units[0].failure_reason
+    assert "not grounded in the selected Source" not in units[0].failure_reason
+    assert len(extractor.calls) == 2
+    assert extractor.calls[1]["payload"]["source"]["source_ref"] == "block-1"
+    assert extractor.calls[1]["invalid_extraction"]["changed_variables"][0][
+        "target_value"
+    ] == 160
+    assert any(
+        "changed_variables[0].target_value=160" in error
+        for error in extractor.calls[1]["validation_errors"]
+    )
+
+
+def test_research_objective_repairs_one_ungrounded_field_against_same_source(
+    tmp_path,
+):
+    class RepairingEvidenceExtractor:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def extract_objective_evidence(
+            self,
+            payload,
+            *,
+            invalid_extraction=None,
+            validation_errors=(),
+        ):
+            self.calls.append(
+                {
+                    "payload": payload,
+                    "invalid_extraction": invalid_extraction,
+                    "validation_errors": validation_errors,
+                }
+            )
+            target_value = 160 if invalid_extraction is None else 140
+            return StructuredEvidenceExtractions.model_validate(
+                {
+                    "extractions": [
+                        {
+                            "evidence_role": "direct_result",
+                            "changed_variables": [
+                                {
+                                    "name": "laser power",
+                                    "baseline_value": 100,
+                                    "target_value": target_value,
+                                    "unit": "W",
+                                }
+                            ],
+                            "comparison": {
+                                "baseline_label": "100 W",
+                                "target_label": f"{target_value} W",
+                                "axis_names": ["laser power"],
+                                "comparable": True,
+                            },
+                            "reported_result": {
+                                "outcome": "relative density",
+                                "value": 98.05,
+                                "unit": "%",
+                                "direction": "increase",
+                                "result_text": (
+                                    "Relative density increased from 97.83% to 98.05%."
+                                ),
+                            },
+                            "attribution_scope": "isolated_effect",
+                            "scientific_context": {},
+                            "resolution_status": "resolved",
+                            "confidence": 0.9,
+                        }
+                    ]
+                }
+            )
+
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    block = SimpleNamespace(
+        block_id="block-1",
+        document_id="paper-1",
+        page=3,
+        block_type="paragraph",
+        heading_path="Results",
+        text=(
+            "At laser powers of 100 W and 140 W, relative density increased "
+            "from 97.83% to 98.05%."
+        ),
+    )
+    extractor = RepairingEvidenceExtractor()
+
+    units = service._build_objective_evidence(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        paper_skims=(),
+        objective_paper_frames=(),
+        objective_evidence_routes=(route,),
+        blocks_by_document_id={"paper-1": [block]},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={},
+    )
+
+    assert len(units) == 1
+    assert units[0].selection_status == "extracted"
+    assert units[0].source_ref == "block-1"
+    assert units[0].changed_variables[0].target_value == 140
+    assert len(extractor.calls) == 2
+    assert extractor.calls[0]["payload"]["source"] == extractor.calls[1]["payload"][
+        "source"
+    ]
+    assert extractor.calls[1]["invalid_extraction"]["changed_variables"][0][
+        "target_value"
+    ] == 160
+    assert any(
+        "changed_variables[0].target_value=160" in error
+        for error in extractor.calls[1]["validation_errors"]
+    )
 
 
 def test_llm_objective_evidence_preserves_zero_extraction_confidence(tmp_path):

@@ -2148,6 +2148,90 @@ def test_domain_model_extractors_validates_objective_evidence_response():
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
 
 
+def test_objective_evidence_grounding_repair_keeps_original_source_prompt():
+    client = _FakeOpenAIClient(
+        """
+        {
+          "extractions": [
+            {
+              "evidence_role": "direct_result",
+              "changed_variables": [
+                {
+                  "name": "laser power",
+                  "baseline_value": 100,
+                  "target_value": 140,
+                  "unit": "W"
+                }
+              ],
+              "comparison": {
+                "baseline_label": "100 W",
+                "target_label": "140 W",
+                "axis_names": ["laser power"],
+                "comparable": true,
+                "incomparability_reasons": []
+              },
+              "reported_result": {
+                "outcome": "relative density",
+                "value": 98.05,
+                "unit": "%",
+                "direction": "increase",
+                "result_text": "Relative density increased to 98.05%."
+              },
+              "attribution_scope": "isolated_effect",
+              "scientific_context": {},
+              "resolution_status": "resolved",
+              "confidence": 0.9
+            }
+          ]
+        }
+        """
+    )
+    extractor = _objective_extractor(client)
+    payload = {
+        "collection_id": "col-1",
+        "objective": {"question": "How does laser power affect density?"},
+        "evidence_route": {
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+        },
+        "source": {
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "text": (
+                "At laser powers of 100 W and 140 W, relative density "
+                "increased to 98.05%."
+            ),
+        },
+    }
+    invalid_extraction = {
+        "changed_variables": [
+            {
+                "name": "laser power",
+                "baseline_value": 100,
+                "target_value": 160,
+                "unit": "W",
+            }
+        ]
+    }
+
+    parsed = extractor.extract_objective_evidence(
+        payload,
+        invalid_extraction=invalid_extraction,
+        validation_errors=(
+            "changed_variables[0].target_value=160 is not grounded in SOURCE",
+        ),
+    )
+
+    assert parsed.extractions[0].changed_variables[0].target_value == 140
+    assert len(client.chat.completions.calls) == 1
+    user_prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
+    assert payload["source"]["text"] in user_prompt
+    assert "TASK\nRepair one invalid Evidence extraction" in user_prompt
+    assert "changed_variables[0].target_value=160" in user_prompt
+    assert '"target_value":160' in user_prompt
+    assert "Correct only values supported by SOURCE" in user_prompt
+
+
 def test_structured_objective_evidence_normalizes_compact_context_attributes():
     context = StructuredEvidenceContext.model_validate(
         {

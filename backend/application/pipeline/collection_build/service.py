@@ -284,8 +284,8 @@ class CollectionBuildPipelineService:
         return "completed"
 
     def _build_objective_progress_callback(self, task_id: str, collection_id: str):
-        last_update: dict[str, tuple[str, int | None, int | None]] = {
-            "value": ("", None, None),
+        last_update: dict[str, tuple[str, int | None, int | None, int | None]] = {
+            "value": ("", None, None, None),
         }
 
         def callback(progress_detail: dict[str, Any]) -> None:
@@ -294,10 +294,16 @@ class CollectionBuildPipelineService:
                 return
             current = self._safe_int(progress_detail.get("current"))
             total = self._safe_int(progress_detail.get("total"))
-            previous_phase, previous_current, previous_total = last_update["value"]
+            window_position = self._safe_int(
+                progress_detail.get("active_window_position")
+            )
+            previous_phase, previous_current, previous_total, previous_window = (
+                last_update["value"]
+            )
             should_update = (
                 phase != previous_phase
                 or total != previous_total
+                or window_position != previous_window
                 or current is None
                 or total is None
                 or current == 1
@@ -307,7 +313,7 @@ class CollectionBuildPipelineService:
             )
             if not should_update:
                 return
-            last_update["value"] = (phase, current, total)
+            last_update["value"] = (phase, current, total, window_position)
             record = self.task_service.update_task(
                 task_id,
                 current_stage=phase,

@@ -121,7 +121,7 @@ def test_possible_unknown_context_cannot_bridge_conflicting_material_anchors():
     ]
 
 
-def test_missing_context_does_not_attach_to_one_known_context_group():
+def test_missing_material_attaches_to_one_unambiguous_known_material_group():
     skims = (
         _paper_skim(
             document_id="paper-known",
@@ -139,10 +139,100 @@ def test_missing_context_does_not_attach_to_one_known_context_group():
         ObjectiveCandidateService()._build_relationship_groups(skims)
     )
 
+    assert groups == [("relationship-known", "relationship-missing")]
+
+
+def test_missing_material_and_one_known_anchor_build_cross_paper_objective():
+    skims = (
+        _paper_skim(
+            document_id="paper-known",
+            relationship_id="relationship-known",
+            material_scope=("316L stainless steel",),
+        ),
+        _paper_skim(
+            document_id="paper-missing",
+            relationship_id="relationship-missing",
+            material_scope=(),
+        ),
+    )
+
+    facts = ObjectiveCandidateService().discover_candidate_facts(
+        "collection-test",
+        paper_skims=skims,
+        extractor=_GroupingExtractor(),
+    )
+
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert objective.material_scope == ()
+    assert set(objective.seed_document_ids) == {"paper-known", "paper-missing"}
+    assert set(objective.source_relationship_ids) == {
+        "relationship-known",
+        "relationship-missing",
+    }
+    assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
+
+
+def test_material_grade_word_order_does_not_fragment_relationship_groups():
+    skims = (
+        _paper_skim(
+            document_id="paper-long-form",
+            relationship_id="relationship-long-form",
+            material_scope=("316L stainless steel",),
+        ),
+        _paper_skim(
+            document_id="paper-reordered",
+            relationship_id="relationship-reordered",
+            material_scope=("stainless steel 316L",),
+        ),
+    )
+
+    groups = _group_relationship_ids(
+        ObjectiveCandidateService()._build_relationship_groups(skims)
+    )
+
     assert groups == [
-        ("relationship-known",),
-        ("relationship-missing",),
+        ("relationship-long-form", "relationship-reordered"),
     ]
+
+
+def test_material_grade_word_order_preserves_shared_objective_material_scope():
+    class RejectingAxisExtractor(_GroupingExtractor):
+        def canonicalize_research_objective_axes(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredAxisCanonicalizationPlan:
+            self.canonicalization_payloads.append(payload)
+            return StructuredAxisCanonicalizationPlan(
+                decisions=[
+                    {"pair_id": pair["pair_id"], "equivalent": False}
+                    for pair in payload.get("axis_pairs", ())
+                ]
+            )
+
+    skims = (
+        _paper_skim(
+            document_id="paper-long-form",
+            relationship_id="relationship-long-form",
+            material_scope=("316L stainless steel",),
+        ),
+        _paper_skim(
+            document_id="paper-reordered",
+            relationship_id="relationship-reordered",
+            material_scope=("stainless steel 316L",),
+        ),
+    )
+
+    facts = ObjectiveCandidateService().discover_candidate_facts(
+        "collection-test",
+        paper_skims=skims,
+        extractor=RejectingAxisExtractor(),
+    )
+
+    assert len(facts.research_objectives) == 1
+    assert facts.research_objectives[0].material_scope == (
+        "316L stainless steel",
+    )
 
 
 def test_two_relationships_with_missing_material_context_share_one_group():
@@ -349,7 +439,7 @@ def test_joint_factors_are_indivisible_and_each_outcome_is_accounted_separately(
     assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
 
 
-def test_different_materials_build_separate_objectives():
+def test_multi_paper_collection_does_not_promote_single_paper_relationships():
     skims = (
         _paper_skim(
             document_id="paper-steel",
@@ -369,12 +459,12 @@ def test_different_materials_build_separate_objectives():
         extractor=_GroupingExtractor(),
     )
 
-    assert len(facts.research_objectives) == 2
+    assert facts.research_objectives == ()
+    assert {item.status.value for item in facts.study_dispositions} == {"rejected"}
     assert all(
-        len(objective.source_relationship_ids) == 1
-        for objective in facts.research_objectives
+        item.reason == "Relationship is not supported by multiple collection papers."
+        for item in facts.study_dispositions
     )
-    assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
 
 
 def test_candidate_build_derives_objective_identity_and_lineage_from_relationships():
@@ -568,7 +658,6 @@ def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
 
     assert {objective.outcomes for objective in facts.research_objectives} == {
         ("max defect diameter",),
-        ("max defect length",),
     }
     diameter_objective = next(
         objective
@@ -579,6 +668,16 @@ def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
         "relationship-1",
         "relationship-2",
     }
+    length_disposition = next(
+        item
+        for item in facts.study_dispositions
+        if item.relationship_id == "relationship-3"
+    )
+    assert length_disposition.status.value == "rejected"
+    assert (
+        length_disposition.reason
+        == "Relationship is not supported by multiple collection papers."
+    )
 
 
 def test_semantic_axis_aliases_are_canonicalized_before_relationship_grouping():
@@ -911,14 +1010,26 @@ def test_variable_alias_canonicalization_does_not_merge_different_outcomes():
 
     skims = (
         _paper_skim(
-            document_id="paper-temperature",
-            relationship_id="relationship-temperature",
+            document_id="paper-temperature-density-1",
+            relationship_id="relationship-temperature-density-1",
             factors=("temperature",),
             outcome="relative density",
         ),
         _paper_skim(
-            document_id="paper-typo",
-            relationship_id="relationship-typo",
+            document_id="paper-temperature-density-2",
+            relationship_id="relationship-temperature-density-2",
+            factors=("temperature",),
+            outcome="relative density",
+        ),
+        _paper_skim(
+            document_id="paper-typo-porosity-1",
+            relationship_id="relationship-typo-porosity-1",
+            factors=("temperatuer",),
+            outcome="porosity",
+        ),
+        _paper_skim(
+            document_id="paper-typo-porosity-2",
+            relationship_id="relationship-typo-porosity-2",
             factors=("temperatuer",),
             outcome="porosity",
         ),
@@ -928,8 +1039,14 @@ def test_variable_alias_canonicalization_does_not_merge_different_outcomes():
     assert _group_relationship_ids(
         service._build_relationship_groups(skims)
     ) == [
-        ("relationship-temperature",),
-        ("relationship-typo",),
+        (
+            "relationship-temperature-density-1",
+            "relationship-temperature-density-2",
+        ),
+        (
+            "relationship-typo-porosity-1",
+            "relationship-typo-porosity-2",
+        ),
     ]
 
     facts = service.discover_candidate_facts(
@@ -945,7 +1062,7 @@ def test_variable_alias_canonicalization_does_not_merge_different_outcomes():
         ("relative density",),
         ("porosity",),
     }
-    assert len(facts.study_dispositions) == 2
+    assert len(facts.study_dispositions) == 4
     assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
 
 

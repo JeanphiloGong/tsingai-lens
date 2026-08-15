@@ -97,6 +97,9 @@ class ObjectiveCandidateService:
         )
 
         accepted_objectives: list[ResearchObjective] = []
+        require_cross_paper_support = len(
+            {skim.document_id for skim in paper_skims}
+        ) > 1
         for group_number, group in enumerate(relationship_groups, start=1):
             relationship_ids = tuple(
                 str(record["relationship"]["relationship_id"])
@@ -107,6 +110,15 @@ class ObjectiveCandidateService:
                 relationship_ids=relationship_ids,
                 relationship_inventory=relationship_inventory,
             )
+            if (
+                objective is not None
+                and require_cross_paper_support
+                and len(objective.seed_document_ids) < 2
+            ):
+                rejection_reason = (
+                    "Relationship is not supported by multiple collection papers."
+                )
+                objective = None
             if objective is not None:
                 accepted_objectives.append(objective)
             else:
@@ -228,10 +240,60 @@ class ObjectiveCandidateService:
             else:
                 compatible_group.append(relationship_id)
 
+        base_groups = self._attach_unambiguous_missing_material_groups(
+            base_groups,
+            relationship_inventory=inventory,
+        )
+
         return [
             [records_by_id[relationship_id] for relationship_id in group]
             for group in sorted(base_groups, key=lambda group: tuple(group))
         ]
+
+    @classmethod
+    def _attach_unambiguous_missing_material_groups(
+        cls,
+        groups: list[list[str]],
+        *,
+        relationship_inventory: RelationshipInventory,
+    ) -> list[list[str]]:
+        def has_known_material(group: Iterable[str]) -> bool:
+            return any(
+                cls._known_material_keys(
+                    relationship_inventory[relationship_id][1].material_scope
+                )
+                for relationship_id in group
+            )
+
+        anchored_groups = [
+            group for group in groups if has_known_material(group)
+        ]
+        unanchored_groups = [
+            group for group in groups if not has_known_material(group)
+        ]
+        retained_unanchored: list[list[str]] = []
+        for group in unanchored_groups:
+            candidates = [
+                anchor
+                for anchor in anchored_groups
+                if all(
+                    cls._relationship_compatibility(
+                        relationship_inventory[relationship_id][1],
+                        relationship_inventory[relationship_id][2],
+                        relationship_inventory[anchor_id][1],
+                        relationship_inventory[anchor_id][2],
+                    )
+                    is _Compatibility.POSSIBLE
+                    for relationship_id in group
+                    for anchor_id in anchor
+                )
+            ]
+            if len(candidates) != 1:
+                retained_unanchored.append(group)
+                continue
+            candidates[0].extend(group)
+            candidates[0].sort()
+        return [*anchored_groups, *retained_unanchored]
 
     @staticmethod
     def _relationship_record(
@@ -313,8 +375,8 @@ class ObjectiveCandidateService:
         left: Iterable[str],
         right: Iterable[str],
     ) -> _Compatibility:
-        left_keys = cls._known_context_keys(left)
-        right_keys = cls._known_context_keys(right)
+        left_keys = cls._known_material_keys(left)
+        right_keys = cls._known_material_keys(right)
         if not left_keys and not right_keys:
             return _Compatibility.COMPATIBLE
         if not left_keys or not right_keys:
@@ -326,12 +388,30 @@ class ObjectiveCandidateService:
         return _Compatibility.INCOMPATIBLE
 
     @classmethod
-    def _known_context_keys(cls, values: Iterable[str]) -> frozenset[str]:
+    def _known_material_keys(cls, values: Iterable[str]) -> frozenset[str]:
         return frozenset(
             key
             for value in values
-            if (key := cls._known_context_scalar(value)) is not None
+            if (key := cls._known_material_scalar(value)) is not None
         )
+
+    @classmethod
+    def _known_material_scalar(cls, value: Any) -> str | None:
+        key = cls._axis_record_key(value)
+        if not key or key in _MISSING_CONTEXT_VALUES:
+            return None
+        material_grades = cls._material_grade_keys(key)
+        if len(material_grades) == 1:
+            remainder = re.sub(
+                r"(?<![a-z0-9])(?:aisi[\s-]*|ss[\s-]*)?"
+                r"\d{3,4}[a-z]{0,2}(?![a-z0-9])",
+                " ",
+                key,
+            )
+            remaining_words = frozenset(re.findall(r"[a-z]+", remainder))
+            if remaining_words <= {"stainless", "steel"}:
+                return f"stainless-steel:{next(iter(material_grades))}"
+        return cls._axis_identity(key)
 
     @classmethod
     def _known_context_scalar(cls, value: Any) -> str | None:
@@ -476,7 +556,7 @@ class ObjectiveCandidateService:
                         right_study,
                         right_relationship,
                     )
-                    is not _Compatibility.COMPATIBLE
+                    is _Compatibility.INCOMPATIBLE
                 ):
                     return False
         return True
@@ -501,13 +581,22 @@ class ObjectiveCandidateService:
         ]
         if not values_by_study or any(not values for values in values_by_study):
             return []
+
+        def values_match(left: str, right: str) -> bool:
+            if field_name != "material_scope":
+                return self._axis_values_are_equivalent(left, right)
+            left_key = self._known_material_scalar(left)
+            return left_key is not None and left_key == self._known_material_scalar(
+                right
+            )
+
         first, *remaining = values_by_study
         return self._unique_axis_values(
             value
             for value in first
             if all(
                 any(
-                    self._axis_values_are_equivalent(value, candidate)
+                    values_match(value, candidate)
                     for candidate in values
                 )
                 for values in remaining

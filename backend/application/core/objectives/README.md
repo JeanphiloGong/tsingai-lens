@@ -56,14 +56,20 @@ Objective analysis.
   frequent source labels, and keeps every unclassified label unchanged. This
   normalized view is transient: persisted studies retain their extracted labels
   and exact Source lineage. Objective membership then requires the same complete
-  factor set, one outcome, and a non-conflicting material scope. Process,
+  factor set, one outcome, and a non-conflicting material scope. Common stainless
+  steel grade spellings have one deterministic material identity. A relationship
+  with missing material scope may join a known-material group only when exactly
+  one scientifically compatible group exists; it cannot bridge conflicting
+  materials. Process,
   sample, test, comparator, design, and fixed-condition differences remain on
   each `PaperStudy`; they do not fragment a candidate Objective because later
-  Evidence and Comparison own scientific comparability. The backend directly
-  promotes each compatible relationship group to one Objective, derives its
-  question, seed documents, shared scope, and lineage, then ranks cross-paper
-  support before relationship count and confidence. Every relationship is
-  promoted to an Objective or receives a backend-derived rejection disposition,
+  Evidence and Comparison own scientific comparability. For a multi-document
+  collection, the backend promotes only compatible groups supported by at least
+  two papers; a single-document collection may still produce paper-local
+  candidates. The backend derives each accepted Objective question, seed
+  documents, shared scope, and lineage, then ranks cross-paper support before
+  relationship count and confidence. Every relationship is promoted to an
+  Objective or receives a backend-derived rejection disposition,
   while unresolved study signals remain separately visible. No second model
   call can move a relationship outside its backend-owned group, reject an input
   relationship, or remove records from persisted accounting.
@@ -200,9 +206,12 @@ has an explicit edge to every current member. The complete jointly varied
 factor tuple and one outcome then define the research axis; explicit material
 conflicts remain a hard boundary. Other study-context differences are retained,
 not flattened, and are evaluated downstream when Evidence is compared. The
-backend turns each membership group directly into one Objective. All Objectives
-are ranked and persisted; the HTTP list returns all ranked Objectives by default
-and supports explicit pagination when requested. Every relationship is
+backend turns each cross-paper membership group into one Objective. A
+paper-local group is promoted only when the collection itself contains one
+document; otherwise it remains traceable through its rejection disposition.
+Accepted Objectives are ranked and persisted; the HTTP list returns all ranked
+Objectives by default and supports explicit pagination when requested. Every
+relationship is
 persisted as `pending`, `promoted`, or `rejected`; rejection is a backend
 eligibility or schema decision, never a model disposition. Partial Source
 signals remain separately visible.

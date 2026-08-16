@@ -1225,6 +1225,29 @@ class ObjectiveExtractor:
                     )
                     normalized_extraction["comparison"] = normalized_comparison
                     changed = True
+            comparison = normalized_extraction.get("comparison")
+            comparison_has_no_axes = (
+                isinstance(comparison, Mapping)
+                and isinstance(comparison.get("axis_names"), list)
+                and not any(
+                    str(axis).strip() for axis in comparison["axis_names"]
+                )
+            )
+            if not changed_variables and (
+                fixed_names or comparison_has_no_axes
+            ):
+                normalized_extraction["comparison"] = None
+                if extraction.get("attribution_scope") in {
+                    "isolated_effect",
+                    "joint_effect",
+                    "association_only",
+                }:
+                    normalized_extraction["attribution_scope"] = (
+                        "descriptive_only"
+                        if extraction.get("reported_result") is not None
+                        else "not_attributable"
+                    )
+                changed = True
             if (
                 extraction.get("attribution_scope") == "joint_effect"
                 and len(changed_variables) == 1

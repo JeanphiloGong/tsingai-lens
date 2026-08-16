@@ -3388,6 +3388,85 @@ def test_objective_evidence_recovers_empty_comparison_axes_from_changed_variable
     assert len(client.chat.completions.calls) == 1
 
 
+@pytest.mark.parametrize(
+    ("changed_variables", "axis_names"),
+    (
+        (
+            [
+                {
+                    "name": "scan speed",
+                    "baseline_value": 800,
+                    "target_value": 800,
+                    "unit": "mm/s",
+                }
+            ],
+            ["scan speed"],
+        ),
+        ([], []),
+    ),
+    ids=("all-variables-are-fixed", "model-returned-no-axis"),
+)
+def test_objective_evidence_downgrades_axisless_result_to_descriptive_result(
+    changed_variables,
+    axis_names,
+):
+    response = json.dumps(
+        {
+            "extractions": [
+                {
+                    "evidence_role": "direct_result",
+                    "changed_variables": changed_variables,
+                    "comparison": {
+                        "baseline_label": "sample A",
+                        "target_label": "sample B",
+                        "axis_names": axis_names,
+                        "comparable": True,
+                    },
+                    "reported_result": {
+                        "outcome": "porosity",
+                        "value": 1.2,
+                        "unit": "%",
+                        "direction": "unknown",
+                        "result_text": "The measured porosity was 1.2%.",
+                    },
+                    "attribution_scope": "isolated_effect",
+                    "scientific_context": {},
+                    "resolution_status": "resolved",
+                    "confidence": 0.8,
+                }
+            ]
+        }
+    )
+    client = _FakeOpenAIClient(response)
+    extractor = ObjectiveExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="json_text",
+    )
+
+    parsed = extractor.extract_objective_evidence(
+        {
+            "objective": {"question": "How does scan speed affect porosity?"},
+            "evidence_route": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+            },
+            "source": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "text": "At 800 mm/s, the measured porosity was 1.2%.",
+            },
+        }
+    )
+
+    extraction = parsed.extractions[0]
+    assert extraction.changed_variables == []
+    assert extraction.comparison is None
+    assert extraction.attribution_scope == "descriptive_only"
+    assert extraction.reported_result is not None
+    assert len(client.chat.completions.calls) == 1
+
+
 @pytest.mark.parametrize("baseline_value", (None, "", [], {}))
 def test_objective_evidence_does_not_invent_axes_for_incomplete_variables(
     baseline_value,

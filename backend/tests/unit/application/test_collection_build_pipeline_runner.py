@@ -14,6 +14,7 @@ from application.pipeline.collection_build.definitions import (
     CollectionBuildNodeDefinition,
     DOCUMENT_PROFILES,
     OBJECTIVE_CANDIDATES,
+    SOURCE_ARTIFACTS,
     dependency_graph_for_mode,
 )
 from application.pipeline.collection_build.runner import CollectionBuildPipelineRunner
@@ -220,6 +221,73 @@ def test_collection_build_pipeline_runner_persists_provider_usage_per_node():
         "paper_framing": "paper_framing.v1"
     }
     assert result.stats.prompt_versions == {"paper_framing": "paper_framing.v1"}
+
+
+def test_objective_candidate_node_reports_permanent_source_unit_failures():
+    paper_skim = SimpleNamespace(
+        source_unit_coverage=(
+            SimpleNamespace(status="relationship_emitted"),
+            SimpleNamespace(status="extraction_failed"),
+        )
+    )
+    facts = SimpleNamespace(
+        research_objectives=(object(),),
+        paper_skims=(paper_skim,),
+    )
+    context = build_context(MemoryTaskService())
+    context.research_objective_service = SimpleNamespace(
+        discover_and_replace_objective_candidates=lambda *args, **kwargs: facts
+    )
+
+    result = nodes.discover_and_replace_objective_candidates(context, build_config())
+
+    assert result["objective_candidate_count"] == 1
+    assert result["paper_skim_count"] == 1
+    assert result["source_unit_count"] == 2
+    assert result["extraction_failed_source_unit_count"] == 1
+    assert result["warnings"] == [
+        "1 PaperSkim Source unit failed extraction permanently; candidate "
+        "objectives were built from the remaining coverage."
+    ]
+
+
+def test_collection_build_final_status_is_partial_when_paper_skim_coverage_failed():
+    pipeline_run = PipelineRun.create(
+        pipeline_name="collection_build",
+        mode="standard",
+        run_id="task_1",
+        scope_type="collection",
+        scope_id="col_1",
+        node_dependencies={
+            SOURCE_ARTIFACTS: (),
+            OBJECTIVE_CANDIDATES: (SOURCE_ARTIFACTS,),
+        },
+        created_at="2026-08-11T01:00:00+00:00",
+        output_build_id="build_1",
+    )
+    pipeline_run = pipeline_run.with_node(
+        pipeline_run.node(SOURCE_ARTIFACTS).succeed(
+            "2026-08-11T01:00:01+00:00"
+        )
+    )
+    pipeline_run = pipeline_run.with_node(
+        pipeline_run.node(OBJECTIVE_CANDIDATES).succeed(
+            "2026-08-11T01:00:02+00:00",
+            output_summary={"extraction_failed_source_unit_count": 1},
+        )
+    )
+    service = CollectionBuildPipelineService(
+        collection_service=SimpleNamespace(),
+        task_service=SimpleNamespace(),
+        artifact_registry_service=SimpleNamespace(),
+        source_artifact_repository=SimpleNamespace(),
+        document_profile_service=SimpleNamespace(),
+        research_objective_service=SimpleNamespace(),
+    )
+
+    assert service._resolve_final_status(SimpleNamespace(), pipeline_run) == (
+        "partial_success"
+    )
 
 
 def test_collection_build_pipeline_runner_keeps_usage_from_failed_node():

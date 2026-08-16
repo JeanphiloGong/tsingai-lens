@@ -3320,6 +3320,99 @@ def test_objective_evidence_normalizes_fixed_endpoint_and_joint_scope_without_re
     assert len(client.chat.completions.calls) == 1
 
 
+def test_objective_evidence_recovers_empty_comparison_axes_from_changed_variables():
+    response = json.dumps(
+        {
+            "extractions": [
+                {
+                    "evidence_role": "direct_result",
+                    "changed_variables": [
+                        {
+                            "name": "laser power",
+                            "baseline_value": 100,
+                            "target_value": 140,
+                            "unit": "W",
+                        }
+                    ],
+                    "comparison": {
+                        "baseline_label": "100 W",
+                        "target_label": "140 W",
+                        "axis_names": [],
+                        "comparable": True,
+                    },
+                    "reported_result": {
+                        "outcome": "relative density",
+                        "value": 98.05,
+                        "unit": "%",
+                        "direction": "increase",
+                        "result_text": "the average density was found to be 98.05%",
+                    },
+                    "attribution_scope": "isolated_effect",
+                    "scientific_context": {},
+                    "resolution_status": "resolved",
+                    "confidence": 0.9,
+                }
+            ]
+        }
+    )
+    client = _FakeOpenAIClient(response)
+    extractor = ObjectiveExtractor(
+        client=client,
+        model="fake-model",
+        extraction_mode="json_text",
+    )
+
+    parsed = extractor.extract_objective_evidence(
+        {
+            "objective": {
+                "question": "How does laser power affect relative density?"
+            },
+            "evidence_route": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+            },
+            "source": {
+                "source_kind": "text_window",
+                "source_ref": "block-1",
+                "text": (
+                    "At laser powers of 100 W and 140 W, the average density "
+                    "was found to be 98.05%."
+                ),
+            },
+        }
+    )
+
+    comparison = parsed.extractions[0].comparison
+    assert comparison is not None
+    assert comparison.axis_names == ["laser power"]
+    assert len(client.chat.completions.calls) == 1
+
+
+@pytest.mark.parametrize("baseline_value", (None, "", [], {}))
+def test_objective_evidence_does_not_invent_axes_for_incomplete_variables(
+    baseline_value,
+):
+    payload = {
+        "extractions": [
+            {
+                "changed_variables": [
+                    {
+                        "name": "laser power",
+                        "baseline_value": baseline_value,
+                        "target_value": 140,
+                    }
+                ],
+                "comparison": {"axis_names": []},
+                "attribution_scope": "isolated_effect",
+            }
+        ]
+    }
+
+    normalized = ObjectiveExtractor._normalize_objective_evidence_payload(payload)
+
+    assert normalized == payload
+
+
 @pytest.mark.parametrize(
     ("variable_name", "endpoint"),
     (
@@ -3349,7 +3442,7 @@ def test_objective_evidence_does_not_normalize_invalid_fixed_endpoints(
         ]
     }
 
-    normalized = ObjectiveExtractor._normalize_fixed_objective_evidence_conditions(
+    normalized = ObjectiveExtractor._normalize_objective_evidence_payload(
         payload
     )
 

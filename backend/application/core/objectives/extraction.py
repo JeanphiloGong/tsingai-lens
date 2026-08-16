@@ -1046,7 +1046,7 @@ class ObjectiveExtractor:
                     raise RuntimeError(
                         "structured extraction returned empty response content"
                     )
-                payload = self._normalize_fixed_objective_evidence_conditions(
+                payload = self._normalize_objective_evidence_payload(
                     load_json_payload(extract_json_object(raw_content))
                 )
                 try:
@@ -1110,7 +1110,7 @@ class ObjectiveExtractor:
         raise RuntimeError("structured extraction failed after repairs") from last_error
 
     @staticmethod
-    def _normalize_fixed_objective_evidence_conditions(payload: Any) -> Any:
+    def _normalize_objective_evidence_payload(payload: Any) -> Any:
         def identical_nonempty_scalar(left: Any, right: Any) -> bool:
             if isinstance(left, bool) or isinstance(right, bool):
                 return type(left) is type(right) and left == right
@@ -1119,6 +1119,36 @@ class ObjectiveExtractor:
             if isinstance(left, str) and isinstance(right, str):
                 return bool(left.strip()) and left == right
             return False
+
+        def complete_changed_variable_names(
+            variables: list[Any],
+        ) -> tuple[str, ...]:
+            def is_complete_scalar(value: Any) -> bool:
+                if isinstance(value, str):
+                    return bool(value.strip())
+                return isinstance(value, (int, float, bool))
+
+            names: list[str] = []
+            seen: set[str] = set()
+            for variable in variables:
+                if not isinstance(variable, Mapping):
+                    return ()
+                name = str(variable.get("name") or "").strip()
+                baseline = variable.get("baseline_value")
+                target = variable.get("target_value")
+                if (
+                    not name
+                    or not is_complete_scalar(baseline)
+                    or not is_complete_scalar(target)
+                    or identical_nonempty_scalar(baseline, target)
+                ):
+                    return ()
+                canonical_name = name.casefold()
+                if canonical_name in seen:
+                    return ()
+                seen.add(canonical_name)
+                names.append(name)
+            return tuple(names)
 
         if not isinstance(payload, Mapping):
             return payload
@@ -1155,11 +1185,9 @@ class ObjectiveExtractor:
                 fixed_names.add(variable_name)
                 changed = True
 
-            if not fixed_names:
-                normalized_extractions.append(extraction)
-                continue
             normalized_extraction = dict(extraction)
-            normalized_extraction["changed_variables"] = changed_variables
+            if fixed_names:
+                normalized_extraction["changed_variables"] = changed_variables
             remaining_variable_names = {
                 str(variable.get("name") or "").strip().casefold()
                 for variable in changed_variables
@@ -1178,6 +1206,25 @@ class ObjectiveExtractor:
                     or str(axis).strip().casefold() in remaining_variable_names
                 ]
                 normalized_extraction["comparison"] = normalized_comparison
+            comparison = normalized_extraction.get("comparison")
+            if isinstance(comparison, Mapping):
+                axis_names = comparison.get("axis_names")
+                missing_axis_names = axis_names is None or (
+                    isinstance(axis_names, list)
+                    and not any(str(axis).strip() for axis in axis_names)
+                )
+                recovered_axis_names = (
+                    complete_changed_variable_names(changed_variables)
+                    if missing_axis_names
+                    else ()
+                )
+                if recovered_axis_names:
+                    normalized_comparison = dict(comparison)
+                    normalized_comparison["axis_names"] = list(
+                        recovered_axis_names
+                    )
+                    normalized_extraction["comparison"] = normalized_comparison
+                    changed = True
             if (
                 extraction.get("attribution_scope") == "joint_effect"
                 and len(changed_variables) == 1

@@ -970,6 +970,73 @@ def test_domain_model_extractors_validates_paper_skim_response():
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 4096
 
 
+def test_paper_skim_downgrades_empty_factor_relationship_without_losing_siblings():
+    response = {
+        "doc_role": "experimental",
+        "studies": [
+            {
+                "experiment_label": "LPBF parameter study",
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "material_scope": ["316L stainless steel"],
+                "process_context": ["LPBF"],
+                "relationships": [
+                    {
+                        "varied_factors": ["laser power"],
+                        "outcome": "porosity",
+                        "source_unit_ids": ["window-source-1"],
+                        "confidence": 0.91,
+                    },
+                    {
+                        "varied_factors": [],
+                        "outcome": "microhardness",
+                        "source_unit_ids": ["window-source-2"],
+                        "confidence": 0.84,
+                    },
+                ],
+                "confidence": 0.9,
+            }
+        ],
+        "unresolved_signals": [],
+        "evidence_density": "high",
+        "confidence": 0.9,
+        "warnings": [],
+    }
+    client = _FakeOpenAIClient(json.dumps(response))
+    extractor = _objective_extractor(client)
+
+    skim = extractor.extract_paper_skim(
+        {
+            "document_id": "paper-1",
+            "source_units": [
+                {
+                    "source_unit_id": "window-source-1",
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "content": "Laser power was varied and porosity was measured.",
+                },
+                {
+                    "source_unit_id": "window-source-2",
+                    "source_kind": "block",
+                    "source_ref": "block-2",
+                    "content": "Microhardness was also reported.",
+                },
+            ],
+        }
+    )
+
+    assert len(client.chat.completions.calls) == 1
+    assert len(skim.studies) == 1
+    assert [item.outcome for item in skim.studies[0].relationships] == ["porosity"]
+    assert len(skim.unresolved_signals) == 1
+    unresolved = skim.unresolved_signals[0]
+    assert unresolved.signal_type == "outcome"
+    assert unresolved.label == "microhardness"
+    assert unresolved.material_scope == ["316L stainless steel"]
+    assert unresolved.process_context == ["LPBF"]
+    assert unresolved.source_unit_ids == ["window-source-2"]
+
+
 def test_structured_paper_skim_rejects_duplicate_study_identities():
     study = {
         "experiment_label": "LPBF parameter study",

@@ -8,6 +8,7 @@ from application.pipeline.collection_build.context import CollectionBuildContext
 from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
+from domain.core import PaperSourceUnitCoverageStatus
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 
 
@@ -125,9 +126,32 @@ def build_document_profiles(
 def discover_and_replace_objective_candidates(
     context: CollectionBuildContext,
     _config: CollectionBuildPipelineConfig,
-) -> None:
-    context.research_objective_service.discover_and_replace_objective_candidates(
+) -> dict[str, Any]:
+    facts = context.research_objective_service.discover_and_replace_objective_candidates(
         context.collection_id,
         progress_callback=context.objective_progress_callback,
         build_id=context.build_id,
     )
+    coverage = tuple(
+        item
+        for paper_skim in facts.paper_skims
+        for item in paper_skim.source_unit_coverage
+    )
+    failed_count = sum(
+        item.status == PaperSourceUnitCoverageStatus.EXTRACTION_FAILED
+        for item in coverage
+    )
+    warnings = []
+    if failed_count:
+        unit = "unit" if failed_count == 1 else "units"
+        warnings.append(
+            f"{failed_count} PaperSkim Source {unit} failed extraction permanently; "
+            "candidate objectives were built from the remaining coverage."
+        )
+    return {
+        "objective_candidate_count": len(facts.research_objectives),
+        "paper_skim_count": len(facts.paper_skims),
+        "source_unit_count": len(coverage),
+        "extraction_failed_source_unit_count": failed_count,
+        "warnings": warnings,
+    }

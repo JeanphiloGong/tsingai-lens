@@ -42,6 +42,7 @@ from infra.source.runtime.source_evidence import (
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
+from tests.support.objective_extractor import FakeObjectiveExtractor
 
 
 class DummyWorkflowOutput:
@@ -349,6 +350,73 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
     )
     assert objective_facts.research_objectives_ready is True
     assert objective_facts.paper_skims
+
+
+def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_coverage(
+    monkeypatch,
+    tmp_path,
+):
+    import application.pipeline.collection_build.service as task_runner_module
+
+    class PartiallyFailingObjectiveExtractor(FakeObjectiveExtractor):
+        def extract_paper_skim(self, payload):  # noqa: ANN001
+            if any(
+                unit.get("source_unit_id") == "source-unit-000002"
+                for unit in payload.get("source_units") or ()
+            ):
+                raise RuntimeError("invalid relationship in Source unit")
+            return super().extract_paper_skim(payload)
+
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    build_repository = MemoryBuildRepository()
+    task_service = TaskService(build_repository)
+    runner, artifact_registry = _build_runner(
+        tmp_path,
+        collection_service,
+        build_repository,
+    )
+    runner.research_objective_service._objective_extractor = (
+        PartiallyFailingObjectiveExtractor()
+    )
+
+    collection = collection_service.create_collection("Partial PaperSkim Collection")
+    paths = collection_service.get_paths(collection["collection_id"])
+    collection_service.add_file(
+        collection["collection_id"],
+        "paper.txt",
+        b"Experimental Section\nMix and anneal.",
+    )
+
+    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003, ARG001
+        return [
+            DummyWorkflowOutput(result=_write_source_artifact_outputs(paths.output_dir))
+        ]
+
+    monkeypatch.setattr(
+        task_runner_module, "build_source_artifacts", fake_build_source_artifacts
+    )
+
+    task = task_service.create_task(collection["collection_id"], "build")
+    result = asyncio.run(runner.run_task(task["task_id"], collection["collection_id"]))
+
+    assert result["status"] == "partial_success"
+    assert result["errors"] == []
+    assert result["warnings"] == [
+        "objective_candidates: 1 PaperSkim Source unit failed extraction "
+        "permanently; candidate objectives were built from the remaining coverage."
+    ]
+    pipeline_run = task_service.read_pipeline_run(task["task_id"])
+    objective_node = pipeline_run.node("objective_candidates")
+    assert objective_node.status == "succeeded"
+    assert objective_node.output_summary["extraction_failed_source_unit_count"] == 1
+
+    objective_facts = runner.research_objective_service.objective_repository.read(
+        collection["collection_id"],
+        build_id=artifact_registry.repository.read_build(task["task_id"]).build_id,
+    )
+    assert objective_facts.research_objectives_ready is True
+    assert objective_facts.research_objectives
+    assert any(not skim.coverage_complete for skim in objective_facts.paper_skims)
 
 
 def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch, tmp_path):

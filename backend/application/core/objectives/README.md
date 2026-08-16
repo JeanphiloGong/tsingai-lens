@@ -36,7 +36,10 @@ Objective analysis.
   splits before execution. Provider length termination or model-declared output
   saturation enters the same recursive Source-unit subdivision path as a failed
   multi-unit batch, preserving stable Source-unit ids until only a terminal
-  singleton can become `extraction_failed`.
+  singleton can become `extraction_failed`. A relationship with no varied
+  factor is retained as an unresolved outcome signal when its outcome and
+  Source lineage are valid; the backend does not invent a missing factor or
+  discard valid sibling relationships.
   Successful siblings are retained. Duplicate studies are consolidated and
   unresolved study signals are reconciled only after every terminal batch has
   finished. The resulting one `PaperSkim` per document retains every distinct
@@ -172,7 +175,10 @@ paper authority. `coverage_complete` therefore means that every eligible
 Source unit was processed by a contract-valid first-stage extraction; it does
 not prove that the model found every scientifically relevant study,
 relationship, variable, or outcome. Model-call count grows with document length
-and with failed-batch subdivision.
+and with failed-batch subdivision. Permanent singleton failures are included in
+the Objective node summary and warnings. The collection build finishes as
+`partial_success` while candidates derived from successful Source units remain
+readable.
 
 Objective paper framing is also source-batched. Explicitly excluded documents
 are rejected by the backend without entering the model. The framing prior

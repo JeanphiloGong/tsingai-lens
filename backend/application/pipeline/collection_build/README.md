@@ -16,6 +16,13 @@ newer build; failed or older concurrent builds remain diagnostic history.
 Public task and artifact responses remain projections of these relational rows,
 not file-backed JSON documents.
 
+An Objective candidate node can succeed with incomplete PaperSkim coverage.
+It records the processed and permanently failed Source-unit counts in its output
+summary and exposes a node warning. A nonzero permanent failure count finalizes
+the task as `partial_success`, while successful candidate Objectives remain part
+of the activated build. A build with complete PaperSkim coverage remains
+`completed`.
+
 The pipeline layer does not parse documents or extract facts directly. Each
 node delegates to the owning implementation module for one concrete step.
 

@@ -345,6 +345,94 @@ class StructuredPaperSkim(_StrictModel):
         max_length=PAPER_SKIM_WARNING_LIMIT[0],
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _downgrade_relationships_without_factors(cls, value: object) -> object:
+        if not isinstance(value, Mapping):
+            return value
+        studies = value.get("studies")
+        unresolved_signals = value.get("unresolved_signals")
+        if not isinstance(studies, list):
+            return value
+        if unresolved_signals is not None and not isinstance(
+            unresolved_signals, list
+        ):
+            return value
+
+        retained_studies: list[object] = []
+        downgraded_signals: list[dict[str, object]] = []
+        changed = False
+        for study in studies:
+            if not isinstance(study, Mapping):
+                retained_studies.append(study)
+                continue
+            relationships = study.get("relationships")
+            if not isinstance(relationships, list):
+                retained_studies.append(study)
+                continue
+
+            retained_relationships: list[object] = []
+            study_changed = False
+            for relationship in relationships:
+                if not isinstance(relationship, Mapping):
+                    retained_relationships.append(relationship)
+                    continue
+                varied_factors = relationship.get("varied_factors")
+                if not isinstance(varied_factors, list) or any(
+                    str(item).strip() for item in varied_factors
+                ):
+                    retained_relationships.append(relationship)
+                    continue
+                outcome = str(relationship.get("outcome") or "").strip()
+                source_unit_ids = relationship.get("source_unit_ids")
+                if (
+                    not outcome
+                    or not isinstance(source_unit_ids, list)
+                    or not any(str(item).strip() for item in source_unit_ids)
+                ):
+                    retained_relationships.append(relationship)
+                    continue
+
+                signal = {
+                    "signal_type": "outcome",
+                    "label": outcome,
+                    "source_unit_ids": list(source_unit_ids),
+                    "confidence": relationship.get(
+                        "confidence", study.get("confidence")
+                    ),
+                }
+                for field_name in (
+                    "experiment_label",
+                    "design_type",
+                    "claim_scope",
+                    "material_scope",
+                    "process_context",
+                    "sample_context",
+                    "test_context",
+                    "comparator",
+                    "fixed_conditions",
+                ):
+                    if field_name in study:
+                        signal[field_name] = study[field_name]
+                downgraded_signals.append(signal)
+                study_changed = True
+                changed = True
+
+            if retained_relationships or not study_changed:
+                retained_study = dict(study)
+                retained_study["relationships"] = retained_relationships
+                retained_studies.append(retained_study)
+
+        if not changed:
+            return value
+        normalized = dict(value)
+        normalized["studies"] = retained_studies
+        normalized["unresolved_signals"] = [
+            *(unresolved_signals or []),
+            *downgraded_signals,
+        ]
+        return normalized
+
     @field_validator(
         "studies",
         "unresolved_signals",

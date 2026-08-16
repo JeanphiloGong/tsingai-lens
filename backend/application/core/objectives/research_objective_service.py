@@ -343,7 +343,7 @@ class ResearchObjectiveService:
         progress_callback: ProgressCallback | None = None,
         *,
         build_id: str,
-    ) -> tuple[ResearchObjective, ...]:
+    ) -> ObjectiveFactSet:
         source_inputs = self._load_objective_source_inputs(
             collection_id,
             build_id=build_id,
@@ -397,7 +397,7 @@ class ResearchObjectiveService:
             len(paper_skims),
             len(research_objectives),
         )
-        return research_objectives
+        return candidate_facts
 
     def generate_objective_analysis_artifacts(
         self,

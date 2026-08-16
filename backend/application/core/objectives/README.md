@@ -255,12 +255,17 @@ removes such a parameter from `changed_variables` and `comparison.axis_names`.
 When that removal leaves exactly one changed variable from a `joint_effect`
 draft, the backend derives `isolated_effect`; endpoint completeness, comparison
 parity, comparability, and Source grounding remain strict validation
-requirements. A non-empty model result that survives schema validation but
-fails Source grounding receives deterministic field-path errors for unsupported
-variable names, endpoints, units, outcomes, values, result text, or table-row
-bindings. The service permits one additional repair call with the same Objective,
-route, Source, invalid item, and field errors. The model may correct only values
-explicitly present in that Source or abstain; the backend never deletes or
+requirements. Because `comparison.axis_names` repeats the changed-variable
+identity, the adapter restores a missing or empty axis list only when every
+changed variable has a unique non-empty name and complete, distinct endpoints.
+Incomplete variables still enter bounded repair; the backend does not infer an
+axis from domain knowledge. A non-empty model result that survives schema
+validation but fails Source grounding receives deterministic field-path errors
+for unsupported variable names, endpoints, units, outcomes, values, result text,
+or table-row bindings. The service permits one additional repair call with the
+same Objective, route, Source, invalid item, and field errors. The model may
+correct only values explicitly present in that Source or abstain; the backend
+never deletes or
 substitutes scientific values merely to make the item pass. A repaired item goes
 through the complete contract and Source-grounding checks again. A failed repair
 or abstention becomes explicit failed Evidence with the final field-level reason

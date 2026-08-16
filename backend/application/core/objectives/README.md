@@ -255,7 +255,11 @@ removes such a parameter from `changed_variables` and `comparison.axis_names`.
 When that removal leaves exactly one changed variable from a `joint_effect`
 draft, the backend derives `isolated_effect`; endpoint completeness, comparison
 parity, comparability, and Source grounding remain strict validation
-requirements. Because `comparison.axis_names` repeats the changed-variable
+requirements. When every named variable is fixed, the backend removes the
+comparison and retains the reported result only as `descriptive_only`; normal
+Source-grounding validation still follows, and the backend does not claim an
+experimental effect from unchanged conditions. Because
+`comparison.axis_names` repeats the changed-variable
 identity, the adapter restores a missing or empty axis list only when every
 changed variable has a unique non-empty name and complete, distinct endpoints.
 Incomplete variables still enter bounded repair; the backend does not infer an

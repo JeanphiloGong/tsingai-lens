@@ -1,6 +1,8 @@
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
+from application.core.objectives.analysis.source_extraction import (
+    ExtractedEvidenceDraft,
+)
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
-from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
 
 
 def test_paper_analysis_frame_does_not_accept_legacy_paper_id() -> None:

@@ -9,10 +9,17 @@ from httpx import Request, Response
 from openai import BadRequestError
 
 from application.core.objectives import property_matching
-from application.core.objectives.analysis import evidence_routing, source_screening
+from application.core.objectives.analysis import (
+    evidence_routing,
+    source_extraction,
+    source_screening,
+)
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
+from application.core.objectives.analysis.source_extraction import (
+    ExtractedEvidenceDraft,
+    extract_source_facts,
+)
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
-from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
 from application.core.objectives.extraction import (
     OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
 )
@@ -193,10 +200,7 @@ def _frame_test_table(table_id: str, caption: str, order: int) -> SimpleNamespac
     )
 
 
-def test_research_objective_table_source_payload_includes_table_cells(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_research_objective_table_source_payload_includes_table_cells():
     route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
@@ -243,7 +247,7 @@ def test_research_objective_table_source_payload_includes_table_cells(tmp_path):
         ),
     ]
 
-    payload = service._build_objective_route_source_payload(
+    payload = source_extraction._build_objective_route_source_payload(
         route=route,
         blocks=[],
         tables=[table],
@@ -266,10 +270,7 @@ def test_research_objective_table_source_payload_includes_table_cells(tmp_path):
     ]
 
 
-def test_research_objective_text_source_payload_uses_document_tree(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_research_objective_text_source_payload_uses_document_tree():
     route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-heat",
@@ -320,7 +321,7 @@ def test_research_objective_text_source_payload_uses_document_tree(tmp_path):
         },
     )
 
-    payload = service._build_objective_route_source_payload(
+    payload = source_extraction._build_objective_route_source_payload(
         route=route,
         blocks=[],
         tables=[],
@@ -1009,7 +1010,6 @@ def test_objective_paper_framing_batches_every_stable_source_once():
 
 
 def test_objective_paper_frame_routes_duplicate_headings_by_selected_source_ref(
-    tmp_path,
 ):
     objective = _research_objective(
         {
@@ -1233,10 +1233,7 @@ def test_objective_paper_framing_does_not_send_over_budget_singleton():
     )
 
 
-def test_objective_symbol_axes_distinguish_scan_and_build_angles(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_symbol_axes_distinguish_scan_and_build_angles():
     objective = _research_objective(
         {
             "objective_id": "obj-angle-effects",
@@ -1266,12 +1263,12 @@ def test_objective_symbol_axes_distinguish_scan_and_build_angles(tmp_path):
     assert property_matching.process_column_axis_keys("β") == {
         "build orientation beta angle"
     }
-    assert service._objective_process_attribute_label(
+    assert source_extraction._objective_process_attribute_label(
         column="θ",
         role="process variable",
         objective_context=objective,
     ) == "scan strategy rotation angle"
-    assert service._objective_process_attribute_label(
+    assert source_extraction._objective_process_attribute_label(
         column="α",
         role="process variable",
         objective_context=objective,
@@ -1315,7 +1312,7 @@ def test_objective_angle_table_comparison_retains_all_changed_axes(tmp_path):
     )
     measurements = tuple(
         ExtractedEvidenceDraft.from_mapping(record)
-        for record in service._objective_table_matrix_evidence_records(
+        for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
             objective_context=objective,
             source={
@@ -1359,10 +1356,7 @@ def test_objective_angle_table_comparison_retains_all_changed_axes(tmp_path):
     )
 
 
-def test_llm_objective_evidence_rejects_values_and_axis_absent_from_source(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_llm_objective_evidence_rejects_values_and_axis_absent_from_source():
     objective = _research_objective(
         {
             "objective_id": "obj-angle-effects",
@@ -1386,7 +1380,7 @@ def test_llm_objective_evidence_rejects_values_and_axis_absent_from_source(tmp_p
         }
     )
 
-    records = service._objective_evidence_records_from_extracted(
+    records = source_extraction._objective_evidence_records_from_extracted(
         route=route,
         source={
             "source_kind": "text_window",
@@ -1596,17 +1590,17 @@ def test_research_objective_binds_same_study_methods_and_results_sources(tmp_pat
         _study_source_route(objective.objective_id, block.block_id)
         for block in blocks
     )
-    drafts = service._build_objective_evidence(
+    source_drafts = extract_source_facts(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
         blocks_by_document_id={"paper-1": blocks},
         tables_by_document_id={"paper-1": []},
         document_trees_by_document_id={},
     )
+    drafts = service._bind_objective_result_process_context(source_drafts)
 
     assert extractor.calls == ["01-methods-s1", "02-methods-s2", "03-results"]
     assert not any(draft.selection_status == "failed" for draft in drafts)
@@ -1723,11 +1717,10 @@ def test_research_objective_keeps_unbound_result_as_descriptive_evidence(tmp_pat
         {"03-results": _cross_source_microstructure_records()["03-results"]}
     )
 
-    drafts = service._build_objective_evidence(
+    source_drafts = extract_source_facts(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=(
             _study_source_route(objective.objective_id, result_block.block_id),
@@ -1736,6 +1729,7 @@ def test_research_objective_keeps_unbound_result_as_descriptive_evidence(tmp_pat
         tables_by_document_id={"paper-1": []},
         document_trees_by_document_id={},
     )
+    drafts = service._bind_objective_result_process_context(source_drafts)
 
     assert extractor.calls == ["03-results"]
     assert len(drafts) == 1
@@ -1747,10 +1741,7 @@ def test_research_objective_keeps_unbound_result_as_descriptive_evidence(tmp_pat
     assert drafts[0].resolution_status == "partial"
 
 
-def test_research_objective_abstains_without_target_result(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_research_objective_abstains_without_target_result():
     objective = _research_objective({"objective_id": "obj-microstructure"})
     block = _study_source_block(
         "03-background",
@@ -1760,11 +1751,10 @@ def test_research_objective_abstains_without_target_result(tmp_path):
     )
     extractor = _StudySourceEvidenceExtractor({"03-background": None})
 
-    drafts = service._build_objective_evidence(
+    drafts = extract_source_facts(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=(
             _study_source_route(objective.objective_id, block.block_id),
@@ -1777,10 +1767,7 @@ def test_research_objective_abstains_without_target_result(tmp_path):
     assert drafts == ()
 
 
-def test_research_objective_records_provider_failure_as_failed_evidence(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_research_objective_records_provider_failure_as_failed_evidence():
     objective = _research_objective({"objective_id": "obj-microstructure"})
     block = _study_source_block(
         "03-results",
@@ -1793,11 +1780,10 @@ def test_research_objective_records_provider_failure_as_failed_evidence(tmp_path
         failing_source_ref="03-results",
     )
 
-    drafts = service._build_objective_evidence(
+    drafts = extract_source_facts(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=(
             _study_source_route(objective.objective_id, block.block_id),
@@ -1814,10 +1800,7 @@ def test_research_objective_records_provider_failure_as_failed_evidence(tmp_path
     )
 
 
-def test_llm_objective_evidence_preserves_zero_extraction_confidence(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_llm_objective_evidence_preserves_zero_extraction_confidence():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -1837,7 +1820,7 @@ def test_llm_objective_evidence_preserves_zero_extraction_confidence(tmp_path):
         }
     )
 
-    records = service._objective_evidence_records_from_extracted(
+    records = source_extraction._objective_evidence_records_from_extracted(
         route=route,
         source={
             "source_kind": "text_window",
@@ -1883,10 +1866,7 @@ def test_llm_objective_evidence_preserves_zero_extraction_confidence(tmp_path):
     assert records[0]["confidence"] == 0.0
 
 
-def test_llm_objective_evidence_accepts_source_grounded_axis_and_values(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_llm_objective_evidence_accepts_source_grounded_axis_and_values():
     objective = _research_objective(
         {
             "objective_id": "obj-angle-effects",
@@ -1907,7 +1887,7 @@ def test_llm_objective_evidence_accepts_source_grounded_axis_and_values(tmp_path
         }
     )
 
-    records = service._objective_evidence_records_from_extracted(
+    records = source_extraction._objective_evidence_records_from_extracted(
         route=route,
         source={
             "source_kind": "table",
@@ -1959,10 +1939,7 @@ def test_llm_objective_evidence_accepts_source_grounded_axis_and_values(tmp_path
     assert len(records) == 1
 
 
-def test_llm_objective_evidence_completes_grounded_categorical_endpoints(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_llm_objective_evidence_completes_grounded_categorical_endpoints():
     objective = _research_objective(
         {
             "objective_id": "obj-preheating",
@@ -1983,7 +1960,7 @@ def test_llm_objective_evidence_completes_grounded_categorical_endpoints(tmp_pat
         }
     )
 
-    records = service._objective_evidence_records_from_extracted(
+    records = source_extraction._objective_evidence_records_from_extracted(
         route=route,
         source={
             "source_kind": "text_window",
@@ -2044,11 +2021,7 @@ def test_llm_objective_evidence_completes_grounded_categorical_endpoints(tmp_pat
 
 
 def test_llm_objective_evidence_accepts_verbatim_preheating_crack_comparison(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-preheating-cracks",
@@ -2071,7 +2044,7 @@ def test_llm_objective_evidence_accepts_verbatim_preheating_crack_comparison(
         }
     )
 
-    records = service._objective_evidence_records_from_extracted(
+    records = source_extraction._objective_evidence_records_from_extracted(
         route=route,
         source={
             "source_kind": "text_window",
@@ -2131,10 +2104,7 @@ def test_llm_objective_evidence_accepts_verbatim_preheating_crack_comparison(
     assert records[0]["reported_result"]["direction"] == "decrease"
 
 
-def test_llm_objective_evidence_drops_unsupported_qualitative_direction(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_llm_objective_evidence_drops_unsupported_qualitative_direction():
     objective = _research_objective(
         {
             "objective_id": "obj-preheating",
@@ -2155,7 +2125,7 @@ def test_llm_objective_evidence_drops_unsupported_qualitative_direction(tmp_path
         }
     )
 
-    records = service._objective_evidence_records_from_extracted(
+    records = source_extraction._objective_evidence_records_from_extracted(
         route=route,
         source={
             "source_kind": "text_window",
@@ -2202,10 +2172,7 @@ def test_llm_objective_evidence_drops_unsupported_qualitative_direction(tmp_path
     assert records[0]["reported_result"]["direction"] == "unknown"
 
 
-def test_llm_objective_evidence_keeps_grounded_qualitative_direction(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_llm_objective_evidence_keeps_grounded_qualitative_direction():
     objective = _research_objective(
         {
             "objective_id": "obj-preheating",
@@ -2226,7 +2193,7 @@ def test_llm_objective_evidence_keeps_grounded_qualitative_direction(tmp_path):
         }
     )
 
-    records = service._objective_evidence_records_from_extracted(
+    records = source_extraction._objective_evidence_records_from_extracted(
         route=route,
         source={
             "source_kind": "text_window",
@@ -2272,10 +2239,7 @@ def test_llm_objective_evidence_keeps_grounded_qualitative_direction(tmp_path):
     assert records[0]["reported_result"]["direction"] == "increase"
 
 
-def test_llm_objective_evidence_repairs_endpoints_to_grounded_group_labels(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_llm_objective_evidence_repairs_endpoints_to_grounded_group_labels():
     objective = _research_objective(
         {
             "objective_id": "obj-preheating",
@@ -2296,7 +2260,7 @@ def test_llm_objective_evidence_repairs_endpoints_to_grounded_group_labels(tmp_p
         }
     )
 
-    records = service._objective_evidence_records_from_extracted(
+    records = source_extraction._objective_evidence_records_from_extracted(
         route=route,
         source={
             "source_kind": "text_window",
@@ -2356,11 +2320,7 @@ def test_llm_objective_evidence_repairs_endpoints_to_grounded_group_labels(tmp_p
 
 
 def test_llm_objective_evidence_keeps_result_without_labels_absent_from_source(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-preheating",
@@ -2381,7 +2341,7 @@ def test_llm_objective_evidence_keeps_result_without_labels_absent_from_source(
         }
     )
 
-    records = service._objective_evidence_records_from_extracted(
+    records = source_extraction._objective_evidence_records_from_extracted(
         route=route,
         source={
             "source_kind": "text_window",
@@ -2428,10 +2388,7 @@ def test_llm_objective_evidence_keeps_result_without_labels_absent_from_source(
     assert records[0]["resolution_status"] == "partial"
 
 
-def test_llm_table_result_rejects_outcome_and_unit_from_another_column(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_llm_table_result_rejects_outcome_and_unit_from_another_column():
     record = {
         "changed_variables": [
             {
@@ -2453,7 +2410,7 @@ def test_llm_table_result_rejects_outcome_and_unit_from_another_column(tmp_path)
         },
     }
 
-    assert not service._objective_extracted_result_is_source_grounded(
+    assert not source_extraction._objective_extracted_result_is_source_grounded(
         record,
         source={
             "source_kind": "table",
@@ -2467,10 +2424,7 @@ def test_llm_table_result_rejects_outcome_and_unit_from_another_column(tmp_path)
     )
 
 
-def test_llm_table_result_rejects_value_from_a_different_experiment_row(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_llm_table_result_rejects_value_from_a_different_experiment_row():
     record = {
         "changed_variables": [
             {
@@ -2492,7 +2446,7 @@ def test_llm_table_result_rejects_value_from_a_different_experiment_row(tmp_path
         },
     }
 
-    assert not service._objective_extracted_result_is_source_grounded(
+    assert not source_extraction._objective_extracted_result_is_source_grounded(
         record,
         source={
             "source_kind": "table",
@@ -2507,12 +2461,9 @@ def test_llm_table_result_rejects_value_from_a_different_experiment_row(tmp_path
     )
 
 
-def test_llm_context_drops_values_absent_from_source(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_llm_context_drops_values_absent_from_source():
 
-    record = service._objective_retain_source_grounded_context(
+    record = source_extraction._objective_retain_source_grounded_context(
         {
             "scientific_context": {
                 "material": [],
@@ -2536,12 +2487,9 @@ def test_llm_context_drops_values_absent_from_source(tmp_path):
     assert record["scientific_context"]["process"] == []
 
 
-def test_llm_result_rejects_ungrounded_categorical_variable_endpoint(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_llm_result_rejects_ungrounded_categorical_variable_endpoint():
 
-    assert not service._objective_extracted_result_is_source_grounded(
+    assert not source_extraction._objective_extracted_result_is_source_grounded(
         {
             "changed_variables": [
                 {
@@ -2569,13 +2517,9 @@ def test_llm_result_rejects_ungrounded_categorical_variable_endpoint(tmp_path):
 
 
 def test_llm_context_drops_attribute_not_bound_to_name_value_and_unit(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
 
-    record = service._objective_retain_source_grounded_context(
+    record = source_extraction._objective_retain_source_grounded_context(
         {
             "scientific_context": {
                 "material": [],
@@ -2636,10 +2580,7 @@ def test_objective_paper_framing_marks_all_explicitly_excluded_sources_irrelevan
     assert frames[0].excluded_tables == ("table-composition",)
 
 
-def test_research_objective_text_source_payload_resolves_tree_node_to_block(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_research_objective_text_source_payload_resolves_tree_node_to_block():
     route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-heat",
@@ -2696,7 +2637,7 @@ def test_research_objective_text_source_payload_resolves_tree_node_to_block(tmp_
         },
     )
 
-    payload = service._build_objective_route_source_payload(
+    payload = source_extraction._build_objective_route_source_payload(
         route=route,
         blocks=[block],
         tables=[],
@@ -2714,10 +2655,7 @@ def test_research_objective_text_source_payload_resolves_tree_node_to_block(tmp_
     }
 
 
-def test_research_objective_prompt_source_uses_cells_without_duplicate_matrix(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_research_objective_prompt_source_uses_cells_without_duplicate_matrix():
     source = {
         "source_kind": "table",
         "source_ref": "table-1",
@@ -2737,23 +2675,19 @@ def test_research_objective_prompt_source_uses_cells_without_duplicate_matrix(tm
         ],
     }
 
-    projected = service._objective_evidence_prompt_source(source)
+    projected = source_extraction._objective_evidence_prompt_source(source)
 
     assert "table_matrix" not in projected
     assert projected["table_cells"] == source["table_cells"]
 
-    fallback = service._objective_evidence_prompt_source(
+    fallback = source_extraction._objective_evidence_prompt_source(
         {key: value for key, value in source.items() if key != "table_cells"}
     )
     assert fallback["table_matrix"] == [["sample", "density"], ["A", "99.6"]]
 
 
 def test_research_objective_evidence_prompt_compacts_long_text_source(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -2808,11 +2742,10 @@ def test_research_objective_evidence_prompt_compacts_long_text_source(
 
     extractor = PayloadCaptureExtractor()
 
-    service._build_objective_evidence(
+    extract_source_facts(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(frame,),
         objective_evidence_routes=(route,),
         blocks_by_document_id={"paper-1": [block]},
@@ -2828,11 +2761,7 @@ def test_research_objective_evidence_prompt_compacts_long_text_source(
 
 
 def test_research_objective_fragmented_table_matrix_triggers_structural_repair(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
@@ -2844,7 +2773,7 @@ def test_research_objective_fragmented_table_matrix_triggers_structural_repair(
         }
     )
 
-    assert service._objective_table_source_needs_llm_structural_repair(
+    assert source_extraction._objective_table_source_needs_llm_structural_repair(
         route=route,
         source={
             "table_matrix": [
@@ -2857,7 +2786,6 @@ def test_research_objective_fragmented_table_matrix_triggers_structural_repair(
 
 
 def test_research_objective_repairs_fragmented_table_with_paper_facts_extractor(
-    tmp_path,
 ):
     class RepairingPaperFactsExtractor:
         def __init__(self) -> None:
@@ -2877,10 +2805,6 @@ def test_research_objective_repairs_fragmented_table_with_paper_facts_extractor(
             )
 
     extractor = RepairingPaperFactsExtractor()
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-        paper_facts_extractor=extractor,
-    )
     route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
@@ -2903,10 +2827,11 @@ def test_research_objective_repairs_fragmented_table_with_paper_facts_extractor(
     }
 
     repaired_source, repair_error = (
-        service._repair_objective_table_source_if_needed(
+        source_extraction._repair_objective_table_source_if_needed(
             collection_id="col-test",
             route=route,
             source=source,
+            paper_facts_extractor=extractor,
         )
     )
 
@@ -2920,7 +2845,7 @@ def test_research_objective_repairs_fragmented_table_with_paper_facts_extractor(
     assert repaired_source["table_matrix_structural_repair_applied"] is True
 
 
-def test_research_objective_table_repair_bad_request_is_route_scoped(tmp_path):
+def test_research_objective_table_repair_bad_request_is_route_scoped():
     class RouteScopedRepairExtractor:
         def __init__(self) -> None:
             self.source_refs: list[str] = []
@@ -2956,10 +2881,6 @@ def test_research_objective_table_repair_bad_request_is_route_scoped(tmp_path):
 
     repair_extractor = RouteScopedRepairExtractor()
     evidence_extractor = UnexpectedEvidenceExtractor()
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-        paper_facts_extractor=repair_extractor,
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -3003,11 +2924,11 @@ def test_research_objective_table_repair_bad_request_is_route_scoped(tmp_path):
         for table_order, source_ref in enumerate(("table-a", "table-b"), start=1)
     ]
 
-    units = service._build_objective_evidence(
+    units = extract_source_facts(
         collection_id="col-test",
         extractor=evidence_extractor,
+        paper_facts_extractor=repair_extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
         blocks_by_document_id={},
@@ -3055,7 +2976,6 @@ def test_research_objective_table_repair_bad_request_is_route_scoped(tmp_path):
     ids=("empty", "unchanged-fragment", "remaining-fragment"),
 )
 def test_research_objective_rejects_unusable_table_matrix_repair(
-    tmp_path,
     repaired_table_matrix,
     expected_failure_reason,
 ):
@@ -3075,10 +2995,7 @@ def test_research_objective_rejects_unusable_table_matrix_repair(
             return StructuredEvidenceExtractions()
 
     evidence_extractor = UnexpectedEvidenceExtractor()
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-        paper_facts_extractor=UnusableRepairExtractor(),
-    )
+    repair_extractor = UnusableRepairExtractor()
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -3116,11 +3033,11 @@ def test_research_objective_rejects_unusable_table_matrix_repair(
         ),
     )
 
-    units = service._build_objective_evidence(
+    units = extract_source_facts(
         collection_id="col-test",
         extractor=evidence_extractor,
+        paper_facts_extractor=repair_extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=(route,),
         blocks_by_document_id={},
@@ -3197,11 +3114,11 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails(
         ),
     )
 
-    units = service._build_objective_evidence(
+    units = extract_source_facts(
         collection_id="col-test",
         extractor=evidence_extractor,
+        paper_facts_extractor=repair_extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=(route,),
         blocks_by_document_id={},
@@ -3243,11 +3160,7 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails(
 
 
 def test_research_objective_service_skips_matrix_test_condition_table_fallback(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
@@ -3265,15 +3178,11 @@ def test_research_objective_service_skips_matrix_test_condition_table_fallback(
         }
     )
 
-    assert service._objective_table_route_should_skip_llm_fallback(route)
+    assert source_extraction._objective_table_route_should_skip_llm_fallback(route)
 
 
 def test_research_objective_service_skips_untyped_table_test_condition_fallback(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
@@ -3285,15 +3194,11 @@ def test_research_objective_service_skips_untyped_table_test_condition_fallback(
         }
     )
 
-    assert service._objective_table_route_should_skip_llm_fallback(route)
+    assert source_extraction._objective_table_route_should_skip_llm_fallback(route)
 
 
 def test_research_objective_service_skips_off_target_result_table_fallback(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-mechanical",
@@ -3325,8 +3230,8 @@ def test_research_objective_service_skips_off_target_result_table_fallback(
         }
     )
 
-    assert service._objective_table_route_should_skip_llm_fallback(route)
-    assert service._objective_table_route_should_skip_llm_fallback(corrosion_route)
+    assert source_extraction._objective_table_route_should_skip_llm_fallback(route)
+    assert source_extraction._objective_table_route_should_skip_llm_fallback(corrosion_route)
 
     eis_route = EvidenceCandidate.from_mapping(
         {
@@ -3341,15 +3246,11 @@ def test_research_objective_service_skips_off_target_result_table_fallback(
         }
     )
 
-    assert service._objective_table_route_should_skip_llm_fallback(eis_route)
+    assert source_extraction._objective_table_route_should_skip_llm_fallback(eis_route)
 
 
 def test_research_objective_service_skips_non_target_result_property_columns(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-preheat",
@@ -3378,7 +3279,7 @@ def test_research_objective_service_skips_non_target_result_property_columns(
         }
     )
 
-    records = service._objective_table_matrix_evidence_records(
+    records = source_extraction._objective_table_matrix_evidence_records(
         route=route,
         objective_context=objective_context,
         source={
@@ -3395,7 +3296,6 @@ def test_research_objective_service_skips_non_target_result_property_columns(
 
 
 def test_research_objective_service_uses_objective_scientific_intent_directly(
-    tmp_path,
 ):
     objective = _research_objective(
         {
@@ -3577,7 +3477,6 @@ def test_research_objective_service_does_not_invent_material_without_document_sk
 
 
 def test_research_objective_service_routes_matching_tables_beyond_seed_documents(
-    tmp_path,
 ):
     objective = _research_objective(
         {
@@ -3735,9 +3634,9 @@ def test_real_ved_process_and_defect_tables_form_joint_comparison(tmp_path):
     units = tuple(
         ExtractedEvidenceDraft.from_mapping(record)
         for route in routes
-        for record in service._objective_table_matrix_evidence_records(
+        for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
-            source=service._build_objective_route_source_payload(
+            source=source_extraction._build_objective_route_source_payload(
                 route=route,
                 blocks=[],
                 tables=list(tables),
@@ -3773,11 +3672,7 @@ def test_real_ved_process_and_defect_tables_form_joint_comparison(tmp_path):
 
 
 def test_objective_densification_outcome_includes_relative_density_evidence(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -3870,9 +3765,9 @@ def test_real_p001_density_table_retains_complete_changed_factor_tuple(tmp_path)
     units = tuple(
         ExtractedEvidenceDraft.from_mapping(record)
         for route in routes
-        for record in service._objective_table_matrix_evidence_records(
+        for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
-            source=service._build_objective_route_source_payload(
+            source=source_extraction._build_objective_route_source_payload(
                 route=route,
                 blocks=[],
                 tables=[table],
@@ -3900,7 +3795,6 @@ def test_real_p001_density_table_retains_complete_changed_factor_tuple(tmp_path)
 
 
 def test_research_objective_service_does_not_route_single_letter_acronym_tables(
-    tmp_path,
 ):
     objective = _research_objective(
         {

@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from application.core.objectives import property_matching
-from application.core.objectives.analysis import evidence_routing
+from application.core.objectives.analysis import evidence_routing, source_extraction
 from application.core.objectives.analysis.evidence_routing import (
     EvidenceCandidate,
     SourceSelectionHint,
@@ -90,12 +90,7 @@ def test_research_objective_service_treats_energy_density_only_table_as_conditio
     assert hints[0].matched_outcomes == ()
 
 
-def test_research_objective_service_normalizes_archimedes_density_column(
-    tmp_path,
-):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_research_objective_service_normalizes_archimedes_density_column():
     objective_context = _research_objective(
         {
             "objective_id": "obj-density",
@@ -379,10 +374,7 @@ def test_research_objective_service_route_payload_uses_objective_contract(
     assert "objective_evidence_lens" not in payload
 
 
-def test_process_route_does_not_treat_result_columns_as_process_context(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_process_route_does_not_treat_result_columns_as_process_context():
     objective_context = _research_objective(
         {
             "objective_id": "obj-fatigue",
@@ -412,7 +404,7 @@ def test_process_route_does_not_treat_result_columns_as_process_context(tmp_path
         }
     )
 
-    records = service._objective_table_matrix_evidence_records(
+    records = source_extraction._objective_table_matrix_evidence_records(
         route=misrouted_result_table,
         source={
             "page": 5,

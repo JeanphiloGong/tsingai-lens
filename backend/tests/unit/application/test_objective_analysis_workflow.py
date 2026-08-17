@@ -4,8 +4,10 @@ from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
+from application.core.objectives.analysis.source_extraction import (
+    ExtractedEvidenceDraft,
+)
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
-from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
 from application.core.objectives.schemas import (
     StructuredEvidenceSelections,
     StructuredPaperFrameBatch,

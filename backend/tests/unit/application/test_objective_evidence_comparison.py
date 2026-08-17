@@ -7,9 +7,13 @@ import pytest
 from httpx import Request, Response
 from openai import APIConnectionError, BadRequestError
 
+from application.core.objectives.analysis import source_extraction
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
+from application.core.objectives.analysis.source_extraction import (
+    ExtractedEvidenceDraft,
+    extract_source_facts,
+)
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
-from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
 from application.core.objectives.schemas import (
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
@@ -24,7 +28,7 @@ from tests.support.research_objective_service import (
 )
 
 
-def test_objective_evidence_document_state_is_typed_and_document_scoped(tmp_path):
+def test_objective_evidence_document_state_is_typed_and_document_scoped():
     class RecordingExtractor:
         def __init__(self) -> None:
             self.payloads: list[dict[str, Any]] = []
@@ -90,9 +94,6 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped(tmp_path
                 ]
             )
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     extractor = RecordingExtractor()
     objective = _research_objective(
         {
@@ -145,11 +146,10 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped(tmp_path
         for document_id in ("paper-1", "paper-2")
     }
 
-    units = service._build_objective_evidence(
+    units = extract_source_facts(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
         blocks_by_document_id=blocks,
@@ -162,7 +162,7 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped(tmp_path
         payload["evidence_route"]["source_ref"]: payload["document_state"]
         for payload in extractor.payloads
     }
-    empty_state = service._empty_objective_document_state()
+    empty_state = source_extraction._empty_objective_document_state()
     assert states_by_source_ref["paper-1-methods"] == empty_state
     assert states_by_source_ref["paper-2-results"] == empty_state
     paper_1_result_state = states_by_source_ref["paper-1-results"]
@@ -184,7 +184,7 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped(tmp_path
     assert paper_1_result.source_refs[0]["source_ref"] == "paper-1-results"
 
 
-def test_objective_evidence_continues_after_one_route_format_failure(tmp_path):
+def test_objective_evidence_continues_after_one_route_format_failure():
     class RecoveringExtractor:
         def __init__(self) -> None:
             self.calls = 0
@@ -210,9 +210,6 @@ def test_objective_evidence_continues_after_one_route_format_failure(tmp_path):
                 ]
             )
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     extractor = RecoveringExtractor()
     objective = _research_objective(
         {
@@ -246,11 +243,10 @@ def test_objective_evidence_continues_after_one_route_format_failure(tmp_path):
         for source_ref in ("block-failed", "block-recovered")
     ]
 
-    units = service._build_objective_evidence(
+    units = extract_source_facts(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
         blocks_by_document_id={"paper-1": blocks},
@@ -267,7 +263,7 @@ def test_objective_evidence_continues_after_one_route_format_failure(tmp_path):
     assert units[1].selection_status == "extracted"
 
 
-def test_objective_evidence_routes_round_robin_across_documents(tmp_path):
+def test_objective_evidence_routes_round_robin_across_documents():
     class RecordingExtractor:
         def __init__(self) -> None:
             self.source_refs: list[str] = []
@@ -279,9 +275,6 @@ def test_objective_evidence_routes_round_robin_across_documents(tmp_path):
             self.source_refs.append(payload["evidence_route"]["source_ref"])
             return StructuredEvidenceExtractions(extractions=[])
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     extractor = RecordingExtractor()
     objective = _research_objective(
         {
@@ -324,11 +317,10 @@ def test_objective_evidence_routes_round_robin_across_documents(tmp_path):
         for document_id in ("paper-1", "paper-2")
     }
 
-    service._build_objective_evidence(
+    extract_source_facts(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
         blocks_by_document_id=blocks,
@@ -339,7 +331,7 @@ def test_objective_evidence_routes_round_robin_across_documents(tmp_path):
     assert extractor.source_refs == ["paper-1-a", "paper-2-a", "paper-1-b"]
 
 
-def test_objective_evidence_provider_failure_is_scoped_to_one_document(tmp_path):
+def test_objective_evidence_provider_failure_is_scoped_to_one_document():
     class RecoveringExtractor:
         def __init__(self) -> None:
             self.source_refs: list[str] = []
@@ -371,9 +363,6 @@ def test_objective_evidence_provider_failure_is_scoped_to_one_document(tmp_path)
                 ]
             )
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     extractor = RecoveringExtractor()
     objective = _research_objective(
         {
@@ -416,11 +405,10 @@ def test_objective_evidence_provider_failure_is_scoped_to_one_document(tmp_path)
         for document_id in ("paper-1", "paper-2")
     }
 
-    units = service._build_objective_evidence(
+    units = extract_source_facts(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
         blocks_by_document_id=blocks,
@@ -441,7 +429,6 @@ def test_objective_evidence_provider_failure_is_scoped_to_one_document(tmp_path)
 
 
 def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
-    tmp_path,
 ):
     class RecoveringExtractor:
         def __init__(self) -> None:
@@ -476,9 +463,6 @@ def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
                 ]
             )
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     extractor = RecoveringExtractor()
     objective = _research_objective(
         {
@@ -513,11 +497,10 @@ def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
         for source_ref in source_refs
     ]
 
-    units = service._build_objective_evidence(
+    units = extract_source_facts(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
         blocks_by_document_id={"paper-1": blocks},
@@ -529,14 +512,11 @@ def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
     assert [unit.selection_status for unit in units] == ["failed", "extracted"]
 
 
-def test_objective_evidence_rejects_selected_route_without_source(tmp_path):
+def test_objective_evidence_rejects_selected_route_without_source():
     class UnexpectedExtractor:
         def extract_objective_evidence(self, _payload):
             raise AssertionError("missing Source must fail before model extraction")
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -557,11 +537,10 @@ def test_objective_evidence_rejects_selected_route_without_source(tmp_path):
     )
 
     with pytest.raises(RuntimeError, match="selected Evidence Source is missing"):
-        service._build_objective_evidence(
+        extract_source_facts(
             collection_id="col-test",
             extractor=UnexpectedExtractor(),
             objectives=(objective,),
-            paper_skims=(),
             objective_paper_frames=(),
             objective_evidence_routes=(route,),
             blocks_by_document_id={"paper-1": []},
@@ -731,7 +710,7 @@ def test_analysis_contributions_report_each_paper_evidence_disposition(tmp_path)
     assert by_document["paper-comparable"].comparable_evidence_count == 1
 
 
-def test_objective_context_drops_model_changed_variable_without_values(tmp_path):
+def test_objective_context_drops_model_changed_variable_without_values():
     class ContextExtractor:
         def extract_objective_evidence(
             self,
@@ -760,9 +739,6 @@ def test_objective_context_drops_model_changed_variable_without_values(tmp_path)
                 ]
             )
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-preheating",
@@ -789,11 +765,10 @@ def test_objective_context_drops_model_changed_variable_without_values(tmp_path)
         heading_path="Methods",
     )
 
-    units = service._build_objective_evidence(
+    units = extract_source_facts(
         collection_id="col-test",
         extractor=ContextExtractor(),
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=(route,),
         blocks_by_document_id={"paper-1": [block]},
@@ -1573,7 +1548,7 @@ def test_table_material_and_cell_locators_bound_comparison_source(tmp_path):
     }
     measurements = tuple(
         ExtractedEvidenceDraft.from_mapping(record)
-        for record in service._objective_table_matrix_evidence_records(
+        for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
             source=source,
             objective_context=objective,

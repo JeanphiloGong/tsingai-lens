@@ -10,9 +10,9 @@ Objective analysis.
   analysis. It loads the immutable Source build, delegates candidate discovery
   to its direct owners, and atomically replaces the candidate fact set. For a
   confirmed Objective, it coordinates the ordered analysis stages and consumes
-  their transient results. The remaining routing, extraction, reconstruction,
-  materialization, and publication responsibilities move to direct owners in
-  separate behavior-preserving slices.
+  their transient results. The remaining reconstruction, materialization, and
+  publication responsibilities move to direct owners in separate
+  behavior-preserving slices.
 - `analysis/source_screening.py`
   Owns confirmed-Objective Source screening from paper inputs to ordered
   `PaperAnalysisFrame` results. It traverses Source document trees, constructs
@@ -27,6 +27,13 @@ Objective analysis.
   round-robins papers before extraction. Model and deterministic decisions are
   inspection hints only; neither is persisted or treated as scientific
   Evidence.
+- `analysis/source_extraction.py`
+  Owns transient `ExtractedEvidenceDraft` records and the inspection of every
+  routed Source. It constructs bounded Source payloads, repairs structurally
+  fragmented tables when required, extracts deterministic table records before
+  model fallback, validates current source-local fields, and records
+  route-scoped provider or structured-output failures. It stops before
+  same-paper Methods/Results binding and durable Evidence materialization.
 - `paper_skim_service.py`
   Owns the per-document discovery stage. It assigns every eligible
   non-reference text node, table row, and table/figure caption to one full
@@ -100,9 +107,6 @@ Objective analysis.
   axis-equivalence decisions. The backend constructs each question, variable,
   outcome, seed-document set, and `source_relationship_ids` from the accepted
   relationship group.
-- `evidence_extraction.py`
-  Owns structured Evidence drafts before the service binds exact Source text
-  and publishes durable `ObjectiveEvidence` records.
 - `property_matching.py`
   Owns application-layer matching from noisy Source labels to Objective axes,
   including observed OCR aliases, materials-specific broad outcome hints,

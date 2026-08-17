@@ -5,7 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from application.core.objectives.finding_synthesis_service import FindingSynthesisService
+from application.core.objectives.analysis.finding_synthesis import (
+    FindingSynthesisService,
+)
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
@@ -19,7 +21,7 @@ class _Extractor:
         self.responses = list(responses)
         self.payloads: list[dict] = []
 
-    def synthesize_findings(self, payload: dict) -> SimpleNamespace:
+    def judge_result_set(self, payload: dict) -> SimpleNamespace:
         self.payloads.append(payload)
         response = self.responses.pop(0) if self.responses else None
         if isinstance(response, Exception):
@@ -187,7 +189,7 @@ def _heterogeneous_candidate(**overrides) -> dict:
 
 def test_synthesis_builds_one_atomic_single_paper_finding() -> None:
     extractor = _Extractor([_candidate()])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     findings = service.synthesize(
         collection_id="col-1",
@@ -212,7 +214,7 @@ def test_synthesis_builds_one_atomic_single_paper_finding() -> None:
 
 def test_synthesis_publishes_only_deterministic_analysis_limitations() -> None:
     service = FindingSynthesisService(
-        finding_extractor=_Extractor(
+        assertion_judge=_Extractor(
             [_candidate(limitations=["The model inferred an uncited limitation."])]
         )
     )
@@ -244,7 +246,7 @@ def test_synthesis_accepts_concrete_defect_measurement_for_defect_structure() ->
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     findings = service.synthesize(
         collection_id="col-1",
@@ -284,7 +286,7 @@ def test_synthesis_accepts_concrete_defect_measurement_for_defect_structure() ->
 
 
 def test_synthesis_keeps_relative_density_out_of_defect_structure() -> None:
-    service = FindingSynthesisService(finding_extractor=_Extractor([]))
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
 
     result_sets = service._result_sets(
         _objective(
@@ -305,7 +307,7 @@ def test_synthesis_keeps_relative_density_out_of_defect_structure() -> None:
 
 
 def test_synthesis_accepts_relative_density_for_densification_outcome() -> None:
-    service = FindingSynthesisService(finding_extractor=_Extractor([]))
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
 
     result_sets = service._result_sets(
         _objective(
@@ -327,7 +329,7 @@ def test_synthesis_accepts_relative_density_for_densification_outcome() -> None:
 
 
 def test_synthesis_canonicalizes_unit_qualified_axes_across_papers() -> None:
-    service = FindingSynthesisService(finding_extractor=_Extractor([]))
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
 
     result_sets = service._result_sets(
         _objective(variables=["laser power"], outcomes=["relative density"]),
@@ -353,7 +355,7 @@ def test_synthesis_canonicalizes_unit_qualified_axes_across_papers() -> None:
 
 
 def test_synthesis_excludes_unknown_direction_from_directional_result_sets() -> None:
-    service = FindingSynthesisService(finding_extractor=_Extractor([]))
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
 
     result_sets = service._result_sets(
         _objective(variables=["laser power"], outcomes=["relative density"]),
@@ -372,7 +374,7 @@ def test_synthesis_excludes_unknown_direction_from_directional_result_sets() -> 
 
 def test_synthesis_prompt_balances_representatives_across_documents() -> None:
     extractor = _Extractor([None])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
     heavy_evidence = tuple(
         _evidence(
             f"heavy-{position}",
@@ -439,7 +441,7 @@ def test_synthesis_prompt_balances_representatives_across_documents() -> None:
 
 def test_synthesis_derives_cross_paper_agreement() -> None:
     extractor = _Extractor([_candidate()])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -458,7 +460,7 @@ def test_synthesis_derives_cross_paper_agreement() -> None:
 
 
 def test_synthesis_groups_comparison_intervals_as_one_condition_series() -> None:
-    service = FindingSynthesisService(finding_extractor=_Extractor([]))
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
     evidence = tuple(
         _evidence(
             evidence_id,
@@ -496,7 +498,7 @@ def test_synthesis_groups_comparison_intervals_as_one_condition_series() -> None
 
 def test_synthesis_generates_uniform_no_change_statement_from_evidence() -> None:
     extractor = _Extractor([_candidate()])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
     evidence = tuple(
         _evidence(
             evidence_id,
@@ -541,7 +543,7 @@ def test_synthesis_generates_uniform_no_change_statement_from_evidence() -> None
 
 def test_synthesis_accepts_source_supported_uniform_mixed_condition_series() -> None:
     extractor = _Extractor([_candidate()])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
     evidence = tuple(
         _evidence(
             evidence_id,
@@ -593,7 +595,7 @@ def test_synthesis_ignores_model_owned_statement_and_direction_fields() -> None:
         direction="increase",
     )
     extractor = _Extractor([model_candidate])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
     evidence = tuple(
         _evidence(
             evidence_id,
@@ -646,7 +648,7 @@ def test_synthesis_uses_backend_direction_and_statement_for_no_change() -> None:
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -680,7 +682,7 @@ def test_synthesis_does_not_read_mixed_powder_as_result_heterogeneity() -> None:
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -700,14 +702,14 @@ def test_synthesis_splits_non_opposing_directions_without_dropping_evidence() ->
         def __init__(self) -> None:
             self.payloads: list[dict] = []
 
-        def synthesize_findings(self, payload: dict) -> SimpleNamespace:
+        def judge_result_set(self, payload: dict) -> SimpleNamespace:
             self.payloads.append(payload)
             return SimpleNamespace(
                 model_dump=lambda: {"findings": [_candidate()]},
             )
 
     extractor = BackendDirectionExtractor()
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     findings = service.synthesize(
         collection_id="col-1",
@@ -736,7 +738,7 @@ def test_synthesis_splits_non_opposing_directions_without_dropping_evidence() ->
 
 
 def test_synthesis_normalizes_scientific_unit_typography_for_display() -> None:
-    service = FindingSynthesisService(finding_extractor=_Extractor([]))
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
 
     result_set = service._result_sets(
         _objective(variables=["energy density"]),
@@ -769,7 +771,7 @@ def test_synthesis_normalizes_scientific_unit_typography_for_display() -> None:
 
 
 def test_synthesis_does_not_use_complete_context_as_a_grouping_key() -> None:
-    service = FindingSynthesisService(finding_extractor=_Extractor([]))
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
     common = {"material": [], "sample": [], "test": []}
 
     result_sets = service._result_sets(
@@ -817,7 +819,7 @@ def test_synthesis_keeps_context_inside_one_comparison_interval() -> None:
             ),
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
     common = {
         "material": [],
         "sample": [],
@@ -899,7 +901,7 @@ def test_synthesis_splits_distinct_outcomes_into_distinct_findings() -> None:
             _candidate(),
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     findings = service.synthesize(
         collection_id="col-1",
@@ -926,7 +928,7 @@ def test_synthesis_splits_distinct_outcomes_into_distinct_findings() -> None:
 
 def test_synthesis_groups_only_exact_factor_tuples() -> None:
     extractor = _Extractor([_candidate()])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     findings = service.synthesize(
         collection_id="col-1",
@@ -964,7 +966,7 @@ def test_synthesis_keeps_coupled_factors_outside_the_objective_axis() -> None:
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     findings = service.synthesize(
         collection_id="col-1",
@@ -1018,7 +1020,7 @@ def test_synthesis_keeps_every_eligible_result_in_one_atomic_set() -> None:
     extractor = _Extractor(
         [_candidate()]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -1054,7 +1056,7 @@ def test_synthesis_does_not_copy_model_numeric_endpoints_into_statement() -> Non
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
     evidence_records = (
         _evidence(
             "scan-group-1",
@@ -1107,7 +1109,7 @@ def test_synthesis_generates_non_numeric_statement_for_multi_interval_series() -
             ),
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -1143,7 +1145,7 @@ def test_synthesis_generates_non_numeric_statement_for_multi_interval_series() -
 
 def test_synthesis_does_not_publish_number_absent_from_structured_evidence() -> None:
     service = FindingSynthesisService(
-        finding_extractor=_Extractor(
+        assertion_judge=_Extractor(
             [
                 _candidate(
                     statement=(
@@ -1185,7 +1187,7 @@ def test_synthesis_does_not_publish_number_absent_from_structured_evidence() -> 
 
 def test_synthesis_does_not_publish_number_from_unrelated_source_property() -> None:
     service = FindingSynthesisService(
-        finding_extractor=_Extractor(
+        assertion_judge=_Extractor(
             [
                 _candidate(
                     statement=(
@@ -1226,7 +1228,7 @@ def test_synthesis_does_not_publish_number_from_unrelated_source_property() -> N
 
 def test_synthesis_derives_all_same_direction_results_as_support() -> None:
     service = FindingSynthesisService(
-        finding_extractor=_Extractor([_candidate()])
+        assertion_judge=_Extractor([_candidate()])
     )
     evidence = (
         _evidence("ev-1", "paper-1"),
@@ -1247,7 +1249,7 @@ def test_synthesis_derives_all_same_direction_results_as_support() -> None:
 
 def test_synthesis_derives_opposing_result_as_contradiction() -> None:
     service = FindingSynthesisService(
-        finding_extractor=_Extractor([_heterogeneous_candidate()])
+        assertion_judge=_Extractor([_heterogeneous_candidate()])
     )
     evidence = (
         _evidence("ev-1", "paper-1"),
@@ -1272,7 +1274,7 @@ def test_synthesis_derives_opposing_result_as_contradiction() -> None:
 
 def test_synthesis_derives_within_paper_opposition_statement_and_limitation() -> None:
     extractor = _Extractor([_candidate()])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -1296,7 +1298,7 @@ def test_synthesis_derives_within_paper_opposition_statement_and_limitation() ->
 
 def test_synthesis_ignores_unknown_direction_instead_of_treating_it_as_opposition() -> None:
     service = FindingSynthesisService(
-        finding_extractor=_Extractor([_candidate()])
+        assertion_judge=_Extractor([_candidate()])
     )
 
     finding = service.synthesize(
@@ -1317,7 +1319,7 @@ def test_synthesis_ignores_unknown_direction_instead_of_treating_it_as_oppositio
 
 def test_synthesis_assigns_support_and_contradiction_by_direction_not_role() -> None:
     service = FindingSynthesisService(
-        finding_extractor=_Extractor(
+        assertion_judge=_Extractor(
             [
                 _candidate(
                     direction="decrease",
@@ -1354,7 +1356,7 @@ def test_synthesis_assigns_support_and_contradiction_by_direction_not_role() -> 
 
 def test_synthesis_primary_direction_counts_documents_before_rows() -> None:
     extractor = _Extractor([_candidate()])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
     repeated_single_paper = tuple(
         _evidence(f"increase-{index}", "paper-heavy", direction="increase")
         for index in range(10)
@@ -1387,7 +1389,7 @@ def test_synthesis_primary_direction_counts_documents_before_rows() -> None:
 def test_synthesis_does_not_drop_results_after_the_first_48() -> None:
     evidence_ids = [f"evidence-{index}" for index in range(49)]
     extractor = _Extractor([_candidate()])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
     contributions = tuple(
         _contribution(f"paper-{index}") for index in range(49)
     )
@@ -1414,7 +1416,7 @@ def test_synthesis_does_not_drop_results_after_the_first_48() -> None:
 def test_synthesis_compacts_large_condition_series_without_dropping_results() -> None:
     evidence_ids = [f"condition-series-{index}" for index in range(49)]
     extractor = _Extractor([_candidate()])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
     contributions = tuple(
         _contribution(f"paper-{'x' * 96}-{index}") for index in range(49)
     )
@@ -1497,7 +1499,7 @@ def test_synthesis_bounds_prompt_excerpts_and_context_without_dropping_results()
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
     contributions = tuple(
         _contribution(f"paper-{index}") for index in range(12)
     )
@@ -1548,7 +1550,7 @@ def test_synthesis_derives_conflict_and_preserves_both_papers() -> None:
     extractor = _Extractor(
         [_heterogeneous_candidate()]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -1587,7 +1589,7 @@ def test_synthesis_does_not_treat_cited_context_as_a_condition_boundary() -> Non
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -1612,7 +1614,7 @@ def test_synthesis_does_not_treat_cited_context_as_a_condition_boundary() -> Non
 
 def test_synthesis_direct_result_cannot_be_a_condition_boundary() -> None:
     service = FindingSynthesisService(
-        finding_extractor=_Extractor(
+        assertion_judge=_Extractor(
             [
                 _heterogeneous_candidate(
                     condition_boundary_evidence_ids=["conflict-1"]
@@ -1644,7 +1646,7 @@ def test_synthesis_direct_result_cannot_be_a_condition_boundary() -> None:
 def test_synthesis_derives_condition_boundary_from_opposing_papers_with_disjoint_context(
 ) -> None:
     service = FindingSynthesisService(
-        finding_extractor=_Extractor([_heterogeneous_candidate()])
+        assertion_judge=_Extractor([_heterogeneous_candidate()])
     )
     shared = {"material": [], "sample": [], "test": []}
 
@@ -1697,7 +1699,7 @@ def test_synthesis_does_not_link_model_boundary_context_implicitly() -> None:
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -1729,7 +1731,7 @@ def test_synthesis_drops_boundary_labels_that_are_not_evidence_ids() -> None:
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -1774,7 +1776,7 @@ def test_synthesis_binds_mechanism_only_from_selected_context() -> None:
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -1797,7 +1799,7 @@ def test_synthesis_drops_mechanism_with_wrong_evidence_role() -> None:
         outcome=None,
     )
     service = FindingSynthesisService(
-        finding_extractor=_Extractor(
+        assertion_judge=_Extractor(
             [
                 _candidate(
                     context_evidence_ids=["condition-1"],
@@ -1829,7 +1831,7 @@ def test_synthesis_drops_mechanism_with_wrong_evidence_role() -> None:
 
 def test_synthesis_keeps_every_candidate_paper_binding() -> None:
     extractor = _Extractor([_candidate()])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
     excluded = _contribution(
         "paper-2",
         analysis_status="excluded",
@@ -1882,7 +1884,7 @@ def test_synthesis_statement_keeps_complete_joint_factor_set() -> None:
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -1907,7 +1909,7 @@ def test_synthesis_statement_does_not_add_unbound_objective_factor() -> None:
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -1945,7 +1947,7 @@ def test_synthesis_statement_keeps_broad_source_factor_without_specializing_it()
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -1978,7 +1980,7 @@ def test_synthesis_accepts_experimental_outcome_without_repeating_qualifier() ->
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -2009,7 +2011,7 @@ def test_synthesis_preserves_prediction_qualifier_in_backend_statement() -> None
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     finding = service.synthesize(
         collection_id="col-1",
@@ -2035,7 +2037,7 @@ def test_synthesis_preserves_prediction_qualifier_in_backend_statement() -> None
 
 def test_synthesis_rejects_causal_joint_factor_candidate() -> None:
     extractor = _Extractor([_candidate(assertion_strength="causal")])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     assert (
         service.synthesize(
@@ -2058,7 +2060,7 @@ def test_synthesis_rejects_causal_descriptive_candidate() -> None:
             )
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     evidence = _evidence(
         "ev-1",
@@ -2081,7 +2083,7 @@ def test_synthesis_rejects_causal_descriptive_candidate() -> None:
 
 def test_synthesis_downgrades_non_deterministic_isolated_result_to_associative() -> None:
     service = FindingSynthesisService(
-        finding_extractor=_Extractor(
+        assertion_judge=_Extractor(
             [
                 _candidate(
                     statement="Laser power increased relative density.",
@@ -2107,7 +2109,7 @@ def test_synthesis_downgrades_non_deterministic_isolated_result_to_associative()
 
 def test_synthesis_keeps_causal_strength_for_deterministic_controlled_table_pair() -> None:
     service = FindingSynthesisService(
-        finding_extractor=_Extractor(
+        assertion_judge=_Extractor(
             [
                 _candidate(
                     statement="Laser power increased relative density.",
@@ -2144,7 +2146,7 @@ def test_synthesis_keeps_causal_strength_for_deterministic_controlled_table_pair
 
 def test_synthesis_excludes_unattributable_and_context_only_evidence() -> None:
     extractor = _Extractor([_candidate()])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
     incomparable = _evidence(
         "incomparable-1",
         "paper-1",
@@ -2183,7 +2185,7 @@ def test_synthesis_continues_after_one_result_set_provider_failure() -> None:
             ),
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
     findings = service.synthesize(
         collection_id="col-1",
         objective=_objective(outcomes=["elongation", "relative density"]),
@@ -2216,7 +2218,7 @@ def test_synthesis_repairs_unavailable_context_reference_once() -> None:
             ),
         ]
     )
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     findings = service.synthesize(
         collection_id="col-1",
@@ -2261,7 +2263,7 @@ def test_synthesis_stops_after_one_semantic_repair(caplog) -> None:
         context_evidence_ids=["missing-context"],
     )
     extractor = _Extractor([rejected, rejected])
-    service = FindingSynthesisService(finding_extractor=extractor)
+    service = FindingSynthesisService(assertion_judge=extractor)
 
     findings = service.synthesize(
         collection_id="col-1",
@@ -2277,7 +2279,7 @@ def test_synthesis_stops_after_one_semantic_repair(caplog) -> None:
 
 
 def test_synthesis_rejects_cross_version_children_and_orphan_evidence() -> None:
-    service = FindingSynthesisService(finding_extractor=_Extractor([]))
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
 
     with pytest.raises(ValueError, match="another objective version"):
         service.synthesize(

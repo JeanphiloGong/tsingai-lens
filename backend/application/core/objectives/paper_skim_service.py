@@ -7,17 +7,20 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from application.core.objectives import property_matching
-from application.core.objectives.extraction import (
-    ObjectiveExtractor,
+from application.core.objectives.discovery.signal_reconciliation import (
     PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT,
-    PAPER_SKIM_PROMPT_TOKEN_LIMIT,
-    PaperSkimOutputSaturatedError,
-)
-from application.core.objectives.schemas import (
-    PAPER_SKIM_SOURCE_UNIT_LIMIT,
-    StructuredPaperStudy,
+    PaperSignalReconciler,
     StructuredPaperSignalReconciliation,
+)
+from application.core.objectives.discovery.study_window import (
+    PAPER_SKIM_PROMPT_TOKEN_LIMIT,
+    PAPER_SKIM_SOURCE_UNIT_LIMIT,
+    PaperStudyWindowExtractor,
     StructuredPaperSkim,
+    StructuredPaperStudy,
+)
+from application.core.objectives.llm.structured_response import (
+    StructuredOutputSaturatedError,
 )
 from domain.core import (
     PaperSkim,
@@ -109,7 +112,8 @@ class PaperSkimService:
             str,
             SourceDocumentTree | None,
         ],
-        extractor: ObjectiveExtractor,
+        study_window_extractor: PaperStudyWindowExtractor,
+        signal_reconciler: PaperSignalReconciler,
         progress_callback: ProgressCallback | None = None,
     ) -> tuple[PaperSkim, ...]:
         logger.info(
@@ -144,7 +148,7 @@ class PaperSkimService:
                 table_rows=document_table_rows,
                 figures=document_figures,
                 document_tree=document_trees_by_document_id.get(document.document_id),
-                extractor=extractor,
+                study_window_extractor=study_window_extractor,
             )
             window_skims: list[PaperSkim] = []
             paper_signals: list[_PaperSignalInput] = []
@@ -168,7 +172,7 @@ class PaperSkimService:
                     collection_id=collection_id,
                     document_id=document.document_id,
                     payload=payload,
-                    extractor=extractor,
+                    study_window_extractor=study_window_extractor,
                 )
                 window_skims.extend(batch_skims)
                 paper_signals.extend(batch_signals)
@@ -180,7 +184,7 @@ class PaperSkimService:
             paper_skim = self._reconcile_paper_signals(
                 paper_skim,
                 paper_signals,
-                extractor=extractor,
+                signal_reconciler=signal_reconciler,
                 progress_callback=progress_callback,
                 document_position=document_position,
                 document_count=document_count,
@@ -215,7 +219,7 @@ class PaperSkimService:
         table_rows: list[Any],
         figures: list[Any],
         document_tree: SourceDocumentTree | None = None,
-        extractor: ObjectiveExtractor,
+        study_window_extractor: PaperStudyWindowExtractor,
     ) -> list[dict[str, Any]]:
         source_items = self._build_source_items(
             document=document,
@@ -254,7 +258,7 @@ class PaperSkimService:
                 payloads.extend(
                     self._fit_payload_to_prompt_limit(
                         payload,
-                        extractor=extractor,
+                        study_window_extractor=study_window_extractor,
                     )
                 )
         if payloads:
@@ -270,7 +274,7 @@ class PaperSkimService:
         return list(
             self._fit_payload_to_prompt_limit(
                 empty_payload,
-                extractor=extractor,
+                study_window_extractor=study_window_extractor,
             )
         )
 
@@ -772,11 +776,11 @@ class PaperSkimService:
         collection_id: str,
         document_id: str,
         payload: Mapping[str, Any],
-        extractor: ObjectiveExtractor,
+        study_window_extractor: PaperStudyWindowExtractor,
         attempt: int = 1,
     ) -> tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]]:
         try:
-            parsed = extractor.extract_paper_skim(dict(payload))
+            parsed = study_window_extractor.extract(dict(payload))
             window_skim, window_signals = self._resolve_window_result(
                 document_id=document_id,
                 payload=payload,
@@ -816,7 +820,7 @@ class PaperSkimService:
                             source_units=child_units,
                             suffix=f"retry-{branch}",
                         ),
-                        extractor=extractor,
+                        study_window_extractor=study_window_extractor,
                         attempt=attempt + 1,
                     )
                     child_skims.extend(retry_skims)
@@ -867,10 +871,10 @@ class PaperSkimService:
         self,
         payload: Mapping[str, Any],
         *,
-        extractor: ObjectiveExtractor,
+        study_window_extractor: PaperStudyWindowExtractor,
     ) -> tuple[dict[str, Any], ...]:
         candidate = dict(payload)
-        prompt_tokens = extractor.estimate_paper_skim_prompt_tokens(candidate)
+        prompt_tokens = study_window_extractor.estimate_prompt_tokens(candidate)
         if prompt_tokens <= PAPER_SKIM_PROMPT_TOKEN_LIMIT:
             return (candidate,)
 
@@ -908,7 +912,7 @@ class PaperSkimService:
                         source_units=child_units,
                         suffix=suffix,
                     ),
-                    extractor=extractor,
+                    study_window_extractor=study_window_extractor,
                 )
             )
         return tuple(children)
@@ -921,7 +925,7 @@ class PaperSkimService:
         parsed: StructuredPaperSkim,
     ) -> tuple[PaperSkim, tuple[_PaperSignalInput, ...]]:
         if parsed.output_saturated:
-            raise PaperSkimOutputSaturatedError(
+            raise StructuredOutputSaturatedError(
                 "PaperSkim model reported that the bounded output omitted visible facts"
             )
         source_units = {
@@ -1168,7 +1172,7 @@ class PaperSkimService:
         paper_skim: PaperSkim,
         signal_inputs: list[_PaperSignalInput],
         *,
-        extractor: ObjectiveExtractor,
+        signal_reconciler: PaperSignalReconciler,
         progress_callback: ProgressCallback | None,
         document_position: int,
         document_count: int,
@@ -1193,7 +1197,7 @@ class PaperSkimService:
         batches = self._build_signal_reconciliation_batches(
             paper_skim.document_id,
             unique_inputs,
-            extractor=extractor,
+            signal_reconciler=signal_reconciler,
         )
         if not batches:
             return replace(
@@ -1225,7 +1229,7 @@ class PaperSkimService:
         for batch_position, batch in enumerate(batches, start=1):
             batch_studies, batch_unresolved = self._reconcile_signal_batch(
                 batch,
-                extractor=extractor,
+                signal_reconciler=signal_reconciler,
                 document_id=paper_skim.document_id,
                 batch_position=batch_position,
                 batch_count=len(batches),
@@ -1371,7 +1375,7 @@ class PaperSkimService:
         document_id: str,
         signal_inputs: tuple[_PaperSignalInput, ...],
         *,
-        extractor: ObjectiveExtractor,
+        signal_reconciler: PaperSignalReconciler,
     ) -> tuple[tuple[_PaperSignalInput, ...], ...]:
         variables = tuple(
             item for item in signal_inputs if item.signal.signal_type == "variable"
@@ -1393,11 +1397,7 @@ class PaperSkimService:
                     "document_id": document_id,
                     "signals": [item.to_payload() for item in candidate],
                 }
-                prompt_tokens = (
-                    extractor.estimate_paper_signal_reconciliation_prompt_tokens(
-                        payload
-                    )
-                )
+                prompt_tokens = signal_reconciler.estimate_prompt_tokens(payload)
                 if (
                     len(candidate) <= _SIGNAL_RECONCILIATION_SIGNAL_LIMIT
                     and prompt_tokens
@@ -1414,10 +1414,8 @@ class PaperSkimService:
                     "document_id": document_id,
                     "signals": [item.to_payload() for item in pair],
                 }
-                pair_prompt_tokens = (
-                    extractor.estimate_paper_signal_reconciliation_prompt_tokens(
-                        pair_payload
-                    )
+                pair_prompt_tokens = signal_reconciler.estimate_prompt_tokens(
+                    pair_payload
                 )
                 if (
                     pair_prompt_tokens
@@ -1443,13 +1441,13 @@ class PaperSkimService:
         self,
         signal_inputs: tuple[_PaperSignalInput, ...],
         *,
-        extractor: ObjectiveExtractor,
+        signal_reconciler: PaperSignalReconciler,
         document_id: str,
         batch_position: int,
         batch_count: int,
     ) -> tuple[tuple[PaperStudy, ...], tuple[PaperStudySignal, ...]]:
         try:
-            parsed = extractor.reconcile_paper_signals(
+            parsed = signal_reconciler.reconcile(
                 {
                     "document_id": document_id,
                     "signals": [item.to_payload() for item in signal_inputs],

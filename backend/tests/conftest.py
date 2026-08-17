@@ -12,7 +12,6 @@ if str(ROOT) not in sys.path:
 
 @pytest.fixture(autouse=True)
 def _patch_domain_model_extractors(monkeypatch):
-    from application.core import comparison_service
     from application.core.document_profiles import (
         service as document_profile_service,
     )
@@ -33,7 +32,7 @@ def _patch_domain_model_extractors(monkeypatch):
     )
     monkeypatch.setattr(
         research_objective_service,
-        "build_default_objective_extractor",
+        "build_default_structured_response_client",
         lambda: fake,
     )
 

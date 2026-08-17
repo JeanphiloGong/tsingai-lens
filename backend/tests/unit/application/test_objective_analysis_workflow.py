@@ -4,10 +4,15 @@ from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
-from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
-from application.core.objectives.research_objective_service import PaperAnalysisFrame
-from application.core.objectives.schemas import (
+from application.core.objectives.analysis import evidence_materialization
+from application.core.objectives.analysis.evidence_routing import (
     StructuredEvidenceSelections,
+)
+from application.core.objectives.analysis.source_extraction import (
+    ExtractedEvidenceDraft,
+)
+from application.core.objectives.analysis.source_screening import (
+    PaperAnalysisFrame,
     StructuredPaperFrameBatch,
 )
 from domain.core import (
@@ -18,22 +23,29 @@ from domain.core import (
     PaperStudyDispositionStatus,
     ResearchObjective,
 )
+from domain.pipeline import ExecutionStats, ModelUsage, TokenUsage
 from domain.source import source_documents_from_records
 from tests.support.collection_service import build_test_collection_service
-from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.objective_extractor import (
     FakeObjectiveExtractor as _ObjectiveExtractor,
 )
+from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.research_objective_service import (
     build_research_objective_service as _build_research_objective_service,
+)
+from tests.support.research_objective_service import (
     queue_running_analysis as _queue_running_analysis,
+)
+from tests.support.research_objective_service import (
     research_objective as _research_objective,
+)
+from tests.support.research_objective_service import (
     seed_document_profiles as _seed_document_profiles,
 )
 
 
 class _FailingRouteExtractor(_ObjectiveExtractor):
-    def select_objective_evidence(
+    def route_source(
         self,
         payload: dict[str, Any],
     ) -> StructuredEvidenceSelections:
@@ -42,7 +54,7 @@ class _FailingRouteExtractor(_ObjectiveExtractor):
 
 
 class _FailingFrameExtractor(_ObjectiveExtractor):
-    def assess_objective_paper(
+    def screen_batch(
         self,
         payload: dict[str, Any],
     ) -> StructuredPaperFrameBatch:
@@ -171,10 +183,63 @@ def test_memory_objective_repository_requires_explicit_activation():
     assert repository.read("col-1") == pending
 
 
-def test_objective_analysis_publishes_one_terminal_evidence_per_source(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
+def test_memory_objective_repository_records_analysis_execution_stats():
+    objective = _research_objective(
+        {
+            "collection_id": "col-1",
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+            "rank": 1,
+            "confirmation_status": "confirmed",
+        }
     )
+    repository = MemoryObjectiveRepository.from_facts(
+        "col-1",
+        ObjectiveFactSet(
+            research_objectives=(objective,),
+        ),
+    )
+    _, analysis = repository.queue_analysis(
+        "col-1",
+        objective.objective_id,
+        pipeline_version="test.v1",
+        model_name=None,
+        prompt_versions={},
+    )
+    repository.claim_analysis("col-1", objective.objective_id, 1)
+    stats = ExecutionStats(
+        model_usage=(
+            ModelUsage(
+                model_name="test-model",
+                request_count=1,
+                token_usage=TokenUsage(
+                    input_tokens=10,
+                    output_tokens=5,
+                    total_tokens=15,
+                ),
+            ),
+        ),
+    )
+
+    updated = repository.update_analysis_execution_stats(
+        "col-1",
+        objective.objective_id,
+        analysis.analysis_version,
+        stats=stats,
+        model_name="test-model",
+        prompt_versions={"source_extraction": "source_extraction.v1"},
+    )
+
+    assert updated.stats == stats
+    assert updated.model_name == "test-model"
+    assert updated.prompt_versions == {
+        "source_extraction": "source_extraction.v1"
+    }
+
+
+def test_objective_analysis_publishes_one_terminal_evidence_per_source():
     objective = _research_objective(
         {
             "collection_id": "col-1",
@@ -357,7 +422,7 @@ def test_objective_analysis_publishes_one_terminal_evidence_per_source(tmp_path)
         ]
     }
 
-    evidence_records = service._analysis_evidence_records(
+    evidence_records = evidence_materialization._analysis_evidence_records(
         collection_id="col-1",
         analysis=analysis,
         objective=objective,
@@ -385,7 +450,7 @@ def test_objective_analysis_publishes_one_terminal_evidence_per_source(tmp_path)
             "paper_role": "primary_experiment",
         }
     )
-    contributions = service._analysis_contributions(
+    contributions = evidence_materialization._analysis_contributions(
         collection_id="col-1",
         analysis=analysis,
         objective=objective,
@@ -408,9 +473,9 @@ def test_objective_analysis_uses_conservative_frame_batch_when_model_fails(
     extractor = _FailingFrameExtractor()
     service = _build_research_objective_service(
         collection_service=collection_service,
-        objective_extractor=extractor,
+        response_client=extractor,
     )
-    service.finding_synthesis_service.finding_extractor = extractor
+    service.finding_synthesis_service.assertion_judge = extractor
     service.source_artifact_repository.replace_collection_documents(
         collection_id,
         "build_test",
@@ -494,9 +559,9 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
     collection_id = collection["collection_id"]
     service = _build_research_objective_service(
         collection_service=collection_service,
-        objective_extractor=_ObjectiveExtractor(),
+        response_client=_ObjectiveExtractor(),
     )
-    service.finding_synthesis_service.finding_extractor = service._objective_extractor
+    service.finding_synthesis_service.assertion_judge = service._response_client
     service.source_artifact_repository.replace_collection_documents(
         collection_id,
         "build_test",
@@ -567,8 +632,9 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
     analysis = _queue_running_analysis(service, collection_id, objective.objective_id)
 
     failing_extractor = _FailingRouteExtractor()
-    service._objective_extractor = failing_extractor
-    service.finding_synthesis_service.finding_extractor = failing_extractor
+    service._response_client = failing_extractor
+    service._objective_evidence_router = failing_extractor
+    service.finding_synthesis_service.assertion_judge = failing_extractor
     artifacts = service.generate_objective_analysis_artifacts(
         collection_id, analysis
     )
@@ -590,9 +656,9 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
     extractor = _ObjectiveExtractor()
     service = _build_research_objective_service(
         collection_service=collection_service,
-        objective_extractor=extractor,
+        response_client=extractor,
     )
-    service.finding_synthesis_service.finding_extractor = extractor
+    service.finding_synthesis_service.assertion_judge = extractor
     service.source_artifact_repository.replace_collection_documents(
         collection_id,
         "build_test",
@@ -686,10 +752,10 @@ def test_queued_analysis_uses_its_source_build_objective_scope_after_rebuild(
     repository = _ActiveBuildScopeObjectiveRepository()
     service = _build_research_objective_service(
         collection_service=collection_service,
-        objective_extractor=extractor,
+        response_client=extractor,
         objective_repository=repository,
     )
-    service.finding_synthesis_service.finding_extractor = extractor
+    service.finding_synthesis_service.assertion_judge = extractor
     service.source_artifact_repository.replace_collection_documents(
         collection_id,
         "build_test",

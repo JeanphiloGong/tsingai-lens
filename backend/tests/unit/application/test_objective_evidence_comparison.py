@@ -7,27 +7,31 @@ import pytest
 from httpx import Request, Response
 from openai import APIConnectionError, BadRequestError
 
-from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
-from application.core.objectives.evidence_routing import EvidenceCandidate
-from application.core.objectives.research_objective_service import PaperAnalysisFrame
-from application.core.objectives.schemas import (
+from application.core.objectives.analysis import (
+    evidence_materialization,
+    paper_experiment,
+    source_extraction,
+)
+from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
+from application.core.objectives.analysis.source_extraction import (
+    ExtractedEvidenceDraft,
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
+    extract_and_validate_source_facts,
 )
+from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from domain.core import ObjectiveAnalysis, ObjectiveEvidence
-from tests.support.collection_service import build_test_collection_service
 from tests.support.research_objective_service import (
-    build_research_objective_service as _build_research_objective_service,
     research_objective as _research_objective,
 )
 
 
-def test_objective_evidence_document_state_is_typed_and_document_scoped(tmp_path):
+def test_objective_evidence_document_state_is_typed_and_document_scoped():
     class RecordingExtractor:
         def __init__(self) -> None:
             self.payloads: list[dict[str, Any]] = []
 
-        def extract_objective_evidence(
+        def extract_source(
             self,
             payload: dict[str, Any],
         ) -> StructuredEvidenceExtractions:
@@ -88,9 +92,6 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped(tmp_path
                 ]
             )
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     extractor = RecordingExtractor()
     objective = _research_objective(
         {
@@ -143,11 +144,10 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped(tmp_path
         for document_id in ("paper-1", "paper-2")
     }
 
-    units = service._build_objective_evidence(
+    units = extract_and_validate_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
         blocks_by_document_id=blocks,
@@ -160,7 +160,7 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped(tmp_path
         payload["evidence_route"]["source_ref"]: payload["document_state"]
         for payload in extractor.payloads
     }
-    empty_state = service._empty_objective_document_state()
+    empty_state = source_extraction._empty_objective_document_state()
     assert states_by_source_ref["paper-1-methods"] == empty_state
     assert states_by_source_ref["paper-2-results"] == empty_state
     paper_1_result_state = states_by_source_ref["paper-1-results"]
@@ -182,12 +182,12 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped(tmp_path
     assert paper_1_result.source_refs[0]["source_ref"] == "paper-1-results"
 
 
-def test_objective_evidence_continues_after_one_route_format_failure(tmp_path):
+def test_objective_evidence_continues_after_one_route_format_failure():
     class RecoveringExtractor:
         def __init__(self) -> None:
             self.calls = 0
 
-        def extract_objective_evidence(
+        def extract_source(
             self,
             payload: dict[str, Any],
         ) -> StructuredEvidenceExtractions:
@@ -208,9 +208,6 @@ def test_objective_evidence_continues_after_one_route_format_failure(tmp_path):
                 ]
             )
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     extractor = RecoveringExtractor()
     objective = _research_objective(
         {
@@ -244,11 +241,10 @@ def test_objective_evidence_continues_after_one_route_format_failure(tmp_path):
         for source_ref in ("block-failed", "block-recovered")
     ]
 
-    units = service._build_objective_evidence(
+    units = extract_and_validate_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
         blocks_by_document_id={"paper-1": blocks},
@@ -265,21 +261,18 @@ def test_objective_evidence_continues_after_one_route_format_failure(tmp_path):
     assert units[1].selection_status == "extracted"
 
 
-def test_objective_evidence_routes_round_robin_across_documents(tmp_path):
+def test_objective_evidence_routes_round_robin_across_documents():
     class RecordingExtractor:
         def __init__(self) -> None:
             self.source_refs: list[str] = []
 
-        def extract_objective_evidence(
+        def extract_source(
             self,
             payload: dict[str, Any],
         ) -> StructuredEvidenceExtractions:
             self.source_refs.append(payload["evidence_route"]["source_ref"])
             return StructuredEvidenceExtractions(extractions=[])
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     extractor = RecordingExtractor()
     objective = _research_objective(
         {
@@ -322,11 +315,10 @@ def test_objective_evidence_routes_round_robin_across_documents(tmp_path):
         for document_id in ("paper-1", "paper-2")
     }
 
-    service._build_objective_evidence(
+    extract_and_validate_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
         blocks_by_document_id=blocks,
@@ -337,12 +329,12 @@ def test_objective_evidence_routes_round_robin_across_documents(tmp_path):
     assert extractor.source_refs == ["paper-1-a", "paper-2-a", "paper-1-b"]
 
 
-def test_objective_evidence_provider_failure_is_scoped_to_one_document(tmp_path):
+def test_objective_evidence_provider_failure_is_scoped_to_one_document():
     class RecoveringExtractor:
         def __init__(self) -> None:
             self.source_refs: list[str] = []
 
-        def extract_objective_evidence(
+        def extract_source(
             self,
             payload: dict[str, Any],
         ) -> StructuredEvidenceExtractions:
@@ -369,9 +361,6 @@ def test_objective_evidence_provider_failure_is_scoped_to_one_document(tmp_path)
                 ]
             )
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     extractor = RecoveringExtractor()
     objective = _research_objective(
         {
@@ -414,11 +403,10 @@ def test_objective_evidence_provider_failure_is_scoped_to_one_document(tmp_path)
         for document_id in ("paper-1", "paper-2")
     }
 
-    units = service._build_objective_evidence(
+    units = extract_and_validate_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
         blocks_by_document_id=blocks,
@@ -439,13 +427,12 @@ def test_objective_evidence_provider_failure_is_scoped_to_one_document(tmp_path)
 
 
 def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
-    tmp_path,
 ):
     class RecoveringExtractor:
         def __init__(self) -> None:
             self.source_refs: list[str] = []
 
-        def extract_objective_evidence(
+        def extract_source(
             self,
             payload: dict[str, Any],
         ) -> StructuredEvidenceExtractions:
@@ -474,9 +461,6 @@ def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
                 ]
             )
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     extractor = RecoveringExtractor()
     objective = _research_objective(
         {
@@ -511,11 +495,10 @@ def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
         for source_ref in source_refs
     ]
 
-    units = service._build_objective_evidence(
+    units = extract_and_validate_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
         blocks_by_document_id={"paper-1": blocks},
@@ -527,14 +510,11 @@ def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
     assert [unit.selection_status for unit in units] == ["failed", "extracted"]
 
 
-def test_objective_evidence_rejects_selected_route_without_source(tmp_path):
+def test_objective_evidence_rejects_selected_route_without_source():
     class UnexpectedExtractor:
-        def extract_objective_evidence(self, _payload):
+        def extract_source(self, _payload):
             raise AssertionError("missing Source must fail before model extraction")
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -555,11 +535,10 @@ def test_objective_evidence_rejects_selected_route_without_source(tmp_path):
     )
 
     with pytest.raises(RuntimeError, match="selected Evidence Source is missing"):
-        service._build_objective_evidence(
+        extract_and_validate_source_facts(
             collection_id="col-test",
-            extractor=UnexpectedExtractor(),
+            source_extractor=UnexpectedExtractor(),
             objectives=(objective,),
-            paper_skims=(),
             objective_paper_frames=(),
             objective_evidence_routes=(route,),
             blocks_by_document_id={"paper-1": []},
@@ -568,10 +547,7 @@ def test_objective_evidence_rejects_selected_route_without_source(tmp_path):
         )
 
 
-def test_analysis_contributions_report_each_paper_evidence_disposition(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_analysis_contributions_report_each_paper_evidence_disposition():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -702,7 +678,7 @@ def test_analysis_contributions_report_each_paper_evidence_disposition(tmp_path)
         evidence("paper-comparable", kind="direct"),
     )
 
-    contributions = service._analysis_contributions(
+    contributions = evidence_materialization._analysis_contributions(
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
@@ -729,9 +705,9 @@ def test_analysis_contributions_report_each_paper_evidence_disposition(tmp_path)
     assert by_document["paper-comparable"].comparable_evidence_count == 1
 
 
-def test_objective_context_drops_model_changed_variable_without_values(tmp_path):
+def test_objective_context_drops_model_changed_variable_without_values():
     class ContextExtractor:
-        def extract_objective_evidence(
+        def extract_source(
             self,
             payload: dict[str, Any],
         ) -> StructuredEvidenceExtractions:
@@ -758,9 +734,6 @@ def test_objective_context_drops_model_changed_variable_without_values(tmp_path)
                 ]
             )
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-preheating",
@@ -787,11 +760,10 @@ def test_objective_context_drops_model_changed_variable_without_values(tmp_path)
         heading_path="Methods",
     )
 
-    units = service._build_objective_evidence(
+    units = extract_and_validate_source_facts(
         collection_id="col-test",
-        extractor=ContextExtractor(),
+        source_extractor=ContextExtractor(),
         objectives=(objective,),
-        paper_skims=(),
         objective_paper_frames=(),
         objective_evidence_routes=(route,),
         blocks_by_document_id={"paper-1": [block]},
@@ -805,10 +777,7 @@ def test_objective_context_drops_model_changed_variable_without_values(tmp_path)
     assert units[0].scientific_context.process[0].value == 150
 
 
-def test_pairwise_comparison_retains_every_changed_process_axis(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_pairwise_comparison_retains_every_changed_process_axis():
 
     def result(evidence_id: str, values: dict[str, float], density: float):
         return ExtractedEvidenceDraft.from_mapping(
@@ -841,7 +810,7 @@ def test_pairwise_comparison_retains_every_changed_process_axis(tmp_path):
             }
         )
 
-    comparisons = service._build_objective_pairwise_comparison_units(
+    comparisons = paper_experiment._build_objective_pairwise_comparison_units(
         (
             result(
                 "row-a",
@@ -870,11 +839,7 @@ def test_pairwise_comparison_retains_every_changed_process_axis(tmp_path):
 
 
 def test_pairwise_comparison_joins_process_and_result_tables_by_sample_label(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
 
     def process_context(
         evidence_id: str,
@@ -989,8 +954,8 @@ def test_pairwise_comparison_joins_process_and_result_tables_by_sample_label(
         defect_result("defect-high", "H-VED", 86),
     )
 
-    bound_units = service._bind_objective_result_process_context(units)
-    comparisons = service._build_objective_pairwise_comparison_units(
+    bound_units = paper_experiment._bind_objective_result_process_context(units)
+    comparisons = paper_experiment._build_objective_pairwise_comparison_units(
         bound_units,
         objectives=(),
     )
@@ -1018,11 +983,7 @@ def test_pairwise_comparison_joins_process_and_result_tables_by_sample_label(
 
 
 def test_text_result_process_binding_requires_exact_groups_and_expands_axes(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
 
     def process_context(
         evidence_id: str,
@@ -1117,7 +1078,7 @@ def test_text_result_process_binding_requires_exact_groups_and_expands_axes(
             }
         )
 
-    units = service._bind_objective_result_process_context(
+    units = paper_experiment._bind_objective_result_process_context(
         (
             process_context(
                 "process-low",
@@ -1184,10 +1145,7 @@ def test_text_result_process_binding_requires_exact_groups_and_expands_axes(
     )
 
 
-def test_process_result_table_join_rejects_conflicting_sample_context(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_process_result_table_join_rejects_conflicting_sample_context():
     context_payload = {
         "objective_id": "obj-defect",
         "document_id": "paper-ved",
@@ -1244,17 +1202,14 @@ def test_process_result_table_join_rejects_conflicting_sample_context(tmp_path):
         }
     )
 
-    bound = service._bind_objective_result_process_context(
+    bound = paper_experiment._bind_objective_result_process_context(
         (first_context, conflicting_context, result)
     )
 
     assert bound[2] == result
 
 
-def test_pairwise_comparison_isolated_effect_requires_one_changed_axis(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_pairwise_comparison_isolated_effect_requires_one_changed_axis():
 
     def result(evidence_id: str, scan_speed: int, density: float):
         return ExtractedEvidenceDraft.from_mapping(
@@ -1287,7 +1242,7 @@ def test_pairwise_comparison_isolated_effect_requires_one_changed_axis(tmp_path)
             }
         )
 
-    comparison = service._build_objective_pairwise_comparison_units(
+    comparison = paper_experiment._build_objective_pairwise_comparison_units(
         (result("row-a", 800, 96.1), result("row-b", 700, 99.2)),
         objectives=(),
     )[0]
@@ -1304,10 +1259,7 @@ def test_pairwise_comparison_isolated_effect_requires_one_changed_axis(tmp_path)
     }
 
 
-def test_pairwise_comparison_marks_sample_state_change_incomparable(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_pairwise_comparison_marks_sample_state_change_incomparable():
 
     def result(
         evidence_id: str,
@@ -1350,7 +1302,7 @@ def test_pairwise_comparison_marks_sample_state_change_incomparable(tmp_path):
             }
         )
 
-    comparison = service._build_objective_pairwise_comparison_units(
+    comparison = paper_experiment._build_objective_pairwise_comparison_units(
         (
             result(
                 "as-slm",
@@ -1378,11 +1330,7 @@ def test_pairwise_comparison_marks_sample_state_change_incomparable(tmp_path):
 
 
 def test_pairwise_comparison_keeps_semantic_values_from_generic_sample_column(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
 
     def result(evidence_id: str, sample: str, energy_density: int, strength: float):
         return ExtractedEvidenceDraft.from_mapping(
@@ -1419,7 +1367,7 @@ def test_pairwise_comparison_keeps_semantic_values_from_generic_sample_column(
             }
         )
 
-    comparison = service._build_objective_pairwise_comparison_units(
+    comparison = paper_experiment._build_objective_pairwise_comparison_units(
         (
             result("as-slm", "as-SLM", 194, 426.7),
             result("hip-slm", "HIP-SLM", 167, 265.1),
@@ -1435,10 +1383,7 @@ def test_pairwise_comparison_keeps_semantic_values_from_generic_sample_column(
     )
 
 
-def test_pairwise_comparison_marks_sparse_process_axis_incomparable(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_pairwise_comparison_marks_sparse_process_axis_incomparable():
 
     def result(evidence_id: str, process: list[dict[str, Any]], value: float):
         return ExtractedEvidenceDraft.from_mapping(
@@ -1466,7 +1411,7 @@ def test_pairwise_comparison_marks_sparse_process_axis_incomparable(tmp_path):
             }
         )
 
-    comparison = service._build_objective_pairwise_comparison_units(
+    comparison = paper_experiment._build_objective_pairwise_comparison_units(
         (
             result("row-a", [{"name": "scan speed", "value": 800}], 96.1),
             result(
@@ -1490,10 +1435,7 @@ def test_pairwise_comparison_marks_sparse_process_axis_incomparable(tmp_path):
     )
 
 
-def test_pairwise_comparison_is_bounded_per_objective_document(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_pairwise_comparison_is_bounded_per_objective_document():
     measurements = tuple(
         ExtractedEvidenceDraft.from_mapping(
             {
@@ -1524,7 +1466,7 @@ def test_pairwise_comparison_is_bounded_per_objective_document(tmp_path):
         for index in range(100)
     )
 
-    comparisons = service._build_objective_pairwise_comparison_units(
+    comparisons = paper_experiment._build_objective_pairwise_comparison_units(
         measurements,
         objectives=(),
     )
@@ -1532,10 +1474,7 @@ def test_pairwise_comparison_is_bounded_per_objective_document(tmp_path):
     assert len(comparisons) == 48
 
 
-def test_table_material_and_cell_locators_bound_comparison_source(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_table_material_and_cell_locators_bound_comparison_source():
     route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
@@ -1571,7 +1510,7 @@ def test_table_material_and_cell_locators_bound_comparison_source(tmp_path):
     }
     measurements = tuple(
         ExtractedEvidenceDraft.from_mapping(record)
-        for record in service._objective_table_matrix_evidence_records(
+        for record in source_extraction._objective_table_matrix_evidence_records(
             route=route,
             source=source,
             objective_context=objective,
@@ -1584,7 +1523,7 @@ def test_table_material_and_cell_locators_bound_comparison_source(tmp_path):
     assert measurements[0].source_refs[0]["row_index"] == 1
     assert measurements[0].source_refs[0]["col_index"] == 2
     assert measurements[0].source_refs[0]["header_path"] == "Relative density [%]"
-    comparison = service._build_objective_pairwise_comparison_units(
+    comparison = paper_experiment._build_objective_pairwise_comparison_units(
         measurements,
         objectives=(objective,),
     )[0]
@@ -1609,7 +1548,7 @@ def test_table_material_and_cell_locators_bound_comparison_source(tmp_path):
         page=4,
         to_record=lambda: {"table_markdown": "full table"},
     )
-    evidence = service._analysis_evidence_records(
+    evidence = evidence_materialization._analysis_evidence_records(
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
@@ -1623,10 +1562,7 @@ def test_table_material_and_cell_locators_bound_comparison_source(tmp_path):
     assert {ref["row_index"] for ref in evidence.related_source_refs} == {1, 2}
 
 
-def test_analysis_evidence_uses_confirmed_objective_axis_names(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_analysis_evidence_uses_confirmed_objective_axis_names():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -1710,7 +1646,7 @@ def test_analysis_evidence_uses_confirmed_objective_axis_names(tmp_path):
         heading_path="Results",
     )
 
-    evidence = service._analysis_evidence_records(
+    evidence = evidence_materialization._analysis_evidence_records(
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
@@ -1735,10 +1671,7 @@ def test_analysis_evidence_uses_confirmed_objective_axis_names(tmp_path):
     assert evidence.reported_result.outcome == "density"
 
 
-def test_analysis_evidence_merges_duplicate_aliases_for_one_objective_axis(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_analysis_evidence_merges_duplicate_aliases_for_one_objective_axis():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -1806,7 +1739,7 @@ def test_analysis_evidence_merges_duplicate_aliases_for_one_objective_axis(tmp_p
         page=3,
     )
 
-    evidence = service._analysis_evidence_records(
+    evidence = evidence_materialization._analysis_evidence_records(
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
@@ -1829,10 +1762,7 @@ def test_analysis_evidence_merges_duplicate_aliases_for_one_objective_axis(tmp_p
     assert evidence.attribution_scope == "isolated_effect"
 
 
-def test_analysis_evidence_marks_conflicting_axis_aliases_failed(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_analysis_evidence_marks_conflicting_axis_aliases_failed():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -1901,7 +1831,7 @@ def test_analysis_evidence_marks_conflicting_axis_aliases_failed(tmp_path):
         page=3,
     )
 
-    evidence = service._analysis_evidence_records(
+    evidence = evidence_materialization._analysis_evidence_records(
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
@@ -1919,10 +1849,7 @@ def test_analysis_evidence_marks_conflicting_axis_aliases_failed(tmp_path):
     assert evidence.reported_result is None
 
 
-def test_analysis_evidence_rejects_draft_without_resolvable_source(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_analysis_evidence_rejects_draft_without_resolvable_source():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -1957,7 +1884,7 @@ def test_analysis_evidence_rejects_draft_without_resolvable_source(tmp_path):
     )
 
     with pytest.raises(RuntimeError, match="Evidence Source cannot be resolved"):
-        service._analysis_evidence_records(
+        evidence_materialization._analysis_evidence_records(
             collection_id="col-test",
             analysis=analysis,
             objective=objective,

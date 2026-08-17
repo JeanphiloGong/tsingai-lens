@@ -5,10 +5,12 @@ from typing import Any
 
 import pytest
 
+from application.core.objectives.discovery.axis_equivalence import (
+    StructuredAxisCanonicalizationPlan,
+)
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
-from application.core.objectives.schemas import StructuredAxisCanonicalizationPlan
 from domain.core import PaperSkim, ResearchObjective
 
 
@@ -16,7 +18,7 @@ class _GroupingExtractor:
     def __init__(self) -> None:
         self.canonicalization_payloads: list[dict[str, Any]] = []
 
-    def canonicalize_research_objective_axes(
+    def classify(
         self,
         payload: dict[str, Any],
     ) -> StructuredAxisCanonicalizationPlan:
@@ -159,7 +161,7 @@ def test_missing_material_and_one_known_anchor_build_cross_paper_objective():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=_GroupingExtractor(),
+        axis_equivalence_classifier=_GroupingExtractor(),
     )
 
     assert len(facts.research_objectives) == 1
@@ -190,7 +192,7 @@ def test_missing_material_does_not_inherit_an_ambiguous_multi_material_scope():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=_GroupingExtractor(),
+        axis_equivalence_classifier=_GroupingExtractor(),
     )
 
     assert len(facts.research_objectives) == 1
@@ -221,7 +223,7 @@ def test_missing_confidence_does_not_erase_supported_objective_confidence():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=_GroupingExtractor(),
+        axis_equivalence_classifier=_GroupingExtractor(),
     )
 
     assert len(facts.research_objectives) == 1
@@ -247,7 +249,7 @@ def test_all_missing_confidence_remains_zero_with_an_explicit_reason():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=_GroupingExtractor(),
+        axis_equivalence_classifier=_GroupingExtractor(),
     )
 
     assert len(facts.research_objectives) == 1
@@ -274,7 +276,7 @@ def test_broad_outcome_group_is_rejected_until_the_outcome_is_specific():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=_GroupingExtractor(),
+        axis_equivalence_classifier=_GroupingExtractor(),
     )
 
     assert facts.research_objectives == ()
@@ -302,7 +304,7 @@ def test_single_measurement_broad_outcome_is_refined_for_the_candidate():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=_GroupingExtractor(),
+        axis_equivalence_classifier=_GroupingExtractor(),
     )
 
     assert len(facts.research_objectives) == 1
@@ -340,7 +342,7 @@ def test_material_grade_word_order_does_not_fragment_relationship_groups():
 
 def test_material_grade_word_order_preserves_shared_objective_material_scope():
     class RejectingAxisExtractor(_GroupingExtractor):
-        def canonicalize_research_objective_axes(
+        def classify(
             self,
             payload: dict[str, Any],
         ) -> StructuredAxisCanonicalizationPlan:
@@ -368,7 +370,7 @@ def test_material_grade_word_order_preserves_shared_objective_material_scope():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=RejectingAxisExtractor(),
+        axis_equivalence_classifier=RejectingAxisExtractor(),
     )
 
     assert len(facts.research_objectives) == 1
@@ -562,7 +564,7 @@ def test_joint_factors_are_indivisible_and_each_outcome_is_accounted_separately(
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=(skim,),
-        extractor=_GroupingExtractor(),
+        axis_equivalence_classifier=_GroupingExtractor(),
     )
 
     assert {objective.variables for objective in facts.research_objectives} == {
@@ -598,7 +600,7 @@ def test_multi_paper_collection_does_not_promote_single_paper_relationships():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=_GroupingExtractor(),
+        axis_equivalence_classifier=_GroupingExtractor(),
     )
 
     assert facts.research_objectives == ()
@@ -621,7 +623,7 @@ def test_candidate_build_derives_objective_identity_and_lineage_from_relationshi
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=_GroupingExtractor(),
+        axis_equivalence_classifier=_GroupingExtractor(),
     )
 
     assert len(facts.research_objectives) == 1
@@ -658,7 +660,7 @@ def test_fallback_consolidation_keeps_context_differences_on_paper_studies():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=_GroupingExtractor(),
+        axis_equivalence_classifier=_GroupingExtractor(),
     )
 
     assert len(facts.research_objectives) == 1
@@ -690,7 +692,7 @@ def test_compatible_relationship_group_builds_one_cross_paper_objective():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=_GroupingExtractor(),
+        axis_equivalence_classifier=_GroupingExtractor(),
     )
 
     assert len(facts.research_objectives) == 1
@@ -720,7 +722,7 @@ def test_non_current_work_relationships_remain_in_inventory_without_seeding_obje
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=(skim,),
-        extractor=extractor,
+        axis_equivalence_classifier=extractor,
     )
 
     assert facts.paper_skims == (skim,)
@@ -742,7 +744,7 @@ def test_uncertain_claim_scope_is_retained_as_a_standalone_candidate():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=(skim,),
-        extractor=_GroupingExtractor(),
+        axis_equivalence_classifier=_GroupingExtractor(),
     )
 
     assert facts.research_objectives[0].source_relationship_ids == (
@@ -753,7 +755,7 @@ def test_uncertain_claim_scope_is_retained_as_a_standalone_candidate():
 
 def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
     class IncompleteAxisPlanExtractor(_GroupingExtractor):
-        def canonicalize_research_objective_axes(
+        def classify(
             self,
             payload: dict[str, Any],
         ) -> StructuredAxisCanonicalizationPlan:
@@ -795,7 +797,7 @@ def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=IncompleteAxisPlanExtractor(),
+        axis_equivalence_classifier=IncompleteAxisPlanExtractor(),
     )
 
     assert {objective.outcomes for objective in facts.research_objectives} == {
@@ -824,7 +826,7 @@ def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
 
 def test_semantic_axis_aliases_are_canonicalized_before_relationship_grouping():
     class SemanticAxisExtractor(_GroupingExtractor):
-        def canonicalize_research_objective_axes(
+        def classify(
             self,
             payload: dict[str, Any],
         ) -> StructuredAxisCanonicalizationPlan:
@@ -857,7 +859,7 @@ def test_semantic_axis_aliases_are_canonicalized_before_relationship_grouping():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=extractor,
+        axis_equivalence_classifier=extractor,
     )
 
     assert len(facts.research_objectives) == 1
@@ -875,7 +877,7 @@ def test_semantic_axis_aliases_are_canonicalized_before_relationship_grouping():
 
 def test_material_and_axis_aliases_build_one_cross_paper_objective():
     class MaterialAxisExtractor(_GroupingExtractor):
-        def canonicalize_research_objective_axes(
+        def classify(
             self,
             payload: dict[str, Any],
         ) -> StructuredAxisCanonicalizationPlan:
@@ -908,7 +910,7 @@ def test_material_and_axis_aliases_build_one_cross_paper_objective():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=extractor,
+        axis_equivalence_classifier=extractor,
     )
 
     assert {
@@ -948,7 +950,7 @@ def test_objective_constraints_omit_the_relationship_axes():
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=(skim,),
-        extractor=_GroupingExtractor(),
+        axis_equivalence_classifier=_GroupingExtractor(),
     )
 
     assert len(facts.research_objectives) == 1
@@ -1115,7 +1117,7 @@ def test_axis_pair_classification_batches_account_for_every_pair_once():
     ObjectiveCandidateService().discover_candidate_facts(
         "collection-test",
         paper_skims=(skim,),
-        extractor=extractor,
+        axis_equivalence_classifier=extractor,
     )
 
     payload_pairs = [
@@ -1135,7 +1137,7 @@ def test_axis_pair_classification_batches_account_for_every_pair_once():
 
 def test_variable_alias_canonicalization_does_not_merge_different_outcomes():
     class FuzzyAliasExtractor(_GroupingExtractor):
-        def canonicalize_research_objective_axes(
+        def classify(
             self,
             payload: dict[str, Any],
         ) -> StructuredAxisCanonicalizationPlan:
@@ -1194,7 +1196,7 @@ def test_variable_alias_canonicalization_does_not_merge_different_outcomes():
     facts = service.discover_candidate_facts(
         "collection-test",
         paper_skims=skims,
-        extractor=FuzzyAliasExtractor(),
+        axis_equivalence_classifier=FuzzyAliasExtractor(),
     )
 
     assert {objective.variables for objective in facts.research_objectives} == {

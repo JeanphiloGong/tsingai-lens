@@ -3,17 +3,28 @@ from __future__ import annotations
 from typing import Any
 
 from application.core.document_profiles.schemas import StructuredDocumentProfile
-from application.core.objectives.schemas import (
-    StructuredAxisCanonicalizationPlan,
-    StructuredEvidenceExtraction,
-    StructuredEvidenceExtractions,
+from application.core.objectives.analysis.evidence_routing import (
     StructuredEvidenceSelection,
     StructuredEvidenceSelections,
+)
+from application.core.objectives.analysis.finding_synthesis import (
     StructuredFindingSynthesis,
     StructuredFindingSynthesisItem,
-    StructuredPaperFrameBatch,
-    StructuredPaperSkim,
 )
+from application.core.objectives.analysis.source_extraction import (
+    StructuredEvidenceExtraction,
+    StructuredEvidenceExtractions,
+)
+from application.core.objectives.analysis.source_screening import (
+    StructuredPaperFrameBatch,
+)
+from application.core.objectives.discovery.axis_equivalence import (
+    StructuredAxisCanonicalizationPlan,
+)
+from application.core.objectives.discovery.signal_reconciliation import (
+    StructuredPaperSignalReconciliation,
+)
+from application.core.objectives.discovery.study_window import StructuredPaperSkim
 
 
 def source_unit_ids_from_payload(payload: dict[str, Any]) -> list[str]:
@@ -62,19 +73,7 @@ class FakeObjectiveExtractor:
         self.unit_payloads: list[dict[str, Any]] = []
         self.finding_payloads: list[dict[str, Any]] = []
 
-    def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
-        return 0
-
-    def estimate_paper_signal_reconciliation_prompt_tokens(
-        self,
-        payload: dict[str, Any],
-    ) -> int:
-        return 0
-
-    def estimate_objective_paper_frame_prompt_tokens(
-        self,
-        payload: dict[str, Any],
-    ) -> int:
+    def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
         return 0
 
     def extract_document_profile(
@@ -88,7 +87,7 @@ class FakeObjectiveExtractor:
             confidence=0.9,
         )
 
-    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+    def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         self.skim_payloads.append(payload)
         title = str(payload.get("title") or "")
         if "Review" in title:
@@ -129,7 +128,13 @@ class FakeObjectiveExtractor:
             warnings=[],
         )
 
-    def canonicalize_research_objective_axes(
+    def reconcile(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredPaperSignalReconciliation:
+        return StructuredPaperSignalReconciliation()
+
+    def classify(
         self,
         payload: dict[str, Any],
     ) -> StructuredAxisCanonicalizationPlan:
@@ -141,14 +146,13 @@ class FakeObjectiveExtractor:
             ]
         )
 
-    def assess_objective_paper(
+    def screen_batch(
         self,
         payload: dict[str, Any],
     ) -> StructuredPaperFrameBatch:
         self.frame_payloads.append(payload)
         objective = payload["objective"]
         document = payload["document"]
-        paper_prior = payload["paper_prior"]
         document_id = str(document.get("document_id") or "")
         source_units = payload["source_units"]
         source_unit_ids = [
@@ -219,7 +223,7 @@ class FakeObjectiveExtractor:
                 source_unit_ids.append(str(unit["source_unit_id"]))
         return source_unit_ids
 
-    def select_objective_evidence(
+    def route_source(
         self,
         payload: dict[str, Any],
     ) -> StructuredEvidenceSelections:
@@ -283,7 +287,7 @@ class FakeObjectiveExtractor:
             )
         return StructuredEvidenceSelections(selections=routes)
 
-    def extract_objective_evidence(
+    def extract_source(
         self,
         payload: dict[str, Any],
     ) -> StructuredEvidenceExtractions:
@@ -371,7 +375,7 @@ class FakeObjectiveExtractor:
             )
         return StructuredEvidenceExtractions()
 
-    def synthesize_findings(
+    def judge_result_set(
         self,
         payload: dict[str, Any],
     ) -> StructuredFindingSynthesis:

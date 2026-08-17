@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from application.core.document_profiles.service import DocumentProfileService
-from application.core.objectives.finding_synthesis_service import FindingSynthesisService
+from application.core.objectives.analysis.finding_synthesis import (
+    FindingSynthesisService,
+)
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
@@ -34,6 +36,14 @@ def build_research_objective_service(
     collection_service,
     **kwargs,
 ) -> ResearchObjectiveService:
+    objective_judgments = kwargs.get("response_client")
+    if objective_judgments is not None:
+        kwargs.setdefault("axis_equivalence_classifier", objective_judgments)
+        kwargs.setdefault("objective_evidence_router", objective_judgments)
+        kwargs.setdefault("objective_source_extractor", objective_judgments)
+        kwargs.setdefault("objective_source_screener", objective_judgments)
+        kwargs.setdefault("paper_study_window_extractor", objective_judgments)
+        kwargs.setdefault("paper_signal_reconciler", objective_judgments)
     source_repository = kwargs.pop("source_artifact_repository", None)
     if source_repository is None:
         source_repository = getattr(
@@ -59,7 +69,7 @@ def build_research_objective_service(
     finding_synthesis_service = kwargs.pop(
         "finding_synthesis_service",
         FindingSynthesisService(
-            finding_extractor=kwargs.get("objective_extractor"),
+            assertion_judge=objective_judgments,
         ),
     )
     return ResearchObjectiveService(

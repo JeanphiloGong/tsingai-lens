@@ -320,7 +320,14 @@
 							<h2>Findings</h2>
 							<p>选择一条发现进行证据审阅。</p>
 						</div>
-						<span>{findings.length} 条 · v{published.analysis_version}</span>
+						<div class="findings-meta" aria-label="分析元信息">
+							<span>{findings.length} 条 · v{published.analysis_version}</span>
+							{#if published.model_name}
+								<span>模型 {published.model_name}</span>
+							{:else}
+								<span>模型未记录</span>
+							{/if}
+						</div>
 					</div>
 					<ul class="finding-list">
 						{#each findings as item (item.finding_id)}
@@ -484,9 +491,17 @@
 		align-items: flex-start;
 		margin-bottom: 12px;
 	}
-	.findings-heading > span {
+	.findings-meta {
+		display: grid;
+		max-width: 55%;
+		gap: 4px;
+		justify-items: end;
+		text-align: right;
 		color: var(--text-secondary);
 		font-size: 12px;
+	}
+	.findings-meta span {
+		overflow-wrap: anywhere;
 	}
 	.finding-list {
 		margin: 0;
@@ -565,6 +580,11 @@
 		.findings-heading {
 			flex-direction: column;
 			align-items: flex-start;
+		}
+		.findings-meta {
+			max-width: 100%;
+			justify-items: start;
+			text-align: left;
 		}
 		.scope-strip {
 			grid-template-columns: 1fr 1fr;

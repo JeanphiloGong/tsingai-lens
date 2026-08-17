@@ -6,13 +6,19 @@ from typing import Any
 
 import pytest
 
-from application.core.objectives.paper_skim_service import PaperSkimService
-from application.core.objectives.schemas import (
+from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
+)
+from application.core.objectives.discovery.study_window import (
     StructuredPaperSkim,
 )
+from application.core.objectives.paper_skim_service import PaperSkimService
 from domain.core import PaperSkim, PaperStudy
-from domain.source import SourceDocument, build_source_document_tree, source_documents_from_records
+from domain.source import (
+    SourceDocument,
+    build_source_document_tree,
+    source_documents_from_records,
+)
 
 
 class _WindowExtractor:
@@ -27,16 +33,10 @@ class _WindowExtractor:
         self.reconciliation = reconciliation
         self.window_failure_marker = window_failure_marker
 
-    def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
+    def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
         return 0
 
-    def estimate_paper_signal_reconciliation_prompt_tokens(
-        self,
-        payload: dict[str, Any],
-    ) -> int:
-        return 0
-
-    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+    def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         self.payloads.append(payload)
         source_units = payload.get("source_units") or []
         text = " ".join(
@@ -141,7 +141,7 @@ class _WindowExtractor:
             ),
         )
 
-    def reconcile_paper_signals(
+    def reconcile(
         self,
         payload: dict[str, Any],
     ) -> StructuredPaperSignalReconciliation:
@@ -255,7 +255,7 @@ class _BoundedSignalReconciliationExtractor(_WindowExtractor):
         self.reject_later_batches = reject_later_batches
         self.response_mode = response_mode
 
-    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+    def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         self.payloads.append(payload)
         signals = []
         for source_unit in payload.get("source_units") or ():
@@ -277,13 +277,12 @@ class _BoundedSignalReconciliationExtractor(_WindowExtractor):
             confidence=0.9,
         )
 
-    def estimate_paper_signal_reconciliation_prompt_tokens(
-        self,
-        payload: dict[str, Any],
-    ) -> int:
+    def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
+        if "signals" not in payload:
+            return super().estimate_prompt_tokens(payload)
         return 20_000 if len(payload["signals"]) > self.prompt_signal_limit else 1_000
 
-    def reconcile_paper_signals(
+    def reconcile(
         self,
         payload: dict[str, Any],
     ) -> StructuredPaperSignalReconciliation:
@@ -523,7 +522,8 @@ def _build_skims(
         documents=artifacts,
         profiles_by_document_id={},
         document_trees_by_document_id={artifacts[0].document_id: tree},
-        extractor=extractor,
+        study_window_extractor=extractor,
+        signal_reconciler=extractor,
         progress_callback=progress.append if progress is not None else None,
     )
 
@@ -717,8 +717,8 @@ def test_unrepaired_duplicate_study_identity_marks_the_whole_window_failed():
     )
 
     class DuplicateStudyExtractor(_WindowExtractor):
-        def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
-            parsed = super().extract_paper_skim(payload)
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            parsed = super().extract(payload)
             return StructuredPaperSkim.model_construct(
                 doc_role=parsed.doc_role,
                 studies=[*parsed.studies, *parsed.studies],
@@ -828,7 +828,9 @@ def test_complete_prompt_token_preflight_splits_before_model_execution():
             super().__init__()
             self.preflight_payloads: list[dict[str, Any]] = []
 
-        def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
+        def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
+            if "source_units" not in payload:
+                return super().estimate_prompt_tokens(payload)
             self.preflight_payloads.append(payload)
             return 20_000 if len(payload["source_units"]) > 1 else 1_000
 
@@ -856,11 +858,11 @@ def test_model_declared_output_saturation_splits_without_losing_source_units():
     )
 
     class SaturatingExtractor(_WindowExtractor):
-        def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
             if len(payload["source_units"]) > 1:
                 self.payloads.append(payload)
                 return StructuredPaperSkim(output_saturated=True)
-            return super().extract_paper_skim(payload)
+            return super().extract(payload)
 
     extractor = SaturatingExtractor()
 

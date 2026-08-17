@@ -8,19 +8,74 @@ Objective analysis.
 - `research_objective_service.py`
   Orchestrates candidate discovery persistence and runs confirmed Objective
   analysis. It loads the immutable Source build, delegates candidate discovery
-  to the two direct owners below, and atomically replaces the candidate fact
-  set. Confirmed analysis traverses Source document trees with bounded
-  transient state, emits one `PaperContribution` for every framed document,
-  and emits `ObjectiveEvidence` records containing exact excerpts and typed
-  Source locators. Extractable routes retain tree order within each document
-  and run round-robin across documents. Provider suppression is scoped to one
-  Objective/document, and paper-level evidence accounting is derived only after
-  durable Evidence is constructed. Framing, routing, and extraction consume the
-  persisted ResearchObjective variables, outcomes, mechanisms, constraints,
-  and requested comparator directly. Table-selection hints remain transient
-  service values.
+  to its direct owners, and atomically replaces the candidate fact set. For a
+  confirmed Objective, it coordinates the ordered analysis stages and consumes
+  their transient and durable results.
+- `analysis/source_screening.py`
+  Owns confirmed-Objective Source screening from paper inputs to ordered
+  `PaperAnalysisFrame` results. It traverses Source document trees, constructs
+  bounded framing batches, and keeps the screening prompt, response schema,
+  Source-id accounting, repair, token bounds, and batch model call with that
+  responsibility. It preserves model, repair, and conservative fallback
+  provenance. A screening decision means that a Source should or should not be
+  inspected; it is not proof that the Source contains usable Evidence.
+- `analysis/evidence_routing.py`
+  Owns the transient `EvidenceCandidate` records created after screening and
+  the complete bounded routing judgment: prompt, response schema, role
+  normalization, model call, deterministic fallback, and final
+  extraction-queue order. It binds every model decision to the current
+  Objective, document, and Source, preserves tree order within a paper, and
+  round-robins papers before extraction. Model and deterministic decisions are
+  inspection hints only; neither is persisted or treated as scientific
+  Evidence.
+- `analysis/source_extraction.py`
+  Owns transient `ExtractedEvidenceDraft` records and the inspection of every
+  routed Source through `extract_and_validate_source_facts`. It constructs
+  bounded Source payloads, repairs structurally fragmented tables when
+  required, extracts deterministic table records before model fallback, and
+  owns the Source-local extraction prompt, response schema, scientific
+  validation, bounded repair, completion budget, and direct model call. It
+  records route-scoped provider or structured-output failures. Each
+  schema-valid model draft is passed immediately to
+  `analysis/source_validation.py` before it can update the state supplied to
+  the next Source prompt, so extraction and validation alternate per Source
+  rather than running as two collection-wide passes.
+- `analysis/source_validation.py`
+  Owns deterministic validation of one model-authored draft against its exact
+  Source. It independently grounds results, comparison labels, variables, and
+  scientific context; unsupported results abstain, while a supported result
+  with incomplete comparison support is retained only as descriptive Evidence.
+  It records the field families supported by the Source and never calls the
+  model or borrows facts from another Source.
+- `analysis/paper_experiment.py`
+  Owns reconstruction after every routed Source in a paper has been inspected.
+  It fills missing material or process scope only from the same paper's skim,
+  binds Methods conditions to Results only through exact and unambiguous sample
+  identities, and derives the existing bounded pairwise comparisons. Missing or
+  conflicting sample identities remain descriptive, and reconstruction never
+  crosses a document boundary.
+- `analysis/evidence_materialization.py`
+  Owns the boundary from reconstructed drafts to durable `ObjectiveEvidence`
+  and auditable `PaperContribution` records. It retains confirmed-Objective
+  details, canonicalizes uniquely matching axes, resolves exact Source excerpts
+  and related locators, and keeps one existing preference winner for each
+  Objective, document, Source kind, and Source ref. Paper route, extracted,
+  failed, and comparable counts come from that same final Evidence set. It does
+  not persist artifacts or perform cross-paper Finding synthesis.
+- `analysis/finding_synthesis.py`
+  Owns deterministic cross-paper result-set construction and durable Finding
+  publication. `FindingSynthesisService` retains complete Evidence membership,
+  direction, identity, statement, status, certainty, limitations, and
+  provenance. Its bounded `FindingAssertionJudge` model call decides only
+  assertion strength and optional context or mechanism annotations for one
+  backend-owned result set.
+- `llm/structured_response.py`
+  Owns the shared technical model boundary: provider invocation, schema-bearing
+  messages, JSON parsing and bounded repair, trace capture, usage accounting,
+  and complete prompt-token estimation. It does not own a scientific judgment,
+  prompt, response schema, or domain state.
 - `paper_skim_service.py`
-  Owns the per-document discovery stage. It assigns every eligible
+  Orchestrates the per-document discovery stage. It assigns every eligible
   non-reference text node, table row, and table/figure caption to one full
   section-path group. `overview`, `methods`, `results`, `conclusion`, and
   `unknown` remain window metadata; they no longer collect unrelated sections
@@ -53,6 +108,24 @@ Objective analysis.
   `table + table_id`; inline table-matrix rows without a persisted row identity
   remain table-level. A skim retains only the stable Source `document_id`;
   title, filename, and window metadata remain Source-owned or transient.
+- `discovery/study_window.py`
+  Owns the model judgment for one bounded PaperSkim Source window: its prompt,
+  response schema, scientific bounds, repair instruction, stable-identity
+  validation, token budget, and model call. It reports studies, relationships,
+  and unresolved signals supported by that window; it does not batch Sources,
+  combine windows, or create collection Objectives.
+- `discovery/signal_reconciliation.py`
+  Owns the model judgment that decides whether variable and outcome signals
+  found in different windows belong to one compatible experiment. Its prompt,
+  response schema, context-conflict validation, bounded repair, deterministic
+  conflict removal, token budget, and model call live together. Paper-wide
+  signal accounting and study consolidation remain in `paper_skim_service.py`.
+- `discovery/axis_equivalence.py`
+  Owns the bounded model judgment that classifies backend-proposed material,
+  variable, and outcome label pairs as exactly equivalent or different. It
+  keeps the pair-accounting schema, prompt, repair, budget, and call together.
+  It cannot return canonical labels, groups, Objective questions, confidence,
+  lineage, or dispositions; those remain backend-owned.
 - `objective_candidate_service.py`
   Owns collection-level Objective discovery from `PaperStudyRelationship`
   records. Before grouping, the backend proposes a bounded set of plausible
@@ -92,12 +165,6 @@ Objective analysis.
   axis-equivalence decisions. The backend constructs each question, variable,
   outcome, seed-document set, and `source_relationship_ids` from the accepted
   relationship group.
-- `evidence_routing.py`
-  Owns the transient Source-selection decisions created while routing one
-  confirmed Objective across its documents.
-- `evidence_extraction.py`
-  Owns structured Evidence drafts before the service binds exact Source text
-  and publishes durable `ObjectiveEvidence` records.
 - `property_matching.py`
   Owns application-layer matching from noisy Source labels to Objective axes,
   including observed OCR aliases, materials-specific broad outcome hints,
@@ -106,19 +173,6 @@ Objective analysis.
 - `analysis_service.py`
   Queues, claims, fails, and atomically publishes one Objective analysis
   version.
-- `finding_synthesis_service.py`
-  Produces evidence-calibrated paper and cross-paper Findings from validated
-  Objective Evidence.
-- `extraction.py`
-  Calls the configured model provider for PaperSkim extraction, relationship
-  axis canonicalization, framing, Evidence extraction, and Finding synthesis
-  and owns their bounded retry and repair behavior. PaperSkim study identities
-  are checked against stable Source locators before extractor results leave this
-  boundary; duplicate identities enter the same bounded structured repair path
-  as other schema violations.
-- `prompts.py` and `schemas.py`
-  Define Objective prompts and their validated response contracts.
-
 ## Objective Boundary
 
 Candidate discovery is part of collection build. Deep analysis begins only
@@ -250,39 +304,45 @@ Source selection and extraction are one persisted Evidence lifecycle:
 `candidate -> selected -> extracted | rejected | failed`. Selection decisions
 may be transient, but only `ObjectiveEvidence` is durable.
 
-Each model call may return zero or one Evidence extraction for the selected
-Source. If that item fails structural or scientific-contract validation, the
-extractor permits at most two sequential bounded repairs against the same Source.
-Each repair includes the latest invalid item and its field-level validation
-errors, so a second repair can address a contract error exposed by the first.
-Repair may correct structure or abstain, but it must not invent endpoints,
-units, context, or comparison groups. The backend does not change comparability
-or attribution merely to make an item pass validation. A named parameter with
-identical, non-empty scalar baseline and target values is fixed scientific
-context, not a changed variable. At the model adapter boundary, the backend
-removes such a parameter from `changed_variables` and `comparison.axis_names`.
-When that removal leaves exactly one changed variable from a `joint_effect`
-draft, the backend derives `isolated_effect`; endpoint completeness, comparison
-parity, comparability, and Source grounding remain strict validation
-requirements. When every named variable is fixed, the backend removes the
-comparison and retains the reported result only as `descriptive_only`; normal
-Source-grounding validation still follows, and the backend does not claim an
-experimental effect from unchanged conditions. Because
-`comparison.axis_names` repeats the changed-variable
+Each model call may return zero or one source-local Evidence extraction for the
+selected Source. The extractor permits at most two sequential bounded repairs
+for malformed JSON or schema-invalid output against that same Source; it does
+not expose a second semantic-grounding call. A named parameter with identical,
+non-empty scalar baseline and target values is fixed scientific context, not a
+changed variable. At the model adapter boundary, the backend removes such a
+parameter from `changed_variables` and `comparison.axis_names`. When that
+removal leaves exactly one changed variable from a `joint_effect` draft, the
+backend derives `isolated_effect`. When every named variable is fixed, the
+backend removes the comparison and retains a grounded reported result as
+`descriptive_only`. Because `comparison.axis_names` repeats changed-variable
 identity, the adapter restores a missing or empty axis list only when every
 changed variable has a unique non-empty name and complete, distinct endpoints.
-Incomplete variables still enter bounded repair; the backend does not infer an
-axis from domain knowledge. A non-empty model result that survives schema
-validation but fails Source grounding receives deterministic field-path errors
-for unsupported variable names, endpoints, units, outcomes, values, result text,
-or table-row bindings. The service permits one additional repair call with the
-same Objective, route, Source, invalid item, and field errors. The model may
-correct only values explicitly present in that Source or abstain; the backend
-never deletes or
-substitutes scientific values merely to make the item pass. A repaired item goes
-through the complete contract and Source-grounding checks again. A failed repair
-or abstention becomes explicit failed Evidence with the final field-level reason
-instead of disappearing from paper accounting.
+When a result is present but an `isolated_effect` or `joint_effect` response has
+no complete changed-variable interval, the adapter preserves the source-local
+result and group labels but demotes the attribution to `association_only` or
+`descriptive_only`; it never asks schema repair to invent the missing endpoint.
+The backend never infers an axis or scientific value from Objective text.
+
+After schema validation, the service grounds the reported result, comparison
+labels, changed variables, and scientific context independently against their
+owning Source. An unsupported result is discarded as abstention. A grounded
+result with unsupported variables or comparison fields survives as partial,
+descriptive Evidence instead of becoming a technical failure. After all routed
+Sources for the document have been inspected, the service may bind that result
+to process conditions from other Sources in the same document only when the
+result names explicit baseline and target samples and both sample identities
+resolve to unambiguous process contexts. A successful binding derives the
+changed-variable endpoints from those condition Sources and preserves the
+result and comparison labels from the result Source. Missing or conflicting
+sample bindings remain `descriptive_only`; no cross-document binding or semantic
+LLM repair is attempted.
+
+Every related Source locator records a `supports` list naming the scientific
+field families owned by that Source, such as `reported_result`,
+`comparison.labels`, `changed_variables`, or `scientific_context.process`.
+Provider, transport, or unrecoverable structured-output errors remain technical
+failures and produce explicit failed Evidence. A Source with no grounded target
+result or useful context is an abstention and does not produce failed Evidence.
 
 Final Evidence materialization enforces zero or one durable record for each
 `objective_id + document_id + source_kind + source_ref`. This boundary covers

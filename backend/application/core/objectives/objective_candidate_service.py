@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from difflib import SequenceMatcher
 from enum import StrEnum
 from itertools import combinations
-import re
 from typing import Any
 
-from application.core.objectives.extraction import ObjectiveExtractor
 from application.core.objectives import property_matching
-from application.core.objectives.schemas import StructuredAxisCanonicalizationPlan
+from application.core.objectives.discovery.axis_equivalence import (
+    ResearchAxisEquivalenceClassifier,
+    StructuredAxisCanonicalizationPlan,
+)
 from domain.core import (
     ObjectiveFactSet,
     PaperSkim,
@@ -66,13 +68,13 @@ class ObjectiveCandidateService:
         collection_id: str,
         *,
         paper_skims: tuple[PaperSkim, ...],
-        extractor: ObjectiveExtractor,
+        axis_equivalence_classifier: ResearchAxisEquivalenceClassifier,
         progress_callback: ProgressCallback | None = None,
     ) -> ObjectiveFactSet:
         source_relationship_inventory = self._relationship_inventory(paper_skims)
         relationship_inventory = self._canonicalize_relationship_inventory_axes(
             collection_id=collection_id,
-            extractor=extractor,
+            axis_equivalence_classifier=axis_equivalence_classifier,
             relationship_inventory=source_relationship_inventory,
         )
         terminal_rejections = {
@@ -722,7 +724,7 @@ class ObjectiveCandidateService:
         self,
         *,
         collection_id: str,
-        extractor: ObjectiveExtractor,
+        axis_equivalence_classifier: ResearchAxisEquivalenceClassifier,
         relationship_inventory: RelationshipInventory,
     ) -> dict[str, tuple[str, PaperStudy, PaperStudyRelationship]]:
         axis_candidates = self._build_relationship_axis_candidates(
@@ -743,7 +745,7 @@ class ObjectiveCandidateService:
         decisions: list[dict[str, Any]] = []
         try:
             for start in range(0, len(pair_records), _AXIS_PAIR_BATCH_SIZE):
-                plan = extractor.canonicalize_research_objective_axes(
+                plan = axis_equivalence_classifier.classify(
                     {
                         "collection_id": collection_id,
                         "axis_pairs": pair_records[

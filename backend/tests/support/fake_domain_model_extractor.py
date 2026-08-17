@@ -1,18 +1,32 @@
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Callable
 from typing import Any
 
 from application.core.document_profiles.schemas import StructuredDocumentProfile
-from application.core.objectives.schemas import (
-    StructuredAxisCanonicalizationPlan,
+from application.core.objectives.analysis.evidence_routing import (
     StructuredEvidenceSelection,
     StructuredEvidenceSelections,
+)
+from application.core.objectives.analysis.finding_synthesis import (
+    StructuredFindingSynthesis,
+)
+from application.core.objectives.analysis.source_extraction import (
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
-    StructuredPaperFrameBatch,
-    StructuredPaperSkim,
 )
+from application.core.objectives.analysis.source_screening import (
+    StructuredPaperFrameBatch,
+)
+from application.core.objectives.discovery.axis_equivalence import (
+    StructuredAxisCanonicalizationPlan,
+)
+from application.core.objectives.discovery.signal_reconciliation import (
+    StructuredPaperSignalReconciliation,
+)
+from application.core.objectives.discovery.study_window import StructuredPaperSkim
 from application.core.paper_facts.schemas import (
     MeasurementValuePayload,
     StructuredTableBatchMentions,
@@ -30,10 +44,7 @@ from application.core.paper_facts.schemas import (
     TextWindowResultClaimPayload,
     TextWindowVariantMentionPayload,
 )
-from tests.support.objective_extractor import (
-    paper_skim_study_outputs,
-)
-
+from tests.support.objective_extractor import paper_skim_study_outputs
 
 _PROPERTY_HINTS = (
     ("yield strength", "yield_strength"),
@@ -58,11 +69,102 @@ _ATM_PATTERN = re.compile(r"\b(?:under|in)\s+(air|argon|ar|nitrogen|n2|vacuum)\b
 _METHODS = ("XRD", "SEM", "TEM", "XPS", "Raman", "FTIR", "DSC", "TGA", "DMA")
 
 
+def _input_payload(user_prompt: str) -> dict[str, Any]:
+    marker = "Input JSON:\n"
+    marker_position = user_prompt.find(marker)
+    if marker_position < 0:
+        return {}
+    payload_start = marker_position + len(marker)
+    payload, _ = json.JSONDecoder().raw_decode(user_prompt[payload_start:])
+    return payload if isinstance(payload, dict) else {}
+
+
+def _source_extraction_payload(user_prompt: str) -> dict[str, Any]:
+    prompt_fields: dict[str, str] = {}
+    source_marker = "SOURCE:\n"
+    source_position = user_prompt.find(source_marker)
+    if source_position < 0:
+        return {}
+    for line in user_prompt[:source_position].splitlines():
+        key, separator, value = line.partition(":")
+        if separator:
+            prompt_fields[key] = value.strip()
+    source_text = user_prompt[source_position + len(source_marker) :]
+    source_text = source_text.rsplit("\nOUTPUT JSON:", maxsplit=1)[0].strip()
+    source_kind = prompt_fields.get("SOURCE KIND", "")
+    source: dict[str, Any] = {"source_kind": source_kind}
+    if source_text.startswith("{"):
+        decoded_source = json.loads(source_text)
+        if isinstance(decoded_source, dict):
+            source.update(decoded_source)
+    else:
+        source["text"] = source_text
+    return {
+        "objective": {
+            "question": prompt_fields.get("OBJECTIVE QUESTION", ""),
+            "variables": json.loads(
+                prompt_fields.get("OBJECTIVE VARIABLES", "[]")
+            ),
+            "outcomes": json.loads(prompt_fields.get("OBJECTIVE OUTCOMES", "[]")),
+        },
+        "evidence_route": {
+            "role": prompt_fields.get(
+                "ROUTE HINT ONLY (DO NOT COPY AS EVIDENCE ROLE)",
+                "",
+            ),
+            "source_kind": source_kind,
+        },
+        "source": source,
+    }
+
+
 class FakeDomainModelExtractor:
     """Deterministic test double for the three domain extraction contracts."""
 
-    def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
+    def estimate_prompt_tokens(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[Any],
+    ) -> int:
+        del system_prompt, user_prompt, response_model
         return 0
+
+    def complete(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[Any],
+        parsed_validator: Callable[[Any], Any | None] | None = None,
+        **_options: Any,
+    ) -> Any:
+        del system_prompt
+        payload = _input_payload(user_prompt)
+        if response_model is StructuredPaperSkim:
+            response = self.extract(payload)
+        elif response_model is StructuredPaperSignalReconciliation:
+            response = self.reconcile(payload)
+        elif response_model is StructuredAxisCanonicalizationPlan:
+            response = self.classify(payload)
+        elif response_model is StructuredPaperFrameBatch:
+            response = self.screen_batch(payload)
+        elif response_model is StructuredEvidenceSelections:
+            response = self.route_source(payload)
+        elif response_model is StructuredEvidenceExtractions:
+            response = self.extract_source(_source_extraction_payload(user_prompt))
+        elif response_model is StructuredFindingSynthesis:
+            response = StructuredFindingSynthesis()
+        else:
+            raise TypeError(
+                f"unsupported fake structured response: {response_model.__name__}"
+            )
+        if parsed_validator is not None:
+            validated = parsed_validator(response)
+            if validated is not None:
+                response = validated
+        return response
 
     def extract_document_profile(self, payload: dict[str, Any]) -> StructuredDocumentProfile:
         title = str(payload.get("title") or "").strip()
@@ -151,7 +253,7 @@ class FakeDomainModelExtractor:
             confidence=0.86 if doc_type == "experimental" else 0.82 if doc_type == "review" else 0.78,
         )
 
-    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+    def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         title = str(payload.get("title") or "").strip()
         profile_hint = (
             payload.get("profile_hint")
@@ -252,7 +354,13 @@ class FakeDomainModelExtractor:
             warnings=[] if studies else ["objective_uncertain"],
         )
 
-    def canonicalize_research_objective_axes(
+    def reconcile(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredPaperSignalReconciliation:
+        return StructuredPaperSignalReconciliation()
+
+    def classify(
         self,
         payload: dict[str, Any],
     ) -> StructuredAxisCanonicalizationPlan:
@@ -264,7 +372,7 @@ class FakeDomainModelExtractor:
             ]
         )
 
-    def assess_objective_paper(
+    def screen_batch(
         self,
         payload: dict[str, Any],
     ) -> StructuredPaperFrameBatch:
@@ -342,13 +450,7 @@ class FakeDomainModelExtractor:
             excluded_source_unit_ids=excluded_source_unit_ids,
         )
 
-    def estimate_objective_paper_frame_prompt_tokens(
-        self,
-        payload: dict[str, Any],
-    ) -> int:
-        return 0
-
-    def select_objective_evidence(
+    def route_source(
         self,
         payload: dict[str, Any],
     ) -> StructuredEvidenceSelections:
@@ -424,7 +526,7 @@ class FakeDomainModelExtractor:
             )
         return StructuredEvidenceSelections(selections=routes)
 
-    def extract_objective_evidence(
+    def extract_source(
         self,
         payload: dict[str, Any],
     ) -> StructuredEvidenceExtractions:

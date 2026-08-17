@@ -360,6 +360,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		const failed = objectiveResponse({
 			objective: objective({ active_analysis_version: 2, published_analysis_version: 1 }),
 			active_analysis: analysisState('failed', 2, {
+				model_name: 'model-2',
 				error_code: 'provider_error',
 				error_message: 'Evidence extraction failed.'
 			}),
@@ -374,11 +375,25 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByText('正在显示已发布的 v1；重试 v2 失败。'))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByText('Evidence extraction failed.')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('模型 model-1')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('模型 model-2')).not.toBeInTheDocument();
 		await expect.element(browserPage.getByText(finding.statement).first()).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('blockquote').filter({ hasText: evidence.source_excerpt }))
 			.toHaveTextContent(evidence.source_excerpt);
 		await expect.element(browserPage.getByRole('button', { name: '重试分析' })).toBeInTheDocument();
+	});
+
+	it('labels historical published analyses whose model was not recorded', async () => {
+		installPublishedResponses(
+			objectiveResponse({
+				published_analysis: analysisState('succeeded', 1, { model_name: null })
+			})
+		);
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('模型未记录')).toBeInTheDocument();
 	});
 
 	it('renders one Finding with relation, Context, and an exact source jump', async () => {
@@ -389,6 +404,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: 'Findings' }))
 			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('模型 model-1')).toBeInTheDocument();
 		await expect.element(browserPage.getByText('相关联', { exact: true })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('associated_with')).not.toBeInTheDocument();
 		await expect

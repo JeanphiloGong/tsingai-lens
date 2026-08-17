@@ -50,6 +50,10 @@ page handles these states explicitly:
   and failed retry version, keep the prior Findings visible, and offer retry;
 - succeeded: show Findings from the published analysis version.
 
+Published Finding metadata shows the model recorded for that published analysis,
+not the model attached to a newer active or failed retry. Historical analyses
+without model metadata are labeled explicitly instead of guessing a model.
+
 The Finding list returns the complete display shape. Selection reuses that item
 and loads only its paginated Evidence with the published `analysis_version`;
 stale rapid-selection responses are discarded.

@@ -29,6 +29,7 @@ export LLM_BASE_URL=http://localhost:11434/v1
 export LLM_MODEL=qwen1.5-8b-chat
 export GOAL_COPILOT_LLM_MODEL=qwen1.5-8b-chat
 export LLM_API_KEY=sk-local
+export LLM_REASONING_EFFORT=none
 export CORE_LLM_EXTRACTION_MODE=json_text
 export CORE_EXTRACTION_MAX_CONCURRENCY=4
 ```
@@ -37,6 +38,10 @@ export CORE_EXTRACTION_MAX_CONCURRENCY=4
 `4`.
 `CORE_LLM_EXTRACTION_MODE` is optional. Supported values are `json_text` and
 `provider_parse`. When unset, Core extraction uses `json_text`.
+`LLM_REASONING_EFFORT` is optional. Set it to a value supported by the model
+provider, such as `none`, when a reasoning model must reserve its bounded
+completion budget for structured JSON output. When unset, the provider default
+is used.
 `GOAL_COPILOT_LLM_MODEL` is optional. When unset, goal chat uses `LLM_MODEL`;
 when set, it must match one of the model ids returned by the configured
 OpenAI-compatible endpoint, for example:

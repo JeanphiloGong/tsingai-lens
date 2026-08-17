@@ -52,6 +52,9 @@ class DocumentProfileExtractor:
             "yes",
             "on",
         }
+        self.reasoning_effort = (
+            os.getenv("LLM_REASONING_EFFORT", "").strip() or None
+        )
         self.last_trace: dict[str, Any] | None = None
         self.client = client or OpenAI(
             api_key=(api_key or os.getenv("LLM_API_KEY", "").strip() or "not-needed"),
@@ -189,15 +192,16 @@ class DocumentProfileExtractor:
         ]
 
     def _provider_request_options(self) -> dict[str, Any]:
-        if self.enable_thinking:
-            return {}
-        return {
-            "extra_body": {
+        options: dict[str, Any] = {}
+        if not self.enable_thinking:
+            options["extra_body"] = {
                 "chat_template_kwargs": {
                     "enable_thinking": False,
                 }
             }
-        }
+        if self.reasoning_effort is not None:
+            options["reasoning_effort"] = self.reasoning_effort
+        return options
 
     def consume_last_trace(self) -> dict[str, Any] | None:
         trace = self.last_trace

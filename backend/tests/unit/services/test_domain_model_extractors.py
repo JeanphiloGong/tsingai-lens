@@ -2982,6 +2982,33 @@ def test_domain_model_extractors_can_opt_in_to_provider_thinking(monkeypatch):
     assert "extra_body" not in client.beta.chat.completions.calls[0]
 
 
+def test_domain_model_extractors_leave_reasoning_effort_unset_by_default(monkeypatch):
+    monkeypatch.delenv("LLM_REASONING_EFFORT", raising=False)
+    extractor = StructuredResponseClient(
+        client=_FakeOpenAIClient("unused"),
+        model="fake-model",
+    )
+
+    assert "reasoning_effort" not in extractor._provider_request_options()
+
+
+@pytest.mark.parametrize(
+    "extractor_type",
+    (DocumentProfileExtractor, PaperFactsExtractor, StructuredResponseClient),
+)
+def test_domain_model_extractors_forward_configured_reasoning_effort(
+    monkeypatch,
+    extractor_type,
+):
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "none")
+    extractor = extractor_type(
+        client=_FakeOpenAIClient("unused"),
+        model="fake-model",
+    )
+
+    assert extractor._provider_request_options()["reasoning_effort"] == "none"
+
+
 def test_domain_model_extractors_routes_objective_selections_directly_to_bounded_json_text(
     monkeypatch,
 ):

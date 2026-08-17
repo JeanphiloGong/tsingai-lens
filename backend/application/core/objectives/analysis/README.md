@@ -22,8 +22,11 @@ Read the analysis responsibilities in real research order:
 5. `paper_experiment.py` runs after all routed Sources have been inspected. It
    fills only missing scope from the same paper, binds Methods and Results only
    through exact sample identities, and derives bounded pairwise comparisons.
-6. Evidence materialization and cross-paper Finding synthesis remain in their
-   existing owners until their responsibility slices move here.
+6. `evidence_materialization.py` turns reconstructed drafts into durable
+   `ObjectiveEvidence`, resolves duplicate candidates by stable Source identity,
+   and derives each paper's `PaperContribution` from that final Evidence set.
+7. Cross-paper Finding synthesis remains in its existing owner until its
+   responsibility slice moves here.
 
 `source_screening.py` owns complete Source-unit accounting, bounded framing
 batches, prompt preflight, model/repaired/fallback dispositions, and frame
@@ -51,6 +54,14 @@ finishes. It may join process conditions from Methods to a result only when the
 baseline and target sample identities resolve unambiguously inside that paper.
 Missing or conflicting identities remain descriptive, and no cross-document
 binding is allowed.
+
+`evidence_materialization.py` owns the trust boundary from transient paper
+facts to durable Evidence. It keeps the confirmed Objective's result details,
+canonicalizes uniquely matching axes, resolves exact Source excerpts and
+related locators, and retains at most one winner for each Objective, document,
+Source kind, and Source ref. `PaperContribution` route, extracted, failed, and
+comparable counts are computed from that same final Source-keyed set. It does
+not persist artifacts or synthesize a cross-paper claim.
 
 Technical JSON parsing, provider retries, prompt schemas, and token accounting
 support this process but do not define its scientific order.

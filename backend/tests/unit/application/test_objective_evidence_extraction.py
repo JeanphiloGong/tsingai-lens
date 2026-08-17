@@ -10,6 +10,7 @@ from openai import BadRequestError
 
 from application.core.objectives import property_matching
 from application.core.objectives.analysis import (
+    evidence_materialization,
     evidence_routing,
     paper_experiment,
     source_extraction,
@@ -32,10 +33,6 @@ from application.core.objectives.schemas import (
 from application.core.paper_facts.schemas import StructuredTableMatrixRepair
 from domain.core import ObjectiveAnalysis, PaperSkim
 from domain.source import SourceDocumentNode, SourceDocumentTree, SourceTable
-from tests.support.collection_service import build_test_collection_service
-from tests.support.research_objective_service import (
-    build_research_objective_service as _build_research_objective_service,
-)
 from tests.support.research_objective_service import (
     research_objective as _research_objective,
 )
@@ -1544,10 +1541,7 @@ def _cross_source_microstructure_records() -> dict[str, dict[str, Any]]:
     }
 
 
-def test_research_objective_binds_same_study_methods_and_results_sources(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_research_objective_binds_same_study_methods_and_results_sources():
     objective = _research_objective(
         {
             "objective_id": "obj-microstructure",
@@ -1653,7 +1647,7 @@ def test_research_objective_binds_same_study_methods_and_results_sources(tmp_pat
         model_name="test-model",
         prompt_versions={},
     )
-    evidence_records = service._analysis_evidence_records(
+    evidence_records = evidence_materialization._analysis_evidence_records(
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
@@ -1675,7 +1669,7 @@ def test_research_objective_binds_same_study_methods_and_results_sources(tmp_pat
             "paper_role": "primary_experiment",
         }
     )
-    contributions = service._analysis_contributions(
+    contributions = evidence_materialization._analysis_contributions(
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
@@ -3048,9 +3042,7 @@ def test_research_objective_rejects_unusable_table_matrix_repair(
     assert units[0].failure_reason == f"ValueError: {expected_failure_reason}"
 
 
-def test_research_objective_records_failed_evidence_when_table_repair_fails(
-    tmp_path,
-):
+def test_research_objective_records_failed_evidence_when_table_repair_fails():
     class FailingPaperFactsExtractor:
         def __init__(self) -> None:
             self.calls = 0
@@ -3069,10 +3061,6 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails(
 
     repair_extractor = FailingPaperFactsExtractor()
     evidence_extractor = UnexpectedEvidenceExtractor()
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-        paper_facts_extractor=repair_extractor,
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -3138,7 +3126,7 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails(
         model_name=None,
         prompt_versions={},
     )
-    evidence = service._analysis_evidence_records(
+    evidence = evidence_materialization._analysis_evidence_records(
         collection_id="col-test",
         analysis=analysis,
         objective=objective,

@@ -10,9 +10,9 @@ Objective analysis.
   analysis. It loads the immutable Source build, delegates candidate discovery
   to its direct owners, and atomically replaces the candidate fact set. For a
   confirmed Objective, it coordinates the ordered analysis stages and consumes
-  their transient results. The remaining materialization and publication
-  responsibilities move to direct owners in separate behavior-preserving
-  slices.
+  their transient and durable results. The remaining publication
+  responsibilities move to direct owners in a separate behavior-preserving
+  slice.
 - `analysis/source_screening.py`
   Owns confirmed-Objective Source screening from paper inputs to ordered
   `PaperAnalysisFrame` results. It traverses Source document trees, constructs
@@ -49,6 +49,14 @@ Objective analysis.
   identities, and derives the existing bounded pairwise comparisons. Missing or
   conflicting sample identities remain descriptive, and reconstruction never
   crosses a document boundary.
+- `analysis/evidence_materialization.py`
+  Owns the boundary from reconstructed drafts to durable `ObjectiveEvidence`
+  and auditable `PaperContribution` records. It retains confirmed-Objective
+  details, canonicalizes uniquely matching axes, resolves exact Source excerpts
+  and related locators, and keeps one existing preference winner for each
+  Objective, document, Source kind, and Source ref. Paper route, extracted,
+  failed, and comparable counts come from that same final Evidence set. It does
+  not persist artifacts or perform cross-paper Finding synthesis.
 - `paper_skim_service.py`
   Owns the per-document discovery stage. It assigns every eligible
   non-reference text node, table row, and table/figure caption to one full

@@ -4,6 +4,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
+from application.core.objectives.analysis import evidence_materialization
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
 )
@@ -179,10 +180,7 @@ def test_memory_objective_repository_requires_explicit_activation():
     assert repository.read("col-1") == pending
 
 
-def test_objective_analysis_publishes_one_terminal_evidence_per_source(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_analysis_publishes_one_terminal_evidence_per_source():
     objective = _research_objective(
         {
             "collection_id": "col-1",
@@ -365,7 +363,7 @@ def test_objective_analysis_publishes_one_terminal_evidence_per_source(tmp_path)
         ]
     }
 
-    evidence_records = service._analysis_evidence_records(
+    evidence_records = evidence_materialization._analysis_evidence_records(
         collection_id="col-1",
         analysis=analysis,
         objective=objective,
@@ -393,7 +391,7 @@ def test_objective_analysis_publishes_one_terminal_evidence_per_source(tmp_path)
             "paper_role": "primary_experiment",
         }
     )
-    contributions = service._analysis_contributions(
+    contributions = evidence_materialization._analysis_contributions(
         collection_id="col-1",
         analysis=analysis,
         objective=objective,

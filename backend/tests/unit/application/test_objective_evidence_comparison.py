@@ -7,7 +7,11 @@ import pytest
 from httpx import Request, Response
 from openai import APIConnectionError, BadRequestError
 
-from application.core.objectives.analysis import paper_experiment, source_extraction
+from application.core.objectives.analysis import (
+    evidence_materialization,
+    paper_experiment,
+    source_extraction,
+)
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
@@ -19,10 +23,6 @@ from application.core.objectives.schemas import (
     StructuredEvidenceExtractions,
 )
 from domain.core import ObjectiveAnalysis, ObjectiveEvidence
-from tests.support.collection_service import build_test_collection_service
-from tests.support.research_objective_service import (
-    build_research_objective_service as _build_research_objective_service,
-)
 from tests.support.research_objective_service import (
     research_objective as _research_objective,
 )
@@ -549,10 +549,7 @@ def test_objective_evidence_rejects_selected_route_without_source():
         )
 
 
-def test_analysis_contributions_report_each_paper_evidence_disposition(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_analysis_contributions_report_each_paper_evidence_disposition():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -683,7 +680,7 @@ def test_analysis_contributions_report_each_paper_evidence_disposition(tmp_path)
         evidence("paper-comparable", kind="direct"),
     )
 
-    contributions = service._analysis_contributions(
+    contributions = evidence_materialization._analysis_contributions(
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
@@ -1479,10 +1476,7 @@ def test_pairwise_comparison_is_bounded_per_objective_document():
     assert len(comparisons) == 48
 
 
-def test_table_material_and_cell_locators_bound_comparison_source(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_table_material_and_cell_locators_bound_comparison_source():
     route = EvidenceCandidate.from_mapping(
         {
             "objective_id": "obj-density",
@@ -1556,7 +1550,7 @@ def test_table_material_and_cell_locators_bound_comparison_source(tmp_path):
         page=4,
         to_record=lambda: {"table_markdown": "full table"},
     )
-    evidence = service._analysis_evidence_records(
+    evidence = evidence_materialization._analysis_evidence_records(
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
@@ -1570,10 +1564,7 @@ def test_table_material_and_cell_locators_bound_comparison_source(tmp_path):
     assert {ref["row_index"] for ref in evidence.related_source_refs} == {1, 2}
 
 
-def test_analysis_evidence_uses_confirmed_objective_axis_names(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_analysis_evidence_uses_confirmed_objective_axis_names():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -1657,7 +1648,7 @@ def test_analysis_evidence_uses_confirmed_objective_axis_names(tmp_path):
         heading_path="Results",
     )
 
-    evidence = service._analysis_evidence_records(
+    evidence = evidence_materialization._analysis_evidence_records(
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
@@ -1682,10 +1673,7 @@ def test_analysis_evidence_uses_confirmed_objective_axis_names(tmp_path):
     assert evidence.reported_result.outcome == "density"
 
 
-def test_analysis_evidence_merges_duplicate_aliases_for_one_objective_axis(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_analysis_evidence_merges_duplicate_aliases_for_one_objective_axis():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -1753,7 +1741,7 @@ def test_analysis_evidence_merges_duplicate_aliases_for_one_objective_axis(tmp_p
         page=3,
     )
 
-    evidence = service._analysis_evidence_records(
+    evidence = evidence_materialization._analysis_evidence_records(
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
@@ -1776,10 +1764,7 @@ def test_analysis_evidence_merges_duplicate_aliases_for_one_objective_axis(tmp_p
     assert evidence.attribution_scope == "isolated_effect"
 
 
-def test_analysis_evidence_marks_conflicting_axis_aliases_failed(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_analysis_evidence_marks_conflicting_axis_aliases_failed():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -1848,7 +1833,7 @@ def test_analysis_evidence_marks_conflicting_axis_aliases_failed(tmp_path):
         page=3,
     )
 
-    evidence = service._analysis_evidence_records(
+    evidence = evidence_materialization._analysis_evidence_records(
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
@@ -1866,10 +1851,7 @@ def test_analysis_evidence_marks_conflicting_axis_aliases_failed(tmp_path):
     assert evidence.reported_result is None
 
 
-def test_analysis_evidence_rejects_draft_without_resolvable_source(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_analysis_evidence_rejects_draft_without_resolvable_source():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -1904,7 +1886,7 @@ def test_analysis_evidence_rejects_draft_without_resolvable_source(tmp_path):
     )
 
     with pytest.raises(RuntimeError, match="Evidence Source cannot be resolved"):
-        service._analysis_evidence_records(
+        evidence_materialization._analysis_evidence_records(
             collection_id="col-test",
             analysis=analysis,
             objective=objective,

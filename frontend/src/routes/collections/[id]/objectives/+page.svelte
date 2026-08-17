@@ -6,12 +6,15 @@
 	import {
 		confirmObjective,
 		fetchCollectionObjectives,
+		fetchObjectiveAnalysis,
 		runObjectiveAnalysis,
+		type ObjectiveAnalysisState,
 		type ObjectiveList,
 		type ObjectiveSummary
 	} from '../../../_shared/researchView';
 
 	let objectiveList: ObjectiveList | null = null;
+	let analysisStates: Record<string, ObjectiveAnalysisState | null> = {};
 	let loading = false;
 	let actionObjectiveId = '';
 	let error = '';
@@ -35,12 +38,70 @@
 		error = '';
 		try {
 			objectiveList = await fetchCollectionObjectives(collectionId);
+			await refreshActiveAnalysisStates();
 		} catch (err) {
 			objectiveList = null;
+			analysisStates = {};
 			error = errorMessage(err);
 		} finally {
 			loading = false;
 		}
+	}
+
+	async function refreshActiveAnalysisStates() {
+		const currentList = objectiveList;
+		if (!currentList) return;
+		const activeObjectives = currentList.objectives.filter(
+			(objective) =>
+				objective.active_analysis_version !== null &&
+				objective.active_analysis_version !== objective.published_analysis_version
+		);
+		if (!activeObjectives.length) {
+			analysisStates = {};
+			return;
+		}
+
+		const states = await Promise.all(
+			activeObjectives.map(async (objective) => {
+				try {
+					const snapshot = await fetchObjectiveAnalysis(collectionId, objective.objective_id);
+					return [objective.objective_id, snapshot.active_analysis] as const;
+				} catch {
+					return [objective.objective_id, null] as const;
+				}
+			})
+		);
+		analysisStates = Object.fromEntries(states);
+	}
+
+	function analysisStatus(objective: ObjectiveSummary) {
+		return analysisStates[objective.objective_id]?.status ?? null;
+	}
+
+	function statusLabel(objective: ObjectiveSummary) {
+		const active = analysisStates[objective.objective_id];
+		if (active?.status === 'queued') return '等待分析';
+		if (active?.status === 'running') {
+			return active.total_document_count > 0
+				? `分析中 · ${active.processed_document_count}/${active.total_document_count}`
+				: '分析中';
+		}
+		if (active?.status === 'failed') return '分析失败';
+		if (objective.published_analysis_version !== null) {
+			return `结果 v${objective.published_analysis_version}`;
+		}
+		if (objective.active_analysis_version !== null) return '分析已启动';
+		return objective.confirmation_status === 'confirmed' ? '已确认' : '待确认';
+	}
+
+	function canStartAnalysis(objective: ObjectiveSummary) {
+		return objective.active_analysis_version === null || analysisStatus(objective) === 'failed';
+	}
+
+	function actionLabel(objective: ObjectiveSummary) {
+		if (actionObjectiveId === objective.objective_id) return '正在启动...';
+		if (analysisStatus(objective) === 'failed') return '重试分析';
+		return objective.confirmation_status === 'candidate' ? '确认并分析' : '开始分析';
 	}
 
 	function objectiveHref(objectiveId: string) {
@@ -104,12 +165,11 @@
 							<h3>{objective.question}</h3>
 							<p>{objective.requested_comparator || '尚未设置比较意图'}</p>
 						</div>
-						<span class:published={objective.published_analysis_version !== null}>
-							{objective.published_analysis_version !== null
-								? `结果 v${objective.published_analysis_version}`
-								: objective.confirmation_status === 'confirmed'
-									? '已确认'
-									: '待确认'}
+						<span
+							class:published={objective.published_analysis_version !== null}
+							class:failed={analysisStatus(objective) === 'failed'}
+						>
+							{statusLabel(objective)}
 						</span>
 					</div>
 					<dl>
@@ -139,14 +199,14 @@
 						</div>
 					</dl>
 					<div class="actions">
-						{#if objective.published_analysis_version === null}
+						{#if canStartAnalysis(objective)}
 							<button
 								class="btn btn--primary btn--small"
 								type="button"
 								disabled={Boolean(actionObjectiveId)}
 								on:click={() => startAnalysis(objective)}
 							>
-								{actionObjectiveId === objective.objective_id ? '正在启动...' : '确认并分析'}
+								{actionLabel(objective)}
 							</button>
 						{/if}
 						<a class="btn btn--ghost btn--small" href={objectiveHref(objective.objective_id)}>
@@ -245,6 +305,10 @@
 	.heading > span.published {
 		border-color: #3a7d5d;
 		color: #256346;
+	}
+	.heading > span.failed {
+		border-color: var(--danger, #b42318);
+		color: var(--danger, #b42318);
 	}
 	dl {
 		margin: 0;

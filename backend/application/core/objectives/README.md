@@ -66,7 +66,16 @@ Objective analysis.
   steel grade spellings have one deterministic material identity. A relationship
   with missing material scope may join a known-material group only when exactly
   one scientifically compatible group exists; it cannot bridge conflicting
-  materials. Process,
+  materials. The resulting Objective retains one unambiguous material anchor;
+  an ambiguous or absent shared scope stays empty and is explained in its
+  reason. Objective confidence is the minimum available non-zero confidence
+  from its source studies and relationships. It remains zero only when no
+  source provides confidence, which is also recorded in the reason. A broad
+  label with one measurement interpretation is refined deterministically, while
+  a generic multi-measurement property family such as `mechanical properties`
+  receives a rejection disposition until a specific outcome is available.
+  Established research outcomes such as fatigue strength or microstructure stay
+  intact rather than being replaced with an invented sub-measurement. Process,
   sample, test, comparator, design, and fixed-condition differences remain on
   each `PaperStudy`; they do not fragment a candidate Objective because later
   Evidence and Comparison own scientific comparability. For a multi-document

@@ -76,6 +76,29 @@ function objective(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function analysisState(status: 'queued' | 'running' | 'succeeded' | 'failed') {
+	return {
+		collection_id: 'col_123',
+		objective_id: 'obj_heat_strength',
+		analysis_version: 1,
+		source_build_id: 'build-1',
+		pipeline_version: 'objective-analysis-v1',
+		model_name: null,
+		prompt_versions: {},
+		status,
+		phase: status === 'running' ? 'evidence_extraction' : status,
+		processed_document_count: status === 'running' ? 2 : 0,
+		total_document_count: 6,
+		current_document_id: status === 'running' ? 'paper-2' : null,
+		progress_message: status === 'running' ? 'Extracting evidence.' : null,
+		error_code: null,
+		error_message: null,
+		created_at: null,
+		started_at: null,
+		completed_at: null
+	};
+}
+
 describe('collections/[id]/objectives/+page.svelte', () => {
 	beforeEach(() => {
 		setPage({
@@ -142,6 +165,44 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			});
 			expect(goto).toHaveBeenCalledWith('/collections/col_123/objectives/obj_heat_strength');
 		});
+	});
+
+	it('shows active analysis progress instead of offering confirmation again', async () => {
+		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+			const current = request(input, init);
+			if (current.path.endsWith('/objectives') && current.method === 'GET') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					objectives: [
+						objective({
+							confirmation_status: 'confirmed',
+							active_analysis_version: 1
+						})
+					]
+				});
+			}
+			if (current.path.endsWith('/obj_heat_strength/analysis') && current.method === 'GET') {
+				return jsonResponse({
+					collection_id: 'col_123',
+					objective: objective({
+						confirmation_status: 'confirmed',
+						active_analysis_version: 1
+					}),
+					active_analysis: analysisState('running'),
+					published_analysis: null,
+					warnings: []
+				});
+			}
+			throw new Error(`unexpected request: ${current.method} ${current.path}`);
+		});
+
+		render(Page);
+
+		await expect.element(browserPage.getByText('分析中 · 2/6')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: '确认并分析' }))
+			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('link', { name: '查看状态' })).toBeInTheDocument();
 	});
 
 	it('shows the published version without a second result lookup', async () => {

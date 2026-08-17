@@ -494,16 +494,56 @@ class ObjectiveCandidateService:
             for relationship_id in relationship_ids
         )
         variables = relationships[0].varied_factors
-        outcome = relationships[0].outcome
+        source_outcome = relationships[0].outcome
+        outcome_expansions = property_matching.broad_outcome_expansions(
+            source_outcome
+        )
+        normalized_outcome = property_matching.normalize_property_label(
+            source_outcome
+        )
+        if (
+            len(outcome_expansions) > 1
+            and normalized_outcome is not None
+            and normalized_outcome.rsplit(" ", 1)[-1] in {"property", "properties"}
+        ):
+            return (
+                None,
+                f"Outcome '{source_outcome}' requires a specific measurable outcome "
+                "before it can seed a research objective.",
+            )
+        outcome = (
+            outcome_expansions[0]
+            if len(outcome_expansions) == 1
+            else source_outcome
+        )
+        confidence = self._objective_confidence(studies, relationships)
+        material_scope = self._shared_study_values(studies, "material_scope")
+        material_scope_was_missing = any(
+            not self._known_material_keys(study.material_scope) for study in studies
+        )
+        reason_parts = [
+            "Supported by one backend-compatible relationship group.",
+            (
+                "Confidence is the minimum available non-zero source confidence."
+                if confidence > 0
+                else "No source supplied a non-zero confidence."
+            ),
+        ]
+        if not material_scope:
+            reason_parts.append(
+                "No unambiguous shared material scope was available."
+            )
+        elif material_scope_was_missing:
+            reason_parts.append(
+                "Material scope was retained from the unambiguous non-conflicting "
+                "source anchor."
+            )
         objective_payload = {
             "collection_id": collection_id,
             "question": self._objective_question(variables, outcome),
             "variables": list(variables),
             "outcomes": [outcome],
-            "material_scope": self._shared_study_values(
-                studies,
-                "material_scope",
-            ),
+            "material_scope": material_scope,
             "mechanisms": [],
             "constraints": self._shared_study_constraints(
                 studies,
@@ -515,11 +555,8 @@ class ObjectiveCandidateService:
             ),
             "seed_document_ids": seed_document_ids,
             "source_relationship_ids": list(relationship_ids),
-            "confidence": min(
-                min(study.confidence for study in studies),
-                min(relationship.confidence for relationship in relationships),
-            ),
-            "reason": "Supported by one backend-compatible relationship group.",
+            "confidence": confidence,
+            "reason": " ".join(reason_parts),
         }
         try:
             return ResearchObjective.from_mapping(objective_payload), None
@@ -579,7 +616,24 @@ class ObjectiveCandidateService:
             tuple(getattr(study, field_name))
             for study in studies
         ]
-        if not values_by_study or any(not values for values in values_by_study):
+        material_scope_was_missing = False
+        if field_name == "material_scope":
+            values_by_study = [
+                tuple(
+                    value
+                    for value in values
+                    if self._known_material_scalar(value) is not None
+                )
+                for values in values_by_study
+            ]
+            material_scope_was_missing = any(
+                not values for values in values_by_study
+            )
+            values_by_study = [values for values in values_by_study if values]
+        if not values_by_study or (
+            field_name != "material_scope"
+            and any(not values for values in values_by_study)
+        ):
             return []
 
         def values_match(left: str, right: str) -> bool:
@@ -591,7 +645,7 @@ class ObjectiveCandidateService:
             )
 
         first, *remaining = values_by_study
-        return self._unique_axis_values(
+        shared_values = self._unique_axis_values(
             value
             for value in first
             if all(
@@ -602,6 +656,28 @@ class ObjectiveCandidateService:
                 for values in remaining
             )
         )
+        if field_name == "material_scope" and material_scope_was_missing:
+            shared_materials = {
+                self._known_material_scalar(value) for value in shared_values
+            }
+            if len(shared_materials) != 1:
+                return []
+        return shared_values
+
+    @staticmethod
+    def _objective_confidence(
+        studies: tuple[PaperStudy, ...],
+        relationships: tuple[PaperStudyRelationship, ...],
+    ) -> float:
+        available = tuple(
+            confidence
+            for confidence in (
+                *(study.confidence for study in studies),
+                *(relationship.confidence for relationship in relationships),
+            )
+            if confidence > 0
+        )
+        return min(available, default=0.0)
 
     def _shared_study_constraints(
         self,

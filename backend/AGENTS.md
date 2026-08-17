@@ -20,6 +20,12 @@ approval gates, and verification rules.
 
 - Keep backend ownership explicit across `controllers/`, `application/`,
   `domain/`, and `infra/`.
+- Before changing domain or workflow logic, model the complete real scenario at
+  the affected scope and derive backend responsibilities, dependencies, states,
+  and outputs from it.
+- Keep technical execution concepts separate from domain concepts. Retries,
+  tokens, transport payloads, and persistence mechanics must not masquerade as
+  the real process the backend represents.
 - Preserve `/api/*` and `/api/v1/*` behavior unless the human explicitly
   approves a contract change.
 - Keep protocol as a conditional downstream branch, not the primary product
@@ -46,6 +52,47 @@ approval gates, and verification rules.
   prefer correctness and explicit ownership over convenience abstractions.
 - Non-negotiables:
   no breaking contract change without explicit approval.
+
+### Reality-Mapped Backend Logic
+
+Use the root worked example as the reference pattern: first reconstruct the
+complete real scenario, then derive backend models, responsibilities,
+dependencies, states, prompts, and verification from it.
+
+- Goal:
+  make backend behavior an explicit implementation of the root
+  `Core Logic Reference: Real-World Chain` rather than an accidental sequence
+  of service calls.
+- Domain mapping:
+  every domain model represents a real object, observation, decision, or state;
+  every field has a real meaning; every state transition corresponds to an
+  event or decision in the reference scenario.
+- Responsibility mapping:
+  each application service or pipeline node owns one coherent real-world
+  responsibility or one clearly technical execution responsibility. Split code
+  when one component combines unrelated real responsibilities; do not split a
+  single real decision merely to match storage, prompt, or framework boundaries.
+- Dependency mapping:
+  node and service dependencies express real prerequisites. Configuration may
+  select a valid scenario or execution mode, but it may not create an ordering
+  that contradicts the real process.
+- Model mapping:
+  an LLM prompt performs one identifiable judgment or extraction step from the
+  scenario and receives only information legitimately available at that point.
+  Deterministic code owns identity, provenance, invariants, and state changes.
+- State mapping:
+  preserve the distinction between real domain outcomes and technical runtime
+  outcomes. A domain absence, uncertainty, conflict, or abstention is not a
+  timeout, parse failure, retry, or provider error.
+- Verification:
+  test the complete affected scenario from real input through intermediate
+  states to the user- or downstream-visible result, including at least one
+  alternate or failure path. Unit and schema tests supplement but do not replace
+  this chain test.
+- Non-negotiables:
+  do not justify behavior solely because an existing class, endpoint, prompt,
+  table, or node already works that way. If it cannot be mapped coherently to
+  the real scenario, it is misplaced, incomplete, or incorrectly modeled.
 
 ### Data and Runtime State
 
@@ -85,6 +132,9 @@ approval gates, and verification rules.
 - The backend should keep the Lens v1 backbone order
   `document_profiles -> paper facts family -> comparison_rows /
   evidence_cards -> protocol branch`.
+- Treat that backbone as a product boundary, not as proof that a particular
+  domain flow is correct. Each concrete implementation still derives its inner
+  logic and ordering from the complete real scenario it represents.
 - Collection-facing behavior should stay explicit through
   `controllers/source/*`, `controllers/core/*`, `controllers/derived/*`, and
   `controllers/goal/*`.
@@ -120,8 +170,8 @@ approval gates, and verification rules.
    presence.
    How: preserve real semantics for document profiles, evidence cards,
    comparison rows, and protocol artifacts.
-   Check: names, readiness states, and payload fields still match the owning
-   docs.
+   Check: names, readiness states, payload fields, ownership, and transitions
+   match both the owning docs and the real object or decision they represent.
 
 5. Do not add compatibility layers by default.
    Why: backend cleanup slows down when old interfaces linger behind wrappers.
@@ -146,15 +196,19 @@ approval gates, and verification rules.
    Why: backend checks can be expensive, but untouched surfaces should not
    block focused work.
    How: run the smallest relevant backend verification for the changed surface.
-   Check: the final report names the actual command run, or says `not run` with
-   a real blocker.
+   Also run the affected behavior through its complete real-world scenario at
+   the smallest useful scope.
+   Check: the final report names the command, scenario, intermediate states,
+   final outcome, and alternate or failure path, or says `not run` with a real
+   blocker.
 
 9. Keep error semantics explicit.
    Why: collection workflows need diagnosable failures and recoverable client
    behavior.
    How: return meaningful status and structured failure information at trust
-   boundaries.
-   Check: changed failure paths stay interpretable in tests, code, or docs.
+   boundaries. Keep domain outcomes distinct from technical execution failures.
+   Check: changed failure paths stay interpretable in tests, code, or docs and
+   map to a real event or decision in the reference scenario.
 
 10. Avoid hidden persistence coupling.
     Why: persistence changes can silently break artifact readers and task flows.
@@ -222,6 +276,11 @@ approval gates, and verification rules.
 - Backend diffs must preserve ownership clarity and contract readability.
 - Docs, schemas, and tests should move with real backend behavior when the task
   changes them.
+- Non-trivial backend behavior must map coherently from a complete real scenario
+  to domain concepts, responsibilities, dependencies, states, and outputs.
+- A green parser, HTTP response, pipeline status, or mocked test is useful
+  operational evidence but is insufficient proof that the real chain is modeled
+  correctly.
 - Final reports must state whether any new abstraction was added, whether it is
   temporary or permanent, and what cleanup was performed.
 

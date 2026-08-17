@@ -28,6 +28,12 @@ comparison, not generic paper chat.
 - Evidence before fluent summary.
 - Comparison before isolated paper chat.
 - Traceability before opaque generation.
+- The complete real-world or scientific scenario is the primary reference for
+  every non-trivial behavior. Code structure must follow that scenario rather
+  than inventing a convenient synthetic workflow.
+- Derive domain objects, responsibilities, ordering, states, and failure paths
+  from what real actors do and observe before choosing APIs, prompts, pipeline
+  nodes, persistence shapes, or abstractions.
 - Prefer direct changes to the owning implementation and direct caller updates.
 - Avoid adding layers unless the human explicitly approves them.
 - Keep one authoritative doc path for each contract surface.
@@ -51,6 +57,95 @@ comparison, not generic paper chat.
 - Non-negotiables:
   do not reframe Lens v1 as a generic paper chat product without explicit
   approval.
+
+### Core Logic Reference: Real-World Chain
+
+- Goal:
+  make the implementation a faithful executable model of a coherent real-world
+  process, not a sequence created by existing code, storage, or model APIs.
+- Required reference before implementation:
+  describe one concrete end-to-end scenario with the real actor, trigger,
+  intended decision or outcome, real objects and evidence, ordered actions and
+  state transitions, prerequisites, invariants, uncertainty, alternate and
+  failure paths, and the feedback that starts the next cycle.
+- Mapping rule:
+  map each domain model, service responsibility, pipeline stage, status, and
+  result to a specific part of that scenario. Infrastructure-only concerns may
+  support the chain but may not redefine its domain order or meaning.
+- Research application:
+  for research-facing behavior, use a complete realistic research scenario at
+  the affected scope. While materials science is the proving vertical, the
+  reference actor is a practicing materials researcher working with real
+  materials, processes, measurements, evidence, uncertainty, and follow-up
+  decisions, not an LLM exchanging JSON with backend services.
+- Evidence:
+  an implementation explanation and test can trace the scenario from its real
+  trigger through every affected decision to its observable outcome and next
+  use, including incomplete and failed paths.
+- Failure cost:
+  code-driven workflows, artificial domain objects, reversed prerequisites,
+  meaningless states, or locally correct steps that cannot form a credible
+  end-to-end real process.
+- Non-negotiables:
+  do not accept an implementation whose behavior is justified only by current
+  modules, prompts, schemas, database tables, API payloads, or test fixtures.
+  When code and the real process disagree, surface the mismatch and correct the
+  model or obtain explicit approval for the deviation.
+
+### Worked Example: Derive Logic from Reality
+
+This example demonstrates how to apply the real-world-chain rule. It is not a
+mandatory product pipeline.
+
+Consider a materials researcher determining whether an LPBF process parameter
+affects one alloy's microstructure and deciding what experiment to perform
+next. The complete real-world chain is:
+
+1. Define the actual decision, material scope, target outcome, constraints, and
+   acceptable evidence.
+2. Collect candidate papers. Relevance means a paper should be inspected; it
+   does not mean that the paper already supplies proven evidence.
+3. Reconstruct each real experiment: material and feedstock, process, varied
+   and fixed parameters, samples, post-processing, characterization or test
+   methods, controls, measurements, and uncertainty.
+4. Account for evidence distributed across Methods, tables, captions, and
+   Results, and bind every extracted fact to its Source.
+5. Validate source-local facts before normalizing terminology, units,
+   materials, or process names.
+6. Assemble within-paper relationships only after variables, conditions,
+   controls, and outcomes are supported. Do not turn jointly varied factors
+   into isolated effects.
+7. Compare papers only when material state, process context, methods, test
+   conditions, and outcomes align; otherwise preserve the non-comparability.
+8. Synthesize agreement, contradiction, independent support, limitations, and
+   uncertainty.
+9. Let the expert decide whether the question is answered or whether an
+   evidence gap supports a new hypothesis.
+10. Specify a follow-up experiment with variables, levels, controls, fixed
+    conditions, characterization, repetitions, acceptance criteria,
+    feasibility, and safety.
+11. Treat new experimental results as evidence, compare them with the
+    hypothesis and literature, and begin the next decision cycle.
+
+Implementation consequences:
+
+- Domain models represent real objects, decisions, evidence, and states.
+- Services and nodes follow real responsibilities and prerequisites.
+- Each LLM prompt performs one real judgment or extraction step.
+- Persistence and runtime machinery support the chain but do not define it.
+- Retries, JSON repair, token limits, and provider failures are technical
+  concerns, not scientific states.
+- End-to-end verification follows the initial decision through the result used
+  by the next decision.
+
+Incorrect derivations include:
+
+- treating a relevant paper or Source as proven Evidence;
+- asking an LLM to invent missing Methods data from Results;
+- marking a scientific step complete because valid JSON was returned;
+- ordering nodes for prompt or database convenience against real
+  prerequisites; and
+- adding domain fields only because an API or table needs them.
 
 ### Docs / Enablement
 
@@ -93,7 +188,8 @@ comparison, not generic paper chat.
   `document_profiles -> paper facts family -> comparison_rows /
   evidence_cards -> protocol branch`.
 - Materials science is the first proving vertical, not the permanent product
-  boundary.
+  boundary. It is the concrete real-world reference used to challenge whether
+  research-facing logic forms a credible complete chain.
 - Protocol output is conditional downstream value, not the default Lens v1
   center.
 - Root `docs/` holds shared governance, architecture, contracts, decisions,
@@ -157,8 +253,11 @@ comparison, not generic paper chat.
 
 9. Verify what you touch.
    Why: this repo spans FastAPI, SvelteKit, and governed docs.
-   How: run the smallest relevant checks for the changed surface.
-   Check: the final report names what ran, or says `not run` with the reason.
+   How: run the smallest relevant checks for the changed surface and exercise
+   the affected behavior through one complete concrete real-world scenario.
+   Check: the final report names what ran, the scenario used, how its real steps
+   map to the implementation, and any known deviation; or says `not run` with
+   the reason. Isolated unit success alone does not establish chain correctness.
 
 10. Follow local module AGENTS for module work.
     Why: backend and frontend each have stricter local constraints than the
@@ -233,6 +332,10 @@ comparison, not generic paper chat.
 - Changes must preserve clear ownership and avoid undocumented coupling.
 - Product-facing behavior must stay aligned with the Lens v1 evidence/comparison
   contract unless explicitly re-scoped.
+- Every non-trivial behavior must be explainable as part of a complete real
+  process. Its domain objects, ordering, state transitions, decisions, and
+  failure handling must preserve that process rather than mirror technical
+  call order.
 - Do not leave dead code, obsolete exports, stale links, or redundant branches
   introduced by the task.
 - Final reports must state whether any new abstraction was added, whether it is

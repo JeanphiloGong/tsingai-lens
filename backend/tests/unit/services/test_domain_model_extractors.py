@@ -10,6 +10,10 @@ from pydantic import ValidationError
 
 from application.core.document_profiles.extraction import DocumentProfileExtractor
 from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.objectives.analysis.evidence_routing import (
+    ObjectiveEvidenceRouter,
+    StructuredEvidenceSelections,
+)
 from application.core.objectives.analysis.source_screening import (
     ObjectiveSourceScreener,
     StructuredPaperFrameBatch,
@@ -42,7 +46,6 @@ from application.core.objectives.schemas import (
     StructuredEvidenceContext,
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
-    StructuredEvidenceSelections,
     StructuredFindingMechanism,
     StructuredFindingSynthesis,
 )
@@ -2146,7 +2149,7 @@ def test_domain_model_extractors_validates_objective_evidence_routes_response():
     )
     extractor = _objective_extractor(client)
 
-    routes = extractor.select_objective_evidence(
+    routes = ObjectiveEvidenceRouter(extractor).route_source(
         {
             "collection_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
@@ -2165,7 +2168,7 @@ def test_domain_model_extractors_rejects_legacy_objective_route_batches():
     extractor = _objective_extractor(client)
 
     with pytest.raises(ValueError):
-        extractor.select_objective_evidence(
+        ObjectiveEvidenceRouter(extractor).route_source(
             {
                 "collection_id": "col-1",
                 "objective": {"question": "How does heat treatment affect corrosion?"},
@@ -2198,7 +2201,7 @@ def test_domain_model_extractors_rejects_verbose_objective_route_objects():
     extractor = _objective_extractor(client)
 
     with pytest.raises(ValidationError):
-        extractor.select_objective_evidence(
+        ObjectiveEvidenceRouter(extractor).route_source(
             {
                 "collection_id": "col-1",
                 "objective": {"question": "How does heat treatment affect corrosion?"},
@@ -2228,7 +2231,7 @@ def test_domain_model_extractors_rejects_source_ids_in_objective_routes():
     extractor = _objective_extractor(client)
 
     with pytest.raises(ValidationError):
-        extractor.select_objective_evidence(
+        ObjectiveEvidenceRouter(extractor).route_source(
             {
                 "collection_id": "col-1",
                 "objective": {"question": "How does heat treatment affect corrosion?"},
@@ -2980,7 +2983,7 @@ def test_domain_model_extractors_routes_objective_selections_directly_to_bounded
     client = _FakeOpenAIClient('{"selections":[]}')
     extractor = ObjectiveExtractor(client=client, model="fake-model")
 
-    routes = extractor.select_objective_evidence(
+    routes = ObjectiveEvidenceRouter(extractor).route_source(
         {
             "collection_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},

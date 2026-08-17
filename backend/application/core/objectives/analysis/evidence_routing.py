@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Literal, Mapping
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from application.core.objectives import property_matching
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
@@ -36,7 +39,144 @@ _OBJECTIVE_EXTRACTABLE_ROUTE_ROLES = {
     "test_condition",
     "characterization",
 }
+_OBJECTIVE_ROUTE_ROLES = {
+    "current_experimental_evidence",
+    "process_or_treatment",
+    "test_condition",
+    "composition_or_background",
+    "characterization",
+    "literature_comparison",
+    "modeling_or_prediction",
+    "low_value_or_irrelevant",
+}
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
+_ROUTE_MAX_COMPLETION_TOKENS = 512
+_ROUTE_PROMPT_VERSION = "objective_evidence_route.v1"
+_ROUTE_SYSTEM_PROMPT = """
+You are routing source units for one research objective in an evidence-backed literature comparison backend.
+
+Non-negotiable rules:
+- This is routing only, not final fact extraction.
+- Return exactly one JSON object and nothing else.
+- Decide only the `current_source` unit and return at most one route.
+- Do not return source identity fields; the backend binds the route to the
+  current source unit.
+- Do not emit measurement results, sample variants, evidence anchors, or backend persistence ids.
+- Do not output table schemas, column roles, join keys, join plans, source text, sample rows, explanations, or copied input JSON.
+- For low-value, review, literature-comparison, composition-only, or unrelated
+  units, return an empty `routes` array instead of writing a low-value route
+  unless the source is explicitly frame-excluded.
+- Prefer fewer, higher-confidence extractable routes over speculative coverage.
+""".strip()
+
+
+class StructuredEvidenceSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    role: Literal[
+        "current_experimental_evidence",
+        "process_or_treatment",
+        "test_condition",
+        "composition_or_background",
+        "characterization",
+        "literature_comparison",
+        "modeling_or_prediction",
+        "low_value_or_irrelevant",
+    ] = "low_value_or_irrelevant"
+    extractable: bool = False
+    confidence: float = 0.0
+
+    @field_validator("confidence", mode="before", check_fields=False)
+    @classmethod
+    def _normalize_default_confidence(cls, value: object) -> object:
+        if value is not None:
+            return value
+        return cls.model_fields["confidence"].get_default(call_default_factory=True)
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _normalize_role(cls, value: object) -> str:
+        normalized = (
+            str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        )
+        return (
+            normalized
+            if normalized in _OBJECTIVE_ROUTE_ROLES
+            else "low_value_or_irrelevant"
+        )
+
+
+class StructuredEvidenceSelections(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    selections: list[StructuredEvidenceSelection] = Field(
+        default_factory=list,
+        max_length=1,
+    )
+
+    @field_validator("selections", mode="before")
+    @classmethod
+    def _normalize_selections(cls, value: object) -> object:
+        return [] if value is None else value
+
+
+def build_objective_evidence_route_prompt(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    user_prompt = (
+        "Route the current source unit for this one research objective.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "Return only schema-valid structured data with a `routes` array.\n"
+        "Return at most one route for `current_source`. If it is not useful "
+        "for later objective-scoped extraction, return `{\"routes\": []}`.\n"
+        "Each route may contain only `role`, `extractable`, and `confidence`. "
+        "Do not return `source_kind`, `source_ref`, ids, copied source text, "
+        "explanations, or any nested input object.\n"
+        "`role` must be one of: current_experimental_evidence, "
+        "process_or_treatment, test_condition, composition_or_background, "
+        "characterization, literature_comparison, modeling_or_prediction, "
+        "low_value_or_irrelevant.\n"
+        "Use the objective to decide whether `current_source` is direct "
+        "target-outcome evidence, mediator/context evidence, or irrelevant. "
+        "Treat `objective.outcomes` as the only outcomes that answer the "
+        "objective. Treat `objective.mechanisms` as explanatory context unless the "
+        "source explicitly links them to a target outcome.\n"
+        "Use `current_experimental_evidence` only when the source unit likely "
+        "contains current-work target results for the active objective.\n"
+        "Use `process_or_treatment` or `test_condition` when a unit is mainly "
+        "needed to bind samples, process variables, or test environments.\n"
+        "Use `characterization` for microstructure, defect, phase, morphology, "
+        "or grain observations tied to the active objective. Use "
+        "`current_experimental_evidence` for explicit trends, best/worst "
+        "conditions, or author explanations tied to target results.\n"
+        "Use `low_value_or_irrelevant` with `extractable: false` only for "
+        "frame-excluded tables that are passed as `current_source`."
+    )
+    return _ROUTE_SYSTEM_PROMPT, user_prompt
+
+
+class ObjectiveEvidenceRouter:
+    """Classify one screened Source for the transient extraction queue."""
+
+    def __init__(self, response_client: ObjectiveExtractor) -> None:
+        self.response_client = response_client
+
+    def route_source(self, payload: dict[str, Any]) -> StructuredEvidenceSelections:
+        if not isinstance(payload.get("current_source"), dict):
+            raise ValueError("objective evidence routing requires current_source")
+        system_prompt, user_prompt = build_objective_evidence_route_prompt(payload)
+        response = self.response_client.complete(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredEvidenceSelections,
+            max_completion_tokens=_ROUTE_MAX_COMPLETION_TOKENS,
+            force_json_text=True,
+            task_type="objective_evidence_route",
+            prompt_version=_ROUTE_PROMPT_VERSION,
+        )
+        if not isinstance(response, StructuredEvidenceSelections):
+            raise TypeError("unexpected objective evidence route response type")
+        return response
 
 
 @dataclass(frozen=True)
@@ -165,7 +305,7 @@ def _progress_document_metadata(
 def route_sources(
     *,
     collection_id: str,
-    extractor: ObjectiveExtractor,
+    evidence_router: ObjectiveEvidenceRouter,
     objectives: tuple[ResearchObjective, ...],
     objective_paper_frames: tuple[PaperAnalysisFrame, ...],
     blocks_by_document_id: dict[str, list[Any]],
@@ -316,7 +456,7 @@ def route_sources(
                 "current_source": _route_prompt_current_source(candidate),
             }
             try:
-                parsed = extractor.select_objective_evidence(payload)
+                parsed = evidence_router.route_source(payload)
                 route_records = [item.model_dump() for item in parsed.selections[:1]]
             except Exception:  # noqa: BLE001
                 logger.warning(
@@ -1885,7 +2025,6 @@ def _build_objective_table_routing_hints(
                     "matched_variables": matched_variable_axes,
                     "reason": _build_objective_table_routing_reason(
                         role,
-                        matched_outcomes=matched_outcomes,
                         matched_variable_axes=matched_variable_axes,
                     ),
                 }
@@ -1908,7 +2047,6 @@ def _objective_table_search_text(table: Any) -> str:
 def _build_objective_table_routing_reason(
     role: str,
     *,
-    matched_outcomes: list[str],
     matched_variable_axes: list[str],
 ) -> str:
     if role == "result_table":

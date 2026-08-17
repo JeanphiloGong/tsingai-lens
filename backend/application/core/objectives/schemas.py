@@ -18,16 +18,6 @@ PAPER_OBJECTIVE_CANDIDATE_OUTPUT_LIMITS = {
     "variables": (4, 80),
     "outcomes": (8, 80),
 }
-_OBJECTIVE_EVIDENCE_ROUTE_ROLES = {
-    "current_experimental_evidence",
-    "process_or_treatment",
-    "test_condition",
-    "composition_or_background",
-    "characterization",
-    "literature_comparison",
-    "modeling_or_prediction",
-    "low_value_or_irrelevant",
-}
 _OBJECTIVE_EVIDENCE_ROLES = {
     "direct_result",
     "condition_context",
@@ -100,42 +90,6 @@ class _StrictModel(BaseModel):
         return cls.model_fields["epistemic_status"].get_default(
             call_default_factory=True
         )
-
-
-class StructuredEvidenceSelection(_StrictModel):
-    role: Literal[
-        "current_experimental_evidence",
-        "process_or_treatment",
-        "test_condition",
-        "composition_or_background",
-        "characterization",
-        "literature_comparison",
-        "modeling_or_prediction",
-        "low_value_or_irrelevant",
-    ] = "low_value_or_irrelevant"
-    extractable: bool = False
-    confidence: float = 0.0
-
-    @field_validator("role", mode="before")
-    @classmethod
-    def _normalize_role(cls, value: object) -> str:
-        return _normalize_underscored_choice(
-            value,
-            allowed=_OBJECTIVE_EVIDENCE_ROUTE_ROLES,
-            default="low_value_or_irrelevant",
-        )
-
-
-class StructuredEvidenceSelections(_StrictModel):
-    selections: list[StructuredEvidenceSelection] = Field(
-        default_factory=list,
-        max_length=1,
-    )
-
-    @field_validator("selections", mode="before")
-    @classmethod
-    def _normalize_selections(cls, value: object) -> object:
-        return _normalize_list_container(value)
 
 
 ScientificScalar = str | int | float | bool

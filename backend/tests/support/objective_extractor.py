@@ -6,6 +6,10 @@ from application.core.document_profiles.schemas import StructuredDocumentProfile
 from application.core.objectives.analysis.source_screening import (
     StructuredPaperFrameBatch,
 )
+from application.core.objectives.analysis.evidence_routing import (
+    StructuredEvidenceSelection,
+    StructuredEvidenceSelections,
+)
 from application.core.objectives.discovery.axis_equivalence import (
     StructuredAxisCanonicalizationPlan,
 )
@@ -16,8 +20,6 @@ from application.core.objectives.discovery.study_window import StructuredPaperSk
 from application.core.objectives.schemas import (
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
-    StructuredEvidenceSelection,
-    StructuredEvidenceSelections,
     StructuredFindingSynthesis,
     StructuredFindingSynthesisItem,
 )
@@ -220,7 +222,7 @@ class FakeObjectiveExtractor:
                 source_unit_ids.append(str(unit["source_unit_id"]))
         return source_unit_ids
 
-    def select_objective_evidence(
+    def route_source(
         self,
         payload: dict[str, Any],
     ) -> StructuredEvidenceSelections:

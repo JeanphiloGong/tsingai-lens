@@ -5,15 +5,15 @@ from types import SimpleNamespace
 from typing import Any
 
 from application.core.objectives.analysis import evidence_materialization
+from application.core.objectives.analysis.evidence_routing import (
+    StructuredEvidenceSelections,
+)
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
 )
 from application.core.objectives.analysis.source_screening import (
     PaperAnalysisFrame,
     StructuredPaperFrameBatch,
-)
-from application.core.objectives.schemas import (
-    StructuredEvidenceSelections,
 )
 from domain.core import (
     ObjectiveAnalysis,
@@ -44,7 +44,7 @@ from tests.support.research_objective_service import (
 
 
 class _FailingRouteExtractor(_ObjectiveExtractor):
-    def select_objective_evidence(
+    def route_source(
         self,
         payload: dict[str, Any],
     ) -> StructuredEvidenceSelections:
@@ -576,6 +576,7 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
 
     failing_extractor = _FailingRouteExtractor()
     service._objective_extractor = failing_extractor
+    service._objective_evidence_router = failing_extractor
     service.finding_synthesis_service.finding_extractor = failing_extractor
     artifacts = service.generate_objective_analysis_artifacts(
         collection_id, analysis

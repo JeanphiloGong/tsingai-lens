@@ -36,9 +36,11 @@ Later stages may consume a frame, but they may not reinterpret a screening
 decision as scientific Evidence.
 
 `evidence_routing.py` owns transient route records, Source-tree candidate
-ordering, model or deterministic route decisions, selection hints, and the
-document round-robin extraction queue. It preserves Source identity and cannot
-redirect a route to another paper or Source.
+ordering, selection hints, the bounded routing prompt and response schema, the
+one-Source model call, deterministic fallback, and the document round-robin
+extraction queue. The model decides only whether and how to inspect the current
+Source; the backend preserves its identity, so a route cannot redirect work to
+another paper or Source or become durable Evidence.
 
 `source_extraction.py` owns the inspection of one exact Source at a time. It
 passes every schema-valid model draft directly to `source_validation.py` before
@@ -65,5 +67,5 @@ Source kind, and Source ref. `PaperContribution` route, extracted, failed, and
 comparable counts are computed from that same final Source-keyed set. It does
 not persist artifacts or synthesize a cross-paper claim.
 
-Technical JSON parsing, provider retries, prompt schemas, and token accounting
+Technical JSON parsing, provider retries, usage accounting, and trace capture
 support this process but do not define its scientific order.

@@ -23,7 +23,9 @@ Objective analysis.
   inspected; it is not proof that the Source contains usable Evidence.
 - `analysis/evidence_routing.py`
   Owns the transient `EvidenceCandidate` records created after screening and
-  the final extraction-queue order. It binds every route to the current
+  the complete bounded routing judgment: prompt, response schema, role
+  normalization, model call, deterministic fallback, and final
+  extraction-queue order. It binds every model decision to the current
   Objective, document, and Source, preserves tree order within a paper, and
   round-robins papers before extraction. Model and deterministic decisions are
   inspection hints only; neither is persisted or treated as scientific
@@ -168,8 +170,8 @@ Objective analysis.
 - `prompts.py` and `schemas.py`
   Temporarily define the prompts and response contracts for Objective judgments
   that have not yet moved to their direct discovery or analysis owner. They do
-  not define PaperSkim, signal-reconciliation, axis-equivalence, or confirmed
-  Source-screening contracts.
+  not define PaperSkim, signal-reconciliation, axis-equivalence, confirmed
+  Source-screening, or Evidence-routing contracts.
 
 ## Objective Boundary
 

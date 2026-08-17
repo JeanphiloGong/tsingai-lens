@@ -3,27 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION = "objective_evidence_route.v1"
 OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v4"
 FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v12"
-
-_OBJECTIVE_EVIDENCE_ROUTE_SYSTEM_PROMPT = """
-You are routing source units for one research objective in an evidence-backed literature comparison backend.
-
-Non-negotiable rules:
-- This is routing only, not final fact extraction.
-- Return exactly one JSON object and nothing else.
-- Decide only the `current_source` unit and return at most one route.
-- Do not return source identity fields; the backend binds the route to the
-  current source unit.
-- Do not emit measurement results, sample variants, evidence anchors, or backend persistence ids.
-- Do not output table schemas, column roles, join keys, join plans, source text, sample rows, explanations, or copied input JSON.
-- For low-value, review, literature-comparison, composition-only, or unrelated
-  units, return an empty `routes` array instead of writing a low-value route
-  unless the source is explicitly frame-excluded.
-- Prefer fewer, higher-confidence extractable routes over speculative coverage.
-""".strip()
-
 
 _OBJECTIVE_EVIDENCE_SYSTEM_PROMPT = """
 TASK MODEL
@@ -205,41 +186,6 @@ Return exactly `{"findings":[]}` or one object shaped as
 `"context_evidence_ids":[],"mechanisms":[]}]}`. Use empty arrays when
 annotations are absent and no extra keys.
 """.strip()
-
-
-def build_objective_evidence_route_prompt(
-    payload: dict[str, Any],
-) -> tuple[str, str]:
-    user_prompt = (
-        "Route the current source unit for this one research objective.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only schema-valid structured data with a `routes` array.\n"
-        "Return at most one route for `current_source`. If it is not useful "
-        "for later objective-scoped extraction, return `{\"routes\": []}`.\n"
-        "Each route may contain only `role`, `extractable`, and `confidence`. "
-        "Do not return `source_kind`, `source_ref`, ids, copied source text, "
-        "explanations, or any nested input object.\n"
-        "`role` must be one of: current_experimental_evidence, "
-        "process_or_treatment, test_condition, composition_or_background, "
-        "characterization, literature_comparison, modeling_or_prediction, "
-        "low_value_or_irrelevant.\n"
-        "Use the objective to decide whether `current_source` is direct "
-        "target-outcome evidence, mediator/context evidence, or irrelevant. "
-        "Treat `objective.outcomes` as the only outcomes that answer the "
-        "objective. Treat `objective.mechanisms` as explanatory context unless the "
-        "source explicitly links them to a target outcome.\n"
-        "Use `current_experimental_evidence` only when the source unit likely "
-        "contains current-work target results for the active objective.\n"
-        "Use `process_or_treatment` or `test_condition` when a unit is mainly "
-        "needed to bind samples, process variables, or test environments.\n"
-        "Use `characterization` for microstructure, defect, phase, morphology, "
-        "or grain observations tied to the active objective. Use "
-        "`current_experimental_evidence` for explicit trends, best/worst "
-        "conditions, or author explanations tied to target results.\n"
-        "Use `low_value_or_irrelevant` with `extractable: false` only for "
-        "frame-excluded tables that are passed as `current_source`."
-    )
-    return _OBJECTIVE_EVIDENCE_ROUTE_SYSTEM_PROMPT, user_prompt
 
 
 def build_objective_evidence_prompt(

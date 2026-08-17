@@ -14,14 +14,11 @@ from pydantic import BaseModel, ValidationError
 from application.core.objectives.prompts import (
     FINDING_SYNTHESIS_PROMPT_VERSION,
     OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION,
-    OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
     build_finding_synthesis_prompt,
     build_objective_evidence_prompt,
-    build_objective_evidence_route_prompt,
 )
 from application.core.objectives.schemas import (
     StructuredEvidenceExtractions,
-    StructuredEvidenceSelections,
     StructuredFindingSynthesis,
 )
 from application.core.structured_extraction.json_support import (
@@ -38,7 +35,6 @@ logger = logging.getLogger(__name__)
 _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
-_OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS = 512
 _OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS = 2048
 _FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS = 1024
 _TRACE_TEXT_LIMIT = 8000
@@ -105,28 +101,6 @@ class ObjectiveExtractor:
             separators=(",", ":"),
         )
         return len(encoding.encode(serialized_messages))
-
-    def select_objective_evidence(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredEvidenceSelections:
-        if not isinstance(payload.get("current_source"), dict):
-            raise ValueError("objective evidence routing requires current_source")
-        system_prompt, user_prompt = build_objective_evidence_route_prompt(payload)
-        response = self.complete(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredEvidenceSelections,
-            max_completion_tokens=(
-                _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS
-            ),
-            force_json_text=True,
-            task_type="objective_evidence_route",
-            prompt_version=OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
-        )
-        if not isinstance(response, StructuredEvidenceSelections):
-            raise TypeError("unexpected objective evidence route response type")
-        return response
 
     def extract_objective_evidence(
         self,

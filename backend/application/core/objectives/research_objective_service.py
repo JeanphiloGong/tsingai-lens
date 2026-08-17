@@ -12,7 +12,10 @@ from application.core.objectives import property_matching
 from application.core.objectives.analysis.evidence_materialization import (
     materialize_evidence,
 )
-from application.core.objectives.analysis.evidence_routing import route_sources
+from application.core.objectives.analysis.evidence_routing import (
+    ObjectiveEvidenceRouter,
+    route_sources,
+)
 from application.core.objectives.analysis.paper_experiment import (
     reconstruct_paper_experiments,
 )
@@ -107,6 +110,7 @@ class ResearchObjectiveService:
         objective_extractor: ObjectiveExtractor | None = None,
         axis_equivalence_classifier: ResearchAxisEquivalenceClassifier | None = None,
         objective_source_screener: ObjectiveSourceScreener | None = None,
+        objective_evidence_router: ObjectiveEvidenceRouter | None = None,
         paper_study_window_extractor: PaperStudyWindowExtractor | None = None,
         paper_signal_reconciler: PaperSignalReconciler | None = None,
         paper_facts_extractor: PaperFactsExtractor | None = None,
@@ -115,6 +119,7 @@ class ResearchObjectiveService:
         self._objective_extractor = objective_extractor
         self._axis_equivalence_classifier = axis_equivalence_classifier
         self._objective_source_screener = objective_source_screener
+        self._objective_evidence_router = objective_evidence_router
         self._paper_study_window_extractor = paper_study_window_extractor
         self._paper_signal_reconciler = paper_signal_reconciler
         self._paper_facts_extractor = paper_facts_extractor
@@ -252,9 +257,13 @@ class ResearchObjectiveService:
             ],
             progress_callback=progress_callback,
         )
+        if self._objective_evidence_router is None:
+            self._objective_evidence_router = ObjectiveEvidenceRouter(
+                objective_inputs["extractor"]
+            )
         evidence_candidates = route_sources(
             collection_id=collection_id,
-            extractor=objective_inputs["extractor"],
+            evidence_router=self._objective_evidence_router,
             objectives=(objective,),
             objective_paper_frames=paper_frames,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],

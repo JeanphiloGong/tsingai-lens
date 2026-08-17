@@ -39,6 +39,7 @@ def build_research_objective_service(
     objective_extractor = kwargs.get("objective_extractor")
     if objective_extractor is not None:
         kwargs.setdefault("axis_equivalence_classifier", objective_extractor)
+        kwargs.setdefault("objective_evidence_router", objective_extractor)
         kwargs.setdefault("objective_source_screener", objective_extractor)
         kwargs.setdefault("paper_study_window_extractor", objective_extractor)
         kwargs.setdefault("paper_signal_reconciler", objective_extractor)

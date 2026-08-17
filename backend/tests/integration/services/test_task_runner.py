@@ -221,6 +221,7 @@ def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN0
         objective_candidate_service=ObjectiveCandidateService(),
         objective_extractor=objective_extractor,
         axis_equivalence_classifier=objective_extractor,
+        objective_evidence_router=objective_extractor,
         objective_source_screener=objective_extractor,
         paper_study_window_extractor=objective_extractor,
         paper_signal_reconciler=objective_extractor,
@@ -387,6 +388,7 @@ def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_covera
         failing_extractor
     )
     runner.research_objective_service._objective_source_screener = failing_extractor
+    runner.research_objective_service._objective_evidence_router = failing_extractor
     runner.research_objective_service._paper_study_window_extractor = failing_extractor
     runner.research_objective_service._paper_signal_reconciler = failing_extractor
 

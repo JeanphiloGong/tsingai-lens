@@ -10,21 +10,15 @@ from application.core.objectives.analysis.evidence_routing import (
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from domain.source import SourceDocumentNode, SourceDocumentTree
-from tests.support.collection_service import build_test_collection_service
 from tests.support.objective_extractor import (
     FakeObjectiveExtractor as _ObjectiveExtractor,
-)
-from tests.support.research_objective_service import (
-    build_research_objective_service as _build_research_objective_service,
 )
 from tests.support.research_objective_service import (
     research_objective as _research_objective,
 )
 
 
-def test_research_objective_service_forces_extractable_objective_route_roles(
-    tmp_path,
-):
+def test_research_objective_service_forces_extractable_objective_route_roles():
 
     assert evidence_routing._normalize_route_extractable(
         {"role": "current_experimental_evidence", "extractable": False}
@@ -40,7 +34,7 @@ def test_research_objective_service_forces_extractable_objective_route_roles(
     )
 
 
-def test_research_objective_service_forces_direct_support_route_role(tmp_path):
+def test_research_objective_service_forces_direct_support_route_role():
 
     record = evidence_routing._apply_route_evidence_role(
         record={
@@ -55,9 +49,7 @@ def test_research_objective_service_forces_direct_support_route_role(tmp_path):
     assert record["join_plan"] == {"evidence_role": "direct_support"}
 
 
-def test_research_objective_service_treats_energy_density_only_table_as_condition(
-    tmp_path,
-):
+def test_research_objective_service_treats_energy_density_only_table_as_condition():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -107,9 +99,7 @@ def test_research_objective_service_normalizes_archimedes_density_column():
     assert normalized == "density"
 
 
-def test_research_objective_service_ignores_analysis_purpose_as_table_result(
-    tmp_path,
-):
+def test_research_objective_service_ignores_analysis_purpose_as_table_result():
     objective = _research_objective(
         {
             "objective_id": "obj-microstructure",
@@ -139,9 +129,7 @@ def test_research_objective_service_ignores_analysis_purpose_as_table_result(
     assert hints == ()
 
 
-def test_research_objective_service_recovers_non_seed_condition_and_result_routes(
-    tmp_path,
-):
+def test_research_objective_service_recovers_non_seed_condition_and_result_routes():
     objective = _research_objective(
         {
             "objective_id": "obj-mechanical",
@@ -198,21 +186,6 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
             ("H-VED", "437", "560", "48.3"),
         ),
     )
-    hints = evidence_routing._build_objective_table_routing_hints(
-        objective,
-        tables=(condition_table, result_table),
-    )
-    objective_context = _research_objective(
-        {
-            "objective_id": objective.objective_id,
-            "question": objective.question,
-            "material_scope": list(objective.material_scope),
-            "variables": list(objective.variables),
-            "outcomes": list(objective.outcomes),
-            "routing_hints": hints,
-            "confidence": 0.9,
-        }
-    )
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": objective.objective_id,
@@ -229,7 +202,7 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        extractor=_ObjectiveExtractor(),
+        evidence_router=_ObjectiveExtractor(),
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-independent": []},
@@ -250,9 +223,7 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
     }
 
 
-def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_results(
-    tmp_path,
-):
+def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_results():
     objective = _research_objective(
         {
             "objective_id": "obj-corrosion",
@@ -310,9 +281,7 @@ def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_re
     }
 
 
-def test_research_objective_service_keeps_density_out_of_defect_structure_results(
-    tmp_path,
-):
+def test_research_objective_service_keeps_density_out_of_defect_structure_results():
     objective = _research_objective(
         {
             "objective_id": "obj-fatigue",
@@ -355,9 +324,7 @@ def test_research_objective_service_keeps_density_out_of_defect_structure_result
     )
 
 
-def test_research_objective_service_route_payload_uses_objective_contract(
-    tmp_path,
-):
+def test_research_objective_service_route_payload_uses_objective_contract():
     context = _research_objective(
         {
             "objective_id": "obj-corrosion",
@@ -430,9 +397,7 @@ def test_process_route_does_not_treat_result_columns_as_process_context():
     assert records == ()
 
 
-def test_research_objective_service_adds_context_hint_route_for_condition_table(
-    tmp_path,
-):
+def test_research_objective_service_adds_context_hint_route_for_condition_table():
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-mechanical",
@@ -506,9 +471,7 @@ def test_research_objective_service_adds_context_hint_route_for_condition_table(
     }
 
 
-def test_research_objective_service_ranks_result_text_candidates(
-    tmp_path,
-):
+def test_research_objective_service_ranks_result_text_candidates():
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-structure",
@@ -597,9 +560,7 @@ def test_research_objective_service_ranks_result_text_candidates(
     }
 
 
-def test_research_objective_text_hints_prefer_observed_result_over_scope_summary(
-    tmp_path,
-):
+def test_research_objective_text_hints_prefer_observed_result_over_scope_summary():
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-preheat",
@@ -673,9 +634,7 @@ def test_research_objective_text_hints_prefer_observed_result_over_scope_summary
     assert routes[-1].source_ref == "scope-summary"
 
 
-def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_support(
-    tmp_path,
-):
+def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_support():
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-corrosion",
@@ -737,7 +696,7 @@ def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_suppo
     assert route_by_ref["pitting-result"].extractable is True
 
 
-def test_research_objective_routing_uses_document_tree_order(tmp_path):
+def test_research_objective_routing_uses_document_tree_order():
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -836,7 +795,7 @@ def test_research_objective_routing_uses_document_tree_order(tmp_path):
 
     evidence_routing.route_sources(
         collection_id="col-test",
-        extractor=extractor,
+        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": blocks},
@@ -852,9 +811,7 @@ def test_research_objective_routing_uses_document_tree_order(tmp_path):
     assert extractor.route_payloads[1]["tree_position"]["section_path"] == ["Results"]
 
 
-def test_research_objective_routing_binds_current_source_to_model_decision(
-    tmp_path,
-):
+def test_research_objective_routing_binds_current_source_to_model_decision():
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -888,7 +845,7 @@ def test_research_objective_routing_binds_current_source_to_model_decision(
 
     routes = evidence_routing.route_sources(
         collection_id="col-test",
-        extractor=extractor,
+        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -911,7 +868,7 @@ def test_research_objective_routing_binds_current_source_to_model_decision(
     assert result_route.join_plan["evidence_role"] == "direct_support"
 
 
-def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
+def test_research_objective_routing_uses_compact_prompt_payload():
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -921,24 +878,6 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
             "outcomes": ["yield strength"],
             "requested_comparator": "compare treated and untreated samples",
             "confidence": 0.9,
-        }
-    )
-    objective_context = _research_objective(
-        {
-            "objective_id": "obj-heat",
-            "question": objective.question,
-            "material_scope": ["316L stainless steel"],
-            "variables": ["heat treatment"],
-            "constraints": ["LPBF"],
-            "outcomes": ["yield strength"],
-            "routing_hints": [
-                {
-                    "table_id": "table-1",
-                    "role": "result_table",
-                    "reason": "Large hint text should not enter routing prompt.",
-                }
-            ],
-            "confidence": 0.8,
         }
     )
     frame = PaperAnalysisFrame.from_mapping(
@@ -970,7 +909,7 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
 
     evidence_routing.route_sources(
         collection_id="col-test",
-        extractor=extractor,
+        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -994,7 +933,7 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
     assert route_payload["current_source"]["row_count"] == 200
 
 
-def test_research_objective_routing_uses_text_hint_not_source_text(tmp_path):
+def test_research_objective_routing_uses_text_hint_not_source_text():
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -1048,7 +987,7 @@ def test_research_objective_routing_uses_text_hint_not_source_text(tmp_path):
 
     evidence_routing.route_sources(
         collection_id="col-test",
-        extractor=extractor,
+        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -1062,7 +1001,7 @@ def test_research_objective_routing_uses_text_hint_not_source_text(tmp_path):
     assert len(current_source["text_hint"]) == 320
 
 
-def test_research_objective_routing_builds_text_candidates_from_document_tree(tmp_path):
+def test_research_objective_routing_builds_text_candidates_from_document_tree():
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -1169,7 +1108,7 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree(tm
 
     evidence_routing.route_sources(
         collection_id="col-test",
-        extractor=extractor,
+        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -1187,7 +1126,7 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree(tm
     }
 
 
-def test_research_objective_low_relevance_tree_routing_uses_frame_sections(tmp_path):
+def test_research_objective_low_relevance_tree_routing_uses_frame_sections():
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -1273,7 +1212,7 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections(tmp_p
 
     evidence_routing.route_sources(
         collection_id="col-test",
-        extractor=extractor,
+        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -1286,9 +1225,7 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections(tmp_p
     ]
 
 
-def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text(
-    tmp_path,
-):
+def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text():
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -1347,7 +1284,7 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text(
 
     evidence_routing.route_sources(
         collection_id="col-test",
-        extractor=extractor,
+        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -1363,7 +1300,7 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text(
     assert routed_refs == [f"block-{index}" for index in range(8)]
 
 
-def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
+def test_research_objective_tree_routing_keeps_late_document_nodes():
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -1422,7 +1359,7 @@ def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
 
     evidence_routing.route_sources(
         collection_id="col-test",
-        extractor=extractor,
+        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -1442,7 +1379,7 @@ def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
     )
 
 
-def test_research_objective_tree_routing_uses_confirmed_objective_axes(tmp_path):
+def test_research_objective_tree_routing_uses_confirmed_objective_axes():
     objective = _research_objective(
         {
             "objective_id": "obj-preheat-cracking",
@@ -1510,7 +1447,7 @@ def test_research_objective_tree_routing_uses_confirmed_objective_axes(tmp_path)
 
     evidence_routing.route_sources(
         collection_id="col-test",
-        extractor=extractor,
+        evidence_router=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         blocks_by_document_id={"paper-1": []},
@@ -1524,9 +1461,7 @@ def test_research_objective_tree_routing_uses_confirmed_objective_axes(tmp_path)
     }
 
 
-def test_research_objective_tree_routing_keeps_direct_result_among_scope_text(
-    tmp_path,
-):
+def test_research_objective_tree_routing_keeps_direct_result_among_scope_text():
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-preheat",
@@ -1601,19 +1536,7 @@ def test_research_objective_tree_routing_keeps_direct_result_among_scope_text(
     }
 
 
-def test_research_objective_tree_routing_recognizes_preheating_crack_results(
-    tmp_path,
-):
-    frame = PaperAnalysisFrame.from_mapping(
-        {
-            "objective_id": "obj-preheat-cracking",
-            "document_id": "paper-1",
-            "relevance": "high",
-            "paper_role": "primary_experiment",
-            "changed_variables": ["base plate preheating temperature"],
-            "measured_property_scope": ["crack formation"],
-        }
-    )
+def test_research_objective_tree_routing_recognizes_preheating_crack_results():
     objective_context = _research_objective(
         {
             "objective_id": "obj-preheat-cracking",
@@ -1652,7 +1575,7 @@ def test_research_objective_tree_routing_recognizes_preheating_crack_results(
     )
 
 
-def test_research_objective_tree_routing_excludes_non_block_caption_refs(tmp_path):
+def test_research_objective_tree_routing_excludes_non_block_caption_refs():
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-density",
@@ -1710,9 +1633,7 @@ def test_research_objective_tree_routing_excludes_non_block_caption_refs(tmp_pat
     assert candidates == []
 
 
-def test_research_objective_tree_routing_keeps_multiple_comparative_results(
-    tmp_path,
-):
+def test_research_objective_tree_routing_keeps_multiple_comparative_results():
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-preheat",
@@ -1785,9 +1706,7 @@ def test_research_objective_tree_routing_keeps_multiple_comparative_results(
     assert {"detailed-result", "conclusion-result"} <= selected_refs
 
 
-def test_research_objective_service_keeps_numeric_mechanism_text_candidates(
-    tmp_path,
-):
+def test_research_objective_service_keeps_numeric_mechanism_text_candidates():
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-preheating",

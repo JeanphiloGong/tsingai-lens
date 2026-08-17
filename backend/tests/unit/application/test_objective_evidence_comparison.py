@@ -7,7 +7,7 @@ import pytest
 from httpx import Request, Response
 from openai import APIConnectionError, BadRequestError
 
-from application.core.objectives.analysis import source_extraction
+from application.core.objectives.analysis import paper_experiment, source_extraction
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
@@ -782,10 +782,7 @@ def test_objective_context_drops_model_changed_variable_without_values():
     assert units[0].scientific_context.process[0].value == 150
 
 
-def test_pairwise_comparison_retains_every_changed_process_axis(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_pairwise_comparison_retains_every_changed_process_axis():
 
     def result(evidence_id: str, values: dict[str, float], density: float):
         return ExtractedEvidenceDraft.from_mapping(
@@ -818,7 +815,7 @@ def test_pairwise_comparison_retains_every_changed_process_axis(tmp_path):
             }
         )
 
-    comparisons = service._build_objective_pairwise_comparison_units(
+    comparisons = paper_experiment._build_objective_pairwise_comparison_units(
         (
             result(
                 "row-a",
@@ -847,11 +844,7 @@ def test_pairwise_comparison_retains_every_changed_process_axis(tmp_path):
 
 
 def test_pairwise_comparison_joins_process_and_result_tables_by_sample_label(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
 
     def process_context(
         evidence_id: str,
@@ -966,8 +959,8 @@ def test_pairwise_comparison_joins_process_and_result_tables_by_sample_label(
         defect_result("defect-high", "H-VED", 86),
     )
 
-    bound_units = service._bind_objective_result_process_context(units)
-    comparisons = service._build_objective_pairwise_comparison_units(
+    bound_units = paper_experiment._bind_objective_result_process_context(units)
+    comparisons = paper_experiment._build_objective_pairwise_comparison_units(
         bound_units,
         objectives=(),
     )
@@ -995,11 +988,7 @@ def test_pairwise_comparison_joins_process_and_result_tables_by_sample_label(
 
 
 def test_text_result_process_binding_requires_exact_groups_and_expands_axes(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
 
     def process_context(
         evidence_id: str,
@@ -1094,7 +1083,7 @@ def test_text_result_process_binding_requires_exact_groups_and_expands_axes(
             }
         )
 
-    units = service._bind_objective_result_process_context(
+    units = paper_experiment._bind_objective_result_process_context(
         (
             process_context(
                 "process-low",
@@ -1161,10 +1150,7 @@ def test_text_result_process_binding_requires_exact_groups_and_expands_axes(
     )
 
 
-def test_process_result_table_join_rejects_conflicting_sample_context(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_process_result_table_join_rejects_conflicting_sample_context():
     context_payload = {
         "objective_id": "obj-defect",
         "document_id": "paper-ved",
@@ -1221,17 +1207,14 @@ def test_process_result_table_join_rejects_conflicting_sample_context(tmp_path):
         }
     )
 
-    bound = service._bind_objective_result_process_context(
+    bound = paper_experiment._bind_objective_result_process_context(
         (first_context, conflicting_context, result)
     )
 
     assert bound[2] == result
 
 
-def test_pairwise_comparison_isolated_effect_requires_one_changed_axis(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_pairwise_comparison_isolated_effect_requires_one_changed_axis():
 
     def result(evidence_id: str, scan_speed: int, density: float):
         return ExtractedEvidenceDraft.from_mapping(
@@ -1264,7 +1247,7 @@ def test_pairwise_comparison_isolated_effect_requires_one_changed_axis(tmp_path)
             }
         )
 
-    comparison = service._build_objective_pairwise_comparison_units(
+    comparison = paper_experiment._build_objective_pairwise_comparison_units(
         (result("row-a", 800, 96.1), result("row-b", 700, 99.2)),
         objectives=(),
     )[0]
@@ -1281,10 +1264,7 @@ def test_pairwise_comparison_isolated_effect_requires_one_changed_axis(tmp_path)
     }
 
 
-def test_pairwise_comparison_marks_sample_state_change_incomparable(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_pairwise_comparison_marks_sample_state_change_incomparable():
 
     def result(
         evidence_id: str,
@@ -1327,7 +1307,7 @@ def test_pairwise_comparison_marks_sample_state_change_incomparable(tmp_path):
             }
         )
 
-    comparison = service._build_objective_pairwise_comparison_units(
+    comparison = paper_experiment._build_objective_pairwise_comparison_units(
         (
             result(
                 "as-slm",
@@ -1355,11 +1335,7 @@ def test_pairwise_comparison_marks_sample_state_change_incomparable(tmp_path):
 
 
 def test_pairwise_comparison_keeps_semantic_values_from_generic_sample_column(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
 
     def result(evidence_id: str, sample: str, energy_density: int, strength: float):
         return ExtractedEvidenceDraft.from_mapping(
@@ -1396,7 +1372,7 @@ def test_pairwise_comparison_keeps_semantic_values_from_generic_sample_column(
             }
         )
 
-    comparison = service._build_objective_pairwise_comparison_units(
+    comparison = paper_experiment._build_objective_pairwise_comparison_units(
         (
             result("as-slm", "as-SLM", 194, 426.7),
             result("hip-slm", "HIP-SLM", 167, 265.1),
@@ -1412,10 +1388,7 @@ def test_pairwise_comparison_keeps_semantic_values_from_generic_sample_column(
     )
 
 
-def test_pairwise_comparison_marks_sparse_process_axis_incomparable(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_pairwise_comparison_marks_sparse_process_axis_incomparable():
 
     def result(evidence_id: str, process: list[dict[str, Any]], value: float):
         return ExtractedEvidenceDraft.from_mapping(
@@ -1443,7 +1416,7 @@ def test_pairwise_comparison_marks_sparse_process_axis_incomparable(tmp_path):
             }
         )
 
-    comparison = service._build_objective_pairwise_comparison_units(
+    comparison = paper_experiment._build_objective_pairwise_comparison_units(
         (
             result("row-a", [{"name": "scan speed", "value": 800}], 96.1),
             result(
@@ -1467,10 +1440,7 @@ def test_pairwise_comparison_marks_sparse_process_axis_incomparable(tmp_path):
     )
 
 
-def test_pairwise_comparison_is_bounded_per_objective_document(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_pairwise_comparison_is_bounded_per_objective_document():
     measurements = tuple(
         ExtractedEvidenceDraft.from_mapping(
             {
@@ -1501,7 +1471,7 @@ def test_pairwise_comparison_is_bounded_per_objective_document(tmp_path):
         for index in range(100)
     )
 
-    comparisons = service._build_objective_pairwise_comparison_units(
+    comparisons = paper_experiment._build_objective_pairwise_comparison_units(
         measurements,
         objectives=(),
     )
@@ -1561,7 +1531,7 @@ def test_table_material_and_cell_locators_bound_comparison_source(tmp_path):
     assert measurements[0].source_refs[0]["row_index"] == 1
     assert measurements[0].source_refs[0]["col_index"] == 2
     assert measurements[0].source_refs[0]["header_path"] == "Relative density [%]"
-    comparison = service._build_objective_pairwise_comparison_units(
+    comparison = paper_experiment._build_objective_pairwise_comparison_units(
         measurements,
         objectives=(objective,),
     )[0]

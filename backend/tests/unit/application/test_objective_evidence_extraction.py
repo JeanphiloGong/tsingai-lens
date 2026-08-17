@@ -11,8 +11,10 @@ from openai import BadRequestError
 from application.core.objectives import property_matching
 from application.core.objectives.analysis import (
     evidence_routing,
+    paper_experiment,
     source_extraction,
     source_screening,
+    source_validation,
 )
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.source_extraction import (
@@ -1275,10 +1277,7 @@ def test_objective_symbol_axes_distinguish_scan_and_build_angles():
     ) == "build orientation alpha angle"
 
 
-def test_objective_angle_table_comparison_retains_all_changed_axes(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_angle_table_comparison_retains_all_changed_axes():
     objective = _research_objective(
         {
             "objective_id": "obj-angle-effects",
@@ -1337,7 +1336,7 @@ def test_objective_angle_table_comparison_retains_all_changed_axes(tmp_path):
         )
     )
 
-    comparison = service._build_objective_pairwise_comparison_units(
+    comparison = paper_experiment._build_objective_pairwise_comparison_units(
         measurements,
         objectives=(objective,),
     )[0]
@@ -1380,7 +1379,7 @@ def test_llm_objective_evidence_rejects_values_and_axis_absent_from_source():
         }
     )
 
-    records = source_extraction._objective_evidence_records_from_extracted(
+    records = source_validation.validate_source_fact(
         route=route,
         source={
             "source_kind": "text_window",
@@ -1600,7 +1599,7 @@ def test_research_objective_binds_same_study_methods_and_results_sources(tmp_pat
         tables_by_document_id={"paper-1": []},
         document_trees_by_document_id={},
     )
-    drafts = service._bind_objective_result_process_context(source_drafts)
+    drafts = paper_experiment._bind_objective_result_process_context(source_drafts)
 
     assert extractor.calls == ["01-methods-s1", "02-methods-s2", "03-results"]
     assert not any(draft.selection_status == "failed" for draft in drafts)
@@ -1693,10 +1692,7 @@ def test_research_objective_binds_same_study_methods_and_results_sources(tmp_pat
     assert contributions[0].failed_source_count == 0
 
 
-def test_research_objective_keeps_unbound_result_as_descriptive_evidence(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_research_objective_keeps_unbound_result_as_descriptive_evidence():
     objective = _research_objective(
         {
             "objective_id": "obj-microstructure",
@@ -1729,7 +1725,7 @@ def test_research_objective_keeps_unbound_result_as_descriptive_evidence(tmp_pat
         tables_by_document_id={"paper-1": []},
         document_trees_by_document_id={},
     )
-    drafts = service._bind_objective_result_process_context(source_drafts)
+    drafts = paper_experiment._bind_objective_result_process_context(source_drafts)
 
     assert extractor.calls == ["03-results"]
     assert len(drafts) == 1
@@ -1820,7 +1816,7 @@ def test_llm_objective_evidence_preserves_zero_extraction_confidence():
         }
     )
 
-    records = source_extraction._objective_evidence_records_from_extracted(
+    records = source_validation.validate_source_fact(
         route=route,
         source={
             "source_kind": "text_window",
@@ -1887,7 +1883,7 @@ def test_llm_objective_evidence_accepts_source_grounded_axis_and_values():
         }
     )
 
-    records = source_extraction._objective_evidence_records_from_extracted(
+    records = source_validation.validate_source_fact(
         route=route,
         source={
             "source_kind": "table",
@@ -1960,7 +1956,7 @@ def test_llm_objective_evidence_completes_grounded_categorical_endpoints():
         }
     )
 
-    records = source_extraction._objective_evidence_records_from_extracted(
+    records = source_validation.validate_source_fact(
         route=route,
         source={
             "source_kind": "text_window",
@@ -2044,7 +2040,7 @@ def test_llm_objective_evidence_accepts_verbatim_preheating_crack_comparison(
         }
     )
 
-    records = source_extraction._objective_evidence_records_from_extracted(
+    records = source_validation.validate_source_fact(
         route=route,
         source={
             "source_kind": "text_window",
@@ -2125,7 +2121,7 @@ def test_llm_objective_evidence_drops_unsupported_qualitative_direction():
         }
     )
 
-    records = source_extraction._objective_evidence_records_from_extracted(
+    records = source_validation.validate_source_fact(
         route=route,
         source={
             "source_kind": "text_window",
@@ -2193,7 +2189,7 @@ def test_llm_objective_evidence_keeps_grounded_qualitative_direction():
         }
     )
 
-    records = source_extraction._objective_evidence_records_from_extracted(
+    records = source_validation.validate_source_fact(
         route=route,
         source={
             "source_kind": "text_window",
@@ -2260,7 +2256,7 @@ def test_llm_objective_evidence_repairs_endpoints_to_grounded_group_labels():
         }
     )
 
-    records = source_extraction._objective_evidence_records_from_extracted(
+    records = source_validation.validate_source_fact(
         route=route,
         source={
             "source_kind": "text_window",
@@ -2341,7 +2337,7 @@ def test_llm_objective_evidence_keeps_result_without_labels_absent_from_source(
         }
     )
 
-    records = source_extraction._objective_evidence_records_from_extracted(
+    records = source_validation.validate_source_fact(
         route=route,
         source={
             "source_kind": "text_window",
@@ -2410,7 +2406,7 @@ def test_llm_table_result_rejects_outcome_and_unit_from_another_column():
         },
     }
 
-    assert not source_extraction._objective_extracted_result_is_source_grounded(
+    assert not source_validation._objective_extracted_result_is_source_grounded(
         record,
         source={
             "source_kind": "table",
@@ -2446,7 +2442,7 @@ def test_llm_table_result_rejects_value_from_a_different_experiment_row():
         },
     }
 
-    assert not source_extraction._objective_extracted_result_is_source_grounded(
+    assert not source_validation._objective_extracted_result_is_source_grounded(
         record,
         source={
             "source_kind": "table",
@@ -2463,7 +2459,7 @@ def test_llm_table_result_rejects_value_from_a_different_experiment_row():
 
 def test_llm_context_drops_values_absent_from_source():
 
-    record = source_extraction._objective_retain_source_grounded_context(
+    record = source_validation._objective_retain_source_grounded_context(
         {
             "scientific_context": {
                 "material": [],
@@ -2489,7 +2485,7 @@ def test_llm_context_drops_values_absent_from_source():
 
 def test_llm_result_rejects_ungrounded_categorical_variable_endpoint():
 
-    assert not source_extraction._objective_extracted_result_is_source_grounded(
+    assert not source_validation._objective_extracted_result_is_source_grounded(
         {
             "changed_variables": [
                 {
@@ -2519,7 +2515,7 @@ def test_llm_result_rejects_ungrounded_categorical_variable_endpoint():
 def test_llm_context_drops_attribute_not_bound_to_name_value_and_unit(
 ):
 
-    record = source_extraction._objective_retain_source_grounded_context(
+    record = source_validation._objective_retain_source_grounded_context(
         {
             "scientific_context": {
                 "material": [],
@@ -3326,11 +3322,7 @@ def test_research_objective_service_uses_objective_scientific_intent_directly(
 
 
 def test_research_objective_service_enriches_missing_source_backed_scope_context(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -3418,7 +3410,7 @@ def test_research_objective_service_enriches_missing_source_backed_scope_context
         }
     )
 
-    enriched = service._enrich_objective_scope_context(
+    enriched = paper_experiment._enrich_objective_scope_context(
         (evidence,),
         paper_skims=(paper_skim,),
     )[0]
@@ -3441,11 +3433,7 @@ def test_research_objective_service_enriches_missing_source_backed_scope_context
 
 
 def test_research_objective_service_does_not_invent_material_without_document_skim(
-    tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     evidence = ExtractedEvidenceDraft.from_mapping(
         {
             "evidence_id": "density-result",
@@ -3468,7 +3456,7 @@ def test_research_objective_service_does_not_invent_material_without_document_sk
         }
     )
 
-    enriched = service._enrich_objective_scope_context(
+    enriched = paper_experiment._enrich_objective_scope_context(
         (evidence,),
         paper_skims=(),
     )[0]
@@ -3522,10 +3510,7 @@ def test_research_objective_service_routes_matching_tables_beyond_seed_documents
     }
 
 
-def test_real_ved_process_and_defect_tables_form_joint_comparison(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_real_ved_process_and_defect_tables_form_joint_comparison():
     objective = _research_objective(
         {
             "objective_id": "obj-defect",
@@ -3644,8 +3629,8 @@ def test_real_ved_process_and_defect_tables_form_joint_comparison(tmp_path):
             objective_context=objective,
         )
     )
-    comparisons = service._build_objective_pairwise_comparison_units(
-        service._bind_objective_result_process_context(units),
+    comparisons = paper_experiment._build_objective_pairwise_comparison_units(
+        paper_experiment._bind_objective_result_process_context(units),
         objectives=(objective,),
     )
     low_to_high = next(
@@ -3691,10 +3676,7 @@ def test_objective_densification_outcome_includes_relative_density_evidence(
     )
 
 
-def test_real_p001_density_table_retains_complete_changed_factor_tuple(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_real_p001_density_table_retains_complete_changed_factor_tuple():
     objective = _research_objective(
         {
             "objective_id": "obj-p001-density",
@@ -3775,8 +3757,8 @@ def test_real_p001_density_table_retains_complete_changed_factor_tuple(tmp_path)
             objective_context=objective,
         )
     )
-    comparisons = service._build_objective_pairwise_comparison_units(
-        service._bind_objective_result_process_context(units),
+    comparisons = paper_experiment._build_objective_pairwise_comparison_units(
+        paper_experiment._bind_objective_result_process_context(units),
         objectives=(objective,),
     )
 

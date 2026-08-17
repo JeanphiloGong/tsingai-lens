@@ -10,9 +10,9 @@ Objective analysis.
   analysis. It loads the immutable Source build, delegates candidate discovery
   to its direct owners, and atomically replaces the candidate fact set. For a
   confirmed Objective, it coordinates the ordered analysis stages and consumes
-  their transient results. The remaining reconstruction, materialization, and
-  publication responsibilities move to direct owners in separate
-  behavior-preserving slices.
+  their transient results. The remaining materialization and publication
+  responsibilities move to direct owners in separate behavior-preserving
+  slices.
 - `analysis/source_screening.py`
   Owns confirmed-Objective Source screening from paper inputs to ordered
   `PaperAnalysisFrame` results. It traverses Source document trees, constructs
@@ -31,9 +31,24 @@ Objective analysis.
   Owns transient `ExtractedEvidenceDraft` records and the inspection of every
   routed Source. It constructs bounded Source payloads, repairs structurally
   fragmented tables when required, extracts deterministic table records before
-  model fallback, validates current source-local fields, and records
-  route-scoped provider or structured-output failures. It stops before
-  same-paper Methods/Results binding and durable Evidence materialization.
+  model fallback, and records route-scoped provider or structured-output
+  failures. Each schema-valid model draft is passed immediately to
+  `analysis/source_validation.py` before it can update the state supplied to the
+  next Source prompt.
+- `analysis/source_validation.py`
+  Owns deterministic validation of one model-authored draft against its exact
+  Source. It independently grounds results, comparison labels, variables, and
+  scientific context; unsupported results abstain, while a supported result
+  with incomplete comparison support is retained only as descriptive Evidence.
+  It records the field families supported by the Source and never calls the
+  model or borrows facts from another Source.
+- `analysis/paper_experiment.py`
+  Owns reconstruction after every routed Source in a paper has been inspected.
+  It fills missing material or process scope only from the same paper's skim,
+  binds Methods conditions to Results only through exact and unambiguous sample
+  identities, and derives the existing bounded pairwise comparisons. Missing or
+  conflicting sample identities remain descriptive, and reconstruction never
+  crosses a document boundary.
 - `paper_skim_service.py`
   Owns the per-document discovery stage. It assigns every eligible
   non-reference text node, table row, and table/figure caption to one full

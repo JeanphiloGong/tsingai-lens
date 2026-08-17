@@ -23,6 +23,7 @@ from domain.core import (
     PaperStudyDispositionStatus,
     ResearchObjective,
 )
+from domain.pipeline import ExecutionStats, ModelUsage, TokenUsage
 from domain.source import source_documents_from_records
 from tests.support.collection_service import build_test_collection_service
 from tests.support.objective_extractor import (
@@ -180,6 +181,62 @@ def test_memory_objective_repository_requires_explicit_activation():
     repository.activate("build_pending")
 
     assert repository.read("col-1") == pending
+
+
+def test_memory_objective_repository_records_analysis_execution_stats():
+    objective = _research_objective(
+        {
+            "collection_id": "col-1",
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+            "rank": 1,
+            "confirmation_status": "confirmed",
+        }
+    )
+    repository = MemoryObjectiveRepository.from_facts(
+        "col-1",
+        ObjectiveFactSet(
+            research_objectives=(objective,),
+        ),
+    )
+    _, analysis = repository.queue_analysis(
+        "col-1",
+        objective.objective_id,
+        pipeline_version="test.v1",
+        model_name=None,
+        prompt_versions={},
+    )
+    repository.claim_analysis("col-1", objective.objective_id, 1)
+    stats = ExecutionStats(
+        model_usage=(
+            ModelUsage(
+                model_name="test-model",
+                request_count=1,
+                token_usage=TokenUsage(
+                    input_tokens=10,
+                    output_tokens=5,
+                    total_tokens=15,
+                ),
+            ),
+        ),
+    )
+
+    updated = repository.update_analysis_execution_stats(
+        "col-1",
+        objective.objective_id,
+        analysis.analysis_version,
+        stats=stats,
+        model_name="test-model",
+        prompt_versions={"source_extraction": "source_extraction.v1"},
+    )
+
+    assert updated.stats == stats
+    assert updated.model_name == "test-model"
+    assert updated.prompt_versions == {
+        "source_extraction": "source_extraction.v1"
+    }
 
 
 def test_objective_analysis_publishes_one_terminal_evidence_per_source():

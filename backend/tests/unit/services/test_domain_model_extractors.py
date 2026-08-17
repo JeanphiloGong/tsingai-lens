@@ -484,6 +484,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
             StructuredResponseClient(
                 client=objective_client,
                 model="fake-model",
+                extraction_mode="provider_parse",
             )
         ).judge_result_set(
             {
@@ -663,7 +664,11 @@ def test_paper_skim_provider_length_finish_skips_whole_window_json_repair():
         '{"studies":[]}',
         parse_error=LengthFinishReasonError(completion=completion),
     )
-    extractor = StructuredResponseClient(client=client, model="fake-model")
+    extractor = StructuredResponseClient(
+        client=client,
+        model="fake-model",
+        extraction_mode="provider_parse",
+    )
 
     with pytest.raises(StructuredOutputSaturatedError):
         PaperStudyWindowExtractor(extractor).extract(
@@ -718,7 +723,11 @@ def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
 def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace():
     parsed = StructuredFindingSynthesis(findings=[])
     client = _FakeOpenAIClient("unused", parsed=parsed)
-    extractor = StructuredResponseClient(client=client, model="fake-model")
+    extractor = StructuredResponseClient(
+        client=client,
+        model="fake-model",
+        extraction_mode="provider_parse",
+    )
     payload = {
         "objective": {"question": "How does energy density affect density?"},
         "result_set": {

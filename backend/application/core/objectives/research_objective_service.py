@@ -24,7 +24,7 @@ from application.core.objectives.analysis.paper_experiment import (
 )
 from application.core.objectives.analysis.source_extraction import (
     ObjectiveSourceExtractor,
-    extract_source_facts,
+    extract_and_validate_source_facts,
 )
 from application.core.objectives.analysis.source_screening import (
     ObjectiveSourceScreener,
@@ -246,11 +246,15 @@ class ResearchObjectiveService:
             created_at=active_objective.created_at,
             updated_at=active_objective.updated_at,
         )
+        response_client = objective_inputs["response_client"]
         if self._objective_source_screener is None:
-            self._objective_source_screener = ObjectiveSourceScreener(
-                objective_inputs["response_client"]
-            )
-        paper_frames = screen_sources(
+            self._objective_source_screener = ObjectiveSourceScreener(response_client)
+        if self._objective_evidence_router is None:
+            self._objective_evidence_router = ObjectiveEvidenceRouter(response_client)
+        if self._objective_source_extractor is None:
+            self._objective_source_extractor = ObjectiveSourceExtractor(response_client)
+
+        screened_sources = screen_sources(
             collection_id=collection_id,
             source_screener=self._objective_source_screener,
             objectives=(objective,),
@@ -264,15 +268,11 @@ class ResearchObjectiveService:
             ],
             progress_callback=progress_callback,
         )
-        if self._objective_evidence_router is None:
-            self._objective_evidence_router = ObjectiveEvidenceRouter(
-                objective_inputs["response_client"]
-            )
-        evidence_candidates = route_sources(
+        source_inspection_routes = route_sources(
             collection_id=collection_id,
             evidence_router=self._objective_evidence_router,
             objectives=(objective,),
-            objective_paper_frames=paper_frames,
+            objective_paper_frames=screened_sources,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
             document_trees_by_document_id=objective_inputs[
@@ -280,17 +280,13 @@ class ResearchObjectiveService:
             ],
             progress_callback=progress_callback,
         )
-        if self._objective_source_extractor is None:
-            self._objective_source_extractor = ObjectiveSourceExtractor(
-                objective_inputs["response_client"]
-            )
-        source_drafts = extract_source_facts(
+        validated_source_facts = extract_and_validate_source_facts(
             collection_id=collection_id,
             source_extractor=self._objective_source_extractor,
             paper_facts_extractor=self._paper_facts_extractor,
             objectives=(objective,),
-            objective_paper_frames=paper_frames,
-            objective_evidence_routes=evidence_candidates,
+            objective_paper_frames=screened_sources,
+            objective_evidence_routes=source_inspection_routes,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
             document_trees_by_document_id=objective_inputs[
@@ -301,9 +297,9 @@ class ResearchObjectiveService:
             ],
             progress_callback=progress_callback,
         )
-        evidence_drafts = reconstruct_paper_experiments(
+        paper_evidence_drafts = reconstruct_paper_experiments(
             collection_id=collection_id,
-            source_facts=source_drafts,
+            source_facts=validated_source_facts,
             paper_skims=objective_inputs["paper_skims"],
             objectives=(objective,),
         )
@@ -311,9 +307,9 @@ class ResearchObjectiveService:
             collection_id=collection_id,
             analysis=analysis,
             objective=objective,
-            drafts=evidence_drafts,
-            frames=paper_frames,
-            routes=evidence_candidates,
+            drafts=paper_evidence_drafts,
+            frames=screened_sources,
+            routes=source_inspection_routes,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],
             tables_by_document_id=objective_inputs["tables_by_document_id"],
             figures_by_document_id=objective_inputs["figures_by_document_id"],

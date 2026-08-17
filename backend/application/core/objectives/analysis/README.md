@@ -11,14 +11,17 @@ Read the analysis responsibilities in real research order:
 2. `evidence_routing.py` turns screened Source units into the transient
    inspection queue consumed by Source-local fact extraction. A route is an
    instruction to inspect a Source, not a scientific finding.
-3. `source_extraction.py` inspects each routed Source and produces transient,
-   source-local `ExtractedEvidenceDraft` records. It owns text and table payload
-   construction, structural table repair, deterministic table parsing, model
-   extraction, and route-scoped technical failures.
+3. `source_extraction.py` exposes `extract_and_validate_source_facts`, which
+   inspects routed Sources one at a time and produces transient, source-local
+   `ExtractedEvidenceDraft` records. It owns text and table payload construction,
+   structural table repair, deterministic table parsing, model extraction, and
+   route-scoped technical failures.
 4. `source_validation.py` immediately checks each model-authored draft against
-   the exact Source being inspected. Unsupported results abstain; supported
-   results with incomplete variable or comparison support become descriptive
-   drafts before they can enter the next Source prompt's document state.
+   the exact Source being inspected. Extraction and validation therefore
+   alternate per Source; they are not two collection-wide passes. Unsupported
+   results abstain, while supported results with incomplete variable or
+   comparison support become descriptive drafts before they can enter the next
+   Source prompt's document state.
 5. `paper_experiment.py` runs after all routed Sources have been inspected. It
    fills only missing scope from the same paper, binds Methods and Results only
    through exact sample identities, and derives bounded pairwise comparisons.

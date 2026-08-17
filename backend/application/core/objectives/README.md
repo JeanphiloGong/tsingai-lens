@@ -30,14 +30,16 @@ Objective analysis.
   Evidence.
 - `analysis/source_extraction.py`
   Owns transient `ExtractedEvidenceDraft` records and the inspection of every
-  routed Source. It constructs bounded Source payloads, repairs structurally
-  fragmented tables when required, extracts deterministic table records before
-  model fallback, and owns the Source-local extraction prompt, response schema,
-  scientific validation, bounded repair, completion budget, and direct model
-  call. It records route-scoped provider or structured-output failures. Each
+  routed Source through `extract_and_validate_source_facts`. It constructs
+  bounded Source payloads, repairs structurally fragmented tables when
+  required, extracts deterministic table records before model fallback, and
+  owns the Source-local extraction prompt, response schema, scientific
+  validation, bounded repair, completion budget, and direct model call. It
+  records route-scoped provider or structured-output failures. Each
   schema-valid model draft is passed immediately to
   `analysis/source_validation.py` before it can update the state supplied to
-  the next Source prompt.
+  the next Source prompt, so extraction and validation alternate per Source
+  rather than running as two collection-wide passes.
 - `analysis/source_validation.py`
   Owns deterministic validation of one model-authored draft against its exact
   Source. It independently grounds results, comparison labels, variables, and

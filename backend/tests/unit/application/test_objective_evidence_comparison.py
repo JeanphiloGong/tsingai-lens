@@ -17,7 +17,7 @@ from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
-    extract_source_facts,
+    extract_and_validate_source_facts,
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from domain.core import ObjectiveAnalysis, ObjectiveEvidence
@@ -144,7 +144,7 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped():
         for document_id in ("paper-1", "paper-2")
     }
 
-    units = extract_source_facts(
+    units = extract_and_validate_source_facts(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -241,7 +241,7 @@ def test_objective_evidence_continues_after_one_route_format_failure():
         for source_ref in ("block-failed", "block-recovered")
     ]
 
-    units = extract_source_facts(
+    units = extract_and_validate_source_facts(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -315,7 +315,7 @@ def test_objective_evidence_routes_round_robin_across_documents():
         for document_id in ("paper-1", "paper-2")
     }
 
-    extract_source_facts(
+    extract_and_validate_source_facts(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -403,7 +403,7 @@ def test_objective_evidence_provider_failure_is_scoped_to_one_document():
         for document_id in ("paper-1", "paper-2")
     }
 
-    units = extract_source_facts(
+    units = extract_and_validate_source_facts(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -495,7 +495,7 @@ def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
         for source_ref in source_refs
     ]
 
-    units = extract_source_facts(
+    units = extract_and_validate_source_facts(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -535,7 +535,7 @@ def test_objective_evidence_rejects_selected_route_without_source():
     )
 
     with pytest.raises(RuntimeError, match="selected Evidence Source is missing"):
-        extract_source_facts(
+        extract_and_validate_source_facts(
             collection_id="col-test",
             source_extractor=UnexpectedExtractor(),
             objectives=(objective,),
@@ -760,7 +760,7 @@ def test_objective_context_drops_model_changed_variable_without_values():
         heading_path="Methods",
     )
 
-    units = extract_source_facts(
+    units = extract_and_validate_source_facts(
         collection_id="col-test",
         source_extractor=ContextExtractor(),
         objectives=(objective,),

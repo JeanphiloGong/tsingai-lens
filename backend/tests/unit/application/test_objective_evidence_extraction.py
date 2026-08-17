@@ -21,7 +21,7 @@ from application.core.objectives.analysis.evidence_routing import EvidenceCandid
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
     StructuredEvidenceExtractions,
-    extract_source_facts,
+    extract_and_validate_source_facts,
 )
 from application.core.objectives.analysis.source_screening import (
     OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
@@ -1581,7 +1581,7 @@ def test_research_objective_binds_same_study_methods_and_results_sources():
         _study_source_route(objective.objective_id, block.block_id)
         for block in blocks
     )
-    source_drafts = extract_source_facts(
+    source_drafts = extract_and_validate_source_facts(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -1705,7 +1705,7 @@ def test_research_objective_keeps_unbound_result_as_descriptive_evidence():
         {"03-results": _cross_source_microstructure_records()["03-results"]}
     )
 
-    source_drafts = extract_source_facts(
+    source_drafts = extract_and_validate_source_facts(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -1739,7 +1739,7 @@ def test_research_objective_abstains_without_target_result():
     )
     extractor = _StudySourceEvidenceExtractor({"03-background": None})
 
-    drafts = extract_source_facts(
+    drafts = extract_and_validate_source_facts(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -1768,7 +1768,7 @@ def test_research_objective_records_provider_failure_as_failed_evidence():
         failing_source_ref="03-results",
     )
 
-    drafts = extract_source_facts(
+    drafts = extract_and_validate_source_facts(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -2730,7 +2730,7 @@ def test_research_objective_evidence_prompt_compacts_long_text_source(
 
     extractor = PayloadCaptureExtractor()
 
-    extract_source_facts(
+    extract_and_validate_source_facts(
         collection_id="col-test",
         source_extractor=extractor,
         objectives=(objective,),
@@ -2912,7 +2912,7 @@ def test_research_objective_table_repair_bad_request_is_route_scoped():
         for table_order, source_ref in enumerate(("table-a", "table-b"), start=1)
     ]
 
-    units = extract_source_facts(
+    units = extract_and_validate_source_facts(
         collection_id="col-test",
         source_extractor=evidence_extractor,
         paper_facts_extractor=repair_extractor,
@@ -3021,7 +3021,7 @@ def test_research_objective_rejects_unusable_table_matrix_repair(
         ),
     )
 
-    units = extract_source_facts(
+    units = extract_and_validate_source_facts(
         collection_id="col-test",
         source_extractor=evidence_extractor,
         paper_facts_extractor=repair_extractor,
@@ -3096,7 +3096,7 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails():
         ),
     )
 
-    units = extract_source_facts(
+    units = extract_and_validate_source_facts(
         collection_id="col-test",
         source_extractor=evidence_extractor,
         paper_facts_extractor=repair_extractor,

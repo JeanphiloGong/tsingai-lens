@@ -1017,7 +1017,7 @@ def _mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
     return tuple(dict(item) for item in value if isinstance(item, Mapping))
 
 
-def extract_source_facts(
+def extract_and_validate_source_facts(
     *,
     collection_id: str,
     source_extractor: ObjectiveSourceExtractor,

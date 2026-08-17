@@ -49,9 +49,9 @@ from application.core.objectives.discovery.study_window import (
     StructuredPaperSkim,
     build_paper_skim_prompt,
 )
-from application.core.objectives.extraction import (
-    ObjectiveExtractor,
+from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
+    StructuredResponseClient,
 )
 from application.core.paper_facts.extraction import PaperFactsExtractor
 from application.core.paper_facts.schemas import (
@@ -394,8 +394,8 @@ class _FakeOpenAIClient:
         self.beta = _FakeBeta(parsed, error=parse_error)
 
 
-def _objective_extractor(client: _FakeOpenAIClient) -> ObjectiveExtractor:
-    return ObjectiveExtractor(
+def _response_client(client: _FakeOpenAIClient) -> StructuredResponseClient:
+    return StructuredResponseClient(
         client=client,
         model="fake-model",
         extraction_mode="json_text",
@@ -481,7 +481,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
             }
         )
         FindingAssertionJudge(
-            ObjectiveExtractor(
+            StructuredResponseClient(
                 client=objective_client,
                 model="fake-model",
             )
@@ -575,13 +575,13 @@ def test_domain_model_extractors_defaults_to_provider_parse_mode(monkeypatch):
     }
 
 
-def test_objective_extractor_does_not_generate_backend_owned_objective_lineage():
-    assert not hasattr(ObjectiveExtractor, "discover_research_objectives")
+def test_response_client_does_not_generate_backend_owned_objective_lineage():
+    assert not hasattr(StructuredResponseClient, "discover_research_objectives")
 
 
 def test_paper_skim_prompt_token_estimate_counts_complete_schema_prompt():
     client = _FakeOpenAIClient("unused")
-    extractor = ObjectiveExtractor(
+    extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
         extraction_mode="provider_parse",
@@ -611,7 +611,7 @@ def test_paper_skim_prompt_token_estimate_counts_complete_schema_prompt():
 
 def test_signal_reconciliation_prompt_token_estimate_counts_complete_schema_prompt():
     client = _FakeOpenAIClient("unused")
-    extractor = ObjectiveExtractor(
+    extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
         extraction_mode="provider_parse",
@@ -663,7 +663,7 @@ def test_paper_skim_provider_length_finish_skips_whole_window_json_repair():
         '{"studies":[]}',
         parse_error=LengthFinishReasonError(completion=completion),
     )
-    extractor = ObjectiveExtractor(client=client, model="fake-model")
+    extractor = StructuredResponseClient(client=client, model="fake-model")
 
     with pytest.raises(StructuredOutputSaturatedError):
         PaperStudyWindowExtractor(extractor).extract(
@@ -695,7 +695,7 @@ def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
         )
 
     client.chat.completions.create = create_with_length_finish
-    extractor = ObjectiveExtractor(
+    extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
         extraction_mode="json_text",
@@ -718,7 +718,7 @@ def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
 def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace():
     parsed = StructuredFindingSynthesis(findings=[])
     client = _FakeOpenAIClient("unused", parsed=parsed)
-    extractor = ObjectiveExtractor(client=client, model="fake-model")
+    extractor = StructuredResponseClient(client=client, model="fake-model")
     payload = {
         "objective": {"question": "How does energy density affect density?"},
         "result_set": {
@@ -744,7 +744,7 @@ def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace()
 
 def test_domain_model_extractors_bounds_json_text_finding_synthesis_output():
     client = _FakeOpenAIClient('{"findings": []}')
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     result = FindingAssertionJudge(extractor).judge_result_set(
         {
@@ -967,7 +967,7 @@ def test_domain_model_extractors_validates_paper_skim_response():
         }
         """
     )
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     skim = PaperStudyWindowExtractor(extractor).extract(
         {
@@ -1024,7 +1024,7 @@ def test_paper_skim_downgrades_empty_factor_relationship_without_losing_siblings
         "warnings": [],
     }
     client = _FakeOpenAIClient(json.dumps(response))
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     skim = PaperStudyWindowExtractor(extractor).extract(
         {
@@ -1132,7 +1132,7 @@ def test_paper_skim_retries_duplicate_study_identities_before_returning():
         ],
     }
     client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     skim = PaperStudyWindowExtractor(extractor).extract(
         {
@@ -1215,7 +1215,7 @@ def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypat
         json.dumps(valid),
         parsed=StructuredPaperSkim.model_validate(invalid),
     )
-    extractor = ObjectiveExtractor(client=client, model="fake-model")
+    extractor = StructuredResponseClient(client=client, model="fake-model")
 
     skim = PaperStudyWindowExtractor(extractor).extract(
         {
@@ -1292,7 +1292,7 @@ def test_paper_skim_preserves_multi_material_multi_outcome_study():
             }
         )
     )
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     skim = PaperStudyWindowExtractor(extractor).extract(
         {
@@ -1378,7 +1378,7 @@ def test_paper_skim_retries_oversized_study_without_truncating_relationships():
     client = _FakeOpenAIClient(
         [json.dumps(invalid), json.dumps(valid)]
     )
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     skim = PaperStudyWindowExtractor(extractor).extract(
         {
@@ -1424,7 +1424,7 @@ def test_domain_model_extractors_validates_paper_signal_reconciliation():
             }
         )
     )
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     reconciliation = PaperSignalReconciler(extractor).reconcile(
         {
@@ -1485,7 +1485,7 @@ def test_paper_signal_reconciliation_repairs_conflicting_contexts(
         ],
     }
     client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(repaired)])
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     reconciliation = PaperSignalReconciler(extractor).reconcile(
         {
@@ -1542,7 +1542,7 @@ def test_provider_parsed_signal_reconciliation_repairs_conflicting_contexts(
         ],
     }
     client = _FakeOpenAIClient(json.dumps(repaired), parsed=invalid)
-    extractor = ObjectiveExtractor(client=client, model="fake-model")
+    extractor = StructuredResponseClient(client=client, model="fake-model")
 
     reconciliation = PaperSignalReconciler(extractor).reconcile(
         {
@@ -1593,7 +1593,7 @@ def test_unrepaired_signal_context_conflict_keeps_valid_relationships():
         "unresolved_signals": [],
     }
     client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(invalid)])
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     reconciliation = PaperSignalReconciler(extractor).reconcile(
         {
@@ -1641,7 +1641,7 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
         }
         """
     )
-    classifier = ResearchAxisEquivalenceClassifier(_objective_extractor(client))
+    classifier = ResearchAxisEquivalenceClassifier(_response_client(client))
 
     canonicalization_plan = classifier.classify(
         {
@@ -1681,7 +1681,7 @@ def test_axis_canonicalization_repairs_ungrounded_and_overlapping_groups():
         }
     )
     client = _FakeOpenAIClient([invalid, repaired])
-    classifier = ResearchAxisEquivalenceClassifier(_objective_extractor(client))
+    classifier = ResearchAxisEquivalenceClassifier(_response_client(client))
 
     plan = classifier.classify(
         {
@@ -1729,7 +1729,7 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
         }
         """
     )
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
@@ -1784,7 +1784,7 @@ def test_objective_paper_frame_json_repair_rejects_unknown_source_id():
         }
     )
     client = _FakeOpenAIClient([invalid, repaired])
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
@@ -1862,7 +1862,7 @@ def test_objective_paper_frame_repairs_omitted_source_unit():
         }
     )
     client = _FakeOpenAIClient([incomplete, repaired])
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
     source_unit_ids = [f"frame-section-{position}" for position in range(1, 9)]
 
     frame = ObjectiveSourceScreener(extractor).screen_batch(
@@ -1928,7 +1928,7 @@ def test_objective_paper_frame_still_rejects_invalid_ids_after_repair(
         }
     )
     client = _FakeOpenAIClient([response, response])
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     with pytest.raises((ValueError, ValidationError)):
         ObjectiveSourceScreener(extractor).screen_batch(
@@ -1978,7 +1978,7 @@ def test_provider_parsed_objective_paper_frame_repairs_omission(
         }
     )
     client = _FakeOpenAIClient(repaired, parsed=incomplete)
-    extractor = ObjectiveExtractor(client=client, model="fake-model")
+    extractor = StructuredResponseClient(client=client, model="fake-model")
 
     frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
@@ -2031,7 +2031,7 @@ def test_provider_parsed_objective_paper_frame_repairs_source_accounting(
         "excluded_source_unit_ids": ["frame-table-background"],
     }
     client = _FakeOpenAIClient(json.dumps(repaired), parsed=invalid)
-    extractor = ObjectiveExtractor(client=client, model="fake-model")
+    extractor = StructuredResponseClient(client=client, model="fake-model")
 
     frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
@@ -2103,7 +2103,7 @@ def test_objective_paper_frame_prompt_defines_bounded_source_accounting():
 
 def test_objective_paper_frame_prompt_token_estimate_counts_complete_schema():
     client = _FakeOpenAIClient("unused")
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
     payload = {
         "objective": {"question": "How does heat treatment affect corrosion?"},
         "paper_prior": {"doc_role": "experimental"},
@@ -2153,7 +2153,7 @@ def test_domain_model_extractors_validates_objective_evidence_routes_response():
             }
         """
     )
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     routes = ObjectiveEvidenceRouter(extractor).route_source(
         {
@@ -2171,7 +2171,7 @@ def test_domain_model_extractors_validates_objective_evidence_routes_response():
 
 def test_domain_model_extractors_rejects_legacy_objective_route_batches():
     client = _FakeOpenAIClient('{"selections": []}')
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     with pytest.raises(ValueError):
         ObjectiveEvidenceRouter(extractor).route_source(
@@ -2204,7 +2204,7 @@ def test_domain_model_extractors_rejects_verbose_objective_route_objects():
         }
         """
     )
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     with pytest.raises(ValidationError):
         ObjectiveEvidenceRouter(extractor).route_source(
@@ -2234,7 +2234,7 @@ def test_domain_model_extractors_rejects_source_ids_in_objective_routes():
         }
         """
     )
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     with pytest.raises(ValidationError):
         ObjectiveEvidenceRouter(extractor).route_source(
@@ -2292,7 +2292,7 @@ def test_domain_model_extractors_validates_objective_evidence_response():
         }
         """
     )
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     extractions = ObjectiveSourceExtractor(extractor).extract_source(
         {
@@ -2323,7 +2323,7 @@ def test_domain_model_extractors_validates_objective_evidence_response():
 
 def test_objective_evidence_extractor_has_no_grounding_repair_call_contract():
     client = _FakeOpenAIClient('{"extractions":[]}')
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
     payload = {
         "collection_id": "col-1",
         "objective": {"question": "How does laser power affect density?"},
@@ -2532,7 +2532,7 @@ def test_domain_model_extractors_ignores_top_level_prompt_echo_for_evidence():
             "SOURCE": "Relative density reached 99.5%.",
         }
     )
-    extractor = _objective_extractor(_FakeOpenAIClient(response))
+    extractor = _response_client(_FakeOpenAIClient(response))
 
     parsed = ObjectiveSourceExtractor(extractor).extract_source(
         {
@@ -2563,7 +2563,7 @@ def test_domain_model_extractors_rejects_unknown_top_level_evidence_fields():
         }
     )
     client = _FakeOpenAIClient(response)
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     with pytest.raises(ValidationError):
         ObjectiveSourceExtractor(extractor).extract_source(
@@ -2600,7 +2600,7 @@ def test_domain_model_extractors_rejects_prompt_only_evidence_echo():
         }
     )
     client = _FakeOpenAIClient(response)
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     with pytest.raises(ValueError, match="echoed input fields"):
         ObjectiveSourceExtractor(extractor).extract_source(
@@ -2778,7 +2778,7 @@ def test_domain_model_extractors_rejects_backend_bound_objective_evidence_fields
         }
         """
     )
-    extractor = _objective_extractor(client)
+    extractor = _response_client(client)
 
     with pytest.raises(ValidationError):
         ObjectiveSourceExtractor(extractor).extract_source(
@@ -2987,7 +2987,7 @@ def test_domain_model_extractors_routes_objective_selections_directly_to_bounded
 ):
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "provider_parse")
     client = _FakeOpenAIClient('{"selections":[]}')
-    extractor = ObjectiveExtractor(client=client, model="fake-model")
+    extractor = StructuredResponseClient(client=client, model="fake-model")
 
     routes = ObjectiveEvidenceRouter(extractor).route_source(
         {
@@ -3018,7 +3018,7 @@ def test_domain_model_extractors_routes_objective_units_through_bounded_json_tex
         '{"extractions":[]}',
         parsed=StructuredEvidenceExtractions(),
     )
-    extractor = ObjectiveExtractor(client=client, model="fake-model")
+    extractor = StructuredResponseClient(client=client, model="fake-model")
 
     units = ObjectiveSourceExtractor(extractor).extract_source(
         {
@@ -3162,7 +3162,7 @@ def test_domain_model_extractors_repairs_layered_structured_validation_errors(
         )
 
     client.chat.completions.create = create
-    extractor = ObjectiveExtractor(
+    extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
         extraction_mode="json_text",
@@ -3257,7 +3257,7 @@ def test_objective_evidence_normalizes_fixed_endpoint_and_joint_scope_without_re
         }
     )
     client = _FakeOpenAIClient(invalid)
-    extractor = ObjectiveExtractor(
+    extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
         extraction_mode="json_text",
@@ -3328,7 +3328,7 @@ def test_objective_evidence_recovers_empty_comparison_axes_from_changed_variable
         }
     )
     client = _FakeOpenAIClient(response)
-    extractor = ObjectiveExtractor(
+    extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
         extraction_mode="json_text",
@@ -3410,7 +3410,7 @@ def test_objective_evidence_downgrades_axisless_result_to_descriptive_result(
         }
     )
     client = _FakeOpenAIClient(response)
-    extractor = ObjectiveExtractor(
+    extractor = StructuredResponseClient(
         client=client,
         model="fake-model",
         extraction_mode="json_text",
@@ -3735,7 +3735,7 @@ def test_domain_model_extractors_falls_back_to_default_for_invalid_mode(monkeypa
     monkeypatch.setenv("CORE_LLM_EXTRACTION_MODE", "not-a-mode")
 
     with caplog.at_level("WARNING"):
-        extractor = ObjectiveExtractor(client=_FakeOpenAIClient("{}"), model="fake-model")
+        extractor = StructuredResponseClient(client=_FakeOpenAIClient("{}"), model="fake-model")
 
     assert extractor.extraction_mode == "provider_parse"
     assert "Invalid CORE_LLM_EXTRACTION_MODE=not-a-mode" in caplog.text

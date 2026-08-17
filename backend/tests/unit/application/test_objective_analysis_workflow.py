@@ -416,7 +416,7 @@ def test_objective_analysis_uses_conservative_frame_batch_when_model_fails(
     extractor = _FailingFrameExtractor()
     service = _build_research_objective_service(
         collection_service=collection_service,
-        objective_extractor=extractor,
+        response_client=extractor,
     )
     service.finding_synthesis_service.assertion_judge = extractor
     service.source_artifact_repository.replace_collection_documents(
@@ -502,9 +502,9 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
     collection_id = collection["collection_id"]
     service = _build_research_objective_service(
         collection_service=collection_service,
-        objective_extractor=_ObjectiveExtractor(),
+        response_client=_ObjectiveExtractor(),
     )
-    service.finding_synthesis_service.assertion_judge = service._objective_extractor
+    service.finding_synthesis_service.assertion_judge = service._response_client
     service.source_artifact_repository.replace_collection_documents(
         collection_id,
         "build_test",
@@ -575,7 +575,7 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
     analysis = _queue_running_analysis(service, collection_id, objective.objective_id)
 
     failing_extractor = _FailingRouteExtractor()
-    service._objective_extractor = failing_extractor
+    service._response_client = failing_extractor
     service._objective_evidence_router = failing_extractor
     service.finding_synthesis_service.assertion_judge = failing_extractor
     artifacts = service.generate_objective_analysis_artifacts(
@@ -599,7 +599,7 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
     extractor = _ObjectiveExtractor()
     service = _build_research_objective_service(
         collection_service=collection_service,
-        objective_extractor=extractor,
+        response_client=extractor,
     )
     service.finding_synthesis_service.assertion_judge = extractor
     service.source_artifact_repository.replace_collection_documents(
@@ -695,7 +695,7 @@ def test_queued_analysis_uses_its_source_build_objective_scope_after_rebuild(
     repository = _ActiveBuildScopeObjectiveRepository()
     service = _build_research_objective_service(
         collection_service=collection_service,
-        objective_extractor=extractor,
+        response_client=extractor,
         objective_repository=repository,
     )
     service.finding_synthesis_service.assertion_judge = extractor

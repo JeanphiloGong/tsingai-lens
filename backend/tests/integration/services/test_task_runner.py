@@ -224,7 +224,7 @@ def _build_runner(
         finding_synthesis_service=FindingSynthesisService(),
         paper_skim_service=PaperSkimService(),
         objective_candidate_service=ObjectiveCandidateService(),
-        objective_extractor=objective_extractor,
+        response_client=objective_extractor,
         axis_equivalence_classifier=objective_extractor,
         objective_evidence_router=objective_extractor,
         objective_source_extractor=objective_extractor,
@@ -389,7 +389,7 @@ def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_covera
         build_repository,
     )
     failing_extractor = PartiallyFailingObjectiveExtractor()
-    runner.research_objective_service._objective_extractor = failing_extractor
+    runner.research_objective_service._response_client = failing_extractor
     runner.research_objective_service._axis_equivalence_classifier = (
         failing_extractor
     )

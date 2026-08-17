@@ -6,7 +6,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from application.core.objectives.extraction import ObjectiveExtractor
+from application.core.objectives.llm.structured_response import StructuredResponseClient
 
 PAPER_SKIM_PROMPT_VERSION = "paper_skim.v2"
 PAPER_SKIM_PROMPT_TOKEN_LIMIT = 12_288
@@ -478,7 +478,7 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
 class PaperStudyWindowExtractor:
     """Extract supported study structure from one bounded Source window."""
 
-    def __init__(self, response_client: ObjectiveExtractor) -> None:
+    def __init__(self, response_client: StructuredResponseClient) -> None:
         self.response_client = response_client
 
     def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
@@ -513,7 +513,7 @@ class PaperStudyWindowExtractor:
             if len(study_identities) != len(set(study_identities)):
                 raise ValueError("studies contain duplicate study identities")
 
-        def complete_json(**kwargs: Any) -> tuple[BaseModel, str | None]:
+        def parse_json_text_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
             return self.response_client.complete_json(
                 **kwargs,
                 repair_instruction_builder=build_repair_instruction,
@@ -526,7 +526,7 @@ class PaperStudyWindowExtractor:
             user_prompt=user_prompt,
             response_model=StructuredPaperSkim,
             max_completion_tokens=_MAX_COMPLETION_TOKENS,
-            json_text_parser=complete_json,
+            json_text_parser=parse_json_text_with_contract,
             parsed_validator=validate_study_identities,
             fail_on_output_saturation=True,
             task_type="paper_skim",

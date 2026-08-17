@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from application.core.objectives import property_matching
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
-from application.core.objectives.extraction import ObjectiveExtractor
+from application.core.objectives.llm.structured_response import StructuredResponseClient
 from domain.core import (
     ResearchObjective,
     normalize_objective_confidence,
@@ -158,7 +158,7 @@ def build_objective_evidence_route_prompt(
 class ObjectiveEvidenceRouter:
     """Classify one screened Source for the transient extraction queue."""
 
-    def __init__(self, response_client: ObjectiveExtractor) -> None:
+    def __init__(self, response_client: StructuredResponseClient) -> None:
         self.response_client = response_client
 
     def route_source(self, payload: dict[str, Any]) -> StructuredEvidenceSelections:

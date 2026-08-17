@@ -16,7 +16,7 @@ from pydantic import (
 )
 
 from application.core.objectives import property_matching
-from application.core.objectives.extraction import ObjectiveExtractor
+from application.core.objectives.llm.structured_response import StructuredResponseClient
 from domain.core import PaperSkim, ResearchObjective, normalize_objective_terms
 from domain.source import SourceDocumentTree
 
@@ -202,7 +202,7 @@ def build_objective_paper_frame_prompt(
 class ObjectiveSourceScreener:
     """Classify one bounded Source batch for a confirmed Objective."""
 
-    def __init__(self, response_client: ObjectiveExtractor) -> None:
+    def __init__(self, response_client: StructuredResponseClient) -> None:
         self.response_client = response_client
 
     def screen_batch(self, payload: dict[str, Any]) -> StructuredPaperFrameBatch:
@@ -268,7 +268,7 @@ class ObjectiveSourceScreener:
                 "an uncertain source as relevant."
             )
 
-        def complete_json(**kwargs: Any) -> tuple[BaseModel, str | None]:
+        def parse_json_text_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
             return self.response_client.complete_json(
                 **kwargs,
                 repair_instruction_builder=build_repair_instruction,
@@ -282,7 +282,7 @@ class ObjectiveSourceScreener:
                 user_prompt=user_prompt,
                 response_model=StructuredPaperFrameBatch,
                 max_completion_tokens=_FRAME_MAX_COMPLETION_TOKENS,
-                json_text_parser=complete_json,
+                json_text_parser=parse_json_text_with_contract,
                 parsed_validator=validate_source_accounting,
                 validation_error_observer=record_source_accounting_error,
                 task_type="objective_paper_frame",

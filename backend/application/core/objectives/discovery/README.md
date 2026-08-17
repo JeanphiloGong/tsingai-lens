@@ -21,9 +21,9 @@ collection Objective. It does not own confirmed-Objective Evidence analysis.
 
 `study_window.py`, `signal_reconciliation.py`, and `axis_equivalence.py` each
 keep one model judgment's prompt, response schema, validation, repair policy,
-token bounds, and call next to each other. `extraction.py` in the parent package
-provides only the shared provider, structured JSON, trace, usage, and
-token-counting mechanics.
+token bounds, and call next to each other. `llm/structured_response.py` provides
+only the shared provider, structured JSON, trace, usage, and token-counting
+mechanics.
 
 Source batching, recursive failed-batch subdivision, stable Source identity,
 paper-wide coverage, study consolidation, and persistence remain outside these

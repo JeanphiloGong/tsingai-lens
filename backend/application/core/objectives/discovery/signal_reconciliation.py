@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from application.core.objectives import property_matching
-from application.core.objectives.extraction import ObjectiveExtractor
+from application.core.objectives.llm.structured_response import StructuredResponseClient
 
 PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION = "paper_signal_reconciliation.v3"
 PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT = 12_288
@@ -157,7 +157,7 @@ def build_paper_signal_reconciliation_prompt(
 class PaperSignalReconciler:
     """Adjudicate one bounded variable/outcome neighborhood within a paper."""
 
-    def __init__(self, response_client: ObjectiveExtractor) -> None:
+    def __init__(self, response_client: StructuredResponseClient) -> None:
         self.response_client = response_client
 
     def reconcile(
@@ -206,7 +206,7 @@ class PaperSignalReconciler:
                 "unresolved records for omitted inputs."
             )
 
-        def complete_json(**kwargs: Any) -> tuple[BaseModel, str | None]:
+        def parse_json_text_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
             return self.response_client.complete_json(
                 **kwargs,
                 repair_instruction_builder=build_repair_instruction,
@@ -218,7 +218,7 @@ class PaperSignalReconciler:
             user_prompt=user_prompt,
             response_model=StructuredPaperSignalReconciliation,
             max_completion_tokens=_MAX_COMPLETION_TOKENS,
-            json_text_parser=complete_json,
+            json_text_parser=parse_json_text_with_contract,
             parsed_validator=validate_or_recover_contexts,
             task_type="paper_signal_reconciliation",
             prompt_version=PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION,

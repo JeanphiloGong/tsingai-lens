@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from application.core.objectives.extraction import ObjectiveExtractor
+from application.core.objectives.llm.structured_response import StructuredResponseClient
 
 RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = (
     "research_axis_canonicalization.v1"
@@ -101,7 +101,7 @@ def build_research_axis_canonicalization_prompt(
 class ResearchAxisEquivalenceClassifier:
     """Classify backend-selected scientific label pairs as equal or different."""
 
-    def __init__(self, response_client: ObjectiveExtractor) -> None:
+    def __init__(self, response_client: StructuredResponseClient) -> None:
         self.response_client = response_client
 
     def classify(
@@ -132,7 +132,7 @@ class ResearchAxisEquivalenceClassifier:
                 "Return only compact JSON."
             )
 
-        def complete_json(**kwargs: Any) -> tuple[BaseModel, str | None]:
+        def parse_json_text_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
             return self.response_client.complete_json(
                 **kwargs,
                 repair_instruction_builder=build_repair_instruction,
@@ -144,7 +144,7 @@ class ResearchAxisEquivalenceClassifier:
             user_prompt=user_prompt,
             response_model=StructuredAxisCanonicalizationPlan,
             max_completion_tokens=_MAX_COMPLETION_TOKENS,
-            json_text_parser=complete_json,
+            json_text_parser=parse_json_text_with_contract,
             parsed_validator=validate_axis_accounting,
             task_type="research_axis_canonicalization",
             prompt_version=RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION,

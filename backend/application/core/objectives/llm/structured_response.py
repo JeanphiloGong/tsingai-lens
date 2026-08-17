@@ -1,3 +1,5 @@
+"""Shared structured-response transport for Objective model judgments."""
+
 from __future__ import annotations
 
 import json
@@ -36,8 +38,8 @@ class StructuredOutputSaturatedError(Exception):
     """A bounded structured response reached its completion-token limit."""
 
 
-class ObjectiveExtractor:
-    """Objective-owned model extraction entrypoint."""
+class StructuredResponseClient:
+    """Invoke models and return schema-validated responses with call traces."""
 
     def __init__(
         self,
@@ -520,5 +522,5 @@ class ObjectiveExtractor:
         return _DEFAULT_EXTRACTION_MODE
 
 
-def build_default_objective_extractor() -> ObjectiveExtractor:
-    return ObjectiveExtractor()
+def build_default_structured_response_client() -> StructuredResponseClient:
+    return StructuredResponseClient()

@@ -10,9 +10,7 @@ Objective analysis.
   analysis. It loads the immutable Source build, delegates candidate discovery
   to its direct owners, and atomically replaces the candidate fact set. For a
   confirmed Objective, it coordinates the ordered analysis stages and consumes
-  their transient and durable results. The remaining publication
-  responsibilities move to direct owners in a separate behavior-preserving
-  slice.
+  their transient and durable results.
 - `analysis/source_screening.py`
   Owns confirmed-Objective Source screening from paper inputs to ordered
   `PaperAnalysisFrame` results. It traverses Source document trees, constructs
@@ -69,6 +67,11 @@ Objective analysis.
   provenance. Its bounded `FindingAssertionJudge` model call decides only
   assertion strength and optional context or mechanism annotations for one
   backend-owned result set.
+- `llm/structured_response.py`
+  Owns the shared technical model boundary: provider invocation, schema-bearing
+  messages, JSON parsing and bounded repair, trace capture, usage accounting,
+  and complete prompt-token estimation. It does not own a scientific judgment,
+  prompt, response schema, or domain state.
 - `paper_skim_service.py`
   Orchestrates the per-document discovery stage. It assigns every eligible
   non-reference text node, table row, and table/figure caption to one full
@@ -168,12 +171,6 @@ Objective analysis.
 - `analysis_service.py`
   Queues, claims, fails, and atomically publishes one Objective analysis
   version.
-- `extraction.py`
-  Owns the shared structured-response transport: provider invocation, JSON
-  parsing and repair, trace capture, usage accounting, and schema-bearing prompt
-  token estimation. Judgment-specific prompts, schemas, validation, and repair
-  instructions belong to their discovery or analysis owner.
-
 ## Objective Boundary
 
 Candidate discovery is part of collection build. Deep analysis begins only

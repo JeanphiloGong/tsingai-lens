@@ -34,7 +34,7 @@ from application.core.objectives.analysis.source_validation import (
     _split_property_unit,
     validate_source_fact,
 )
-from application.core.objectives.extraction import ObjectiveExtractor
+from application.core.objectives.llm.structured_response import StructuredResponseClient
 from application.core.paper_facts.extraction import (
     PaperFactsExtractor,
     build_default_paper_facts_extractor,
@@ -792,7 +792,7 @@ def _objective_evidence_repair_instruction(
 class ObjectiveSourceExtractor:
     """Extract at most one scientific fact from one exact Source."""
 
-    def __init__(self, response_client: ObjectiveExtractor) -> None:
+    def __init__(self, response_client: StructuredResponseClient) -> None:
         self.response_client = response_client
 
     def extract_source(

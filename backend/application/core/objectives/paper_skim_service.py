@@ -19,7 +19,9 @@ from application.core.objectives.discovery.study_window import (
     StructuredPaperSkim,
     StructuredPaperStudy,
 )
-from application.core.objectives.extraction import StructuredOutputSaturatedError
+from application.core.objectives.llm.structured_response import (
+    StructuredOutputSaturatedError,
+)
 from domain.core import (
     PaperSkim,
     PaperSourceUnitCoverage,

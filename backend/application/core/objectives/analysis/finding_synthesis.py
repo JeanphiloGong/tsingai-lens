@@ -11,7 +11,7 @@ from typing import Any, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from application.core.objectives import property_matching
-from application.core.objectives.extraction import ObjectiveExtractor
+from application.core.objectives.llm.structured_response import StructuredResponseClient
 from domain.core import (
     Finding,
     FindingPaperContribution,
@@ -292,8 +292,8 @@ def build_finding_synthesis_prompt(
 class FindingAssertionJudge:
     """Judge one backend-owned result set without constructing its Finding."""
 
-    def __init__(self, response_client: ObjectiveExtractor | None = None) -> None:
-        self.response_client = response_client or ObjectiveExtractor()
+    def __init__(self, response_client: StructuredResponseClient | None = None) -> None:
+        self.response_client = response_client or StructuredResponseClient()
 
     def judge_result_set(
         self,

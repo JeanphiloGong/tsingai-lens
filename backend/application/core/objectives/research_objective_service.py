@@ -39,9 +39,9 @@ from application.core.objectives.discovery.signal_reconciliation import (
 from application.core.objectives.discovery.study_window import (
     PaperStudyWindowExtractor,
 )
-from application.core.objectives.extraction import (
-    ObjectiveExtractor,
-    build_default_objective_extractor,
+from application.core.objectives.llm.structured_response import (
+    StructuredResponseClient,
+    build_default_structured_response_client,
 )
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
@@ -110,7 +110,7 @@ class ResearchObjectiveService:
         finding_synthesis_service: FindingSynthesisService,
         paper_skim_service: PaperSkimService,
         objective_candidate_service: ObjectiveCandidateService,
-        objective_extractor: ObjectiveExtractor | None = None,
+        response_client: StructuredResponseClient | None = None,
         axis_equivalence_classifier: ResearchAxisEquivalenceClassifier | None = None,
         objective_source_screener: ObjectiveSourceScreener | None = None,
         objective_evidence_router: ObjectiveEvidenceRouter | None = None,
@@ -120,7 +120,7 @@ class ResearchObjectiveService:
         paper_facts_extractor: PaperFactsExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
-        self._objective_extractor = objective_extractor
+        self._response_client = response_client
         self._axis_equivalence_classifier = axis_equivalence_classifier
         self._objective_source_screener = objective_source_screener
         self._objective_evidence_router = objective_evidence_router
@@ -148,14 +148,16 @@ class ResearchObjectiveService:
             build_id=build_id,
         )
         documents = source_inputs["documents"]
-        extractor = source_inputs["extractor"]
+        response_client = source_inputs["response_client"]
         if self._paper_study_window_extractor is None:
-            self._paper_study_window_extractor = PaperStudyWindowExtractor(extractor)
+            self._paper_study_window_extractor = PaperStudyWindowExtractor(
+                response_client
+            )
         if self._paper_signal_reconciler is None:
-            self._paper_signal_reconciler = PaperSignalReconciler(extractor)
+            self._paper_signal_reconciler = PaperSignalReconciler(response_client)
         if self._axis_equivalence_classifier is None:
             self._axis_equivalence_classifier = ResearchAxisEquivalenceClassifier(
-                extractor
+                response_client
             )
         paper_skims = self.paper_skim_service.build_collection_paper_skims(
             collection_id,
@@ -246,7 +248,7 @@ class ResearchObjectiveService:
         )
         if self._objective_source_screener is None:
             self._objective_source_screener = ObjectiveSourceScreener(
-                objective_inputs["extractor"]
+                objective_inputs["response_client"]
             )
         paper_frames = screen_sources(
             collection_id=collection_id,
@@ -264,7 +266,7 @@ class ResearchObjectiveService:
         )
         if self._objective_evidence_router is None:
             self._objective_evidence_router = ObjectiveEvidenceRouter(
-                objective_inputs["extractor"]
+                objective_inputs["response_client"]
             )
         evidence_candidates = route_sources(
             collection_id=collection_id,
@@ -280,7 +282,7 @@ class ResearchObjectiveService:
         )
         if self._objective_source_extractor is None:
             self._objective_source_extractor = ObjectiveSourceExtractor(
-                objective_inputs["extractor"]
+                objective_inputs["response_client"]
             )
         source_drafts = extract_source_facts(
             collection_id=collection_id,
@@ -397,15 +399,13 @@ class ResearchObjectiveService:
                 )
                 for document in documents
             },
-            "extractor": self._get_objective_extractor(),
+            "response_client": self._get_response_client(),
         }
 
-
-    def _get_objective_extractor(self) -> ObjectiveExtractor:
-        if self._objective_extractor is None:
-            self._objective_extractor = build_default_objective_extractor()
-        return self._objective_extractor
-
+    def _get_response_client(self) -> StructuredResponseClient:
+        if self._response_client is None:
+            self._response_client = build_default_structured_response_client()
+        return self._response_client
 
     def _load_source_documents(
         self,

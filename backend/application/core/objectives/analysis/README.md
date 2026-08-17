@@ -83,4 +83,5 @@ cannot change result-set membership, scientific direction, Evidence bindings,
 or any published Finding identity.
 
 Technical JSON parsing, provider retries, usage accounting, and trace capture
-support this process but do not define its scientific order.
+live in `llm/structured_response.py`; they support this process but do not
+define its scientific order.

@@ -202,9 +202,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('button', { name: '确认并分析' }))
 			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('link', { name: '查看状态' }))
-			.toBeInTheDocument();
+		await expect.element(browserPage.getByRole('link', { name: '查看状态' })).toBeInTheDocument();
 	});
 
 	it('shows the published version without a second result lookup', async () => {

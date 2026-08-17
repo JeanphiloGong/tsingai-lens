@@ -4,14 +4,17 @@ import re
 from typing import Any
 
 from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.objectives.discovery.signal_reconciliation import (
+    StructuredPaperSignalReconciliation,
+)
+from application.core.objectives.discovery.study_window import StructuredPaperSkim
 from application.core.objectives.schemas import (
     StructuredAxisCanonicalizationPlan,
-    StructuredEvidenceSelection,
-    StructuredEvidenceSelections,
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
+    StructuredEvidenceSelection,
+    StructuredEvidenceSelections,
     StructuredPaperFrameBatch,
-    StructuredPaperSkim,
 )
 from application.core.paper_facts.schemas import (
     MeasurementValuePayload,
@@ -30,10 +33,7 @@ from application.core.paper_facts.schemas import (
     TextWindowResultClaimPayload,
     TextWindowVariantMentionPayload,
 )
-from tests.support.objective_extractor import (
-    paper_skim_study_outputs,
-)
-
+from tests.support.objective_extractor import paper_skim_study_outputs
 
 _PROPERTY_HINTS = (
     ("yield strength", "yield_strength"),
@@ -61,7 +61,7 @@ _METHODS = ("XRD", "SEM", "TEM", "XPS", "Raman", "FTIR", "DSC", "TGA", "DMA")
 class FakeDomainModelExtractor:
     """Deterministic test double for the three domain extraction contracts."""
 
-    def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
+    def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
         return 0
 
     def extract_document_profile(self, payload: dict[str, Any]) -> StructuredDocumentProfile:
@@ -151,7 +151,7 @@ class FakeDomainModelExtractor:
             confidence=0.86 if doc_type == "experimental" else 0.82 if doc_type == "review" else 0.78,
         )
 
-    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+    def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         title = str(payload.get("title") or "").strip()
         profile_hint = (
             payload.get("profile_hint")
@@ -251,6 +251,12 @@ class FakeDomainModelExtractor:
             confidence=0.86 if studies else 0.62,
             warnings=[] if studies else ["objective_uncertain"],
         )
+
+    def reconcile(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredPaperSignalReconciliation:
+        return StructuredPaperSignalReconciliation()
 
     def canonicalize_research_objective_axes(
         self,

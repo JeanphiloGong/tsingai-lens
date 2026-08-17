@@ -18,6 +18,12 @@ from application.core.objectives.analysis.paper_experiment import (
 )
 from application.core.objectives.analysis.source_extraction import extract_source_facts
 from application.core.objectives.analysis.source_screening import screen_sources
+from application.core.objectives.discovery.signal_reconciliation import (
+    PaperSignalReconciler,
+)
+from application.core.objectives.discovery.study_window import (
+    PaperStudyWindowExtractor,
+)
 from application.core.objectives.extraction import (
     ObjectiveExtractor,
     build_default_objective_extractor,
@@ -93,10 +99,14 @@ class ResearchObjectiveService:
         paper_skim_service: PaperSkimService,
         objective_candidate_service: ObjectiveCandidateService,
         objective_extractor: ObjectiveExtractor | None = None,
+        paper_study_window_extractor: PaperStudyWindowExtractor | None = None,
+        paper_signal_reconciler: PaperSignalReconciler | None = None,
         paper_facts_extractor: PaperFactsExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
         self._objective_extractor = objective_extractor
+        self._paper_study_window_extractor = paper_study_window_extractor
+        self._paper_signal_reconciler = paper_signal_reconciler
         self._paper_facts_extractor = paper_facts_extractor
         self.paper_fact_repository = paper_fact_repository
         self.objective_repository = objective_repository
@@ -119,6 +129,10 @@ class ResearchObjectiveService:
         )
         documents = source_inputs["documents"]
         extractor = source_inputs["extractor"]
+        if self._paper_study_window_extractor is None:
+            self._paper_study_window_extractor = PaperStudyWindowExtractor(extractor)
+        if self._paper_signal_reconciler is None:
+            self._paper_signal_reconciler = PaperSignalReconciler(extractor)
         paper_skims = self.paper_skim_service.build_collection_paper_skims(
             collection_id,
             documents=documents,
@@ -126,7 +140,8 @@ class ResearchObjectiveService:
             document_trees_by_document_id=source_inputs[
                 "document_trees_by_document_id"
             ],
-            extractor=extractor,
+            study_window_extractor=self._paper_study_window_extractor,
+            signal_reconciler=self._paper_signal_reconciler,
             progress_callback=progress_callback,
         )
         self.objective_repository.replace(

@@ -58,7 +58,7 @@ Objective analysis.
   failed, and comparable counts come from that same final Evidence set. It does
   not persist artifacts or perform cross-paper Finding synthesis.
 - `paper_skim_service.py`
-  Owns the per-document discovery stage. It assigns every eligible
+  Orchestrates the per-document discovery stage. It assigns every eligible
   non-reference text node, table row, and table/figure caption to one full
   section-path group. `overview`, `methods`, `results`, `conclusion`, and
   `unknown` remain window metadata; they no longer collect unrelated sections
@@ -91,6 +91,18 @@ Objective analysis.
   `table + table_id`; inline table-matrix rows without a persisted row identity
   remain table-level. A skim retains only the stable Source `document_id`;
   title, filename, and window metadata remain Source-owned or transient.
+- `discovery/study_window.py`
+  Owns the model judgment for one bounded PaperSkim Source window: its prompt,
+  response schema, scientific bounds, repair instruction, stable-identity
+  validation, token budget, and model call. It reports studies, relationships,
+  and unresolved signals supported by that window; it does not batch Sources,
+  combine windows, or create collection Objectives.
+- `discovery/signal_reconciliation.py`
+  Owns the model judgment that decides whether variable and outcome signals
+  found in different windows belong to one compatible experiment. Its prompt,
+  response schema, context-conflict validation, bounded repair, deterministic
+  conflict removal, token budget, and model call live together. Paper-wide
+  signal accounting and study consolidation remain in `paper_skim_service.py`.
 - `objective_candidate_service.py`
   Owns collection-level Objective discovery from `PaperStudyRelationship`
   records. Before grouping, the backend proposes a bounded set of plausible
@@ -142,14 +154,14 @@ Objective analysis.
   Produces evidence-calibrated paper and cross-paper Findings from validated
   Objective Evidence.
 - `extraction.py`
-  Calls the configured model provider for PaperSkim extraction, relationship
-  axis canonicalization, framing, Evidence extraction, and Finding synthesis
-  and owns their bounded retry and repair behavior. PaperSkim study identities
-  are checked against stable Source locators before extractor results leave this
-  boundary; duplicate identities enter the same bounded structured repair path
-  as other schema violations.
+  Owns the shared structured-response transport: provider invocation, JSON
+  parsing and repair, trace capture, usage accounting, and schema-bearing prompt
+  token estimation. Judgment-specific prompts, schemas, validation, and repair
+  instructions belong to their discovery or analysis owner.
 - `prompts.py` and `schemas.py`
-  Define Objective prompts and their validated response contracts.
+  Temporarily define the prompts and response contracts for Objective judgments
+  that have not yet moved to their direct discovery or analysis owner. They do
+  not define the PaperSkim window or signal-reconciliation contracts.
 
 ## Objective Boundary
 

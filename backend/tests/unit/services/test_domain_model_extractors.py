@@ -9,32 +9,38 @@ from openai import LengthFinishReasonError
 from pydantic import ValidationError
 
 from application.core.document_profiles.extraction import DocumentProfileExtractor
+from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.objectives.discovery.signal_reconciliation import (
+    PaperSignalReconciler,
+    StructuredPaperSignalReconciliation,
+    build_paper_signal_reconciliation_prompt,
+)
+from application.core.objectives.discovery.study_window import (
+    PaperStudyWindowExtractor,
+    StructuredPaperSkim,
+    build_paper_skim_prompt,
+)
 from application.core.objectives.extraction import (
     ObjectiveExtractor,
-    PaperSkimOutputSaturatedError,
+    StructuredOutputSaturatedError,
 )
-from application.core.paper_facts.extraction import PaperFactsExtractor
 from application.core.objectives.prompts import (
+    build_finding_synthesis_prompt,
     build_objective_evidence_prompt,
     build_objective_paper_frame_prompt,
-    build_paper_skim_prompt,
-    build_paper_signal_reconciliation_prompt,
     build_research_axis_canonicalization_prompt,
-    build_finding_synthesis_prompt,
 )
-from application.core.document_profiles.schemas import StructuredDocumentProfile
 from application.core.objectives.schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredEvidenceContext,
     StructuredEvidenceExtraction,
-    StructuredEvidenceSelections,
     StructuredEvidenceExtractions,
-    StructuredPaperFrameBatch,
-    StructuredPaperSignalReconciliation,
-    StructuredPaperSkim,
+    StructuredEvidenceSelections,
     StructuredFindingMechanism,
     StructuredFindingSynthesis,
+    StructuredPaperFrameBatch,
 )
+from application.core.paper_facts.extraction import PaperFactsExtractor
 from application.core.paper_facts.schemas import (
     StructuredExtractionBundle,
     StructuredTableBatchMentions,
@@ -581,7 +587,7 @@ def test_paper_skim_prompt_token_estimate_counts_complete_schema_prompt():
         ],
     }
 
-    estimated_tokens = extractor.estimate_paper_skim_prompt_tokens(payload)
+    estimated_tokens = PaperStudyWindowExtractor(extractor).estimate_prompt_tokens(payload)
 
     assert estimated_tokens > 1_000
     assert client.beta.chat.completions.calls == []
@@ -625,7 +631,7 @@ def test_signal_reconciliation_prompt_token_estimate_counts_complete_schema_prom
         ],
     }
 
-    estimated_tokens = extractor.estimate_paper_signal_reconciliation_prompt_tokens(
+    estimated_tokens = PaperSignalReconciler(extractor).estimate_prompt_tokens(
         payload
     )
 
@@ -644,8 +650,8 @@ def test_paper_skim_provider_length_finish_skips_whole_window_json_repair():
     )
     extractor = ObjectiveExtractor(client=client, model="fake-model")
 
-    with pytest.raises(PaperSkimOutputSaturatedError):
-        extractor.extract_paper_skim(
+    with pytest.raises(StructuredOutputSaturatedError):
+        PaperStudyWindowExtractor(extractor).extract(
             {
                 "document_id": "paper-1",
                 "title": "Density study",
@@ -680,8 +686,8 @@ def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
         extraction_mode="json_text",
     )
 
-    with pytest.raises(PaperSkimOutputSaturatedError):
-        extractor.extract_paper_skim(
+    with pytest.raises(StructuredOutputSaturatedError):
+        PaperStudyWindowExtractor(extractor).extract(
             {
                 "document_id": "paper-1",
                 "title": "Density study",
@@ -948,7 +954,7 @@ def test_domain_model_extractors_validates_paper_skim_response():
     )
     extractor = _objective_extractor(client)
 
-    skim = extractor.extract_paper_skim(
+    skim = PaperStudyWindowExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "LPBF 316L corrosion study",
@@ -1005,7 +1011,7 @@ def test_paper_skim_downgrades_empty_factor_relationship_without_losing_siblings
     client = _FakeOpenAIClient(json.dumps(response))
     extractor = _objective_extractor(client)
 
-    skim = extractor.extract_paper_skim(
+    skim = PaperStudyWindowExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "source_units": [
@@ -1113,7 +1119,7 @@ def test_paper_skim_retries_duplicate_study_identities_before_returning():
     client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
     extractor = _objective_extractor(client)
 
-    skim = extractor.extract_paper_skim(
+    skim = PaperStudyWindowExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "LPBF parameter study",
@@ -1196,7 +1202,7 @@ def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypat
     )
     extractor = ObjectiveExtractor(client=client, model="fake-model")
 
-    skim = extractor.extract_paper_skim(
+    skim = PaperStudyWindowExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "LPBF parameter study",
@@ -1273,7 +1279,7 @@ def test_paper_skim_preserves_multi_material_multi_outcome_study():
     )
     extractor = _objective_extractor(client)
 
-    skim = extractor.extract_paper_skim(
+    skim = PaperStudyWindowExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "Application of base plate preheating during selective laser melting",
@@ -1359,7 +1365,7 @@ def test_paper_skim_retries_oversized_study_without_truncating_relationships():
     )
     extractor = _objective_extractor(client)
 
-    skim = extractor.extract_paper_skim(
+    skim = PaperStudyWindowExtractor(extractor).extract(
         {
             "document_id": "paper-1",
             "title": "Multi-material preheating study",
@@ -1405,7 +1411,7 @@ def test_domain_model_extractors_validates_paper_signal_reconciliation():
     )
     extractor = _objective_extractor(client)
 
-    reconciliation = extractor.reconcile_paper_signals(
+    reconciliation = PaperSignalReconciler(extractor).reconcile(
         {
             "document_id": "paper-1",
             "signals": [
@@ -1466,7 +1472,7 @@ def test_paper_signal_reconciliation_repairs_conflicting_contexts(
     client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(repaired)])
     extractor = _objective_extractor(client)
 
-    reconciliation = extractor.reconcile_paper_signals(
+    reconciliation = PaperSignalReconciler(extractor).reconcile(
         {
             "document_id": "paper-1",
             "signals": [
@@ -1523,7 +1529,7 @@ def test_provider_parsed_signal_reconciliation_repairs_conflicting_contexts(
     client = _FakeOpenAIClient(json.dumps(repaired), parsed=invalid)
     extractor = ObjectiveExtractor(client=client, model="fake-model")
 
-    reconciliation = extractor.reconcile_paper_signals(
+    reconciliation = PaperSignalReconciler(extractor).reconcile(
         {
             "document_id": "paper-1",
             "signals": [
@@ -1574,7 +1580,7 @@ def test_unrepaired_signal_context_conflict_keeps_valid_relationships():
     client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(invalid)])
     extractor = _objective_extractor(client)
 
-    reconciliation = extractor.reconcile_paper_signals(
+    reconciliation = PaperSignalReconciler(extractor).reconcile(
         {
             "document_id": "paper-1",
             "signals": [

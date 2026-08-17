@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from application.core.document_profiles.service import DocumentProfileService
-from application.core.objectives.finding_synthesis_service import FindingSynthesisService
+from application.core.objectives.finding_synthesis_service import (
+    FindingSynthesisService,
+)
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
@@ -34,6 +36,10 @@ def build_research_objective_service(
     collection_service,
     **kwargs,
 ) -> ResearchObjectiveService:
+    objective_extractor = kwargs.get("objective_extractor")
+    if objective_extractor is not None:
+        kwargs.setdefault("paper_study_window_extractor", objective_extractor)
+        kwargs.setdefault("paper_signal_reconciler", objective_extractor)
     source_repository = kwargs.pop("source_artifact_repository", None)
     if source_repository is None:
         source_repository = getattr(

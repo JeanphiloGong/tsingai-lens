@@ -209,6 +209,7 @@ def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN0
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
     )
+    objective_extractor = FakeObjectiveExtractor()
     research_objective_service = ResearchObjectiveService(
         collection_service=collection_service,
         source_artifact_repository=source_repository,
@@ -218,6 +219,9 @@ def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN0
         finding_synthesis_service=FindingSynthesisService(),
         paper_skim_service=PaperSkimService(),
         objective_candidate_service=ObjectiveCandidateService(),
+        objective_extractor=objective_extractor,
+        paper_study_window_extractor=objective_extractor,
+        paper_signal_reconciler=objective_extractor,
     )
     artifact_registry = ArtifactRegistryService(
         build_repository,
@@ -359,13 +363,13 @@ def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_covera
     import application.pipeline.collection_build.service as task_runner_module
 
     class PartiallyFailingObjectiveExtractor(FakeObjectiveExtractor):
-        def extract_paper_skim(self, payload):  # noqa: ANN001
+        def extract(self, payload):  # noqa: ANN001
             if any(
                 unit.get("source_unit_id") == "source-unit-000002"
                 for unit in payload.get("source_units") or ()
             ):
                 raise RuntimeError("invalid relationship in Source unit")
-            return super().extract_paper_skim(payload)
+            return super().extract(payload)
 
     collection_service = build_test_collection_service(tmp_path / "collections")
     build_repository = MemoryBuildRepository()
@@ -375,9 +379,10 @@ def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_covera
         collection_service,
         build_repository,
     )
-    runner.research_objective_service._objective_extractor = (
-        PartiallyFailingObjectiveExtractor()
-    )
+    failing_extractor = PartiallyFailingObjectiveExtractor()
+    runner.research_objective_service._objective_extractor = failing_extractor
+    runner.research_objective_service._paper_study_window_extractor = failing_extractor
+    runner.research_objective_service._paper_signal_reconciler = failing_extractor
 
     collection = collection_service.create_collection("Partial PaperSkim Collection")
     paths = collection_service.get_paths(collection["collection_id"])

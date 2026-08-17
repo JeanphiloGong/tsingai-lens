@@ -3,8 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Mapping
 from time import perf_counter
 from typing import Any
 
@@ -12,32 +11,24 @@ import tiktoken
 from openai import LengthFinishReasonError, OpenAI
 from pydantic import BaseModel, ValidationError
 
-from application.core.objectives import property_matching
 from application.core.objectives.prompts import (
     FINDING_SYNTHESIS_PROMPT_VERSION,
     OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION,
     OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
     OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
-    PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION,
-    PAPER_SKIM_PROMPT_VERSION,
     RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION,
     build_finding_synthesis_prompt,
     build_objective_evidence_prompt,
     build_objective_evidence_route_prompt,
     build_objective_paper_frame_prompt,
-    build_paper_skim_prompt,
-    build_paper_signal_reconciliation_prompt,
     build_research_axis_canonicalization_prompt,
 )
 from application.core.objectives.schemas import (
-    PAPER_SKIM_SOURCE_UNIT_LIMIT,
     StructuredAxisCanonicalizationPlan,
     StructuredEvidenceExtractions,
     StructuredEvidenceSelections,
     StructuredFindingSynthesis,
     StructuredPaperFrameBatch,
-    StructuredPaperSignalReconciliation,
-    StructuredPaperSkim,
 )
 from application.core.structured_extraction.json_support import (
     coerce_message_content,
@@ -53,10 +44,6 @@ logger = logging.getLogger(__name__)
 _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
-_PAPER_SKIM_MAX_COMPLETION_TOKENS = 4096
-PAPER_SKIM_PROMPT_TOKEN_LIMIT = 12_288
-_PAPER_SIGNAL_RECONCILIATION_MAX_COMPLETION_TOKENS = 4096
-PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT = 12_288
 _AXIS_CANONICALIZATION_MAX_COMPLETION_TOKENS = 1024
 _OBJECTIVE_PAPER_FRAME_MAX_COMPLETION_TOKENS = 1024
 OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT = 12_288
@@ -70,8 +57,8 @@ _SUPPORTED_EXTRACTION_MODES = {
 }
 
 
-class PaperSkimOutputSaturatedError(Exception):
-    """A PaperSkim response cannot completely fit in one bounded output."""
+class StructuredOutputSaturatedError(Exception):
+    """A bounded structured response reached its completion-token limit."""
 
 
 class ObjectiveExtractor:
@@ -102,162 +89,19 @@ class ObjectiveExtractor:
             base_url=(base_url or os.getenv("LLM_BASE_URL", "").strip() or None),
         )
 
-    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
-        system_prompt, user_prompt = build_paper_skim_prompt(payload)
-
-        def build_repair_instruction(repair_detail: str) -> str:
-            return (
-                "Previous PaperSkim output was invalid: "
-                f"{repair_detail}. Preserve every distinct supported study, "
-                "relationship, and unresolved signal. Copy only unique Source-unit "
-                f"IDs from the input, with at most {PAPER_SKIM_SOURCE_UNIT_LIMIT} IDs "
-                "per relationship or unresolved signal. Set output_saturated=true "
-                "instead of silently omitting a scientific item. Return only compact "
-                "schema-valid JSON."
-            )
-
-        def validate_study_identities(response: BaseModel) -> None:
-            if not isinstance(response, StructuredPaperSkim):
-                raise TypeError("unexpected paper skim response type")
-            source_keys = {
-                str(source_unit.get("source_unit_id") or "").strip(): (
-                    str(source_unit.get("source_kind") or "").strip(),
-                    str(source_unit.get("source_ref") or "").strip(),
-                )
-                for source_unit in payload.get("source_units") or ()
-                if isinstance(source_unit, Mapping)
-                and str(source_unit.get("source_unit_id") or "").strip()
-            }
-            study_identities = [
-                study.identity_key(source_keys) for study in response.studies
-            ]
-            if len(study_identities) != len(set(study_identities)):
-                raise ValueError("studies contain duplicate study identities")
-
-        def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
-            return self._parse_json_text_response(
-                **kwargs,
-                repair_instruction_builder=build_repair_instruction,
-                parsed_validator=validate_study_identities,
-                fail_on_output_saturation=True,
-            )
-
-        response = self._parse_structured_response(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredPaperSkim,
-            max_completion_tokens=_PAPER_SKIM_MAX_COMPLETION_TOKENS,
-            json_text_parser=parse_json_text,
-            parsed_validator=validate_study_identities,
-            fail_on_output_saturation=True,
-            task_type="paper_skim",
-            prompt_version=PAPER_SKIM_PROMPT_VERSION,
-        )
-        if not isinstance(response, StructuredPaperSkim):
-            raise TypeError("unexpected paper skim response type")
-        return response
-
-    def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
-        """Count the complete repair-capable prompt before model execution."""
-
-        system_prompt, user_prompt = build_paper_skim_prompt(payload)
-        messages = self._build_messages(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredPaperSkim,
-            include_schema=True,
-        )
-        try:
-            encoding = tiktoken.encoding_for_model(self.model)
-        except KeyError:
-            encoding = tiktoken.get_encoding("cl100k_base")
-        serialized_messages = json.dumps(
-            messages,
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
-        return len(encoding.encode(serialized_messages))
-
-    def reconcile_paper_signals(
+    def estimate_prompt_tokens(
         self,
-        payload: dict[str, Any],
-    ) -> StructuredPaperSignalReconciliation:
-        system_prompt, user_prompt = build_paper_signal_reconciliation_prompt(payload)
-        signals_by_id = {
-            str(signal.get("signal_id") or "").strip(): signal
-            for signal in payload.get("signals") or ()
-            if isinstance(signal, Mapping)
-            and str(signal.get("signal_id") or "").strip()
-        }
-        conflicting_response_count = 0
-
-        def validate_or_recover_contexts(response: BaseModel) -> BaseModel | None:
-            nonlocal conflicting_response_count
-            if not isinstance(response, StructuredPaperSignalReconciliation):
-                raise TypeError("unexpected paper signal reconciliation response type")
-            conflicts = self._paper_signal_reconciliation_conflicts(
-                response,
-                signals_by_id=signals_by_id,
-            )
-            if not conflicts:
-                return None
-            conflicting_response_count += 1
-            if conflicting_response_count == 1:
-                raise ValueError(
-                    "paper signal relationships must be context-compatible; "
-                    + "; ".join(conflicts)
-                )
-            return self._discard_conflicting_signal_relationships(
-                response,
-                signals_by_id=signals_by_id,
-            )
-
-        def build_repair_instruction(repair_detail: str) -> str:
-            return (
-                "Previous paper signal reconciliation was invalid: "
-                f"{repair_detail}. Make every relationship context-compatible. "
-                "Do not combine signals when material_scope, process_context, "
-                "sample_context, test_context, fixed_conditions, experiment_label, "
-                "comparator, design_type, or claim_scope conflict. Return only safe "
-                "relationships, optionally explain rejected candidates in "
-                "unresolved_signals, and return only compact JSON. The backend derives "
-                "unresolved records for omitted inputs."
-            )
-
-        def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
-            return self._parse_json_text_response(
-                **kwargs,
-                repair_instruction_builder=build_repair_instruction,
-                parsed_validator=validate_or_recover_contexts,
-            )
-
-        response = self._parse_structured_response(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredPaperSignalReconciliation,
-            max_completion_tokens=(
-                _PAPER_SIGNAL_RECONCILIATION_MAX_COMPLETION_TOKENS
-            ),
-            json_text_parser=parse_json_text,
-            parsed_validator=validate_or_recover_contexts,
-            task_type="paper_signal_reconciliation",
-            prompt_version=PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION,
-        )
-        if not isinstance(response, StructuredPaperSignalReconciliation):
-            raise TypeError("unexpected paper signal reconciliation response type")
-        return response
-
-    def estimate_paper_signal_reconciliation_prompt_tokens(
-        self,
-        payload: dict[str, Any],
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[BaseModel],
     ) -> int:
-        """Count the complete schema-bearing reconciliation prompt."""
+        """Count one complete schema-bearing structured-response prompt."""
 
-        system_prompt, user_prompt = build_paper_signal_reconciliation_prompt(payload)
         messages = self._build_messages(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_model=StructuredPaperSignalReconciliation,
+            response_model=response_model,
             include_schema=True,
         )
         try:
@@ -270,75 +114,6 @@ class ObjectiveExtractor:
             separators=(",", ":"),
         )
         return len(encoding.encode(serialized_messages))
-
-    @staticmethod
-    def _paper_signal_reconciliation_conflicts(
-        response: StructuredPaperSignalReconciliation,
-        *,
-        signals_by_id: Mapping[str, Mapping[str, Any]],
-    ) -> tuple[str, ...]:
-        conflicts: list[str] = []
-        for study_position, study in enumerate(response.studies):
-            for relationship_position, relationship in enumerate(study.relationships):
-                signal_ids = tuple(
-                    str(signal_id).strip() for signal_id in relationship.signal_ids
-                )
-                context_conflicts = property_matching.paper_signal_context_conflicts(
-                    signals_by_id[signal_id]
-                    for signal_id in signal_ids
-                    if signal_id in signals_by_id
-                )
-                if context_conflicts:
-                    conflicts.append(
-                        f"studies[{study_position}].relationships"
-                        f"[{relationship_position}] signal_ids={list(signal_ids)} "
-                        f"conflict in {', '.join(context_conflicts)}"
-                    )
-        return tuple(conflicts)
-
-    @staticmethod
-    def _discard_conflicting_signal_relationships(
-        response: StructuredPaperSignalReconciliation,
-        *,
-        signals_by_id: Mapping[str, Mapping[str, Any]],
-    ) -> StructuredPaperSignalReconciliation:
-        studies: list[dict[str, Any]] = []
-        retained_signal_ids: set[str] = set()
-        rejected_reasons_by_id: dict[str, str] = {}
-        for study in response.studies:
-            relationships: list[dict[str, Any]] = []
-            for relationship in study.relationships:
-                signal_ids = tuple(
-                    str(signal_id).strip() for signal_id in relationship.signal_ids
-                )
-                conflicts = property_matching.paper_signal_context_conflicts(
-                    signals_by_id[signal_id]
-                    for signal_id in signal_ids
-                    if signal_id in signals_by_id
-                )
-                if conflicts:
-                    reason = (
-                        "Conflicting reconciliation context: "
-                        f"{', '.join(conflicts)}."
-                    )
-                    for signal_id in signal_ids:
-                        rejected_reasons_by_id.setdefault(signal_id, reason)
-                    continue
-                relationships.append(relationship.model_dump())
-                retained_signal_ids.update(signal_ids)
-            if relationships:
-                studies.append({"relationships": relationships})
-
-        unresolved = [item.model_dump() for item in response.unresolved_signals]
-        unresolved_ids = {str(item["signal_id"]).strip() for item in unresolved}
-        for signal_id, reason in rejected_reasons_by_id.items():
-            if signal_id in retained_signal_ids or signal_id in unresolved_ids:
-                continue
-            unresolved.append({"signal_id": signal_id, "reason": reason})
-            unresolved_ids.add(signal_id)
-        return StructuredPaperSignalReconciliation.model_validate(
-            {"studies": studies, "unresolved_signals": unresolved}
-        )
 
     def canonicalize_research_objective_axes(
         self,
@@ -362,7 +137,7 @@ class ObjectiveExtractor:
                 axis_accounting_validator=validate_axis_accounting,
             )
 
-        response = self._parse_structured_response(
+        response = self.complete(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredAxisCanonicalizationPlan,
@@ -414,7 +189,7 @@ class ObjectiveExtractor:
                 "Return only compact JSON."
             )
 
-        return self._parse_json_text_response(
+        return self.complete_json(
             messages=messages,
             response_model=response_model,
             max_completion_tokens=max_completion_tokens,
@@ -490,7 +265,7 @@ class ObjectiveExtractor:
             )
 
         def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
-            return self._parse_json_text_response(
+            return self.complete_json(
                 **kwargs,
                 repair_instruction_builder=build_repair_instruction,
                 parsed_validator=validate_source_accounting,
@@ -498,7 +273,7 @@ class ObjectiveExtractor:
             )
 
         try:
-            response = self._parse_structured_response(
+            response = self.complete(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 response_model=StructuredPaperFrameBatch,
@@ -529,22 +304,11 @@ class ObjectiveExtractor:
         """Count the complete schema-bearing objective framing prompt."""
 
         system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
-        messages = self._build_messages(
+        return self.estimate_prompt_tokens(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredPaperFrameBatch,
-            include_schema=True,
         )
-        try:
-            encoding = tiktoken.encoding_for_model(self.model)
-        except KeyError:
-            encoding = tiktoken.get_encoding("cl100k_base")
-        serialized_messages = json.dumps(
-            messages,
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
-        return len(encoding.encode(serialized_messages))
 
     def select_objective_evidence(
         self,
@@ -553,7 +317,7 @@ class ObjectiveExtractor:
         if not isinstance(payload.get("current_source"), dict):
             raise ValueError("objective evidence routing requires current_source")
         system_prompt, user_prompt = build_objective_evidence_route_prompt(payload)
-        response = self._parse_structured_response(
+        response = self.complete(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredEvidenceSelections,
@@ -573,7 +337,7 @@ class ObjectiveExtractor:
         payload: dict[str, Any],
     ) -> StructuredEvidenceExtractions:
         system_prompt, user_prompt = build_objective_evidence_prompt(payload)
-        response = self._parse_structured_response(
+        response = self.complete(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredEvidenceExtractions,
@@ -593,7 +357,7 @@ class ObjectiveExtractor:
         payload: dict[str, Any],
     ) -> StructuredFindingSynthesis:
         system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
-        response = self._parse_structured_response(
+        response = self.complete(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredFindingSynthesis,
@@ -606,7 +370,7 @@ class ObjectiveExtractor:
             raise TypeError("unexpected Finding synthesis response type")
         return response
 
-    def _parse_structured_response(
+    def complete(
         self,
         *,
         system_prompt: str,
@@ -624,7 +388,7 @@ class ObjectiveExtractor:
     ) -> BaseModel:
         if task_type is not None and prompt_version is not None:
             record_llm_prompt_version(task_type, prompt_version)
-        parse_json_text = json_text_parser or self._parse_json_text_response
+        parse_json_text = json_text_parser or self.complete_json
         messages = self._build_messages(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -652,7 +416,7 @@ class ObjectiveExtractor:
                             parsed = validated
                 except LengthFinishReasonError as exc:
                     if fail_on_output_saturation:
-                        raise PaperSkimOutputSaturatedError(
+                        raise StructuredOutputSaturatedError(
                             "PaperSkim provider output reached the completion-token "
                             "limit"
                         ) from exc
@@ -794,7 +558,7 @@ class ObjectiveExtractor:
             {"role": "user", "content": user_content},
         ]
 
-    def _parse_json_text_response(
+    def complete_json(
         self,
         *,
         messages: list[dict[str, str]],
@@ -864,7 +628,7 @@ class ObjectiveExtractor:
                     fail_on_output_saturation
                     and getattr(choice, "finish_reason", None) == "length"
                 ):
-                    raise PaperSkimOutputSaturatedError(
+                    raise StructuredOutputSaturatedError(
                         "PaperSkim JSON output reached the completion-token limit"
                     )
                 raw_content = coerce_message_content(
@@ -930,7 +694,7 @@ class ObjectiveExtractor:
                 '{"findings":[]}. Return only compact JSON.'
             )
 
-        return self._parse_json_text_response(
+        return self.complete_json(
             messages=messages,
             response_model=response_model,
             max_completion_tokens=max_completion_tokens,

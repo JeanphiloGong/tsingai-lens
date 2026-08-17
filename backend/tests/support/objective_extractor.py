@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.objectives.discovery.signal_reconciliation import (
+    StructuredPaperSignalReconciliation,
+)
+from application.core.objectives.discovery.study_window import StructuredPaperSkim
 from application.core.objectives.schemas import (
     StructuredAxisCanonicalizationPlan,
     StructuredEvidenceExtraction,
@@ -12,7 +16,6 @@ from application.core.objectives.schemas import (
     StructuredFindingSynthesis,
     StructuredFindingSynthesisItem,
     StructuredPaperFrameBatch,
-    StructuredPaperSkim,
 )
 
 
@@ -62,13 +65,7 @@ class FakeObjectiveExtractor:
         self.unit_payloads: list[dict[str, Any]] = []
         self.finding_payloads: list[dict[str, Any]] = []
 
-    def estimate_paper_skim_prompt_tokens(self, payload: dict[str, Any]) -> int:
-        return 0
-
-    def estimate_paper_signal_reconciliation_prompt_tokens(
-        self,
-        payload: dict[str, Any],
-    ) -> int:
+    def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
         return 0
 
     def estimate_objective_paper_frame_prompt_tokens(
@@ -88,7 +85,7 @@ class FakeObjectiveExtractor:
             confidence=0.9,
         )
 
-    def extract_paper_skim(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+    def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         self.skim_payloads.append(payload)
         title = str(payload.get("title") or "")
         if "Review" in title:
@@ -128,6 +125,12 @@ class FakeObjectiveExtractor:
             confidence=0.91,
             warnings=[],
         )
+
+    def reconcile(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredPaperSignalReconciliation:
+        return StructuredPaperSignalReconciliation()
 
     def canonicalize_research_objective_axes(
         self,

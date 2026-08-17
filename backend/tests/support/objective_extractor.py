@@ -3,16 +3,20 @@ from __future__ import annotations
 from typing import Any
 
 from application.core.document_profiles.schemas import StructuredDocumentProfile
-from application.core.objectives.analysis.source_screening import (
-    StructuredPaperFrameBatch,
-)
 from application.core.objectives.analysis.evidence_routing import (
     StructuredEvidenceSelection,
     StructuredEvidenceSelections,
 )
+from application.core.objectives.analysis.finding_synthesis import (
+    StructuredFindingSynthesis,
+    StructuredFindingSynthesisItem,
+)
 from application.core.objectives.analysis.source_extraction import (
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
+)
+from application.core.objectives.analysis.source_screening import (
+    StructuredPaperFrameBatch,
 )
 from application.core.objectives.discovery.axis_equivalence import (
     StructuredAxisCanonicalizationPlan,
@@ -21,10 +25,6 @@ from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
 from application.core.objectives.discovery.study_window import StructuredPaperSkim
-from application.core.objectives.schemas import (
-    StructuredFindingSynthesis,
-    StructuredFindingSynthesisItem,
-)
 
 
 def source_unit_ids_from_payload(payload: dict[str, Any]) -> list[str]:
@@ -153,7 +153,6 @@ class FakeObjectiveExtractor:
         self.frame_payloads.append(payload)
         objective = payload["objective"]
         document = payload["document"]
-        paper_prior = payload["paper_prior"]
         document_id = str(document.get("document_id") or "")
         source_units = payload["source_units"]
         source_unit_ids = [
@@ -376,7 +375,7 @@ class FakeObjectiveExtractor:
             )
         return StructuredEvidenceExtractions()
 
-    def synthesize_findings(
+    def judge_result_set(
         self,
         payload: dict[str, Any],
     ) -> StructuredFindingSynthesis:

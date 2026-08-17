@@ -5,13 +5,13 @@ from typing import Any, Mapping
 
 from application.core.objectives import property_matching
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
+from application.core.objectives.analysis.finding_synthesis import (
+    FindingSynthesisService,
+)
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
-from application.core.objectives.finding_synthesis_service import (
-    FindingSynthesisService,
-)
 from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,

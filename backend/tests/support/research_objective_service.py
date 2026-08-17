@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from application.core.document_profiles.service import DocumentProfileService
-from application.core.objectives.finding_synthesis_service import (
+from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
 from application.core.objectives.objective_candidate_service import (
@@ -69,7 +69,7 @@ def build_research_objective_service(
     finding_synthesis_service = kwargs.pop(
         "finding_synthesis_service",
         FindingSynthesisService(
-            finding_extractor=kwargs.get("objective_extractor"),
+            assertion_judge=kwargs.get("objective_extractor"),
         ),
     )
     return ResearchObjectiveService(

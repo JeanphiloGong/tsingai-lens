@@ -11,13 +11,6 @@ import tiktoken
 from openai import LengthFinishReasonError, OpenAI
 from pydantic import BaseModel, ValidationError
 
-from application.core.objectives.prompts import (
-    FINDING_SYNTHESIS_PROMPT_VERSION,
-    build_finding_synthesis_prompt,
-)
-from application.core.objectives.schemas import (
-    StructuredFindingSynthesis,
-)
 from application.core.structured_extraction.json_support import (
     coerce_message_content,
     extract_json_object,
@@ -32,7 +25,6 @@ logger = logging.getLogger(__name__)
 _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
-_FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS = 1024
 _TRACE_TEXT_LIMIT = 8000
 _SUPPORTED_EXTRACTION_MODES = {
     _EXTRACTION_MODE_JSON_TEXT,
@@ -97,24 +89,6 @@ class ObjectiveExtractor:
             separators=(",", ":"),
         )
         return len(encoding.encode(serialized_messages))
-
-    def synthesize_findings(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredFindingSynthesis:
-        system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
-        response = self.complete(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredFindingSynthesis,
-            max_completion_tokens=_FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS,
-            json_text_parser=self._parse_finding_synthesis_json_response,
-            task_type="finding_synthesis",
-            prompt_version=FINDING_SYNTHESIS_PROMPT_VERSION,
-        )
-        if not isinstance(response, StructuredFindingSynthesis):
-            raise TypeError("unexpected Finding synthesis response type")
-        return response
 
     def complete(
         self,
@@ -437,27 +411,6 @@ class ObjectiveExtractor:
                     continue
                 raise
         raise RuntimeError("structured extraction failed after retry") from last_error
-
-    def _parse_finding_synthesis_json_response(
-        self,
-        *,
-        messages: list[dict[str, str]],
-        response_model: type[BaseModel],
-        max_completion_tokens: int | None,
-    ) -> tuple[BaseModel, str | None]:
-        def build_repair_instruction(repair_detail: str) -> str:
-            return (
-                "Previous finding synthesis output failed validation: "
-                f"{repair_detail}. Return at most one schema-valid finding or "
-                '{"findings":[]}. Return only compact JSON.'
-            )
-
-        return self.complete_json(
-            messages=messages,
-            response_model=response_model,
-            max_completion_tokens=max_completion_tokens,
-            repair_instruction_builder=build_repair_instruction,
-        )
 
     def _parse_provider_structured_response(
         self,

@@ -16,6 +16,9 @@ from application.core.objectives.analysis.evidence_routing import (
     ObjectiveEvidenceRouter,
     route_sources,
 )
+from application.core.objectives.analysis.finding_synthesis import (
+    FindingSynthesisService,
+)
 from application.core.objectives.analysis.paper_experiment import (
     reconstruct_paper_experiments,
 )
@@ -39,9 +42,6 @@ from application.core.objectives.discovery.study_window import (
 from application.core.objectives.extraction import (
     ObjectiveExtractor,
     build_default_objective_extractor,
-)
-from application.core.objectives.finding_synthesis_service import (
-    FindingSynthesisService,
 )
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,

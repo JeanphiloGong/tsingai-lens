@@ -14,6 +14,12 @@ from application.core.objectives.analysis.evidence_routing import (
     ObjectiveEvidenceRouter,
     StructuredEvidenceSelections,
 )
+from application.core.objectives.analysis.finding_synthesis import (
+    FindingAssertionJudge,
+    StructuredFindingMechanism,
+    StructuredFindingSynthesis,
+    build_finding_synthesis_prompt,
+)
 from application.core.objectives.analysis.source_extraction import (
     ObjectiveSourceExtractor,
     StructuredEvidenceContext,
@@ -46,13 +52,6 @@ from application.core.objectives.discovery.study_window import (
 from application.core.objectives.extraction import (
     ObjectiveExtractor,
     StructuredOutputSaturatedError,
-)
-from application.core.objectives.prompts import (
-    build_finding_synthesis_prompt,
-)
-from application.core.objectives.schemas import (
-    StructuredFindingMechanism,
-    StructuredFindingSynthesis,
 )
 from application.core.paper_facts.extraction import PaperFactsExtractor
 from application.core.paper_facts.schemas import (
@@ -481,10 +480,12 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
                 "text_window": {"text": "Laser power was 200 W."},
             }
         )
-        ObjectiveExtractor(
-            client=objective_client,
-            model="fake-model",
-        ).synthesize_findings(
+        FindingAssertionJudge(
+            ObjectiveExtractor(
+                client=objective_client,
+                model="fake-model",
+            )
+        ).judge_result_set(
             {
                 "objective": {"question": "How does power affect density?"},
                 "result_set": {},
@@ -728,7 +729,7 @@ def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace()
         },
     }
 
-    result = extractor.synthesize_findings(payload)
+    result = FindingAssertionJudge(extractor).judge_result_set(payload)
 
     assert result == parsed
     parse_call = client.beta.chat.completions.calls[0]
@@ -745,7 +746,7 @@ def test_domain_model_extractors_bounds_json_text_finding_synthesis_output():
     client = _FakeOpenAIClient('{"findings": []}')
     extractor = _objective_extractor(client)
 
-    result = extractor.synthesize_findings(
+    result = FindingAssertionJudge(extractor).judge_result_set(
         {
             "objective": {"question": "How does energy density affect density?"},
             "result_set": {},

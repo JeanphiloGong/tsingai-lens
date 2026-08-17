@@ -13,7 +13,7 @@ if "devtools" not in sys.modules:
 from application.core.document_profiles.service import (
     DocumentProfileService,
 )
-from application.core.objectives.finding_synthesis_service import (
+from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
 )
 from application.core.objectives.objective_candidate_service import (

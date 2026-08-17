@@ -25,8 +25,9 @@ Read the analysis responsibilities in real research order:
 6. `evidence_materialization.py` turns reconstructed drafts into durable
    `ObjectiveEvidence`, resolves duplicate candidates by stable Source identity,
    and derives each paper's `PaperContribution` from that final Evidence set.
-7. Cross-paper Finding synthesis remains in its existing owner until its
-   responsibility slice moves here.
+7. `finding_synthesis.py` groups durable Evidence into backend-owned result
+   sets, asks the bounded assertion judge only for claim strength and supported
+   context, and publishes traceable cross-paper `Finding` records.
 
 `source_screening.py` owns complete Source-unit accounting, bounded framing
 batches, the screening prompt and response schema, prompt preflight, bounded
@@ -70,6 +71,16 @@ related locators, and retains at most one winner for each Objective, document,
 Source kind, and Source ref. `PaperContribution` route, extracted, failed, and
 comparable counts are computed from that same final Source-keyed set. It does
 not persist artifacts or synthesize a cross-paper claim.
+
+`finding_synthesis.py` owns cross-paper comparison after durable Evidence and
+paper outcomes exist. `FindingSynthesisService` deterministically selects
+comparable Evidence, constructs atomic factor/outcome result sets, balances the
+bounded model input across papers, assigns all supporting and opposing Evidence,
+and derives the published statement, status, certainty, limitations, identity,
+and provenance. `FindingAssertionJudge` decides only assertion strength and
+optional context or mechanism annotations for one backend-owned result set. It
+cannot change result-set membership, scientific direction, Evidence bindings,
+or any published Finding identity.
 
 Technical JSON parsing, provider retries, usage accounting, and trace capture
 support this process but do not define its scientific order.

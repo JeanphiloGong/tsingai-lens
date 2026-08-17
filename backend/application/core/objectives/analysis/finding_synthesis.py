@@ -6,7 +6,9 @@ import re
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
 from hashlib import sha1
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from application.core.objectives import property_matching
 from application.core.objectives.extraction import ObjectiveExtractor
@@ -20,10 +22,11 @@ from domain.core import (
     directions_contradict,
 )
 
-
 _MAX_CONTEXT_EVIDENCE_PER_SET = 8
 _MAX_RESULT_EVIDENCE_REPRESENTATIVES = 16
 _MAX_EXCERPT_CHARS = 320
+_FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS = 1024
+_FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v12"
 _CONTEXT_ROLES = {
     "condition_context",
     "mechanism_context",
@@ -43,13 +46,300 @@ _J_PER_CUBIC_MM_RE = re.compile(
     r"\bj\s*/\s*mm\s*(?:\^\s*)?(?:3|\u00b3)\b",
     re.IGNORECASE,
 )
+_FINDING_ASSERTION_STRENGTHS = {"causal", "associative", "descriptive"}
+_FINDING_SYNTHESIS_SYSTEM_PROMPT = """
+TASK MODEL
+You are the scientific assertion judge for one atomic materials-literature
+result set. The backend owns its factor tuple, outcome, primary direction,
+support/opposition bindings, cross-paper status, identity, and published
+statement. The model decides only the defensible assertion strength and optional
+source-backed context or mechanism annotations. This is not extraction,
+clustering, direction selection, lineage generation, or prose generation.
+
+INPUT SCHEMA
+- `objective`: the user-confirmed question and requested scientific scope.
+- `result_set`: backend-owned `factors`, one `outcome`, `primary_direction`,
+  total Evidence count, condition-series flag, document-balanced
+  `result_evidence` representatives, and complete per-document count summaries.
+  Representatives carry exact Evidence ids, paper ids, structured comparisons,
+  reported results, attribution scope, and sometimes bounded source excerpts.
+  The backend retains the complete durable Evidence set for publication.
+- `paper_contributions`: every paper considered in this Objective analysis,
+  including analyzed, excluded, and failed papers. These records describe
+  coverage; they cannot create Evidence or change the primary direction.
+- `context_evidence`: bounded condition, comparison, mechanism, and baseline
+  Evidence candidates. Each candidate supplies `evidence_id`, `evidence_role`,
+  a bounded source excerpt, and structured context. Only ids from this array may
+  be returned as context.
+- `candidate_rejection`: present only for one bounded repair attempt. It contains
+  one backend semantic rejection reason: correction guidance, not Evidence and
+  not a source of scientific facts.
+
+DECISION PROCESS
+1. Verify that the supplied result Evidence supports the bounded factor-to-outcome
+   relationship in the Objective. Return an empty `findings` array only when it
+   does not support a scientifically defensible Finding.
+2. Choose `descriptive` for an observation without defensible attribution. Choose
+   `associative` for joint-factor changes, correlations, or non-isolated effects.
+   Choose `causal` only for one isolated intervention whose direct Evidence
+   explicitly supports that strength.
+3. Select context Evidence only when it materially qualifies interpretation.
+   Copy exact ids from `context_evidence`; an empty list is preferred to a weak
+   or merely topical citation.
+4. Emit a mechanism only when a supplied `mechanism_context` item explicitly
+   supports that subordinate relation. Its Evidence ids must also appear in
+   `context_evidence_ids`.
+5. When `candidate_rejection` is present, correct that exact semantic failure and
+   re-check the original Evidence. Return empty rather than inventing a repair.
+
+HARD RULES
+- Return exactly one JSON object and nothing else.
+- Return at most one item. Return only `assertion_strength`,
+  `context_evidence_ids`, and `mechanisms`.
+- Do not return `result_set_id`, statement, direction, factors, outcome, direct
+  Evidence ids, condition boundaries, paper count, status, certainty,
+  limitations, or hidden reasoning. The backend owns those values.
+- Treat each paper as one independent source. Repeated rows from one paper do not
+  increase cross-paper authority, and paper metadata is not direct Evidence.
+- Every context or mechanism id must copy an exact supplied `context_evidence`
+  id. Every mechanism id must reference `mechanism_context` and must also appear
+  in `context_evidence_ids`.
+- Do not strengthen a joint or descriptive result into isolated causation.
+
+BOUNDARY EXAMPLES
+- `laser power` and `scan speed` change together while relative density changes:
+  return this even if many rows repeat the same pattern:
+  ```json
+  {"findings":[{"assertion_strength":"associative","context_evidence_ids":[],"mechanisms":[]}]}
+  ```
+- One isolated factor is compared but the excerpt reports only coexistence:
+  return `associative`, not `causal`.
+- A mechanism excerpt explicitly links melt-pool stability to density: return
+  the following when `mechanism-1` is a supplied `mechanism_context` item:
+  ```json
+  {"findings":[{"assertion_strength":"associative","context_evidence_ids":["mechanism-1"],"mechanisms":[{"source_term":"melt-pool stability","relation_type":"associated_with","target_term":"relative density","direction":"increase","assertion_strength":"associative","supporting_evidence_ids":["mechanism-1"]}]}]}
+  ```
+- A methods excerpt merely mentions melt-pool stability: omit the mechanism and
+  return empty context ids.
+- The result concerns an outcome outside the confirmed Objective: return
+  `{"findings":[]}`.
+
+OUTPUT CONTRACT
+Return exactly `{"findings":[]}` or one object shaped as
+`{"findings":[{"assertion_strength":"descriptive|associative|causal",`
+`"context_evidence_ids":[],"mechanisms":[]}]}`. Use empty arrays when
+annotations are absent and no extra keys.
+""".strip()
+
+
+def _normalize_underscored_choice(
+    value: object,
+    *,
+    allowed: set[str],
+    default: str,
+) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized if normalized in allowed else default
+
+
+def _normalize_list_container(value: object) -> object:
+    return [] if value is None else value
+
+
+class _FindingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class StructuredFindingMechanism(_FindingResponse):
+    source_term: str = Field(min_length=1)
+    relation_type: str = Field(min_length=1)
+    target_term: str = Field(min_length=1)
+    direction: str | None = None
+    assertion_strength: Literal["causal", "associative", "descriptive"] = (
+        "descriptive"
+    )
+    supporting_evidence_ids: list[str] = Field(min_length=1, max_length=16)
+
+    @field_validator("source_term", "relation_type", "target_term")
+    @classmethod
+    def _require_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("finding mechanism terms cannot be blank")
+        return text
+
+    @field_validator("supporting_evidence_ids")
+    @classmethod
+    def _require_unique_evidence(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("finding mechanism evidence ids must be unique")
+        return value
+
+    @field_validator("assertion_strength", mode="before")
+    @classmethod
+    def _normalize_assertion_strength(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_FINDING_ASSERTION_STRENGTHS,
+            default="descriptive",
+        )
+
+
+class StructuredFindingSynthesisItem(_FindingResponse):
+    assertion_strength: Literal["causal", "associative", "descriptive"] = (
+        "descriptive"
+    )
+    context_evidence_ids: list[str] = Field(default_factory=list, max_length=24)
+    mechanisms: list[StructuredFindingMechanism] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+
+    @field_validator("assertion_strength", mode="before")
+    @classmethod
+    def _normalize_assertion_strength(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_FINDING_ASSERTION_STRENGTHS,
+            default="descriptive",
+        )
+
+    @field_validator("context_evidence_ids")
+    @classmethod
+    def _require_unique_evidence(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("finding evidence ids must be unique within each role")
+        return value
+
+
+class StructuredFindingSynthesis(_FindingResponse):
+    findings: list[StructuredFindingSynthesisItem] = Field(
+        default_factory=list,
+        max_length=1,
+    )
+
+    @field_validator("findings", mode="before")
+    @classmethod
+    def _normalize_findings(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+def build_finding_synthesis_prompt(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    result_set = (
+        payload.get("result_set")
+        if isinstance(payload.get("result_set"), dict)
+        else {}
+    )
+    candidate_rejection = (
+        payload.get("candidate_rejection")
+        if isinstance(payload.get("candidate_rejection"), dict)
+        else {}
+    )
+    rejection_reason = str(candidate_rejection.get("reason") or "").strip()
+    prompt_payload = {
+        "objective": (
+            payload.get("objective")
+            if isinstance(payload.get("objective"), dict)
+            else {}
+        ),
+        "result_set": {
+            key: result_set[key]
+            for key in (
+                "factors",
+                "outcome",
+                "primary_direction",
+                "total_evidence_count",
+                "is_condition_series",
+                "result_evidence",
+                "document_evidence_summaries",
+            )
+            if key in result_set
+        },
+        "paper_contributions": payload.get("paper_contributions") or [],
+        "context_evidence": payload.get("context_evidence") or [],
+    }
+    if rejection_reason:
+        prompt_payload["candidate_rejection"] = {"reason": rejection_reason}
+    input_json = json.dumps(
+        prompt_payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    repair_contract = ""
+    if rejection_reason:
+        repair_contract = (
+            "Semantic repair required:\n"
+            f"- The previous candidate was rejected because: {rejection_reason}\n"
+            "- Return one corrected judgment only if it satisfies the original "
+            "Evidence contract; otherwise return an empty findings array.\n"
+            "- Return only ids present in `context_evidence`.\n\n"
+        )
+    user_prompt = (
+        "Judge assertion strength and optional context for this backend-owned "
+        "atomic result set.\n\n"
+        f"Input JSON:\n{input_json}\n\n"
+        f"{repair_contract}"
+        "Return only schema-valid JSON with a `findings` array. Return at most one "
+        "item containing assertion strength, context Evidence ids, and subordinate "
+        "mechanisms. Return `{\"findings\":[]}` when the supplied result does not "
+        "support a defensible Finding."
+    )
+    return _FINDING_SYNTHESIS_SYSTEM_PROMPT, user_prompt
+
+
+class FindingAssertionJudge:
+    """Judge one backend-owned result set without constructing its Finding."""
+
+    def __init__(self, response_client: ObjectiveExtractor | None = None) -> None:
+        self.response_client = response_client or ObjectiveExtractor()
+
+    def judge_result_set(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredFindingSynthesis:
+        system_prompt, user_prompt = build_finding_synthesis_prompt(payload)
+        response = self.response_client.complete(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredFindingSynthesis,
+            max_completion_tokens=_FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS,
+            json_text_parser=self._parse_json_response,
+            task_type="finding_synthesis",
+            prompt_version=_FINDING_SYNTHESIS_PROMPT_VERSION,
+        )
+        if not isinstance(response, StructuredFindingSynthesis):
+            raise TypeError("unexpected Finding synthesis response type")
+        return response
+
+    def _parse_json_response(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        response_model: type[BaseModel],
+        max_completion_tokens: int | None,
+    ) -> tuple[BaseModel, str | None]:
+        def build_repair_instruction(repair_detail: str) -> str:
+            return (
+                "Previous finding synthesis output failed validation: "
+                f"{repair_detail}. Return at most one schema-valid finding or "
+                '{"findings":[]}. Return only compact JSON.'
+            )
+
+        return self.response_client.complete_json(
+            messages=messages,
+            response_model=response_model,
+            max_completion_tokens=max_completion_tokens,
+            repair_instruction_builder=build_repair_instruction,
+        )
 
 
 class FindingSynthesisService:
     """Synthesize one-outcome, source-backed Findings for an analysis version."""
 
-    def __init__(self, finding_extractor: Any | None = None) -> None:
-        self.finding_extractor = finding_extractor or ObjectiveExtractor()
+    def __init__(self, assertion_judge: Any | None = None) -> None:
+        self.assertion_judge = assertion_judge or FindingAssertionJudge()
 
     def synthesize(
         self,
@@ -138,9 +428,7 @@ class FindingSynthesisService:
                 if candidate_rejection is not None:
                     request_payload["candidate_rejection"] = candidate_rejection
                 try:
-                    parsed = self.finding_extractor.synthesize_findings(
-                        request_payload
-                    )
+                    parsed = self.assertion_judge.judge_result_set(request_payload)
                 except Exception:  # noqa: BLE001
                     logger.exception(
                         "Finding synthesis failed result_set_id=%s semantic_attempt=%s",

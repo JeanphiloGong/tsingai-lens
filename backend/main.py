@@ -1,65 +1,78 @@
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-import os
 from time import perf_counter
 
-from config import DATA_DIR
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
 from application.auth import AuthSessionService, SessionNotFoundError
 from application.core.comparison_service import ComparisonService
+from application.core.document_profiles.service import (
+    DocumentProfileService,
+)
+from application.core.objectives.analysis.finding_synthesis import (
+    FindingSynthesisService,
+)
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
-from application.core.objectives.finding_synthesis_service import FindingSynthesisService
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
 from application.core.objectives.paper_skim_service import PaperSkimService
-from application.core.research_view_aggregation_service import (
-    ResearchViewAggregationService,
-)
-from application.core.document_profiles.service import (
-    DocumentProfileService,
-)
-from application.core.paper_facts.service import PaperFactsService
 from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
 )
+from application.core.paper_facts.service import PaperFactsService
+from application.core.research_view_aggregation_service import (
+    ResearchViewAggregationService,
+)
 from application.core.workspace_overview_service import WorkspaceService
-from application.goal.brief_service import GoalService
-from application.goal.experiment_plan_service import ExperimentPlanService
-from application.goal.session_service import GoalSessionService
 from application.evaluation import (
     FindingFeedbackService,
 )
+from application.goal.brief_service import GoalService
+from application.goal.experiment_plan_service import ExperimentPlanService
+from application.goal.session_service import GoalSessionService
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
 from application.source.document_markdown_service import DocumentMarkdownService
 from application.source.reference_workflow_service import SourceReferenceWorkflowService
 from application.source.task_service import TaskService
+from config import DATA_DIR
 from controllers import auth
 from controllers.core import (
     comparable_results,
     comparisons,
     documents,
     evidence,
-    research_objectives,
     finding_review,
+    research_objectives,
     research_view,
     results,
     workspace,
 )
 from controllers.derived import graph
-from controllers.goal import intake as goals
 from controllers.goal import experiment_plans
+from controllers.goal import intake as goals
 from controllers.goal import sessions as goal_sessions
 from controllers.source import collections, references, tasks
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
+from domain.ports import (
+    ComparisonRepository,
+    ExperimentPlanRepository,
+    FindingReviewRepository,
+    GoalSessionRepository,
+    ObjectiveRepository,
+    PaperFactRepository,
+    SourceArtifactRepository,
+)
 from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,
     build_session_factory,
 )
+from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.build_repository import PostgresBuildRepository
 from infra.persistence.postgres.collection_repository import (
@@ -68,32 +81,21 @@ from infra.persistence.postgres.collection_repository import (
 from infra.persistence.postgres.comparison_repository import (
     PostgresComparisonRepository,
 )
-from infra.persistence.postgres.paper_fact_repository import (
-    PostgresPaperFactRepository,
+from infra.persistence.postgres.finding_review_repository import (
+    PostgresFindingReviewRepository,
 )
 from infra.persistence.postgres.objective_repository import (
     PostgresObjectiveRepository,
 )
-from infra.persistence.postgres.source_artifact_repository import (
-    PostgresSourceArtifactRepository,
-)
 from infra.persistence.postgres.objective_workspace_repository import (
     PostgresObjectiveWorkspaceRepository,
 )
-from infra.persistence.postgres.finding_review_repository import (
-    PostgresFindingReviewRepository,
+from infra.persistence.postgres.paper_fact_repository import (
+    PostgresPaperFactRepository,
 )
-from domain.ports import (
-    ComparisonRepository,
-    ExperimentPlanRepository,
-    GoalSessionRepository,
-    ObjectiveRepository,
-    PaperFactRepository,
-    FindingReviewRepository,
-    SourceArtifactRepository,
+from infra.persistence.postgres.source_artifact_repository import (
+    PostgresSourceArtifactRepository,
 )
-from infra.persistence.file import FileCollectionWorkspace
-
 from utils.logger import (
     REQUEST_ID_HEADER,
     bind_request_id,

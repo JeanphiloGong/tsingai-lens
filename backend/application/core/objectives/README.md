@@ -62,6 +62,13 @@ Objective analysis.
   Objective, document, Source kind, and Source ref. Paper route, extracted,
   failed, and comparable counts come from that same final Evidence set. It does
   not persist artifacts or perform cross-paper Finding synthesis.
+- `analysis/finding_synthesis.py`
+  Owns deterministic cross-paper result-set construction and durable Finding
+  publication. `FindingSynthesisService` retains complete Evidence membership,
+  direction, identity, statement, status, certainty, limitations, and
+  provenance. Its bounded `FindingAssertionJudge` model call decides only
+  assertion strength and optional context or mechanism annotations for one
+  backend-owned result set.
 - `paper_skim_service.py`
   Orchestrates the per-document discovery stage. It assigns every eligible
   non-reference text node, table row, and table/figure caption to one full
@@ -161,19 +168,11 @@ Objective analysis.
 - `analysis_service.py`
   Queues, claims, fails, and atomically publishes one Objective analysis
   version.
-- `finding_synthesis_service.py`
-  Produces evidence-calibrated paper and cross-paper Findings from validated
-  Objective Evidence.
 - `extraction.py`
   Owns the shared structured-response transport: provider invocation, JSON
   parsing and repair, trace capture, usage accounting, and schema-bearing prompt
   token estimation. Judgment-specific prompts, schemas, validation, and repair
   instructions belong to their discovery or analysis owner.
-- `prompts.py` and `schemas.py`
-  Temporarily define the prompts and response contracts for Objective judgments
-  that have not yet moved to their direct discovery or analysis owner. They do
-  not define PaperSkim, signal-reconciliation, axis-equivalence, confirmed
-  Source-screening, Evidence-routing, or Source-local extraction contracts.
 
 ## Objective Boundary
 

@@ -220,6 +220,7 @@ def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN0
         paper_skim_service=PaperSkimService(),
         objective_candidate_service=ObjectiveCandidateService(),
         objective_extractor=objective_extractor,
+        axis_equivalence_classifier=objective_extractor,
         paper_study_window_extractor=objective_extractor,
         paper_signal_reconciler=objective_extractor,
     )
@@ -381,6 +382,9 @@ def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_covera
     )
     failing_extractor = PartiallyFailingObjectiveExtractor()
     runner.research_objective_service._objective_extractor = failing_extractor
+    runner.research_objective_service._axis_equivalence_classifier = (
+        failing_extractor
+    )
     runner.research_objective_service._paper_study_window_extractor = failing_extractor
     runner.research_objective_service._paper_signal_reconciler = failing_extractor
 

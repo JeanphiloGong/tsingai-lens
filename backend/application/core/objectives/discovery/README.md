@@ -11,15 +11,19 @@ collection Objective. It does not own confirmed-Objective Evidence analysis.
    failed batches, and consolidates window results into one paper map.
 3. `signal_reconciliation.py` decides whether compatible signals found in
    different windows belong to the same within-paper experiment.
-4. `objective_candidate_service.py` in the parent package groups compatible
-   paper relationships into collection-level Objective candidates.
+4. `axis_equivalence.py` classifies only backend-proposed label pairs as the
+   same or different scientific axis.
+5. `objective_candidate_service.py` in the parent package applies those pair
+   decisions and groups compatible paper relationships into collection-level
+   Objective candidates.
 
 ## Ownership
 
-`study_window.py` and `signal_reconciliation.py` each keep one model judgment's
-prompt, response schema, validation, repair policy, token bounds, and call next
-to each other. `extraction.py` in the parent package provides only the shared
-provider, structured JSON, trace, usage, and token-counting mechanics.
+`study_window.py`, `signal_reconciliation.py`, and `axis_equivalence.py` each
+keep one model judgment's prompt, response schema, validation, repair policy,
+token bounds, and call next to each other. `extraction.py` in the parent package
+provides only the shared provider, structured JSON, trace, usage, and
+token-counting mechanics.
 
 Source batching, recursive failed-batch subdivision, stable Source identity,
 paper-wide coverage, study consolidation, and persistence remain outside these

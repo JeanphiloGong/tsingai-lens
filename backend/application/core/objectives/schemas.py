@@ -114,20 +114,6 @@ class _StrictModel(BaseModel):
         )
 
 
-class StructuredAxisPairDecision(_StrictModel):
-    pair_id: Annotated[str, Field(min_length=1, max_length=80)]
-    equivalent: bool
-
-
-class StructuredAxisCanonicalizationPlan(_StrictModel):
-    decisions: list[StructuredAxisPairDecision] = Field(default_factory=list)
-
-    @field_validator("decisions", mode="before")
-    @classmethod
-    def _normalize_decisions(cls, value: object) -> object:
-        return _normalize_list_container(value)
-
-
 class StructuredPaperFrameBatch(_StrictModel):
     _source_accounting_origin: Literal["model", "repair"] = PrivateAttr(
         default="model"

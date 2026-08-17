@@ -16,15 +16,12 @@ from application.core.objectives.prompts import (
     OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION,
     OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
     OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
-    RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION,
     build_finding_synthesis_prompt,
     build_objective_evidence_prompt,
     build_objective_evidence_route_prompt,
     build_objective_paper_frame_prompt,
-    build_research_axis_canonicalization_prompt,
 )
 from application.core.objectives.schemas import (
-    StructuredAxisCanonicalizationPlan,
     StructuredEvidenceExtractions,
     StructuredEvidenceSelections,
     StructuredFindingSynthesis,
@@ -44,7 +41,6 @@ logger = logging.getLogger(__name__)
 _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
-_AXIS_CANONICALIZATION_MAX_COMPLETION_TOKENS = 1024
 _OBJECTIVE_PAPER_FRAME_MAX_COMPLETION_TOKENS = 1024
 OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT = 12_288
 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS = 512
@@ -114,88 +110,6 @@ class ObjectiveExtractor:
             separators=(",", ":"),
         )
         return len(encoding.encode(serialized_messages))
-
-    def canonicalize_research_objective_axes(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredAxisCanonicalizationPlan:
-        system_prompt, user_prompt = build_research_axis_canonicalization_prompt(
-            payload
-        )
-
-        def validate_axis_accounting(response: BaseModel) -> None:
-            if not isinstance(response, StructuredAxisCanonicalizationPlan):
-                raise TypeError("unexpected research axis canonicalization response type")
-            self._validate_axis_candidate_accounting(
-                response,
-                axis_pairs=payload.get("axis_pairs"),
-            )
-
-        def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
-            return self._parse_axis_canonicalization_json_response(
-                **kwargs,
-                axis_accounting_validator=validate_axis_accounting,
-            )
-
-        response = self.complete(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredAxisCanonicalizationPlan,
-            max_completion_tokens=_AXIS_CANONICALIZATION_MAX_COMPLETION_TOKENS,
-            json_text_parser=parse_json_text,
-            parsed_validator=validate_axis_accounting,
-            task_type="research_axis_canonicalization",
-            prompt_version=RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION,
-        )
-        if not isinstance(response, StructuredAxisCanonicalizationPlan):
-            raise TypeError("unexpected research axis canonicalization response type")
-        return response
-
-    @staticmethod
-    def _validate_axis_candidate_accounting(
-        response: StructuredAxisCanonicalizationPlan,
-        *,
-        axis_pairs: Any,
-    ) -> None:
-        if not isinstance(axis_pairs, list):
-            raise ValueError("axis pair selection requires axis_pairs")
-        expected_ids = [
-            str(pair.get("pair_id") or "").strip()
-            for pair in axis_pairs
-            if isinstance(pair, Mapping) and str(pair.get("pair_id") or "").strip()
-        ]
-        decision_ids = [decision.pair_id for decision in response.decisions]
-        if decision_ids != expected_ids:
-            raise ValueError(
-                "axis pair decisions must account for every input pair_id exactly once "
-                "and in input order"
-            )
-
-    def _parse_axis_canonicalization_json_response(
-        self,
-        *,
-        messages: list[dict[str, str]],
-        response_model: type[BaseModel],
-        max_completion_tokens: int | None,
-        axis_accounting_validator: Callable[[BaseModel], None],
-    ) -> tuple[BaseModel, str | None]:
-        def build_repair_instruction(repair_detail: str) -> str:
-            return (
-                "Previous axis pair classification was invalid: "
-                f"{repair_detail}. Return one decision for every input pair_id, in "
-                "input order, without omissions or duplicates. Set equivalent=true "
-                "only when both labels name exactly the same scientific axis. Related, "
-                "inverse, broad, narrow, or uncertain pairs require equivalent=false. "
-                "Return only compact JSON."
-            )
-
-        return self.complete_json(
-            messages=messages,
-            response_model=response_model,
-            max_completion_tokens=max_completion_tokens,
-            repair_instruction_builder=build_repair_instruction,
-            parsed_validator=axis_accounting_validator,
-        )
 
     def assess_objective_paper(
         self,

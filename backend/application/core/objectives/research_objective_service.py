@@ -18,6 +18,9 @@ from application.core.objectives.analysis.paper_experiment import (
 )
 from application.core.objectives.analysis.source_extraction import extract_source_facts
 from application.core.objectives.analysis.source_screening import screen_sources
+from application.core.objectives.discovery.axis_equivalence import (
+    ResearchAxisEquivalenceClassifier,
+)
 from application.core.objectives.discovery.signal_reconciliation import (
     PaperSignalReconciler,
 )
@@ -99,12 +102,14 @@ class ResearchObjectiveService:
         paper_skim_service: PaperSkimService,
         objective_candidate_service: ObjectiveCandidateService,
         objective_extractor: ObjectiveExtractor | None = None,
+        axis_equivalence_classifier: ResearchAxisEquivalenceClassifier | None = None,
         paper_study_window_extractor: PaperStudyWindowExtractor | None = None,
         paper_signal_reconciler: PaperSignalReconciler | None = None,
         paper_facts_extractor: PaperFactsExtractor | None = None,
     ) -> None:
         self.collection_service = collection_service
         self._objective_extractor = objective_extractor
+        self._axis_equivalence_classifier = axis_equivalence_classifier
         self._paper_study_window_extractor = paper_study_window_extractor
         self._paper_signal_reconciler = paper_signal_reconciler
         self._paper_facts_extractor = paper_facts_extractor
@@ -133,6 +138,10 @@ class ResearchObjectiveService:
             self._paper_study_window_extractor = PaperStudyWindowExtractor(extractor)
         if self._paper_signal_reconciler is None:
             self._paper_signal_reconciler = PaperSignalReconciler(extractor)
+        if self._axis_equivalence_classifier is None:
+            self._axis_equivalence_classifier = ResearchAxisEquivalenceClassifier(
+                extractor
+            )
         paper_skims = self.paper_skim_service.build_collection_paper_skims(
             collection_id,
             documents=documents,
@@ -166,7 +175,7 @@ class ResearchObjectiveService:
         candidate_facts = self.objective_candidate_service.discover_candidate_facts(
             collection_id,
             paper_skims=paper_skims,
-            extractor=extractor,
+            axis_equivalence_classifier=self._axis_equivalence_classifier,
             progress_callback=progress_callback,
         )
         self.objective_repository.replace(

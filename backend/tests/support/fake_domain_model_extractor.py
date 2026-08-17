@@ -4,12 +4,14 @@ import re
 from typing import Any
 
 from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.objectives.discovery.axis_equivalence import (
+    StructuredAxisCanonicalizationPlan,
+)
 from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
 from application.core.objectives.discovery.study_window import StructuredPaperSkim
 from application.core.objectives.schemas import (
-    StructuredAxisCanonicalizationPlan,
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
     StructuredEvidenceSelection,
@@ -258,7 +260,7 @@ class FakeDomainModelExtractor:
     ) -> StructuredPaperSignalReconciliation:
         return StructuredPaperSignalReconciliation()
 
-    def canonicalize_research_objective_axes(
+    def classify(
         self,
         payload: dict[str, Any],
     ) -> StructuredAxisCanonicalizationPlan:

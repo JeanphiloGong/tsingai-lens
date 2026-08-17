@@ -38,6 +38,7 @@ def build_research_objective_service(
 ) -> ResearchObjectiveService:
     objective_extractor = kwargs.get("objective_extractor")
     if objective_extractor is not None:
+        kwargs.setdefault("axis_equivalence_classifier", objective_extractor)
         kwargs.setdefault("paper_study_window_extractor", objective_extractor)
         kwargs.setdefault("paper_signal_reconciler", objective_extractor)
     source_repository = kwargs.pop("source_artifact_repository", None)

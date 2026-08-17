@@ -10,6 +10,11 @@ from pydantic import ValidationError
 
 from application.core.document_profiles.extraction import DocumentProfileExtractor
 from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.objectives.discovery.axis_equivalence import (
+    ResearchAxisEquivalenceClassifier,
+    StructuredAxisCanonicalizationPlan,
+    build_research_axis_canonicalization_prompt,
+)
 from application.core.objectives.discovery.signal_reconciliation import (
     PaperSignalReconciler,
     StructuredPaperSignalReconciliation,
@@ -28,10 +33,8 @@ from application.core.objectives.prompts import (
     build_finding_synthesis_prompt,
     build_objective_evidence_prompt,
     build_objective_paper_frame_prompt,
-    build_research_axis_canonicalization_prompt,
 )
 from application.core.objectives.schemas import (
-    StructuredAxisCanonicalizationPlan,
     StructuredEvidenceContext,
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,
@@ -1626,9 +1629,9 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
         }
         """
     )
-    extractor = _objective_extractor(client)
+    classifier = ResearchAxisEquivalenceClassifier(_objective_extractor(client))
 
-    canonicalization_plan = extractor.canonicalize_research_objective_axes(
+    canonicalization_plan = classifier.classify(
         {
             "collection_id": "col-1",
             "axis_pairs": [
@@ -1666,9 +1669,9 @@ def test_axis_canonicalization_repairs_ungrounded_and_overlapping_groups():
         }
     )
     client = _FakeOpenAIClient([invalid, repaired])
-    extractor = _objective_extractor(client)
+    classifier = ResearchAxisEquivalenceClassifier(_objective_extractor(client))
 
-    plan = extractor.canonicalize_research_objective_axes(
+    plan = classifier.classify(
         {
             "collection_id": "col-1",
             "axis_pairs": [

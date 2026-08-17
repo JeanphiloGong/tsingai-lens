@@ -3,24 +3,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = "research_axis_canonicalization.v1"
 OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v2"
 OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION = "objective_evidence_route.v1"
 OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v4"
 FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v12"
-
-_RESEARCH_OBJECTIVE_SYSTEM_PROMPT = """
-You are building research-objective records for an evidence-backed literature comparison backend.
-
-Non-negotiable rules:
-- This is research-map extraction, not final fact extraction.
-- Return exactly one JSON object and nothing else.
-- Do not emit measurement results, sample variants, evidence anchors, backend ids, or source locators.
-- Do not infer material systems from filenames.
-- Prefer fewer, higher-signal outputs over speculative coverage.
-- Research objectives must be question-shaped. Do not return a plain material list.
-""".strip()
-
 
 _OBJECTIVE_PAPER_FRAME_SYSTEM_PROMPT = """
 You are the source-relevance judge for one bounded neighborhood of a paper under one confirmed research objective.
@@ -235,60 +221,6 @@ Return exactly `{"findings":[]}` or one object shaped as
 `"context_evidence_ids":[],"mechanisms":[]}]}`. Use empty arrays when
 annotations are absent and no extra keys.
 """.strip()
-
-
-def build_research_axis_canonicalization_prompt(
-    payload: dict[str, Any],
-) -> tuple[str, str]:
-    user_prompt = (
-        "TASK MODEL\n"
-        "Classify whether each candidate label pair names exactly the same neutral "
-        "scientific axis before collection objective grouping. This is pair "
-        "classification, not "
-        "property-family clustering, causal interpretation, objective discovery, or "
-        "evidence synthesis.\n\n"
-        "INPUT SCHEMA\n"
-        "- `collection_id` identifies the request and must not appear in output.\n"
-        "- `axis_pairs` contains backend-selected possible aliases. Each item has an "
-        "opaque `pair_id`, one `axis_type`, and exact `left` and `right` labels.\n"
-        "- `material` pairs are material identities; `variable` pairs are changed "
-        "factors; `outcome` pairs are measured or predicted responses.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "DECISION PROCESS\n"
-        "1. Judge every pair independently within its supplied axis_type.\n"
-        "2. Set `equivalent=true` only when substituting one label for the other preserves "
-        "the exact scientific question. Acronyms, spelling variants, and grammatical "
-        "variants can qualify.\n"
-        "3. Set `equivalent=false` when the labels are merely related, inverse, causal, "
-        "broad/narrow, jointly reported, different material grades, or different "
-        "process parameters.\n"
-        "4. Set `equivalent=false` when uncertain. This keeps both source labels.\n\n"
-        "HARD RULES\n"
-        "- Return one decision for every input pair, in input order.\n"
-        "- Copy each input `pair_id` exactly once; do not omit, repeat, or invent IDs.\n"
-        "- Each decision contains only `pair_id` and boolean `equivalent`.\n"
-        "- Do not return labels, canonical names, groups, explanations, or confidence.\n\n"
-        "BOUNDARY EXAMPLES\n"
-        "- VED and volumetric energy density: select; they are the same variable.\n"
-        "- SS316L and 316L stainless steel: select; they are the same material grade.\n"
-        "- SS316 and 316L stainless steel are different grades: reject.\n"
-        "- scan speed and laser scanning speed: select when both denote the scan-speed "
-        "factor; laser power and energy density: reject.\n"
-        "- porosity and relative density are scientifically related but distinct "
-        "measured outcomes: reject.\n"
-        "- mechanical properties is a broad property family, not an alias for yield "
-        "strength, elongation, hardness, fatigue, corrosion, or microstructure: reject.\n"
-        "- microstructure and grain size, or porosity and defect size: reject; one is "
-        "broader than the other.\n"
-        "- tensile strength and ultimate tensile strength: reject without source "
-        "context explicitly defining them as the same measurement.\n"
-        "- surface hardness and hardness: reject; surface scope is meaningful.\n"
-        "\n"
-        "OUTPUT CONTRACT\n"
-        "Return only schema-valid structured data with one `decisions` array. "
-        "The array must account for every input pair even when all decisions are false.\n"
-    )
-    return _RESEARCH_OBJECTIVE_SYSTEM_PROMPT, user_prompt
 
 
 def build_objective_paper_frame_prompt(

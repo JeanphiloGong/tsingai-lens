@@ -103,6 +103,12 @@ Objective analysis.
   response schema, context-conflict validation, bounded repair, deterministic
   conflict removal, token budget, and model call live together. Paper-wide
   signal accounting and study consolidation remain in `paper_skim_service.py`.
+- `discovery/axis_equivalence.py`
+  Owns the bounded model judgment that classifies backend-proposed material,
+  variable, and outcome label pairs as exactly equivalent or different. It
+  keeps the pair-accounting schema, prompt, repair, budget, and call together.
+  It cannot return canonical labels, groups, Objective questions, confidence,
+  lineage, or dispositions; those remain backend-owned.
 - `objective_candidate_service.py`
   Owns collection-level Objective discovery from `PaperStudyRelationship`
   records. Before grouping, the backend proposes a bounded set of plausible
@@ -161,7 +167,7 @@ Objective analysis.
 - `prompts.py` and `schemas.py`
   Temporarily define the prompts and response contracts for Objective judgments
   that have not yet moved to their direct discovery or analysis owner. They do
-  not define the PaperSkim window or signal-reconciliation contracts.
+  not define PaperSkim, signal-reconciliation, or axis-equivalence contracts.
 
 ## Objective Boundary
 

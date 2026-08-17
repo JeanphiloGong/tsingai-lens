@@ -43,9 +43,13 @@ Source; the backend preserves its identity, so a route cannot redirect work to
 another paper or Source or become durable Evidence.
 
 `source_extraction.py` owns the inspection of one exact Source at a time. It
-passes every schema-valid model draft directly to `source_validation.py` before
-updating the accepted state supplied to the next Source prompt. Provider or
-irrecoverable structured-output failures remain technical failed drafts.
+owns that judgment's prompt, response schema, scientific validation, bounded
+repair instructions, completion budget, and direct model call. It passes every
+schema-valid model draft directly to `source_validation.py` before updating the
+accepted state supplied to the next Source prompt. Provider or irrecoverable
+structured-output failures remain technical failed drafts. Shared provider
+invocation, JSON parsing, usage accounting, and trace capture stay outside this
+scientific responsibility.
 
 `source_validation.py` owns deterministic source-local acceptance, demotion,
 or abstention. It checks the reported result, comparison labels, changed

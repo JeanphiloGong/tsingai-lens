@@ -15,13 +15,11 @@ from application.core.objectives.analysis import (
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
+    StructuredEvidenceExtraction,
+    StructuredEvidenceExtractions,
     extract_source_facts,
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
-from application.core.objectives.schemas import (
-    StructuredEvidenceExtraction,
-    StructuredEvidenceExtractions,
-)
 from domain.core import ObjectiveAnalysis, ObjectiveEvidence
 from tests.support.research_objective_service import (
     research_objective as _research_objective,
@@ -33,7 +31,7 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped():
         def __init__(self) -> None:
             self.payloads: list[dict[str, Any]] = []
 
-        def extract_objective_evidence(
+        def extract_source(
             self,
             payload: dict[str, Any],
         ) -> StructuredEvidenceExtractions:
@@ -148,7 +146,7 @@ def test_objective_evidence_document_state_is_typed_and_document_scoped():
 
     units = extract_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
@@ -189,7 +187,7 @@ def test_objective_evidence_continues_after_one_route_format_failure():
         def __init__(self) -> None:
             self.calls = 0
 
-        def extract_objective_evidence(
+        def extract_source(
             self,
             payload: dict[str, Any],
         ) -> StructuredEvidenceExtractions:
@@ -245,7 +243,7 @@ def test_objective_evidence_continues_after_one_route_format_failure():
 
     units = extract_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
@@ -268,7 +266,7 @@ def test_objective_evidence_routes_round_robin_across_documents():
         def __init__(self) -> None:
             self.source_refs: list[str] = []
 
-        def extract_objective_evidence(
+        def extract_source(
             self,
             payload: dict[str, Any],
         ) -> StructuredEvidenceExtractions:
@@ -319,7 +317,7 @@ def test_objective_evidence_routes_round_robin_across_documents():
 
     extract_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
@@ -336,7 +334,7 @@ def test_objective_evidence_provider_failure_is_scoped_to_one_document():
         def __init__(self) -> None:
             self.source_refs: list[str] = []
 
-        def extract_objective_evidence(
+        def extract_source(
             self,
             payload: dict[str, Any],
         ) -> StructuredEvidenceExtractions:
@@ -407,7 +405,7 @@ def test_objective_evidence_provider_failure_is_scoped_to_one_document():
 
     units = extract_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
@@ -434,7 +432,7 @@ def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
         def __init__(self) -> None:
             self.source_refs: list[str] = []
 
-        def extract_objective_evidence(
+        def extract_source(
             self,
             payload: dict[str, Any],
         ) -> StructuredEvidenceExtractions:
@@ -499,7 +497,7 @@ def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
 
     units = extract_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
@@ -514,7 +512,7 @@ def test_objective_evidence_bad_request_does_not_suppress_later_document_route(
 
 def test_objective_evidence_rejects_selected_route_without_source():
     class UnexpectedExtractor:
-        def extract_objective_evidence(self, _payload):
+        def extract_source(self, _payload):
             raise AssertionError("missing Source must fail before model extraction")
 
     objective = _research_objective(
@@ -539,7 +537,7 @@ def test_objective_evidence_rejects_selected_route_without_source():
     with pytest.raises(RuntimeError, match="selected Evidence Source is missing"):
         extract_source_facts(
             collection_id="col-test",
-            extractor=UnexpectedExtractor(),
+            source_extractor=UnexpectedExtractor(),
             objectives=(objective,),
             objective_paper_frames=(),
             objective_evidence_routes=(route,),
@@ -709,7 +707,7 @@ def test_analysis_contributions_report_each_paper_evidence_disposition():
 
 def test_objective_context_drops_model_changed_variable_without_values():
     class ContextExtractor:
-        def extract_objective_evidence(
+        def extract_source(
             self,
             payload: dict[str, Any],
         ) -> StructuredEvidenceExtractions:
@@ -764,7 +762,7 @@ def test_objective_context_drops_model_changed_variable_without_values():
 
     units = extract_source_facts(
         collection_id="col-test",
-        extractor=ContextExtractor(),
+        source_extractor=ContextExtractor(),
         objectives=(objective,),
         objective_paper_frames=(),
         objective_evidence_routes=(route,),

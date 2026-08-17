@@ -10,25 +10,25 @@ import pandas as pd
 if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
-from application.source.artifact_registry_service import ArtifactRegistryService
 from application.core.document_profiles.service import (
     DocumentProfileService,
 )
-from application.core.objectives.research_objective_service import (
-    ResearchObjectiveService,
+from application.core.objectives.finding_synthesis_service import (
+    FindingSynthesisService,
 )
-from application.core.objectives.finding_synthesis_service import FindingSynthesisService
 from application.core.objectives.objective_candidate_service import (
     ObjectiveCandidateService,
 )
 from application.core.objectives.paper_skim_service import PaperSkimService
-from tests.support.collection_service import build_test_collection_service
+from application.core.objectives.research_objective_service import (
+    ResearchObjectiveService,
+)
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
+from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.task_service import TaskService
 from domain.source import (
     SourceDocument,
     SourceReferenceSet,
-    assemble_source_documents,
     build_source_document_tree,
 )
 from infra.persistence.memory import MemoryBuildRepository
@@ -39,10 +39,11 @@ from infra.source.runtime.source_evidence import (
     build_table_cells,
     build_table_rows,
 )
-from tests.support.paper_fact_repository import MemoryPaperFactRepository
-from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.collection_service import build_test_collection_service
 from tests.support.comparison_repository import MemoryComparisonRepository
 from tests.support.objective_extractor import FakeObjectiveExtractor
+from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.paper_fact_repository import MemoryPaperFactRepository
 
 
 class DummyWorkflowOutput:
@@ -199,7 +200,11 @@ def _write_source_artifact_outputs(
     )
 
 
-def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN001
+def _build_runner(
+    tmp_path,  # noqa: ARG001
+    collection_service,
+    build_repository,
+):  # noqa: ANN001
     source_repository = MemorySourceArtifactRepository()
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
@@ -222,6 +227,7 @@ def _build_runner(tmp_path, collection_service, build_repository):  # noqa: ANN0
         objective_extractor=objective_extractor,
         axis_equivalence_classifier=objective_extractor,
         objective_evidence_router=objective_extractor,
+        objective_source_extractor=objective_extractor,
         objective_source_screener=objective_extractor,
         paper_study_window_extractor=objective_extractor,
         paper_signal_reconciler=objective_extractor,
@@ -389,6 +395,7 @@ def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_covera
     )
     runner.research_objective_service._objective_source_screener = failing_extractor
     runner.research_objective_service._objective_evidence_router = failing_extractor
+    runner.research_objective_service._objective_source_extractor = failing_extractor
     runner.research_objective_service._paper_study_window_extractor = failing_extractor
     runner.research_objective_service._paper_signal_reconciler = failing_extractor
 

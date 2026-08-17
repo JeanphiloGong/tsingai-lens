@@ -34,10 +34,12 @@ Objective analysis.
   Owns transient `ExtractedEvidenceDraft` records and the inspection of every
   routed Source. It constructs bounded Source payloads, repairs structurally
   fragmented tables when required, extracts deterministic table records before
-  model fallback, and records route-scoped provider or structured-output
-  failures. Each schema-valid model draft is passed immediately to
-  `analysis/source_validation.py` before it can update the state supplied to the
-  next Source prompt.
+  model fallback, and owns the Source-local extraction prompt, response schema,
+  scientific validation, bounded repair, completion budget, and direct model
+  call. It records route-scoped provider or structured-output failures. Each
+  schema-valid model draft is passed immediately to
+  `analysis/source_validation.py` before it can update the state supplied to
+  the next Source prompt.
 - `analysis/source_validation.py`
   Owns deterministic validation of one model-authored draft against its exact
   Source. It independently grounds results, comparison labels, variables, and
@@ -171,7 +173,7 @@ Objective analysis.
   Temporarily define the prompts and response contracts for Objective judgments
   that have not yet moved to their direct discovery or analysis owner. They do
   not define PaperSkim, signal-reconciliation, axis-equivalence, confirmed
-  Source-screening, or Evidence-routing contracts.
+  Source-screening, Evidence-routing, or Source-local extraction contracts.
 
 ## Objective Boundary
 

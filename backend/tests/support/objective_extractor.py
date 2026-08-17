@@ -10,6 +10,10 @@ from application.core.objectives.analysis.evidence_routing import (
     StructuredEvidenceSelection,
     StructuredEvidenceSelections,
 )
+from application.core.objectives.analysis.source_extraction import (
+    StructuredEvidenceExtraction,
+    StructuredEvidenceExtractions,
+)
 from application.core.objectives.discovery.axis_equivalence import (
     StructuredAxisCanonicalizationPlan,
 )
@@ -18,8 +22,6 @@ from application.core.objectives.discovery.signal_reconciliation import (
 )
 from application.core.objectives.discovery.study_window import StructuredPaperSkim
 from application.core.objectives.schemas import (
-    StructuredEvidenceExtraction,
-    StructuredEvidenceExtractions,
     StructuredFindingSynthesis,
     StructuredFindingSynthesisItem,
 )
@@ -286,7 +288,7 @@ class FakeObjectiveExtractor:
             )
         return StructuredEvidenceSelections(selections=routes)
 
-    def extract_objective_evidence(
+    def extract_source(
         self,
         payload: dict[str, Any],
     ) -> StructuredEvidenceExtractions:

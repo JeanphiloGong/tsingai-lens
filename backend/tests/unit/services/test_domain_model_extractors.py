@@ -14,6 +14,15 @@ from application.core.objectives.analysis.evidence_routing import (
     ObjectiveEvidenceRouter,
     StructuredEvidenceSelections,
 )
+from application.core.objectives.analysis.source_extraction import (
+    ObjectiveSourceExtractor,
+    StructuredEvidenceContext,
+    StructuredEvidenceExtraction,
+    StructuredEvidenceExtractions,
+    _normalize_objective_evidence_payload,
+    _objective_evidence_repair_instruction,
+    build_objective_evidence_prompt,
+)
 from application.core.objectives.analysis.source_screening import (
     ObjectiveSourceScreener,
     StructuredPaperFrameBatch,
@@ -40,12 +49,8 @@ from application.core.objectives.extraction import (
 )
 from application.core.objectives.prompts import (
     build_finding_synthesis_prompt,
-    build_objective_evidence_prompt,
 )
 from application.core.objectives.schemas import (
-    StructuredEvidenceContext,
-    StructuredEvidenceExtraction,
-    StructuredEvidenceExtractions,
     StructuredFindingMechanism,
     StructuredFindingSynthesis,
 )
@@ -2288,7 +2293,7 @@ def test_domain_model_extractors_validates_objective_evidence_response():
     )
     extractor = _objective_extractor(client)
 
-    extractions = extractor.extract_objective_evidence(
+    extractions = ObjectiveSourceExtractor(extractor).extract_source(
         {
             "collection_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
@@ -2335,7 +2340,7 @@ def test_objective_evidence_extractor_has_no_grounding_repair_call_contract():
         },
     }
     with pytest.raises(TypeError, match="invalid_extraction"):
-        extractor.extract_objective_evidence(
+        ObjectiveSourceExtractor(extractor).extract_source(
             payload,
             invalid_extraction={"changed_variables": []},
         )
@@ -2528,7 +2533,7 @@ def test_domain_model_extractors_ignores_top_level_prompt_echo_for_evidence():
     )
     extractor = _objective_extractor(_FakeOpenAIClient(response))
 
-    parsed = extractor.extract_objective_evidence(
+    parsed = ObjectiveSourceExtractor(extractor).extract_source(
         {
             "objective": {
                 "question": "How does energy density affect relative density?"
@@ -2560,7 +2565,7 @@ def test_domain_model_extractors_rejects_unknown_top_level_evidence_fields():
     extractor = _objective_extractor(client)
 
     with pytest.raises(ValidationError):
-        extractor.extract_objective_evidence(
+        ObjectiveSourceExtractor(extractor).extract_source(
             {
                 "objective": {
                     "question": "How does energy density affect relative density?"
@@ -2597,7 +2602,7 @@ def test_domain_model_extractors_rejects_prompt_only_evidence_echo():
     extractor = _objective_extractor(client)
 
     with pytest.raises(ValueError, match="echoed input fields"):
-        extractor.extract_objective_evidence(
+        ObjectiveSourceExtractor(extractor).extract_source(
             {
                 "objective": {
                     "question": "How does energy density affect relative density?"
@@ -2775,7 +2780,7 @@ def test_domain_model_extractors_rejects_backend_bound_objective_evidence_fields
     extractor = _objective_extractor(client)
 
     with pytest.raises(ValidationError):
-        extractor.extract_objective_evidence(
+        ObjectiveSourceExtractor(extractor).extract_source(
             {
                 "collection_id": "col-1",
                 "objective": {"question": "How does heat treatment affect strength?"},
@@ -3014,7 +3019,7 @@ def test_domain_model_extractors_routes_objective_units_through_bounded_json_tex
     )
     extractor = ObjectiveExtractor(client=client, model="fake-model")
 
-    units = extractor.extract_objective_evidence(
+    units = ObjectiveSourceExtractor(extractor).extract_source(
         {
             "collection_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
@@ -3162,7 +3167,7 @@ def test_domain_model_extractors_repairs_layered_structured_validation_errors(
         extraction_mode="json_text",
     )
 
-    parsed = extractor.extract_objective_evidence(
+    parsed = ObjectiveSourceExtractor(extractor).extract_source(
         {
             "objective": {
                 "question": "How does preheating affect microstructure?"
@@ -3257,7 +3262,7 @@ def test_objective_evidence_normalizes_fixed_endpoint_and_joint_scope_without_re
         extraction_mode="json_text",
     )
 
-    parsed = extractor.extract_objective_evidence(
+    parsed = ObjectiveSourceExtractor(extractor).extract_source(
         {
             "objective": {
                 "question": "How do laser power and scan speed affect density?"
@@ -3328,7 +3333,7 @@ def test_objective_evidence_recovers_empty_comparison_axes_from_changed_variable
         extraction_mode="json_text",
     )
 
-    parsed = extractor.extract_objective_evidence(
+    parsed = ObjectiveSourceExtractor(extractor).extract_source(
         {
             "objective": {
                 "question": "How does laser power affect relative density?"
@@ -3410,7 +3415,7 @@ def test_objective_evidence_downgrades_axisless_result_to_descriptive_result(
         extraction_mode="json_text",
     )
 
-    parsed = extractor.extract_objective_evidence(
+    parsed = ObjectiveSourceExtractor(extractor).extract_source(
         {
             "objective": {"question": "How does scan speed affect porosity?"},
             "evidence_route": {
@@ -3453,7 +3458,7 @@ def test_objective_evidence_does_not_invent_axes_for_incomplete_variables(
         ]
     }
 
-    normalized = ObjectiveExtractor._normalize_objective_evidence_payload(payload)
+    normalized = _normalize_objective_evidence_payload(payload)
 
     assert normalized == payload
 
@@ -3492,7 +3497,7 @@ def test_objective_evidence_demotes_unbound_experimental_result_without_repair()
         ]
     }
 
-    normalized = ObjectiveExtractor._normalize_objective_evidence_payload(payload)
+    normalized = _normalize_objective_evidence_payload(payload)
 
     extraction = normalized["extractions"][0]
     assert extraction["attribution_scope"] == "association_only"
@@ -3535,15 +3540,13 @@ def test_objective_evidence_does_not_normalize_invalid_fixed_endpoints(
         ]
     }
 
-    normalized = ObjectiveExtractor._normalize_objective_evidence_payload(
-        payload
-    )
+    normalized = _normalize_objective_evidence_payload(payload)
 
     assert normalized == payload
 
 
 def test_objective_evidence_repair_prompt_requires_role_result_consistency():
-    repair_prompt = ObjectiveExtractor._objective_evidence_repair_instruction(
+    repair_prompt = _objective_evidence_repair_instruction(
         repair_detail=(
             "extractions.0: Value error, context evidence cannot report an "
             "experimental result"

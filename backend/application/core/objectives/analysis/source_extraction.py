@@ -7,9 +7,17 @@ import logging
 import re
 from dataclasses import dataclass
 from hashlib import sha1
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Literal, Mapping
 
 from openai import APIConnectionError, APIStatusError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from application.core.objectives import property_matching
 from application.core.objectives.analysis.evidence_routing import (
@@ -64,6 +72,144 @@ _OBJECTIVE_NON_RESULT_VALUE_COLUMN_TERMS = (
     "sample number",
 )
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
+_SOURCE_EXTRACTION_MAX_COMPLETION_TOKENS = 2048
+_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v4"
+_SOURCE_EXTRACTION_ROLES = {
+    "direct_result",
+    "condition_context",
+    "mechanism_context",
+    "baseline_context",
+    "comparison_context",
+    "background_context",
+    "contradictory_result",
+    "irrelevant",
+}
+_SOURCE_EXTRACTION_ATTRIBUTION_SCOPES = {
+    "isolated_effect",
+    "joint_effect",
+    "association_only",
+    "descriptive_only",
+    "not_attributable",
+}
+_SOURCE_EXTRACTION_RESULT_DIRECTIONS = {
+    "increase",
+    "decrease",
+    "improve",
+    "worsen",
+    "no_change",
+    "mixed",
+    "unknown",
+}
+_SOURCE_EXTRACTION_RESOLUTION_STATUSES = {
+    "resolved",
+    "partial",
+    "unresolved",
+    "skipped",
+    "unknown",
+}
+_SOURCE_EXTRACTION_ECHOED_PROMPT_KEYS = {
+    "OBJECTIVE",
+    "OBJECTIVE VARIABLES",
+    "OBJECTIVE OUTCOMES",
+    "ROUTE HINT ONLY (DO NOT COPY AS EVIDENCE ROLE)",
+    "SOURCE KIND",
+    "SOURCE",
+}
+_SOURCE_EXTRACTION_SYSTEM_PROMPT = """
+TASK MODEL
+Extract at most one objective-relevant, source-local fact from one selected
+source unit. This is evidence extraction, not routing, whole-paper joining,
+terminology canonicalization, summarization, or Finding synthesis.
+
+INPUT SCHEMA AND AUTHORITY
+- `OBJECTIVE` limits relevance and allowed outcomes; its variable and outcome
+  names are not evidence and must not be copied when absent from SOURCE.
+- `ROUTE HINT` is only a selection hint.
+- `SOURCE` is the only scientific authority for every returned value.
+
+DECISION PROCESS
+1. If SOURCE does not report an objective outcome or useful objective-specific
+   context, return `{"extractions":[]}`.
+2. Context source: choose its context role and return no changed variables, no
+   comparison, no reported result, and `not_attributable`.
+3. Result source: include exactly one `reported_result`. Keep the exact concise
+   SOURCE term for the measured outcome in `reported_result.outcome`; the backend
+   canonicalizes it to the OBJECTIVE only after grounding. Copy one short verbatim
+   result clause into `result_text`.
+4. Return a changed variable only when this SOURCE explicitly names the factor and
+   its baseline and target endpoints. Never borrow a factor or endpoint from the
+   OBJECTIVE, ROUTE HINT, another section, or general scientific knowledge. If this
+   SOURCE compares explicit group labels such as Sample S1 and Sample S2 but their
+   process definitions are elsewhere, return no changed variables, keep those exact
+   labels in `comparison`, use only a SOURCE-local grouping axis such as `sample`,
+   and use `association_only`. The backend may bind another grounded Source later.
+5. One extraction represents one baseline-to-target comparison interval. If SOURCE
+   reports a condition series, choose one complete source-supported pair. Never
+   convert an absent, off, or without condition to numeric 0; retain the exact
+   source phrase as a categorical endpoint with a null unit. A complete comparison
+   may bind endpoint phrases stated in separate sentences of the same SOURCE unit.
+6. Never repeat a changed-variable name. Use `isolated_effect` only for one
+   distinct changed factor with a complete comparable baseline/target comparison.
+   Use `joint_effect` for two or more distinct changed factors. Otherwise use
+   `association_only`, `descriptive_only`, or `not_attributable`. Parameters with
+   identical baseline and target values are fixed context, never changed variables
+   or comparison axes.
+7. Return empty output rather than inventing a missing result or useful context.
+
+HARD RULES
+- Return exactly one compact JSON object with one top-level key: `extractions`.
+- Return at most one extraction. Never repeat the input or output reasoning,
+  markdown, source ids, or backend ids.
+- Every scientific term, group label, value, unit, and context attribute must be
+  present in this SOURCE. Preserve source-local wording until backend
+  canonicalization; do not replace a narrow observed outcome with a broader
+  OBJECTIVE label.
+- `result_text` is the only source text allowed in output and must be a short
+  verbatim substring: one contiguous span copied from SOURCE. Never synthesize it
+  from separate clauses or copy wording from a boundary example.
+- A result direction describes the objective outcome, never an intermediate
+  mechanism. Use `mixed` for an unordered qualitative change.
+- When SOURCE mixes current work with cited literature, extract current work only.
+  Conditions from cited literature are not current-work comparison conditions.
+- Generic composition or background is irrelevant unless OBJECTIVE explicitly
+  asks about that composition, material identity, or background concept.
+- For a comparable comparison, `incomparability_reasons` must be empty. For an
+  incomparable comparison, provide at least one source-supported reason.
+- Include `resolution_status` and numeric `confidence` for every extraction.
+
+BOUNDARY EXAMPLES
+Context source:
+{"extractions":[{"evidence_role":"condition_context","changed_variables":[],"comparison":null,"reported_result":null,"attribution_scope":"not_attributable","scientific_context":{"material":[],"sample":[],"process":[{"name":"build platform temperature","value":100,"unit":"C"}],"test":[]},"resolution_status":"resolved","confidence":0.9}]}
+
+Categorical endpoint and source-local outcome wording:
+OBJECTIVE OUTCOME: crack formation
+SOURCE: Cracks were abundant without preheating. Application of preheating largely reduces this cracking behavior, though cracks remain after preheating at 400 C.
+OUTPUT: {"extractions":[{"evidence_role":"direct_result","changed_variables":[{"name":"preheating","baseline_value":"without preheating","target_value":"preheating at 400 C","unit":null}],"comparison":{"baseline_label":"without preheating","target_label":"preheating at 400 C","axis_names":["preheating"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"cracking behavior","value":null,"unit":null,"direction":"decrease","result_text":"Application of preheating largely reduces this cracking behavior"},"attribution_scope":"isolated_effect","scientific_context":{"material":[],"sample":[],"process":[],"test":[]},"resolution_status":"resolved","confidence":0.9}]}
+
+Result groups whose process definitions are in another Source:
+OBJECTIVE VARIABLES: laser power, scanning speed
+OBJECTIVE OUTCOME: microstructure
+SOURCE: Sample S1 showed equiaxed grains, whereas S2 displayed a cellular-dendritic microstructure.
+OUTPUT: {"extractions":[{"evidence_role":"direct_result","changed_variables":[],"comparison":{"baseline_label":"S1","target_label":"S2","axis_names":["sample"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"cellular-dendritic microstructure","value":null,"unit":null,"direction":"mixed","result_text":"S2 displayed a cellular-dendritic microstructure"},"attribution_scope":"association_only","scientific_context":{},"resolution_status":"partial","confidence":0.85}]}
+
+Joint result source:
+{"extractions":[{"evidence_role":"direct_result","changed_variables":[{"name":"laser power","baseline_value":100,"target_value":200,"unit":"W"},{"name":"scan speed","baseline_value":500,"target_value":900,"unit":"mm/s"}],"comparison":{"baseline_label":"A","target_label":"B","axis_names":["laser power","scan speed"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"relative density","value":98.0,"unit":"%","direction":"increase","result_text":"relative density increased to 98.0%"},"attribution_scope":"joint_effect","scientific_context":{"material":[],"sample":[],"process":[],"test":[]},"resolution_status":"resolved","confidence":0.9}]}
+
+Unsupported or ambiguous source:
+{"extractions":[]}
+
+Unrelated composition example:
+OBJECTIVE OUTCOME: fatigue life
+ROUTE HINT: composition_or_background
+SOURCE: The nominal alloy composition contains chromium and nickel.
+OUTPUT: {"extractions":[]}
+
+OUTPUT CONTRACT
+Allowed result directions are `increase`, `decrease`, `improve`, `worsen`,
+`no_change`, `mixed`, and `unknown`. Allowed resolution statuses are `resolved`,
+`partial`, `unresolved`, `skipped`, and `unknown`. Return the smallest valid object
+and stop immediately after it.
+""".strip()
 
 
 def _provider_is_temporarily_unavailable(error: Exception) -> bool:
@@ -73,6 +219,663 @@ def _provider_is_temporarily_unavailable(error: Exception) -> bool:
         return False
     status_code = int(error.status_code)
     return status_code in {408, 409, 429} or status_code >= 500
+
+
+def _normalize_underscored_choice(
+    value: object,
+    *,
+    allowed: set[str],
+    default: str,
+) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized if normalized in allowed else default
+
+
+def _normalize_list_container(value: object) -> object:
+    return [] if value is None else value
+
+
+class _SourceExtractionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    @field_validator("confidence", mode="before", check_fields=False)
+    @classmethod
+    def _normalize_default_confidence(cls, value: object) -> object:
+        if value is not None:
+            return value
+        return cls.model_fields["confidence"].get_default(call_default_factory=True)
+
+
+ScientificScalar = str | int | float | bool
+
+
+class StructuredEvidenceAttribute(_SourceExtractionResponse):
+    name: str
+    value: ScientificScalar
+    unit: str | None = None
+
+
+class StructuredEvidenceVariable(_SourceExtractionResponse):
+    name: str
+    baseline_value: ScientificScalar | None = None
+    target_value: ScientificScalar | None = None
+    unit: str | None = None
+
+
+class StructuredEvidenceComparison(_SourceExtractionResponse):
+    baseline_label: str
+    target_label: str
+    axis_names: list[str] = Field(min_length=1)
+    comparable: bool
+    incomparability_reasons: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_comparability(self) -> "StructuredEvidenceComparison":
+        if not self.comparable and not self.incomparability_reasons:
+            raise ValueError("incomparable evidence requires reasons")
+        if self.comparable and self.incomparability_reasons:
+            raise ValueError("comparable evidence cannot have incomparability reasons")
+        return self
+
+
+class StructuredEvidenceResult(_SourceExtractionResponse):
+    outcome: str
+    value: ScientificScalar | None = None
+    unit: str | None = None
+    direction: Literal[
+        "increase",
+        "decrease",
+        "improve",
+        "worsen",
+        "no_change",
+        "mixed",
+        "unknown",
+    ] = "unknown"
+    result_text: str
+
+    @field_validator("direction", mode="before")
+    @classmethod
+    def _normalize_direction(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_SOURCE_EXTRACTION_RESULT_DIRECTIONS,
+            default="unknown",
+        )
+
+
+class StructuredEvidenceContext(_SourceExtractionResponse):
+    material: list[StructuredEvidenceAttribute] = Field(default_factory=list)
+    sample: list[StructuredEvidenceAttribute] = Field(default_factory=list)
+    process: list[StructuredEvidenceAttribute] = Field(default_factory=list)
+    test: list[StructuredEvidenceAttribute] = Field(default_factory=list)
+
+    @field_validator("material", "sample", "process", "test", mode="before")
+    @classmethod
+    def _normalize_lists(cls, value: object, info: ValidationInfo) -> object:
+        items = _normalize_list_container(value)
+        if not isinstance(items, list):
+            return items
+        normalized_items: list[object] = []
+        for item in items:
+            if isinstance(item, StructuredEvidenceAttribute):
+                normalized_items.append(item)
+                continue
+            if isinstance(item, (str, int, float, bool)):
+                normalized_items.append(
+                    {"name": info.field_name, "value": item, "unit": None}
+                )
+                continue
+            if not isinstance(item, dict):
+                normalized_items.append(item)
+                continue
+
+            name = str(item.get("name") or info.field_name).strip()
+            unit = item.get("unit")
+            if "value" in item:
+                attribute_value = item["value"]
+                if isinstance(attribute_value, (dict, list)):
+                    attribute_value = json.dumps(
+                        attribute_value,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                normalized_items.append(
+                    {"name": name, "value": attribute_value, "unit": unit}
+                )
+                continue
+
+            details = {
+                key: detail
+                for key, detail in item.items()
+                if key not in {"name", "unit"}
+            }
+            normalized_items.append(
+                {
+                    "name": name if details else info.field_name,
+                    "value": (
+                        json.dumps(
+                            details,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        )
+                        if details
+                        else name
+                    ),
+                    "unit": unit,
+                }
+            )
+        return normalized_items
+
+
+class StructuredEvidenceExtraction(_SourceExtractionResponse):
+    evidence_role: Literal[
+        "direct_result",
+        "condition_context",
+        "mechanism_context",
+        "baseline_context",
+        "comparison_context",
+        "background_context",
+        "contradictory_result",
+        "irrelevant",
+    ] = "irrelevant"
+    changed_variables: list[StructuredEvidenceVariable] = Field(
+        default_factory=list,
+        max_length=12,
+    )
+    comparison: StructuredEvidenceComparison | None = None
+    reported_result: StructuredEvidenceResult | None = None
+    attribution_scope: Literal[
+        "isolated_effect",
+        "joint_effect",
+        "association_only",
+        "descriptive_only",
+        "not_attributable",
+    ] = "not_attributable"
+    scientific_context: StructuredEvidenceContext = Field(
+        default_factory=StructuredEvidenceContext
+    )
+    resolution_status: Literal[
+        "resolved",
+        "partial",
+        "unresolved",
+        "skipped",
+        "unknown",
+    ] = "partial"
+    confidence: float = 0.0
+
+    @field_validator("evidence_role", mode="before")
+    @classmethod
+    def _normalize_evidence_role(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_SOURCE_EXTRACTION_ROLES,
+            default="irrelevant",
+        )
+
+    @field_validator("attribution_scope", mode="before")
+    @classmethod
+    def _normalize_attribution_scope(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_SOURCE_EXTRACTION_ATTRIBUTION_SCOPES,
+            default="not_attributable",
+        )
+
+    @field_validator("resolution_status", mode="before")
+    @classmethod
+    def _normalize_resolution_status(cls, value: object) -> str:
+        return _normalize_underscored_choice(
+            value,
+            allowed=_SOURCE_EXTRACTION_RESOLUTION_STATUSES,
+            default="partial",
+        )
+
+    @field_validator("changed_variables", mode="before")
+    @classmethod
+    def _normalize_changed_variables(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+    @model_validator(mode="after")
+    def _validate_scientific_contract(self) -> "StructuredEvidenceExtraction":
+        result_role = self.evidence_role in {"direct_result", "contradictory_result"}
+        if result_role and self.reported_result is None:
+            raise ValueError("result evidence requires one reported result")
+        if not result_role and self.reported_result is not None:
+            raise ValueError("context evidence cannot report an experimental result")
+        if not result_role and self.attribution_scope in {
+            "isolated_effect",
+            "joint_effect",
+        }:
+            raise ValueError("context evidence cannot claim experimental attribution")
+        if self.comparison is not None and not self.comparison.comparable:
+            if self.attribution_scope != "not_attributable":
+                raise ValueError("incomparable evidence cannot be attributed")
+        variable_names = [item.name.casefold() for item in self.changed_variables]
+        if len(variable_names) != len(set(variable_names)):
+            raise ValueError("changed variable names must be unique per extraction")
+        if any(
+            item.baseline_value is not None
+            and item.target_value is not None
+            and item.baseline_value == item.target_value
+            for item in self.changed_variables
+        ):
+            raise ValueError(
+                "changed variables require distinct baseline and target values"
+            )
+        if self.attribution_scope in {"isolated_effect", "joint_effect"}:
+            if self.comparison is None or not self.comparison.comparable:
+                raise ValueError("experimental attribution requires comparison")
+            variables = set(variable_names)
+            axes = {item.casefold() for item in self.comparison.axis_names}
+            if variables != axes:
+                raise ValueError("comparison axes must match changed variables")
+            if any(
+                item.baseline_value is None or item.target_value is None
+                for item in self.changed_variables
+            ):
+                raise ValueError(
+                    "experimental attribution requires baseline and target values"
+                )
+            if self.attribution_scope == "isolated_effect" and len(variables) != 1:
+                raise ValueError("isolated effect requires one changed variable")
+            if self.attribution_scope == "joint_effect" and len(variables) < 2:
+                raise ValueError("joint effect requires multiple changed variables")
+        return self
+
+
+class StructuredEvidenceExtractions(_SourceExtractionResponse):
+    extractions: list[StructuredEvidenceExtraction] = Field(
+        default_factory=list,
+        max_length=1,
+    )
+
+    @field_validator("extractions", mode="before")
+    @classmethod
+    def _normalize_extractions(cls, value: object) -> object:
+        return _normalize_list_container(value)
+
+
+def build_objective_evidence_prompt(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    objective = (
+        payload.get("objective")
+        if isinstance(payload.get("objective"), dict)
+        else {}
+    )
+    route = (
+        payload.get("evidence_route")
+        if isinstance(payload.get("evidence_route"), dict)
+        else {}
+    )
+    source = (
+        payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    )
+    source_text = str(source.get("text") or source.get("caption_text") or "").strip()
+    if not source_text:
+        source_text = json.dumps(
+            {
+                key: source[key]
+                for key in (
+                    "source_kind",
+                    "page",
+                    "heading_path",
+                    "column_headers",
+                    "table_matrix",
+                    "table_cells",
+                )
+                if source.get(key) not in (None, "", [], {})
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    user_prompt = (
+        f"OBJECTIVE QUESTION: {str(objective.get('question') or '').strip()}\n"
+        "OBJECTIVE VARIABLES: "
+        f"{json.dumps(objective.get('variables') or [], ensure_ascii=False, separators=(',', ':'))}\n"
+        "OBJECTIVE OUTCOMES: "
+        f"{json.dumps(objective.get('outcomes') or [], ensure_ascii=False, separators=(',', ':'))}\n"
+        "ROUTE HINT ONLY (DO NOT COPY AS EVIDENCE ROLE): "
+        f"{str(route.get('role') or '').strip()}\n"
+        "SOURCE KIND: "
+        f"{str(source.get('source_kind') or route.get('source_kind') or '').strip()}\n"
+        f"SOURCE:\n{source_text}\n"
+        "OUTPUT JSON:"
+    )
+    return _SOURCE_EXTRACTION_SYSTEM_PROMPT, user_prompt
+
+
+def _normalize_objective_evidence_payload(payload: Any) -> Any:
+    def identical_nonempty_scalar(left: Any, right: Any) -> bool:
+        if isinstance(left, bool) or isinstance(right, bool):
+            return type(left) is type(right) and left == right
+        if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+            return left == right
+        if isinstance(left, str) and isinstance(right, str):
+            return bool(left.strip()) and left == right
+        return False
+
+    def complete_changed_variable_names(
+        variables: list[Any],
+    ) -> tuple[str, ...]:
+        def is_complete_scalar(value: Any) -> bool:
+            if isinstance(value, str):
+                return bool(value.strip())
+            return isinstance(value, (int, float, bool))
+
+        names: list[str] = []
+        seen: set[str] = set()
+        for variable in variables:
+            if not isinstance(variable, Mapping):
+                return ()
+            name = str(variable.get("name") or "").strip()
+            baseline = variable.get("baseline_value")
+            target = variable.get("target_value")
+            if (
+                not name
+                or not is_complete_scalar(baseline)
+                or not is_complete_scalar(target)
+                or identical_nonempty_scalar(baseline, target)
+            ):
+                return ()
+            canonical_name = name.casefold()
+            if canonical_name in seen:
+                return ()
+            seen.add(canonical_name)
+            names.append(name)
+        return tuple(names)
+
+    if not isinstance(payload, Mapping):
+        return payload
+    extractions = payload.get("extractions")
+    if not isinstance(extractions, list):
+        return payload
+
+    changed = False
+    normalized_extractions: list[Any] = []
+    for extraction in extractions:
+        if not isinstance(extraction, Mapping):
+            normalized_extractions.append(extraction)
+            continue
+        variables = extraction.get("changed_variables")
+        if not isinstance(variables, list):
+            normalized_extractions.append(extraction)
+            continue
+
+        fixed_names: set[str] = set()
+        changed_variables: list[Any] = []
+        for variable in variables:
+            if not isinstance(variable, Mapping):
+                changed_variables.append(variable)
+                continue
+            baseline = variable.get("baseline_value")
+            target = variable.get("target_value")
+            variable_name = str(variable.get("name") or "").strip().casefold()
+            if not variable_name or not identical_nonempty_scalar(
+                baseline,
+                target,
+            ):
+                changed_variables.append(variable)
+                continue
+            fixed_names.add(variable_name)
+            changed = True
+
+        normalized_extraction = dict(extraction)
+        if fixed_names:
+            normalized_extraction["changed_variables"] = changed_variables
+        remaining_variable_names = {
+            str(variable.get("name") or "").strip().casefold()
+            for variable in changed_variables
+            if isinstance(variable, Mapping)
+            and str(variable.get("name") or "").strip()
+        }
+        comparison = extraction.get("comparison")
+        if isinstance(comparison, Mapping) and isinstance(
+            comparison.get("axis_names"), list
+        ):
+            normalized_comparison = dict(comparison)
+            normalized_comparison["axis_names"] = [
+                axis
+                for axis in comparison["axis_names"]
+                if str(axis).strip().casefold() not in fixed_names
+                or str(axis).strip().casefold() in remaining_variable_names
+            ]
+            normalized_extraction["comparison"] = normalized_comparison
+        comparison = normalized_extraction.get("comparison")
+        if isinstance(comparison, Mapping):
+            axis_names = comparison.get("axis_names")
+            missing_axis_names = axis_names is None or (
+                isinstance(axis_names, list)
+                and not any(str(axis).strip() for axis in axis_names)
+            )
+            recovered_axis_names = (
+                complete_changed_variable_names(changed_variables)
+                if missing_axis_names
+                else ()
+            )
+            if recovered_axis_names:
+                normalized_comparison = dict(comparison)
+                normalized_comparison["axis_names"] = list(recovered_axis_names)
+                normalized_extraction["comparison"] = normalized_comparison
+                changed = True
+        comparison = normalized_extraction.get("comparison")
+        complete_variable_names = complete_changed_variable_names(changed_variables)
+        if (
+            extraction.get("reported_result") is not None
+            and extraction.get("attribution_scope")
+            in {"isolated_effect", "joint_effect"}
+            and not complete_variable_names
+        ):
+            normalized_extraction["attribution_scope"] = (
+                "association_only"
+                if isinstance(comparison, Mapping)
+                and comparison.get("comparable") is True
+                else (
+                    "not_attributable"
+                    if isinstance(comparison, Mapping)
+                    else "descriptive_only"
+                )
+            )
+            normalized_extraction["resolution_status"] = "partial"
+            changed = True
+        comparison_has_no_axes = (
+            isinstance(comparison, Mapping)
+            and isinstance(comparison.get("axis_names"), list)
+            and not any(str(axis).strip() for axis in comparison["axis_names"])
+        )
+        if not changed_variables and (fixed_names or comparison_has_no_axes):
+            normalized_extraction["comparison"] = None
+            if extraction.get("attribution_scope") in {
+                "isolated_effect",
+                "joint_effect",
+                "association_only",
+            }:
+                normalized_extraction["attribution_scope"] = (
+                    "descriptive_only"
+                    if extraction.get("reported_result") is not None
+                    else "not_attributable"
+                )
+            changed = True
+        if (
+            extraction.get("attribution_scope") == "joint_effect"
+            and len(changed_variables) == 1
+            and len(remaining_variable_names) == 1
+        ):
+            normalized_extraction["attribution_scope"] = "isolated_effect"
+        normalized_extractions.append(normalized_extraction)
+
+    if not changed:
+        return payload
+    normalized_payload = dict(payload)
+    normalized_payload["extractions"] = normalized_extractions
+    return normalized_payload
+
+
+def _single_objective_evidence_extraction(
+    payload: Any,
+) -> dict[str, Any] | None:
+    if not isinstance(payload, Mapping):
+        return None
+    extractions = payload.get("extractions")
+    if not isinstance(extractions, list) or len(extractions) != 1:
+        return None
+    item = extractions[0]
+    return dict(item) if isinstance(item, Mapping) else None
+
+
+def _objective_evidence_repair_instruction(
+    *,
+    repair_detail: str,
+    invalid_extraction: Mapping[str, Any] | None,
+) -> str:
+    invalid_json = (
+        json.dumps(
+            dict(invalid_extraction),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        if invalid_extraction is not None
+        else "null"
+    )
+    return (
+        "TASK\nRepair one invalid Evidence extraction against the original "
+        "SOURCE. This is correction of the supplied candidate, not a new Source "
+        "search or a new extraction task.\n"
+        "REPAIR INPUT\n"
+        f"- VALIDATION ERRORS: {repair_detail[:1000]}\n"
+        f"- INVALID EXTRACTION: {invalid_json}\n"
+        "DECISION PROCESS\n"
+        "1. Check each named invalid field against SOURCE and keep every valid "
+        "field unchanged.\n"
+        "2. Correct a field only when its replacement is explicit in SOURCE. "
+        "When SOURCE does not support a valid correction, remove the unsupported "
+        "claim only if the remaining item still has honest scientific meaning; "
+        "otherwise abstain with {\"extractions\":[]}.\n"
+        "3. If `reported_result` is non-null, use `direct_result` or "
+        "`contradictory_result` as `evidence_role`. If keeping a context role, "
+        "set `reported_result` to null, `changed_variables` to [], `comparison` "
+        "to null, and `attribution_scope` to `not_attributable`.\n"
+        "4. `isolated_effect` and `joint_effect` require distinct baseline and "
+        "target values for every changed variable. `comparison.axis_names` must "
+        "exactly match the distinct `changed_variables` names. If SOURCE lacks "
+        "complete endpoints, use `association_only` only for an explicit "
+        "association; otherwise use `descriptive_only` or abstain.\n"
+        "5. If `comparison.comparable` is false, use `not_attributable`; do not "
+        "change it to true unless SOURCE explicitly supports a complete "
+        "comparison. Remove each fixed parameter from `changed_variables` and "
+        "`comparison.axis_names` when its endpoints are identical. A fixed "
+        "control does not make the comparison incomparable. For a condition "
+        "series, choose one complete Source-supported interval.\n"
+        "HARD RULES\n"
+        "- Correct only values supported by SOURCE; do not invent comparison "
+        "endpoints or scientific context, and never copy from outside SOURCE.\n"
+        "- A fixed parameter is fixed context, not a changed variable.\n"
+        "- For a condition series, choose one complete source-supported interval "
+        "and never merge separate intervals.\n"
+        "- Preserve valid fields that do not require correction.\n"
+        "BOUNDARY EXAMPLES\n"
+        "- If candidate target is 160 W but SOURCE explicitly compares 100 W "
+        "with 140 W, 140 W may replace 160 W; other grounded fields stay fixed.\n"
+        "- If candidate unit is MPa but SOURCE gives no unit, set that unit to "
+        "null only when the remaining result is still meaningful; never infer a "
+        "unit from domain knowledge.\n"
+        "- If SOURCE contains no complete comparison or attributable result, "
+        "return {\"extractions\":[]}.\n"
+        "OUTPUT SCHEMA\nReturn only "
+        "{\"extractions\":[<one corrected extraction>]} or "
+        "{\"extractions\":[]}."
+    )
+
+
+class ObjectiveSourceExtractor:
+    """Extract at most one scientific fact from one exact Source."""
+
+    def __init__(self, response_client: ObjectiveExtractor) -> None:
+        self.response_client = response_client
+
+    def extract_source(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredEvidenceExtractions:
+        system_prompt, user_prompt = build_objective_evidence_prompt(payload)
+        response = self.response_client.complete(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredEvidenceExtractions,
+            max_completion_tokens=_SOURCE_EXTRACTION_MAX_COMPLETION_TOKENS,
+            force_json_text=True,
+            include_schema_for_forced_json=False,
+            json_text_parser=self._parse_json_response,
+            task_type="objective_evidence_extraction",
+            prompt_version=_SOURCE_EXTRACTION_PROMPT_VERSION,
+        )
+        if not isinstance(response, StructuredEvidenceExtractions):
+            raise TypeError("unexpected objective evidence extraction response type")
+        return response
+
+    def _parse_json_response(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        response_model: type[BaseModel],
+        max_completion_tokens: int | None,
+    ) -> tuple[BaseModel, str | None]:
+        last_invalid_extraction: dict[str, Any] | None = None
+
+        def normalize_payload(payload: Any) -> Any:
+            nonlocal last_invalid_extraction
+            normalized = _normalize_objective_evidence_payload(payload)
+            last_invalid_extraction = _single_objective_evidence_extraction(
+                normalized
+            )
+            if not isinstance(normalized, dict):
+                return normalized
+            extractions = normalized.get("extractions")
+            extra_keys = set(normalized) - {"extractions"}
+            if (
+                isinstance(extractions, list)
+                and extra_keys
+                and extra_keys <= _SOURCE_EXTRACTION_ECHOED_PROMPT_KEYS
+            ):
+                return {"extractions": extractions}
+            if (
+                "extractions" not in normalized
+                and normalized
+                and set(normalized) <= _SOURCE_EXTRACTION_ECHOED_PROMPT_KEYS
+            ):
+                raise ValueError(
+                    "objective evidence response echoed input fields instead of "
+                    "returning extractions"
+                )
+            return normalized
+
+        def build_repair_instruction(repair_detail: str) -> str:
+            if "echoed input fields" in repair_detail:
+                return (
+                    "Your previous response only echoed the input fields and did "
+                    "not perform evidence extraction. Do not repeat OBJECTIVE, "
+                    "OBJECTIVE VARIABLES, OBJECTIVE OUTCOMES, ROUTE HINT, SOURCE "
+                    "KIND, or SOURCE. Re-read SOURCE and return exactly one compact "
+                    "JSON object with the single top-level key `extractions`. Use "
+                    "{\"extractions\":[]} only when SOURCE contains no comparison "
+                    "that answers the objective."
+                )
+            return _objective_evidence_repair_instruction(
+                repair_detail=repair_detail,
+                invalid_extraction=last_invalid_extraction,
+            )
+
+        return self.response_client.complete_json(
+            messages=messages,
+            response_model=response_model,
+            max_completion_tokens=max_completion_tokens,
+            repair_instruction_builder=build_repair_instruction,
+            payload_normalizer=normalize_payload,
+            max_attempts=3,
+            json_schema_name="structured_evidence_extractions",
+        )
 
 
 @dataclass(frozen=True)
@@ -217,7 +1020,7 @@ def _mapping_tuple(value: Any) -> tuple[dict[str, Any], ...]:
 def extract_source_facts(
     *,
     collection_id: str,
-    extractor: ObjectiveExtractor,
+    source_extractor: ObjectiveSourceExtractor,
     paper_facts_extractor: PaperFactsExtractor | None = None,
     objectives: tuple[ResearchObjective, ...],
     objective_paper_frames: tuple[PaperAnalysisFrame, ...],
@@ -381,7 +1184,7 @@ def extract_source_facts(
             extraction_error = llm_evidence_unavailable.get(document_key)
             if extraction_error is None:
                 try:
-                    parsed = extractor.extract_objective_evidence(payload)
+                    parsed = source_extractor.extract_source(payload)
                     llm_route_records = tuple(
                         record
                         for item in parsed.extractions

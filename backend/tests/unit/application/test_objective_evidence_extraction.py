@@ -20,15 +20,13 @@ from application.core.objectives.analysis import (
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
+    StructuredEvidenceExtractions,
     extract_source_facts,
 )
 from application.core.objectives.analysis.source_screening import (
     OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
     PaperAnalysisFrame,
     StructuredPaperFrameBatch,
-)
-from application.core.objectives.schemas import (
-    StructuredEvidenceExtractions,
 )
 from application.core.paper_facts.schemas import StructuredTableMatrixRepair
 from domain.core import ObjectiveAnalysis, PaperSkim
@@ -1441,7 +1439,7 @@ class _StudySourceEvidenceExtractor:
         self.failing_source_ref = failing_source_ref
         self.calls: list[str] = []
 
-    def extract_objective_evidence(self, payload):
+    def extract_source(self, payload):
         source_ref = str(payload["source"]["source_ref"])
         self.calls.append(source_ref)
         if source_ref == self.failing_source_ref:
@@ -1585,7 +1583,7 @@ def test_research_objective_binds_same_study_methods_and_results_sources():
     )
     source_drafts = extract_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
         objective_paper_frames=(),
         objective_evidence_routes=routes,
@@ -1709,7 +1707,7 @@ def test_research_objective_keeps_unbound_result_as_descriptive_evidence():
 
     source_drafts = extract_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
         objective_paper_frames=(),
         objective_evidence_routes=(
@@ -1743,7 +1741,7 @@ def test_research_objective_abstains_without_target_result():
 
     drafts = extract_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
         objective_paper_frames=(),
         objective_evidence_routes=(
@@ -1772,7 +1770,7 @@ def test_research_objective_records_provider_failure_as_failed_evidence():
 
     drafts = extract_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
         objective_paper_frames=(),
         objective_evidence_routes=(
@@ -2723,7 +2721,7 @@ def test_research_objective_evidence_prompt_compacts_long_text_source(
         def __init__(self) -> None:
             self.unit_payloads: list[dict[str, Any]] = []
 
-        def extract_objective_evidence(
+        def extract_source(
             self,
             payload: dict[str, Any],
         ) -> StructuredEvidenceExtractions:
@@ -2734,7 +2732,7 @@ def test_research_objective_evidence_prompt_compacts_long_text_source(
 
     extract_source_facts(
         collection_id="col-test",
-        extractor=extractor,
+        source_extractor=extractor,
         objectives=(objective,),
         objective_paper_frames=(frame,),
         objective_evidence_routes=(route,),
@@ -2865,7 +2863,7 @@ def test_research_objective_table_repair_bad_request_is_route_scoped():
         def __init__(self) -> None:
             self.calls = 0
 
-        def extract_objective_evidence(self, _payload):
+        def extract_source(self, _payload):
             self.calls += 1
             return StructuredEvidenceExtractions()
 
@@ -2916,7 +2914,7 @@ def test_research_objective_table_repair_bad_request_is_route_scoped():
 
     units = extract_source_facts(
         collection_id="col-test",
-        extractor=evidence_extractor,
+        source_extractor=evidence_extractor,
         paper_facts_extractor=repair_extractor,
         objectives=(objective,),
         objective_paper_frames=(),
@@ -2980,7 +2978,7 @@ def test_research_objective_rejects_unusable_table_matrix_repair(
         def __init__(self) -> None:
             self.calls = 0
 
-        def extract_objective_evidence(self, _payload):
+        def extract_source(self, _payload):
             self.calls += 1
             return StructuredEvidenceExtractions()
 
@@ -3025,7 +3023,7 @@ def test_research_objective_rejects_unusable_table_matrix_repair(
 
     units = extract_source_facts(
         collection_id="col-test",
-        extractor=evidence_extractor,
+        source_extractor=evidence_extractor,
         paper_facts_extractor=repair_extractor,
         objectives=(objective,),
         objective_paper_frames=(),
@@ -3055,7 +3053,7 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails():
         def __init__(self) -> None:
             self.calls = 0
 
-        def extract_objective_evidence(self, _payload):
+        def extract_source(self, _payload):
             self.calls += 1
             return StructuredEvidenceExtractions()
 
@@ -3100,7 +3098,7 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails():
 
     units = extract_source_facts(
         collection_id="col-test",
-        extractor=evidence_extractor,
+        source_extractor=evidence_extractor,
         paper_facts_extractor=repair_extractor,
         objectives=(objective,),
         objective_paper_frames=(),

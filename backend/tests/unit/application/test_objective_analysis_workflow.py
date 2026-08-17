@@ -8,10 +8,12 @@ from application.core.objectives.analysis import evidence_materialization
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
 )
-from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
+from application.core.objectives.analysis.source_screening import (
+    PaperAnalysisFrame,
+    StructuredPaperFrameBatch,
+)
 from application.core.objectives.schemas import (
     StructuredEvidenceSelections,
-    StructuredPaperFrameBatch,
 )
 from domain.core import (
     ObjectiveAnalysis,
@@ -51,7 +53,7 @@ class _FailingRouteExtractor(_ObjectiveExtractor):
 
 
 class _FailingFrameExtractor(_ObjectiveExtractor):
-    def assess_objective_paper(
+    def screen_batch(
         self,
         payload: dict[str, Any],
     ) -> StructuredPaperFrameBatch:

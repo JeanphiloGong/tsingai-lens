@@ -22,13 +22,13 @@ from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
     extract_source_facts,
 )
-from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
-from application.core.objectives.extraction import (
+from application.core.objectives.analysis.source_screening import (
     OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
+    PaperAnalysisFrame,
+    StructuredPaperFrameBatch,
 )
 from application.core.objectives.schemas import (
     StructuredEvidenceExtractions,
-    StructuredPaperFrameBatch,
 )
 from application.core.paper_facts.schemas import StructuredTableMatrixRepair
 from domain.core import ObjectiveAnalysis, PaperSkim
@@ -51,7 +51,7 @@ class _BoundedFrameExtractor:
         self.failing_source_refs = failing_source_refs or set()
         self.frame_payloads: list[dict[str, Any]] = []
 
-    def estimate_objective_paper_frame_prompt_tokens(
+    def estimate_prompt_tokens(
         self,
         payload: dict[str, Any],
     ) -> int:
@@ -61,12 +61,12 @@ class _BoundedFrameExtractor:
             else 1_000
         )
 
-    def assess_objective_paper(
+    def screen_batch(
         self,
         payload: dict[str, Any],
     ) -> StructuredPaperFrameBatch:
         assert (
-            self.estimate_objective_paper_frame_prompt_tokens(payload)
+            self.estimate_prompt_tokens(payload)
             <= OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT
         )
         self.frame_payloads.append(payload)
@@ -963,7 +963,7 @@ def test_objective_paper_framing_batches_every_stable_source_once():
 
     frames = source_screening.screen_sources(
         collection_id="col-test",
-        extractor=extractor,
+        source_screener=extractor,
         objectives=(objective,),
         paper_skims=(),
         documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
@@ -1086,7 +1086,7 @@ def test_objective_paper_framing_preserves_siblings_when_one_batch_fails():
 
     frames = source_screening.screen_sources(
         collection_id="col-test",
-        extractor=extractor,
+        source_screener=extractor,
         objectives=(objective,),
         paper_skims=(),
         documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
@@ -1131,7 +1131,7 @@ def test_objective_paper_framing_keeps_failed_batch_routable_when_sibling_is_irr
 
     frames = source_screening.screen_sources(
         collection_id="col-test",
-        extractor=extractor,
+        source_screener=extractor,
         objectives=(objective,),
         paper_skims=(),
         documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
@@ -1175,7 +1175,7 @@ def test_objective_paper_framing_skips_explicitly_excluded_document():
 
     frames = source_screening.screen_sources(
         collection_id="col-test",
-        extractor=extractor,
+        source_screener=extractor,
         objectives=(objective,),
         paper_skims=(),
         documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
@@ -1209,7 +1209,7 @@ def test_objective_paper_framing_does_not_send_over_budget_singleton():
 
     frames = source_screening.screen_sources(
         collection_id="col-test",
-        extractor=extractor,
+        source_screener=extractor,
         objectives=(objective,),
         paper_skims=(),
         documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
@@ -2550,7 +2550,7 @@ def test_objective_paper_framing_marks_all_explicitly_excluded_sources_irrelevan
 
     frames = source_screening.screen_sources(
         collection_id="col-test",
-        extractor=extractor,
+        source_screener=extractor,
         objectives=(objective,),
         paper_skims=(),
         documents=(SimpleNamespace(document_id="paper-1", title="Background"),),

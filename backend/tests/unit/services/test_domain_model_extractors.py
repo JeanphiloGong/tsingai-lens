@@ -10,6 +10,11 @@ from pydantic import ValidationError
 
 from application.core.document_profiles.extraction import DocumentProfileExtractor
 from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.objectives.analysis.source_screening import (
+    ObjectiveSourceScreener,
+    StructuredPaperFrameBatch,
+    build_objective_paper_frame_prompt,
+)
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
     StructuredAxisCanonicalizationPlan,
@@ -32,7 +37,6 @@ from application.core.objectives.extraction import (
 from application.core.objectives.prompts import (
     build_finding_synthesis_prompt,
     build_objective_evidence_prompt,
-    build_objective_paper_frame_prompt,
 )
 from application.core.objectives.schemas import (
     StructuredEvidenceContext,
@@ -41,7 +45,6 @@ from application.core.objectives.schemas import (
     StructuredEvidenceSelections,
     StructuredFindingMechanism,
     StructuredFindingSynthesis,
-    StructuredPaperFrameBatch,
 )
 from application.core.paper_facts.extraction import PaperFactsExtractor
 from application.core.paper_facts.schemas import (
@@ -1719,7 +1722,7 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
     )
     extractor = _objective_extractor(client)
 
-    frame = extractor.assess_objective_paper(
+    frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
             "collection_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
@@ -1774,7 +1777,7 @@ def test_objective_paper_frame_json_repair_rejects_unknown_source_id():
     client = _FakeOpenAIClient([invalid, repaired])
     extractor = _objective_extractor(client)
 
-    frame = extractor.assess_objective_paper(
+    frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
             "collection_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
@@ -1853,7 +1856,7 @@ def test_objective_paper_frame_repairs_omitted_source_unit():
     extractor = _objective_extractor(client)
     source_unit_ids = [f"frame-section-{position}" for position in range(1, 9)]
 
-    frame = extractor.assess_objective_paper(
+    frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
             "collection_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
@@ -1919,7 +1922,7 @@ def test_objective_paper_frame_still_rejects_invalid_ids_after_repair(
     extractor = _objective_extractor(client)
 
     with pytest.raises((ValueError, ValidationError)):
-        extractor.assess_objective_paper(
+        ObjectiveSourceScreener(extractor).screen_batch(
             {
                 "collection_id": "col-1",
                 "objective": {
@@ -1968,7 +1971,7 @@ def test_provider_parsed_objective_paper_frame_repairs_omission(
     client = _FakeOpenAIClient(repaired, parsed=incomplete)
     extractor = ObjectiveExtractor(client=client, model="fake-model")
 
-    frame = extractor.assess_objective_paper(
+    frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
             "collection_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
@@ -2021,7 +2024,7 @@ def test_provider_parsed_objective_paper_frame_repairs_source_accounting(
     client = _FakeOpenAIClient(json.dumps(repaired), parsed=invalid)
     extractor = ObjectiveExtractor(client=client, model="fake-model")
 
-    frame = extractor.assess_objective_paper(
+    frame = ObjectiveSourceScreener(extractor).screen_batch(
         {
             "collection_id": "col-1",
             "objective": {"question": "How does heat treatment affect corrosion?"},
@@ -2106,7 +2109,9 @@ def test_objective_paper_frame_prompt_token_estimate_counts_complete_schema():
         ],
     }
 
-    estimated_tokens = extractor.estimate_objective_paper_frame_prompt_tokens(payload)
+    estimated_tokens = ObjectiveSourceScreener(extractor).estimate_prompt_tokens(
+        payload
+    )
     system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
     prompt_without_schema = json.dumps(
         [

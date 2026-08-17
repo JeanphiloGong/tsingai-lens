@@ -16,10 +16,11 @@ Objective analysis.
 - `analysis/source_screening.py`
   Owns confirmed-Objective Source screening from paper inputs to ordered
   `PaperAnalysisFrame` results. It traverses Source document trees, constructs
-  bounded framing batches, accounts for every Source unit, and preserves
-  model, repair, and conservative fallback provenance. A screening decision
-  means that a Source should or should not be inspected; it is not proof that
-  the Source contains usable Evidence.
+  bounded framing batches, and keeps the screening prompt, response schema,
+  Source-id accounting, repair, token bounds, and batch model call with that
+  responsibility. It preserves model, repair, and conservative fallback
+  provenance. A screening decision means that a Source should or should not be
+  inspected; it is not proof that the Source contains usable Evidence.
 - `analysis/evidence_routing.py`
   Owns the transient `EvidenceCandidate` records created after screening and
   the final extraction-queue order. It binds every route to the current
@@ -167,7 +168,8 @@ Objective analysis.
 - `prompts.py` and `schemas.py`
   Temporarily define the prompts and response contracts for Objective judgments
   that have not yet moved to their direct discovery or analysis owner. They do
-  not define PaperSkim, signal-reconciliation, or axis-equivalence contracts.
+  not define PaperSkim, signal-reconciliation, axis-equivalence, or confirmed
+  Source-screening contracts.
 
 ## Objective Boundary
 

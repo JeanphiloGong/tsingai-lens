@@ -4,13 +4,19 @@ import json
 import logging
 from dataclasses import dataclass
 from hashlib import sha1
-from typing import Any, Callable, Iterable, Mapping
+from typing import Annotated, Any, Callable, Iterable, Literal, Mapping
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 from application.core.objectives import property_matching
-from application.core.objectives.extraction import (
-    OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
-    ObjectiveExtractor,
-)
+from application.core.objectives.extraction import ObjectiveExtractor
 from domain.core import PaperSkim, ResearchObjective, normalize_objective_terms
 from domain.source import SourceDocumentTree
 
@@ -25,6 +31,283 @@ _FRAME_PRIOR_STUDY_LIMIT = 8
 _FRAME_PRIOR_RELATIONSHIP_LIMIT = 12
 _FRAME_TABLE_TEXT_CHARS = 800
 _FRAME_TABLE_VALUE_CHARS = 240
+OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT = 12_288
+OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v2"
+
+_FRAME_MAX_COMPLETION_TOKENS = 1024
+_FRAME_RELEVANCE = {"high", "medium", "low", "irrelevant", "uncertain"}
+_FRAME_PAPER_ROLES = {
+    "primary_experiment",
+    "supporting_method",
+    "supporting_background",
+    "review",
+    "modeling_only",
+    "irrelevant",
+    "mixed",
+    "uncertain",
+}
+_FRAME_SYSTEM_PROMPT = """
+You are the source-relevance judge for one bounded neighborhood of a paper under one confirmed research objective.
+
+Non-negotiable rules:
+- This is bounded source-candidate classification, not whole-paper summarization or final fact extraction.
+- Return exactly one JSON object and nothing else.
+- Copy every supplied `source_unit_id` exactly once into either `relevant_source_unit_ids` or `excluded_source_unit_ids`.
+- Never invent, rewrite, omit, or duplicate a source-unit id.
+- Treat uncertain candidates as relevant so the downstream evidence router can inspect them.
+- Do not emit measurement results, sample variants, evidence anchors, source text, or persistence ids.
+- Do not infer material systems from filenames.
+- Judge only the supplied neighborhood; omitted paper sources are outside this batch.
+""".strip()
+
+
+class _SourceScreeningResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class StructuredPaperFrameBatch(_SourceScreeningResponse):
+    _source_accounting_origin: Literal["model", "repair"] = PrivateAttr(default="model")
+    _source_accounting_errors: tuple[str, ...] = PrivateAttr(default=())
+
+    relevance: Literal["high", "medium", "low", "irrelevant", "uncertain"] = "uncertain"
+    paper_role: Literal[
+        "primary_experiment",
+        "supporting_method",
+        "supporting_background",
+        "review",
+        "modeling_only",
+        "irrelevant",
+        "mixed",
+        "uncertain",
+    ] = "uncertain"
+    background: str | None = Field(default=None, max_length=320)
+    material_match: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    changed_variables: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    measured_property_scope: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    test_environment_scope: list[Annotated[str, Field(max_length=160)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    relevant_source_unit_ids: list[Annotated[str, Field(max_length=200)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    excluded_source_unit_ids: list[Annotated[str, Field(max_length=200)]] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+
+    @field_validator(
+        "material_match",
+        "changed_variables",
+        "measured_property_scope",
+        "test_environment_scope",
+        "relevant_source_unit_ids",
+        "excluded_source_unit_ids",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return [] if value is None else value
+
+    @model_validator(mode="after")
+    def _validate_source_partition(self) -> "StructuredPaperFrameBatch":
+        relevant = self.relevant_source_unit_ids
+        excluded = self.excluded_source_unit_ids
+        if len(relevant) != len(set(relevant)) or len(excluded) != len(set(excluded)):
+            raise ValueError("paper frame source-unit ids must be unique")
+        if set(relevant) & set(excluded):
+            raise ValueError(
+                "paper frame source-unit ids cannot be both relevant and excluded"
+            )
+        return self
+
+    @property
+    def source_accounting_origin(self) -> Literal["model", "repair"]:
+        return self._source_accounting_origin
+
+    @property
+    def source_accounting_errors(self) -> tuple[str, ...]:
+        return self._source_accounting_errors
+
+    def record_source_accounting_repair(self, errors: Iterable[str]) -> None:
+        self._source_accounting_origin = "repair"
+        self._source_accounting_errors = tuple(
+            str(error).strip() for error in errors if str(error).strip()
+        )
+
+    @field_validator("relevance", mode="before")
+    @classmethod
+    def _normalize_relevance(cls, value: object) -> str:
+        return _normalize_choice(value, allowed=_FRAME_RELEVANCE, default="uncertain")
+
+    @field_validator("paper_role", mode="before")
+    @classmethod
+    def _normalize_paper_role(cls, value: object) -> str:
+        return _normalize_choice(value, allowed=_FRAME_PAPER_ROLES, default="uncertain")
+
+
+def _normalize_choice(value: object, *, allowed: set[str], default: str) -> str:
+    lowered = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return lowered if lowered in allowed else default
+
+
+def build_objective_paper_frame_prompt(
+    payload: dict[str, Any],
+) -> tuple[str, str]:
+    user_prompt = (
+        "TASK MODEL\n"
+        "Perform bounded source-candidate classification for downstream objective-scoped evidence routing. "
+        "This request contains one partial neighborhood, not the whole paper.\n\n"
+        "INPUT SCHEMA\n"
+        "- `collection_id`: backend scope identity; it is not scientific evidence and must not be returned.\n"
+        "- `objective`: the confirmed comparison question and scientific axes.\n"
+        "- `document`: backend metadata; the filename is not scientific evidence.\n"
+        "- `document_profile`: backend document-type metadata; it is a routing hint, not authority over visible source text.\n"
+        "- `paper_prior`: compact PaperSkim study context linked to the objective; it is a hint, not authority over visible source text.\n"
+        "- `source_units`: current section chunks and table-row chunks. Each has a backend-owned `source_unit_id`, kind, stable source reference, and visible scientific content.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "DECISION PROCESS\n"
+        "1. Read the objective variables, outcomes, material scope, constraints, and comparator.\n"
+        "2. For each source unit independently, decide whether it may contain direct results, changed-variable context, material/sample/test context, mechanism context, or a useful table for that objective.\n"
+        "3. Put useful or uncertain candidates in `relevant_source_unit_ids`; put only clearly unrelated, review-only, composition-only, or generic background candidates in `excluded_source_unit_ids`.\n"
+        "4. Summarize only scientific scope supported by the current relevant candidates.\n"
+        "5. Set batch `relevance` and `paper_role` from current evidence and `paper_prior`. Do not infer whole-paper irrelevance from facts absent in this partial neighborhood.\n\n"
+        "BOUNDARY EXAMPLES\n"
+        "- A Methods section defining the objective variable but not reporting the outcome is relevant.\n"
+        "- A Results table using a symbol or abbreviation for an objective axis is relevant when headers, caption, or cells establish that meaning.\n"
+        "- A literature-comparison table without current-work results is excluded unless the objective explicitly asks for literature comparison.\n"
+        "- Shared material alone does not make generic composition or background text relevant.\n\n"
+        "SAME-SCHEMA EXAMPLE\n"
+        "Example input: "
+        '{"collection_id":"col-example","objective":{"variables":["laser power"],"outcomes":["relative density"]},"document":{"document_id":"paper-example"},"document_profile":{"doc_type":"experimental"},"paper_prior":{"doc_role":"experimental"},"source_units":[{"source_unit_id":"unit-methods","source_kind":"section","text":"Laser power was varied."},{"source_unit_id":"unit-composition","source_kind":"table","caption_text":"Nominal composition."}]}\n'
+        "Example output: "
+        '{"relevance":"medium","paper_role":"primary_experiment","background":"The current batch defines the changed process variable.","material_match":[],"changed_variables":["laser power"],"measured_property_scope":[],"test_environment_scope":[],"relevant_source_unit_ids":["unit-methods"],"excluded_source_unit_ids":["unit-composition"]}\n\n'
+        "OUTPUT CONTRACT\n"
+        "Return only schema-valid structured data. Every input `source_unit_id` must appear exactly once across `relevant_source_unit_ids` and `excluded_source_unit_ids`. "
+        "Keep `background` concise and return no source text or reasoning transcript."
+    )
+    return _FRAME_SYSTEM_PROMPT, user_prompt
+
+
+class ObjectiveSourceScreener:
+    """Classify one bounded Source batch for a confirmed Objective."""
+
+    def __init__(self, response_client: ObjectiveExtractor) -> None:
+        self.response_client = response_client
+
+    def screen_batch(self, payload: dict[str, Any]) -> StructuredPaperFrameBatch:
+        system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
+        source_accounting_errors: list[str] = []
+        source_unit_ids = tuple(
+            str(item.get("source_unit_id") or "").strip()
+            for item in payload.get("source_units") or ()
+            if isinstance(item, Mapping)
+            and str(item.get("source_unit_id") or "").strip()
+        )
+        if not source_unit_ids or len(source_unit_ids) != len(set(source_unit_ids)):
+            raise ValueError("objective paper framing requires unique source-unit ids")
+
+        def record_source_accounting_error(error: Exception) -> None:
+            detail = str(error).strip()
+            if not detail or not any(
+                marker in detail
+                for marker in (
+                    "objective paper frame must account",
+                    "paper frame source-unit ids",
+                )
+            ):
+                return
+            if detail not in source_accounting_errors:
+                source_accounting_errors.append(detail)
+
+        def validate_source_accounting(parsed: BaseModel) -> BaseModel:
+            if not isinstance(parsed, StructuredPaperFrameBatch):
+                raise TypeError("unexpected objective paper frame response type")
+            returned_ids = (
+                *parsed.relevant_source_unit_ids,
+                *parsed.excluded_source_unit_ids,
+            )
+            missing_ids = [
+                source_unit_id
+                for source_unit_id in source_unit_ids
+                if source_unit_id not in returned_ids
+            ]
+            unknown_ids = [
+                source_unit_id
+                for source_unit_id in returned_ids
+                if source_unit_id not in source_unit_ids
+            ]
+            if missing_ids or unknown_ids:
+                raise ValueError(
+                    "objective paper frame must account for every source-unit id "
+                    "exactly once; "
+                    f"expected_source_unit_ids={list(source_unit_ids)}; "
+                    f"missing_source_unit_ids={missing_ids}; "
+                    f"unknown_source_unit_ids={unknown_ids}"
+                )
+            return parsed
+
+        def build_repair_instruction(repair_detail: str) -> str:
+            return (
+                "Previous objective paper framing output had invalid source-unit "
+                f"accounting: {repair_detail}. Return only one compact JSON object. "
+                "Partition this exact ID list once and only once between "
+                "relevant_source_unit_ids and excluded_source_unit_ids: "
+                f"{json.dumps(source_unit_ids, ensure_ascii=True)}. Copy every ID "
+                "verbatim; do not omit, duplicate, shorten, or invent an ID. Treat "
+                "an uncertain source as relevant."
+            )
+
+        def complete_json(**kwargs: Any) -> tuple[BaseModel, str | None]:
+            return self.response_client.complete_json(
+                **kwargs,
+                repair_instruction_builder=build_repair_instruction,
+                parsed_validator=validate_source_accounting,
+                validation_error_observer=record_source_accounting_error,
+            )
+
+        try:
+            response = self.response_client.complete(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_model=StructuredPaperFrameBatch,
+                max_completion_tokens=_FRAME_MAX_COMPLETION_TOKENS,
+                json_text_parser=complete_json,
+                parsed_validator=validate_source_accounting,
+                validation_error_observer=record_source_accounting_error,
+                task_type="objective_paper_frame",
+                prompt_version=OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
+            )
+        except Exception as exc:
+            if not source_accounting_errors:
+                raise
+            raise ValueError(
+                "objective paper frame source accounting repair failed; "
+                f"initial_errors={source_accounting_errors}; final_error={exc}"
+            ) from exc
+        if not isinstance(response, StructuredPaperFrameBatch):
+            raise TypeError("unexpected objective paper frame response type")
+        if source_accounting_errors:
+            response.record_source_accounting_repair(source_accounting_errors)
+        return response
+
+    def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
+        system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
+        return self.response_client.estimate_prompt_tokens(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_model=StructuredPaperFrameBatch,
+        )
 
 
 @dataclass(frozen=True)
@@ -185,7 +468,7 @@ def _notify_progress(
 def screen_sources(
     *,
     collection_id: str,
-    extractor: ObjectiveExtractor,
+    source_screener: ObjectiveSourceScreener,
     objectives: tuple[ResearchObjective, ...],
     paper_skims: tuple[PaperSkim, ...],
     documents: tuple[Any, ...],
@@ -278,7 +561,7 @@ def screen_sources(
                 document_tree=document_trees_by_document_id.get(document_id),
             )
             batches = _build_objective_paper_frame_batches(
-                extractor=extractor,
+                source_screener=source_screener,
                 payload=payload,
             )
             batch_results: list[tuple[Mapping[str, Any], str, tuple[str, ...]]] = []
@@ -300,7 +583,7 @@ def screen_sources(
                     )
                 else:
                     try:
-                        parsed = extractor.assess_objective_paper(batch_payload)
+                        parsed = source_screener.screen_batch(batch_payload)
                         batch_results.append(
                             (
                                 parsed.model_dump(),
@@ -439,7 +722,7 @@ def _build_objective_paper_frame_payload(
 
 def _build_objective_paper_frame_batches(
     *,
-    extractor: ObjectiveExtractor,
+    source_screener: ObjectiveSourceScreener,
     payload: Mapping[str, Any],
 ) -> tuple[tuple[dict[str, Any], int | None], ...]:
     base_payload = {
@@ -459,7 +742,7 @@ def _build_objective_paper_frame_batches(
 
     def estimate(candidate: dict[str, Any]) -> int | None:
         try:
-            return extractor.estimate_objective_paper_frame_prompt_tokens(candidate)
+            return source_screener.estimate_prompt_tokens(candidate)
         except Exception:  # noqa: BLE001
             logger.warning(
                 "Research objective paper framing token preflight failed",

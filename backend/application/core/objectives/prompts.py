@@ -3,25 +3,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v2"
 OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION = "objective_evidence_route.v1"
 OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v4"
 FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v12"
-
-_OBJECTIVE_PAPER_FRAME_SYSTEM_PROMPT = """
-You are the source-relevance judge for one bounded neighborhood of a paper under one confirmed research objective.
-
-Non-negotiable rules:
-- This is bounded source-candidate classification, not whole-paper summarization or final fact extraction.
-- Return exactly one JSON object and nothing else.
-- Copy every supplied `source_unit_id` exactly once into either `relevant_source_unit_ids` or `excluded_source_unit_ids`.
-- Never invent, rewrite, omit, or duplicate a source-unit id.
-- Treat uncertain candidates as relevant so the downstream evidence router can inspect them.
-- Do not emit measurement results, sample variants, evidence anchors, source text, or persistence ids.
-- Do not infer material systems from filenames.
-- Judge only the supplied neighborhood; omitted paper sources are outside this batch.
-""".strip()
-
 
 _OBJECTIVE_EVIDENCE_ROUTE_SYSTEM_PROMPT = """
 You are routing source units for one research objective in an evidence-backed literature comparison backend.
@@ -221,44 +205,6 @@ Return exactly `{"findings":[]}` or one object shaped as
 `"context_evidence_ids":[],"mechanisms":[]}]}`. Use empty arrays when
 annotations are absent and no extra keys.
 """.strip()
-
-
-def build_objective_paper_frame_prompt(
-    payload: dict[str, Any],
-) -> tuple[str, str]:
-    user_prompt = (
-        "TASK MODEL\n"
-        "Perform bounded source-candidate classification for downstream objective-scoped evidence routing. "
-        "This request contains one partial neighborhood, not the whole paper.\n\n"
-        "INPUT SCHEMA\n"
-        "- `collection_id`: backend scope identity; it is not scientific evidence and must not be returned.\n"
-        "- `objective`: the confirmed comparison question and scientific axes.\n"
-        "- `document`: backend metadata; the filename is not scientific evidence.\n"
-        "- `document_profile`: backend document-type metadata; it is a routing hint, not authority over visible source text.\n"
-        "- `paper_prior`: compact PaperSkim study context linked to the objective; it is a hint, not authority over visible source text.\n"
-        "- `source_units`: current section chunks and table-row chunks. Each has a backend-owned `source_unit_id`, kind, stable source reference, and visible scientific content.\n\n"
-        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "DECISION PROCESS\n"
-        "1. Read the objective variables, outcomes, material scope, constraints, and comparator.\n"
-        "2. For each source unit independently, decide whether it may contain direct results, changed-variable context, material/sample/test context, mechanism context, or a useful table for that objective.\n"
-        "3. Put useful or uncertain candidates in `relevant_source_unit_ids`; put only clearly unrelated, review-only, composition-only, or generic background candidates in `excluded_source_unit_ids`.\n"
-        "4. Summarize only scientific scope supported by the current relevant candidates.\n"
-        "5. Set batch `relevance` and `paper_role` from current evidence and `paper_prior`. Do not infer whole-paper irrelevance from facts absent in this partial neighborhood.\n\n"
-        "BOUNDARY EXAMPLES\n"
-        "- A Methods section defining the objective variable but not reporting the outcome is relevant.\n"
-        "- A Results table using a symbol or abbreviation for an objective axis is relevant when headers, caption, or cells establish that meaning.\n"
-        "- A literature-comparison table without current-work results is excluded unless the objective explicitly asks for literature comparison.\n"
-        "- Shared material alone does not make generic composition or background text relevant.\n\n"
-        "SAME-SCHEMA EXAMPLE\n"
-        "Example input: "
-        '{"collection_id":"col-example","objective":{"variables":["laser power"],"outcomes":["relative density"]},"document":{"document_id":"paper-example"},"document_profile":{"doc_type":"experimental"},"paper_prior":{"doc_role":"experimental"},"source_units":[{"source_unit_id":"unit-methods","source_kind":"section","text":"Laser power was varied."},{"source_unit_id":"unit-composition","source_kind":"table","caption_text":"Nominal composition."}]}\n'
-        "Example output: "
-        '{"relevance":"medium","paper_role":"primary_experiment","background":"The current batch defines the changed process variable.","material_match":[],"changed_variables":["laser power"],"measured_property_scope":[],"test_environment_scope":[],"relevant_source_unit_ids":["unit-methods"],"excluded_source_unit_ids":["unit-composition"]}\n\n'
-        "OUTPUT CONTRACT\n"
-        "Return only schema-valid structured data. Every input `source_unit_id` must appear exactly once across `relevant_source_unit_ids` and `excluded_source_unit_ids`. "
-        "Keep `background` concise and return no source text or reasoning transcript."
-    )
-    return _OBJECTIVE_PAPER_FRAME_SYSTEM_PROMPT, user_prompt
 
 
 def build_objective_evidence_route_prompt(

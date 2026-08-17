@@ -17,7 +17,10 @@ from application.core.objectives.analysis.paper_experiment import (
     reconstruct_paper_experiments,
 )
 from application.core.objectives.analysis.source_extraction import extract_source_facts
-from application.core.objectives.analysis.source_screening import screen_sources
+from application.core.objectives.analysis.source_screening import (
+    ObjectiveSourceScreener,
+    screen_sources,
+)
 from application.core.objectives.discovery.axis_equivalence import (
     ResearchAxisEquivalenceClassifier,
 )
@@ -103,6 +106,7 @@ class ResearchObjectiveService:
         objective_candidate_service: ObjectiveCandidateService,
         objective_extractor: ObjectiveExtractor | None = None,
         axis_equivalence_classifier: ResearchAxisEquivalenceClassifier | None = None,
+        objective_source_screener: ObjectiveSourceScreener | None = None,
         paper_study_window_extractor: PaperStudyWindowExtractor | None = None,
         paper_signal_reconciler: PaperSignalReconciler | None = None,
         paper_facts_extractor: PaperFactsExtractor | None = None,
@@ -110,6 +114,7 @@ class ResearchObjectiveService:
         self.collection_service = collection_service
         self._objective_extractor = objective_extractor
         self._axis_equivalence_classifier = axis_equivalence_classifier
+        self._objective_source_screener = objective_source_screener
         self._paper_study_window_extractor = paper_study_window_extractor
         self._paper_signal_reconciler = paper_signal_reconciler
         self._paper_facts_extractor = paper_facts_extractor
@@ -229,9 +234,13 @@ class ResearchObjectiveService:
             created_at=active_objective.created_at,
             updated_at=active_objective.updated_at,
         )
+        if self._objective_source_screener is None:
+            self._objective_source_screener = ObjectiveSourceScreener(
+                objective_inputs["extractor"]
+            )
         paper_frames = screen_sources(
             collection_id=collection_id,
-            extractor=objective_inputs["extractor"],
+            source_screener=self._objective_source_screener,
             objectives=(objective,),
             paper_skims=objective_inputs["paper_skims"],
             documents=objective_inputs["documents"],

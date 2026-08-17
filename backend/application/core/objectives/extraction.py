@@ -15,17 +15,14 @@ from application.core.objectives.prompts import (
     FINDING_SYNTHESIS_PROMPT_VERSION,
     OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION,
     OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION,
-    OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
     build_finding_synthesis_prompt,
     build_objective_evidence_prompt,
     build_objective_evidence_route_prompt,
-    build_objective_paper_frame_prompt,
 )
 from application.core.objectives.schemas import (
     StructuredEvidenceExtractions,
     StructuredEvidenceSelections,
     StructuredFindingSynthesis,
-    StructuredPaperFrameBatch,
 )
 from application.core.structured_extraction.json_support import (
     coerce_message_content,
@@ -41,8 +38,6 @@ logger = logging.getLogger(__name__)
 _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
-_OBJECTIVE_PAPER_FRAME_MAX_COMPLETION_TOKENS = 1024
-OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT = 12_288
 _OBJECTIVE_EVIDENCE_SELECTION_MAX_COMPLETION_TOKENS = 512
 _OBJECTIVE_EVIDENCE_MAX_COMPLETION_TOKENS = 2048
 _FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS = 1024
@@ -110,119 +105,6 @@ class ObjectiveExtractor:
             separators=(",", ":"),
         )
         return len(encoding.encode(serialized_messages))
-
-    def assess_objective_paper(
-        self,
-        payload: dict[str, Any],
-    ) -> StructuredPaperFrameBatch:
-        system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
-        source_accounting_errors: list[str] = []
-
-        source_unit_ids = tuple(
-            str(item.get("source_unit_id") or "").strip()
-            for item in payload.get("source_units") or ()
-            if isinstance(item, Mapping)
-            and str(item.get("source_unit_id") or "").strip()
-        )
-        if not source_unit_ids or len(source_unit_ids) != len(set(source_unit_ids)):
-            raise ValueError("objective paper framing requires unique source-unit ids")
-
-        def record_source_accounting_error(error: Exception) -> None:
-            detail = str(error).strip()
-            if not detail or not any(
-                marker in detail
-                for marker in (
-                    "objective paper frame must account",
-                    "paper frame source-unit ids",
-                )
-            ):
-                return
-            if detail not in source_accounting_errors:
-                source_accounting_errors.append(detail)
-
-        def validate_source_accounting(parsed: BaseModel) -> BaseModel:
-            if not isinstance(parsed, StructuredPaperFrameBatch):
-                raise TypeError("unexpected objective paper frame response type")
-            returned_ids = (
-                *parsed.relevant_source_unit_ids,
-                *parsed.excluded_source_unit_ids,
-            )
-            missing_ids = [
-                source_unit_id
-                for source_unit_id in source_unit_ids
-                if source_unit_id not in returned_ids
-            ]
-            unknown_ids = [
-                source_unit_id
-                for source_unit_id in returned_ids
-                if source_unit_id not in source_unit_ids
-            ]
-            if missing_ids or unknown_ids:
-                raise ValueError(
-                    "objective paper frame must account for every source-unit id "
-                    "exactly once; "
-                    f"expected_source_unit_ids={list(source_unit_ids)}; "
-                    f"missing_source_unit_ids={missing_ids}; "
-                    f"unknown_source_unit_ids={unknown_ids}"
-                )
-            return parsed
-
-        def build_repair_instruction(repair_detail: str) -> str:
-            return (
-                "Previous objective paper framing output had invalid source-unit "
-                f"accounting: {repair_detail}. Return only one compact JSON object. "
-                "Partition this exact ID list once and only once between "
-                "relevant_source_unit_ids and excluded_source_unit_ids: "
-                f"{json.dumps(source_unit_ids, ensure_ascii=True)}. Copy every ID "
-                "verbatim; do not omit, duplicate, shorten, or invent an ID. Treat "
-                "an uncertain source as relevant."
-            )
-
-        def parse_json_text(**kwargs: Any) -> tuple[BaseModel, str | None]:
-            return self.complete_json(
-                **kwargs,
-                repair_instruction_builder=build_repair_instruction,
-                parsed_validator=validate_source_accounting,
-                validation_error_observer=record_source_accounting_error,
-            )
-
-        try:
-            response = self.complete(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                response_model=StructuredPaperFrameBatch,
-                max_completion_tokens=_OBJECTIVE_PAPER_FRAME_MAX_COMPLETION_TOKENS,
-                json_text_parser=parse_json_text,
-                parsed_validator=validate_source_accounting,
-                validation_error_observer=record_source_accounting_error,
-                task_type="objective_paper_frame",
-                prompt_version=OBJECTIVE_PAPER_FRAME_PROMPT_VERSION,
-            )
-        except Exception as exc:
-            if not source_accounting_errors:
-                raise
-            raise ValueError(
-                "objective paper frame source accounting repair failed; "
-                f"initial_errors={source_accounting_errors}; final_error={exc}"
-            ) from exc
-        if not isinstance(response, StructuredPaperFrameBatch):
-            raise TypeError("unexpected objective paper frame response type")
-        if source_accounting_errors:
-            response.record_source_accounting_repair(source_accounting_errors)
-        return response
-
-    def estimate_objective_paper_frame_prompt_tokens(
-        self,
-        payload: dict[str, Any],
-    ) -> int:
-        """Count the complete schema-bearing objective framing prompt."""
-
-        system_prompt, user_prompt = build_objective_paper_frame_prompt(payload)
-        return self.estimate_prompt_tokens(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredPaperFrameBatch,
-        )
 
     def select_objective_evidence(
         self,

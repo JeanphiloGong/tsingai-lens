@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Iterable, Literal, Mapping
+from typing import Literal
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    PrivateAttr,
     ValidationInfo,
     field_validator,
     model_validator,
@@ -18,17 +17,6 @@ PAPER_OBJECTIVE_CANDIDATE_OUTPUT_LIMITS = {
     "process_context": (4, 80),
     "variables": (4, 80),
     "outcomes": (8, 80),
-}
-_OBJECTIVE_FRAME_RELEVANCE = {"high", "medium", "low", "irrelevant", "uncertain"}
-_OBJECTIVE_FRAME_PAPER_ROLES = {
-    "primary_experiment",
-    "supporting_method",
-    "supporting_background",
-    "review",
-    "modeling_only",
-    "irrelevant",
-    "mixed",
-    "uncertain",
 }
 _OBJECTIVE_EVIDENCE_ROUTE_ROLES = {
     "current_experimental_evidence",
@@ -111,110 +99,6 @@ class _StrictModel(BaseModel):
             return value
         return cls.model_fields["epistemic_status"].get_default(
             call_default_factory=True
-        )
-
-
-class StructuredPaperFrameBatch(_StrictModel):
-    _source_accounting_origin: Literal["model", "repair"] = PrivateAttr(
-        default="model"
-    )
-    _source_accounting_errors: tuple[str, ...] = PrivateAttr(default=())
-
-    relevance: Literal["high", "medium", "low", "irrelevant", "uncertain"] = (
-        "uncertain"
-    )
-    paper_role: Literal[
-        "primary_experiment",
-        "supporting_method",
-        "supporting_background",
-        "review",
-        "modeling_only",
-        "irrelevant",
-        "mixed",
-        "uncertain",
-    ] = "uncertain"
-    background: str | None = Field(default=None, max_length=320)
-    material_match: list[Annotated[str, Field(max_length=120)]] = Field(
-        default_factory=list,
-        max_length=8,
-    )
-    changed_variables: list[Annotated[str, Field(max_length=120)]] = Field(
-        default_factory=list,
-        max_length=8,
-    )
-    measured_property_scope: list[Annotated[str, Field(max_length=120)]] = Field(
-        default_factory=list,
-        max_length=8,
-    )
-    test_environment_scope: list[Annotated[str, Field(max_length=160)]] = Field(
-        default_factory=list,
-        max_length=8,
-    )
-    relevant_source_unit_ids: list[Annotated[str, Field(max_length=200)]] = Field(
-        default_factory=list,
-        max_length=8,
-    )
-    excluded_source_unit_ids: list[Annotated[str, Field(max_length=200)]] = Field(
-        default_factory=list,
-        max_length=8,
-    )
-
-    @field_validator(
-        "material_match",
-        "changed_variables",
-        "measured_property_scope",
-        "test_environment_scope",
-        "relevant_source_unit_ids",
-        "excluded_source_unit_ids",
-        mode="before",
-    )
-    @classmethod
-    def _normalize_lists(cls, value: object) -> object:
-        return _normalize_list_container(value)
-
-    @model_validator(mode="after")
-    def _validate_source_partition(self) -> "StructuredPaperFrameBatch":
-        relevant = self.relevant_source_unit_ids
-        excluded = self.excluded_source_unit_ids
-        if len(relevant) != len(set(relevant)) or len(excluded) != len(set(excluded)):
-            raise ValueError("paper frame source-unit ids must be unique")
-        if set(relevant) & set(excluded):
-            raise ValueError("paper frame source-unit ids cannot be both relevant and excluded")
-        return self
-
-    @property
-    def source_accounting_origin(self) -> Literal["model", "repair"]:
-        return self._source_accounting_origin
-
-    @property
-    def source_accounting_errors(self) -> tuple[str, ...]:
-        return self._source_accounting_errors
-
-    def record_source_accounting_repair(
-        self,
-        errors: Iterable[str],
-    ) -> None:
-        self._source_accounting_origin = "repair"
-        self._source_accounting_errors = tuple(
-            str(error).strip() for error in errors if str(error).strip()
-        )
-
-    @field_validator("relevance", mode="before")
-    @classmethod
-    def _normalize_relevance(cls, value: object) -> str:
-        return _normalize_underscored_choice(
-            value,
-            allowed=_OBJECTIVE_FRAME_RELEVANCE,
-            default="uncertain",
-        )
-
-    @field_validator("paper_role", mode="before")
-    @classmethod
-    def _normalize_paper_role(cls, value: object) -> str:
-        return _normalize_underscored_choice(
-            value,
-            allowed=_OBJECTIVE_FRAME_PAPER_ROLES,
-            default="uncertain",
         )
 
 

@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.objectives.analysis.source_screening import (
+    StructuredPaperFrameBatch,
+)
 from application.core.objectives.discovery.axis_equivalence import (
     StructuredAxisCanonicalizationPlan,
 )
@@ -17,7 +20,6 @@ from application.core.objectives.schemas import (
     StructuredEvidenceSelections,
     StructuredFindingSynthesis,
     StructuredFindingSynthesisItem,
-    StructuredPaperFrameBatch,
 )
 
 
@@ -68,12 +70,6 @@ class FakeObjectiveExtractor:
         self.finding_payloads: list[dict[str, Any]] = []
 
     def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
-        return 0
-
-    def estimate_objective_paper_frame_prompt_tokens(
-        self,
-        payload: dict[str, Any],
-    ) -> int:
         return 0
 
     def extract_document_profile(
@@ -146,7 +142,7 @@ class FakeObjectiveExtractor:
             ]
         )
 
-    def assess_objective_paper(
+    def screen_batch(
         self,
         payload: dict[str, Any],
     ) -> StructuredPaperFrameBatch:

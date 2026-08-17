@@ -4,6 +4,9 @@ import re
 from typing import Any
 
 from application.core.document_profiles.schemas import StructuredDocumentProfile
+from application.core.objectives.analysis.source_screening import (
+    StructuredPaperFrameBatch,
+)
 from application.core.objectives.discovery.axis_equivalence import (
     StructuredAxisCanonicalizationPlan,
 )
@@ -16,7 +19,6 @@ from application.core.objectives.schemas import (
     StructuredEvidenceExtractions,
     StructuredEvidenceSelection,
     StructuredEvidenceSelections,
-    StructuredPaperFrameBatch,
 )
 from application.core.paper_facts.schemas import (
     MeasurementValuePayload,
@@ -272,7 +274,7 @@ class FakeDomainModelExtractor:
             ]
         )
 
-    def assess_objective_paper(
+    def screen_batch(
         self,
         payload: dict[str, Any],
     ) -> StructuredPaperFrameBatch:
@@ -349,12 +351,6 @@ class FakeDomainModelExtractor:
             relevant_source_unit_ids=relevant_source_unit_ids,
             excluded_source_unit_ids=excluded_source_unit_ids,
         )
-
-    def estimate_objective_paper_frame_prompt_tokens(
-        self,
-        payload: dict[str, Any],
-    ) -> int:
-        return 0
 
     def select_objective_evidence(
         self,

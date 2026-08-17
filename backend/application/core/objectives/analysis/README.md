@@ -29,9 +29,11 @@ Read the analysis responsibilities in real research order:
    responsibility slice moves here.
 
 `source_screening.py` owns complete Source-unit accounting, bounded framing
-batches, prompt preflight, model/repaired/fallback dispositions, and frame
-aggregation. Later stages may consume a frame, but they may not reinterpret a
-screening decision as scientific Evidence.
+batches, the screening prompt and response schema, prompt preflight, bounded
+repair, model/repaired/fallback dispositions, and frame aggregation. Its
+`ObjectiveSourceScreener` performs only the current bounded relevance judgment.
+Later stages may consume a frame, but they may not reinterpret a screening
+decision as scientific Evidence.
 
 `evidence_routing.py` owns transient route records, Source-tree candidate
 ordering, model or deterministic route decisions, selection hints, and the

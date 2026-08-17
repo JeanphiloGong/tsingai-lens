@@ -8,7 +8,7 @@ PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION = "paper_signal_reconciliation.v3"
 RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = "research_axis_canonicalization.v1"
 OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v2"
 OBJECTIVE_EVIDENCE_ROUTE_PROMPT_VERSION = "objective_evidence_route.v1"
-OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v3"
+OBJECTIVE_EVIDENCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v4"
 FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v12"
 
 _RESEARCH_OBJECTIVE_SYSTEM_PROMPT = """
@@ -85,11 +85,13 @@ Non-negotiable rules:
 
 _OBJECTIVE_EVIDENCE_SYSTEM_PROMPT = """
 TASK MODEL
-Extract at most one objective-relevant fact from one selected source unit. This
-is evidence extraction, not routing, summarization, or Finding synthesis.
+Extract at most one objective-relevant, source-local fact from one selected
+source unit. This is evidence extraction, not routing, whole-paper joining,
+terminology canonicalization, summarization, or Finding synthesis.
 
 INPUT SCHEMA AND AUTHORITY
-- `OBJECTIVE` limits relevance and allowed outcomes; it is not evidence.
+- `OBJECTIVE` limits relevance and allowed outcomes; its variable and outcome
+  names are not evidence and must not be copied when absent from SOURCE.
 - `ROUTE HINT` is only a selection hint.
 - `SOURCE` is the only scientific authority for every returned value.
 
@@ -98,28 +100,38 @@ DECISION PROCESS
    context, return `{"extractions":[]}`.
 2. Context source: choose its context role and return no changed variables, no
    comparison, no reported result, and `not_attributable`.
-3. Result source: include exactly one `reported_result`. One extraction represents
-   one baseline-to-target comparison interval. Identify every changed factor and
-   use exact source group labels or values as endpoints. If SOURCE reports a
-   condition series, choose one complete source-supported pair. Never convert an
-   absent, off, or without condition to numeric 0; retain the exact source phrase
-   as a categorical endpoint with a null unit. The canonical OBJECTIVE outcome may
-   appear under inflected, narrower, or synonymous SOURCE wording; keep the
-   canonical name in `reported_result.outcome` but copy the exact source-local
-   result clause into `result_text`. A complete comparison may bind endpoint
-   phrases stated in separate sentences of the same SOURCE unit.
-4. Never repeat a changed-variable name. Use `isolated_effect` only for one
+3. Result source: include exactly one `reported_result`. Keep the exact concise
+   SOURCE term for the measured outcome in `reported_result.outcome`; the backend
+   canonicalizes it to the OBJECTIVE only after grounding. Copy one short verbatim
+   result clause into `result_text`.
+4. Return a changed variable only when this SOURCE explicitly names the factor and
+   its baseline and target endpoints. Never borrow a factor or endpoint from the
+   OBJECTIVE, ROUTE HINT, another section, or general scientific knowledge. If this
+   SOURCE compares explicit group labels such as Sample S1 and Sample S2 but their
+   process definitions are elsewhere, return no changed variables, keep those exact
+   labels in `comparison`, use only a SOURCE-local grouping axis such as `sample`,
+   and use `association_only`. The backend may bind another grounded Source later.
+5. One extraction represents one baseline-to-target comparison interval. If SOURCE
+   reports a condition series, choose one complete source-supported pair. Never
+   convert an absent, off, or without condition to numeric 0; retain the exact
+   source phrase as a categorical endpoint with a null unit. A complete comparison
+   may bind endpoint phrases stated in separate sentences of the same SOURCE unit.
+6. Never repeat a changed-variable name. Use `isolated_effect` only for one
    distinct changed factor with a complete comparable baseline/target comparison.
    Use `joint_effect` for two or more distinct changed factors. Otherwise use
    `association_only`, `descriptive_only`, or `not_attributable`. Parameters with
    identical baseline and target values are fixed context, never changed variables
    or comparison axes.
-5. Return empty output rather than inventing a missing binding.
+7. Return empty output rather than inventing a missing result or useful context.
 
 HARD RULES
 - Return exactly one compact JSON object with one top-level key: `extractions`.
 - Return at most one extraction. Never repeat the input or output reasoning,
   markdown, source ids, or backend ids.
+- Every scientific term, group label, value, unit, and context attribute must be
+  present in this SOURCE. Preserve source-local wording until backend
+  canonicalization; do not replace a narrow observed outcome with a broader
+  OBJECTIVE label.
 - `result_text` is the only source text allowed in output and must be a short
   verbatim substring: one contiguous span copied from SOURCE. Never synthesize it
   from separate clauses or copy wording from a boundary example.
@@ -140,7 +152,13 @@ Context source:
 Categorical endpoint and source-local outcome wording:
 OBJECTIVE OUTCOME: crack formation
 SOURCE: Cracks were abundant without preheating. Application of preheating largely reduces this cracking behavior, though cracks remain after preheating at 400 C.
-OUTPUT: {"extractions":[{"evidence_role":"direct_result","changed_variables":[{"name":"preheating","baseline_value":"without preheating","target_value":"preheating at 400 C","unit":null}],"comparison":{"baseline_label":"without preheating","target_label":"preheating at 400 C","axis_names":["preheating"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"crack formation","value":null,"unit":null,"direction":"decrease","result_text":"Application of preheating largely reduces this cracking behavior"},"attribution_scope":"isolated_effect","scientific_context":{"material":[],"sample":[],"process":[],"test":[]},"resolution_status":"resolved","confidence":0.9}]}
+OUTPUT: {"extractions":[{"evidence_role":"direct_result","changed_variables":[{"name":"preheating","baseline_value":"without preheating","target_value":"preheating at 400 C","unit":null}],"comparison":{"baseline_label":"without preheating","target_label":"preheating at 400 C","axis_names":["preheating"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"cracking behavior","value":null,"unit":null,"direction":"decrease","result_text":"Application of preheating largely reduces this cracking behavior"},"attribution_scope":"isolated_effect","scientific_context":{"material":[],"sample":[],"process":[],"test":[]},"resolution_status":"resolved","confidence":0.9}]}
+
+Result groups whose process definitions are in another Source:
+OBJECTIVE VARIABLES: laser power, scanning speed
+OBJECTIVE OUTCOME: microstructure
+SOURCE: Sample S1 showed equiaxed grains, whereas S2 displayed a cellular-dendritic microstructure.
+OUTPUT: {"extractions":[{"evidence_role":"direct_result","changed_variables":[],"comparison":{"baseline_label":"S1","target_label":"S2","axis_names":["sample"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"cellular-dendritic microstructure","value":null,"unit":null,"direction":"mixed","result_text":"S2 displayed a cellular-dendritic microstructure"},"attribution_scope":"association_only","scientific_context":{},"resolution_status":"partial","confidence":0.85}]}
 
 Joint result source:
 {"extractions":[{"evidence_role":"direct_result","changed_variables":[{"name":"laser power","baseline_value":100,"target_value":200,"unit":"W"},{"name":"scan speed","baseline_value":500,"target_value":900,"unit":"mm/s"}],"comparison":{"baseline_label":"A","target_label":"B","axis_names":["laser power","scan speed"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"relative density","value":98.0,"unit":"%","direction":"increase","result_text":"relative density increased to 98.0%"},"attribution_scope":"joint_effect","scientific_context":{"material":[],"sample":[],"process":[],"test":[]},"resolution_status":"resolved","confidence":0.9}]}

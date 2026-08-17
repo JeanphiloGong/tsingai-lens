@@ -571,25 +571,8 @@ class ObjectiveExtractor:
     def extract_objective_evidence(
         self,
         payload: dict[str, Any],
-        *,
-        invalid_extraction: Mapping[str, Any] | None = None,
-        validation_errors: Iterable[str] = (),
     ) -> StructuredEvidenceExtractions:
         system_prompt, user_prompt = build_objective_evidence_prompt(payload)
-        repair_errors = tuple(
-            str(error).strip() for error in validation_errors if str(error).strip()
-        )
-        if invalid_extraction is not None:
-            user_prompt = (
-                f"{user_prompt}\n\n"
-                + self._objective_evidence_repair_instruction(
-                    repair_detail="; ".join(repair_errors)
-                    or "the extraction failed deterministic Source grounding",
-                    invalid_extraction=invalid_extraction,
-                )
-            )
-        elif repair_errors:
-            raise ValueError("Evidence repair errors require an invalid extraction")
         response = self._parse_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -1226,6 +1209,27 @@ class ObjectiveExtractor:
                     normalized_extraction["comparison"] = normalized_comparison
                     changed = True
             comparison = normalized_extraction.get("comparison")
+            complete_variable_names = complete_changed_variable_names(
+                changed_variables
+            )
+            if (
+                extraction.get("reported_result") is not None
+                and extraction.get("attribution_scope")
+                in {"isolated_effect", "joint_effect"}
+                and not complete_variable_names
+            ):
+                normalized_extraction["attribution_scope"] = (
+                    "association_only"
+                    if isinstance(comparison, Mapping)
+                    and comparison.get("comparable") is True
+                    else (
+                        "not_attributable"
+                        if isinstance(comparison, Mapping)
+                        else "descriptive_only"
+                    )
+                )
+                normalized_extraction["resolution_status"] = "partial"
+                changed = True
             comparison_has_no_axes = (
                 isinstance(comparison, Mapping)
                 and isinstance(comparison.get("axis_names"), list)

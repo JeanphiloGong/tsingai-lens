@@ -2298,44 +2298,8 @@ def test_domain_model_extractors_validates_objective_evidence_response():
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
 
 
-def test_objective_evidence_grounding_repair_keeps_original_source_prompt():
-    client = _FakeOpenAIClient(
-        """
-        {
-          "extractions": [
-            {
-              "evidence_role": "direct_result",
-              "changed_variables": [
-                {
-                  "name": "laser power",
-                  "baseline_value": 100,
-                  "target_value": 140,
-                  "unit": "W"
-                }
-              ],
-              "comparison": {
-                "baseline_label": "100 W",
-                "target_label": "140 W",
-                "axis_names": ["laser power"],
-                "comparable": true,
-                "incomparability_reasons": []
-              },
-              "reported_result": {
-                "outcome": "relative density",
-                "value": 98.05,
-                "unit": "%",
-                "direction": "increase",
-                "result_text": "Relative density increased to 98.05%."
-              },
-              "attribution_scope": "isolated_effect",
-              "scientific_context": {},
-              "resolution_status": "resolved",
-              "confidence": 0.9
-            }
-          ]
-        }
-        """
-    )
+def test_objective_evidence_extractor_has_no_grounding_repair_call_contract():
+    client = _FakeOpenAIClient('{"extractions":[]}')
     extractor = _objective_extractor(client)
     payload = {
         "collection_id": "col-1",
@@ -2353,33 +2317,13 @@ def test_objective_evidence_grounding_repair_keeps_original_source_prompt():
             ),
         },
     }
-    invalid_extraction = {
-        "changed_variables": [
-            {
-                "name": "laser power",
-                "baseline_value": 100,
-                "target_value": 160,
-                "unit": "W",
-            }
-        ]
-    }
+    with pytest.raises(TypeError, match="invalid_extraction"):
+        extractor.extract_objective_evidence(
+            payload,
+            invalid_extraction={"changed_variables": []},
+        )
 
-    parsed = extractor.extract_objective_evidence(
-        payload,
-        invalid_extraction=invalid_extraction,
-        validation_errors=(
-            "changed_variables[0].target_value=160 is not grounded in SOURCE",
-        ),
-    )
-
-    assert parsed.extractions[0].changed_variables[0].target_value == 140
-    assert len(client.chat.completions.calls) == 1
-    user_prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
-    assert payload["source"]["text"] in user_prompt
-    assert "TASK\nRepair one invalid Evidence extraction" in user_prompt
-    assert "changed_variables[0].target_value=160" in user_prompt
-    assert '"target_value":160' in user_prompt
-    assert "Correct only values supported by SOURCE" in user_prompt
+    assert client.chat.completions.calls == []
 
 
 def test_structured_objective_evidence_normalizes_compact_context_attributes():
@@ -2759,7 +2703,7 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     )
     contract = " ".join(system_prompt.split())
 
-    assert "Extract at most one objective-relevant fact" in contract
+    assert "Extract at most one objective-relevant, source-local fact" in contract
     assert "`SOURCE` is the only scientific authority" in contract
     assert "Return at most one extraction" in contract
     assert "one top-level key: `extractions`" in contract
@@ -2771,8 +2715,8 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     assert "document_state" not in prompt
     assert "must not become evidence" not in prompt
     assert "must not be copied" not in prompt
-    assert "Identify every changed" in contract
-    assert "exact source group labels" in contract
+    assert "Return a changed variable only when this SOURCE explicitly names" in contract
+    assert "The backend may bind another grounded Source later" in contract
     assert "absent, off, or without condition to numeric 0" in contract
     assert "one baseline-to-target comparison interval" in contract
     assert "Never repeat a changed-variable name" in contract
@@ -3087,6 +3031,7 @@ def test_objective_evidence_prompt_requires_verbatim_outcome_bound_result_text()
     )
 
     contract = f"{system_prompt}\n{user_prompt}"
+    normalized_contract = " ".join(contract.split())
 
     assert "verbatim substring" in contract
     assert "direction describes the objective outcome" in contract
@@ -3095,6 +3040,10 @@ def test_objective_evidence_prompt_requires_verbatim_outcome_bound_result_text()
     assert "`incomparability_reasons` must be empty" in contract
     assert "Conditions from cited literature" in contract
     assert "identical baseline and target values are fixed context" in contract
+    assert "Keep the exact concise SOURCE term" in normalized_contract
+    assert "must not be copied when absent from SOURCE" in normalized_contract
+    assert "cellular-dendritic microstructure" in normalized_contract
+    assert '"changed_variables":[]' in normalized_contract
     assert "TASK MODEL" in system_prompt
     assert "INPUT SCHEMA" in system_prompt
     assert "DECISION PROCESS" in system_prompt
@@ -3490,6 +3439,54 @@ def test_objective_evidence_does_not_invent_axes_for_incomplete_variables(
     normalized = ObjectiveExtractor._normalize_objective_evidence_payload(payload)
 
     assert normalized == payload
+
+
+def test_objective_evidence_demotes_unbound_experimental_result_without_repair():
+    payload = {
+        "extractions": [
+            {
+                "evidence_role": "direct_result",
+                "changed_variables": [
+                    {
+                        "name": "laser power",
+                        "baseline_value": None,
+                        "target_value": 120,
+                        "unit": "W",
+                    }
+                ],
+                "comparison": {
+                    "baseline_label": "lower laser power",
+                    "target_label": "120 W",
+                    "axis_names": ["laser power"],
+                    "comparable": True,
+                },
+                "reported_result": {
+                    "outcome": "density",
+                    "value": None,
+                    "unit": None,
+                    "direction": "increase",
+                    "result_text": "Average density increased with scan speed.",
+                },
+                "attribution_scope": "isolated_effect",
+                "scientific_context": {},
+                "resolution_status": "resolved",
+                "confidence": 0.8,
+            }
+        ]
+    }
+
+    normalized = ObjectiveExtractor._normalize_objective_evidence_payload(payload)
+
+    extraction = normalized["extractions"][0]
+    assert extraction["attribution_scope"] == "association_only"
+    assert extraction["resolution_status"] == "partial"
+    assert extraction["changed_variables"] == payload["extractions"][0][
+        "changed_variables"
+    ]
+    assert extraction["comparison"] == payload["extractions"][0]["comparison"]
+    assert extraction["reported_result"] == payload["extractions"][0][
+        "reported_result"
+    ]
 
 
 @pytest.mark.parametrize(

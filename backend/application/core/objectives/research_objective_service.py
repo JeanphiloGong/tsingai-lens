@@ -846,10 +846,23 @@ class ResearchObjectiveService:
             )
         result = payload.get("reported_result")
         if isinstance(result, dict):
-            result["outcome"] = canonical(
-                result.get("outcome"),
-                objective.outcomes,
-            )[0]
+            source_outcome = result.get("outcome")
+            canonical_outcome = canonical(source_outcome, objective.outcomes)[1]
+            if canonical_outcome is None:
+                broad_matches = tuple(
+                    axis
+                    for axis in objective.outcomes
+                    if property_matching.property_matches_target_axes(
+                        source_outcome,
+                        target_axes=(
+                            axis,
+                            *property_matching.broad_outcome_expansions(axis),
+                        ),
+                    )
+                )
+                if len(broad_matches) == 1:
+                    canonical_outcome = broad_matches[0]
+            result["outcome"] = canonical_outcome or str(source_outcome or "").strip()
         if (
             payload.get("attribution_scope") == "joint_effect"
             and len(canonical_variables) == 1
@@ -2331,40 +2344,16 @@ class ResearchObjectiveService:
                 if extraction_error is None:
                     try:
                         parsed = extractor.extract_objective_evidence(payload)
-                        try:
-                            llm_route_records = tuple(
-                                record
-                                for item in parsed.extractions
-                                for record in self._objective_evidence_records_from_extracted(
-                                    route=route,
-                                    source=source,
-                                    objective_context=objective_context,
-                                    extracted_record=item.model_dump(),
-                                    raise_on_grounding_error=True,
-                                )
+                        llm_route_records = tuple(
+                            record
+                            for item in parsed.extractions
+                            for record in self._objective_evidence_records_from_extracted(
+                                route=route,
+                                source=source,
+                                objective_context=objective_context,
+                                extracted_record=item.model_dump(),
                             )
-                        except ValueError as grounding_error:
-                            invalid_extraction = parsed.extractions[0].model_dump()
-                            repaired = extractor.extract_objective_evidence(
-                                payload,
-                                invalid_extraction=invalid_extraction,
-                                validation_errors=tuple(
-                                    str(error) for error in grounding_error.args
-                                ),
-                            )
-                            if not repaired.extractions:
-                                raise grounding_error
-                            llm_route_records = tuple(
-                                record
-                                for item in repaired.extractions
-                                for record in self._objective_evidence_records_from_extracted(
-                                    route=route,
-                                    source=source,
-                                    objective_context=objective_context,
-                                    extracted_record=item.model_dump(),
-                                    raise_on_grounding_error=True,
-                                )
-                            )
+                        )
                     except Exception as exc:
                         extraction_error = exc
                         provider_unavailable = _provider_is_temporarily_unavailable(exc)
@@ -2385,15 +2374,6 @@ class ResearchObjectiveService:
                             provider_unavailable,
                         )
                     else:
-                        if (
-                            parsed.extractions
-                            and not llm_route_records
-                            and not route_records
-                        ):
-                            extraction_error = ValueError(
-                                "model evidence was rejected because it was not "
-                                "grounded in the selected Source"
-                            )
                         route_records = self._objective_merge_table_repair_records(
                             deterministic_records=route_records,
                             llm_records=llm_route_records,
@@ -3270,6 +3250,29 @@ class ResearchObjectiveService:
                 deduped.append(dict(ref))
         return tuple(deduped)
 
+    @staticmethod
+    def _objective_source_refs_with_supports(
+        source_refs: tuple[dict[str, Any], ...],
+        *supports: str,
+    ) -> tuple[dict[str, Any], ...]:
+        annotated: list[dict[str, Any]] = []
+        for source_ref in source_refs:
+            record = dict(source_ref)
+            record["supports"] = list(
+                dict.fromkeys(
+                    (
+                        *(support for support in supports if support),
+                        *(
+                            str(value)
+                            for value in source_ref.get("supports", ())
+                            if str(value).strip()
+                        ),
+                    )
+                )
+            )
+            annotated.append(record)
+        return tuple(annotated)
+
 
     def _objective_numeric_match_tokens(self, value: Any) -> tuple[str, ...]:
         tokens: list[str] = []
@@ -3283,6 +3286,32 @@ class ResearchObjectiveService:
             else:
                 tokens.append(("%f" % number).rstrip("0").rstrip("."))
         return tuple(tokens)
+
+    @staticmethod
+    def _objective_descriptive_result(
+        unit: ExtractedEvidenceDraft,
+        *,
+        reason: str,
+    ) -> ExtractedEvidenceDraft:
+        payload = unit.to_record()
+        payload["changed_variables"] = []
+        payload["comparison"] = None
+        payload["attribution_scope"] = "descriptive_only"
+        payload["resolution_status"] = "partial"
+        payload["selection_reason"] = reason
+        payload["source_refs"] = [
+            {
+                **ref,
+                "supports": [
+                    value
+                    for value in ref.get("supports", ())
+                    if not str(value).startswith("comparison")
+                    and value != "changed_variables"
+                ],
+            }
+            for ref in unit.source_refs
+        ]
+        return ExtractedEvidenceDraft.from_mapping(payload)
 
     def _bind_objective_result_process_context(
         self,
@@ -3317,13 +3346,31 @@ class ResearchObjectiveService:
         for unit in units:
             comparison = unit.comparison
             scope = (unit.objective_id, unit.document_id)
-            if (
+            pending_process_binding = bool(
+                unit.source_kind == "text_window"
+                and unit.reported_result is not None
+                and comparison is not None
+                and not unit.changed_variables
+            )
+            source_claims_effect = bool(
                 unit.source_kind == "text_window"
                 and unit.reported_result is not None
                 and comparison is not None
                 and unit.attribution_scope in {"isolated_effect", "joint_effect"}
                 and scope in process_context_scopes
-            ):
+            )
+            if pending_process_binding or source_claims_effect:
+                if scope not in process_context_scopes:
+                    bound.append(
+                        self._objective_descriptive_result(
+                            unit,
+                            reason=(
+                                "Grounded result has no same-document process "
+                                "context for its comparison groups."
+                            ),
+                        )
+                    )
+                    continue
                 baseline_key = (
                     unit.objective_id,
                     unit.document_id,
@@ -3343,6 +3390,17 @@ class ResearchObjectiveService:
                     and target_key not in conflicting_samples
                 )
                 if not groups_are_grounded:
+                    if pending_process_binding:
+                        bound.append(
+                            self._objective_descriptive_result(
+                                unit,
+                                reason=(
+                                    "Grounded result comparison groups do not bind "
+                                    "to unambiguous same-document process conditions."
+                                ),
+                            )
+                        )
+                        continue
                     payload = unit.to_record()
                     payload["changed_variables"] = []
                     comparison_payload = comparison.to_record()
@@ -3449,8 +3507,16 @@ class ResearchObjectiveService:
                     self._dedupe_objective_source_refs(
                         (
                             unit.source_refs,
-                            baseline_context.source_refs,
-                            target_context.source_refs,
+                            self._objective_source_refs_with_supports(
+                                baseline_context.source_refs,
+                                "changed_variables",
+                                "comparison.axis_names",
+                            ),
+                            self._objective_source_refs_with_supports(
+                                target_context.source_refs,
+                                "changed_variables",
+                                "comparison.axis_names",
+                            ),
                         )
                     )
                 )
@@ -4696,7 +4762,6 @@ class ResearchObjectiveService:
         source: dict[str, Any],
         objective_context: ResearchObjective | None,
         extracted_record: dict[str, Any],
-        raise_on_grounding_error: bool = False,
     ) -> tuple[dict[str, Any], ...]:
         record = self._objective_complete_extracted_variable_endpoints(
             extracted_record,
@@ -4782,14 +4847,60 @@ class ResearchObjectiveService:
             record["changed_variables"] = []
             record["comparison"] = None
         if isinstance(reported_result, Mapping):
-            grounding_errors = self._objective_evidence_grounding_errors(
+            source_text = self._objective_source_grounding_text(source)
+            result_grounding_errors = self._objective_evidence_result_grounding_errors(
                 record,
                 source=source,
+                source_text=source_text,
             )
-            if grounding_errors:
-                if raise_on_grounding_error:
-                    raise ValueError(*grounding_errors)
+            if result_grounding_errors:
                 return ()
+            variable_grounding_errors = (
+                self._objective_evidence_variable_grounding_errors(
+                    record,
+                    source=source,
+                    source_text=source_text,
+                )
+            )
+            comparison_grounding_errors = (
+                self._objective_evidence_comparison_grounding_errors(
+                    record,
+                    source_text=source_text,
+                )
+            )
+            if (
+                not variable_grounding_errors
+                and not comparison_grounding_errors
+                and source.get("source_kind") == "table"
+                and source.get("table_matrix")
+                and not self._objective_extracted_table_result_is_row_grounded(
+                    record,
+                    source=source,
+                )
+            ):
+                return ()
+            if variable_grounding_errors or comparison_grounding_errors:
+                record["changed_variables"] = []
+                record["resolution_status"] = "partial"
+                if comparison_grounding_errors:
+                    record["comparison"] = None
+                    record["attribution_scope"] = "descriptive_only"
+                    record["selection_reason"] = (
+                        "Grounded result retained without a source-grounded "
+                        "comparison binding."
+                    )
+                else:
+                    comparison = record.get("comparison")
+                    record["attribution_scope"] = (
+                        "association_only"
+                        if isinstance(comparison, Mapping)
+                        and comparison.get("comparable") is True
+                        else "not_attributable"
+                    )
+                    record["selection_reason"] = (
+                        "Grounded result retained pending same-study process "
+                        "context binding."
+                    )
             outcome = property_matching.normalize_objective_unit_property(
                 reported_result.get("outcome"),
                 objective_context=objective_context,
@@ -4815,6 +4926,20 @@ class ResearchObjectiveService:
                 for group in ("material", "sample", "process", "test")
             ):
                 return ()
+        supported_fields: list[str] = []
+        if record.get("changed_variables"):
+            supported_fields.extend(("changed_variables", "comparison.axis_names"))
+        if isinstance(record.get("comparison"), Mapping):
+            supported_fields.append("comparison.labels")
+        if isinstance(record.get("reported_result"), Mapping):
+            supported_fields.append("reported_result")
+        scientific_context = record.get("scientific_context")
+        if isinstance(scientific_context, Mapping):
+            supported_fields.extend(
+                f"scientific_context.{group}"
+                for group in ("material", "sample", "process", "test")
+                if scientific_context.get(group)
+            )
         record.update(
             {
                 "objective_id": route.objective_id,
@@ -4822,6 +4947,7 @@ class ResearchObjectiveService:
                 "source_refs": self._objective_route_source_refs(
                     route=route,
                     source=source,
+                    supports=tuple(supported_fields),
                 ),
             }
         )
@@ -4919,6 +5045,45 @@ class ResearchObjectiveService:
         source_text = self._objective_source_grounding_text(source)
         if not source_text:
             return ("source has no text or table content for grounding",)
+        errors = [
+            *self._objective_evidence_variable_grounding_errors(
+                record,
+                source=source,
+                source_text=source_text,
+            ),
+            *self._objective_evidence_comparison_grounding_errors(
+                record,
+                source_text=source_text,
+            ),
+            *self._objective_evidence_result_grounding_errors(
+                record,
+                source=source,
+                source_text=source_text,
+            ),
+        ]
+        if (
+            not errors
+            and source.get("source_kind") == "table"
+            and source.get("table_matrix")
+            and record.get("reported_result") is not None
+            and not self._objective_extracted_table_result_is_row_grounded(
+                record,
+                source=source,
+            )
+        ):
+            errors.append(
+                "table_rows do not bind the reported result to the selected "
+                "comparison endpoints in SOURCE"
+            )
+        return tuple(errors)
+
+    def _objective_evidence_variable_grounding_errors(
+        self,
+        record: Mapping[str, Any],
+        *,
+        source: Mapping[str, Any],
+        source_text: str,
+    ) -> tuple[str, ...]:
         errors: list[str] = []
         for position, variable in enumerate(record.get("changed_variables") or ()):
             path = f"changed_variables[{position}]"
@@ -4946,9 +5111,37 @@ class ResearchObjectiveService:
                 errors.append(
                     f"{path}.unit={variable_unit!r} is not grounded in SOURCE"
                 )
+        return tuple(errors)
+
+    def _objective_evidence_comparison_grounding_errors(
+        self,
+        record: Mapping[str, Any],
+        *,
+        source_text: str,
+    ) -> tuple[str, ...]:
+        comparison = record.get("comparison")
+        if not isinstance(comparison, Mapping):
+            return ()
+        errors: list[str] = []
+        for field in ("baseline_label", "target_label"):
+            value = comparison.get(field)
+            if not self._objective_value_is_source_grounded(value, source_text):
+                errors.append(
+                    f"comparison.{field}={value!r} is not grounded in SOURCE"
+                )
+        return tuple(errors)
+
+    def _objective_evidence_result_grounding_errors(
+        self,
+        record: Mapping[str, Any],
+        *,
+        source: Mapping[str, Any],
+        source_text: str,
+    ) -> tuple[str, ...]:
         reported_result = record.get("reported_result")
         if not isinstance(reported_result, Mapping):
-            return tuple(errors)
+            return ()
+        errors: list[str] = []
         outcome = reported_result.get("outcome")
         if not self._objective_axis_is_source_grounded(
             outcome,
@@ -4986,19 +5179,6 @@ class ResearchObjectiveService:
             errors.append(
                 "reported_result.result_text="
                 f"{result_text!r} is not grounded in SOURCE"
-            )
-        if (
-            not errors
-            and source.get("source_kind") == "table"
-            and source.get("table_matrix")
-            and not self._objective_extracted_table_result_is_row_grounded(
-                record,
-                source=source,
-            )
-        ):
-            errors.append(
-                "table_rows do not bind the reported result to the selected "
-                "comparison endpoints in SOURCE"
             )
         return tuple(errors)
 
@@ -5173,7 +5353,7 @@ class ResearchObjectiveService:
         axis = str(value or "").strip()
         if not axis:
             return False
-        if property_matching.axis_label_is_mentioned(source_text, axis):
+        if property_matching.source_text_mentions_axis(source_text, axis):
             return True
         labels = [
             *source.get("column_headers", ()),
@@ -5453,6 +5633,7 @@ class ResearchObjectiveService:
         col_index: int | None = None,
         header_path: str | None = None,
         source_excerpt: str | None = None,
+        supports: tuple[str, ...] = (),
     ) -> tuple[dict[str, Any], ...]:
         ref = {
             "source_kind": route.source_kind,
@@ -5464,6 +5645,7 @@ class ResearchObjectiveService:
             "col_index": col_index,
             "header_path": header_path,
             "source_excerpt": source_excerpt,
+            "supports": list(supports),
         }
         return (
             {

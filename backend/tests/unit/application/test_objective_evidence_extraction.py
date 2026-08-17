@@ -1497,247 +1497,377 @@ def test_llm_objective_evidence_rejects_values_and_axis_absent_from_source(tmp_p
     assert records == ()
 
 
-def test_research_objective_records_failed_evidence_when_model_item_is_ungrounded(
-    tmp_path,
-):
-    class UngroundedEvidenceExtractor:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, Any]] = []
+class _StudySourceEvidenceExtractor:
+    def __init__(
+        self,
+        records_by_source_ref: dict[str, dict[str, Any] | None],
+        *,
+        failing_source_ref: str | None = None,
+    ) -> None:
+        self.records_by_source_ref = records_by_source_ref
+        self.failing_source_ref = failing_source_ref
+        self.calls: list[str] = []
 
-        def extract_objective_evidence(
-            self,
-            payload,
-            *,
-            invalid_extraction=None,
-            validation_errors=(),
-        ):
-            self.calls.append(
-                {
-                    "payload": payload,
-                    "invalid_extraction": invalid_extraction,
-                    "validation_errors": validation_errors,
-                }
-            )
-            target_value = 160 if invalid_extraction is None else 180
-            return StructuredEvidenceExtractions.model_validate(
-                {
-                    "extractions": [
-                        {
-                            "evidence_role": "direct_result",
-                            "changed_variables": [
-                                {
-                                    "name": "laser power",
-                                    "baseline_value": 100,
-                                    "target_value": target_value,
-                                    "unit": "W",
-                                }
-                            ],
-                            "comparison": {
-                                "baseline_label": "100 W",
-                                "target_label": f"{target_value} W",
-                                "axis_names": ["laser power"],
-                                "comparable": True,
-                            },
-                            "reported_result": {
-                                "outcome": "relative density",
-                                "value": 98.05,
-                                "unit": "%",
-                                "direction": "increase",
-                                "result_text": (
-                                    "Relative density increased from 97.83% to 98.05%."
-                                ),
-                            },
-                            "attribution_scope": "isolated_effect",
-                            "scientific_context": {},
-                            "resolution_status": "resolved",
-                            "confidence": 0.9,
-                        }
-                    ]
-                }
-            )
+    def extract_objective_evidence(self, payload):
+        source_ref = str(payload["source"]["source_ref"])
+        self.calls.append(source_ref)
+        if source_ref == self.failing_source_ref:
+            raise RuntimeError("objective evidence provider unavailable")
+        record = self.records_by_source_ref[source_ref]
+        return StructuredEvidenceExtractions.model_validate(
+            {"extractions": [record] if record is not None else []}
+        )
 
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
-    objective = _research_objective(
+
+def _study_source_route(objective_id: str, source_ref: str) -> EvidenceCandidate:
+    return EvidenceCandidate.from_mapping(
         {
-            "objective_id": "obj-density",
-            "variables": ["laser power"],
-            "outcomes": ["relative density"],
-        }
-    )
-    route = EvidenceCandidate.from_mapping(
-        {
-            "objective_id": objective.objective_id,
+            "objective_id": objective_id,
             "document_id": "paper-1",
             "source_kind": "text_window",
-            "source_ref": "block-1",
+            "source_ref": source_ref,
             "role": "current_experimental_evidence",
             "extractable": True,
             "confidence": 0.9,
         }
     )
-    block = SimpleNamespace(
-        block_id="block-1",
+
+
+def _study_source_block(source_ref: str, heading: str, text: str, page: int):
+    return SimpleNamespace(
+        block_id=source_ref,
         document_id="paper-1",
-        page=3,
+        page=page,
         block_type="paragraph",
-        heading_path="Results",
-        text=(
-            "At laser powers of 100 W and 140 W, relative density increased "
-            "from 97.83% to 98.05%."
-        ),
-    )
-    extractor = UngroundedEvidenceExtractor()
-
-    units = service._build_objective_evidence(
-        collection_id="col-test",
-        extractor=extractor,
-        objectives=(objective,),
-        paper_skims=(),
-        objective_paper_frames=(),
-        objective_evidence_routes=(route,),
-        blocks_by_document_id={"paper-1": [block]},
-        tables_by_document_id={"paper-1": []},
-        document_trees_by_document_id={},
-    )
-
-    assert len(units) == 1
-    assert units[0].source_ref == "block-1"
-    assert units[0].selection_status == "failed"
-    assert units[0].failure_reason is not None
-    assert "changed_variables[0].target_value=180" in units[0].failure_reason
-    assert "not grounded in the selected Source" not in units[0].failure_reason
-    assert len(extractor.calls) == 2
-    assert extractor.calls[1]["payload"]["source"]["source_ref"] == "block-1"
-    assert extractor.calls[1]["invalid_extraction"]["changed_variables"][0][
-        "target_value"
-    ] == 160
-    assert any(
-        "changed_variables[0].target_value=160" in error
-        for error in extractor.calls[1]["validation_errors"]
+        heading_path=heading,
+        text=text,
     )
 
 
-def test_research_objective_repairs_one_ungrounded_field_against_same_source(
-    tmp_path,
-):
-    class RepairingEvidenceExtractor:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, Any]] = []
+def _cross_source_microstructure_records() -> dict[str, dict[str, Any]]:
+    def condition(sample: str, power: int, speed: int) -> dict[str, Any]:
+        return {
+            "evidence_role": "condition_context",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": None,
+            "attribution_scope": "not_attributable",
+            "scientific_context": {
+                "sample": [{"name": "sample", "value": sample}],
+                "process": [
+                    {"name": "laser power", "value": power, "unit": "W"},
+                    {
+                        "name": "scanning speed",
+                        "value": speed,
+                        "unit": "mm/s",
+                    },
+                ],
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.93,
+        }
 
-        def extract_objective_evidence(
-            self,
-            payload,
-            *,
-            invalid_extraction=None,
-            validation_errors=(),
-        ):
-            self.calls.append(
+    return {
+        "01-methods-s1": condition("S1", 180, 600),
+        "02-methods-s2": condition("S2", 240, 900),
+        "03-results": {
+            "evidence_role": "direct_result",
+            "changed_variables": [
                 {
-                    "payload": payload,
-                    "invalid_extraction": invalid_extraction,
-                    "validation_errors": validation_errors,
-                }
-            )
-            target_value = 160 if invalid_extraction is None else 140
-            return StructuredEvidenceExtractions.model_validate(
+                    "name": "laser power",
+                    "baseline_value": 180,
+                    "target_value": 240,
+                    "unit": "W",
+                },
                 {
-                    "extractions": [
-                        {
-                            "evidence_role": "direct_result",
-                            "changed_variables": [
-                                {
-                                    "name": "laser power",
-                                    "baseline_value": 100,
-                                    "target_value": target_value,
-                                    "unit": "W",
-                                }
-                            ],
-                            "comparison": {
-                                "baseline_label": "100 W",
-                                "target_label": f"{target_value} W",
-                                "axis_names": ["laser power"],
-                                "comparable": True,
-                            },
-                            "reported_result": {
-                                "outcome": "relative density",
-                                "value": 98.05,
-                                "unit": "%",
-                                "direction": "increase",
-                                "result_text": (
-                                    "Relative density increased from 97.83% to 98.05%."
-                                ),
-                            },
-                            "attribution_scope": "isolated_effect",
-                            "scientific_context": {},
-                            "resolution_status": "resolved",
-                            "confidence": 0.9,
-                        }
-                    ]
-                }
-            )
+                    "name": "scanning speed",
+                    "baseline_value": 600,
+                    "target_value": 900,
+                    "unit": "mm/s",
+                },
+            ],
+            "comparison": {
+                "baseline_label": "S1",
+                "target_label": "S2",
+                "axis_names": ["laser power", "scanning speed"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "cellular-dendritic microstructure",
+                "value": None,
+                "unit": None,
+                "direction": "mixed",
+                "result_text": "S2 displayed a cellular-dendritic microstructure",
+            },
+            "attribution_scope": "joint_effect",
+            "scientific_context": {},
+            "resolution_status": "resolved",
+            "confidence": 0.91,
+        },
+    }
 
+
+def test_research_objective_binds_same_study_methods_and_results_sources(tmp_path):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
     objective = _research_objective(
         {
-            "objective_id": "obj-density",
-            "variables": ["laser power"],
-            "outcomes": ["relative density"],
+            "objective_id": "obj-microstructure",
+            "question": (
+                "How do laser power and scanning speed affect microstructure?"
+            ),
+            "variables": ["laser power", "scanning speed"],
+            "outcomes": ["microstructure"],
         }
     )
-    route = EvidenceCandidate.from_mapping(
-        {
-            "objective_id": objective.objective_id,
-            "document_id": "paper-1",
-            "source_kind": "text_window",
-            "source_ref": "block-1",
-            "role": "current_experimental_evidence",
-            "extractable": True,
-            "confidence": 0.9,
-        }
-    )
-    block = SimpleNamespace(
-        block_id="block-1",
-        document_id="paper-1",
-        page=3,
-        block_type="paragraph",
-        heading_path="Results",
-        text=(
-            "At laser powers of 100 W and 140 W, relative density increased "
-            "from 97.83% to 98.05%."
+    blocks = [
+        _study_source_block(
+            "01-methods-s1",
+            "Methods",
+            "Sample S1 used laser power 180 W and scanning speed 600 mm/s.",
+            2,
         ),
-    )
-    extractor = RepairingEvidenceExtractor()
-
-    units = service._build_objective_evidence(
-        collection_id="col-test",
-        extractor=extractor,
-        objectives=(objective,),
-        paper_skims=(),
-        objective_paper_frames=(),
-        objective_evidence_routes=(route,),
-        blocks_by_document_id={"paper-1": [block]},
-        tables_by_document_id={"paper-1": []},
-        document_trees_by_document_id={},
-    )
-
-    assert len(units) == 1
-    assert units[0].selection_status == "extracted"
-    assert units[0].source_ref == "block-1"
-    assert units[0].changed_variables[0].target_value == 140
-    assert len(extractor.calls) == 2
-    assert extractor.calls[0]["payload"]["source"] == extractor.calls[1]["payload"][
-        "source"
+        _study_source_block(
+            "02-methods-s2",
+            "Methods",
+            "Sample S2 used laser power 240 W and scanning speed 900 mm/s.",
+            2,
+        ),
+        _study_source_block(
+            "03-results",
+            "Results",
+            (
+                "Sample S1 showed equiaxed grains, whereas S2 displayed a "
+                "cellular-dendritic microstructure."
+            ),
+            6,
+        ),
     ]
-    assert extractor.calls[1]["invalid_extraction"]["changed_variables"][0][
-        "target_value"
-    ] == 160
-    assert any(
-        "changed_variables[0].target_value=160" in error
-        for error in extractor.calls[1]["validation_errors"]
+    extractor = _StudySourceEvidenceExtractor(
+        _cross_source_microstructure_records()
+    )
+
+    routes = tuple(
+        _study_source_route(objective.objective_id, block.block_id)
+        for block in blocks
+    )
+    drafts = service._build_objective_evidence(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        paper_skims=(),
+        objective_paper_frames=(),
+        objective_evidence_routes=routes,
+        blocks_by_document_id={"paper-1": blocks},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={},
+    )
+
+    assert extractor.calls == ["01-methods-s1", "02-methods-s2", "03-results"]
+    assert not any(draft.selection_status == "failed" for draft in drafts)
+    result_draft = next(draft for draft in drafts if draft.reported_result is not None)
+    assert result_draft.attribution_scope == "joint_effect"
+    assert [variable.to_record() for variable in result_draft.changed_variables] == [
+        {
+            "name": "laser power",
+            "baseline_value": 180,
+            "target_value": 240,
+            "unit": "W",
+        },
+        {
+            "name": "scanning speed",
+            "baseline_value": 600,
+            "target_value": 900,
+            "unit": "mm/s",
+        },
+    ]
+    assert {
+        (ref["source_ref"], tuple(ref.get("supports", ())))
+        for ref in result_draft.source_refs
+    } == {
+        (
+            "01-methods-s1",
+            (
+                "changed_variables",
+                "comparison.axis_names",
+                "scientific_context.sample",
+                "scientific_context.process",
+            ),
+        ),
+        (
+            "02-methods-s2",
+            (
+                "changed_variables",
+                "comparison.axis_names",
+                "scientific_context.sample",
+                "scientific_context.process",
+            ),
+        ),
+        ("03-results", ("comparison.labels", "reported_result")),
+    }
+
+    analysis = ObjectiveAnalysis(
+        collection_id="col-test",
+        objective_id=objective.objective_id,
+        analysis_version=1,
+        source_build_id="build-test",
+        pipeline_version="test.v1",
+        model_name="test-model",
+        prompt_versions={},
+    )
+    evidence_records = service._analysis_evidence_records(
+        collection_id="col-test",
+        analysis=analysis,
+        objective=objective,
+        drafts=drafts,
+        blocks_by_document_id={"paper-1": blocks},
+        tables_by_document_id={"paper-1": []},
+        figures_by_document_id={"paper-1": []},
+    )
+    result_evidence = next(
+        evidence for evidence in evidence_records if evidence.reported_result is not None
+    )
+    assert result_evidence.reported_result.outcome == "microstructure"
+    assert len(result_evidence.related_source_refs) == 3
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+        }
+    )
+    contributions = service._analysis_contributions(
+        collection_id="col-test",
+        analysis=analysis,
+        objective=objective,
+        frames=(frame,),
+        routes=routes,
+        evidence_records=evidence_records,
+    )
+
+    assert len(contributions) == 1
+    assert contributions[0].evidence_disposition == "comparable_evidence"
+    assert contributions[0].routed_source_count == 3
+    assert contributions[0].extracted_source_count == 3
+    assert contributions[0].comparable_evidence_count == 1
+    assert contributions[0].failed_source_count == 0
+
+
+def test_research_objective_keeps_unbound_result_as_descriptive_evidence(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-microstructure",
+            "variables": ["laser power", "scanning speed"],
+            "outcomes": ["microstructure"],
+        }
+    )
+    result_block = _study_source_block(
+        "03-results",
+        "Results",
+        (
+            "Sample S1 showed equiaxed grains, whereas S2 displayed a "
+            "cellular-dendritic microstructure."
+        ),
+        6,
+    )
+    extractor = _StudySourceEvidenceExtractor(
+        {"03-results": _cross_source_microstructure_records()["03-results"]}
+    )
+
+    drafts = service._build_objective_evidence(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        paper_skims=(),
+        objective_paper_frames=(),
+        objective_evidence_routes=(
+            _study_source_route(objective.objective_id, result_block.block_id),
+        ),
+        blocks_by_document_id={"paper-1": [result_block]},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={},
+    )
+
+    assert extractor.calls == ["03-results"]
+    assert len(drafts) == 1
+    assert drafts[0].selection_status == "extracted"
+    assert drafts[0].reported_result is not None
+    assert drafts[0].changed_variables == ()
+    assert drafts[0].comparison is None
+    assert drafts[0].attribution_scope == "descriptive_only"
+    assert drafts[0].resolution_status == "partial"
+
+
+def test_research_objective_abstains_without_target_result(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective({"objective_id": "obj-microstructure"})
+    block = _study_source_block(
+        "03-background",
+        "Introduction",
+        "Additive manufacturing is widely used for metal components.",
+        1,
+    )
+    extractor = _StudySourceEvidenceExtractor({"03-background": None})
+
+    drafts = service._build_objective_evidence(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        paper_skims=(),
+        objective_paper_frames=(),
+        objective_evidence_routes=(
+            _study_source_route(objective.objective_id, block.block_id),
+        ),
+        blocks_by_document_id={"paper-1": [block]},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={},
+    )
+
+    assert drafts == ()
+
+
+def test_research_objective_records_provider_failure_as_failed_evidence(tmp_path):
+    service = _build_research_objective_service(
+        collection_service=build_test_collection_service(tmp_path / "collections"),
+    )
+    objective = _research_objective({"objective_id": "obj-microstructure"})
+    block = _study_source_block(
+        "03-results",
+        "Results",
+        "S2 displayed a cellular-dendritic microstructure.",
+        6,
+    )
+    extractor = _StudySourceEvidenceExtractor(
+        {"03-results": None},
+        failing_source_ref="03-results",
+    )
+
+    drafts = service._build_objective_evidence(
+        collection_id="col-test",
+        extractor=extractor,
+        objectives=(objective,),
+        paper_skims=(),
+        objective_paper_frames=(),
+        objective_evidence_routes=(
+            _study_source_route(objective.objective_id, block.block_id),
+        ),
+        blocks_by_document_id={"paper-1": [block]},
+        tables_by_document_id={"paper-1": []},
+        document_trees_by_document_id={},
+    )
+
+    assert len(drafts) == 1
+    assert drafts[0].selection_status == "failed"
+    assert drafts[0].failure_reason == (
+        "RuntimeError: objective evidence provider unavailable"
     )
 
 
@@ -2282,7 +2412,9 @@ def test_llm_objective_evidence_repairs_endpoints_to_grounded_group_labels(tmp_p
     ]
 
 
-def test_llm_objective_evidence_does_not_complete_labels_absent_from_source(tmp_path):
+def test_llm_objective_evidence_keeps_result_without_labels_absent_from_source(
+    tmp_path,
+):
     service = _build_research_objective_service(
         collection_service=build_test_collection_service(tmp_path / "collections"),
     )
@@ -2345,7 +2477,12 @@ def test_llm_objective_evidence_does_not_complete_labels_absent_from_source(tmp_
         },
     )
 
-    assert records == ()
+    assert len(records) == 1
+    assert records[0]["reported_result"]["outcome"] == "microstructure"
+    assert records[0]["changed_variables"] == []
+    assert records[0]["comparison"] is None
+    assert records[0]["attribution_scope"] == "descriptive_only"
+    assert records[0]["resolution_status"] == "partial"
 
 
 def test_llm_table_result_rejects_outcome_and_unit_from_another_column(tmp_path):

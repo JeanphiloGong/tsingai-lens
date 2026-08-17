@@ -250,39 +250,45 @@ Source selection and extraction are one persisted Evidence lifecycle:
 `candidate -> selected -> extracted | rejected | failed`. Selection decisions
 may be transient, but only `ObjectiveEvidence` is durable.
 
-Each model call may return zero or one Evidence extraction for the selected
-Source. If that item fails structural or scientific-contract validation, the
-extractor permits at most two sequential bounded repairs against the same Source.
-Each repair includes the latest invalid item and its field-level validation
-errors, so a second repair can address a contract error exposed by the first.
-Repair may correct structure or abstain, but it must not invent endpoints,
-units, context, or comparison groups. The backend does not change comparability
-or attribution merely to make an item pass validation. A named parameter with
-identical, non-empty scalar baseline and target values is fixed scientific
-context, not a changed variable. At the model adapter boundary, the backend
-removes such a parameter from `changed_variables` and `comparison.axis_names`.
-When that removal leaves exactly one changed variable from a `joint_effect`
-draft, the backend derives `isolated_effect`; endpoint completeness, comparison
-parity, comparability, and Source grounding remain strict validation
-requirements. When every named variable is fixed, the backend removes the
-comparison and retains the reported result only as `descriptive_only`; normal
-Source-grounding validation still follows, and the backend does not claim an
-experimental effect from unchanged conditions. Because
-`comparison.axis_names` repeats the changed-variable
+Each model call may return zero or one source-local Evidence extraction for the
+selected Source. The extractor permits at most two sequential bounded repairs
+for malformed JSON or schema-invalid output against that same Source; it does
+not expose a second semantic-grounding call. A named parameter with identical,
+non-empty scalar baseline and target values is fixed scientific context, not a
+changed variable. At the model adapter boundary, the backend removes such a
+parameter from `changed_variables` and `comparison.axis_names`. When that
+removal leaves exactly one changed variable from a `joint_effect` draft, the
+backend derives `isolated_effect`. When every named variable is fixed, the
+backend removes the comparison and retains a grounded reported result as
+`descriptive_only`. Because `comparison.axis_names` repeats changed-variable
 identity, the adapter restores a missing or empty axis list only when every
 changed variable has a unique non-empty name and complete, distinct endpoints.
-Incomplete variables still enter bounded repair; the backend does not infer an
-axis from domain knowledge. A non-empty model result that survives schema
-validation but fails Source grounding receives deterministic field-path errors
-for unsupported variable names, endpoints, units, outcomes, values, result text,
-or table-row bindings. The service permits one additional repair call with the
-same Objective, route, Source, invalid item, and field errors. The model may
-correct only values explicitly present in that Source or abstain; the backend
-never deletes or
-substitutes scientific values merely to make the item pass. A repaired item goes
-through the complete contract and Source-grounding checks again. A failed repair
-or abstention becomes explicit failed Evidence with the final field-level reason
-instead of disappearing from paper accounting.
+When a result is present but an `isolated_effect` or `joint_effect` response has
+no complete changed-variable interval, the adapter preserves the source-local
+result and group labels but demotes the attribution to `association_only` or
+`descriptive_only`; it never asks schema repair to invent the missing endpoint.
+The backend never infers an axis or scientific value from Objective text.
+
+After schema validation, the service grounds the reported result, comparison
+labels, changed variables, and scientific context independently against their
+owning Source. An unsupported result is discarded as abstention. A grounded
+result with unsupported variables or comparison fields survives as partial,
+descriptive Evidence instead of becoming a technical failure. After all routed
+Sources for the document have been inspected, the service may bind that result
+to process conditions from other Sources in the same document only when the
+result names explicit baseline and target samples and both sample identities
+resolve to unambiguous process contexts. A successful binding derives the
+changed-variable endpoints from those condition Sources and preserves the
+result and comparison labels from the result Source. Missing or conflicting
+sample bindings remain `descriptive_only`; no cross-document binding or semantic
+LLM repair is attempted.
+
+Every related Source locator records a `supports` list naming the scientific
+field families owned by that Source, such as `reported_result`,
+`comparison.labels`, `changed_variables`, or `scientific_context.process`.
+Provider, transport, or unrecoverable structured-output errors remain technical
+failures and produce explicit failed Evidence. A Source with no grounded target
+result or useful context is an abstention and does not produce failed Evidence.
 
 Final Evidence materialization enforces zero or one durable record for each
 `objective_id + document_id + source_kind + source_ref`. This boundary covers

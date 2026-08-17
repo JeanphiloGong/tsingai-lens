@@ -3,9 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from application.core.objectives import property_matching
+from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from application.core.objectives.evidence_routing import EvidenceCandidate
 from application.core.objectives.research_objective_service import (
-    PaperAnalysisFrame,
     SourceSelectionHint,
 )
 from domain.source import SourceDocumentNode, SourceDocumentTree
@@ -15,6 +15,8 @@ from tests.support.objective_extractor import (
 )
 from tests.support.research_objective_service import (
     build_research_objective_service as _build_research_objective_service,
+)
+from tests.support.research_objective_service import (
     research_objective as _research_objective,
 )
 

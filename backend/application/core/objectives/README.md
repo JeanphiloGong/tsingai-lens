@@ -8,17 +8,18 @@ Objective analysis.
 - `research_objective_service.py`
   Orchestrates candidate discovery persistence and runs confirmed Objective
   analysis. It loads the immutable Source build, delegates candidate discovery
-  to the two direct owners below, and atomically replaces the candidate fact
-  set. Confirmed analysis traverses Source document trees with bounded
-  transient state, emits one `PaperContribution` for every framed document,
-  and emits `ObjectiveEvidence` records containing exact excerpts and typed
-  Source locators. Extractable routes retain tree order within each document
-  and run round-robin across documents. Provider suppression is scoped to one
-  Objective/document, and paper-level evidence accounting is derived only after
-  durable Evidence is constructed. Framing, routing, and extraction consume the
-  persisted ResearchObjective variables, outcomes, mechanisms, constraints,
-  and requested comparator directly. Table-selection hints remain transient
-  service values.
+  to its direct owners, and atomically replaces the candidate fact set. For a
+  confirmed Objective, it coordinates the ordered analysis stages and consumes
+  their transient results. The remaining routing, extraction, reconstruction,
+  materialization, and publication responsibilities move to direct owners in
+  separate behavior-preserving slices.
+- `analysis/source_screening.py`
+  Owns confirmed-Objective Source screening from paper inputs to ordered
+  `PaperAnalysisFrame` results. It traverses Source document trees, constructs
+  bounded framing batches, accounts for every Source unit, and preserves
+  model, repair, and conservative fallback provenance. A screening decision
+  means that a Source should or should not be inspected; it is not proof that
+  the Source contains usable Evidence.
 - `paper_skim_service.py`
   Owns the per-document discovery stage. It assigns every eligible
   non-reference text node, table row, and table/figure caption to one full

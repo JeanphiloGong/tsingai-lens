@@ -9,12 +9,13 @@ from httpx import Request, Response
 from openai import BadRequestError
 
 from application.core.objectives import property_matching
+from application.core.objectives.analysis import source_screening
+from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
+from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
+from application.core.objectives.evidence_routing import EvidenceCandidate
 from application.core.objectives.extraction import (
     OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
 )
-from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
-from application.core.objectives.evidence_routing import EvidenceCandidate
-from application.core.objectives.research_objective_service import PaperAnalysisFrame
 from application.core.objectives.schemas import (
     StructuredEvidenceExtractions,
     StructuredPaperFrameBatch,
@@ -25,6 +26,8 @@ from domain.source import SourceDocumentNode, SourceDocumentTree, SourceTable
 from tests.support.collection_service import build_test_collection_service
 from tests.support.research_objective_service import (
     build_research_objective_service as _build_research_objective_service,
+)
+from tests.support.research_objective_service import (
     research_objective as _research_objective,
 )
 
@@ -335,12 +338,7 @@ def test_research_objective_text_source_payload_uses_document_tree(tmp_path):
     }
 
 
-def test_objective_paper_frame_payload_keeps_all_tree_sections_with_stable_ids(
-    tmp_path,
-):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_paper_frame_payload_keeps_all_tree_sections_with_stable_ids():
     objective = _research_objective(
         {
             "objective_id": "obj-texture-yield",
@@ -446,7 +444,7 @@ def test_objective_paper_frame_payload_keeps_all_tree_sections_with_stable_ids(
         nodes=nodes,
     )
 
-    payload = service._build_objective_paper_frame_payload(
+    payload = source_screening._build_objective_paper_frame_payload(
         collection_id="col-test",
         objective=objective,
         paper_skim=None,
@@ -481,12 +479,7 @@ def test_objective_paper_frame_payload_keeps_all_tree_sections_with_stable_ids(
     assert "objective_context" not in payload
 
 
-def test_objective_paper_frame_payload_gives_unsectioned_chunks_unique_ids(
-    tmp_path,
-):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_paper_frame_payload_gives_unsectioned_chunks_unique_ids():
     source_text = "Relative density changed with laser power. " * 200
     document_tree = SourceDocumentTree(
         document_id="paper-1",
@@ -515,7 +508,7 @@ def test_objective_paper_frame_payload_gives_unsectioned_chunks_unique_ids(
         },
     )
 
-    payload = service._build_objective_paper_frame_payload(
+    payload = source_screening._build_objective_paper_frame_payload(
         collection_id="col-test",
         objective=_research_objective(
             {
@@ -545,10 +538,7 @@ def test_objective_paper_frame_payload_gives_unsectioned_chunks_unique_ids(
     ).split() == source_text.split()
 
 
-def test_objective_paper_frame_payload_keeps_root_text_beside_sections(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_paper_frame_payload_keeps_root_text_beside_sections():
     document_tree = SourceDocumentTree(
         document_id="paper-1",
         collection_id="col-test",
@@ -597,7 +587,7 @@ def test_objective_paper_frame_payload_keeps_root_text_beside_sections(tmp_path)
         },
     )
 
-    payload = service._build_objective_paper_frame_payload(
+    payload = source_screening._build_objective_paper_frame_payload(
         collection_id="col-test",
         objective=_research_objective(
             {
@@ -627,12 +617,7 @@ def test_objective_paper_frame_payload_keeps_root_text_beside_sections(tmp_path)
     assert len({item["source_unit_id"] for item in section_units}) == 2
 
 
-def test_objective_paper_frame_uses_bounded_opaque_ids_for_long_source_refs(
-    tmp_path,
-):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_paper_frame_uses_bounded_opaque_ids_for_long_source_refs():
     long_section_id = f"node_{'a' * 280}"
     document_tree = _frame_test_tree(
         (
@@ -642,7 +627,7 @@ def test_objective_paper_frame_uses_bounded_opaque_ids_for_long_source_refs(
         ),
     )
 
-    units = service._build_frame_tree_section_source_units(document_tree)
+    units = source_screening._build_frame_tree_section_source_units(document_tree)
 
     assert len(units) == 1
     assert units[0]["source_ref"] == long_section_id
@@ -650,12 +635,7 @@ def test_objective_paper_frame_uses_bounded_opaque_ids_for_long_source_refs(
     assert long_section_id not in units[0]["source_unit_id"]
 
 
-def test_objective_paper_frame_payload_keeps_all_tables_for_model_classification(
-    tmp_path,
-):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_paper_frame_payload_keeps_all_tables_for_model_classification():
     objective = _research_objective(
         {
             "objective_id": "obj-texture-yield",
@@ -669,7 +649,7 @@ def test_objective_paper_frame_payload_keeps_all_tables_for_model_classification
             "confidence": 0.9,
         }
     )
-    payload = service._build_objective_paper_frame_payload(
+    payload = source_screening._build_objective_paper_frame_payload(
         collection_id="col-test",
         objective=objective,
         paper_skim=None,
@@ -727,18 +707,13 @@ def test_objective_paper_frame_payload_keeps_all_tables_for_model_classification
     assert len({item["source_unit_id"] for item in table_units}) == 2
 
 
-def test_objective_paper_frame_payload_keeps_every_table_row_in_stable_chunks(
-    tmp_path,
-):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_paper_frame_payload_keeps_every_table_row_in_stable_chunks():
     matrix = tuple(
         (f"condition-{index}", f"result-{index}")
         for index in range(8)
     )
 
-    units = service._build_frame_table_source_units(
+    units = source_screening._build_frame_table_source_units(
         [
             SimpleNamespace(
                 table_id="table-late-result",
@@ -765,7 +740,7 @@ def test_objective_paper_frame_payload_keeps_every_table_row_in_stable_chunks(
         for unit in units
     )
 
-    frame = service._aggregate_objective_paper_frame_batches(
+    frame = source_screening._aggregate_objective_paper_frame_batches(
         objective_id="obj-density",
         document_id="paper-1",
         source_units=units,
@@ -813,13 +788,8 @@ def test_objective_paper_frame_payload_keeps_every_table_row_in_stable_chunks(
     ]
 
 
-def test_objective_paper_frame_aggregation_rejects_missing_source_disposition(
-    tmp_path,
-):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
-    units = service._build_frame_tree_section_source_units(
+def test_objective_paper_frame_aggregation_rejects_missing_source_disposition():
+    units = source_screening._build_frame_tree_section_source_units(
         _frame_test_tree(
             ("methods", "Methods", "Laser power was varied."),
             ("results", "Results", "Relative density increased."),
@@ -827,7 +797,7 @@ def test_objective_paper_frame_aggregation_rejects_missing_source_disposition(
     )
 
     with pytest.raises(ValueError, match="missing Source-unit dispositions"):
-        service._aggregate_objective_paper_frame_batches(
+        source_screening._aggregate_objective_paper_frame_batches(
             objective_id="obj-density",
             document_id="paper-1",
             source_units=units,
@@ -847,12 +817,7 @@ def test_objective_paper_frame_aggregation_rejects_missing_source_disposition(
         )
 
 
-def test_objective_paper_frame_payload_uses_compact_lineage_scientific_prior(
-    tmp_path,
-):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_paper_frame_payload_uses_compact_lineage_scientific_prior():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -917,7 +882,7 @@ def test_objective_paper_frame_payload_uses_compact_lineage_scientific_prior(
         }
     )
 
-    payload = service._build_objective_paper_frame_payload(
+    payload = source_screening._build_objective_paper_frame_payload(
         collection_id="col-test",
         objective=objective,
         paper_skim=paper_skim,
@@ -961,10 +926,7 @@ def test_objective_paper_frame_payload_uses_compact_lineage_scientific_prior(
     assert "microhardness" not in serialized
 
 
-def test_objective_paper_framing_batches_every_stable_source_once(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_paper_framing_batches_every_stable_source_once():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -999,7 +961,7 @@ def test_objective_paper_framing_batches_every_stable_source_once(tmp_path):
         },
     )
 
-    frames = service._build_objective_paper_frames(
+    frames = source_screening.screen_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -1095,12 +1057,7 @@ def test_objective_paper_frame_routes_duplicate_headings_by_selected_source_ref(
     ]
 
 
-def test_objective_paper_framing_preserves_siblings_when_one_batch_fails(
-    tmp_path,
-):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_paper_framing_preserves_siblings_when_one_batch_fails():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -1131,7 +1088,7 @@ def test_objective_paper_framing_preserves_siblings_when_one_batch_fails(
         failing_source_refs={"middle"},
     )
 
-    frames = service._build_objective_paper_frames(
+    frames = source_screening.screen_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -1154,12 +1111,7 @@ def test_objective_paper_framing_preserves_siblings_when_one_batch_fails(
     assert frame.background != "Deterministic frame built after model framing failed."
 
 
-def test_objective_paper_framing_keeps_failed_batch_routable_when_sibling_is_irrelevant(
-    tmp_path,
-):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_paper_framing_keeps_failed_batch_routable_when_sibling_is_irrelevant():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -1181,7 +1133,7 @@ def test_objective_paper_framing_keeps_failed_batch_routable_when_sibling_is_irr
         failing_source_refs={"results"},
     )
 
-    frames = service._build_objective_paper_frames(
+    frames = source_screening.screen_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -1213,10 +1165,7 @@ def test_objective_paper_framing_keeps_failed_batch_routable_when_sibling_is_irr
     assert "frame batch unavailable" in frames[0].source_dispositions[1].accounting_errors[0]
 
 
-def test_objective_paper_framing_skips_explicitly_excluded_document(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_paper_framing_skips_explicitly_excluded_document():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -1228,7 +1177,7 @@ def test_objective_paper_framing_skips_explicitly_excluded_document(tmp_path):
     )
     extractor = _BoundedFrameExtractor(max_source_units=8)
 
-    frames = service._build_objective_paper_frames(
+    frames = source_screening.screen_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -1251,10 +1200,7 @@ def test_objective_paper_framing_skips_explicitly_excluded_document(tmp_path):
     assert frames[0].relevant_sections == ()
 
 
-def test_objective_paper_framing_does_not_send_over_budget_singleton(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_paper_framing_does_not_send_over_budget_singleton():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -1265,7 +1211,7 @@ def test_objective_paper_framing_does_not_send_over_budget_singleton(tmp_path):
     )
     extractor = _BoundedFrameExtractor(max_source_units=0)
 
-    frames = service._build_objective_paper_frames(
+    frames = source_screening.screen_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -2652,12 +2598,7 @@ def test_llm_context_drops_attribute_not_bound_to_name_value_and_unit(
     assert record["scientific_context"]["process"] == []
 
 
-def test_objective_paper_framing_marks_all_explicitly_excluded_sources_irrelevant(
-    tmp_path,
-):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
+def test_objective_paper_framing_marks_all_explicitly_excluded_sources_irrelevant():
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -2676,7 +2617,7 @@ def test_objective_paper_framing_marks_all_explicitly_excluded_sources_irrelevan
         },
     )
 
-    frames = service._build_objective_paper_frames(
+    frames = source_screening.screen_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),

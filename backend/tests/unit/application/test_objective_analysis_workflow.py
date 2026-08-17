@@ -4,8 +4,8 @@ from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
+from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
-from application.core.objectives.research_objective_service import PaperAnalysisFrame
 from application.core.objectives.schemas import (
     StructuredEvidenceSelections,
     StructuredPaperFrameBatch,
@@ -20,14 +20,20 @@ from domain.core import (
 )
 from domain.source import source_documents_from_records
 from tests.support.collection_service import build_test_collection_service
-from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.objective_extractor import (
     FakeObjectiveExtractor as _ObjectiveExtractor,
 )
+from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.research_objective_service import (
     build_research_objective_service as _build_research_objective_service,
+)
+from tests.support.research_objective_service import (
     queue_running_analysis as _queue_running_analysis,
+)
+from tests.support.research_objective_service import (
     research_objective as _research_objective,
+)
+from tests.support.research_objective_service import (
     seed_document_profiles as _seed_document_profiles,
 )
 

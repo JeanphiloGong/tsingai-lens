@@ -3,11 +3,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from application.core.objectives import property_matching
-from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
-from application.core.objectives.evidence_routing import EvidenceCandidate
-from application.core.objectives.research_objective_service import (
+from application.core.objectives.analysis import evidence_routing
+from application.core.objectives.analysis.evidence_routing import (
+    EvidenceCandidate,
     SourceSelectionHint,
 )
+from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from domain.source import SourceDocumentNode, SourceDocumentTree
 from tests.support.collection_service import build_test_collection_service
 from tests.support.objective_extractor import (
@@ -24,30 +25,24 @@ from tests.support.research_objective_service import (
 def test_research_objective_service_forces_extractable_objective_route_roles(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
 
-    assert service._normalize_route_extractable(
+    assert evidence_routing._normalize_route_extractable(
         {"role": "current_experimental_evidence", "extractable": False}
     )
-    assert service._normalize_route_extractable(
+    assert evidence_routing._normalize_route_extractable(
         {"role": "process_or_treatment", "extractable": False}
     )
-    assert not service._normalize_route_extractable(
+    assert not evidence_routing._normalize_route_extractable(
         {"role": "low_value_or_irrelevant", "extractable": True}
     )
-    assert not service._normalize_route_extractable(
+    assert not evidence_routing._normalize_route_extractable(
         {"role": "literature_comparison", "extractable": False}
     )
 
 
 def test_research_objective_service_forces_direct_support_route_role(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
 
-    record = service._apply_route_evidence_role(
+    record = evidence_routing._apply_route_evidence_role(
         record={
             "role": "low_value_or_irrelevant",
             "extractable": False,
@@ -63,9 +58,6 @@ def test_research_objective_service_forces_direct_support_route_role(tmp_path):
 def test_research_objective_service_treats_energy_density_only_table_as_condition(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -76,7 +68,7 @@ def test_research_objective_service_treats_energy_density_only_table_as_conditio
         }
     )
 
-    hints = service._build_objective_table_routing_hints(
+    hints = evidence_routing._build_objective_table_routing_hints(
         objective,
         tables=(
             SimpleNamespace(
@@ -123,9 +115,6 @@ def test_research_objective_service_normalizes_archimedes_density_column(
 def test_research_objective_service_ignores_analysis_purpose_as_table_result(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-microstructure",
@@ -136,7 +125,7 @@ def test_research_objective_service_ignores_analysis_purpose_as_table_result(
         }
     )
 
-    hints = service._build_objective_table_routing_hints(
+    hints = evidence_routing._build_objective_table_routing_hints(
         objective,
         tables=(
             SimpleNamespace(
@@ -158,9 +147,6 @@ def test_research_objective_service_ignores_analysis_purpose_as_table_result(
 def test_research_objective_service_recovers_non_seed_condition_and_result_routes(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-mechanical",
@@ -217,7 +203,7 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
             ("H-VED", "437", "560", "48.3"),
         ),
     )
-    hints = service._build_objective_table_routing_hints(
+    hints = evidence_routing._build_objective_table_routing_hints(
         objective,
         tables=(condition_table, result_table),
     )
@@ -246,7 +232,7 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
         }
     )
 
-    routes = service._build_objective_evidence_routes(
+    routes = evidence_routing.route_sources(
         collection_id="col-test",
         extractor=_ObjectiveExtractor(),
         objectives=(objective,),
@@ -272,9 +258,6 @@ def test_research_objective_service_recovers_non_seed_condition_and_result_route
 def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_results(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-corrosion",
@@ -288,7 +271,7 @@ def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_re
         }
     )
 
-    hints = service._build_objective_table_routing_hints(
+    hints = evidence_routing._build_objective_table_routing_hints(
         objective,
         tables=(
             SimpleNamespace(
@@ -335,9 +318,6 @@ def test_research_objective_service_routes_pitting_corrosion_metric_tables_as_re
 def test_research_objective_service_keeps_density_out_of_defect_structure_results(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-fatigue",
@@ -351,7 +331,7 @@ def test_research_objective_service_keeps_density_out_of_defect_structure_result
         }
     )
 
-    hints = service._build_objective_table_routing_hints(
+    hints = evidence_routing._build_objective_table_routing_hints(
         objective,
         tables=(
             SimpleNamespace(
@@ -383,9 +363,6 @@ def test_research_objective_service_keeps_density_out_of_defect_structure_result
 def test_research_objective_service_route_payload_uses_objective_contract(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     context = _research_objective(
         {
             "objective_id": "obj-corrosion",
@@ -395,7 +372,7 @@ def test_research_objective_service_route_payload_uses_objective_contract(
         }
     )
 
-    payload = service._route_prompt_objective_record(context)
+    payload = evidence_routing._route_prompt_objective_record(context)
 
     assert payload["outcomes"] == ["pitting potential"]
     assert payload["mechanisms"] == ["porosity"]
@@ -464,9 +441,6 @@ def test_process_route_does_not_treat_result_columns_as_process_context(tmp_path
 def test_research_objective_service_adds_context_hint_route_for_condition_table(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-mechanical",
@@ -492,7 +466,7 @@ def test_research_objective_service_adds_context_hint_route_for_condition_table(
     )
     routes: list[EvidenceCandidate] = []
 
-    service._append_objective_context_hint_routes(
+    evidence_routing._append_objective_context_hint_routes(
         routes=routes,
         seen=set(),
         frame=frame,
@@ -543,9 +517,6 @@ def test_research_objective_service_adds_context_hint_route_for_condition_table(
 def test_research_objective_service_ranks_result_text_candidates(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-structure",
@@ -603,7 +574,7 @@ def test_research_objective_service_ranks_result_text_candidates(
         ),
     ]
 
-    candidates = service._build_route_source_candidates(
+    candidates = evidence_routing._build_route_source_candidates(
         frame=frame,
         objective_context=objective_context,
         blocks=blocks,
@@ -616,7 +587,7 @@ def test_research_objective_service_ranks_result_text_candidates(
     assert "page-number" not in candidate_refs
 
     routes: list[EvidenceCandidate] = []
-    service._append_ranked_text_hint_routes(
+    evidence_routing._append_ranked_text_hint_routes(
         routes=routes,
         seen=set(),
         frame=frame,
@@ -637,9 +608,6 @@ def test_research_objective_service_ranks_result_text_candidates(
 def test_research_objective_text_hints_prefer_observed_result_over_scope_summary(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-preheat",
@@ -698,7 +666,7 @@ def test_research_objective_text_hints_prefer_observed_result_over_scope_summary
     ]
     routes: list[EvidenceCandidate] = []
 
-    service._append_ranked_text_hint_routes(
+    evidence_routing._append_ranked_text_hint_routes(
         routes=routes,
         seen=set(),
         frame=frame,
@@ -716,9 +684,6 @@ def test_research_objective_text_hints_prefer_observed_result_over_scope_summary
 def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_support(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-corrosion",
@@ -764,7 +729,7 @@ def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_suppo
     ]
     routes: list[EvidenceCandidate] = []
 
-    service._append_ranked_text_hint_routes(
+    evidence_routing._append_ranked_text_hint_routes(
         routes=routes,
         seen=set(),
         frame=frame,
@@ -781,9 +746,6 @@ def test_research_objective_service_text_hint_keeps_mediator_out_of_direct_suppo
 
 
 def test_research_objective_routing_uses_document_tree_order(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -880,7 +842,7 @@ def test_research_objective_routing_uses_document_tree_order(tmp_path):
     )
     extractor = _ObjectiveExtractor()
 
-    service._build_objective_evidence_routes(
+    evidence_routing.route_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -901,9 +863,6 @@ def test_research_objective_routing_uses_document_tree_order(tmp_path):
 def test_research_objective_routing_binds_current_source_to_model_decision(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -935,7 +894,7 @@ def test_research_objective_routing_binds_current_source_to_model_decision(
     )
     extractor = _ObjectiveExtractor()
 
-    routes = service._build_objective_evidence_routes(
+    routes = evidence_routing.route_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -961,9 +920,6 @@ def test_research_objective_routing_binds_current_source_to_model_decision(
 
 
 def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -1020,7 +976,7 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
     )
     extractor = _ObjectiveExtractor()
 
-    service._build_objective_evidence_routes(
+    evidence_routing.route_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -1047,9 +1003,6 @@ def test_research_objective_routing_uses_compact_prompt_payload(tmp_path):
 
 
 def test_research_objective_routing_uses_text_hint_not_source_text(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -1101,7 +1054,7 @@ def test_research_objective_routing_uses_text_hint_not_source_text(tmp_path):
     )
     extractor = _ObjectiveExtractor()
 
-    service._build_objective_evidence_routes(
+    evidence_routing.route_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -1118,9 +1071,6 @@ def test_research_objective_routing_uses_text_hint_not_source_text(tmp_path):
 
 
 def test_research_objective_routing_builds_text_candidates_from_document_tree(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -1225,7 +1175,7 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree(tm
     )
     extractor = _ObjectiveExtractor()
 
-    service._build_objective_evidence_routes(
+    evidence_routing.route_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -1246,9 +1196,6 @@ def test_research_objective_routing_builds_text_candidates_from_document_tree(tm
 
 
 def test_research_objective_low_relevance_tree_routing_uses_frame_sections(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -1332,7 +1279,7 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections(tmp_p
     )
     extractor = _ObjectiveExtractor()
 
-    service._build_objective_evidence_routes(
+    evidence_routing.route_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -1350,9 +1297,6 @@ def test_research_objective_low_relevance_tree_routing_uses_frame_sections(tmp_p
 def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -1409,7 +1353,7 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text(
     )
     extractor = _ObjectiveExtractor()
 
-    service._build_objective_evidence_routes(
+    evidence_routing.route_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -1428,9 +1372,6 @@ def test_research_objective_low_relevance_tree_routing_limits_unsectioned_text(
 
 
 def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-heat",
@@ -1487,7 +1428,7 @@ def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
     )
     extractor = _ObjectiveExtractor()
 
-    service._build_objective_evidence_routes(
+    evidence_routing.route_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -1510,9 +1451,6 @@ def test_research_objective_tree_routing_keeps_late_document_nodes(tmp_path):
 
 
 def test_research_objective_tree_routing_uses_confirmed_objective_axes(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-preheat-cracking",
@@ -1578,7 +1516,7 @@ def test_research_objective_tree_routing_uses_confirmed_objective_axes(tmp_path)
     )
     extractor = _ObjectiveExtractor()
 
-    service._build_objective_evidence_routes(
+    evidence_routing.route_sources(
         collection_id="col-test",
         extractor=extractor,
         objectives=(objective,),
@@ -1597,9 +1535,6 @@ def test_research_objective_tree_routing_uses_confirmed_objective_axes(tmp_path)
 def test_research_objective_tree_routing_keeps_direct_result_among_scope_text(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-preheat",
@@ -1661,7 +1596,7 @@ def test_research_objective_tree_routing_keeps_direct_result_among_scope_text(
         nodes=nodes,
     )
 
-    candidates = service._build_tree_route_text_candidates(
+    candidates = evidence_routing._build_tree_route_text_candidates(
         frame=frame,
         objective_context=objective_context,
         blocks=[],
@@ -1677,9 +1612,6 @@ def test_research_objective_tree_routing_keeps_direct_result_among_scope_text(
 def test_research_objective_tree_routing_recognizes_preheating_crack_results(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-preheat-cracking",
@@ -1711,13 +1643,13 @@ def test_research_objective_tree_routing_recognizes_preheating_crack_results(
     )
 
     assert all(
-        service._route_text_candidate_is_direct_result(
+        evidence_routing._route_text_candidate_is_direct_result(
             objective_context=objective_context,
             candidate={"text": text},
         )
         for text in direct_results
     )
-    assert not service._route_text_candidate_is_direct_result(
+    assert not evidence_routing._route_text_candidate_is_direct_result(
         objective_context=objective_context,
         candidate={
             "text": (
@@ -1729,9 +1661,6 @@ def test_research_objective_tree_routing_recognizes_preheating_crack_results(
 
 
 def test_research_objective_tree_routing_excludes_non_block_caption_refs(tmp_path):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-density",
@@ -1779,7 +1708,7 @@ def test_research_objective_tree_routing_excludes_non_block_caption_refs(tmp_pat
         },
     )
 
-    candidates = service._build_tree_route_text_candidates(
+    candidates = evidence_routing._build_tree_route_text_candidates(
         frame=frame,
         objective_context=objective_context,
         blocks=[],
@@ -1792,9 +1721,6 @@ def test_research_objective_tree_routing_excludes_non_block_caption_refs(tmp_pat
 def test_research_objective_tree_routing_keeps_multiple_comparative_results(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-preheat",
@@ -1857,7 +1783,7 @@ def test_research_objective_tree_routing_keeps_multiple_comparative_results(
         ),
     ]
 
-    selected = service._bounded_tree_route_text_candidates(
+    selected = evidence_routing._bounded_tree_route_text_candidates(
         frame=frame,
         objective_context=objective_context,
         scored_candidates=[*generic_candidates, *comparative_candidates],
@@ -1870,9 +1796,6 @@ def test_research_objective_tree_routing_keeps_multiple_comparative_results(
 def test_research_objective_service_keeps_numeric_mechanism_text_candidates(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": "obj-preheating",
@@ -1940,7 +1863,7 @@ def test_research_objective_service_keeps_numeric_mechanism_text_candidates(
         ),
     ]
 
-    candidates = service._build_route_source_candidates(
+    candidates = evidence_routing._build_route_source_candidates(
         frame=frame,
         objective_context=objective_context,
         blocks=blocks,

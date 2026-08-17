@@ -7,9 +7,9 @@ import pytest
 from httpx import Request, Response
 from openai import APIConnectionError, BadRequestError
 
+from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
-from application.core.objectives.evidence_routing import EvidenceCandidate
 from application.core.objectives.schemas import (
     StructuredEvidenceExtraction,
     StructuredEvidenceExtractions,

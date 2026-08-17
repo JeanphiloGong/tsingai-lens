@@ -9,10 +9,10 @@ from httpx import Request, Response
 from openai import BadRequestError
 
 from application.core.objectives import property_matching
-from application.core.objectives.analysis import source_screening
+from application.core.objectives.analysis import evidence_routing, source_screening
+from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from application.core.objectives.evidence_extraction import ExtractedEvidenceDraft
-from application.core.objectives.evidence_routing import EvidenceCandidate
 from application.core.objectives.extraction import (
     OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT,
 )
@@ -1011,9 +1011,6 @@ def test_objective_paper_framing_batches_every_stable_source_once():
 def test_objective_paper_frame_routes_duplicate_headings_by_selected_source_ref(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -1045,7 +1042,7 @@ def test_objective_paper_frame_routes_duplicate_headings_by_selected_source_ref(
         }
     )
 
-    candidates = service._build_tree_route_text_candidates(
+    candidates = evidence_routing._build_tree_route_text_candidates(
         frame=frame,
         objective_context=objective,
         blocks=[],
@@ -3400,9 +3397,6 @@ def test_research_objective_service_skips_non_target_result_property_columns(
 def test_research_objective_service_uses_objective_scientific_intent_directly(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-corrosion",
@@ -3419,7 +3413,7 @@ def test_research_objective_service_uses_objective_scientific_intent_directly(
         }
     )
 
-    assert service._route_prompt_objective_record(objective) == {
+    assert evidence_routing._route_prompt_objective_record(objective) == {
         "objective_id": "obj-corrosion",
         "question": objective.question,
         "material_scope": ["316L stainless steel"],
@@ -3585,9 +3579,6 @@ def test_research_objective_service_does_not_invent_material_without_document_sk
 def test_research_objective_service_routes_matching_tables_beyond_seed_documents(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -3599,7 +3590,7 @@ def test_research_objective_service_routes_matching_tables_beyond_seed_documents
         }
     )
 
-    hints = service._build_objective_table_routing_hints(
+    hints = evidence_routing._build_objective_table_routing_hints(
         objective,
         tables=(
             SimpleNamespace(
@@ -3709,7 +3700,7 @@ def test_real_ved_process_and_defect_tables_form_joint_comparison(tmp_path):
     )
     tables = (process_table, result_table)
 
-    hints = service._build_objective_table_routing_hints(objective, tables=tables)
+    hints = evidence_routing._build_objective_table_routing_hints(objective, tables=tables)
 
     assert {(hint.table_id, hint.role) for hint in hints} == {
         ("table-2", "condition_context"),
@@ -3717,7 +3708,7 @@ def test_real_ved_process_and_defect_tables_form_joint_comparison(tmp_path):
     }
 
     routes: list[EvidenceCandidate] = []
-    service._append_objective_context_hint_routes(
+    evidence_routing._append_objective_context_hint_routes(
         routes=routes,
         seen=set(),
         frame=PaperAnalysisFrame.from_mapping(
@@ -3736,7 +3727,7 @@ def test_real_ved_process_and_defect_tables_form_joint_comparison(tmp_path):
                 "source_kind": "table",
                 "source_ref": table.table_id,
                 "frame_status": "relevant",
-                "table_schema": service._build_route_table_schema(table),
+                    "table_schema": evidence_routing._build_route_table_schema(table),
             }
             for table in tables
         },
@@ -3848,12 +3839,12 @@ def test_real_p001_density_table_retains_complete_changed_factor_tuple(tmp_path)
         row_count=3,
         col_count=7,
     )
-    hints = service._build_objective_table_routing_hints(
+    hints = evidence_routing._build_objective_table_routing_hints(
         objective,
         tables=(table,),
     )
     routes: list[EvidenceCandidate] = []
-    service._append_objective_context_hint_routes(
+    evidence_routing._append_objective_context_hint_routes(
         routes=routes,
         seen=set(),
         frame=PaperAnalysisFrame.from_mapping(
@@ -3872,7 +3863,7 @@ def test_real_p001_density_table_retains_complete_changed_factor_tuple(tmp_path)
                 "source_kind": "table",
                 "source_ref": table.table_id,
                 "frame_status": "relevant",
-                "table_schema": service._build_route_table_schema(table),
+                    "table_schema": evidence_routing._build_route_table_schema(table),
             }
         },
     )
@@ -3911,9 +3902,6 @@ def test_real_p001_density_table_retains_complete_changed_factor_tuple(tmp_path)
 def test_research_objective_service_does_not_route_single_letter_acronym_tables(
     tmp_path,
 ):
-    service = _build_research_objective_service(
-        collection_service=build_test_collection_service(tmp_path / "collections"),
-    )
     objective = _research_objective(
         {
             "objective_id": "obj-density",
@@ -3924,7 +3912,7 @@ def test_research_objective_service_does_not_route_single_letter_acronym_tables(
         }
     )
 
-    hints = service._build_objective_table_routing_hints(
+    hints = evidence_routing._build_objective_table_routing_hints(
         objective,
         tables=(
             SimpleNamespace(

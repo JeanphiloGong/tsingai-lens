@@ -20,6 +20,13 @@ Objective analysis.
   model, repair, and conservative fallback provenance. A screening decision
   means that a Source should or should not be inspected; it is not proof that
   the Source contains usable Evidence.
+- `analysis/evidence_routing.py`
+  Owns the transient `EvidenceCandidate` records created after screening and
+  the final extraction-queue order. It binds every route to the current
+  Objective, document, and Source, preserves tree order within a paper, and
+  round-robins papers before extraction. Model and deterministic decisions are
+  inspection hints only; neither is persisted or treated as scientific
+  Evidence.
 - `paper_skim_service.py`
   Owns the per-document discovery stage. It assigns every eligible
   non-reference text node, table row, and table/figure caption to one full
@@ -93,9 +100,6 @@ Objective analysis.
   axis-equivalence decisions. The backend constructs each question, variable,
   outcome, seed-document set, and `source_relationship_ids` from the accepted
   relationship group.
-- `evidence_routing.py`
-  Owns the transient Source-selection decisions created while routing one
-  confirmed Objective across its documents.
 - `evidence_extraction.py`
   Owns structured Evidence drafts before the service binds exact Source text
   and publishes durable `ObjectiveEvidence` records.

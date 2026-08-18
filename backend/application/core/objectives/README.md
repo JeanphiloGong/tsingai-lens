@@ -93,8 +93,10 @@ Objective analysis.
   multi-unit batch, preserving stable Source-unit ids until only a terminal
   singleton can become `extraction_failed`. A relationship with no varied
   factor is retained as an unresolved outcome signal when its outcome and
-  Source lineage are valid; the backend does not invent a missing factor or
-  discard valid sibling relationships.
+  Source lineage are valid. Compound outcomes and broad property-family labels
+  are also retained as unresolved signals until the Source supports one
+  specific measured outcome. The backend does not invent a missing factor or
+  outcome and does not discard valid sibling relationships.
   Successful siblings are retained. Duplicate studies are consolidated and
   unresolved study signals are reconciled only after every terminal batch has
   finished. The resulting one `PaperSkim` per document retains every distinct
@@ -120,23 +122,34 @@ Objective analysis.
   response schema, context-conflict validation, bounded repair, deterministic
   conflict removal, token budget, and model call live together. Paper-wide
   signal accounting and study consolidation remain in `paper_skim_service.py`.
+  That final boundary keeps a broad or compound outcome signal unresolved even
+  when reconciliation tries to link it to candidate variables.
 - `discovery/axis_equivalence.py`
   Owns the bounded model judgment that classifies backend-proposed material,
-  variable, and outcome label pairs as exactly equivalent or different. It
-  keeps the pair-accounting schema, prompt, repair, budget, and call together.
-  It cannot return canonical labels, groups, Objective questions, confidence,
-  lineage, or dispositions; those remain backend-owned.
+  variable, and outcome label pairs at two distinct levels: exact equivalence
+  and, for variables only, membership in one researcher-facing intervention
+  topic. Topic membership proposes a shared question only; it is not a
+  direct-comparability judgment. The module
+  keeps pair accounting, prompt, repair, budget, and calls together. It cannot
+  return canonical labels, groups, Objective questions, confidence, lineage,
+  or dispositions; those remain backend-owned.
 - `objective_candidate_service.py`
   Owns collection-level Objective discovery from `PaperStudyRelationship`
-  records. Before grouping, the backend proposes a bounded set of plausible
-  material, variable, and outcome label pairs. The model classifies every pair
-  as exactly equivalent or different; it cannot invent labels or groups. The
-  backend then builds conservative complete-link groups, anchored by the most
-  frequent source labels, and keeps every unclassified label unchanged. This
-  normalized view is transient: persisted studies retain their extracted labels
-  and exact Source lineage. Objective membership then requires the same complete
-  factor set, one outcome, and a non-conflicting material scope. Common stainless
-  steel grade spellings have one deterministic material identity. A relationship
+  records. The backend proposes exact-equivalence candidates plus topic pairs
+  supported by compatible facts from different papers. The model classifies
+  every proposed pair at both relation levels; it cannot invent labels or
+  groups. Exact-equivalence edges build conservative complete-link alias groups,
+  while topic edges may connect distinct variables without renaming them.
+  Outcomes must remain one exact measurement identity or an accepted synonym;
+  related but distinct outcomes seed separate candidate questions. This
+  normalized view is transient: persisted studies retain their
+  extracted labels and exact Source lineage. Objective membership requires one
+  coherent topic and a non-conflicting material scope, not identical complete
+  factor tuples. The Objective retains the union of every source relationship's
+  concrete factors and one focused outcome; processing-stage and joint-factor
+  differences therefore remain visible for later comparison. Common stainless steel grade
+  spellings and established Ti-6Al-4V forms have one deterministic material
+  identity. A relationship
   with missing material scope may join a known-material group only when exactly
   one scientifically compatible group exists; it cannot bridge conflicting
   materials. The resulting Objective retains one unambiguous material anchor;
@@ -277,17 +290,26 @@ source unit was explicitly excluded by a model or repaired decision.
 After screening, the backend persists extracted studies, relationships,
 unresolved signals, and Source-unit coverage before collection grouping. It
 normalizes material, variable, and outcome labels before computing candidate
-membership. Candidate generation is capped at 96 pairs per axis type, and the
-model receives at most 16 pairs per call. Every response must classify every
-input pair exactly once and in order. Missing, duplicate, unknown, or reordered
-IDs trigger one bounded repair; if any batch still fails, the whole collection
-keeps its source labels rather than applying a partial mapping. Only
-`equivalent=true` decisions form edges, and a label joins a group only when it
-has an explicit edge to every current member. The complete jointly varied
-factor tuple and one outcome then define the research axis; explicit material
-conflicts remain a hard boundary. Other study-context differences are retained,
-not flattened, and are evaluated downstream when Evidence is compared. The
-backend turns each cross-paper membership group into one Objective. A
+membership. Exact-equivalence candidates come from label similarity; additional
+variable-topic candidates require supporting, material-compatible facts from
+different papers that report the same outcome. When compatible cross-paper facts
+share a variable, their otherwise dissimilar outcome labels may also enter exact
+alias classification; only `equivalent=true`, never topic membership, can merge
+those outcomes. All eligible pairs are processed in batches of at most 16. Every
+response must classify every input pair exactly once and in order. Missing,
+duplicate, unknown, or reordered IDs trigger one bounded repair; if any batch
+still fails, the whole collection keeps its source labels rather than applying a
+partial mapping. Only `equivalent=true` decisions form alias edges, and a label
+joins an alias group only when it has an explicit edge to every current member.
+`same_research_topic=true` may connect non-equivalent variables for candidate
+discovery, but it never renames them or asserts direct comparability. Outcomes
+must be exactly equivalent after accepted alias normalization.
+Every source relationship keeps its complete jointly varied factor tuple and one
+specific outcome; the Objective presents their union as the scope of the common
+question. Explicit material conflicts remain a hard boundary. Other study-context
+differences are retained, not flattened, and are evaluated downstream when
+Evidence is compared. The backend turns each cross-paper topic group into one
+Objective. A
 paper-local group is promoted only when the collection itself contains one
 document; otherwise it remains traceable through its rejection disposition.
 Accepted Objectives are ranked and persisted; the HTTP list returns all ranked

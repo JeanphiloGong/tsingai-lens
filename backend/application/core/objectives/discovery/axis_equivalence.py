@@ -4,13 +4,11 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 
-RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = (
-    "research_axis_canonicalization.v1"
-)
+RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = "research_axis_canonicalization.v2"
 
 _MAX_COMPLETION_TOKENS = 1024
 _SYSTEM_PROMPT = """
@@ -33,6 +31,13 @@ class _AxisEquivalenceResponse(BaseModel):
 class StructuredAxisPairDecision(_AxisEquivalenceResponse):
     pair_id: str = Field(min_length=1, max_length=80)
     equivalent: bool
+    same_research_topic: bool
+
+    @model_validator(mode="after")
+    def _validate_relation_levels(self) -> StructuredAxisPairDecision:
+        if self.equivalent and not self.same_research_topic:
+            raise ValueError("equivalent axes must share one research topic")
+        return self
 
 
 class StructuredAxisCanonicalizationPlan(_AxisEquivalenceResponse):
@@ -49,10 +54,9 @@ def build_research_axis_canonicalization_prompt(
 ) -> tuple[str, str]:
     user_prompt = (
         "TASK MODEL\n"
-        "Classify whether each candidate label pair names exactly the same neutral "
-        "scientific axis before collection objective grouping. This is pair "
-        "classification, not "
-        "property-family clustering, causal interpretation, objective discovery, or "
+        "Classify the relationship between each candidate pair of neutral scientific "
+        "axes before collection objective grouping. This is pair classification, not "
+        "causal interpretation, direct-comparability judgment, objective wording, or "
         "evidence synthesis.\n\n"
         "INPUT SCHEMA\n"
         "- `collection_id` identifies the request and must not appear in output.\n"
@@ -65,31 +69,50 @@ def build_research_axis_canonicalization_prompt(
         "1. Judge every pair independently within its supplied axis_type.\n"
         "2. Set `equivalent=true` only when substituting one label for the other preserves "
         "the exact scientific question. Acronyms, spelling variants, and grammatical "
-        "variants can qualify.\n"
-        "3. Set `equivalent=false` when the labels are merely related, inverse, causal, "
-        "broad/narrow, jointly reported, different material grades, or different "
-        "process parameters.\n"
-        "4. Set `equivalent=false` when uncertain. This keeps both source labels.\n\n"
+        "variants can qualify. Exact equivalence always requires "
+        "`same_research_topic=true`.\n"
+        "3. For `variable` pairs only, set `same_research_topic=true` when both factors "
+        "can legitimately appear in one focused researcher-facing intervention topic "
+        "while their distinct source meanings remain visible. This does not mean "
+        "directly comparable: processing stage, material state, jointly varied factors, "
+        "methods, and test conditions remain later comparison constraints.\n"
+        "4. For non-equivalent `material` or `outcome` pairs, set "
+        "`same_research_topic=false`. A candidate Objective keeps one specific outcome; "
+        "related but distinct measurements must not be fused into one question.\n"
+        "5. Set both fields false when the pair is unrelated or uncertain.\n\n"
         "HARD RULES\n"
         "- Return one decision for every input pair, in input order.\n"
         "- Copy each input `pair_id` exactly once; do not omit, repeat, or invent IDs.\n"
-        "- Each decision contains only `pair_id` and boolean `equivalent`.\n"
+        "- Each decision contains only `pair_id`, boolean `equivalent`, and boolean "
+        "`same_research_topic`.\n"
         "- Do not return labels, canonical names, groups, explanations, or confidence.\n\n"
         "BOUNDARY EXAMPLES\n"
-        "- VED and volumetric energy density: select; they are the same variable.\n"
-        "- SS316L and 316L stainless steel: select; they are the same material grade.\n"
-        "- SS316 and 316L stainless steel are different grades: reject.\n"
-        "- scan speed and laser scanning speed: select when both denote the scan-speed "
-        "factor; laser power and energy density: reject.\n"
-        "- porosity and relative density are scientifically related but distinct "
-        "measured outcomes: reject.\n"
+        "- VED and volumetric energy density: equivalent=true and "
+        "same_research_topic=true.\n"
+        "- SS316L and 316L stainless steel: equivalent=true and "
+        "same_research_topic=true.\n"
+        "- Ti6Al4V and Ti-6Al-4V: equivalent=true and same_research_topic=true; "
+        "Ti-64 is also the same alloy identity when used as that established grade.\n"
+        "- SS316 and 316L stainless steel are different grades: reject by setting both "
+        "fields false.\n"
+        "- annealing temperature and base-plate preheating temperature: "
+        "equivalent=false but same_research_topic=true for a thermal-processing topic; "
+        "they remain different processing stages and cannot be treated as the same "
+        "intervention.\n"
+        "- scan speed and laser scanning speed: equivalent=true when both denote the "
+        "same scan-speed factor. Laser power and energy density can share an LPBF "
+        "parameter topic but are not equivalent.\n"
+        "- porosity and relative density are related but distinct measurements: set both "
+        "fields false so each can anchor its own focused outcome.\n"
         "- mechanical properties is a broad property family, not an alias for yield "
-        "strength, elongation, hardness, fatigue, corrosion, or microstructure: reject.\n"
-        "- microstructure and grain size, or porosity and defect size: reject; one is "
-        "broader than the other.\n"
-        "- tensile strength and ultimate tensile strength: reject without source "
-        "context explicitly defining them as the same measurement.\n"
-        "- surface hardness and hardness: reject; surface scope is meaningful.\n"
+        "strength, elongation, hardness, fatigue, corrosion, or microstructure: never "
+        "equivalent and never a focused outcome topic.\n"
+        "- microstructure and grain size, or porosity and defect size: set both fields "
+        "false; the narrower measurement must remain visible.\n"
+        "- tensile strength and ultimate tensile strength: not equivalent without source "
+        "context explicitly defining the same measurement, so set both fields false.\n"
+        "- surface hardness and hardness: not equivalent because surface scope is "
+        "meaningful; set both fields false.\n"
         "\n"
         "OUTPUT CONTRACT\n"
         "Return only schema-valid structured data with one `decisions` array. "
@@ -99,7 +122,7 @@ def build_research_axis_canonicalization_prompt(
 
 
 class ResearchAxisEquivalenceClassifier:
-    """Classify backend-selected scientific label pairs as equal or different."""
+    """Classify exact axis identity and focused variable-topic membership."""
 
     def __init__(self, response_client: StructuredResponseClient) -> None:
         self.response_client = response_client
@@ -126,10 +149,11 @@ class ResearchAxisEquivalenceClassifier:
             return (
                 "Previous axis pair classification was invalid: "
                 f"{repair_detail}. Return one decision for every input pair_id, in "
-                "input order, without omissions or duplicates. Set equivalent=true "
-                "only when both labels name exactly the same scientific axis. Related, "
-                "inverse, broad, narrow, or uncertain pairs require equivalent=false. "
-                "Return only compact JSON."
+                "input order, without omissions or duplicates. Return both booleans. "
+                "Set equivalent=true only for the exact same scientific axis, and then "
+                "also set same_research_topic=true. Only non-equivalent variable pairs "
+                "may share a focused topic. Non-equivalent material and outcome pairs "
+                "require both booleans false. Return only compact JSON."
             )
 
         def parse_json_text_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:

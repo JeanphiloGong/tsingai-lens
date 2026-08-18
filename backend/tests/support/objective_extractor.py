@@ -141,7 +141,11 @@ class FakeObjectiveExtractor:
         self.canonicalization_payloads.append(payload)
         return StructuredAxisCanonicalizationPlan(
             decisions=[
-                {"pair_id": pair["pair_id"], "equivalent": True}
+                {
+                    "pair_id": pair["pair_id"],
+                    "equivalent": True,
+                    "same_research_topic": True,
+                }
                 for pair in payload.get("axis_pairs", ())
             ]
         )

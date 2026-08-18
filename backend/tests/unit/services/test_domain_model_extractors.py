@@ -1067,6 +1067,96 @@ def test_paper_skim_downgrades_empty_factor_relationship_without_losing_siblings
     assert unresolved.source_unit_ids == ["window-source-2"]
 
 
+def test_paper_skim_downgrades_compound_and_generic_outcomes_without_losing_siblings():
+    response = {
+        "doc_role": "experimental",
+        "studies": [
+            {
+                "experiment_label": "SLM Ti-6Al-4V annealing study",
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "material_scope": ["Ti-6Al-4V"],
+                "process_context": ["post-build annealing"],
+                "relationships": [
+                    {
+                        "varied_factors": ["annealing temperature"],
+                        "outcome": "microstructure",
+                        "source_unit_ids": ["window-source-1"],
+                        "confidence": 0.91,
+                    },
+                    {
+                        "varied_factors": ["annealing temperature"],
+                        "outcome": "strength and ductility of SLMed Ti-6Al-4V",
+                        "source_unit_ids": ["window-source-2"],
+                        "confidence": 0.86,
+                    },
+                    {
+                        "varied_factors": ["annealing temperature"],
+                        "outcome": "mechanical property combination",
+                        "source_unit_ids": ["window-source-3"],
+                        "confidence": 0.81,
+                    },
+                    {
+                        "varied_factors": ["annealing temperature"],
+                        "outcome": (
+                            "microstructure (grain size, shape, phase fraction, "
+                            "composition)"
+                        ),
+                        "source_unit_ids": ["window-source-4"],
+                        "confidence": 0.79,
+                    },
+                ],
+                "confidence": 0.9,
+            }
+        ],
+        "unresolved_signals": [],
+        "evidence_density": "high",
+        "confidence": 0.9,
+        "warnings": [],
+    }
+    client = _FakeOpenAIClient(json.dumps(response))
+
+    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+        {
+            "document_id": "paper-ti64",
+            "source_units": [
+                {
+                    "source_unit_id": f"window-source-{index}",
+                    "source_kind": "block",
+                    "source_ref": f"block-{index}",
+                    "content": "Annealing results for SLM Ti-6Al-4V.",
+                }
+                for index in range(1, 5)
+            ],
+        }
+    )
+
+    assert [
+        relationship.outcome
+        for study in skim.studies
+        for relationship in study.relationships
+    ] == ["microstructure"]
+    assert [signal.label for signal in skim.unresolved_signals] == [
+        "strength and ductility of SLMed Ti-6Al-4V",
+        "mechanical property combination",
+        "microstructure (grain size, shape, phase fraction, composition)",
+    ]
+    assert [signal.source_unit_ids for signal in skim.unresolved_signals] == [
+        ["window-source-2"],
+        ["window-source-3"],
+        ["window-source-4"],
+    ]
+    assert all(
+        signal.material_scope == ["Ti-6Al-4V"]
+        and signal.process_context == ["post-build annealing"]
+        for signal in skim.unresolved_signals
+    )
+    prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
+    assert "one specific outcome" in prompt
+    assert "compound outcome" in prompt
+    assert "unresolved_signals" in prompt
+
+
 def test_structured_paper_skim_rejects_duplicate_study_identities():
     study = {
         "experiment_label": "LPBF parameter study",
@@ -1330,8 +1420,11 @@ def test_paper_skim_preserves_multi_material_multi_outcome_study():
         "crack formation",
         "internal stresses",
         "microstructure",
-        "mechanical properties",
     ]
+    assert [signal.label for signal in skim.unresolved_signals] == [
+        "mechanical properties"
+    ]
+    assert skim.unresolved_signals[0].source_unit_ids == ["window-source-1"]
     assert len(skim.warnings[0]) <= 240
 
 
@@ -1645,7 +1738,11 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
         """
         {
           "decisions": [
-            {"pair_id": "axis_pair_0001", "equivalent": true}
+            {
+              "pair_id": "axis_pair_0001",
+              "equivalent": true,
+              "same_research_topic": true
+            }
           ]
         }
         """
@@ -1668,24 +1765,47 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
 
     assert isinstance(canonicalization_plan, StructuredAxisCanonicalizationPlan)
     assert [item.model_dump() for item in canonicalization_plan.decisions] == [
-        {"pair_id": "axis_pair_0001", "equivalent": True}
+        {
+            "pair_id": "axis_pair_0001",
+            "equivalent": True,
+            "same_research_topic": True,
+        }
     ]
+    prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
+    assert "one focused researcher-facing intervention" in prompt
+    assert "does not mean directly comparable" in prompt
 
 
 def test_axis_canonicalization_repairs_ungrounded_and_overlapping_groups():
     invalid = json.dumps(
         {
             "decisions": [
-                {"pair_id": "axis_pair_9999", "equivalent": True},
-                {"pair_id": "axis_pair_9999", "equivalent": False},
+                {
+                    "pair_id": "axis_pair_9999",
+                    "equivalent": True,
+                    "same_research_topic": True,
+                },
+                {
+                    "pair_id": "axis_pair_9999",
+                    "equivalent": False,
+                    "same_research_topic": False,
+                },
             ]
         }
     )
     repaired = json.dumps(
         {
             "decisions": [
-                {"pair_id": "axis_pair_0001", "equivalent": True},
-                {"pair_id": "axis_pair_0002", "equivalent": False},
+                {
+                    "pair_id": "axis_pair_0001",
+                    "equivalent": True,
+                    "same_research_topic": True,
+                },
+                {
+                    "pair_id": "axis_pair_0002",
+                    "equivalent": False,
+                    "same_research_topic": False,
+                },
             ]
         }
     )
@@ -1714,12 +1834,20 @@ def test_axis_canonicalization_repairs_ungrounded_and_overlapping_groups():
 
     assert len(client.chat.completions.calls) == 2
     assert [item.model_dump() for item in plan.decisions] == [
-        {"pair_id": "axis_pair_0001", "equivalent": True},
-        {"pair_id": "axis_pair_0002", "equivalent": False},
+        {
+            "pair_id": "axis_pair_0001",
+            "equivalent": True,
+            "same_research_topic": True,
+        },
+        {
+            "pair_id": "axis_pair_0002",
+            "equivalent": False,
+            "same_research_topic": False,
+        },
     ]
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
     assert "axis pair classification" in repair_prompt
-    assert "equivalent=false" in repair_prompt
+    assert "require both booleans false" in repair_prompt
 
 
 def test_domain_model_extractors_validates_objective_paper_frame_response():

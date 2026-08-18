@@ -224,6 +224,23 @@ def broad_outcome_expansions(value: Any) -> tuple[str, ...]:
     return _BROAD_OUTCOME_EXPANSIONS.get(normalized, ())
 
 
+def outcome_label_requires_resolution(value: Any) -> bool:
+    outcome = " ".join(str(value or "").strip().casefold().split())
+    if not outcome:
+        return False
+    if re.search(r"\b(?:and|versus)\b|\s[&/]\s", outcome):
+        return True
+    if re.search(r"\([^)]*(?:,|;|\band\b)[^)]*\)", outcome):
+        return True
+    words = outcome.split()
+    return words[-1] in {
+        "combination",
+        "performance",
+        "properties",
+        "property",
+    } or words[0] in {"combined", "comprehensive", "overall"}
+
+
 def objective_outcomes(objective: ResearchObjective) -> tuple[str, ...]:
     axes: list[str] = []
     seen: set[str] = set()

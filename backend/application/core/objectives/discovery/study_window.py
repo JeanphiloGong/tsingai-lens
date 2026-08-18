@@ -6,9 +6,10 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from application.core.objectives import property_matching
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 
-PAPER_SKIM_PROMPT_VERSION = "paper_skim.v2"
+PAPER_SKIM_PROMPT_VERSION = "paper_skim.v3"
 PAPER_SKIM_PROMPT_TOKEN_LIMIT = 12_288
 PAPER_SKIM_SOURCE_UNIT_LIMIT = 12
 PAPER_SKIM_WARNING_LIMIT = (2, 240)
@@ -263,7 +264,7 @@ class StructuredPaperSkim(_PaperSkimResponse):
 
     @model_validator(mode="before")
     @classmethod
-    def _downgrade_relationships_without_factors(cls, value: object) -> object:
+    def _downgrade_unresolved_relationships(cls, value: object) -> object:
         if not isinstance(value, Mapping):
             return value
         studies = value.get("studies")
@@ -295,12 +296,15 @@ class StructuredPaperSkim(_PaperSkimResponse):
                     retained_relationships.append(relationship)
                     continue
                 varied_factors = relationship.get("varied_factors")
-                if not isinstance(varied_factors, list) or any(
+                has_varied_factor = not isinstance(varied_factors, list) or any(
                     str(item).strip() for item in varied_factors
+                )
+                outcome = str(relationship.get("outcome") or "").strip()
+                if has_varied_factor and not (
+                    property_matching.outcome_label_requires_resolution(outcome)
                 ):
                     retained_relationships.append(relationship)
                     continue
-                outcome = str(relationship.get("outcome") or "").strip()
                 source_unit_ids = relationship.get("source_unit_ids")
                 if (
                     not outcome
@@ -403,8 +407,13 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "background remain synthesis or background.\n"
         "4. Express every factor and outcome as a neutral scientific axis. A factor "
         "names what was varied, compared, or modeled, not its tested levels. An "
-        "outcome names what was measured or predicted, not the result direction, "
-        "value, or comparison sentence.\n"
+        "outcome names one specific outcome that was measured or predicted, not the "
+        "result direction, value, or comparison sentence; it must also not be a broad "
+        "property family or compound outcome. Split strength and ductility, for "
+        "example, into separate relationships with the same factor set and Source "
+        "lineage. If the Source does not support a specific component, retain the "
+        "supplied label as an outcome in `unresolved_signals` instead of inventing "
+        "one.\n"
         "5. Within each study, return one relationship per outcome. `varied_factors` "
         "must contain the full jointly varied, compared, or modeled factor set. Never "
         "split a joint-factor experiment into isolated effects.\n"

@@ -19,6 +19,7 @@ from application.pipeline.collection_build.definitions import (
 )
 from application.pipeline.collection_build.runner import CollectionBuildPipelineRunner
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
+from controllers.schemas.source.task import TaskResponse
 from domain.pipeline import ModelUsage, PipelineRun, TokenUsage
 from infra.llm.usage import record_llm_completion, record_llm_prompt_version
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
@@ -131,6 +132,43 @@ def test_objective_progress_persists_each_window_for_the_active_document():
         detail["active_window_position"]
         for detail in task_service.progress_updates
     ] == [1, 2, 3]
+
+
+def test_objective_progress_projects_internal_phase_to_public_task_stage():
+    task_service = RecordingTaskService()
+    service = CollectionBuildPipelineService(
+        collection_service=SimpleNamespace(),
+        task_service=task_service,
+        artifact_registry_service=SimpleNamespace(),
+        source_artifact_repository=SimpleNamespace(),
+        document_profile_service=SimpleNamespace(),
+        research_objective_service=SimpleNamespace(),
+    )
+
+    service._build_objective_progress_callback("task_1", "col_1")(
+        {
+            "phase": "objective_discovery_batch_finished",
+            "current": 1,
+            "total": 2,
+            "unit": "groups",
+        }
+    )
+
+    assert task_service.record["current_stage"] == "objective_discovery_started"
+    assert (
+        task_service.record["progress_detail"]["phase"]
+        == "objective_discovery_batch_finished"
+    )
+    TaskResponse.model_validate(
+        {
+            **task_service.record,
+            "task_type": "build",
+            "output_path": None,
+            "updated_at": "2026-08-11T01:00:01+00:00",
+            "started_at": None,
+            "finished_at": None,
+        }
+    )
 
 
 def test_collection_build_pipeline_runner_uses_run_dependencies_not_config_order():

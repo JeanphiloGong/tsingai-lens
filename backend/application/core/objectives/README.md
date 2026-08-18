@@ -366,16 +366,12 @@ Provider, transport, or unrecoverable structured-output errors remain technical
 failures and produce explicit failed Evidence. A Source with no grounded target
 result or useful context is an abstention and does not produce failed Evidence.
 
-Final Evidence materialization enforces zero or one durable record for each
-`objective_id + document_id + source_kind + source_ref`. This boundary covers
-normal extraction, repair output, deterministic derivation, and replayed drafts;
-`evidence_id` alone is not Source identity. When candidates conflict, extracted
-Evidence outranks failed attempts, result Evidence outranks context, richer
-validated scientific content outranks sparse content, and resolution then
-confidence break remaining ties. The service never merges scientific fields
-from competing candidates. If every candidate failed, one detailed failed
-record remains, so PaperContribution extracted/failed counts are derived from
-the same final Source-keyed Evidence set exposed to readers.
+Final Evidence materialization uses stable `evidence_id` as the scientific-claim
+identity and exact Source locators as provenance. Replayed drafts with the same
+`evidence_id` remain idempotent, while distinct measurements or comparisons
+from the same table, figure, or text Source remain separate durable records with
+their own related locators. PaperContribution extracted/failed counts are
+derived from this complete claim set exposed to readers.
 
 An extraction failure is also durable Evidence when the analysis can otherwise
 complete. It retains the exact `document_id + source_kind + source_ref` locator

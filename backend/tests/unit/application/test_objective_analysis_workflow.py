@@ -239,7 +239,7 @@ def test_memory_objective_repository_records_analysis_execution_stats():
     }
 
 
-def test_objective_analysis_publishes_one_terminal_evidence_per_source():
+def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids():
     objective = _research_objective(
         {
             "collection_id": "col-1",
@@ -318,7 +318,7 @@ def test_objective_analysis_publishes_one_terminal_evidence_per_source():
         ),
         ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_id": "replay-result",
+                "evidence_id": "repair-result",
                 "objective_id": objective.objective_id,
                 "document_id": "paper-1",
                 "source_kind": "text_window",
@@ -349,23 +349,7 @@ def test_objective_analysis_publishes_one_terminal_evidence_per_source():
                 "attribution_scope": "isolated_effect",
                 "source_refs": source_refs,
                 "resolution_status": "resolved",
-                "confidence": 0.9,
-            }
-        ),
-        ExtractedEvidenceDraft.from_mapping(
-            {
-                "evidence_id": "failed-repair",
-                "objective_id": objective.objective_id,
-                "document_id": "paper-1",
-                "source_kind": "text_window",
-                "source_ref": "block-1",
-                "evidence_role": "irrelevant",
-                "selection_status": "failed",
-                "attribution_scope": "not_attributable",
-                "source_refs": source_refs,
-                "resolution_status": "unknown",
-                "failure_reason": "repair failed",
-                "confidence": 0.0,
+                "confidence": 0.8,
             }
         ),
         ExtractedEvidenceDraft.from_mapping(
@@ -388,7 +372,7 @@ def test_objective_analysis_publishes_one_terminal_evidence_per_source():
         ),
         ExtractedEvidenceDraft.from_mapping(
             {
-                "evidence_id": "failed-detailed",
+                "evidence_id": "failed-short",
                 "objective_id": objective.objective_id,
                 "document_id": "paper-1",
                 "source_kind": "text_window",
@@ -400,9 +384,7 @@ def test_objective_analysis_publishes_one_terminal_evidence_per_source():
                     {"source_kind": "text_window", "source_ref": "block-2"}
                 ],
                 "resolution_status": "unknown",
-                "failure_reason": (
-                    "changed_variables[0].target_value=160 is not grounded in SOURCE"
-                ),
+                "failure_reason": "invalid",
                 "confidence": 0.0,
             }
         ),
@@ -433,15 +415,11 @@ def test_objective_analysis_publishes_one_terminal_evidence_per_source():
     )
 
     assert [record.evidence_id for record in evidence_records] == [
-        "replay-result",
-        "failed-detailed",
+        "normal-context",
+        "repair-result",
+        "failed-short",
     ]
-    assert len(
-        {
-            (record.document_id, record.source_kind, record.source_ref)
-            for record in evidence_records
-        }
-    ) == len(evidence_records)
+    assert len(evidence_records) == len({record.evidence_id for record in evidence_records})
     frame = PaperAnalysisFrame.from_mapping(
         {
             "objective_id": objective.objective_id,

@@ -491,6 +491,13 @@ the same Evidence. The repaired candidate must pass every original guard; a
 second rejection is terminal for that result set and no invalid Finding is
 published.
 
+An empty Finding set is a valid scientific abstention when paper contributions
+and source-backed Evidence were still produced. That analysis version is
+published as `succeeded` with its paper dispositions and Evidence intact; the
+backend does not manufacture a placeholder conclusion. Missing contributions,
+missing source-backed Evidence, provider failures, invalid structured output,
+and persistence failures remain technical analysis failures.
+
 `agreement`, `conflict`, `condition_dependent`, and
 `insufficient_confirmation` therefore describe validated Evidence coverage,
 not provider confidence or a stored paper-count declaration. Coupled variables

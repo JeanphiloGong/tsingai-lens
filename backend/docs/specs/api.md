@@ -148,7 +148,11 @@ allocates a new version. A failed active version leaves the prior published
 version readable. If the backend cannot dispatch a queued version to its local
 analysis worker, it records that version as failed and returns `503`, allowing
 the client to retry without leaving a permanently queued version. Only a
-complete succeeded version can become published.
+complete succeeded version can become published. A succeeded version may have
+zero Findings when paper contributions and source-backed Evidence were
+published but no defensible comparison survived; this is a scientific
+abstention, not a technical failure. The Finding list then returns `total=0`
+without a placeholder Finding.
 
 Objective document scope and current-analysis projection are build-scoped. A
 rebuild may preserve a confirmed Objective identity and all historical analysis

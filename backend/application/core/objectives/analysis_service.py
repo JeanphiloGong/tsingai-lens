@@ -245,8 +245,6 @@ class ObjectiveAnalysisService:
             raise RuntimeError("objective analysis produced no paper contributions")
         if not artifacts.evidence_records:
             raise RuntimeError("objective analysis produced no source-backed evidence")
-        if not artifacts.findings:
-            raise RuntimeError("objective analysis produced no reviewable findings")
 
     def _result(
         self,

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
+
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
 from application.core.objectives.research_objective_service import (
     ObjectiveAnalysisArtifacts,
@@ -256,7 +258,6 @@ class FakeObjectiveRepository:
         return analysis
 
     def publish_analysis(self, collection_id, objective_id, analysis_version, **artifacts):
-        assert artifacts["findings"]
         analysis = self.analyses[analysis_version].succeed()
         self.analyses[analysis_version] = analysis
         self.objective = self.objective.publish_analysis(analysis)
@@ -405,7 +406,7 @@ def test_route_progress_does_not_replace_paper_counts() -> None:
     assert progressed.total_document_count == 6
 
 
-def test_empty_finding_output_fails_version_without_publication() -> None:
+def test_empty_finding_output_publishes_scientific_abstention() -> None:
     artifacts = replace(_artifacts(1), findings=())
     service, repository, _analyzer = _service(
         analyzer=FakeResearchObjectiveService(artifacts=artifacts)
@@ -413,7 +414,34 @@ def test_empty_finding_output_fails_version_without_publication() -> None:
     service.queue_analysis("collection-1", "objective-1")
     result = service.execute_queued_analysis("collection-1", "objective-1", 1)
 
+    assert result["analysis"].status == "succeeded"
+    assert result["objective"].published_analysis_version == 1
+    assert result["findings"] == ()
+    assert result["paper_contributions"] == artifacts.contributions
+    assert repository.published_calls == 1
+
+
+@pytest.mark.parametrize(
+    ("missing_field", "expected_error"),
+    (
+        ("contributions", "objective analysis produced no paper contributions"),
+        ("evidence_records", "objective analysis produced no source-backed evidence"),
+    ),
+)
+def test_missing_required_analysis_artifacts_still_fail_without_publication(
+    missing_field: str,
+    expected_error: str,
+) -> None:
+    artifacts = replace(_artifacts(1), **{missing_field: ()})
+    service, repository, _analyzer = _service(
+        analyzer=FakeResearchObjectiveService(artifacts=artifacts)
+    )
+    service.queue_analysis("collection-1", "objective-1")
+
+    result = service.execute_queued_analysis("collection-1", "objective-1", 1)
+
     assert result["analysis"].status == "failed"
+    assert result["analysis"].error_message == expected_error
     assert result["objective"].published_analysis_version is None
     assert repository.published_calls == 0
 

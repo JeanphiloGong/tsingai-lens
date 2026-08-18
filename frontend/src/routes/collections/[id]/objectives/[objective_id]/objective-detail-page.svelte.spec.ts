@@ -475,6 +475,18 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('发生变化').first()).toBeInTheDocument();
 	});
 
+	it('shows completed scientific abstention when no comparable Finding was formed', async () => {
+		installPublishedResponses(objectiveResponse(), null, []);
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByText('分析已完成，但当前证据未形成可直接比较的 Finding。'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('v1 · 模型 model-1')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('本次分析失败')).not.toBeInTheDocument();
+	});
+
 	it('loads every Finding and selected Evidence page', async () => {
 		const secondFinding = {
 			...finding,

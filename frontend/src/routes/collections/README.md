@@ -48,7 +48,9 @@ page handles these states explicitly:
 - failed without a published result: retry;
 - failed with a published result: identify both the displayed published version
   and failed retry version, keep the prior Findings visible, and offer retry;
-- succeeded: show Findings from the published analysis version.
+- succeeded with Findings: show Findings from the published analysis version;
+- succeeded without Findings: state that analysis completed but the inspected
+  Evidence did not form a directly comparable Finding.
 
 Published Finding metadata shows the model recorded for that published analysis,
 not the model attached to a newer active or failed retry. Historical analyses

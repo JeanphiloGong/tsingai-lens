@@ -1562,6 +1562,287 @@ def test_table_material_and_cell_locators_bound_comparison_source():
     assert {ref["row_index"] for ref in evidence.related_source_refs} == {1, 2}
 
 
+def test_analysis_evidence_preserves_distinct_claims_from_one_table_source():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "variables": ["scan speed"],
+            "outcomes": ["relative density"],
+        }
+    )
+    analysis = ObjectiveAnalysis(
+        collection_id="col-test",
+        objective_id=objective.objective_id,
+        analysis_version=1,
+        source_build_id="build-1",
+        pipeline_version="test.v1",
+        model_name=None,
+        prompt_versions={},
+    )
+    drafts = tuple(
+        ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": evidence_id,
+                "objective_id": objective.objective_id,
+                "document_id": "paper-1",
+                "source_kind": "table",
+                "source_ref": "table-density",
+                "evidence_role": "direct_result",
+                "selection_status": "extracted",
+                "changed_variables": [
+                    {
+                        "name": "scan speed",
+                        "target_value": scan_speed,
+                        "unit": "mm/s",
+                    }
+                ],
+                "reported_result": {
+                    "outcome": "relative density",
+                    "value": density,
+                    "unit": "%",
+                    "direction": "unknown",
+                    "result_text": f"Relative density was {density}%.",
+                },
+                "attribution_scope": "descriptive_only",
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-density",
+                        "row_index": row_index,
+                        "col_index": 2,
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+        for evidence_id, row_index, scan_speed, density in (
+            ("evidence-row-1", 1, 700, 98.1),
+            ("evidence-row-2", 2, 900, 99.2),
+        )
+    )
+    table = SimpleNamespace(
+        table_id="table-density",
+        page=4,
+        to_record=lambda: {
+            "table_markdown": (
+                "| Scan speed (mm/s) | Relative density (%) |\n"
+                "| --- | --- |\n"
+                "| 700 | 98.1 |\n"
+                "| 900 | 99.2 |"
+            )
+        },
+    )
+
+    evidence = evidence_materialization._analysis_evidence_records(
+        collection_id="col-test",
+        analysis=analysis,
+        objective=objective,
+        drafts=drafts,
+        blocks_by_document_id={},
+        tables_by_document_id={"paper-1": [table]},
+        figures_by_document_id={},
+    )
+
+    assert {item.evidence_id for item in evidence} == {
+        "evidence-row-1",
+        "evidence-row-2",
+    }
+    assert {
+        item.related_source_refs[0]["row_index"] for item in evidence
+    } == {1, 2}
+
+
+@pytest.mark.parametrize(
+    ("baseline_phase", "target_phase", "expected_direction"),
+    (
+        ("alpha-prime", "alpha+beta", "changed"),
+        ("alpha+beta", "alpha+beta", "no_change"),
+    ),
+)
+def test_pairwise_comparison_preserves_categorical_result_transition(
+    baseline_phase: str,
+    target_phase: str,
+    expected_direction: str,
+):
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "obj-phase",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-phase",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Heat treatment": "process_variable",
+                "Phase composition": "result_property",
+            },
+            "confidence": 0.9,
+        }
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-phase",
+            "variables": ["heat treatment"],
+            "outcomes": ["phase composition"],
+        }
+    )
+    measurements = tuple(
+        ExtractedEvidenceDraft.from_mapping(record)
+        for record in source_extraction._objective_table_matrix_evidence_records(
+            route=route,
+            source={
+                "page": 6,
+                "column_headers": ["Heat treatment", "Phase composition"],
+                "table_matrix": [
+                    ["Heat treatment", "Phase composition"],
+                    ["as-built", baseline_phase],
+                    ["annealed", target_phase],
+                ],
+            },
+            objective_context=objective,
+        )
+    )
+
+    assert [item.reported_result.value for item in measurements] == [
+        baseline_phase,
+        target_phase,
+    ]
+    comparison = paper_experiment._build_objective_pairwise_comparison_units(
+        measurements,
+        objectives=(objective,),
+    )[0]
+
+    assert comparison.reported_result is not None
+    assert comparison.reported_result.baseline_value == baseline_phase
+    assert comparison.reported_result.target_value == target_phase
+    assert comparison.reported_result.direction == expected_direction
+    assert comparison.comparison is not None
+    assert comparison.comparison.comparable is True
+    assert comparison.attribution_scope == "isolated_effect"
+
+
+def test_pairwise_categorical_result_keeps_context_conflict_incomparable():
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "obj-phase",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-phase",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Material": "material",
+                "Heat treatment": "process_variable",
+                "Phase composition": "result_property",
+            },
+            "confidence": 0.9,
+        }
+    )
+    objective = _research_objective(
+        {
+            "objective_id": "obj-phase",
+            "variables": ["heat treatment"],
+            "outcomes": ["phase composition"],
+        }
+    )
+    measurements = tuple(
+        ExtractedEvidenceDraft.from_mapping(record)
+        for record in source_extraction._objective_table_matrix_evidence_records(
+            route=route,
+            source={
+                "page": 6,
+                "column_headers": [
+                    "Material",
+                    "Heat treatment",
+                    "Phase composition",
+                ],
+                "table_matrix": [
+                    ["Material", "Heat treatment", "Phase composition"],
+                    ["Ti-6Al-4V", "as-built", "alpha-prime"],
+                    ["316L", "annealed", "alpha+beta"],
+                ],
+            },
+            objective_context=objective,
+        )
+    )
+
+    comparison = paper_experiment._build_objective_pairwise_comparison_units(
+        measurements,
+        objectives=(objective,),
+    )[0]
+
+    assert comparison.reported_result is not None
+    assert comparison.reported_result.direction == "changed"
+    assert comparison.comparison is not None
+    assert comparison.comparison.comparable is False
+    assert comparison.attribution_scope == "not_attributable"
+    assert any(
+        "material condition differs" in reason
+        for reason in comparison.comparison.incomparability_reasons
+    )
+
+
+def test_pairwise_mixed_result_value_types_are_incomparable():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-phase",
+            "variables": ["heat treatment"],
+            "outcomes": ["phase composition"],
+        }
+    )
+    measurements = tuple(
+        ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": f"phase-{index}",
+                "objective_id": objective.objective_id,
+                "document_id": "paper-1",
+                "source_kind": "table",
+                "source_ref": "table-phase",
+                "evidence_role": "direct_result",
+                "selection_status": "extracted",
+                "reported_result": {
+                    "outcome": "phase composition",
+                    "value": value,
+                    "direction": "unknown",
+                    "result_text": f"Phase composition = {value}",
+                },
+                "attribution_scope": "descriptive_only",
+                "scientific_context": {
+                    "process": [{"name": "heat treatment", "value": treatment}]
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-phase",
+                        "row_index": index,
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+        for index, treatment, value in (
+            (1, "as-built", 1),
+            (2, "annealed", "alpha+beta"),
+        )
+    )
+
+    comparison = paper_experiment._build_objective_pairwise_comparison_units(
+        measurements,
+        objectives=(objective,),
+    )[0]
+
+    assert comparison.reported_result is not None
+    assert comparison.reported_result.direction == "unknown"
+    assert comparison.comparison is not None
+    assert comparison.comparison.comparable is False
+    assert any(
+        "result value types differ" in reason
+        for reason in comparison.comparison.incomparability_reasons
+    )
+
+
 def test_analysis_evidence_uses_confirmed_objective_axis_names():
     objective = _research_objective(
         {

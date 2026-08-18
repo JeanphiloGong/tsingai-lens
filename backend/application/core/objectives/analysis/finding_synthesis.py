@@ -38,6 +38,7 @@ _DIRECTION_PRIORITY = (
     "decrease",
     "improve",
     "worsen",
+    "changed",
     "no_change",
     "mixed",
 )
@@ -776,6 +777,8 @@ class FindingSynthesisService:
                     "reported_result": {
                         "outcome": reported_result.get("outcome"),
                         "value": reported_result.get("value"),
+                        "baseline_value": reported_result.get("baseline_value"),
+                        "target_value": reported_result.get("target_value"),
                         "unit": reported_result.get("unit"),
                         "direction": reported_result.get("direction"),
                     },
@@ -1194,6 +1197,7 @@ class FindingSynthesisService:
             "decrease": "a decrease",
             "improve": "an improvement",
             "worsen": "a worsening",
+            "changed": "a qualitative change",
             "no_change": "no reported change",
             "mixed": "a source-reported mixed change",
         }

@@ -19,6 +19,7 @@ EvidenceResultDirection = Literal[
     "decrease",
     "improve",
     "worsen",
+    "changed",
     "no_change",
     "mixed",
     "unknown",
@@ -265,6 +266,8 @@ class ObjectiveEvidenceResultResponse(BaseModel):
 
     outcome: str
     value: str | int | float | bool | None = None
+    baseline_value: str | int | float | bool | None = None
+    target_value: str | int | float | bool | None = None
     unit: str | None = None
     direction: EvidenceResultDirection
     result_text: str

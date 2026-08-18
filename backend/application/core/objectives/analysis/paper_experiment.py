@@ -461,7 +461,7 @@ def _build_objective_pairwise_comparison_units(
         result = unit.reported_result
         if result is None or unit.attribution_scope != "descriptive_only":
             continue
-        if _coerce_number(result.value) is None or not unit.source_refs:
+        if result.value in (None, "") or not unit.source_refs:
             continue
         primary_source = unit.source_refs[0]
         results_by_scope.setdefault(
@@ -619,8 +619,22 @@ def _build_objective_pairwise_comparison_units(
                     _objective_sample_identity_key(target_sample_values)
                     or target.evidence_id
                 )
-                comparable = not incomparability_reasons and bool(
-                    changed_variables
+                baseline_result = baseline.reported_result
+                target_result = target.reported_result
+                if baseline_result is None or target_result is None:
+                    continue
+                direction, result_values_comparable, result_reason = (
+                    _objective_pairwise_result_direction(
+                        baseline_result.value,
+                        target_result.value,
+                    )
+                )
+                if result_reason is not None:
+                    incomparability_reasons.append(result_reason)
+                comparable = (
+                    not incomparability_reasons
+                    and bool(changed_variables)
+                    and result_values_comparable
                 )
                 attribution_scope = (
                     "not_attributable"
@@ -630,21 +644,6 @@ def _build_objective_pairwise_comparison_units(
                         if len(changed_variables) == 1
                         else "joint_effect"
                     )
-                )
-                baseline_result = baseline.reported_result
-                target_result = target.reported_result
-                if baseline_result is None or target_result is None:
-                    continue
-                baseline_value = _coerce_number(baseline_result.value)
-                target_value = _coerce_number(target_result.value)
-                if baseline_value is None or target_value is None:
-                    continue
-                direction = (
-                    "increase"
-                    if target_value > baseline_value
-                    else "decrease"
-                    if target_value < baseline_value
-                    else "no_change"
                 )
                 source_refs = _dedupe_objective_source_refs(
                     (baseline.source_refs, target.source_refs)
@@ -689,6 +688,8 @@ def _build_objective_pairwise_comparison_units(
                             "reported_result": {
                                 "outcome": target_result.outcome,
                                 "value": target_result.value,
+                                "baseline_value": baseline_result.value,
+                                "target_value": target_result.value,
                                 "unit": target_result.unit,
                                 "direction": direction,
                                 "result_text": (
@@ -731,6 +732,46 @@ def _build_objective_pairwise_comparison_units(
                     generated_by_scope.get(scope_key, 0) + 1
                 )
     return tuple(generated)
+
+
+def _objective_pairwise_result_direction(
+    baseline_value: Any,
+    target_value: Any,
+) -> tuple[str, bool, str | None]:
+    numeric_types = (int, float)
+    baseline_is_number = isinstance(baseline_value, numeric_types) and not isinstance(
+        baseline_value, bool
+    )
+    target_is_number = isinstance(target_value, numeric_types) and not isinstance(
+        target_value, bool
+    )
+    if baseline_is_number and target_is_number:
+        direction = (
+            "increase"
+            if target_value > baseline_value
+            else "decrease"
+            if target_value < baseline_value
+            else "no_change"
+        )
+        return direction, True, None
+
+    if isinstance(baseline_value, str) and isinstance(target_value, str):
+        baseline_text = " ".join(baseline_value.split())
+        target_text = " ".join(target_value.split())
+        if baseline_text and target_text:
+            direction = (
+                "no_change"
+                if baseline_text.casefold() == target_text.casefold()
+                else "changed"
+            )
+            return direction, True, None
+
+    return (
+        "unknown",
+        False,
+        "result value types differ between baseline and target: "
+        f"{type(baseline_value).__name__} vs {type(target_value).__name__}",
+    )
 
 
 def _objective_common_pairwise_context(

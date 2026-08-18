@@ -97,6 +97,8 @@ const evidence = [
 		reported_result: {
 			outcome: 'strength',
 			value: 620,
+			baseline_value: null,
+			target_value: null,
 			unit: 'MPa',
 			direction: 'increase' as const,
 			result_text: 'At 500 C, tensile strength increased to 620 MPa.'
@@ -183,6 +185,8 @@ describe('single Finding workbench', () => {
 			reported_result: {
 				outcome: 'relative density',
 				value: 99.1,
+				baseline_value: null,
+				target_value: null,
 				unit: '%',
 				direction: 'increase' as const,
 				result_text: 'Relative density increased to 99.1%.'

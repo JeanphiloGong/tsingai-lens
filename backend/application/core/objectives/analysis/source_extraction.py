@@ -2322,6 +2322,9 @@ def _objective_result_table_matrix_records(
                 or property_source
             )
             numeric_value = _coerce_result_cell_number(raw_value)
+            result_value = (
+                numeric_value if numeric_value is not None else str(raw_value).strip()
+            )
             records.append(
                 {
                     "evidence_id": _objective_matrix_unit_id(
@@ -2336,7 +2339,7 @@ def _objective_result_table_matrix_records(
                     "comparison": None,
                     "reported_result": {
                         "outcome": outcome,
-                        "value": numeric_value,
+                        "value": result_value,
                         "unit": unit,
                         "direction": "unknown",
                         "result_text": (

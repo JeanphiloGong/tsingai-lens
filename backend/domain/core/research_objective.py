@@ -69,6 +69,7 @@ EVIDENCE_RESULT_DIRECTIONS: Final[frozenset[str]] = frozenset(
         "decrease",
         "improve",
         "worsen",
+        "changed",
         "no_change",
         "mixed",
         "unknown",
@@ -1410,6 +1411,8 @@ class ObjectiveEvidenceResult:
     unit: str | None
     direction: str
     result_text: str
+    baseline_value: EvidenceScalar | None = None
+    target_value: EvidenceScalar | None = None
 
     def __post_init__(self) -> None:
         if not _text(self.outcome) or not _text(self.result_text):
@@ -1427,12 +1430,16 @@ class ObjectiveEvidenceResult:
                 payload.get("direction"), EVIDENCE_RESULT_DIRECTIONS, "unknown"
             ),
             result_text=_text(payload.get("result_text")) or "",
+            baseline_value=_scientific_scalar(payload.get("baseline_value")),
+            target_value=_scientific_scalar(payload.get("target_value")),
         )
 
     def to_record(self) -> dict[str, Any]:
         return {
             "outcome": self.outcome,
             "value": self.value,
+            "baseline_value": self.baseline_value,
+            "target_value": self.target_value,
             "unit": self.unit,
             "direction": self.direction,
             "result_text": self.result_text,

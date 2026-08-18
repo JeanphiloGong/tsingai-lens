@@ -265,6 +265,7 @@ export type ObjectiveEvidenceResultDirection =
 	| 'decrease'
 	| 'improve'
 	| 'worsen'
+	| 'changed'
 	| 'no_change'
 	| 'mixed'
 	| 'unknown';
@@ -386,6 +387,8 @@ export type ObjectiveEvidence = {
 	reported_result: {
 		outcome: string;
 		value: string | number | boolean | null;
+		baseline_value: string | number | boolean | null;
+		target_value: string | number | boolean | null;
 		unit: string | null;
 		direction: ObjectiveEvidenceResultDirection;
 		result_text: string;

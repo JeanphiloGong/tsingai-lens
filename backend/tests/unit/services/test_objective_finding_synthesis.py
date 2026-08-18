@@ -541,6 +541,45 @@ def test_synthesis_generates_uniform_no_change_statement_from_evidence() -> None
     )
 
 
+def test_synthesis_generates_categorical_changed_finding_from_evidence() -> None:
+    extractor = _Extractor([_candidate()])
+    service = FindingSynthesisService(assertion_judge=extractor)
+    evidence = _evidence(
+        "phase-change",
+        "paper-1",
+        outcome="phase composition",
+        factors=("heat treatment",),
+        direction="changed",
+        reported_result={
+            "outcome": "phase composition",
+            "value": "alpha+beta",
+            "baseline_value": "alpha-prime",
+            "target_value": "alpha+beta",
+            "unit": None,
+            "direction": "changed",
+            "result_text": "Phase composition changed from alpha-prime to alpha+beta.",
+        },
+    )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            variables=("heat treatment",),
+            outcomes=("phase composition",),
+        ),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(evidence,),
+    )[0]
+
+    assert finding.direction == "changed"
+    assert finding.statement == (
+        "Changes in heat treatment were associated with a qualitative change "
+        "in phase composition."
+    )
+    assert extractor.payloads[0]["result_set"]["primary_direction"] == "changed"
+
+
 def test_synthesis_accepts_source_supported_uniform_mixed_condition_series() -> None:
     extractor = _Extractor([_candidate()])
     service = FindingSynthesisService(assertion_judge=extractor)

@@ -203,6 +203,11 @@
 
 	function resultLabel(item: ObjectiveEvidence) {
 		if (!item.reported_result) return '未报告';
+		const baseline = formatValue(item.reported_result.baseline_value, item.reported_result.unit);
+		const target = formatValue(item.reported_result.target_value, item.reported_result.unit);
+		if (baseline && target) {
+			return `${item.reported_result.outcome}: ${baseline} → ${target}`;
+		}
 		const value = formatValue(item.reported_result.value, item.reported_result.unit);
 		return `${item.reported_result.outcome}: ${value || item.reported_result.result_text}`;
 	}
@@ -244,6 +249,7 @@
 			decrease: '降低',
 			improve: '改善',
 			worsen: '恶化',
+			changed: '发生变化',
 			no_change: '无变化',
 			mixed: '结果不一致',
 			unknown: '方向未知'

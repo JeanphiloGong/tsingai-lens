@@ -36,7 +36,10 @@ _CONTRADICTING_DIRECTIONS: Final[dict[str, frozenset[str]]] = {
     "decrease": frozenset({"increase", "no_change"}),
     "improve": frozenset({"worsen", "no_change"}),
     "worsen": frozenset({"improve", "no_change"}),
-    "no_change": frozenset({"increase", "decrease", "improve", "worsen"}),
+    "changed": frozenset({"no_change"}),
+    "no_change": frozenset(
+        {"increase", "decrease", "improve", "worsen", "changed"}
+    ),
 }
 _J_PER_CUBIC_MM_RE = re.compile(
     r"\bj\s*/\s*mm\s*(?:\^\s*)?(?:3|\u00b3)\b",

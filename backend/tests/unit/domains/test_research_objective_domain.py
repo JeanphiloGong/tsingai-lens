@@ -466,6 +466,50 @@ def test_objective_evidence_preserves_source_and_structured_result() -> None:
     assert "evidence_unit_id" not in extracted.to_record()
 
 
+def test_objective_evidence_result_preserves_categorical_transition() -> None:
+    evidence = _candidate_evidence(
+        selection_status="extracted",
+        changed_variables=[
+            {
+                "name": "heat treatment",
+                "baseline_value": "as-built",
+                "target_value": "annealed",
+            }
+        ],
+        comparison={
+            "baseline_label": "as-built",
+            "target_label": "annealed",
+            "axis_names": ["heat treatment"],
+            "comparable": True,
+        },
+        reported_result={
+            "outcome": "phase composition",
+            "value": "alpha+beta",
+            "baseline_value": "alpha-prime",
+            "target_value": "alpha+beta",
+            "unit": None,
+            "direction": "changed",
+            "result_text": "Phase composition changed from alpha-prime to alpha+beta.",
+        },
+        attribution_scope="isolated_effect",
+        resolution_status="resolved",
+    )
+
+    assert evidence.reported_result is not None
+    assert evidence.reported_result.baseline_value == "alpha-prime"
+    assert evidence.reported_result.target_value == "alpha+beta"
+    assert evidence.reported_result.direction == "changed"
+    assert evidence.to_record()["reported_result"] == {
+        "outcome": "phase composition",
+        "value": "alpha+beta",
+        "baseline_value": "alpha-prime",
+        "target_value": "alpha+beta",
+        "unit": None,
+        "direction": "changed",
+        "result_text": "Phase composition changed from alpha-prime to alpha+beta.",
+    }
+
+
 def test_context_only_evidence_cannot_establish_finding_by_itself() -> None:
     evidence = _candidate_evidence(
         evidence_role="condition_context",

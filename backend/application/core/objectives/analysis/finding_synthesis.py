@@ -26,7 +26,7 @@ _MAX_CONTEXT_EVIDENCE_PER_SET = 8
 _MAX_RESULT_EVIDENCE_REPRESENTATIVES = 16
 _MAX_EXCERPT_CHARS = 320
 _FINDING_SYNTHESIS_MAX_COMPLETION_TOKENS = 1024
-_FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v12"
+_FINDING_SYNTHESIS_PROMPT_VERSION = "finding_synthesis.v13"
 _CONTEXT_ROLES = {
     "condition_context",
     "mechanism_context",
@@ -58,8 +58,9 @@ clustering, direction selection, lineage generation, or prose generation.
 
 INPUT SCHEMA
 - `objective`: the user-confirmed question and requested scientific scope.
-- `result_set`: backend-owned `factors`, one `outcome`, `primary_direction`,
-  total Evidence count, condition-series flag, document-balanced
+- `result_set`: backend-owned context-compatible Evidence stratum with `factors`,
+  one `outcome`, `primary_direction`, total Evidence count, condition-series flag,
+  document-balanced
   `result_evidence` representatives, and complete per-document count summaries.
   Representatives carry exact Evidence ids, paper ids, structured comparisons,
   reported results, attribution scope, and sometimes bounded source excerpts.
@@ -76,7 +77,8 @@ INPUT SCHEMA
   not a source of scientific facts.
 
 DECISION PROCESS
-1. Verify that the supplied result Evidence supports the bounded factor-to-outcome
+1. Treat the supplied result set as one backend-established comparability stratum.
+   Verify that its result Evidence supports the bounded factor-to-outcome
    relationship in the Objective. Return an empty `findings` array only when it
    does not support a scientifically defensible Finding.
 2. Choose `descriptive` for an observation without defensible attribution. Choose
@@ -588,26 +590,93 @@ class FindingSynthesisService:
         for factor_key, outcome_key in sorted(grouped):
             factors = factor_labels[factor_key]
             outcome = outcome_labels[outcome_key]
-            for primary_direction, evidence_items in self._direction_result_groups(
+            evidence_groups = self._comparability_groups(
                 tuple(grouped[(factor_key, outcome_key)])
-            ):
-                result_sets.append(
-                    {
-                        "result_set_id": self._result_set_id(
-                            factors,
-                            outcome,
-                            primary_direction,
-                        ),
-                        "factors": list(factors),
-                        "outcome": outcome,
-                        "primary_direction": primary_direction,
-                        "result_evidence": [
-                            self._evidence_payload(evidence)
-                            for evidence in evidence_items
-                        ],
-                    }
-                )
+            )
+            for evidence_group in evidence_groups:
+                for primary_direction, evidence_items in (
+                    self._direction_result_groups(evidence_group)
+                ):
+                    result_sets.append(
+                        {
+                            "result_set_id": self._result_set_id(
+                                factors,
+                                outcome,
+                                primary_direction,
+                                evidence_ids=tuple(
+                                    item.evidence_id for item in evidence_items
+                                ),
+                            ),
+                            "factors": list(factors),
+                            "outcome": outcome,
+                            "primary_direction": primary_direction,
+                            "result_evidence": [
+                                self._evidence_payload(evidence)
+                                for evidence in evidence_items
+                            ],
+                        }
+                    )
         return tuple(result_sets)
+
+    @classmethod
+    def _comparability_groups(
+        cls,
+        evidence_items: tuple[ObjectiveEvidence, ...],
+    ) -> tuple[tuple[ObjectiveEvidence, ...], ...]:
+        context_values = {
+            evidence.evidence_id: cls._fixed_context_values(evidence)
+            for evidence in evidence_items
+        }
+        ordered = sorted(
+            evidence_items,
+            key=lambda evidence: (
+                -sum(
+                    len(values)
+                    for values in context_values[evidence.evidence_id].values()
+                ),
+                evidence.document_id,
+                evidence.evidence_id,
+            ),
+        )
+        groups: list[list[ObjectiveEvidence]] = []
+        for evidence in ordered:
+            compatible_groups = [
+                group
+                for group in groups
+                if all(
+                    evidence.document_id == member.document_id
+                    or context_values[evidence.evidence_id]
+                    == context_values[member.evidence_id]
+                    for member in group
+                )
+            ]
+            if len(compatible_groups) == 1:
+                compatible_groups[0].append(evidence)
+            else:
+                groups.append([evidence])
+        return tuple(
+            tuple(sorted(group, key=lambda item: item.evidence_id))
+            for group in groups
+        )
+
+    @staticmethod
+    def _fixed_context_values(
+        evidence: ObjectiveEvidence,
+    ) -> dict[tuple[str, str], set[str]]:
+        changed_axes = tuple(item.name for item in evidence.changed_variables)
+        values: dict[tuple[str, str], set[str]] = defaultdict(set)
+        for section in ("material", "sample", "process", "test"):
+            for attribute in getattr(evidence.scientific_context, section):
+                if any(
+                    property_matching.axis_values_match(attribute.name, axis)
+                    for axis in changed_axes
+                ):
+                    continue
+                key = (section, _context_attribute_key(section, attribute.name))
+                value = _scalar_key(attribute.value)
+                if key[1] and value:
+                    values[key].add(f"{value}|{_normalize_term(attribute.unit)}")
+        return values
 
     @staticmethod
     def _direction_result_groups(
@@ -1355,9 +1424,11 @@ class FindingSynthesisService:
         factors: tuple[str, ...],
         outcome: str,
         primary_direction: str,
+        *,
+        evidence_ids: tuple[str, ...],
     ) -> str:
         identity = json.dumps(
-            [factors, outcome, primary_direction],
+            [factors, outcome, primary_direction, sorted(evidence_ids)],
             ensure_ascii=True,
             separators=(",", ":"),
         )
@@ -1426,6 +1497,38 @@ def _normalize_term(value: Any) -> str:
             for character in (_text(value) or "")
         ).split()
     )
+
+
+def _context_attribute_key(section: str, value: Any) -> str:
+    key = _normalize_term(value)
+    aliases = {
+        "material": {
+            "alloy": "material identity",
+            "composition": "material identity",
+            "material": "material identity",
+            "material grade": "material identity",
+        },
+        "sample": {
+            "material state": "sample state",
+            "state": "sample state",
+        },
+        "process": {
+            "fabrication process": "process",
+            "manufacturing process": "process",
+            "processing method": "process",
+            "production process": "process",
+        },
+        "test": {
+            "characterization method": "test method",
+            "loading orientation": "test orientation",
+            "measurement method": "test method",
+            "orientation": "test orientation",
+            "specimen orientation": "test orientation",
+            "temperature": "test temperature",
+            "testing temperature": "test temperature",
+        },
+    }
+    return aliases.get(section, {}).get(key, key)
 
 
 def _normalize_scientific_typography(value: Any) -> str:

@@ -453,13 +453,24 @@ terminal dispositions are:
 Finding synthesis first excludes Evidence that cannot support a Finding or has
 `direction=unknown`. A unit-qualified or noisy factor/outcome label is mapped to
 an Objective axis only when that match is unique; the canonical factor tuple
-and one outcome define the initial group. Explicitly opposing directions remain
-in one result set; non-opposing labels such as `mixed` form separate result sets
-instead of being mislabeled as contradictions. The primary direction is chosen
-first by independent document support, then by Evidence count, confidence, and
-a stable direction order. Multiple baseline-to-target intervals in one set form
-a condition series rather than separate Findings, and their exact endpoints
-remain on the individual Evidence records.
+and one outcome define the initial group. Before result direction is inspected,
+the backend divides cross-paper Evidence into complete-link comparability
+strata using fixed material, sample, process, and test context. Cross-paper
+records must expose the same fixed-context fields with non-conflicting values;
+missing fields do not imply equality and explicit differences form separate
+strata. Changed variables are excluded from that fixed-context comparison. A
+paper's already reconstructed within-paper comparison intervals remain intact.
+Explicitly opposing directions remain in one context-compatible result set;
+non-opposing labels such as `mixed` form separate result sets instead of being
+mislabeled as contradictions. The primary direction is chosen only after this
+scientific boundary, first by independent document support, then by Evidence
+count, confidence, and a stable direction order. Multiple baseline-to-target
+intervals in one set form a condition series rather than separate Findings, and
+their exact endpoints remain on the individual Evidence records.
+Opposing directions across different ranges of the changed axis may therefore
+form one `condition_dependent` Finding when every fixed context field remains
+compatible; an opposing fixed material, sample, process, or test condition does
+not.
 
 The model sees at most 16 representatives selected round-robin across documents
 and directions. It also receives a complete per-document summary containing

@@ -498,7 +498,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
     )
     assert usage.prompt_versions == {
         "document_profile": "document_profile.v1",
-        "finding_synthesis": "finding_synthesis.v12",
+        "finding_synthesis": "finding_synthesis.v13",
         "paper_fact_text_window": "paper_fact_text_window.v1",
     }
 
@@ -747,7 +747,7 @@ def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace()
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v12"
+    assert trace["prompt_version"] == "finding_synthesis.v13"
     assert trace["parsed_output"] == {"findings": []}
 
 

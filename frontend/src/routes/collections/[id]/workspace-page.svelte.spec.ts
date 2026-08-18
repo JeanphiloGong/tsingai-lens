@@ -124,6 +124,7 @@ function buildWorkspacePayload(overrides: Record<string, unknown> = {}) {
 describe('collections/[id]/+page.svelte', () => {
 	let workspacePayload: Record<string, unknown>;
 	let researchViewPayload: Record<string, unknown> | null;
+	let objectivesPayload: Record<string, unknown> | null;
 
 	beforeEach(() => {
 		setPage({
@@ -132,6 +133,7 @@ describe('collections/[id]/+page.svelte', () => {
 		});
 		workspacePayload = buildWorkspacePayload();
 		researchViewPayload = null;
+		objectivesPayload = null;
 		fetchMock.mockReset();
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
 			const rawUrl =
@@ -149,6 +151,9 @@ describe('collections/[id]/+page.svelte', () => {
 			}
 			if (url.pathname === '/api/v1/collections/col_123/research-view' && researchViewPayload) {
 				return jsonResponse(researchViewPayload);
+			}
+			if (url.pathname === '/api/v1/collections/col_123/objectives' && objectivesPayload) {
+				return jsonResponse(objectivesPayload);
 			}
 
 			return jsonResponse({ detail: 'collection not found: col_123' }, 404, 'Not Found');
@@ -208,6 +213,51 @@ describe('collections/[id]/+page.svelte', () => {
 
 		const primaryLink = browserPage.getByRole('link', { name: 'Enter objectives' }).first();
 		await expect.element(primaryLink).toBeInTheDocument();
+	});
+
+	it('distinguishes a completed build with zero Objective candidates from completed analysis', async () => {
+		workspacePayload = buildWorkspacePayload({
+			workflow: {
+				documents: 'ready',
+				results: 'not_started',
+				evidence: 'not_started',
+				comparisons: 'not_started'
+			},
+			capabilities: {
+				can_view_documents: true,
+				can_view_results: false,
+				can_view_evidence: false,
+				can_view_comparisons: false,
+				can_view_graph: false,
+				can_download_graphml: false
+			}
+		});
+		objectivesPayload = {
+			collection_id: 'col_123',
+			objectives: []
+		};
+
+		render(Page);
+
+		await vi.waitFor(() => {
+			expect(
+				fetchMock.mock.calls.some(([input]) =>
+					String(input).includes('/collections/col_123/objectives')
+				)
+			).toBe(true);
+		});
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'No research objective candidates' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText(/Objective Evidence analysis has not started/))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'View evidence' }))
+			.not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Evidence extraction complete'))
+			.not.toBeInTheDocument();
 	});
 
 	it('shows build subprogress when the latest task includes progress detail', async () => {

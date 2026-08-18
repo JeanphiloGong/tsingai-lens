@@ -11,9 +11,11 @@
 	} from '../../_shared/files';
 	import { t } from '../../_shared/i18n';
 	import {
+		fetchCollectionObjectives,
 		fetchCollectionResearchView,
 		getResearchViewStateTone,
 		type CollectionAggregation,
+		type ObjectiveList,
 		type ResearchViewState,
 		type ResearchViewWarning
 	} from '../../_shared/researchView';
@@ -53,6 +55,8 @@
 	let workspace: WorkspaceOverview | null = null;
 	let researchView: CollectionAggregation | null = null;
 	let researchViewError = '';
+	let objectiveList: ObjectiveList | null = null;
+	let objectivesLoaded = false;
 	let loading = false;
 	let error = '';
 	let actionStatus = '';
@@ -77,6 +81,13 @@
 	);
 	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveFileCount } : null;
 	$: readinessState = getOverviewReadinessState(stateWorkspace);
+	$: noObjectiveCandidates =
+		readinessState === 'ready' &&
+		objectivesLoaded &&
+		(objectiveList?.objectives.length ?? 0) === 0;
+	$: canViewEvidence = ['ready', 'limited'].includes(
+		getWorkspaceSurfaceState(stateWorkspace, 'evidence')
+	);
 	$: hasActiveTask = isTaskActive(stateWorkspace?.latest_task);
 	$: uploadControlsDisabled = uploadLoading || hasActiveTask;
 	$: pipelineSteps = buildOverviewPipelineSteps(stateWorkspace);
@@ -114,7 +125,9 @@
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
 		clearPoll();
-		void Promise.all([loadWorkspace(), loadFiles(), loadResearchView()]);
+		objectiveList = null;
+		objectivesLoaded = false;
+		void Promise.all([loadWorkspace(), loadFiles(), loadResearchView(), loadObjectives()]);
 	}
 
 	onDestroy(() => {
@@ -156,7 +169,12 @@
 			schedulePoll(task.task_id);
 		} else {
 			clearPoll();
-			await Promise.all([loadWorkspace(false), loadFiles(false), loadResearchView()]);
+			await Promise.all([
+				loadWorkspace(false),
+				loadFiles(false),
+				loadResearchView(),
+				loadObjectives()
+			]);
 			uploadResult = null;
 			actionStatus =
 				task.status === 'failed' || task.status === 'partial_success'
@@ -199,6 +217,16 @@
 		}
 	}
 
+	async function loadObjectives() {
+		try {
+			objectiveList = await fetchCollectionObjectives(collectionId);
+			objectivesLoaded = true;
+		} catch {
+			objectiveList = null;
+			objectivesLoaded = false;
+		}
+	}
+
 	async function loadFiles(showLoading = true) {
 		if (showLoading) filesLoading = true;
 		filesError = '';
@@ -214,7 +242,7 @@
 	}
 
 	async function refreshAll() {
-		await Promise.all([loadWorkspace(), loadFiles(), loadResearchView()]);
+		await Promise.all([loadWorkspace(), loadFiles(), loadResearchView(), loadObjectives()]);
 	}
 
 	function browseFiles() {
@@ -295,7 +323,12 @@
 			uploadResult = await uploadCollectionFiles(collectionId, selectedFiles);
 			selectedFiles = [];
 			if (fileInput) fileInput.value = '';
-			await Promise.all([loadFiles(false), loadWorkspace(false), loadResearchView()]);
+			await Promise.all([
+				loadFiles(false),
+				loadWorkspace(false),
+				loadResearchView(),
+				loadObjectives()
+			]);
 			actionStatus = $t('documents.uploadDone');
 		} catch (err) {
 			uploadError = errorMessage(err);
@@ -360,11 +393,13 @@
 		return $t(`overview.pipeline.statuses.${status}`);
 	}
 
-	function readinessTitle(state: OverviewReadinessState) {
+	function readinessTitle(state: OverviewReadinessState, hasNoObjectiveCandidates: boolean) {
+		if (hasNoObjectiveCandidates) return $t('overview.readiness.noObjectives.title');
 		return $t(`overview.readiness.${state}.title`);
 	}
 
-	function readinessBody(state: OverviewReadinessState) {
+	function readinessBody(state: OverviewReadinessState, hasNoObjectiveCandidates: boolean) {
+		if (hasNoObjectiveCandidates) return $t('overview.readiness.noObjectives.body');
 		return $t(`overview.readiness.${state}.body`, { count: paperCount });
 	}
 
@@ -566,8 +601,8 @@
 				<span></span>
 			</div>
 			<div class="readiness-card__body">
-				<h2>{readinessTitle(readinessState)}</h2>
-				<p>{readinessBody(readinessState)}</p>
+				<h2>{readinessTitle(readinessState, noObjectiveCandidates)}</h2>
+				<p>{readinessBody(readinessState, noObjectiveCandidates)}</p>
 			</div>
 			<div class="readiness-card__actions">
 				{#if readinessState === 'ready'}
@@ -575,7 +610,9 @@
 						{readyPrimaryLabel()}
 						<span aria-hidden="true">-&gt;</span>
 					</a>
-					<a class="btn btn--ghost" href={evidenceHref()}>{$t('overview.actions.viewEvidence')}</a>
+					{#if canViewEvidence}
+						<a class="btn btn--ghost" href={evidenceHref()}>{$t('overview.actions.viewEvidence')}</a>
+					{/if}
 					<button class="btn btn--ghost" type="button" on:click={refreshAll}>
 						{$t('overview.actions.refreshStatus')}
 					</button>
@@ -868,9 +905,11 @@
 				</div>
 				<div class="split-actions">
 					{#if readinessState === 'ready'}
-						<a class="btn btn--ghost btn--small" href={evidenceHref()}>
-							{$t('overview.actions.viewEvidence')}
-						</a>
+						{#if canViewEvidence}
+							<a class="btn btn--ghost btn--small" href={evidenceHref()}>
+								{$t('overview.actions.viewEvidence')}
+							</a>
+						{/if}
 						<a class="btn btn--primary btn--small" href={readyPrimaryHref()}>
 							{$t('overview.actions.enterObjectives')}
 						</a>

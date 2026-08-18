@@ -669,7 +669,11 @@ const translations: Record<Language, Translations> = {
 			readiness: {
 				ready: {
 					title: 'Collection is ready',
-					body: 'This collection contains {count} document(s), and parsing plus evidence extraction are complete. Start from Research objectives, then inspect materials, papers, evidence, and comparisons as needed.'
+					body: 'This collection contains {count} document(s). Document parsing and Objective discovery are complete. Confirm a research objective before starting Objective Evidence analysis.'
+				},
+				noObjectives: {
+					title: 'No research objective candidates',
+					body: 'Document parsing and Objective discovery completed, but no cross-paper candidate met the current source-support rules. Objective Evidence analysis has not started.'
 				},
 				processing: {
 					title: 'Collection is processing',
@@ -708,7 +712,7 @@ const translations: Record<Language, Translations> = {
 				steps: {
 					upload: 'Document upload',
 					parse: 'Document parsing',
-					evidence: 'Evidence extraction',
+					evidence: 'Reusable paper evidence',
 					comparisons: 'Comparison generation',
 					graph: 'Graph construction'
 				},
@@ -724,7 +728,7 @@ const translations: Record<Language, Translations> = {
 					title: 'Current status',
 					uploaded: '{count} document(s) uploaded',
 					parsed: 'Document parsing complete',
-					evidence: 'Evidence extraction complete',
+					evidence: 'Reusable paper evidence available',
 					comparison: 'Comparison view available',
 					graph: 'Graph construction pending',
 					logs: 'View processing log'
@@ -2954,7 +2958,11 @@ const translations: Record<Language, Translations> = {
 			readiness: {
 				ready: {
 					title: '集合已准备好',
-					body: '该集合包含 {count} 篇文档，解析与证据提取已完成。建议先进入研究目标，再按需要查看材料、文献、证据和比较。'
+					body: '该集合包含 {count} 篇文档，文档解析与研究目标发现已完成。确认一个研究目标后，才会开始目标级证据分析。'
+				},
+				noObjectives: {
+					title: '没有符合条件的研究目标候选',
+					body: '文档解析与研究目标发现已完成，但没有跨论文候选满足当前的来源支持规则。目标级证据分析尚未开始。'
 				},
 				processing: {
 					title: '集合正在处理中',
@@ -2993,7 +3001,7 @@ const translations: Record<Language, Translations> = {
 				steps: {
 					upload: '文档上传',
 					parse: '文档解析',
-					evidence: '证据提取',
+					evidence: '可复用的论文证据',
 					comparisons: '比较结果生成',
 					graph: '图谱构建'
 				},
@@ -3009,7 +3017,7 @@ const translations: Record<Language, Translations> = {
 					title: '当前状态',
 					uploaded: '{count} 篇文档已上传',
 					parsed: '文档解析完成',
-					evidence: '证据提取完成',
+					evidence: '可复用的论文证据可用',
 					comparison: '比较视图可用',
 					graph: '图谱构建待生成',
 					logs: '查看处理日志'

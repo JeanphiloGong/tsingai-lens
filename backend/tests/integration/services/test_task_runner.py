@@ -127,17 +127,20 @@ class MemorySourceArtifactRepository:
 
 def _write_source_artifact_outputs(
     output_dir: Path,
+    *,
+    include_nul: bool = False,
 ) -> SourceArtifactBundle:
     output_dir.mkdir(parents=True, exist_ok=True)
+    nul = "\x00" if include_nul else ""
     documents = pd.DataFrame(
         [
             {
                 "id": "paper-1",
-                "title": "Composite Paper",
+                "title": f"Composite{nul} Paper",
                 "text": "\n".join(
                     [
                         "Experimental Section",
-                        "The precursor powders were mixed in ethanol and stirred for 2 h.",
+                        f"The precursor powders were mixed{nul} in ethanol and stirred for 2 h.",
                         "The slurry was dried at 80 C and annealed at 600 C for 2 h under Ar.",
                         "Characterization",
                         "XRD and SEM were used to characterize the powders.",
@@ -173,7 +176,7 @@ def _write_source_artifact_outputs(
                 "table_id": "tbl-1",
                 "document_id": "paper-1",
                 "table_order": 0,
-                "caption_text": "Processing summary",
+                "caption_text": f"Processing{nul} summary",
                 "caption_block_id": None,
                 "page": None,
                 "heading_path": ["Experimental Section"],
@@ -363,6 +366,59 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
     )
     assert objective_facts.research_objectives_ready is True
     assert objective_facts.paper_skims
+
+
+def test_build_pipeline_removes_parser_nul_before_source_persistence(
+    monkeypatch,
+    tmp_path,
+):
+    import application.pipeline.collection_build.service as task_runner_module
+
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    build_repository = MemoryBuildRepository()
+    task_service = TaskService(build_repository)
+    runner, _artifact_registry = _build_runner(
+        tmp_path,
+        collection_service,
+        build_repository,
+    )
+    collection = collection_service.create_collection("NUL Source Collection")
+    paths = collection_service.get_paths(collection["collection_id"])
+    collection_service.add_file(
+        collection["collection_id"],
+        "paper.txt",
+        b"Experimental Section\nMix and anneal.",
+    )
+
+    async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003, ARG001
+        return [
+            DummyWorkflowOutput(
+                result=_write_source_artifact_outputs(
+                    paths.output_dir,
+                    include_nul=True,
+                )
+            )
+        ]
+
+    monkeypatch.setattr(
+        task_runner_module,
+        "build_source_artifacts",
+        fake_build_source_artifacts,
+    )
+
+    task = task_service.create_task(collection["collection_id"], "build")
+    result = asyncio.run(runner.run_task(task["task_id"], collection["collection_id"]))
+
+    assert result["status"] == "completed"
+    build = build_repository.read_build(task["task_id"])
+    assert build is not None
+    source_document = runner.source_artifact_repository.read_collection_documents(
+        collection["collection_id"],
+        build_id=build.build_id,
+    )[0]
+    assert "\x00" not in source_document.title
+    assert "\x00" not in source_document.text
+    assert "\x00" not in source_document.tables[0].caption_text
 
 
 def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_coverage(

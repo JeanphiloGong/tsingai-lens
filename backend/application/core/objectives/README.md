@@ -462,7 +462,12 @@ mislabeled as contradictions. The primary direction is chosen only after this
 scientific boundary, first by independent document support, then by Evidence
 count, confidence, and a stable direction order. Multiple baseline-to-target
 intervals in one set form a condition series rather than separate Findings, and
-their exact endpoints remain on the individual Evidence records.
+their exact endpoints remain on the individual Evidence records. For treatment
+or processing-condition axes, the backend first separates untreated-reference
+comparisons (`AB`, `AF`, `as-built`, or `as-fabricated` to a treated state) from
+treated-state-to-treated-state comparisons. This preserves every extracted
+interval while preventing a treatment-series contrast from manufacturing a
+conflict inside a cross-paper reference-to-treatment Finding.
 Opposing directions across different ranges of the changed axis may therefore
 form one `condition_dependent` Finding when every fixed context field remains
 compatible; an opposing fixed material, sample, process, or test condition does

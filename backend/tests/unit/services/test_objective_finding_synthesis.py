@@ -496,6 +496,91 @@ def test_synthesis_groups_comparison_intervals_as_one_condition_series() -> None
     assert [len(item["result_evidence"]) for item in result_sets] == [3]
 
 
+def test_synthesis_separates_reference_treatment_from_treatment_comparisons(
+) -> None:
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    objective = _objective(
+        variables=["post-processing condition"],
+        outcomes=["ultimate tensile strength"],
+        material_scope=["Ti-6Al-4V"],
+    )
+
+    def uts_comparison(
+        evidence_id: str,
+        document_id: str,
+        baseline: str,
+        target: str,
+        direction: str,
+    ) -> ObjectiveEvidence:
+        return _evidence(
+            evidence_id,
+            document_id,
+            factors=("post-processing condition",),
+            outcome="ultimate tensile strength",
+            direction=direction,
+            material="Ti-6Al-4V",
+            changed_variables=[
+                {
+                    "name": "post-processing condition",
+                    "baseline_value": baseline,
+                    "target_value": target,
+                }
+            ],
+            scientific_context={
+                "material": [{"name": "material", "value": "Ti-6Al-4V"}],
+                "sample": [{"name": "build orientation", "value": "vertical"}],
+                "process": [
+                    {
+                        "name": "manufacturing process",
+                        "value": "laser powder bed fusion",
+                    }
+                ],
+                "test": [],
+            },
+        )
+
+    result_sets = service._result_sets(
+        objective,
+        (
+            uts_comparison(
+                "2020-af-to-hip",
+                "paper-2020",
+                "as-fabricated",
+                "HIP + polishing",
+                "decrease",
+            ),
+            uts_comparison(
+                "2024-ab-to-800-sc",
+                "paper-2024",
+                "AB",
+                "800 SC",
+                "decrease",
+            ),
+            uts_comparison(
+                "2024-800-fc-to-920-rq",
+                "paper-2024",
+                "800 FC",
+                "920 RQ",
+                "increase",
+            ),
+        ),
+    )
+
+    evidence_ids_by_interval = {
+        result_set["comparison_interval"]: {
+            item["evidence_id"] for item in result_set["result_evidence"]
+        }
+        for result_set in result_sets
+    }
+    assert evidence_ids_by_interval == {
+        "reference_to_treatment": {
+            "2020-af-to-hip",
+            "2024-ab-to-800-sc",
+        },
+        "treatment_to_treatment": {"2024-800-fc-to-920-rq"},
+    }
+
+
 def test_synthesis_generates_uniform_no_change_statement_from_evidence() -> None:
     extractor = _Extractor([_candidate()])
     service = FindingSynthesisService(assertion_judge=extractor)
@@ -847,6 +932,62 @@ def test_synthesis_splits_cross_paper_results_at_process_context_boundary() -> N
     assert len({item["result_set_id"] for item in result_sets}) == 2
 
 
+def test_synthesis_matches_cross_paper_stratum_when_one_paper_has_two_orientations(
+) -> None:
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+
+    def evidence(
+        evidence_id: str,
+        document_id: str,
+        orientation: str,
+    ) -> ObjectiveEvidence:
+        return _evidence(
+            evidence_id,
+            document_id,
+            factors=("post-processing condition",),
+            outcome="ultimate tensile strength",
+            direction="decrease",
+            material="Ti-6Al-4V",
+            scientific_context={
+                "material": [{"name": "material", "value": "Ti-6Al-4V"}],
+                "sample": [
+                    {"name": "build orientation", "value": orientation}
+                ],
+                "process": [
+                    {
+                        "name": "manufacturing process",
+                        "value": "laser powder bed fusion",
+                    }
+                ],
+                "test": [],
+            },
+        )
+
+    result_sets = service._result_sets(
+        _objective(
+            material_scope=["Ti-6Al-4V"],
+            variables=["post-processing condition"],
+            outcomes=["ultimate tensile strength"],
+        ),
+        (
+            evidence("paper-2020-vertical", "paper-2020", "vertical"),
+            evidence("paper-2020-horizontal", "paper-2020", "horizontal"),
+            evidence("paper-2024-vertical", "paper-2024", "vertical"),
+        ),
+    )
+
+    assert len(result_sets) == 2
+    assert {
+        tuple(
+            sorted(
+                item["document_id"]
+                for item in result_set["result_evidence"]
+            )
+        )
+        for result_set in result_sets
+    } == {("paper-2020",), ("paper-2020", "paper-2024")}
+
+
 @pytest.mark.parametrize(
     ("section", "attribute_name", "left_value", "right_value"),
     (
@@ -1070,16 +1211,11 @@ def test_synthesis_excludes_changed_axis_from_fixed_context_boundary() -> None:
     assert len(result_sets[0]["result_evidence"]) == 2
 
 
-def test_synthesis_keeps_context_inside_one_comparison_interval() -> None:
+def test_synthesis_splits_same_paper_results_at_fixed_context_boundary() -> None:
     extractor = _Extractor(
         [
-            _heterogeneous_candidate(
-                statement=(
-                    "Scan strategy rotation angle showed heterogeneous yield strength "
-                    "responses across the reported conditions, with an increase and "
-                    "an opposing decrease."
-                ),
-            ),
+            _candidate(),
+            _candidate(),
         ]
     )
     service = FindingSynthesisService(assertion_judge=extractor)
@@ -1141,14 +1277,26 @@ def test_synthesis_keeps_context_inside_one_comparison_interval() -> None:
         ),
     )
 
-    assert len(findings) == 1
-    assert len(extractor.payloads) == 1
-    assert findings[0].direction == "increase"
-    assert findings[0].contradicting_evidence_ids == ("alpha-45",)
-    assert findings[0].scientific_context.to_record()["process"] == [
-        {"name": "build orientation alpha angle", "value": 0, "unit": None},
-        {"name": "build orientation beta angle", "value": 0, "unit": None},
-    ]
+    assert len(findings) == 2
+    assert len(extractor.payloads) == 2
+    assert {finding.direction for finding in findings} == {"increase", "decrease"}
+    assert all(not finding.contradicting_evidence_ids for finding in findings)
+    assert {
+        tuple(
+            (item["name"], item["value"])
+            for item in finding.scientific_context.to_record()["process"]
+        )
+        for finding in findings
+    } == {
+        (
+            ("build orientation alpha angle", 0),
+            ("build orientation beta angle", 0),
+        ),
+        (
+            ("build orientation alpha angle", 45),
+            ("build orientation beta angle", 22.5),
+        ),
+    }
 
 
 def test_synthesis_splits_distinct_outcomes_into_distinct_findings() -> None:

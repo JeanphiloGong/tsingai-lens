@@ -42,6 +42,25 @@ _DIRECTION_PRIORITY = (
     "no_change",
     "mixed",
 )
+_UNTREATED_REFERENCE_STATES = frozenset(
+    {
+        "ab",
+        "af",
+        "as built",
+        "as built condition",
+        "as built state",
+        "as fabricated",
+        "as fabricated condition",
+        "as fabricated state",
+        "as manufactured",
+        "as printed",
+        "as produced",
+        "no treatment",
+        "unprocessed",
+        "untreated",
+        "without treatment",
+    }
+)
 logger = logging.getLogger(__name__)
 _J_PER_CUBIC_MM_RE = re.compile(
     r"\bj\s*/\s*mm\s*(?:\^\s*)?(?:3|\u00b3)\b",
@@ -595,28 +614,32 @@ class FindingSynthesisService:
                 tuple(grouped[(factor_key, outcome_key)])
             )
             for evidence_group in evidence_groups:
-                for primary_direction, evidence_items in (
-                    self._direction_result_groups(evidence_group)
+                for comparison_interval, interval_items in (
+                    self._comparison_interval_groups(evidence_group)
                 ):
-                    result_sets.append(
-                        {
-                            "result_set_id": self._result_set_id(
-                                factors,
-                                outcome,
-                                primary_direction,
-                                evidence_ids=tuple(
-                                    item.evidence_id for item in evidence_items
+                    for primary_direction, evidence_items in (
+                        self._direction_result_groups(interval_items)
+                    ):
+                        result_sets.append(
+                            {
+                                "result_set_id": self._result_set_id(
+                                    factors,
+                                    outcome,
+                                    primary_direction,
+                                    evidence_ids=tuple(
+                                        item.evidence_id for item in evidence_items
+                                    ),
                                 ),
-                            ),
-                            "factors": list(factors),
-                            "outcome": outcome,
-                            "primary_direction": primary_direction,
-                            "result_evidence": [
-                                self._evidence_payload(evidence)
-                                for evidence in evidence_items
-                            ],
-                        }
-                    )
+                                "factors": list(factors),
+                                "outcome": outcome,
+                                "comparison_interval": comparison_interval,
+                                "primary_direction": primary_direction,
+                                "result_evidence": [
+                                    self._evidence_payload(evidence)
+                                    for evidence in evidence_items
+                                ],
+                            }
+                        )
         return tuple(result_sets)
 
     @classmethod
@@ -639,25 +662,25 @@ class FindingSynthesisService:
                 evidence.evidence_id,
             ),
         )
-        groups: list[list[ObjectiveEvidence]] = []
+        groups_by_context: dict[
+            tuple[tuple[str, str, tuple[str, ...]], ...],
+            list[ObjectiveEvidence],
+        ] = {}
         for evidence in ordered:
-            compatible_groups = [
-                group
-                for group in groups
-                if all(
-                    evidence.document_id == member.document_id
-                    or context_values[evidence.evidence_id]
-                    == context_values[member.evidence_id]
-                    for member in group
+            context_signature = tuple(
+                (
+                    section,
+                    name,
+                    tuple(sorted(values)),
                 )
-            ]
-            if len(compatible_groups) == 1:
-                compatible_groups[0].append(evidence)
-            else:
-                groups.append([evidence])
+                for (section, name), values in sorted(
+                    context_values[evidence.evidence_id].items()
+                )
+            )
+            groups_by_context.setdefault(context_signature, []).append(evidence)
         return tuple(
             tuple(sorted(group, key=lambda item: item.evidence_id))
-            for group in groups
+            for group in groups_by_context.values()
         )
 
     @staticmethod
@@ -678,6 +701,52 @@ class FindingSynthesisService:
                 if key[1] and value:
                     values[key].add(f"{value}|{_normalize_term(attribute.unit)}")
         return values
+
+    @classmethod
+    def _comparison_interval_groups(
+        cls,
+        evidence_items: tuple[ObjectiveEvidence, ...],
+    ) -> tuple[tuple[str, tuple[ObjectiveEvidence, ...]], ...]:
+        groups: dict[str, list[ObjectiveEvidence]] = defaultdict(list)
+        for evidence in evidence_items:
+            groups[cls._comparison_interval(evidence)].append(evidence)
+        return tuple(
+            (
+                interval,
+                tuple(sorted(items, key=lambda item: item.evidence_id)),
+            )
+            for interval, items in sorted(groups.items())
+        )
+
+    @staticmethod
+    def _comparison_interval(evidence: ObjectiveEvidence) -> str:
+        treatment_variables = tuple(
+            variable
+            for variable in evidence.changed_variables
+            if _is_treatment_condition_axis(variable.name)
+        )
+        if not treatment_variables:
+            return "unspecified"
+
+        baseline_is_reference = any(
+            _is_untreated_reference_state(variable.baseline_value)
+            for variable in treatment_variables
+        )
+        target_is_reference = any(
+            _is_untreated_reference_state(variable.target_value)
+            for variable in treatment_variables
+        )
+        if baseline_is_reference and not target_is_reference:
+            return "reference_to_treatment"
+        if target_is_reference and not baseline_is_reference:
+            return "treatment_to_reference"
+        if all(
+            variable.baseline_value is not None
+            and variable.target_value is not None
+            for variable in treatment_variables
+        ):
+            return "treatment_to_treatment"
+        return "unspecified"
 
     @staticmethod
     def _direction_result_groups(
@@ -1501,6 +1570,19 @@ def _normalize_term(value: Any) -> str:
             for character in (_text(value) or "")
         ).split()
     )
+
+
+def _is_treatment_condition_axis(value: Any) -> bool:
+    axis = _normalize_term(value)
+    return bool(
+        "treatment" in axis.split()
+        or "processing condition" in axis
+        or axis in {"condition", "material state", "sample state"}
+    )
+
+
+def _is_untreated_reference_state(value: Any) -> bool:
+    return _normalize_term(value) in _UNTREATED_REFERENCE_STATES
 
 
 def _context_attribute_key(section: str, value: Any) -> str:

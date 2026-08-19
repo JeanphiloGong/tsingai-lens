@@ -695,6 +695,7 @@ def test_research_view_endpoint_returns_empty_state_for_empty_collection(app_cli
 def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     import application.pipeline.collection_build.service as task_runner_module
     from application.source.task_service import TaskService
+    from infra.persistence.postgres.chat_repository import PostgresChatRepository
 
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
@@ -729,6 +730,9 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
             comparison_repository=comparison_repository,
             finding_review_repository=finding_review_repository,
             experiment_plan_repository=experiment_plan_repository,
+            chat_repository=PostgresChatRepository(
+                auth_session_service.repository.session_factory
+            ),
         )
     ) as client:
         login_response = client.post(

@@ -75,23 +75,83 @@ def test_paper_skim_contract_bounds_model_output():
         "StructuredPaperStudyRelationship"
     ]["properties"]
     assert study_schema["material_scope"]["maxItems"] == 8
-    assert study_schema["process_context"]["maxItems"] == 4
-    assert study_schema["sample_context"]["maxItems"] == 4
-    assert study_schema["test_context"]["maxItems"] == 4
+    assert study_schema["process_context"]["maxItems"] == 12
+    assert study_schema["process_context"]["items"]["maxLength"] == 160
+    assert study_schema["sample_context"]["maxItems"] == 12
+    assert study_schema["sample_context"]["items"]["maxLength"] == 160
+    assert study_schema["test_context"]["maxItems"] == 12
+    assert study_schema["test_context"]["items"]["maxLength"] == 160
     assert study_schema["fixed_conditions"]["maxItems"] == 12
     assert study_schema["relationships"]["maxItems"] == 8
-    assert relationship_schema["varied_factors"]["maxItems"] == 8
+    assert relationship_schema["varied_factors"]["maxItems"] == 12
     assert relationship_schema["source_unit_ids"]["minItems"] == 1
     assert relationship_schema["source_unit_ids"]["maxItems"] == 12
     signal_schema = model_schema["$defs"]["StructuredPaperStudySignal"][
         "properties"
     ]
     assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
+    assert signal_schema["process_context"]["maxItems"] == 12
+    assert signal_schema["process_context"]["items"]["maxLength"] == 160
+    assert signal_schema["sample_context"]["maxItems"] == 12
+    assert signal_schema["test_context"]["maxItems"] == 12
     assert signal_schema["source_unit_ids"]["minItems"] == 1
     assert signal_schema["source_unit_ids"]["maxItems"] == 12
     assert "source_unit_coverage" not in schema
     assert "StructuredPaperSourceUnitCoverage" not in model_schema.get("$defs", {})
     assert schema["warnings"]["items"]["maxLength"] == 240
+
+
+def test_paper_skim_contract_represents_a_full_bounded_experiment_context():
+    sample_context = [
+        f"HIP condition {index}: temperature, pressure, and cooling schedule"
+        for index in range(1, 12)
+    ]
+    varied_factors = [
+        "HIP temperature",
+        "HIP pressure",
+        "cooling rate",
+        "prior beta grain size",
+        "alpha lath thickness",
+        "alpha phase fraction",
+        "beta phase fraction",
+        "pore fraction",
+        "pore diameter",
+        "build orientation",
+    ]
+
+    parsed = StructuredPaperSkim.model_validate(
+        {
+            "studies": [
+                {
+                    "process_context": [
+                        "laser powder bed fusion",
+                        "hot isostatic pressing",
+                        "sandblasting",
+                        "mechanical polishing",
+                        "chemical etching",
+                    ],
+                    "sample_context": sample_context,
+                    "test_context": [
+                        "room-temperature tensile testing",
+                        "optical microscopy",
+                        "scanning electron microscopy",
+                        "electron backscatter diffraction",
+                        "X-ray computed tomography",
+                    ],
+                    "relationships": [
+                        {
+                            "varied_factors": varied_factors,
+                            "outcome": "yield strength",
+                            "source_unit_ids": ["table-8"],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert parsed.studies[0].sample_context == sample_context
+    assert parsed.studies[0].relationships[0].varied_factors == varied_factors
 
 
 def test_paper_signal_reconciliation_contract_requires_source_signal_ids():
@@ -228,6 +288,9 @@ def test_paper_skim_prompt_defines_structured_research_map_contract():
     assert "up to 12 unresolved signals" in user_prompt
     assert "output_saturated=true" in user_prompt
     assert "neutral scientific axis" in user_prompt
+    assert "at most 12 process, sample, and test context values" in user_prompt
+    assert "each context value is at most 160 characters" in user_prompt
+    assert "at most 12 varied-factor labels" in user_prompt
     assert "L-VED, M-VED, and H-VED" in user_prompt
     assert "varied_factors=['volumetric energy density']" in user_prompt
     assert "outcome='fatigue strength'" in user_prompt
@@ -1262,6 +1325,105 @@ def test_paper_skim_retries_duplicate_study_identities_before_returning():
     assert "at most 12 IDs" in client.chat.completions.calls[1]["messages"][-1][
         "content"
     ]
+
+
+def test_paper_skim_repairs_unknown_source_unit_ids_before_returning():
+    invalid = {
+        "doc_role": "experimental",
+        "studies": [
+            {
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "relationships": [
+                    {
+                        "varied_factors": ["HIP temperature"],
+                        "outcome": "yield strength",
+                        "source_unit_ids": ["invented-source-unit"],
+                    }
+                ],
+            }
+        ],
+    }
+    valid = {
+        **invalid,
+        "studies": [
+            {
+                **invalid["studies"][0],
+                "relationships": [
+                    {
+                        **invalid["studies"][0]["relationships"][0],
+                        "source_unit_ids": ["window-source-1"],
+                    }
+                ],
+            }
+        ],
+    }
+    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
+
+    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+        {
+            "document_id": "paper-ti64",
+            "source_units": [
+                {
+                    "source_unit_id": "window-source-1",
+                    "source_kind": "table",
+                    "source_ref": "table-8",
+                    "content": "HIP temperature was varied and yield strength measured.",
+                }
+            ],
+        }
+    )
+
+    assert skim.studies[0].relationships[0].source_unit_ids == [
+        "window-source-1"
+    ]
+    assert len(client.chat.completions.calls) == 2
+    repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "invented-source-unit" in repair_prompt
+    assert "Copy only unique Source-unit IDs from the input" in repair_prompt
+
+
+def test_paper_skim_repairs_unknown_signal_source_unit_ids_before_returning():
+    invalid = {
+        "doc_role": "experimental",
+        "unresolved_signals": [
+            {
+                "signal_type": "outcome",
+                "label": "elongation",
+                "source_unit_ids": ["invented-source-unit"],
+            }
+        ],
+    }
+    valid = {
+        **invalid,
+        "unresolved_signals": [
+            {
+                **invalid["unresolved_signals"][0],
+                "source_unit_ids": ["window-source-1"],
+            }
+        ],
+    }
+    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
+
+    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+        {
+            "document_id": "paper-ti64",
+            "source_units": [
+                {
+                    "source_unit_id": "window-source-1",
+                    "source_kind": "table",
+                    "source_ref": "table-8",
+                    "content": "Total elongation was reported for each HIP condition.",
+                }
+            ],
+        }
+    )
+
+    assert skim.unresolved_signals[0].source_unit_ids == ["window-source-1"]
+    assert len(client.chat.completions.calls) == 2
+    assert "invented-source-unit" in client.chat.completions.calls[1]["messages"][
+        -1
+    ]["content"]
 
 
 def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypatch):

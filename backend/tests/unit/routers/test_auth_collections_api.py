@@ -15,6 +15,43 @@ import pytest
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 
 
+def _app_repository_dependencies(auth_session_service) -> dict[str, object]:
+    from infra.persistence.postgres.chat_repository import PostgresChatRepository
+    from infra.persistence.postgres.comparison_repository import (
+        PostgresComparisonRepository,
+    )
+    from infra.persistence.postgres.experiment_plan_repository import (
+        PostgresExperimentPlanRepository,
+    )
+    from infra.persistence.postgres.finding_review_repository import (
+        PostgresFindingReviewRepository,
+    )
+    from infra.persistence.postgres.objective_repository import (
+        PostgresObjectiveRepository,
+    )
+    from infra.persistence.postgres.paper_fact_repository import (
+        PostgresPaperFactRepository,
+    )
+    from infra.persistence.postgres.source_artifact_repository import (
+        PostgresSourceArtifactRepository,
+    )
+
+    session_factory = auth_session_service.repository.session_factory
+    return {
+        "source_artifact_repository": PostgresSourceArtifactRepository(
+            session_factory
+        ),
+        "paper_fact_repository": PostgresPaperFactRepository(session_factory),
+        "objective_repository": PostgresObjectiveRepository(session_factory),
+        "comparison_repository": PostgresComparisonRepository(session_factory),
+        "finding_review_repository": PostgresFindingReviewRepository(session_factory),
+        "experiment_plan_repository": PostgresExperimentPlanRepository(
+            session_factory
+        ),
+        "chat_repository": PostgresChatRepository(session_factory),
+    }
+
+
 @contextmanager
 def _build_client(
     monkeypatch,
@@ -36,6 +73,7 @@ def _build_client(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
             task_service=TaskService(MemoryBuildRepository()),
+            **_app_repository_dependencies(auth_session_service),
         )
     ) as client:
         yield client
@@ -115,6 +153,7 @@ def test_app_lifespan_composes_one_shared_collection_service(
             auth_session_service=auth_session_service,
             collection_service=collection_service,
             task_service=TaskService(MemoryBuildRepository()),
+            **_app_repository_dependencies(auth_session_service),
         )
     ) as client:
         state = client.app.state

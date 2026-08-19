@@ -2534,8 +2534,9 @@ def _objective_result_table_matrix_records(
             header
             for header in headers
             if not _objective_value_column_is_non_result(header)
-            and _objective_result_column_matches_target(
+            and _objective_result_column_matches_source_target(
                 header,
+                source=source,
                 objective_context=objective_context,
             )
         )
@@ -2568,6 +2569,7 @@ def _objective_result_table_matrix_records(
                 continue
             property_source = _objective_result_column_property_label(
                 route=route,
+                source=source,
                 result_column=result_column,
                 objective_context=objective_context,
             )
@@ -2659,8 +2661,9 @@ def _objective_process_table_matrix_records(
             header
             for header in headers
             if not _objective_value_column_is_non_result(header)
-            and _objective_result_column_matches_target(
+            and _objective_result_column_matches_source_target(
                 header,
+                source=source,
                 objective_context=objective_context,
             )
         )
@@ -3317,9 +3320,17 @@ def _objective_route_result_columns(
 def _objective_result_column_property_label(
     *,
     route: EvidenceCandidate,
+    source: Mapping[str, Any],
     result_column: str,
     objective_context: ResearchObjective | None,
 ) -> str:
+    source_defined_property = _objective_source_defined_result_property(
+        result_column,
+        source=source,
+        objective_context=objective_context,
+    )
+    if source_defined_property is not None:
+        return source_defined_property
     role_label = property_matching.normalize_property_label(
         route.column_roles.get(result_column)
     )
@@ -3377,6 +3388,52 @@ def _objective_result_column_matches_target(
         or property_matching.axis_label_is_mentioned(column_text, axis)
         for axis in target_axes
     )
+
+
+def _objective_result_column_matches_source_target(
+    column_text: str,
+    *,
+    source: Mapping[str, Any],
+    objective_context: ResearchObjective | None,
+) -> bool:
+    return _objective_result_column_matches_target(
+        column_text,
+        objective_context=objective_context,
+    ) or _objective_source_defined_result_property(
+        column_text,
+        source=source,
+        objective_context=objective_context,
+    ) is not None
+
+
+def _objective_source_defined_result_property(
+    column_text: str,
+    *,
+    source: Mapping[str, Any],
+    objective_context: ResearchObjective | None,
+) -> str | None:
+    if objective_context is None or not objective_context.outcomes:
+        return None
+    property_name, _unit = _split_property_unit(column_text)
+    property_key = _objective_column_key(property_name)
+    caption = str(source.get("caption_text") or "")
+    if not property_key or not caption:
+        return None
+    for match in re.finditer(
+        r"\b(?P<label>[A-Za-z][A-Za-z0-9._-]{0,15})\s*"
+        r"(?:=|means?|denotes?)\s*(?P<definition>[^,;.\n]+)",
+        caption,
+        flags=re.IGNORECASE,
+    ):
+        if _objective_column_key(match.group("label")) != property_key:
+            continue
+        definition = match.group("definition").strip()
+        if _objective_result_column_matches_target(
+            definition,
+            objective_context=objective_context,
+        ):
+            return property_matching.normalize_property_label(definition) or definition
+    return None
 
 
 def _objective_value_column_is_non_result(value: str) -> bool:

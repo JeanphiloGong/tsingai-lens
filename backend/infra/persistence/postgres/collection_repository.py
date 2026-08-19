@@ -61,10 +61,8 @@ from infra.persistence.postgres.models.objective import (
     objective_finding_evidence_links,
     objective_finding_relation_evidence_links,
 )
-from infra.persistence.postgres.models.objective_workspace import (
-    ObjectiveExperimentPlan,
-    ObjectiveSession,
-)
+from infra.persistence.postgres.models.chat import ChatSessionRow
+from infra.persistence.postgres.models.objective_workspace import ObjectiveExperimentPlan
 from infra.persistence.postgres.models.source import (
     SourceDocument,
     SourceReferenceCandidate,
@@ -492,8 +490,8 @@ class PostgresCollectionRepository:
                 )
             )
             session.execute(
-                delete(ObjectiveSession).where(
-                    ObjectiveSession.collection_id == collection_id
+                delete(ChatSessionRow).where(
+                    ChatSessionRow.collection_id == collection_id
                 )
             )
             session.execute(

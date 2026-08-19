@@ -19,6 +19,7 @@ from domain.core import (
     TestCondition as CoreTestCondition,
 )
 from domain.core.paper_fact import PaperFactSet
+from domain.chat import ChatMessage, ChatSession
 from domain.evaluation import (
     EvaluationGoldItem,
     EvaluationGoldSet,
@@ -51,15 +52,16 @@ from infra.persistence.postgres.build_repository import PostgresBuildRepository
 from infra.persistence.postgres.evaluation_repository import (
     PostgresEvaluationRepository,
 )
+from infra.persistence.postgres.chat_repository import PostgresChatRepository
+from infra.persistence.postgres.experiment_plan_repository import (
+    PostgresExperimentPlanRepository,
+)
 from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from scripts.persistence.capture_baseline import capture_baseline
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
 from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
-from tests.support.objective_workspace_repository import (
-    InMemoryObjectiveWorkspaceRepository,
-)
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -113,8 +115,10 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         paper_fact_repository=paper_fact_repository,
         comparison_repository=comparison_repository,
     )
-    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
-    experiment_plan_repository = goal_session_repository
+    chat_repository = PostgresChatRepository(auth_repository.session_factory)
+    experiment_plan_repository = PostgresExperimentPlanRepository(
+        auth_repository.session_factory
+    )
     evaluation_repository = PostgresEvaluationRepository(
         auth_repository.session_factory
     )
@@ -303,10 +307,15 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
             ),
         ),
     )
-    goal_session_repository.write_session(records["goal_sessions"][0])
-    goal_session_repository.write_messages(
-        records["goal_sessions"][0]["session_id"],
-        records["goal_messages"],
+    chat_session = ChatSession.from_mapping(records["chat_sessions"][0])
+    chat_repository.add_session(chat_session)
+    chat_repository.save_trajectory(
+        session=chat_session,
+        messages=tuple(
+            ChatMessage.from_mapping(item) for item in records["chat_messages"]
+        ),
+        tool_calls=(),
+        tool_results=(),
     )
     experiment_plan_repository.upsert_plan(
         ExperimentPlanRecord.from_mapping(records["experiment_plans"][0])
@@ -447,13 +456,13 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
             for index, actual in enumerate(actual_items)
         ]
 
-    session_id = records["goal_sessions"][0]["session_id"]
-    observed_records["goal_sessions"] = [
-        goal_session_repository.read_session(session_id)
+    session_id = records["chat_sessions"][0]["session_id"]
+    observed_records["chat_sessions"] = [
+        chat_repository.read_session(session_id).to_record()
     ]
-    observed_records["goal_messages"] = goal_session_repository.read_messages(
-        session_id
-    )
+    observed_records["chat_messages"] = [
+        item.to_record() for item in chat_repository.read_messages(session_id)
+    ]
     observed_records["experiment_plans"] = [
         item.to_record()
         for item in experiment_plan_repository.list_plans(

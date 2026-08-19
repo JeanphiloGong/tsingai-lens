@@ -125,7 +125,7 @@ def test_app_lifespan_composes_one_shared_collection_service(
             state.document_markdown_service,
             state.document_profile_service,
             state.goal_service,
-            state.goal_session_service,
+            state.chat_session_service,
             state.paper_facts_service,
             state.research_objective_service,
             state.research_view_service,

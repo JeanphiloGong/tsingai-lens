@@ -3,30 +3,26 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from application.evaluation.finding_feedback_service import _source_snapshot_validity
+from pydantic import ValidationError
+import pytest
+
 from application.goal.experiment_plan_service import ExperimentPlanService
 from controllers.goal import experiment_plans as experiment_plans_controller
 from controllers.schemas.goal.experiment_plan import (
     ExperimentPlanCreateRequest,
     ExperimentPlanUpdateRequest,
 )
-from tests.support.objective_workspace_repository import (
-    InMemoryObjectiveWorkspaceRepository,
+from tests.support.experiment_plan_repository import (
+    InMemoryExperimentPlanRepository,
 )
 
 
-PROTOCOL_DRAFT = """Hypothesis: 150 C build-platform preheating improves LPBF 316L ductility compared with room-temperature builds [Source 1].
-
-Variable matrix: compare room-temperature and 150 C build-platform settings under the same LPBF material and scan setup.
-
-Measurements: tensile ductility, yield strength, and microstructure indicators after printing.
-
-Controls: include a no-preheat control build and repeat specimens for both temperatures.
-
-Risks and limits: one reviewed finding is not enough to generalize beyond the cited 316L condition."""
+class _FindingFeedbackService:
+    def source_snapshot_validity(self, **_kwargs):
+        return "current", []
 
 
-def _request(service, user_id: str = "expert-a"):
+def _request(service: ExperimentPlanService, user_id: str = "expert-a"):
     return SimpleNamespace(
         app=SimpleNamespace(
             state=SimpleNamespace(experiment_plan_service=service),
@@ -35,93 +31,10 @@ def _request(service, user_id: str = "expert-a"):
     )
 
 
-class _FindingFeedbackService:
-    def export_dataset(self, **kwargs):  # noqa: ANN003, ANN201
-        return {
-            "collection_id": kwargs["collection_id"],
-            "objective_id": kwargs["objective_id"],
-            "items": [
-                {
-                    "finding_id": "finding-1",
-                    "analysis_version": 1,
-                    "finding_fingerprint": "finding.v2:abc",
-                    "evidence_fingerprint": "evidence.v2:def",
-                    "dataset_use_status": "training_ready",
-                    "evidence": [{"evidence_id": "ev_1"}],
-                }
-            ],
-        }
-
-    def source_snapshot_validity(self, **kwargs):  # noqa: ANN003, ANN201
-        dataset = self.export_dataset(**kwargs)
-        return _source_snapshot_validity(kwargs["source_findings"], dataset["items"])
-
-
-def _write_goal_message(repository: InMemoryObjectiveWorkspaceRepository) -> None:
-    repository.write_session(
-        {
-            "session_id": "session_1",
-            "user_id": "expert-a",
-            "collection_id": "col_1",
-            "focused_material_id": None,
-            "focused_paper_id": None,
-            "focused_objective_id": "objective_1",
-            "goal_text": None,
-            "goal_brief_json": {},
-            "answer_mode": "hybrid",
-            "rolling_summary": "",
-            "last_evidence_ids": [],
-            "last_material_ids": [],
-            "last_paper_ids": [],
-            "collection_data_version": None,
-            "created_at": "2026-07-13T00:00:00+00:00",
-            "updated_at": "2026-07-13T00:00:00+00:00",
-        }
-    )
-    repository.write_messages(
-        "session_1",
-        [
-            {
-                "message_id": "msg_1",
-                "session_id": "session_1",
-                "role": "assistant",
-                "content": PROTOCOL_DRAFT,
-                "answer": PROTOCOL_DRAFT,
-                "source_mode": "collection_grounded",
-                "used_evidence_ids": ["ev_1"],
-                "warnings": [],
-                "links": {},
-                "review_gate": "reviewed_findings",
-                "source_links": [
-                    {
-                        "kind": "evidence",
-                        "label": "Source 1",
-                        "href": "/collections/col_1/documents/paper-a?evidence_id=ev_1",
-                    }
-                ],
-                "source_finding_refs": [
-                    {
-                        "objective_id": "objective_1",
-                        "finding_id": "finding-1",
-                        "analysis_version": 1,
-                        "finding_fingerprint": "finding.v2:abc",
-                        "evidence_fingerprint": "evidence.v2:def",
-                        "evidence_ids": ["ev_1"],
-                    }
-                ],
-                "created_at": "2026-07-13T00:01:00+00:00",
-            }
-        ],
-    )
-
-
-def test_experiment_plan_routes_create_list_and_update():
-    goal_session_repository = InMemoryObjectiveWorkspaceRepository()
-    _write_goal_message(goal_session_repository)
+def test_experiment_plan_routes_create_list_and_update_manual_plan() -> None:
     service = ExperimentPlanService(
-        repository=InMemoryObjectiveWorkspaceRepository(),
-        goal_session_repository=goal_session_repository,
-        finding_feedback_service=(_FindingFeedbackService()),
+        repository=InMemoryExperimentPlanRepository(),
+        finding_feedback_service=_FindingFeedbackService(),
     )
     request = _request(service)
 
@@ -131,15 +44,7 @@ def test_experiment_plan_routes_create_list_and_update():
             "objective_1",
             ExperimentPlanCreateRequest(
                 title="Preheating validation matrix",
-                content=PROTOCOL_DRAFT,
-                source_message_id="msg_1",
-                source_links=[
-                    {
-                        "kind": "evidence",
-                        "label": "Source 1",
-                        "href": "/collections/col_1/documents/paper-a?evidence_id=ev_1",
-                    }
-                ],
+                content="Expert-authored validation design.",
             ),
             request,
         )
@@ -156,10 +61,7 @@ def test_experiment_plan_routes_create_list_and_update():
             created.plan_id,
             ExperimentPlanUpdateRequest(
                 title="Edited validation matrix",
-                content=(
-                    PROTOCOL_DRAFT
-                    + "\n\nMeasurements: add repeat tensile testing and EBSD checks."
-                ),
+                content="Edited design with explicit controls.",
                 status="ready_for_review",
             ),
             request,
@@ -168,9 +70,19 @@ def test_experiment_plan_routes_create_list_and_update():
 
     assert created.status == "draft"
     assert created.created_by == "expert-a"
-    assert created.source_links[0].label == "Source 1"
-    assert created.metadata["source_validity"] == "current"
+    assert created.source_message_id is None
+    assert created.metadata == {"source": "manual"}
     assert listed.items[0].plan_id == created.plan_id
-    assert listed.items[0].metadata["source_validity_reasons"] == []
     assert updated.title == "Edited validation matrix"
     assert updated.status == "ready_for_review"
+
+
+def test_experiment_plan_create_contract_rejects_chat_message_provenance() -> None:
+    with pytest.raises(ValidationError):
+        ExperimentPlanCreateRequest.model_validate(
+            {
+                "title": "Unvalidated Agent plan",
+                "content": "General chat prose.",
+                "source_message_id": "msg_chat",
+            }
+        )

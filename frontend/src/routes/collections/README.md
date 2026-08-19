@@ -19,7 +19,8 @@ This node owns the collection workspace route family.
 - `collections/[id]/materials/*`
   Material and sample-matrix projections.
 - `collections/[id]/assistant/+page.svelte`
-  Collection-bound assistant grounded on published, reviewed Findings.
+  Collection-bound Research Agent conversation, capability activity,
+  structured results, canonical resource links, and exact write approval.
 - `collections/[id]/graph/+page.svelte`
   Secondary graph projection.
 
@@ -84,9 +85,11 @@ mechanisms link to their exact supporting Evidence.
 The collection comparison workspace remains the Lens v1 primary analysis
 surface. Objective Findings are the expert review and downstream grounding
 surface; they do not introduce a second Goal/Task/Workspace product concept.
-Materials, graph, assistant, and experiment plans consume published Findings or
-other canonical Core artifacts and do not reconstruct an alternate conclusion
-model.
+Materials, graph, the Research Agent, and experiment plans consume published
+Findings or other canonical Core artifacts and do not reconstruct an alternate
+conclusion model. The Agent may draft Objective proposals from bounded
+PaperSkim context, but only an exact user-approved write creates an unconfirmed
+candidate; confirmation and analysis stay in the Objective workspace.
 
 ## Current Contract Docs
 

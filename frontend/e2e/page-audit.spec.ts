@@ -1,14 +1,14 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Route } from '@playwright/test';
 
 const collectionId = 'col_123';
 const documentId = 'doc_1';
 const materialId = 'mat_316l';
 const objectiveId = 'obj_1';
 const resultId = 'cres_1';
-const sessionId = 'gs_1';
+const sessionId = 'chat_1';
 const screenshotDir = process.env.PAGE_AUDIT_SCREENSHOT_DIR ?? '';
 
 if (screenshotDir) {
@@ -31,7 +31,7 @@ const routes = [
 	[`/collections/${collectionId}/evidence`, 'Evidence Review'],
 	[`/collections/${collectionId}/comparisons`, 'Comparable groups'],
 	[`/collections/${collectionId}/graph`, 'Collection Knowledge Map'],
-	[`/collections/${collectionId}/assistant`, 'Research Copilot']
+	[`/collections/${collectionId}/assistant`, 'Research Agent']
 ] as const;
 
 test.describe('page interaction audit', () => {
@@ -101,6 +101,124 @@ test.describe('page interaction audit', () => {
 			`/collections/${collectionId}/objectives`
 		);
 		await expect(page.getByRole('link', { name: 'Enter comparison' })).toHaveCount(0);
+	});
+
+	test('research agent completes conversation, capability, draft, and approved write states', async ({
+		page
+	}) => {
+		const consoleErrors: string[] = [];
+		const decisions: Array<Record<string, unknown>> = [];
+		let trajectory: Array<Record<string, unknown>> = [];
+		let pendingApproval: Record<string, unknown> | null = null;
+		let messageSequence = 0;
+
+		page.on('console', (message) => {
+			if (message.type() === 'error' || message.type() === 'warning') {
+				consoleErrors.push(message.text());
+			}
+		});
+		page.on('pageerror', (error) => consoleErrors.push(error.message));
+
+		const handleChatRoute = async (route: Route) => {
+			const request = route.request();
+			const url = new URL(request.url());
+			const path = url.pathname;
+			if (path === '/api/v1/chat-sessions' && request.method() === 'POST') {
+				return route.fulfill(json(chatSession(), 201));
+			}
+			if (path === `/api/v1/chat-sessions/${sessionId}` && request.method() === 'GET') {
+				return route.fulfill(json(chatSession()));
+			}
+			if (path === `/api/v1/chat-sessions/${sessionId}/messages` && request.method() === 'GET') {
+				return route.fulfill(json({ items: trajectory, pending_approval: pendingApproval }));
+			}
+			if (path === `/api/v1/chat-sessions/${sessionId}/messages` && request.method() === 'POST') {
+				const prompt = String(request.postDataJSON().message ?? '');
+				messageSequence += 1;
+				const turn = agentTurn(prompt, messageSequence);
+				trajectory = [...trajectory, ...turn.messages];
+				pendingApproval = turn.pending_approval;
+				return route.fulfill(json(turn));
+			}
+			if (/\/tool-calls\/call_write_[12]\/decision$/.test(path) && request.method() === 'POST') {
+				const decision = request.postDataJSON() as Record<string, unknown>;
+				const approvedCallId = String(pendingApproval?.tool_call_id ?? '');
+				decisions.push(decision);
+				pendingApproval = null;
+				if (decision.decision === 'rejected') {
+					return route.fulfill(
+						json({
+							status: 'rejected',
+							messages: [],
+							pending_approval: null,
+							error_code: null
+						})
+					);
+				}
+				const completed = approvedAgentTurn(approvedCallId);
+				trajectory = [...trajectory, ...completed.messages];
+				return route.fulfill(json(completed));
+			}
+			return route.fallback();
+		};
+
+		await page.route('**/api/v1/chat-sessions', handleChatRoute);
+		await page.route('**/api/v1/chat-sessions/**', handleChatRoute);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto(`/collections/${collectionId}/assistant`);
+
+		await sendAgentMessage(page, 'Hello');
+		await expect(page.getByText('Hello. I can help you work with this collection.')).toBeVisible();
+		await expect(page.getByLabel('Research activity')).toHaveCount(0);
+
+		await sendAgentMessage(page, 'What published findings are available?');
+		await expect(page.getByText('Published findings completed')).toBeVisible();
+		await expect(page.getByText('1 findings · 3 evidence records')).toBeVisible();
+		await expect(page.getByText('One paper used a different heat treatment.')).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Open finding' })).toHaveAttribute(
+			'href',
+			`/collections/${collectionId}/objectives/${objectiveId}?finding_id=finding-1`
+		);
+
+		await sendAgentMessage(page, 'Suggest a focused objective');
+		await expect(page.getByText('How does energy input affect grain morphology?')).toBeVisible();
+		await expect(page.getByText('Proposal context: collection_supported')).toBeVisible();
+
+		await sendAgentMessage(page, 'Create that objective');
+		await expect(page.getByRole('heading', { name: 'Approval required' })).toBeVisible();
+		await expect(page.getByLabel('Message')).toBeDisabled();
+		await page.getByRole('button', { name: 'Reject' }).click();
+		await expect(page.getByText('The proposed write was rejected.')).toBeVisible();
+
+		await sendAgentMessage(page, 'Create that objective');
+		await expect(page.getByRole('heading', { name: 'Approval required' })).toBeVisible();
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.reload();
+		await expect(page.getByRole('heading', { name: 'Approval required' })).toBeVisible();
+		await expect(page.getByLabel('Message')).toBeDisabled();
+		expect(await visibleElementsFitViewport(page, '.approval')).toBe(true);
+		await page.getByRole('button', { name: 'Approve and create' }).click();
+
+		await expect(
+			page.getByText('The objective candidate was created for your review.')
+		).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Open research objective' })).toHaveAttribute(
+			'href',
+			`/collections/${collectionId}/objectives/obj_agent_1`
+		);
+		expect(decisions).toEqual([
+			{ decision: 'rejected', arguments_digest: 'digest_exact_1' },
+			{ decision: 'approved', arguments_digest: 'digest_exact_1' }
+		]);
+		expect(consoleErrors).toEqual([]);
+		await expectNoHorizontalOverflow(page);
+
+		if (screenshotDir) {
+			await page.screenshot({
+				path: join(screenshotDir, 'research-agent-approved-mobile.png'),
+				fullPage: true
+			});
+		}
 	});
 
 	test('unprocessed collections lock direct research route access', async ({ page }) => {
@@ -521,10 +639,10 @@ async function mockApis(page: Page) {
 				body: '<graphml />'
 			});
 		}
-		if (path === '/api/v1/goal-sessions') return route.fulfill(json(goalSession(), 201));
-		if (path === `/api/v1/goal-sessions/${sessionId}`) return route.fulfill(json(goalSession()));
-		if (path === `/api/v1/goal-sessions/${sessionId}/messages`) {
-			return route.fulfill(json({ session_id: sessionId, items: [] }));
+		if (path === '/api/v1/chat-sessions') return route.fulfill(json(chatSession(), 201));
+		if (path === `/api/v1/chat-sessions/${sessionId}`) return route.fulfill(json(chatSession()));
+		if (path === `/api/v1/chat-sessions/${sessionId}/messages`) {
+			return route.fulfill(json({ items: [], pending_approval: null }));
 		}
 
 		return route.fulfill(json({ detail: `unhandled audit route: ${path}` }, 404));
@@ -533,6 +651,203 @@ async function mockApis(page: Page) {
 
 function json(body: unknown, status = 200) {
 	return { status, contentType: 'application/json', body: JSON.stringify(body) };
+}
+
+async function sendAgentMessage(page: Page, text: string) {
+	await page.getByLabel('Message').fill(text);
+	await page.getByRole('button', { name: 'Send' }).click();
+}
+
+function agentMessage(
+	messageId: string,
+	role: 'user' | 'assistant' | 'tool',
+	content: string,
+	overrides: Record<string, unknown> = {}
+) {
+	return {
+		message_id: messageId,
+		session_id: sessionId,
+		role,
+		content,
+		created_at: now(),
+		tool_call_id: null,
+		tool_name: null,
+		tool_arguments: null,
+		tool_result: null,
+		...overrides
+	};
+}
+
+function agentTurn(prompt: string, sequence: number) {
+	const user = agentMessage(`msg_user_${sequence}`, 'user', prompt);
+	if (prompt === 'Hello') {
+		return {
+			status: 'completed',
+			messages: [
+				user,
+				agentMessage(
+					`msg_assistant_${sequence}`,
+					'assistant',
+					'Hello. I can help you work with this collection.'
+				)
+			],
+			pending_approval: null,
+			error_code: null
+		};
+	}
+
+	if (prompt === 'What published findings are available?') {
+		const callId = `call_read_${sequence}`;
+		return {
+			status: 'completed',
+			messages: [
+				user,
+				agentMessage(`msg_call_${sequence}`, 'assistant', '', {
+					tool_call_id: callId,
+					tool_name: 'query_published_findings',
+					tool_arguments: { query: 'energy input' }
+				}),
+				agentMessage(`msg_result_${sequence}`, 'tool', '', {
+					tool_call_id: callId,
+					tool_result: {
+						tool_call_id: callId,
+						status: 'succeeded',
+						data: { finding_count: 1, evidence_count: 3 },
+						resource_refs: [
+							{
+								resource_type: 'finding',
+								resource_id: 'finding-1',
+								href: `/collections/${collectionId}/objectives/${objectiveId}?finding_id=finding-1`
+							}
+						],
+						warnings: ['One paper used a different heat treatment.'],
+						error_code: null,
+						error_message: null
+					}
+				}),
+				agentMessage(
+					`msg_assistant_${sequence}`,
+					'assistant',
+					'One published finding is available for expert review.'
+				)
+			],
+			pending_approval: null,
+			error_code: null
+		};
+	}
+
+	if (prompt === 'Suggest a focused objective') {
+		const callId = `call_draft_${sequence}`;
+		return {
+			status: 'completed',
+			messages: [
+				user,
+				agentMessage(`msg_call_${sequence}`, 'assistant', '', {
+					tool_call_id: callId,
+					tool_name: 'propose_objective_drafts',
+					tool_arguments: { question: 'energy input effects' }
+				}),
+				agentMessage(`msg_result_${sequence}`, 'tool', '', {
+					tool_call_id: callId,
+					tool_result: {
+						tool_call_id: callId,
+						status: 'succeeded',
+						data: {
+							draft_count: 1,
+							drafts: [
+								{
+									question: 'How does energy input affect grain morphology?',
+									variables: ['energy input'],
+									outcomes: ['grain morphology'],
+									support_status: 'collection_supported'
+								}
+							]
+						},
+						resource_refs: [],
+						warnings: [],
+						error_code: null,
+						error_message: null
+					}
+				}),
+				agentMessage(
+					`msg_assistant_${sequence}`,
+					'assistant',
+					'I drafted one focused, single-outcome question.'
+				)
+			],
+			pending_approval: null,
+			error_code: null
+		};
+	}
+
+	const callId = `call_write_${sequence - 3}`;
+	const arguments_ = {
+		question: 'How does energy input affect grain morphology?',
+		variables: ['energy input'],
+		outcomes: ['grain morphology']
+	};
+	const approval = {
+		tool_call_id: callId,
+		session_id: sessionId,
+		assistant_message_id: `msg_call_${sequence}`,
+		name: 'create_objective_candidate',
+		arguments: arguments_,
+		arguments_digest: 'digest_exact_1',
+		risk: 'write',
+		status: 'approval_required',
+		started_at: null,
+		finished_at: null,
+		error_code: null,
+		decision_user_id: null,
+		decision_arguments_digest: null,
+		decided_at: null
+	};
+	return {
+		status: 'approval_required',
+		messages: [
+			user,
+			agentMessage(`msg_call_${sequence}`, 'assistant', '', {
+				tool_call_id: callId,
+				tool_name: 'create_objective_candidate',
+				tool_arguments: arguments_
+			})
+		],
+		pending_approval: approval,
+		error_code: null
+	};
+}
+
+function approvedAgentTurn(callId: string) {
+	return {
+		status: 'completed',
+		messages: [
+			agentMessage('msg_result_approved', 'tool', '', {
+				tool_call_id: callId,
+				tool_result: {
+					tool_call_id: callId,
+					status: 'succeeded',
+					data: { objective_id: 'obj_agent_1' },
+					resource_refs: [
+						{
+							resource_type: 'research_objective',
+							resource_id: 'obj_agent_1',
+							href: `/collections/${collectionId}/objectives/obj_agent_1`
+						}
+					],
+					warnings: [],
+					error_code: null,
+					error_message: null
+				}
+			}),
+			agentMessage(
+				'msg_assistant_approved',
+				'assistant',
+				'The objective candidate was created for your review.'
+			)
+		],
+		pending_approval: null,
+		error_code: null
+	};
 }
 
 function now() {
@@ -881,7 +1196,7 @@ function documentContent() {
 				order: 1,
 				text: 'Conductivity improved to 12 mS/cm.',
 				text_unit_ids: [],
-				page: 1,
+				page: 1
 			},
 			{
 				block_id: 'results',
@@ -891,7 +1206,7 @@ function documentContent() {
 				order: 2,
 				text: 'Conductivity improved to 12 mS/cm under EIS.',
 				text_unit_ids: [],
-				page: 3,
+				page: 3
 			}
 		],
 		warnings: []
@@ -1315,21 +1630,11 @@ function graph() {
 	};
 }
 
-function goalSession() {
+function chatSession() {
 	return {
 		session_id: sessionId,
 		user_id: 'user_1',
 		collection_id: collectionId,
-		focused_material_id: null,
-		focused_paper_id: null,
-		goal_text: null,
-		goal_brief_json: {},
-		answer_mode: 'hybrid',
-		rolling_summary: '',
-		last_evidence_ids: [],
-		last_material_ids: [],
-		last_paper_ids: [],
-		collection_data_version: null,
 		created_at: now(),
 		updated_at: now()
 	};

@@ -1,21 +1,23 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import { errorMessage } from '../../../_shared/api';
-	import { createExperimentPlan } from '../../../_shared/experimentPlans';
 	import {
-		createGoalSession,
-		fetchGoalSession,
-		fetchGoalSessionMessages,
-		postGoalSessionMessage,
-		type GoalSession,
-		type GoalSessionMessage,
-		type GoalSourceLink
-	} from '../../../_shared/goalSessions';
+		createChatSession,
+		decideChatToolCall,
+		fetchChatSession,
+		fetchChatTrajectory,
+		postChatMessage,
+		type ChatMessage,
+		type ChatResourceRef,
+		type ChatSession,
+		type ChatToolCall,
+		type ChatTurn
+	} from '../../../_shared/chatSessions';
 	import { t } from '../../../_shared/i18n';
-	import { fetchObjectiveFindingDataset, type FindingDataset } from '../../../_shared/researchView';
 
-	type StoredGoalSession = {
+	type StoredChatSession = {
 		session_id: string;
 		title: string;
 		created_at: string;
@@ -27,130 +29,49 @@
 		strong: boolean;
 	};
 
-	type ParagraphBlock = {
-		kind: 'paragraph';
-		segments: InlineSegment[];
-	};
-
-	type ListBlock = {
-		kind: 'list';
-		items: InlineSegment[][];
-	};
-
-	type RenderBlock = ParagraphBlock | ListBlock;
+	type RenderBlock =
+		| { kind: 'paragraph'; segments: InlineSegment[] }
+		| { kind: 'list'; items: InlineSegment[][] };
 
 	const suggestionKeys = [
-		'goalCopilot.suggestions.summary',
-		'goalCopilot.suggestions.lpbf',
-		'goalCopilot.suggestions.elongation',
-		'goalCopilot.suggestions.samples'
+		'researchAgent.suggestions.greeting',
+		'researchAgent.suggestions.overview',
+		'researchAgent.suggestions.findings',
+		'researchAgent.suggestions.objectives'
 	];
 
-	let session: GoalSession | null = null;
-	let messages: GoalSessionMessage[] = [];
-	let history: StoredGoalSession[] = [];
+	let session: ChatSession | null = null;
+	let messages: ChatMessage[] = [];
+	let pendingApproval: ChatToolCall | null = null;
+	let history: StoredChatSession[] = [];
 	let loading = false;
 	let sending = false;
-	let savingPlanMessageId = '';
-	let savedPlanMessageIds: Record<string, string> = {};
+	let deciding = false;
 	let error = '';
-	let readinessError = '';
+	let notice = '';
 	let input = '';
-	let loadedKey = '';
-	let objectiveDatasetSummary: FindingDataset | null = null;
-	let objectiveDatasetLoading = false;
-	let readinessText = '';
+	let loadedCollectionId = '';
 
 	$: collectionId = $page.params.id ?? '';
-	$: queryMaterialId = $page.url.searchParams.get('material_id') ?? '';
-	$: queryPaperId = $page.url.searchParams.get('paper_id') ?? '';
 	$: queryObjectiveId = $page.url.searchParams.get('objective_id') ?? '';
-	$: loadKey = `${collectionId}:${queryMaterialId}:${queryPaperId}:${queryObjectiveId}`;
 	$: activeSessionId = session?.session_id ?? '';
-	$: objectiveTrainingReadyCount =
-		objectiveDatasetSummary?.items.filter((item) => item.dataset_use_status === 'training_ready')
-			.length ?? 0;
-	$: objectiveTrainingMessageCount =
-		objectiveDatasetSummary?.items.filter((item) => item.training_messages.length > 0).length ?? 0;
-	$: objectiveProtocolReadyCount =
-		objectiveDatasetSummary?.items.filter(
-			(item) => item.dataset_use_status === 'training_ready' && item.training_messages.length > 0
-		).length ?? 0;
-	$: objectiveReviewCandidateCount =
-		objectiveDatasetSummary?.items.filter((item) => item.dataset_use_status === 'review_candidate')
-			.length ?? 0;
-	$: objectiveProtocolReady = objectiveProtocolReadyCount > 0;
-	$: nextReviewAction = nextReviewActionForDisplay(objectiveDatasetSummary);
-	$: objectiveReviewLinkHref = objectiveReviewHref(
-		collectionId,
-		queryObjectiveId,
-		objectiveReviewCandidateCount,
-		objectiveTrainingReadyCount,
-		objectiveProtocolReady
-	);
-	$: objectiveReviewLinkLabel = objectiveReviewActionLabel(
-		objectiveReviewCandidateCount,
-		objectiveTrainingReadyCount,
-		objectiveProtocolReady
-	);
-	$: readinessStatus = objectiveProtocolReady
-		? 'ready'
-		: objectiveTrainingReadyCount > 0
-			? 'messages_pending'
-			: objectiveReviewCandidateCount > 0
-				? 'needs_review'
-				: objectiveDatasetSummary
-					? 'empty'
-					: readinessError
-						? 'error'
-						: 'pending';
-	$: {
-		if (!queryObjectiveId) {
-			readinessText = $t('goalCopilot.experimentReadiness.noObjective');
-		} else if (objectiveDatasetLoading) {
-			readinessText = $t('goalCopilot.experimentReadiness.loading');
-		} else if (readinessError) {
-			readinessText = $t('goalCopilot.experimentReadiness.error', { message: readinessError });
-		} else if (objectiveProtocolReady) {
-			readinessText = $t('goalCopilot.experimentReadiness.ready', {
-				training: objectiveTrainingReadyCount,
-				messages: objectiveTrainingMessageCount
-			});
-		} else if (objectiveTrainingMessageCount > 0) {
-			readinessText = $t('goalCopilot.experimentReadiness.protocolInputsPending', {
-				training: objectiveTrainingReadyCount,
-				messages: objectiveTrainingMessageCount,
-				protocol: objectiveProtocolReadyCount
-			});
-		} else if (objectiveTrainingReadyCount > 0) {
-			readinessText = $t('goalCopilot.experimentReadiness.messagesPending', {
-				training: objectiveTrainingReadyCount,
-				messages: objectiveTrainingMessageCount
-			});
-		} else if (objectiveReviewCandidateCount > 0) {
-			readinessText = nextReviewAction
-				? $t('goalCopilot.experimentReadiness.needsReviewAction', {
-						review: objectiveReviewCandidateCount,
-						action: nextReviewAction
-					})
-				: $t('goalCopilot.experimentReadiness.needsReview', {
-						review: objectiveReviewCandidateCount
-					});
-		} else {
-			readinessText = $t('goalCopilot.experimentReadiness.empty');
-		}
-	}
-	$: if (collectionId && loadKey !== loadedKey) {
-		loadedKey = loadKey;
+	$: if (browser && collectionId && collectionId !== loadedCollectionId) {
+		loadedCollectionId = collectionId;
 		void loadSession();
 	}
 
 	function sessionStorageKey() {
-		return `lens.goalSession.${collectionId}`;
+		return `lens.chatSession.${collectionId}`;
 	}
 
 	function historyStorageKey() {
-		return `lens.goalSessionHistory.${collectionId}`;
+		return `lens.chatSessionHistory.${collectionId}`;
+	}
+
+	function clearLegacySessionStorage() {
+		if (!browser) return;
+		window.localStorage.removeItem(`lens.goalSession.${collectionId}`);
+		window.localStorage.removeItem(`lens.goalSessionHistory.${collectionId}`);
 	}
 
 	function readStoredSessionId() {
@@ -168,7 +89,7 @@
 		window.localStorage.removeItem(sessionStorageKey());
 	}
 
-	function readHistory() {
+	function readHistory(): StoredChatSession[] {
 		if (!browser) return [];
 		try {
 			const raw = window.localStorage.getItem(historyStorageKey());
@@ -181,37 +102,37 @@
 					title:
 						typeof item.title === 'string' && item.title.trim()
 							? item.title
-							: $t('goalCopilot.untitledSession'),
+							: $t('researchAgent.untitledSession'),
 					created_at:
 						typeof item.created_at === 'string' ? item.created_at : new Date().toISOString(),
 					updated_at:
 						typeof item.updated_at === 'string' ? item.updated_at : new Date().toISOString()
-				})) as StoredGoalSession[];
+				}))
+				.slice(0, 12);
 		} catch {
 			return [];
 		}
 	}
 
-	function writeHistory(nextHistory: StoredGoalSession[]) {
+	function writeHistory(nextHistory: StoredChatSession[]) {
 		history = nextHistory.slice(0, 12);
 		if (!browser) return;
 		window.localStorage.setItem(historyStorageKey(), JSON.stringify(history));
 	}
 
-	function titleFromMessages(nextMessages: GoalSessionMessage[]) {
+	function titleFromMessages(nextMessages: ChatMessage[]) {
 		const firstUserMessage = nextMessages.find((message) => message.role === 'user');
-		const text = (firstUserMessage?.content ?? firstUserMessage?.answer ?? '').trim();
-		if (!text) return $t('goalCopilot.untitledSession');
-		return text.length > 34 ? `${text.slice(0, 34)}...` : text;
+		const text = firstUserMessage?.content.trim() ?? '';
+		if (!text) return $t('researchAgent.untitledSession');
+		return text.length > 38 ? `${text.slice(0, 38)}...` : text;
 	}
 
-	function upsertHistory(nextSession: GoalSession, title = '') {
-		const nextTitle = title || titleFromMessages(messages);
+	function upsertHistory(nextSession: ChatSession, title = '') {
 		const existing = history.filter((item) => item.session_id !== nextSession.session_id);
 		writeHistory([
 			{
 				session_id: nextSession.session_id,
-				title: nextTitle,
+				title: title || titleFromMessages(messages),
 				created_at: nextSession.created_at,
 				updated_at: nextSession.updated_at
 			},
@@ -219,190 +140,138 @@
 		]);
 	}
 
-	async function loadSession(sessionId = '') {
+	async function loadSession(requestedSessionId = '') {
 		const activeCollectionId = collectionId;
-		const activeObjectiveId = queryObjectiveId;
 		loading = true;
 		error = '';
+		notice = '';
+		pendingApproval = null;
+		if (!requestedSessionId) clearLegacySessionStorage();
 		history = readHistory();
+
 		try {
-			const storedSessionId = sessionId || readStoredSessionId();
+			const storedSessionId = requestedSessionId || readStoredSessionId();
+			let nextSession: ChatSession | null = null;
 			if (storedSessionId) {
 				try {
-					session = await fetchGoalSession(storedSessionId);
-					if (!sessionMatchesCurrentFocus(session)) session = null;
+					nextSession = await fetchChatSession(storedSessionId);
+					if (nextSession.collection_id !== activeCollectionId) nextSession = null;
 				} catch {
-					if (!sessionId) clearStoredSessionId();
-					session = null;
+					nextSession = null;
+					clearStoredSessionId();
+					writeHistory(history.filter((item) => item.session_id !== storedSessionId));
 				}
 			}
 
-			if (!session || session.collection_id !== collectionId) {
-				session = await createGoalSession({
-					collection_id: collectionId,
-					focused_material_id: queryMaterialId || null,
-					focused_paper_id: queryPaperId || null,
-					focused_objective_id: queryObjectiveId || null,
-					answer_mode: 'hybrid'
-				});
+			if (activeCollectionId !== collectionId) return;
+			if (nextSession === null) {
+				nextSession = await createChatSession(activeCollectionId);
 				messages = [];
-				storeSessionId(session.session_id);
-				upsertHistory(session, $t('goalCopilot.untitledSession'));
 			} else {
-				messages = await fetchGoalSessionMessages(session.session_id);
-				storeSessionId(session.session_id);
-				upsertHistory(session);
+				const trajectory = await fetchChatTrajectory(nextSession.session_id);
+				messages = trajectory.items;
+				pendingApproval = trajectory.pending_approval;
 			}
-			await loadObjectiveReadiness(activeCollectionId, activeObjectiveId);
+			session = nextSession;
+			storeSessionId(nextSession.session_id);
+			upsertHistory(nextSession);
 		} catch (err) {
 			error = errorMessage(err);
 			session = null;
 			messages = [];
+			pendingApproval = null;
 		} finally {
 			loading = false;
 		}
-	}
-
-	async function loadObjectiveReadiness(activeCollectionId: string, activeObjectiveId: string) {
-		objectiveDatasetSummary = null;
-		readinessError = '';
-		if (!activeCollectionId || !activeObjectiveId) {
-			objectiveDatasetLoading = false;
-			return;
-		}
-		objectiveDatasetLoading = true;
-		try {
-			const dataset = await fetchObjectiveFindingDataset(activeCollectionId, activeObjectiveId);
-			objectiveDatasetSummary = dataset;
-		} catch (err) {
-			readinessError = errorMessage(err);
-		} finally {
-			objectiveDatasetLoading = false;
-		}
-	}
-
-	function sessionMatchesCurrentFocus(nextSession: GoalSession | null) {
-		if (!nextSession || nextSession.collection_id !== collectionId) return false;
-		return (
-			(nextSession.focused_material_id ?? '') === queryMaterialId &&
-			(nextSession.focused_paper_id ?? '') === queryPaperId &&
-			(nextSession.focused_objective_id ?? '') === queryObjectiveId
-		);
 	}
 
 	async function startNewSession() {
-		loading = true;
-		error = '';
+		if (loading || sending || deciding) return;
+		clearStoredSessionId();
+		session = null;
+		messages = [];
+		pendingApproval = null;
 		input = '';
-		try {
-			session = await createGoalSession({
-				collection_id: collectionId,
-				focused_material_id: queryMaterialId || null,
-				focused_paper_id: queryPaperId || null,
-				focused_objective_id: queryObjectiveId || null,
-				answer_mode: 'hybrid'
-			});
-			messages = [];
-			storeSessionId(session.session_id);
-			upsertHistory(session, $t('goalCopilot.untitledSession'));
-		} catch (err) {
-			error = errorMessage(err);
-		} finally {
-			loading = false;
-		}
+		await loadSession();
 	}
 
 	async function switchSession(sessionId: string) {
-		if (sessionId === activeSessionId || loading) return;
+		if (sessionId === activeSessionId || loading || sending || deciding) return;
 		session = null;
 		messages = [];
+		pendingApproval = null;
 		await loadSession(sessionId);
 	}
 
 	async function sendMessage(nextText = input.trim()) {
 		const text = nextText.trim();
-		if (!session || !text || sending) return;
-		sending = true;
-		error = '';
-		const userMessage: GoalSessionMessage = {
-			message_id: `local-${Date.now()}`,
-			session_id: session.session_id,
+		if (!session || !text || sending || deciding || pendingApproval) return;
+		const activeSession = session;
+		const optimisticId = `local-${Date.now()}`;
+		const optimisticMessage: ChatMessage = {
+			message_id: optimisticId,
+			session_id: activeSession.session_id,
 			role: 'user',
 			content: text,
-			created_at: new Date().toISOString()
+			created_at: new Date().toISOString(),
+			tool_call_id: null,
+			tool_name: null,
+			tool_arguments: null,
+			tool_result: null
 		};
-		messages = [...messages, userMessage];
+		messages = [...messages, optimisticMessage];
 		input = '';
-		upsertHistory(session, titleFromMessages(messages));
+		sending = true;
+		error = '';
+		notice = '';
 		try {
-			const response = await postGoalSessionMessage(session.session_id, text, {
-				route: 'collection_assistant',
-				material_id: queryMaterialId || null,
-				paper_id: queryPaperId || null,
-				objective_id: queryObjectiveId || null
-			});
-			messages = [...messages, response];
-			session = await fetchGoalSession(session.session_id);
-			upsertHistory(session, titleFromMessages(messages));
+			const turn = await postChatMessage(activeSession.session_id, text);
+			applyTurn(turn, optimisticId);
 		} catch (err) {
+			messages = messages.filter((message) => message.message_id !== optimisticId);
+			input = text;
 			error = errorMessage(err);
 		} finally {
 			sending = false;
 		}
 	}
 
+	function applyTurn(turn: ChatTurn, optimisticId = '') {
+		const prior = optimisticId
+			? messages.filter((message) => message.message_id !== optimisticId)
+			: messages;
+		const knownIds = new Set(prior.map((message) => message.message_id));
+		messages = [...prior, ...turn.messages.filter((message) => !knownIds.has(message.message_id))];
+		pendingApproval = turn.pending_approval;
+		if (turn.status === 'rejected') notice = $t('researchAgent.rejected');
+		if (turn.status === 'failed' || turn.status === 'step_limit_reached') {
+			error = $t('researchAgent.turnFailed', { code: turn.error_code ?? turn.status });
+		}
+		if (session) {
+			const updatedAt = turn.messages.at(-1)?.created_at ?? session.updated_at;
+			session = { ...session, updated_at: updatedAt };
+			upsertHistory(session, titleFromMessages(messages));
+		}
+	}
+
+	async function decide(decision: 'approved' | 'rejected') {
+		if (!session || !pendingApproval || deciding) return;
+		const call = pendingApproval;
+		deciding = true;
+		error = '';
+		notice = '';
+		try {
+			const turn = await decideChatToolCall(session.session_id, call, decision);
+			applyTurn(turn);
+		} catch (err) {
+			error = errorMessage(err);
+		} finally {
+			deciding = false;
+		}
+	}
+
 	function askSuggestion(key: string) {
-		const text = $t(key);
-		void sendMessage(text);
-	}
-
-	function draftProtocolFromReviewedFindings() {
-		void sendMessage($t('goalCopilot.experimentReadiness.protocolPrompt'));
-	}
-
-	function nextReviewActionForDisplay(dataset: FindingDataset | null) {
-		if (!dataset) return '';
-		return dataset.items.some((item) => item.dataset_use_status === 'review_candidate')
-			? $t('goalCopilot.experimentReadiness.reviewFindings')
-			: '';
-	}
-
-	function objectiveReviewHref(
-		activeCollectionId: string,
-		activeObjectiveId: string,
-		reviewCandidateCount: number,
-		trainingReadyCount: number,
-		protocolReady: boolean
-	) {
-		if (!activeCollectionId || !activeObjectiveId) return '';
-		const baseHref = `/collections/${encodeURIComponent(activeCollectionId)}/objectives/${encodeURIComponent(
-			activeObjectiveId
-		)}`;
-		if (reviewCandidateCount > 0 && !protocolReady) {
-			return `${baseHref}?review=queue`;
-		}
-		if (trainingReadyCount > 0) {
-			return `${baseHref}?review=training_ready`;
-		}
-		return baseHref;
-	}
-
-	function objectiveReviewActionLabel(
-		reviewCandidateCount: number,
-		trainingReadyCount: number,
-		protocolReady: boolean
-	) {
-		if (reviewCandidateCount > 0 && !protocolReady) {
-			return $t('goalCopilot.experimentReadiness.reviewFindings');
-		}
-		if (trainingReadyCount > 0 && !protocolReady) {
-			return $t('goalCopilot.experimentReadiness.checkObjectiveReadiness');
-		}
-		return $t('goalCopilot.experimentReadiness.openObjective');
-	}
-
-	function messageText(message: GoalSessionMessage) {
-		return message.answer ?? message.content ?? '';
+		void sendMessage($t(key));
 	}
 
 	function renderInlineMarkdown(text: string): InlineSegment[] {
@@ -433,312 +302,253 @@
 					.split('\n')
 					.map((line) => line.trim())
 					.filter(Boolean);
-				const listItems = lines
+				const items = lines
 					.map((line) => line.match(/^(?:[-*]\s+|\d+\.\s+)(.+)$/))
 					.filter((match): match is RegExpMatchArray => Boolean(match));
-				if (lines.length > 0 && listItems.length === lines.length) {
-					const listBlock: ListBlock = {
-						kind: 'list',
-						items: listItems.map((match) => renderInlineMarkdown(match[1].trim()))
+				if (items.length === lines.length) {
+					return {
+						kind: 'list' as const,
+						items: items.map((item) => renderInlineMarkdown(item[1].trim()))
 					};
-					return listBlock;
 				}
-				const paragraphBlock: ParagraphBlock = {
-					kind: 'paragraph',
+				return {
+					kind: 'paragraph' as const,
 					segments: renderInlineMarkdown(lines.join(' '))
 				};
-				return paragraphBlock;
 			});
 	}
 
-	function visibleSourceLinks(message: GoalSessionMessage) {
-		return (message.source_links ?? [])
-			.filter((link) => link.href.startsWith('/collections/'))
-			.slice(0, 12);
-	}
-
-	function needsReviewedFindings(message: GoalSessionMessage) {
-		return (message.warnings ?? []).includes('reviewed_findings_empty');
-	}
-
-	function hasReviewedFindingGate(message: GoalSessionMessage) {
-		return message.review_gate === 'reviewed_findings';
-	}
-
-	function hasStaleSources(message: GoalSessionMessage) {
-		return message.source_validity === 'stale';
-	}
-
-	function missingSourceCitation(message: GoalSessionMessage) {
-		return (message.warnings ?? []).includes('goal_copilot_missing_source_citation');
-	}
-
-	function invalidProtocolContract(message: GoalSessionMessage) {
-		return (message.warnings ?? []).includes('goal_copilot_protocol_contract_invalid');
-	}
-
-	function hasEvidenceCitations(message: GoalSessionMessage) {
-		return (message.used_evidence_ids ?? []).length > 0;
-	}
-
-	function citesVisibleSourceLabel(message: GoalSessionMessage) {
-		const text = messageText(message);
-		return visibleSourceLinks(message).some((link) => text.includes(link.label));
-	}
-
-	function sourceLinksMatchEvidenceCitations(message: GoalSessionMessage) {
-		const usedEvidenceIds = new Set(message.used_evidence_ids ?? []);
-		const linkedEvidenceIds = visibleSourceLinks(message)
-			.map((link) => new URL(link.href, 'http://localhost').searchParams.get('evidence_id') ?? '')
-			.filter(Boolean);
-		return linkedEvidenceIds.every((evidenceId) => usedEvidenceIds.has(evidenceId));
-	}
-
-	function allEvidenceCitationsHaveSourceLinks(message: GoalSessionMessage) {
-		const usedEvidenceIds = new Set(message.used_evidence_ids ?? []);
-		const linkedEvidenceIds = new Set(
-			visibleSourceLinks(message)
-				.map((link) => new URL(link.href, 'http://localhost').searchParams.get('evidence_id') ?? '')
-				.filter(Boolean)
-		);
-		return [...usedEvidenceIds].every((evidenceId) => linkedEvidenceIds.has(evidenceId));
-	}
-
-	function hasProtocolDraftStructure(message: GoalSessionMessage) {
-		const text = messageText(message).toLowerCase();
-		return [
-			['hypothesis', '假设'],
-			['variable matrix', '变量矩阵', '变量'],
-			['measurement', 'measurements', '表征', '测试指标', '测量'],
-			['control', 'controls', '对照'],
-			['risk', 'risks', 'limit', 'limits', '风险', '限制']
-		].every((terms) => terms.some((term) => text.includes(term)));
-	}
-
-	function sourceLinkLabel(link: GoalSourceLink, index: number) {
-		const key =
-			link.kind === 'document'
-				? 'goalCopilot.sourceLinks.document'
-				: 'goalCopilot.sourceLinks.evidence';
-		return $t(key, { number: index + 1 });
-	}
-
-	function formatTime(value?: string) {
-		if (!value) return '';
-		const date = new Date(value);
-		if (Number.isNaN(date.getTime())) return '';
-		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-	}
-
-	function formatHistoryTime(value?: string) {
-		if (!value) return '';
-		const date = new Date(value);
-		if (Number.isNaN(date.getTime())) return '';
-		const now = new Date();
-		const isToday = date.toDateString() === now.toDateString();
-		if (isToday) return formatTime(value);
-		return date.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
-	}
-
-	function copyMessage(text: string) {
-		if (!browser || !text) return;
-		void navigator.clipboard?.writeText(text);
-	}
-
-	function canSaveExperimentPlan(message: GoalSessionMessage) {
-		return Boolean(
-			queryObjectiveId &&
-			message.role === 'assistant' &&
-			message.source_mode === 'collection_grounded' &&
-			hasReviewedFindingGate(message) &&
-			message.source_validity === 'current' &&
-			messageText(message).trim() &&
-			visibleSourceLinks(message).length > 0 &&
-			hasEvidenceCitations(message) &&
-			citesVisibleSourceLabel(message) &&
-			sourceLinksMatchEvidenceCitations(message) &&
-			allEvidenceCitationsHaveSourceLinks(message) &&
-			hasProtocolDraftStructure(message) &&
-			!needsReviewedFindings(message)
-		);
-	}
-
-	function experimentPlanTitle(text: string) {
-		const firstLine = text
-			.split('\n')
-			.map((line) => cleanPlanTitleLine(line))
-			.filter((line) => !isProtocolSectionHeading(line))
-			.find(Boolean);
-		if (!firstLine) return $t('goalCopilot.experimentPlan.defaultTitle');
-		const title = text.match(/^\s*\*{0,2}hypothesis\*{0,2}\s*$/im)
-			? `Hypothesis: ${firstLine.replace(/^hypothesis\s*:\s*/i, '')}`
-			: firstLine;
-		return title.length > 80 ? `${title.slice(0, 80)}...` : title;
-	}
-
-	function cleanPlanTitleLine(line: string) {
-		return line
-			.trim()
-			.replace(/^#+\s*/, '')
-			.replace(/^\d+\.\s+/, '')
-			.replace(/^\*\*(.+)\*\*$/, '$1')
-			.trim();
-	}
-
-	function isProtocolSectionHeading(line: string) {
-		return [
-			'hypothesis',
-			'variable matrix',
-			'measurements',
-			'controls',
-			'risks or limits'
-		].includes(line.toLowerCase());
-	}
-
-	function experimentPlanHref(planId: string) {
-		const anchor = planId ? `?plan_id=${encodeURIComponent(planId)}` : '';
-		return `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(
-			queryObjectiveId
-		)}${anchor}#experiment-plans-title`;
-	}
-
-	async function saveExperimentPlan(message: GoalSessionMessage) {
-		const content = messageText(message).trim();
-		if (!queryObjectiveId || !content || savingPlanMessageId) return;
-		savingPlanMessageId = message.message_id;
-		error = '';
-		try {
-			const plan = await createExperimentPlan(collectionId, queryObjectiveId, {
-				title: experimentPlanTitle(content),
-				content,
-				source_message_id: message.message_id,
-				source_links: visibleSourceLinks(message),
-				metadata: {
-					source: 'goal_copilot',
-					source_mode: message.source_mode,
-					review_gate: message.review_gate ?? null,
-					source_validity: message.source_validity ?? null,
-					used_evidence_ids: message.used_evidence_ids ?? [],
-					source_link_count: visibleSourceLinks(message).length
-				}
-			});
-			savedPlanMessageIds = {
-				...savedPlanMessageIds,
-				[message.message_id]: plan.plan_id
-			};
-		} catch (err) {
-			error = errorMessage(err);
-		} finally {
-			savingPlanMessageId = '';
+	function capabilityName(toolName: string | null) {
+		switch (toolName) {
+			case 'get_collection_context':
+				return $t('researchAgent.capability.collection');
+			case 'query_published_findings':
+				return $t('researchAgent.capability.findings');
+			case 'propose_objective_drafts':
+				return $t('researchAgent.capability.proposals');
+			case 'create_objective_candidate':
+				return $t('researchAgent.capability.createObjective');
+			default:
+				return $t('researchAgent.capability.unknown');
 		}
+	}
+
+	function resultToolName(message: ChatMessage) {
+		if (!message.tool_call_id) return null;
+		return (
+			messages.find(
+				(candidate) =>
+					candidate.role === 'assistant' && candidate.tool_call_id === message.tool_call_id
+			)?.tool_name ?? null
+		);
+	}
+
+	function numberValue(data: Record<string, unknown>, key: string) {
+		const value = data[key];
+		return typeof value === 'number' ? value : 0;
+	}
+
+	function resultSummary(message: ChatMessage) {
+		const result = message.tool_result;
+		if (!result) return '';
+		const name = resultToolName(message);
+		if (result.status === 'failed') {
+			return (
+				result.error_message ||
+				$t('researchAgent.capability.failed', { name: capabilityName(name) })
+			);
+		}
+		if (result.status === 'queued') {
+			return $t('researchAgent.capability.queuedDescription');
+		}
+		if (name === 'get_collection_context') {
+			const collection = result.data.collection;
+			const papers =
+				collection && typeof collection === 'object' && 'paper_count' in collection
+					? Number(collection.paper_count) || 0
+					: 0;
+			return $t('researchAgent.capability.paperCount', {
+				papers,
+				objectives: numberValue(result.data, 'objective_count')
+			});
+		}
+		if (name === 'query_published_findings') {
+			if (result.data.scientific_absence === true) return $t('researchAgent.capability.absence');
+			return $t('researchAgent.capability.findingCount', {
+				findings: numberValue(result.data, 'finding_count'),
+				evidence: numberValue(result.data, 'evidence_count')
+			});
+		}
+		if (name === 'propose_objective_drafts') {
+			return $t('researchAgent.capability.draftCount', {
+				count: numberValue(result.data, 'draft_count')
+			});
+		}
+		if (name === 'create_objective_candidate') {
+			return $t('researchAgent.capability.objectiveCreated');
+		}
+		return $t('researchAgent.capability.succeeded', { name: capabilityName(name) });
+	}
+
+	function resultTitle(message: ChatMessage) {
+		const result = message.tool_result;
+		const name = capabilityName(resultToolName(message));
+		if (result?.status === 'failed') return $t('researchAgent.capability.failed', { name });
+		if (result?.status === 'queued') return $t('researchAgent.capability.queued', { name });
+		return $t('researchAgent.capability.succeeded', { name });
+	}
+
+	function resultDrafts(message: ChatMessage) {
+		const drafts = message.tool_result?.data.drafts;
+		return Array.isArray(drafts)
+			? drafts.filter((item): item is Record<string, unknown> =>
+					Boolean(item && typeof item === 'object')
+				)
+			: [];
+	}
+
+	function draftList(draft: Record<string, unknown>, key: string) {
+		const value = draft[key];
+		return Array.isArray(value) ? value.map(String).filter(Boolean).join(', ') : '';
+	}
+
+	function visibleResources(message: ChatMessage) {
+		return (message.tool_result?.resource_refs ?? []).filter(
+			(ref): ref is ChatResourceRef & { href: `/collections/${string}` } =>
+				typeof ref.href === 'string' && ref.href.startsWith('/collections/')
+		);
+	}
+
+	function resourceLabel(resourceType: string) {
+		switch (resourceType) {
+			case 'collection':
+				return $t('researchAgent.resource.collection');
+			case 'research_objective':
+				return $t('researchAgent.resource.objective');
+			case 'finding':
+				return $t('researchAgent.resource.finding');
+			case 'evidence':
+				return $t('researchAgent.resource.evidence');
+			case 'objective_analysis':
+				return $t('researchAgent.resource.analysis');
+			default:
+				return $t('researchAgent.resource.other');
+		}
+	}
+
+	function approvalArguments(call: ChatToolCall) {
+		return Object.entries(call.arguments);
+	}
+
+	function formatValue(value: unknown) {
+		if (Array.isArray(value)) return value.map(String).join(', ');
+		if (value && typeof value === 'object') return JSON.stringify(value);
+		if (value === null || value === undefined || value === '') return '--';
+		return String(value);
+	}
+
+	function formatTime(value: string) {
+		const date = new Date(value);
+		if (Number.isNaN(date.getTime())) return '';
+		return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(date);
+	}
+
+	function formatHistoryTime(value: string) {
+		const date = new Date(value);
+		if (Number.isNaN(date.getTime())) return '';
+		return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
 	}
 </script>
 
 <svelte:head>
-	<title>{$t('goalCopilot.title')}</title>
+	<title>{$t('researchAgent.title')}</title>
 </svelte:head>
 
-<section class="research-chat-page" aria-label={$t('goalCopilot.chatLabel')}>
-	<aside class="sidebar" aria-label={$t('goalCopilot.sidebarLabel')}>
-		<div class="brand-row">
-			<div class="logo" aria-hidden="true">
-				<span>AI</span>
-			</div>
-			<h1>{$t('goalCopilot.title')}</h1>
-			<span class="beta-tag">{$t('goalCopilot.beta')}</span>
+<section class="research-agent" aria-label={$t('researchAgent.chatLabel')}>
+	<aside class="sidebar" aria-label={$t('researchAgent.sidebarLabel')}>
+		<div class="brand">
+			<span class="brand-mark" aria-hidden="true">L</span>
+			<h1>{$t('researchAgent.title')}</h1>
 		</div>
 
-		<button class="new-chat-button" type="button" disabled={loading} on:click={startNewSession}>
+		<button
+			class="new-session"
+			type="button"
+			disabled={loading || sending || deciding}
+			on:click={startNewSession}
+		>
 			<span aria-hidden="true">+</span>
-			{$t('goalCopilot.newSession')}
+			{$t('researchAgent.newSession')}
 		</button>
 
-		<section class="history-section" aria-label={$t('goalCopilot.historyTitle')}>
-			<h2>{$t('goalCopilot.historyTitle')}</h2>
+		<section class="history" aria-label={$t('researchAgent.historyTitle')}>
+			<h2>{$t('researchAgent.historyTitle')}</h2>
 			<div class="history-list">
-				{#each history as item}
+				{#each history as item (item.session_id)}
 					<button
-						class="chat-item"
+						class="history-item"
 						class:active={item.session_id === activeSessionId}
 						type="button"
+						disabled={loading || sending || deciding}
 						on:click={() => switchSession(item.session_id)}
 					>
-						<span class="chat-icon" aria-hidden="true"></span>
-						<span class="chat-title">{item.title}</span>
-						<span class="chat-time">{formatHistoryTime(item.updated_at)}</span>
+						<span class="history-title">{item.title}</span>
+						<time>{formatHistoryTime(item.updated_at)}</time>
 					</button>
 				{:else}
-					<div class="empty-history">{$t('goalCopilot.emptyHistory')}</div>
+					<p class="empty-history">{$t('researchAgent.emptyHistory')}</p>
 				{/each}
 			</div>
 		</section>
 
-		<a
-			class="knowledge-card"
-			href={`/collections/${collectionId}`}
-			aria-label={$t('goalCopilot.knowledgeCardLabel')}
-		>
+		<a class="collection-link" href={resolve('/collections/[id]', { id: collectionId })}>
 			<span>
-				<small>{$t('goalCopilot.currentKnowledge')}</small>
+				<small>{$t('researchAgent.currentCollection')}</small>
 				<strong>{collectionId}</strong>
 			</span>
-			<span class="knowledge-chevron" aria-hidden="true">›</span>
+			<span>{$t('researchAgent.openWorkspace')}</span>
 		</a>
 	</aside>
 
-	<main class="main">
-		<header class="chat-header">
+	<main class="conversation">
+		<header class="conversation-header">
 			<div>
-				<h2>{$t('goalCopilot.title')}</h2>
-				<p>
-					{$t('goalCopilot.headerPrefix')}
-					<span>{collectionId}</span>
-					<i aria-hidden="true">i</i>
-				</p>
+				<h2>{$t('researchAgent.title')}</h2>
+				<p>{$t('researchAgent.headerPrefix')} <strong>{collectionId}</strong></p>
 			</div>
-			<button class="more-button" type="button">
-				{$t('goalCopilot.more')}
-				<span aria-hidden="true">⋮</span>
-			</button>
+			{#if queryObjectiveId}
+				<a
+					class="objective-link"
+					href={resolve('/collections/[id]/objectives/[objective_id]', {
+						id: collectionId,
+						objective_id: queryObjectiveId
+					})}
+				>
+					{$t('researchAgent.objectiveScope')}
+				</a>
+			{/if}
 		</header>
 
-		{#if queryObjectiveId}
-			<section class={`experiment-readiness experiment-readiness--${readinessStatus}`}>
-				<div>
-					<span>{$t('goalCopilot.experimentReadiness.title')}</span>
-					<strong>{readinessText}</strong>
-				</div>
-				<div class="experiment-readiness__actions">
-					{#if objectiveProtocolReady}
-						<button type="button" on:click={draftProtocolFromReviewedFindings} disabled={sending}>
-							{$t('goalCopilot.experimentReadiness.draftProtocol')}
-						</button>
-					{/if}
-					<a href={objectiveReviewLinkHref}>
-						{objectiveReviewLinkLabel}
-					</a>
-				</div>
-			</section>
-		{/if}
-
 		{#if error}
-			<div class="status-message" role="alert">{error}</div>
+			<div class="status status-error" role="alert">{error}</div>
+		{/if}
+		{#if notice}
+			<div class="status status-notice" role="status">{notice}</div>
 		{/if}
 
-		<div class="messages" aria-live="polite" aria-busy={loading || sending}>
-			<div class="messages-inner">
+		<div class="message-scroll" aria-live="polite" aria-busy={loading || sending || deciding}>
+			<div class="message-list">
 				{#if loading}
-					<div class="empty-state">
-						<h3>{$t('goalCopilot.loading')}</h3>
+					<div class="empty-state" role="status">
+						<h3>{$t('researchAgent.loading')}</h3>
 					</div>
-				{:else if !messages.length}
+				{:else if messages.length === 0}
 					<div class="empty-state">
-						<h3>{$t('goalCopilot.emptyTitle')}</h3>
-						<p>{$t('goalCopilot.emptyBody')}</p>
-						<div class="suggestion-grid">
-							{#each suggestionKeys as key}
+						<h3>{$t('researchAgent.emptyTitle')}</h3>
+						<p>{$t('researchAgent.emptyBody')}</p>
+						<div class="suggestions">
+							{#each suggestionKeys as key (key)}
 								<button
-									class="suggestion-card"
 									type="button"
 									disabled={!session || sending}
 									on:click={() => askSuggestion(key)}
@@ -749,715 +559,520 @@
 						</div>
 					</div>
 				{:else}
-					{#each messages as message}
+					{#each messages as message (message.message_id)}
 						{#if message.role === 'user'}
 							<article class="user-message">
 								<div>
 									<time>{formatTime(message.created_at)}</time>
-									<div class="user-bubble">{messageText(message)}</div>
+									<p>{message.content}</p>
 								</div>
 							</article>
-						{:else}
+						{:else if message.role === 'assistant'}
 							<article class="assistant-message">
-								<div class="assistant-avatar" aria-hidden="true">
-									<span>AI</span>
-								</div>
+								<div class="assistant-mark" aria-hidden="true">AI</div>
 								<div class="assistant-content">
 									<time>{formatTime(message.created_at)}</time>
-									<div class="assistant-bubble">
-										{#each renderMessageBlocks(messageText(message)) as block}
-											{#if block.kind === 'list'}
-												<ul>
-													{#each block.items as item}
-														<li>
-															{#each item as segment}
-																{#if segment.strong}
-																	<strong>{segment.text}</strong>
-																{:else}
-																	{segment.text}
-																{/if}
-															{/each}
-														</li>
-													{/each}
-												</ul>
-											{:else}
-												<p>
-													{#each block.segments as segment}
-														{#if segment.strong}
-															<strong>{segment.text}</strong>
-														{:else}
-															{segment.text}
-														{/if}
-													{/each}
-												</p>
-											{/if}
-										{/each}
-									</div>
-									{#if visibleSourceLinks(message).length}
-										<nav class="source-links" aria-label={$t('goalCopilot.sourceLinks.label')}>
-											{#each visibleSourceLinks(message) as link, index}
-												<a class="source-link" href={link.href}>
-													{sourceLinkLabel(link, index)}
-												</a>
+									{#if message.content}
+										<div class="assistant-copy">
+											{#each renderMessageBlocks(message.content) as block, blockIndex (blockIndex)}
+												{#if block.kind === 'list'}
+													<ul>
+														{#each block.items as item, itemIndex (itemIndex)}
+															<li>
+																{#each item as segment, segmentIndex (segmentIndex)}
+																	{#if segment.strong}<strong>{segment.text}</strong
+																		>{:else}{segment.text}{/if}
+																{/each}
+															</li>
+														{/each}
+													</ul>
+												{:else}
+													<p>
+														{#each block.segments as segment, segmentIndex (segmentIndex)}
+															{#if segment.strong}<strong>{segment.text}</strong
+																>{:else}{segment.text}{/if}
+														{/each}
+													</p>
+												{/if}
 											{/each}
-										</nav>
+										</div>
 									{/if}
-									{#if hasStaleSources(message)}
-										<p class="review-required-note">
-											{$t('goalCopilot.experimentPlan.sourceStale')}
-										</p>
-									{:else if message.role === 'assistant' && message.source_mode === 'collection_grounded' && !hasReviewedFindingGate(message)}
-										<p class="review-required-note">
-											{$t('goalCopilot.experimentPlan.reviewRequired')}
-										</p>
-									{:else if needsReviewedFindings(message)}
-										<p class="review-required-note">
-											{$t('goalCopilot.experimentPlan.reviewRequired')}
-										</p>
-									{:else if invalidProtocolContract(message)}
-										<p class="review-required-note">
-											{$t('goalCopilot.experimentPlan.protocolContractInvalid')}
-										</p>
-									{:else if missingSourceCitation(message)}
-										<p class="review-required-note">
-											{$t('goalCopilot.experimentPlan.sourceTraceRequired')}
-										</p>
-									{:else if message.role === 'assistant' && message.source_mode === 'collection_grounded' && visibleSourceLinks(message).length && !hasEvidenceCitations(message)}
-										<p class="review-required-note">
-											{$t('goalCopilot.experimentPlan.evidenceRequired')}
-										</p>
-									{:else if message.role === 'assistant' && message.source_mode === 'collection_grounded' && visibleSourceLinks(message).length && hasEvidenceCitations(message) && !citesVisibleSourceLabel(message)}
-										<p class="review-required-note">
-											{$t('goalCopilot.experimentPlan.sourceCitationRequired')}
-										</p>
-									{:else if message.role === 'assistant' && message.source_mode === 'collection_grounded' && visibleSourceLinks(message).length && hasEvidenceCitations(message) && citesVisibleSourceLabel(message) && !sourceLinksMatchEvidenceCitations(message)}
-										<p class="review-required-note">
-											{$t('goalCopilot.experimentPlan.evidenceLinkMismatch')}
-										</p>
-									{:else if message.role === 'assistant' && message.source_mode === 'collection_grounded' && visibleSourceLinks(message).length && hasEvidenceCitations(message) && citesVisibleSourceLabel(message) && sourceLinksMatchEvidenceCitations(message) && !allEvidenceCitationsHaveSourceLinks(message)}
-										<p class="review-required-note">
-											{$t('goalCopilot.experimentPlan.sourceLinkRequired')}
-										</p>
-									{:else if message.role === 'assistant' && message.source_mode === 'collection_grounded' && hasReviewedFindingGate(message) && visibleSourceLinks(message).length && hasEvidenceCitations(message) && citesVisibleSourceLabel(message) && sourceLinksMatchEvidenceCitations(message) && allEvidenceCitationsHaveSourceLinks(message) && !hasProtocolDraftStructure(message)}
-										<p class="review-required-note">
-											{$t('goalCopilot.experimentPlan.protocolStructureRequired')}
+									{#if message.tool_call_id}
+										<p class="capability-request">
+											{$t('researchAgent.capability.requested', {
+												name: capabilityName(message.tool_name)
+											})}
 										</p>
 									{/if}
-									<div class="message-actions">
-										<button
-											class="action-button"
-											type="button"
-											aria-label={$t('goalCopilot.actions.copy')}
-											on:click={() => copyMessage(messageText(message))}
-										>
-											<span aria-hidden="true">⧉</span>
-										</button>
-										{#if canSaveExperimentPlan(message)}
-											{#if savedPlanMessageIds[message.message_id]}
-												<a
-													class="action-button action-button--text"
-													href={experimentPlanHref(savedPlanMessageIds[message.message_id])}
-												>
-													{$t('goalCopilot.experimentPlan.open')}
-												</a>
-											{:else}
-												<button
-													class="action-button action-button--text"
-													type="button"
-													disabled={savingPlanMessageId === message.message_id}
-													on:click={() => saveExperimentPlan(message)}
-												>
-													{#if savingPlanMessageId === message.message_id}
-														{$t('goalCopilot.experimentPlan.saving')}
-													{:else}
-														{$t('goalCopilot.experimentPlan.save')}
-													{/if}
-												</button>
-											{/if}
-										{/if}
-									</div>
 								</div>
 							</article>
+						{:else if message.tool_result}
+							<section
+								class="capability-event"
+								aria-label={$t('researchAgent.capability.activity')}
+							>
+								<header>
+									<span
+										class:failed={message.tool_result.status === 'failed'}
+										class:queued={message.tool_result.status === 'queued'}
+									>
+										{message.tool_result.status === 'failed'
+											? '!'
+											: message.tool_result.status === 'queued'
+												? '…'
+												: '✓'}
+									</span>
+									<div>
+										<strong>{resultTitle(message)}</strong>
+										<p>{resultSummary(message)}</p>
+									</div>
+								</header>
+
+								{#if resultDrafts(message).length}
+									<ol class="draft-list">
+										{#each resultDrafts(message) as draft, draftIndex (`${String(draft.question ?? '')}-${draftIndex}`)}
+											<li>
+												<strong>{String(draft.question ?? '')}</strong>
+												<p>{draftList(draft, 'variables')} → {draftList(draft, 'outcomes')}</p>
+												<small>
+													{$t('researchAgent.capability.draftSupport', {
+														status: String(draft.support_status ?? 'unknown')
+													})}
+												</small>
+											</li>
+										{/each}
+									</ol>
+								{/if}
+
+								{#if message.tool_result.warnings.length}
+									<div class="warnings">
+										<strong>{$t('researchAgent.warnings')}</strong>
+										<ul>
+											{#each message.tool_result.warnings as warning, warningIndex (warningIndex)}<li
+												>
+													{warning}
+												</li>{/each}
+										</ul>
+									</div>
+								{/if}
+
+								{#if visibleResources(message).length}
+									<nav class="resource-links" aria-label={$t('researchAgent.resources')}>
+										{#each visibleResources(message) as resource (`${resource.resource_type}:${resource.resource_id}`)}
+											<a href={resolve(resource.href)}>{resourceLabel(resource.resource_type)}</a>
+										{/each}
+									</nav>
+								{/if}
+							</section>
 						{/if}
 					{/each}
+				{/if}
+
+				{#if pendingApproval}
+					<section class="approval" aria-labelledby="approval-title">
+						<header>
+							<div>
+								<h3 id="approval-title">{$t('researchAgent.approval.title')}</h3>
+								<p>{$t('researchAgent.approval.body')}</p>
+							</div>
+							<strong>{capabilityName(pendingApproval.name)}</strong>
+						</header>
+						<h4>{$t('researchAgent.approval.arguments')}</h4>
+						<dl>
+							{#each approvalArguments(pendingApproval) as [key, value] (key)}
+								<div>
+									<dt>{key.replaceAll('_', ' ')}</dt>
+									<dd>{formatValue(value)}</dd>
+								</div>
+							{/each}
+						</dl>
+						<div class="approval-actions">
+							<button
+								class="reject"
+								type="button"
+								disabled={deciding}
+								on:click={() => decide('rejected')}
+							>
+								{$t('researchAgent.approval.reject')}
+							</button>
+							<button
+								class="approve"
+								type="button"
+								disabled={deciding}
+								on:click={() => decide('approved')}
+							>
+								{deciding
+									? $t('researchAgent.approval.processing')
+									: $t('researchAgent.approval.approve')}
+							</button>
+						</div>
+					</section>
 				{/if}
 			</div>
 		</div>
 
-		<form class="input-area" on:submit|preventDefault={() => sendMessage()}>
-			<div class="input-inner">
-				<div class="chat-input-box">
-					<label class="sr-only" for="goal-message">{$t('goalCopilot.messageLabel')}</label>
-					<textarea
-						id="goal-message"
-						class="chat-textarea"
-						rows="2"
-						bind:value={input}
-						placeholder={$t('goalCopilot.messagePlaceholder')}
-						disabled={!session || sending}
-					></textarea>
-					<button
-						class="send-button"
-						type="submit"
-						disabled={!session || sending || !input.trim()}
-						aria-label={$t('goalCopilot.send')}
-					>
-						<span aria-hidden="true">➤</span>
-					</button>
-				</div>
-				<p class="input-hint">{$t('goalCopilot.inputHint')}</p>
-			</div>
+		<form class="composer" on:submit|preventDefault={() => sendMessage()}>
+			<label class="sr-only" for="research-agent-message">{$t('researchAgent.messageLabel')}</label>
+			<textarea
+				id="research-agent-message"
+				rows="2"
+				bind:value={input}
+				placeholder={$t('researchAgent.messagePlaceholder')}
+				disabled={!session || sending || deciding || Boolean(pendingApproval)}
+			></textarea>
+			<button
+				type="submit"
+				disabled={!session || sending || deciding || Boolean(pendingApproval) || !input.trim()}
+			>
+				{sending ? $t('researchAgent.sending') : $t('researchAgent.send')}
+			</button>
 		</form>
 	</main>
 </section>
 
 <style>
-	:global(.app-shell:has(.research-chat-page)) {
+	:global(.app-shell:has(.research-agent)) {
 		padding: 0;
 		overflow: hidden;
-		background: #f6f8fc;
+		background: #f4f6f8;
 	}
 
-	:global(.app-shell:has(.research-chat-page) .site-header),
-	:global(.app-shell:has(.research-chat-page) .site-footer) {
+	:global(.app-shell:has(.research-agent) .site-header),
+	:global(.app-shell:has(.research-agent) .site-footer),
+	:global(.app-shell:has(.research-agent) .bg-grid),
+	:global(.collection-header:has(+ .collection-tabs + .collection-panel .research-agent)),
+	:global(.collection-tabs:has(+ .collection-panel .research-agent)) {
 		display: none;
 	}
 
-	:global(.app-shell:has(.research-chat-page) .page) {
+	:global(.app-shell:has(.research-agent) .page) {
 		width: 100vw;
 		max-width: none;
 		margin: 0;
 	}
 
-	:global(.app-shell:has(.research-chat-page) .bg-grid),
-	:global(.collection-header:has(+ .collection-tabs + .collection-panel .research-chat-page)),
-	:global(.collection-tabs:has(+ .collection-panel .research-chat-page)) {
-		display: none;
-	}
-
-	:global(.collection-panel:has(.research-chat-page)) {
+	:global(.collection-panel:has(.research-agent)) {
 		gap: 0;
 	}
 
-	.research-chat-page {
+	.research-agent {
 		position: fixed;
 		inset: 0;
 		z-index: 60;
-		display: flex;
+		display: grid;
+		grid-template-columns: 280px minmax(0, 1fr);
 		width: 100vw;
 		height: 100vh;
-		background: #f6f8fc;
-		color: #111827;
-		font-family:
-			Inter,
-			-apple-system,
-			BlinkMacSystemFont,
-			'Segoe UI',
-			'PingFang SC',
-			'Hiragino Sans GB',
-			'Microsoft YaHei',
-			sans-serif;
+		background: #f4f6f8;
+		color: #18202a;
 		letter-spacing: 0;
 		overflow: hidden;
 	}
 
 	.sidebar {
-		width: 300px;
-		height: 100vh;
-		background: #f8faff;
-		border-right: 1px solid #e5eaf2;
-		padding: 24px;
 		display: flex;
+		min-height: 0;
 		flex-direction: column;
-		flex: 0 0 300px;
+		padding: 24px 20px;
+		border-right: 1px solid #dce1e7;
+		background: #eef1f4;
 	}
 
-	.brand-row {
-		height: 48px;
+	.brand {
 		display: flex;
 		align-items: center;
 		gap: 12px;
-		min-width: 0;
 	}
 
-	.logo {
-		width: 40px;
-		height: 40px;
-		border-radius: 12px;
-		background: #eef4ff;
-		border: 1px solid #dbe7ff;
+	.brand-mark,
+	.assistant-mark {
 		display: grid;
 		place-items: center;
-		color: #2563eb;
-		font-size: 12px;
+		background: #fff;
+		border: 1px solid #cbd3dc;
+		color: #215b43;
 		font-weight: 800;
-		flex: 0 0 auto;
 	}
 
-	.brand-row h1 {
+	.brand-mark {
+		width: 36px;
+		height: 36px;
+		border-radius: 6px;
+	}
+
+	.brand h1 {
 		margin: 0;
-		font-size: 22px;
-		line-height: 32px;
-		font-weight: 700;
-		color: #111827;
-		white-space: nowrap;
-	}
-
-	.beta-tag {
-		height: 24px;
-		padding: 0 10px;
-		border-radius: 8px;
-		background: #eef2f7;
-		color: #64748b;
-		font-size: 12px;
+		font-size: 18px;
 		line-height: 24px;
-		font-weight: 500;
 	}
 
-	.new-chat-button {
-		width: 100%;
-		height: 44px;
-		border-radius: 10px;
-		background: #2563eb;
-		color: #fff;
-		font-size: 15px;
-		line-height: 20px;
-		font-weight: 600;
-		border: none;
-		margin-top: 28px;
+	.new-session {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
 		gap: 8px;
+		min-height: 42px;
+		margin-top: 24px;
+		border: 1px solid #174c38;
+		border-radius: 6px;
+		background: #215b43;
+		color: #fff;
+		font-weight: 700;
 		cursor: pointer;
 	}
 
-	.new-chat-button:hover {
-		background: #1d4ed8;
+	.new-session:hover:not(:disabled),
+	.approve:hover:not(:disabled) {
+		background: #174c38;
 	}
 
-	.new-chat-button:disabled {
-		background: #94a3b8;
+	button:disabled {
 		cursor: not-allowed;
+		opacity: 0.55;
 	}
 
-	.history-section {
-		margin-top: 40px;
-		min-height: 0;
+	.history {
 		display: flex;
+		min-height: 0;
+		flex: 1;
 		flex-direction: column;
+		margin-top: 32px;
 	}
 
-	.history-section h2 {
-		margin: 0 0 14px;
-		color: #64748b;
-		font-size: 14px;
-		line-height: 20px;
-		font-weight: 600;
+	.history h2 {
+		margin: 0 0 10px;
+		color: #65717e;
+		font-size: 12px;
+		line-height: 18px;
+		text-transform: uppercase;
 	}
 
 	.history-list {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
+		display: grid;
+		gap: 4px;
 		overflow-y: auto;
-		min-height: 0;
 	}
 
-	.chat-item {
-		height: 48px;
-		border-radius: 10px;
-		padding: 0 12px;
-		display: flex;
+	.history-item {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
-		gap: 10px;
-		color: #334155;
+		gap: 8px;
+		min-height: 42px;
+		padding: 8px 10px;
+		border: 1px solid transparent;
+		border-radius: 6px;
 		background: transparent;
-		border: none;
+		color: #34404c;
 		text-align: left;
 		cursor: pointer;
 	}
 
-	.chat-item.active {
-		background: #eaf2ff;
-		color: #1e3a8a;
+	.history-item:hover,
+	.history-item.active {
+		border-color: #cbd3dc;
+		background: #fff;
 	}
 
-	.chat-item:hover {
-		background: #f1f5f9;
-	}
-
-	.chat-icon {
-		width: 16px;
-		height: 16px;
-		border: 1.8px solid currentColor;
-		border-radius: 50%;
-		position: relative;
-		flex: 0 0 auto;
-		opacity: 0.82;
-	}
-
-	.chat-icon::after {
-		content: '';
-		position: absolute;
-		left: 3px;
-		bottom: -3px;
-		width: 6px;
-		height: 5px;
-		border-left: 1.8px solid currentColor;
-		border-bottom: 1.8px solid currentColor;
-		transform: rotate(-22deg);
-		background: inherit;
-	}
-
-	.chat-title {
-		flex: 1;
+	.history-title {
 		overflow: hidden;
 		white-space: nowrap;
 		text-overflow: ellipsis;
-		font-size: 14px;
-		line-height: 20px;
+		font-size: 13px;
 	}
 
-	.chat-time {
-		color: #64748b;
-		font-size: 12px;
-		line-height: 18px;
-		flex: 0 0 auto;
-	}
-
+	.history-item time,
 	.empty-history {
-		color: #94a3b8;
-		font-size: 13px;
-		line-height: 20px;
-		padding: 8px 2px;
-	}
-
-	.knowledge-card {
-		margin-top: auto;
-		height: 70px;
-		border-radius: 12px;
-		border: 1px solid #d8e0ec;
-		background: #fff;
-		padding: 14px;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		color: inherit;
-	}
-
-	.knowledge-card small {
-		display: block;
-		font-size: 12px;
-		line-height: 18px;
-		color: #64748b;
-	}
-
-	.knowledge-card strong {
-		display: block;
-		max-width: 210px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		font-size: 14px;
-		line-height: 20px;
-		font-weight: 600;
-		color: #111827;
-	}
-
-	.knowledge-chevron {
-		color: #64748b;
-		font-size: 28px;
-		line-height: 1;
-	}
-
-	.main {
-		flex: 1;
-		min-width: 0;
-		height: 100vh;
-		background: #fff;
-		display: flex;
-		flex-direction: column;
-	}
-
-	.chat-header {
-		height: 88px;
-		padding: 24px 36px 18px;
-		border-bottom: 1px solid #e5eaf2;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 24px;
-		flex: 0 0 88px;
-	}
-
-	.chat-header h2 {
-		margin: 0;
-		font-size: 22px;
-		line-height: 32px;
-		font-weight: 700;
-		color: #111827;
-	}
-
-	.chat-header p {
-		margin: 4px 0 0;
-		font-size: 14px;
-		line-height: 20px;
-		color: #64748b;
-	}
-
-	.chat-header p span {
-		color: #111827;
-		font-weight: 600;
-	}
-
-	.chat-header i {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 16px;
-		height: 16px;
-		margin-left: 8px;
-		border-radius: 50%;
-		border: 1px solid #94a3b8;
-		color: #64748b;
+		color: #7a8693;
 		font-size: 11px;
-		font-style: normal;
-		font-weight: 700;
-		vertical-align: -1px;
 	}
 
-	.experiment-readiness {
-		margin: 12px 40px 0;
-		border: 1px solid #d8e0ec;
-		border-radius: 8px;
-		padding: 12px 14px;
-		background: #f8fafc;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 14px;
-	}
-
-	.experiment-readiness div {
+	.collection-link {
 		display: grid;
-		gap: 3px;
-		min-width: 0;
-	}
-
-	.experiment-readiness span {
-		color: #64748b;
-		font-size: 12px;
-		line-height: 18px;
-		font-weight: 700;
-		text-transform: uppercase;
-	}
-
-	.experiment-readiness strong {
-		color: #111827;
-		font-size: 14px;
-		line-height: 21px;
-		font-weight: 650;
-	}
-
-	.experiment-readiness__actions {
-		display: flex;
-		align-items: center;
 		gap: 10px;
-		flex: 0 0 auto;
-	}
-
-	.experiment-readiness__actions button {
-		border: 1px solid #16a34a;
-		border-radius: 6px;
-		padding: 7px 10px;
-		background: #16a34a;
-		color: #ffffff;
-		font-size: 13px;
-		line-height: 18px;
-		font-weight: 700;
-		cursor: pointer;
-	}
-
-	.experiment-readiness__actions button:disabled {
-		cursor: not-allowed;
-		opacity: 0.6;
-	}
-
-	.experiment-readiness a {
-		flex: 0 0 auto;
-		color: #2563eb;
-		font-size: 13px;
-		line-height: 20px;
+		padding-top: 16px;
+		border-top: 1px solid #d3d9e0;
+		color: #215b43;
+		font-size: 12px;
 		font-weight: 700;
 		text-decoration: none;
 	}
 
-	.experiment-readiness a:hover,
-	.experiment-readiness a:focus-visible {
+	.collection-link span:first-child {
+		display: grid;
+		gap: 2px;
+		min-width: 0;
+	}
+
+	.collection-link small {
+		color: #65717e;
+		font-weight: 500;
+	}
+
+	.collection-link strong {
+		overflow: hidden;
+		color: #18202a;
+		text-overflow: ellipsis;
+	}
+
+	.conversation {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		min-height: 0;
+		background: #fff;
+	}
+
+	.conversation-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 20px;
+		min-height: 76px;
+		padding: 16px 32px;
+		border-bottom: 1px solid #e1e5ea;
+	}
+
+	.conversation-header h2 {
+		margin: 0;
+		font-size: 18px;
+		line-height: 26px;
+	}
+
+	.conversation-header p {
+		margin: 3px 0 0;
+		color: #65717e;
+		font-size: 13px;
+	}
+
+	.objective-link,
+	.resource-links a {
+		color: #1f684d;
+		font-weight: 700;
+		text-decoration: none;
+	}
+
+	.objective-link:hover,
+	.resource-links a:hover {
 		text-decoration: underline;
 	}
 
-	.experiment-readiness--ready {
-		border-color: #bbf7d0;
-		background: #f0fdf4;
-	}
-
-	.experiment-readiness--needs_review,
-	.experiment-readiness--pending {
-		border-color: #fed7aa;
-		background: #fff7ed;
-	}
-
-	.experiment-readiness--error {
-		border-color: #fecaca;
-		background: #fef2f2;
-	}
-
-	.more-button {
-		height: 40px;
-		padding: 0 16px;
-		border-radius: 10px;
-		border: 1px solid #d8e0ec;
-		background: #fff;
-		color: #111827;
-		font-size: 14px;
-		line-height: 20px;
-		display: inline-flex;
-		align-items: center;
-		gap: 8px;
-		cursor: pointer;
-	}
-
-	.more-button:hover {
-		background: #f8fafc;
-	}
-
-	.status-message {
-		margin: 12px 40px 0;
+	.status {
+		margin: 12px 32px 0;
 		padding: 10px 12px;
-		border-radius: 10px;
-		border: 1px solid #fecaca;
-		background: #fef2f2;
-		color: #b91c1c;
+		border-radius: 6px;
 		font-size: 13px;
-		line-height: 20px;
 	}
 
-	.messages {
+	.status-error {
+		border: 1px solid #efb3b3;
+		background: #fff3f3;
+		color: #9f2828;
+	}
+
+	.status-notice {
+		border: 1px solid #e4c77a;
+		background: #fff9e8;
+		color: #765619;
+	}
+
+	.message-scroll {
 		flex: 1;
+		min-height: 0;
 		overflow-y: auto;
-		padding: 32px 40px 24px;
+		padding: 28px 32px;
 	}
 
-	.messages-inner {
-		max-width: 960px;
+	.message-list {
+		width: min(100%, 900px);
 		margin: 0 auto;
 	}
 
 	.empty-state {
-		max-width: 640px;
-		margin: 120px auto 0;
+		max-width: 620px;
+		margin: 100px auto 0;
 		text-align: center;
 	}
 
 	.empty-state h3 {
 		margin: 0;
-		font-size: 22px;
-		line-height: 32px;
-		font-weight: 700;
-		color: #111827;
+		font-size: 20px;
 	}
 
-	.empty-state p {
+	.empty-state > p {
 		margin: 8px 0 0;
+		color: #65717e;
 		font-size: 14px;
-		line-height: 22px;
-		color: #64748b;
 	}
 
-	.suggestion-grid {
-		margin-top: 24px;
+	.suggestions {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 12px;
+		gap: 8px;
+		margin-top: 22px;
 	}
 
-	.suggestion-card {
-		min-height: 48px;
-		padding: 12px 14px;
-		border-radius: 12px;
-		border: 1px solid #d8e0ec;
+	.suggestions button {
+		min-height: 46px;
+		padding: 10px 12px;
+		border: 1px solid #cfd6de;
+		border-radius: 6px;
 		background: #fff;
+		color: #34404c;
 		text-align: left;
-		font-size: 14px;
-		line-height: 20px;
-		color: #334155;
 		cursor: pointer;
 	}
 
-	.suggestion-card:hover {
-		border-color: #2563eb;
-		background: #f8fbff;
-	}
-
-	.suggestion-card:disabled {
-		cursor: not-allowed;
-		color: #94a3b8;
+	.suggestions button:hover:not(:disabled) {
+		border-color: #4e806a;
+		background: #f3f8f5;
 	}
 
 	.user-message {
 		display: flex;
 		justify-content: flex-end;
-		margin-bottom: 28px;
+		margin-bottom: 24px;
 	}
 
 	.user-message > div {
-		max-width: 560px;
+		max-width: min(72%, 620px);
+	}
+
+	.user-message time,
+	.assistant-content > time {
+		display: block;
+		margin-bottom: 5px;
+		color: #87919b;
+		font-size: 11px;
 	}
 
 	.user-message time {
-		display: block;
-		margin-bottom: 6px;
 		text-align: right;
-		font-size: 12px;
-		line-height: 18px;
-		color: #94a3b8;
 	}
 
-	.user-bubble {
-		max-width: 560px;
-		padding: 14px 18px;
-		border-radius: 14px 14px 4px 14px;
-		background: #eaf2ff;
-		color: #111827;
-		font-size: 15px;
-		line-height: 26px;
+	.user-message p {
+		margin: 0;
+		padding: 12px 15px;
+		border-radius: 8px 8px 2px 8px;
+		background: #e8f0ec;
+		font-size: 14px;
+		line-height: 22px;
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
-		word-break: break-word;
 	}
 
 	.assistant-message {
-		display: flex;
-		align-items: flex-start;
+		display: grid;
+		grid-template-columns: 36px minmax(0, 1fr);
 		gap: 12px;
-		margin-bottom: 28px;
+		margin-bottom: 18px;
 	}
 
-	.assistant-avatar {
-		width: 42px;
-		height: 42px;
+	.assistant-mark {
+		width: 36px;
+		height: 36px;
 		border-radius: 50%;
-		background: #eef4ff;
-		border: 1px solid #e5eaf2;
-		display: grid;
-		place-items: center;
-		color: #2563eb;
-		font-size: 12px;
-		font-weight: 800;
-		flex-shrink: 0;
-		margin-top: 24px;
+		font-size: 10px;
 	}
 
 	.assistant-content {
@@ -1465,253 +1080,341 @@
 		min-width: 0;
 	}
 
-	.assistant-content time {
-		display: block;
-		margin-bottom: 6px;
-		font-size: 12px;
-		line-height: 18px;
-		color: #94a3b8;
-	}
-
-	.assistant-bubble {
-		max-width: 760px;
-		padding: 18px 20px;
-		border-radius: 14px;
+	.assistant-copy {
+		padding: 14px 16px;
+		border: 1px solid #d8dee5;
+		border-radius: 8px;
 		background: #fff;
-		border: 1px solid #d8e0ec;
-		box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
-		font-size: 15px;
-		line-height: 26px;
-		color: #111827;
+		font-size: 14px;
+		line-height: 23px;
 		overflow-wrap: anywhere;
-		word-break: break-word;
 	}
 
-	.assistant-bubble p {
-		margin: 0 0 10px;
+	.assistant-copy p,
+	.assistant-copy ul {
+		margin: 0 0 9px;
 	}
 
-	.assistant-bubble p:last-child,
-	.assistant-bubble ul:last-child {
+	.assistant-copy p:last-child,
+	.assistant-copy ul:last-child {
 		margin-bottom: 0;
 	}
 
-	.assistant-bubble ul {
-		margin: 8px 0;
-		padding-left: 20px;
-	}
-
-	.assistant-bubble li {
-		margin-bottom: 6px;
-	}
-
-	.source-links {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-		margin-top: 10px;
-	}
-
-	.source-link {
-		display: inline-flex;
-		align-items: center;
-		min-height: 30px;
-		padding: 5px 10px;
-		border-radius: 8px;
-		border: 1px solid #d8e0ec;
-		background: #fff;
-		color: #2563eb;
-		font-size: 13px;
-		line-height: 18px;
-		font-weight: 500;
-		text-decoration: none;
-	}
-
-	.source-link:hover {
-		border-color: #2563eb;
-		background: #f8fbff;
-	}
-
-	.review-required-note {
-		margin: 10px 0 0;
-		padding: 9px 11px;
-		border-radius: 8px;
-		border: 1px solid #fde68a;
-		background: #fffbeb;
-		color: #92400e;
-		font-size: 13px;
-		line-height: 19px;
-	}
-
-	.message-actions {
-		display: flex;
-		gap: 8px;
-		justify-content: flex-end;
-		margin-top: -12px;
-		padding-right: 8px;
-	}
-
-	.source-links + .message-actions {
-		margin-top: 8px;
-	}
-
-	.action-button {
-		width: 28px;
-		height: 28px;
-		border-radius: 8px;
-		border: 1px solid #e5eaf2;
-		background: #fff;
-		color: #64748b;
-		display: inline-grid;
-		place-items: center;
-		cursor: pointer;
-	}
-
-	.action-button:hover {
-		background: #f8fafc;
-		color: #2563eb;
-	}
-
-	.action-button--text {
-		width: auto;
-		min-width: 92px;
-		padding: 0 10px;
+	.capability-request {
+		margin: 7px 0 0;
+		color: #65717e;
 		font-size: 12px;
-		font-weight: 700;
-		letter-spacing: 0;
-		white-space: nowrap;
 	}
 
-	.action-button:disabled {
-		cursor: not-allowed;
-		opacity: 0.65;
+	.capability-event {
+		margin: 0 0 22px 48px;
+		padding: 14px 16px;
+		border: 1px solid #ccd7d1;
+		border-radius: 6px;
+		background: #f5f8f6;
 	}
 
-	.input-area {
-		min-height: 120px;
-		padding: 16px 40px 20px;
-		border-top: 1px solid #e5eaf2;
-		background: #fff;
-		flex: 0 0 auto;
-	}
-
-	.input-inner {
-		max-width: 960px;
-		margin: 0 auto;
-	}
-
-	.chat-input-box {
-		position: relative;
-		min-height: 72px;
-		border-radius: 12px;
-		border: 1px solid #d8e0ec;
-		background: #fff;
+	.capability-event > header {
 		display: flex;
 		align-items: flex-start;
-		padding: 14px 56px 14px 16px;
+		gap: 10px;
 	}
 
-	.chat-textarea {
-		width: 100%;
-		min-height: 44px;
-		max-height: 160px;
-		border: none;
-		outline: none;
-		resize: none;
-		font-size: 15px;
-		line-height: 24px;
-		color: #111827;
-		background: transparent;
-	}
-
-	.chat-textarea::placeholder {
-		color: #94a3b8;
-	}
-
-	.send-button {
-		position: absolute;
-		right: 12px;
-		bottom: 12px;
-		width: 40px;
-		height: 40px;
-		border-radius: 10px;
-		border: none;
-		background: #2563eb;
-		color: #fff;
+	.capability-event > header > span {
 		display: grid;
 		place-items: center;
+		width: 22px;
+		height: 22px;
+		border-radius: 50%;
+		background: #dcece4;
+		color: #215b43;
+		font-size: 12px;
+		font-weight: 800;
+	}
+
+	.capability-event > header > span.failed {
+		background: #f8dddd;
+		color: #9f2828;
+	}
+
+	.capability-event > header > span.queued {
+		background: #eee7c9;
+		color: #6f5a10;
+	}
+
+	.capability-event header strong {
+		font-size: 13px;
+	}
+
+	.capability-event header p {
+		margin: 2px 0 0;
+		color: #56636f;
+		font-size: 13px;
+	}
+
+	.draft-list {
+		display: grid;
+		gap: 8px;
+		margin: 14px 0 0;
+		padding: 0;
+		list-style: none;
+		counter-reset: drafts;
+	}
+
+	.draft-list li {
+		padding-top: 8px;
+		border-top: 1px solid #d6dfda;
+		counter-increment: drafts;
+	}
+
+	.draft-list li > strong::before {
+		content: counter(drafts) '. ';
+	}
+
+	.draft-list p,
+	.draft-list small {
+		margin: 4px 0 0;
+		color: #65717e;
+		font-size: 12px;
+	}
+
+	.warnings {
+		margin-top: 12px;
+		padding: 10px 12px;
+		border-left: 3px solid #c38b24;
+		background: #fff9e8;
+		color: #765619;
+		font-size: 12px;
+	}
+
+	.warnings ul {
+		margin: 5px 0 0;
+		padding-left: 18px;
+	}
+
+	.resource-links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px 14px;
+		margin-top: 12px;
+		font-size: 12px;
+	}
+
+	.approval {
+		margin: 8px 0 24px 48px;
+		padding: 18px;
+		border: 1px solid #d5b55f;
+		border-radius: 8px;
+		background: #fffaf0;
+	}
+
+	.approval > header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 18px;
+	}
+
+	.approval h3,
+	.approval h4,
+	.approval p {
+		margin: 0;
+	}
+
+	.approval h3 {
+		font-size: 16px;
+	}
+
+	.approval h4 {
+		margin-top: 18px;
+		font-size: 12px;
+		text-transform: uppercase;
+	}
+
+	.approval header p {
+		margin-top: 4px;
+		color: #6c6250;
+		font-size: 13px;
+	}
+
+	.approval > header > strong {
+		color: #765619;
+		font-size: 12px;
+	}
+
+	.approval dl {
+		display: grid;
+		gap: 0;
+		margin: 8px 0 0;
+		border-top: 1px solid #e6d7ad;
+	}
+
+	.approval dl div {
+		display: grid;
+		grid-template-columns: minmax(120px, 0.3fr) minmax(0, 1fr);
+		gap: 16px;
+		padding: 8px 0;
+		border-bottom: 1px solid #e6d7ad;
+	}
+
+	.approval dt {
+		color: #6c6250;
+		font-size: 12px;
+		font-weight: 700;
+		text-transform: capitalize;
+	}
+
+	.approval dd {
+		margin: 0;
+		font-size: 13px;
+		overflow-wrap: anywhere;
+	}
+
+	.approval-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: 16px;
+	}
+
+	.approval-actions button {
+		min-height: 38px;
+		padding: 0 14px;
+		border-radius: 6px;
+		font-weight: 700;
 		cursor: pointer;
 	}
 
-	.send-button:hover {
-		background: #1d4ed8;
+	.reject {
+		border: 1px solid #aeb7c1;
+		background: #fff;
+		color: #34404c;
 	}
 
-	.send-button:disabled {
-		background: #cbd5e1;
-		cursor: not-allowed;
+	.approve {
+		border: 1px solid #174c38;
+		background: #215b43;
+		color: #fff;
 	}
 
-	.input-hint {
-		margin: 8px 0 0;
-		text-align: center;
-		font-size: 12px;
-		line-height: 18px;
-		color: #94a3b8;
+	.composer {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 10px;
+		padding: 16px 32px 20px;
+		border-top: 1px solid #e1e5ea;
+		background: #fff;
 	}
 
-	@media (max-width: 900px) {
-		.research-chat-page {
-			position: fixed;
-			display: grid;
+	.composer textarea {
+		min-height: 54px;
+		max-height: 150px;
+		padding: 12px 14px;
+		border: 1px solid #cbd3dc;
+		border-radius: 6px;
+		background: #fff;
+		color: #18202a;
+		font: inherit;
+		line-height: 22px;
+		resize: vertical;
+	}
+
+	.composer textarea:focus {
+		border-color: #2f7055;
+		outline: 2px solid #cfe3da;
+		outline-offset: 1px;
+	}
+
+	.composer button {
+		align-self: end;
+		min-width: 92px;
+		min-height: 42px;
+		border: 1px solid #174c38;
+		border-radius: 6px;
+		background: #215b43;
+		color: #fff;
+		font-weight: 700;
+		cursor: pointer;
+	}
+
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+
+	@media (max-width: 820px) {
+		.research-agent {
 			grid-template-columns: 1fr;
 			grid-template-rows: auto minmax(0, 1fr);
 		}
 
 		.sidebar {
-			width: 100%;
-			height: auto;
-			max-height: 260px;
-			flex-basis: auto;
-			border-right: none;
-			border-bottom: 1px solid #e5eaf2;
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: center;
+			gap: 12px;
+			padding: 12px 16px;
+			border-right: 0;
+			border-bottom: 1px solid #dce1e7;
 		}
 
-		.history-section {
-			margin-top: 18px;
+		.new-session {
+			margin: 0;
+			padding: 0 12px;
 		}
 
-		.knowledge-card {
+		.history,
+		.collection-link {
 			display: none;
 		}
 
-		.main {
-			height: auto;
-			min-height: 0;
-		}
-	}
-
-	@media (max-width: 640px) {
-		.sidebar {
-			padding: 16px;
-		}
-
-		.chat-header,
-		.messages,
-		.input-area {
+		.conversation-header,
+		.message-scroll,
+		.composer {
 			padding-left: 18px;
 			padding-right: 18px;
 		}
+	}
 
-		.suggestion-grid {
+	@media (max-width: 560px) {
+		.conversation-header {
+			align-items: flex-start;
+			flex-direction: column;
+			gap: 6px;
+		}
+
+		.suggestions {
 			grid-template-columns: 1fr;
 		}
 
-		.assistant-content,
-		.assistant-bubble,
-		.user-message > div,
-		.user-bubble {
-			max-width: 100%;
+		.user-message > div {
+			max-width: 90%;
+		}
+
+		.capability-event,
+		.approval {
+			margin-left: 0;
+		}
+
+		.approval > header,
+		.approval dl div {
+			grid-template-columns: 1fr;
+			flex-direction: column;
+		}
+
+		.composer {
+			grid-template-columns: 1fr;
+		}
+
+		.composer button {
+			width: 100%;
 		}
 	}
 </style>

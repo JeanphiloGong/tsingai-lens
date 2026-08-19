@@ -26,7 +26,7 @@ to code.
 - [`docs/frontend-plan.md`](docs/frontend-plan.md)
   Frontend same-origin API integration guide
 - [`docs/goal-copilot-proposal.md`](docs/goal-copilot-proposal.md)
-  Proposal for a workflow-first, Core-grounded goal chat entry
+  Collection-bound Research Agent Chat and approval presentation contract
 - [`docs/research-view-aggregation/README.md`](docs/research-view-aggregation/README.md)
   Frontend implementation topic for collection research-view navigation,
   paper matrices, comparison matrices, evidence drawers, and debug placement

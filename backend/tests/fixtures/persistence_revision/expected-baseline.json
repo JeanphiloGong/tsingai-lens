@@ -169,7 +169,7 @@
     "feedback": [
       "feedback_strength"
     ],
-    "goal_messages": [
+    "chat_messages": [
       "message_user",
       "message_assistant"
     ],
@@ -212,8 +212,8 @@
     "evaluation_runs": 1,
     "experiment_plans": 1,
     "feedback": 1,
-    "goal_messages": 2,
-    "goal_sessions": 1,
+    "chat_messages": 2,
+    "chat_sessions": 1,
     "import_manifests": 1,
     "objective_analyses": 1,
     "objective_evidence": 1,

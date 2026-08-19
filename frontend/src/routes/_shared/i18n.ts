@@ -198,123 +198,71 @@ const translations: Record<Language, Translations> = {
 				backToWorkspace: 'Back to workspace'
 			}
 		},
-		goalCopilot: {
-			eyebrow: 'Collection Copilot',
-			title: 'AI Research Copilot',
-			beta: 'Beta',
-			subtitle:
-				'Ask questions against the bound collection first. Hybrid mode falls back to general background only when collection evidence is missing.',
-			sidebarLabel: 'AI research assistant sessions',
-			contextLabel: 'Goal session context',
-			chatLabel: 'Goal copilot conversation',
-			chatTitle: 'Collection-bound conversation',
-			collection: 'Knowledge base',
-			goal: 'Goal',
-			goalPlaceholder: 'Compare LPBF process effects on strength and elongation...',
-			focusedMaterial: 'Focused material',
-			focusedMaterialPlaceholder: 'Optional material id or name',
-			focusedPaper: 'Focused paper',
-			focusedPaperPlaceholder: 'Optional paper or document id',
-			mode: 'Answer mode',
-			modes: {
-				grounded: 'Grounded',
-				hybrid: 'Hybrid',
-				general: 'General'
-			},
-			saveContext: 'Save context',
-			saving: 'Saving...',
-			contextSaved: 'Context saved',
+		researchAgent: {
+			title: 'Research Agent',
+			sidebarLabel: 'Research Agent sessions',
+			chatLabel: 'Collection Research Agent conversation',
 			newSession: 'New session',
-			newSessionReady: 'New session ready',
 			historyTitle: 'Conversation history',
 			emptyHistory: 'No conversations yet',
 			untitledSession: 'New conversation',
-			knowledgeCardLabel: 'Open current knowledge base',
-			currentKnowledge: 'Current knowledge base',
-			commandsTitle: 'Commands',
-			sessionMeta: '{mode} · {id}',
+			currentCollection: 'Current collection',
 			openWorkspace: 'Open workspace',
-			loading: 'Loading copilot...',
-			headerPrefix: 'Answering questions from the current collection: ',
-			more: 'More',
-			emptyTitle: 'Ask this collection directly',
-			emptyBody: 'I will prioritize answers from the literature in the current collection.',
-			userRole: 'You',
-			assistantRole: 'Lens',
-			evidenceLabel: 'Evidence used',
-			sourceLinks: {
-				label: 'Answer sources',
-				document: 'Paper {number}',
-				evidence: 'Source {number}'
-			},
+			loading: 'Loading conversation...',
+			headerPrefix: 'Collection',
+			objectiveScope: 'Open selected objective',
+			emptyTitle: 'Start with a research question',
+			emptyBody: 'Ask a question or request a collection-backed research action.',
 			messageLabel: 'Message',
-			messagePlaceholder:
-				'Ask the current collection, for example: compare LPBF process effects on strength and elongation',
-			inputHint: 'AI can generate inaccurate information. Check important content.',
+			messagePlaceholder: 'Ask about this literature collection',
 			send: 'Send',
 			sending: 'Sending...',
 			suggestions: {
-				summary: 'Summarize the main conclusions of this literature set',
-				lpbf: 'Compare LPBF process effects on strength and elongation',
-				elongation: 'Which papers mention elongation?',
-				samples: 'What comparable samples are in these papers?'
+				overview: 'What does this collection contain?',
+				findings: 'What published findings are available?',
+				objectives: 'Suggest focused research objectives from these papers',
+				greeting: 'Hello, what can you help me do?'
 			},
-			actions: {
-				copy: 'Copy answer'
+			capability: {
+				activity: 'Research activity',
+				requested: 'Requested {name}',
+				succeeded: '{name} completed',
+				queued: '{name} started',
+				failed: '{name} failed',
+				collection: 'Collection context',
+				findings: 'Published findings',
+				proposals: 'Objective drafts',
+				createObjective: 'Create objective candidate',
+				unknown: 'Research capability',
+				paperCount: '{papers} papers · {objectives} objectives',
+				findingCount: '{findings} findings · {evidence} evidence records',
+				absence: 'No published findings or evidence were returned.',
+				draftCount: '{count} objective drafts',
+				objectiveCreated: 'Objective candidate created',
+				queuedDescription: 'Task queued. You can continue while it runs.',
+				details: 'Structured result',
+				draftSupport: 'Proposal context: {status}'
 			},
-			experimentPlan: {
-				save: 'Save plan',
-				saving: 'Saving...',
-				saved: 'Saved',
-				open: 'Open plan',
-				defaultTitle: 'Experiment plan draft',
-				reviewRequired: 'Save is disabled until this objective has expert-reviewed Findings.',
-				sourceStale:
-					'The reviewed Finding or Evidence used by this answer has changed. Generate a new answer before saving a plan.',
-				evidenceRequired:
-					'Save is disabled until the answer cites the exact reviewed evidence used for the plan.',
-				sourceTraceRequired:
-					'This answer is limited because Lens could not verify a visible source citation. Review the findings and evidence before using it for a protocol.',
-				protocolContractInvalid:
-					'This draft failed the source/design contract and cannot be saved. Review the Findings and regenerate it.',
-				sourceCitationRequired:
-					'Save is disabled until the answer names the visible source label, such as [Source 1].',
-				sourceLinkRequired:
-					'Save is disabled until every reviewed evidence citation has a visible source link.',
-				evidenceLinkMismatch:
-					'Save is disabled until source links match the reviewed evidence citations.',
-				protocolStructureRequired:
-					'Save is disabled until the answer includes a hypothesis, variable matrix, measurements, controls, and risks or limits.'
+			warnings: 'Warnings',
+			resources: 'Referenced records',
+			resource: {
+				collection: 'Open collection',
+				objective: 'Open research objective',
+				finding: 'Open finding',
+				evidence: 'Open evidence',
+				analysis: 'Open analysis',
+				other: 'Open referenced record'
 			},
-			experimentReadiness: {
-				title: 'Experiment readiness',
-				loading: 'Checking reviewed findings for this objective...',
-				noObjective: 'Select a confirmed objective before saving protocol drafts.',
-				ready:
-					'{training} training-ready finding(s) and {messages} message-ready sample(s) are available for traceable protocol drafts.',
-				protocolInputsPending:
-					'{training} training-ready finding(s) and {messages} message-ready sample(s) exist, but {protocol} protocol-ready input(s) are available. Review variables, outcomes, direction or scope, and evidence before drafting a protocol.',
-				messagesPending:
-					'{training} training-ready finding(s) exist, but only {messages} training message sample(s) are exportable. Check dataset export quality before drafting a protocol.',
-				needsReview:
-					'{review} finding(s) still need expert review before protocol drafts can be saved.',
-				needsReviewAction:
-					'{review} finding(s) still need expert review before protocol drafts can be saved. Next: {action}.',
-				empty: 'No protocol-ready findings are available for this objective yet.',
-				error: 'Readiness is unavailable: {message}',
-				openObjective: 'Open objective review',
-				reviewFindings: 'Review findings first',
-				checkObjectiveReadiness: 'Check objective readiness',
-				draftProtocol: 'Draft protocol',
-				protocolPrompt:
-					'Draft a traceable next-step experiment protocol from the protocol-ready findings for this objective. Include these exact sections: Hypothesis, Variable matrix, Measurements, Controls, and Risks or limits. Cite every evidence-backed recommendation with the visible source labels.'
+			approval: {
+				title: 'Approval required',
+				body: 'Review the exact candidate that will be created.',
+				arguments: 'Proposed values',
+				approve: 'Approve and create',
+				reject: 'Reject',
+				processing: 'Recording decision...'
 			},
-			sourceMode: {
-				collection_grounded: 'Collection evidence',
-				collection_limited: 'Limited collection evidence',
-				general_fallback: 'General fallback',
-				general_only: 'General background'
-			}
+			rejected: 'The proposed write was rejected. No research objective was created.',
+			turnFailed: 'The Agent turn stopped with error: {code}'
 		},
 		research: {
 			emptyValue: '--',
@@ -2506,117 +2454,71 @@ const translations: Record<Language, Translations> = {
 				backToWorkspace: '返回工作区'
 			}
 		},
-		goalCopilot: {
-			eyebrow: '集合助手',
-			title: 'AI 研究助手',
-			beta: 'Beta',
-			subtitle:
-				'优先基于当前绑定的 collection 回答；Hybrid 模式只有在知识库缺少证据时才回退到通用背景。',
-			sidebarLabel: 'AI 研究助手会话',
-			contextLabel: 'Goal session 上下文',
-			chatLabel: 'Goal copilot 对话',
-			chatTitle: '绑定知识库的对话',
-			collection: '知识库',
-			goal: '目标',
-			goalPlaceholder: '比较 LPBF 工艺对强度和延伸率的影响...',
-			focusedMaterial: '关注材料',
-			focusedMaterialPlaceholder: '可选材料 ID 或名称',
-			focusedPaper: '关注文献',
-			focusedPaperPlaceholder: '可选 paper 或 document ID',
-			mode: '回答模式',
-			modes: {
-				grounded: '仅知识库',
-				hybrid: '知识库优先',
-				general: '通用背景'
-			},
-			saveContext: '保存上下文',
-			saving: '保存中...',
-			contextSaved: '上下文已保存',
+		researchAgent: {
+			title: '研究 Agent',
+			sidebarLabel: '研究 Agent 会话',
+			chatLabel: '集合研究 Agent 对话',
 			newSession: '新建会话',
-			newSessionReady: '新会话已就绪',
 			historyTitle: '历史会话',
 			emptyHistory: '暂无历史会话',
 			untitledSession: '新建会话',
-			knowledgeCardLabel: '打开当前知识库',
-			currentKnowledge: '当前知识库',
-			commandsTitle: '命令',
-			sessionMeta: '{mode} · {id}',
+			currentCollection: '当前集合',
 			openWorkspace: '打开工作区',
-			loading: '正在加载助手...',
-			headerPrefix: '正在基于当前 collection 回答问题：',
-			more: '更多',
-			emptyTitle: '直接询问这个 collection',
-			emptyBody: '我会优先基于当前 collection 的文献内容回答。',
-			userRole: '你',
-			assistantRole: 'Lens',
-			evidenceLabel: '使用的证据',
-			sourceLinks: {
-				label: '回答来源',
-				document: '文献 {number}',
-				evidence: '来源 {number}'
-			},
+			loading: '正在加载会话...',
+			headerPrefix: '文献集合',
+			objectiveScope: '打开当前研究目标',
+			emptyTitle: '从一个研究问题开始',
+			emptyBody: '可以直接提问，也可以要求 Agent 基于当前集合执行研究操作。',
 			messageLabel: '消息',
-			messagePlaceholder: '向当前 collection 提问，例如：比较 LPBF 工艺对强度和延伸率的影响',
-			inputHint: 'AI 可能会生成不准确的信息，请核查重要内容。',
+			messagePlaceholder: '询问当前文献集合',
 			send: '发送',
 			sending: '发送中...',
 			suggestions: {
-				summary: '总结这批文献的主要结论',
-				lpbf: '比较 LPBF 工艺对强度和延伸率的影响',
-				elongation: '哪些文献提到了延伸率？',
-				samples: '这些论文里有哪些可比样品？'
+				overview: '这个集合里包含什么？',
+				findings: '目前有哪些已发布的研究发现？',
+				objectives: '根据这些论文提出聚焦的研究目标',
+				greeting: '你好，你可以帮助我做什么？'
 			},
-			actions: {
-				copy: '复制回答'
+			capability: {
+				activity: '研究活动',
+				requested: '请求执行{name}',
+				succeeded: '{name}已完成',
+				queued: '{name}已启动',
+				failed: '{name}执行失败',
+				collection: '集合上下文',
+				findings: '已发布研究发现',
+				proposals: '研究目标草稿',
+				createObjective: '创建研究目标候选',
+				unknown: '研究能力',
+				paperCount: '{papers} 篇论文 · {objectives} 个研究目标',
+				findingCount: '{findings} 条发现 · {evidence} 条证据',
+				absence: '没有返回已发布的研究发现或证据。',
+				draftCount: '{count} 个研究目标草稿',
+				objectiveCreated: '研究目标候选已创建',
+				queuedDescription: '任务已进入队列，运行期间你可以继续其他工作。',
+				details: '结构化结果',
+				draftSupport: '提议上下文：{status}'
 			},
-			experimentPlan: {
-				save: '保存方案',
-				saving: '保存中...',
-				saved: '已保存',
-				open: '打开方案',
-				defaultTitle: '实验方案草稿',
-				reviewRequired: '该研究目标还没有专家复核后的可生成方案 Findings，暂不能保存为实验方案。',
-				sourceStale: '该回答使用的已复核 Finding 或 Evidence 已变化，请重新生成回答后再保存方案。',
-				evidenceRequired: '该回答还没有引用用于方案的已复核证据，暂不能保存为实验方案。',
-				sourceTraceRequired:
-					'该回答因缺少可验证的可见来源引用而受限。请先检查 Findings 和证据，再用于实验方案。',
-				protocolContractInvalid:
-					'该草稿未通过来源事实与拟议设计边界校验，不能保存。请检查可生成方案的 Findings 后重新生成。',
-				sourceCitationRequired:
-					'该回答还没有写出可见来源标签，例如 [Source 1]，暂不能保存为实验方案。',
-				sourceLinkRequired: '每条已复核证据引用都需要可见来源链接，暂不能保存为实验方案。',
-				evidenceLinkMismatch: '来源链接和已复核证据引用不一致，暂不能保存为实验方案。',
-				protocolStructureRequired:
-					'回答需要包含假设、变量矩阵、测试指标、对照和风险/限制后，才能保存为实验方案。'
+			warnings: '警告',
+			resources: '引用记录',
+			resource: {
+				collection: '打开集合',
+				objective: '打开研究目标',
+				finding: '打开研究发现',
+				evidence: '打开证据',
+				analysis: '打开分析',
+				other: '打开引用记录'
 			},
-			experimentReadiness: {
-				title: '实验方案就绪度',
-				loading: '正在检查该目标下已复核的 Findings...',
-				noObjective: '请选择一个已确认研究目标后，再保存实验方案草稿。',
-				ready:
-					'当前有 {training} 条可训练 Finding，{messages} 条可导出 messages，可用于带证据的实验方案草稿。',
-				protocolInputsPending:
-					'当前有 {training} 条可训练 Finding、{messages} 条可导出 messages，但只有 {protocol} 条具备实验方案输入。生成方案前需要检查变量、结果、方向或范围以及证据。',
-				messagesPending:
-					'当前有 {training} 条可训练 Finding，但只有 {messages} 条训练 messages 可导出。生成实验方案前需要检查数据集导出质量。',
-				needsReview: '还有 {review} 条 Finding 需要专家复核后，才能保存实验方案草稿。',
-				needsReviewAction:
-					'还有 {review} 条 Finding 需要专家复核后，才能保存实验方案草稿。下一步：{action}。',
-				empty: '该目标还没有可用于实验方案的 protocol-ready Findings。',
-				error: '就绪度不可用：{message}',
-				openObjective: '打开目标复核',
-				reviewFindings: '先复核 Findings',
-				checkObjectiveReadiness: '检查目标就绪度',
-				draftProtocol: '生成实验方案',
-				protocolPrompt:
-					'请基于该研究目标下 protocol-ready Findings 生成一个可追溯的下一步实验方案，并包含这些固定小节：Hypothesis、Variable matrix、Measurements、Controls、Risks or limits。每个有证据支撑的建议都必须引用可见的 source label。'
+			approval: {
+				title: '需要确认',
+				body: '请核对即将创建的候选研究目标。',
+				arguments: '拟写入内容',
+				approve: '确认并创建',
+				reject: '拒绝',
+				processing: '正在记录决定...'
 			},
-			sourceMode: {
-				collection_grounded: '基于知识库证据',
-				collection_limited: '知识库证据不足',
-				general_fallback: '通用背景回退',
-				general_only: '通用背景'
-			}
+			rejected: '已拒绝写入，没有创建研究目标。',
+			turnFailed: 'Agent 本轮执行停止，错误：{code}'
 		},
 		research: {
 			emptyValue: '--',

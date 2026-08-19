@@ -1115,6 +1115,124 @@ def test_list_objectives_uses_only_the_active_ready_build_and_persisted_rank(
     assert repository.read_objective("col_source", "objective-z") is None
 
 
+def test_authored_candidate_is_idempotent_and_survives_collection_rebuild(
+    source_repositories,
+) -> None:
+    source_repository, builds = source_repositories
+    repository = _prepare_studies(
+        source_repository,
+        builds,
+        "build_authored_source",
+    )
+    candidate = ResearchObjective.from_mapping(
+        {
+            "collection_id": "col_source",
+            "question": (
+                "How does temperature affect strength under ambient conditions?"
+            ),
+            "material_scope": ["Alloy A"],
+            "variables": ["temperature"],
+            "outcomes": ["strength"],
+            "constraints": ["ambient conditions"],
+            "seed_document_ids": ["srcdoc_runtime"],
+            "confidence": 0.9,
+            "reason": "Supported by one PaperSkim relationship context.",
+            "origin": "chat_assisted",
+            "created_by_user_id": "user_source",
+            "created_by_tool_call_id": "call-authored-1",
+        }
+    )
+
+    created = repository.create_authored_candidate(
+        candidate,
+        created_by_user_id="user_source",
+        created_by_tool_call_id="call-authored-1",
+    )
+    retried = repository.create_authored_candidate(
+        candidate,
+        created_by_user_id="user_source",
+        created_by_tool_call_id="call-authored-1",
+    )
+
+    assert retried == created
+    assert created.confirmation_status == "candidate"
+    assert created.origin == "chat_assisted"
+    assert created.source_build_id == "build_authored_source"
+    assert created.created_by_user_id == "user_source"
+    assert created.created_by_tool_call_id == "call-authored-1"
+    assert created.source_relationship_ids == ()
+    assert created.rank == 2
+
+    _prepare_studies(source_repository, builds, "build_after_authored")
+
+    listed = repository.list_objectives("col_source")
+    restored = repository.read_objective("col_source", created.objective_id)
+    assert [item.objective_id for item in listed] == [
+        "objective-1",
+        created.objective_id,
+    ]
+    assert restored is not None
+    assert restored.source_build_id == "build_authored_source"
+    assert restored.rank == 2
+
+    confirmed = repository.confirm_objective("col_source", created.objective_id)
+    queued_objective, analysis = repository.queue_analysis(
+        "col_source",
+        created.objective_id,
+        pipeline_version="test.v1",
+        model_name="test-model",
+        prompt_versions={"finding": "v1"},
+    )
+    assert confirmed.confirmation_status == "confirmed"
+    assert queued_objective.active_analysis_version == 1
+    assert analysis.source_build_id == "build_authored_source"
+
+
+def test_authored_candidate_rejects_reusing_tool_call_for_other_arguments(
+    source_repositories,
+) -> None:
+    source_repository, builds = source_repositories
+    repository = _prepare_studies(source_repository, builds, "build_authored_collision")
+    first = ResearchObjective.from_mapping(
+        {
+            "collection_id": "col_source",
+            "question": "How does temperature affect strength?",
+            "variables": ["temperature"],
+            "outcomes": ["strength"],
+            "seed_document_ids": ["srcdoc_runtime"],
+            "confidence": 0.9,
+            "origin": "chat_assisted",
+            "created_by_user_id": "user_source",
+            "created_by_tool_call_id": "call-authored-collision",
+        }
+    )
+    second = ResearchObjective.from_mapping(
+        {
+            "collection_id": "col_source",
+            "question": "How does temperature affect hardness?",
+            "variables": ["temperature"],
+            "outcomes": ["hardness"],
+            "seed_document_ids": ["srcdoc_runtime"],
+            "confidence": 0.8,
+            "origin": "chat_assisted",
+            "created_by_user_id": "user_source",
+            "created_by_tool_call_id": "call-authored-collision",
+        }
+    )
+    repository.create_authored_candidate(
+        first,
+        created_by_user_id="user_source",
+        created_by_tool_call_id="call-authored-collision",
+    )
+
+    with pytest.raises(ValueError, match="different objective"):
+        repository.create_authored_candidate(
+            second,
+            created_by_user_id="user_source",
+            created_by_tool_call_id="call-authored-collision",
+        )
+
+
 def test_analysis_version_claim_progress_and_retry_are_explicit(source_repositories) -> None:
     source_repository, builds = source_repositories
     repository = _prepare_studies(source_repository, builds)

@@ -57,11 +57,14 @@ Objective result graph or intermediate traversal identities.
 identity. Cross-version or unknown references fail at the persistence/service
 boundary.
 
-`PostgresObjectiveWorkspaceRepository` owns Objective-focused assistant
-sessions, messages, and experiment plans in `objective_sessions`,
-`objective_messages`, and `objective_experiment_plans`. The class name reflects
-the user interaction surface; it is not an Objective analysis aggregate or a
-second research identity.
+`PostgresChatRepository` owns append-only Research Agent sessions, messages,
+tool calls, results, and exact approval decisions. It stores references to Core
+resources but is not an Objective analysis aggregate or a second research
+identity.
+
+`PostgresExperimentPlanRepository` owns Objective-scoped manual plans and
+retained historical message provenance in `objective_experiment_plans`. New
+plans do not derive authority from general Chat text.
 
 ## Other Aggregates
 

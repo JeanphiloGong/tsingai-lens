@@ -39,8 +39,8 @@ from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
 from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
-from tests.support.objective_workspace_repository import (
-    InMemoryObjectiveWorkspaceRepository,
+from tests.support.experiment_plan_repository import (
+    InMemoryExperimentPlanRepository,
 )
 
 try:
@@ -702,8 +702,6 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     from main import create_app
 
     monkeypatch.setattr("main.DATA_DIR", tmp_path)
-    monkeypatch.setattr("main.GoalSessionService", lambda **_kwargs: object())
-
     build_repository = MemoryBuildRepository()
     task_service = TaskService(build_repository)
     source_artifact_repository = MemorySourceArtifactRepository()
@@ -711,7 +709,7 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     objective_repository = MemoryObjectiveRepository()
     comparison_repository = MemoryComparisonRepository()
     finding_review_repository = InMemoryObjectiveReviewRepository()
-    objective_workspace_repository = InMemoryObjectiveWorkspaceRepository()
+    experiment_plan_repository = InMemoryExperimentPlanRepository()
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         output_dir = Path(kwargs["config"].output.base_dir)
@@ -730,8 +728,7 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
             objective_repository=objective_repository,
             comparison_repository=comparison_repository,
             finding_review_repository=finding_review_repository,
-            goal_session_repository=objective_workspace_repository,
-            experiment_plan_repository=objective_workspace_repository,
+            experiment_plan_repository=experiment_plan_repository,
         )
     ) as client:
         login_response = client.post(

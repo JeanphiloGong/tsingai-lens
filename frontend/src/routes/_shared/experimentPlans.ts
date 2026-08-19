@@ -1,5 +1,10 @@
 import { requestJson } from './api';
-import type { GoalSourceLink } from './goalSessions';
+
+export type ExperimentPlanSourceLink = {
+	kind: 'document' | 'evidence';
+	label: string;
+	href: string;
+};
 
 export type ExperimentPlanStatus = 'draft' | 'ready_for_review' | 'archived';
 
@@ -11,7 +16,7 @@ export type ExperimentPlan = {
 	content: string;
 	status: ExperimentPlanStatus;
 	source_message_id: string | null;
-	source_links: GoalSourceLink[];
+	source_links: ExperimentPlanSourceLink[];
 	metadata: Record<string, unknown>;
 	created_by: string | null;
 	created_at: string;
@@ -27,9 +32,6 @@ export type ExperimentPlanList = {
 type CreateExperimentPlanOptions = {
 	title: string;
 	content: string;
-	source_message_id?: string | null;
-	source_links?: GoalSourceLink[];
-	metadata?: Record<string, unknown>;
 };
 
 type UpdateExperimentPlanOptions = {
@@ -54,10 +56,7 @@ export async function createExperimentPlan(
 		method: 'POST',
 		body: JSON.stringify({
 			title: options.title,
-			content: options.content,
-			source_message_id: options.source_message_id ?? null,
-			source_links: options.source_links ?? [],
-			metadata: options.metadata ?? {}
+			content: options.content
 		})
 	})) as ExperimentPlan;
 }

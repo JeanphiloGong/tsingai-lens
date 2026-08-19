@@ -42,32 +42,24 @@ describe('experimentPlans api helper', () => {
 
 		const plan = await createExperimentPlan('col_1', 'obj_1', {
 			title: 'Preheating matrix',
-			content: 'Compare 25 C and 150 C builds.',
-			source_message_id: 'msg_1',
-			source_links: [
-				{
-					kind: 'evidence',
-					label: 'Source 1',
-					href: '/collections/col_1/documents/paper-a?evidence_id=ev_1'
-				}
-			],
-			metadata: { source: 'chat' }
+			content: 'Compare 25 C and 150 C builds.'
 		});
 		const [path, init] = fetchMock.mock.calls[0];
 
 		expect(path).toBe('/api/v1/collections/col_1/objectives/obj_1/experiment-plans');
 		expect(init.method).toBe('POST');
-		expect(JSON.parse(init.body as string)).toMatchObject({
+		expect(JSON.parse(init.body as string)).toEqual({
 			title: 'Preheating matrix',
-			source_message_id: 'msg_1',
-			metadata: { source: 'chat' }
+			content: 'Compare 25 C and 150 C builds.'
 		});
 		expect(plan.plan_id).toBe('exp_1');
 	});
 
 	it('lists and updates objective-scoped experiment plans', async () => {
 		fetchMock
-			.mockResolvedValueOnce(jsonResponse({ collection_id: 'col_1', objective_id: 'obj_1', items: [] }))
+			.mockResolvedValueOnce(
+				jsonResponse({ collection_id: 'col_1', objective_id: 'obj_1', items: [] })
+			)
 			.mockResolvedValueOnce(
 				jsonResponse({
 					plan_id: 'exp_1',

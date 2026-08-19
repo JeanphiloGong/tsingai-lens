@@ -2492,3 +2492,439 @@ def test_analysis_evidence_rejects_draft_without_resolvable_source():
             tables_by_document_id={},
             figures_by_document_id={},
         )
+
+
+def test_real_hip_multilevel_condition_table_reconstructs_experiment_conditions():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-hip-elongation",
+            "question": "How does cooling rate after HIP affect elongation?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["cooling rate after HIP"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-hip",
+            "source_kind": "table",
+            "source_ref": "table-hip-conditions",
+            "role": "process_or_treatment",
+            "extractable": True,
+            "column_roles": {
+                "Nomenclature": "sample_condition",
+                "Heat Treatment": "process_context",
+                "Temper": "process_context",
+            },
+            "confidence": 0.95,
+        }
+    )
+
+    records = source_extraction._objective_table_matrix_evidence_records(
+        route=route,
+        objective_context=objective,
+        source={
+            "source_kind": "table",
+            "source_ref": route.source_ref,
+            "caption_text": (
+                "Nominal HIP conditions. Heating/cooling rates are in C/min. "
+                "Up and down arrows refer to the nominal heating rates and "
+                "cooling rates, respectively."
+            ),
+            "column_headers": [
+                "Nomenclature",
+                "Heat Treatment",
+                "Heat Treatment",
+                "Heat Treatment",
+                "Heat Treatment",
+                "Heat Treatment",
+                "Temper",
+                "Temper",
+                "Temper",
+                "Temper",
+                "Temper",
+                "Temper",
+            ],
+            "table_matrix": [
+                [
+                    "Nomenclature",
+                    "Heat Treatment",
+                    "Heat Treatment",
+                    "Heat Treatment",
+                    "Heat Treatment",
+                    "Heat Treatment",
+                    "Temper",
+                    "Temper",
+                    "Temper",
+                    "Temper",
+                    "Temper",
+                    "Temper",
+                ],
+                [
+                    "HT",
+                    "Color",
+                    "up",
+                    "T (C)",
+                    "P (MPa)",
+                    "t (hr)",
+                    "down",
+                    "up",
+                    "T (C)",
+                    "P (MPa)",
+                    "t (hr)",
+                    "down",
+                ],
+                [
+                    "800 SC",
+                    "black",
+                    "12",
+                    "800",
+                    "200",
+                    "2",
+                    "12",
+                    "-",
+                    "-",
+                    "-",
+                    "-",
+                    "-",
+                ],
+                [
+                    "800 FC",
+                    "black",
+                    "12",
+                    "800",
+                    "200",
+                    "2",
+                    "100",
+                    "-",
+                    "-",
+                    "-",
+                    "-",
+                    "-",
+                ],
+                [
+                    "800 RQ",
+                    "black",
+                    "12",
+                    "800",
+                    "200",
+                    "2",
+                    "2000",
+                    "-",
+                    "-",
+                    "-",
+                    "-",
+                    "-",
+                ],
+            ],
+        },
+    )
+
+    conditions = tuple(
+        ExtractedEvidenceDraft.from_mapping(record)
+        for record in records
+        if record["evidence_role"] == "condition_context"
+    )
+    assert len(conditions) == 3
+    assert [
+        paper_experiment._objective_explicit_sample_identity(item)
+        for item in conditions
+    ] == [
+        "800 sc",
+        "800 fc",
+        "800 rq",
+    ]
+    process_by_label = {
+        paper_experiment._objective_explicit_sample_identity(item): {
+            attribute.name: (attribute.value, attribute.unit)
+            for attribute in item.scientific_context.process
+        }
+        for item in conditions
+    }
+    assert process_by_label["800 sc"] == {
+        "heating rate": ("12", "C/min"),
+        "heat treatment temperature": ("800", "C"),
+        "heat treatment pressure": ("200", "MPa"),
+        "heat treatment duration": ("2", "hr"),
+        "cooling rate": ("12", "C/min"),
+    }
+    assert process_by_label["800 rq"]["cooling rate"] == ("2000", "C/min")
+
+
+def test_real_hip_result_uses_condition_registry_when_model_omits_comparison():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-hip-elongation",
+            "question": "How does cooling rate after HIP affect elongation?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["cooling rate after HIP"],
+            "outcomes": ["elongation"],
+        }
+    )
+
+    def condition(
+        label: str,
+        cooling_rate: str,
+        row_index: int,
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": f"condition-{label.casefold().replace(' ', '-')}",
+                "objective_id": objective.objective_id,
+                "document_id": "paper-hip",
+                "source_kind": "table",
+                "source_ref": "table-hip-conditions",
+                "evidence_role": "condition_context",
+                "attribution_scope": "not_attributable",
+                "scientific_context": {
+                    "material": [{"name": "material", "value": "Ti-6Al-4V"}],
+                    "sample": [{"name": "condition", "value": label}],
+                    "process": [
+                        {"name": "heating rate", "value": "12", "unit": "C/min"},
+                        {
+                            "name": "heat treatment temperature",
+                            "value": "800",
+                            "unit": "C",
+                        },
+                        {
+                            "name": "heat treatment pressure",
+                            "value": "200",
+                            "unit": "MPa",
+                        },
+                        {"name": "heat treatment duration", "value": "2", "unit": "hr"},
+                        {
+                            "name": "cooling rate",
+                            "value": cooling_rate,
+                            "unit": "C/min",
+                        },
+                    ],
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-hip-conditions",
+                        "row_index": row_index,
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.95,
+            }
+        )
+
+    result_source = (
+        "The 800 SC condition had the highest strength compared to the 800 FC "
+        "and 800 RQ conditions, which had progressively lower strengths as a "
+        "result of the increased cooling rate. While the decrease in strength "
+        "was observed for the faster cooling rates, the elongation of the "
+        "800 C HIP treatments remained relatively unchanged."
+    )
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "result-hip-elongation",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-hip",
+            "source_kind": "text_window",
+            "source_ref": "results-800-cooling",
+            "evidence_role": "direct_result",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "elongation",
+                "direction": "no_change",
+                "result_text": (
+                    "the elongation of the 800 C HIP treatments remained "
+                    "relatively unchanged"
+                ),
+            },
+            "attribution_scope": "descriptive_only",
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "results-800-cooling",
+                    "source_excerpt": result_source,
+                }
+            ],
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        }
+    )
+
+    bound = paper_experiment._bind_objective_result_process_context(
+        (
+            condition("800 SC", "12", 3),
+            condition("800 FC", "100", 4),
+            condition("800 RQ", "2000", 5),
+            result,
+        )
+    )[-1]
+
+    assert bound.attribution_scope == "isolated_effect"
+    assert [item.to_record() for item in bound.changed_variables] == [
+        {
+            "name": "cooling rate",
+            "baseline_value": "12",
+            "target_value": "2000",
+            "unit": "C/min",
+        }
+    ]
+    assert bound.comparison is not None
+    assert bound.comparison.to_record() == {
+        "baseline_label": "800 SC",
+        "target_label": "800 RQ",
+        "axis_names": ["cooling rate"],
+        "comparable": True,
+        "incomparability_reasons": [],
+    }
+    assert {
+        item.name: (item.value, item.unit)
+        for item in bound.scientific_context.process
+    } == {
+        "heating rate": ("12", "C/min"),
+        "heat treatment temperature": ("800", "C"),
+        "heat treatment pressure": ("200", "MPa"),
+        "heat treatment duration": ("2", "hr"),
+    }
+    assert {ref["source_ref"] for ref in bound.source_refs} == {
+        "table-hip-conditions",
+        "results-800-cooling",
+    }
+
+
+def test_condition_registry_does_not_bind_a_conflicting_condition_label():
+    def condition(
+        label: str,
+        cooling_rate: str,
+        source_ref: str,
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": source_ref,
+                "objective_id": "obj-hip-elongation",
+                "document_id": "paper-hip",
+                "source_kind": "table",
+                "source_ref": source_ref,
+                "evidence_role": "condition_context",
+                "scientific_context": {
+                    "sample": [{"name": "condition", "value": label}],
+                    "process": [
+                        {
+                            "name": "cooling rate",
+                            "value": cooling_rate,
+                            "unit": "C/min",
+                        }
+                    ],
+                },
+                "source_refs": [{"source_kind": "table", "source_ref": source_ref}],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "result-conflicting-condition",
+            "objective_id": "obj-hip-elongation",
+            "document_id": "paper-hip",
+            "source_kind": "text_window",
+            "source_ref": "result-source",
+            "evidence_role": "direct_result",
+            "reported_result": {
+                "outcome": "elongation",
+                "direction": "no_change",
+                "result_text": "elongation remained unchanged",
+            },
+            "attribution_scope": "descriptive_only",
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "result-source",
+                    "source_excerpt": (
+                        "Elongation remained unchanged between 800 SC and 800 RQ."
+                    ),
+                }
+            ],
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        }
+    )
+
+    bound = paper_experiment._bind_objective_result_process_context(
+        (
+            condition("800 SC", "12", "condition-source-a"),
+            condition("800 SC", "20", "condition-source-b"),
+            condition("800 RQ", "2000", "condition-source-rq"),
+            result,
+        )
+    )[-1]
+
+    assert bound.comparison is None
+    assert bound.changed_variables == ()
+    assert bound.attribution_scope == "descriptive_only"
+
+
+def test_condition_registry_does_not_bind_labels_from_a_remote_claim():
+    def condition(label: str, cooling_rate: str) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": f"condition-{label}",
+                "objective_id": "obj-hip-elongation",
+                "document_id": "paper-hip",
+                "source_kind": "table",
+                "source_ref": "condition-table",
+                "evidence_role": "condition_context",
+                "scientific_context": {
+                    "sample": [{"name": "condition", "value": label}],
+                    "process": [
+                        {
+                            "name": "cooling rate",
+                            "value": cooling_rate,
+                            "unit": "C/min",
+                        }
+                    ],
+                },
+                "source_refs": [
+                    {"source_kind": "table", "source_ref": "condition-table"}
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    result_text = "Elongation remained unchanged in the specimens."
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "result-remote-labels",
+            "objective_id": "obj-hip-elongation",
+            "document_id": "paper-hip",
+            "source_kind": "text_window",
+            "source_ref": "long-results-source",
+            "evidence_role": "direct_result",
+            "reported_result": {
+                "outcome": "elongation",
+                "direction": "no_change",
+                "result_text": result_text,
+            },
+            "attribution_scope": "descriptive_only",
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "long-results-source",
+                    "source_excerpt": (
+                        "800 SC and 800 RQ differed in strength. "
+                        + "Unrelated discussion. " * 100
+                        + result_text
+                    ),
+                }
+            ],
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        }
+    )
+
+    bound = paper_experiment._bind_objective_result_process_context(
+        (condition("800 SC", "12"), condition("800 RQ", "2000"), result)
+    )[-1]
+
+    assert bound.comparison is None
+    assert bound.attribution_scope == "descriptive_only"

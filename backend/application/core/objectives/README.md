@@ -366,21 +366,25 @@ labels, changed variables, and scientific context independently against their
 owning Source. An unsupported result is discarded as abstention. A grounded
 result with unsupported variables or comparison fields survives as partial,
 descriptive Evidence instead of becoming a technical failure. After all routed
-Sources for the document have been inspected, the service may bind that result
-to process conditions from other Sources in the same document only when the
-result names explicit baseline and target samples and both sample identities
-resolve to unambiguous process contexts. A successful binding derives the
-changed-variable endpoints from those condition Sources and preserves the
-result and comparison labels from the result Source. Missing or conflicting
-sample bindings remain `descriptive_only`; no cross-document binding or semantic
-LLM repair is attempted.
+Sources for the document have been inspected, paper reconstruction may bind that
+result to process conditions from other Sources in the same document. A
+multi-level condition table is usable only when its repeated parent headers,
+leaf headers, caption-defined symbols and units, and row values jointly define
+exact labeled conditions. The backend does not derive process meaning from a
+label such as `800 SC` itself.
 
-When one grounded text Source explicitly reports an unchanged outcome for one
-uniquely identifiable named-condition series but the model omits its comparison,
-Source validation may recover the first and last exact group labels and the
-Source-local variable phrase. This recovery remains `association_only`; it does
-not infer numeric process values, isolate causation, or run when the condition
-series or variable phrase is ambiguous.
+Paper reconstruction registers those exact labels within one Objective and
+document, merges complementary condition context, and marks conflicting
+same-label definitions ambiguous. A grounded result with no model-authored
+comparison may use registered labels mentioned verbatim in its own Source. For
+an explicit unchanged series, the first and last mentioned conditions form a
+comparison only when both have complete process context and exactly one process
+factor differs. The backend derives that factor's endpoints and fixed context
+from the condition Sources, retains the result Source, and may then classify the
+Evidence as `isolated_effect`. Missing fields, multiple changed factors,
+ambiguous labels, or conflicting definitions remain associative or
+`descriptive_only`; no cross-document binding, label-format heuristic, or
+semantic LLM repair is attempted.
 
 Every related Source locator records a `supports` list naming the scientific
 field families owned by that Source, such as `reported_result`,

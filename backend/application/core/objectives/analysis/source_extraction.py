@@ -2109,7 +2109,10 @@ def _build_objective_route_source_payload(
             "source_ref": route.source_ref,
             "document_id": route.document_id,
             "page": getattr(table, "page", None),
-            "caption_text": getattr(table, "caption_text", None),
+            "caption_text": _objective_table_caption_text(
+                table=table,
+                blocks=blocks,
+            ),
             "heading_path": getattr(table, "heading_path", None),
             "column_headers": [
                 str(value) for value in getattr(table, "column_headers", ()) or ()
@@ -2164,6 +2167,50 @@ def _build_objective_route_source_payload(
             "text": text[:_OBJECTIVE_EVIDENCE_TEXT_CHARS],
         }
     return {}
+
+
+def _objective_table_caption_text(*, table: Any, blocks: list[Any]) -> str | None:
+    caption = str(getattr(table, "caption_text", "") or "").strip()
+    if not re.fullmatch(r"table\s+[A-Za-z0-9.\-]+", caption, flags=re.IGNORECASE):
+        return caption or None
+
+    caption_block_id = str(getattr(table, "caption_block_id", "") or "").strip()
+    if not caption_block_id:
+        return caption
+    caption_block = next(
+        (
+            block
+            for block in blocks
+            if str(getattr(block, "block_id", "") or "") == caption_block_id
+        ),
+        None,
+    )
+    if caption_block is None:
+        return caption
+
+    document_id = str(getattr(table, "document_id", "") or "")
+    caption_order = int(getattr(caption_block, "block_order", 0) or 0)
+    following = sorted(
+        (
+            block
+            for block in blocks
+            if str(getattr(block, "document_id", "") or "") == document_id
+            and int(getattr(block, "block_order", 0) or 0) > caption_order
+        ),
+        key=lambda block: int(getattr(block, "block_order", 0) or 0),
+    )
+    if not following:
+        return caption
+    description = following[0]
+    if (
+        int(getattr(description, "block_order", 0) or 0) != caption_order + 1
+        or str(getattr(description, "block_type", "") or "").casefold()
+        != "paragraph"
+        or getattr(description, "page", None) != getattr(table, "page", None)
+    ):
+        return caption
+    description_text = str(getattr(description, "text", "") or "").strip()
+    return f"{caption}. {description_text}" if description_text else caption
 
 
 def _route_text_block_id(
@@ -2236,6 +2283,13 @@ def _objective_table_matrix_evidence_records(
             data_rows=data_rows,
         )
     if route.role == "process_or_treatment":
+        multilevel_records = _objective_multilevel_process_table_records(
+            route=route,
+            source=source,
+            objective_context=objective_context,
+        )
+        if multilevel_records is not None:
+            return multilevel_records
         process_records = _objective_process_table_matrix_records(
             route=route,
             source=source,
@@ -2265,10 +2319,202 @@ def _objective_table_matrix_evidence_records(
     return ()
 
 
+def _objective_multilevel_process_table_records(
+    *,
+    route: EvidenceCandidate,
+    source: dict[str, Any],
+    objective_context: ResearchObjective | None,
+) -> tuple[dict[str, Any], ...] | None:
+    headers = tuple(str(value).strip() for value in source.get("column_headers", ()))
+    matrix = tuple(
+        tuple(str(cell).strip() for cell in row)
+        for row in source.get("table_matrix", ())
+        if isinstance(row, (list, tuple))
+    )
+    if not headers or len(matrix) < 3 or len(set(headers)) == len(headers):
+        return None
+
+    first_data_position = 1 if _objective_row_matches_headers(matrix[0], headers) else 0
+    if first_data_position >= len(matrix):
+        return None
+    leaf_headers = matrix[first_data_position]
+    columns = _objective_condition_table_columns(
+        route=route,
+        caption=str(source.get("caption_text") or ""),
+        parent_headers=headers,
+        leaf_headers=leaf_headers,
+    )
+    label_columns = [
+        index for index, column in columns.items() if column[0] == "condition"
+    ]
+    process_columns = {
+        index: column for index, column in columns.items() if column[0] == "process"
+    }
+    if len(label_columns) != 1 or not process_columns:
+        return None
+
+    label_index = label_columns[0]
+    records: list[dict[str, Any]] = []
+    for row_index, row in enumerate(
+        matrix[first_data_position + 1 :],
+        start=first_data_position + 1,
+    ):
+        label = str(row[label_index] if label_index < len(row) else "").strip()
+        if not label or label == "-":
+            continue
+        process = [
+            {"name": name, "value": value, "unit": unit}
+            for index, (_kind, name, unit) in process_columns.items()
+            if index < len(row)
+            and (value := str(row[index]).strip())
+            and value != "-"
+        ]
+        if not process:
+            continue
+        context = _objective_table_source_scope_attributes(
+            source=source,
+            objective_context=objective_context,
+        )
+        records.append(
+            {
+                "evidence_id": _objective_matrix_unit_id(
+                    route=route,
+                    row_index=row_index,
+                    column="scientific_context",
+                ),
+                "objective_id": route.objective_id,
+                "document_id": route.document_id,
+                "evidence_role": "condition_context",
+                "changed_variables": [],
+                "comparison": None,
+                "reported_result": None,
+                "attribution_scope": "not_attributable",
+                "scientific_context": {
+                    "material": [
+                        {"name": name, "value": value}
+                        for name, value in context["material"].items()
+                    ],
+                    "sample": [
+                        {"name": "condition", "value": label},
+                        *(
+                            {"name": name, "value": value}
+                            for name, value in context["sample"].items()
+                        ),
+                    ],
+                    "process": [
+                        *process,
+                        *(
+                            {"name": name, "value": value}
+                            for name, value in context["process"].items()
+                        ),
+                    ],
+                    "test": [],
+                },
+                "source_refs": _objective_route_source_refs(
+                    route=route,
+                    source=source,
+                    row_index=row_index,
+                    source_excerpt=" | ".join(
+                        f"{headers[index]} > {leaf_headers[index]}: {row[index]}"
+                        for index in range(
+                            min(len(headers), len(leaf_headers), len(row))
+                        )
+                        if str(row[index]).strip()
+                    ),
+                ),
+                "resolution_status": "resolved",
+                "confidence": route.confidence,
+            }
+        )
+    return tuple(records)
 
 
+def _objective_condition_table_columns(
+    *,
+    route: EvidenceCandidate,
+    caption: str,
+    parent_headers: tuple[str, ...],
+    leaf_headers: tuple[str, ...],
+) -> dict[int, tuple[str, str, str | None]]:
+    rate_unit = _objective_condition_rate_unit(caption)
+    columns: dict[int, tuple[str, str, str | None]] = {}
+    active_stage: str | None = None
+    for index, parent in enumerate(parent_headers):
+        if index >= len(leaf_headers):
+            continue
+        leaf = leaf_headers[index]
+        parent_key = _objective_column_key(parent)
+        leaf_key = _objective_column_key(leaf)
+        role = str(route.column_roles.get(parent) or "").casefold()
+        if (
+            "sample" in role
+            or "condition" in role
+            or parent_key in {"condition", "nomenclature", "sample", "specimen"}
+        ):
+            columns[index] = ("condition", "condition", None)
+            continue
+
+        property_name, unit = _split_property_unit(leaf)
+        parent_stage = property_matching.normalize_property_label(parent) or parent_key
+        if leaf_key in {"up", "heating_rate"} or leaf == "↑":
+            active_stage = parent_stage
+        stage = active_stage or parent_stage
+        is_heat_treatment = stage == "heat treatment"
+        if property_name == "T":
+            columns[index] = (
+                "process",
+                (
+                    "heat treatment temperature"
+                    if is_heat_treatment
+                    else f"{stage} temperature"
+                ),
+                _objective_condition_unit(unit),
+            )
+        elif property_name == "P":
+            columns[index] = (
+                "process",
+                "heat treatment pressure" if is_heat_treatment else f"{stage} pressure",
+                _objective_condition_unit(unit),
+            )
+        elif property_name == "t":
+            columns[index] = (
+                "process",
+                "heat treatment duration" if is_heat_treatment else f"{stage} duration",
+                _objective_condition_unit(unit),
+            )
+        elif (leaf_key in {"up", "heating_rate"} or leaf == "↑") and (
+            rate_unit is not None
+        ):
+            columns[index] = (
+                "process",
+                "heating rate" if is_heat_treatment else f"{stage} heating rate",
+                rate_unit,
+            )
+        elif (leaf_key in {"down", "cooling_rate"} or leaf == "↓") and (
+            rate_unit is not None
+        ):
+            columns[index] = (
+                "process",
+                "cooling rate" if is_heat_treatment else f"{stage} cooling rate",
+                rate_unit,
+            )
+    return columns
 
 
+def _objective_condition_rate_unit(caption: str) -> str | None:
+    if not re.search(r"heating\s*/?\s*cooling\s+rates?", caption, re.IGNORECASE):
+        return None
+    match = re.search(
+        r"(?:are\s+)?in\s+([°º]?[A-Za-z]+\s*/\s*(?:min|s|h|hr))",
+        caption,
+        re.IGNORECASE,
+    )
+    return _objective_condition_unit(match.group(1)) if match else None
+
+
+def _objective_condition_unit(value: str | None) -> str | None:
+    unit = re.sub(r"\s+", "", str(value or "")).replace("°", "").replace("º", "")
+    return unit or None
 
 
 def _objective_result_table_matrix_records(

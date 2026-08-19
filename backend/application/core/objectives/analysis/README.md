@@ -59,18 +59,27 @@ scientific responsibility.
 `source_validation.py` owns deterministic source-local acceptance, demotion,
 or abstention. It checks the reported result, comparison labels, changed
 variables, and scientific context independently and records which field
-families each Source supports. It does not call the model or bind information
-from another Source.
+families each Source supports. For a grounded text result whose comparison is
+still absent, it keeps the exact Source excerpt as transient reconstruction
+input. It does not identify experiment groups, call the model, or bind
+information from another Source.
 
 `paper_experiment.py` owns same-document reconstruction after Source inspection
-finishes. It may join process conditions from Methods to a result only when the
-baseline and target sample identities resolve unambiguously inside that paper.
-Missing or conflicting identities remain descriptive, and no cross-document
-binding is allowed. For same-table row comparisons, numeric results retain
-ordered increase/decrease semantics, while categorical results retain both raw
-endpoints and report only `changed` or `no_change`. A numeric/category mismatch
-or any incompatible material, sample, or test context remains explicitly
-non-comparable.
+finishes. Deterministic parsing may reconstruct an experiment condition from a
+multi-level Methods table only when the table's parent headers, leaf headers,
+caption-defined symbols, units, and row values jointly define it. The paper
+reconstruction then builds a registry keyed by exact condition label, merges
+complementary same-label context, and rejects conflicting definitions. A result
+may join registered conditions only when its own Source mentions those exact
+labels. An unchanged series becomes an isolated effect only when its first and
+last registered conditions have complete process context and differ by exactly
+one factor; incomplete, multi-factor, missing, or conflicting conditions remain
+associative or descriptive. No label spelling convention and no cross-document
+binding supplies scientific meaning. For same-table row comparisons, numeric
+results retain ordered increase/decrease semantics, while categorical results
+retain both raw endpoints and report only `changed` or `no_change`. A
+numeric/category mismatch or any incompatible material, sample, or test context
+remains explicitly non-comparable.
 
 `evidence_materialization.py` owns the trust boundary from transient paper
 facts to durable Evidence. It keeps the confirmed Objective's result details,

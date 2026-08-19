@@ -267,6 +267,74 @@ def test_research_objective_table_source_payload_includes_table_cells():
     ]
 
 
+def test_table_source_payload_recovers_adjacent_descriptive_caption():
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "obj-hip",
+            "document_id": "paper-hip",
+            "source_kind": "table",
+            "source_ref": "table-2",
+            "role": "process_or_treatment",
+            "extractable": True,
+        }
+    )
+    table = SimpleNamespace(
+        table_id="table-2",
+        document_id="paper-hip",
+        page=4,
+        caption_text="Table 2",
+        caption_block_id="caption-57",
+        heading_path="Methods",
+        column_headers=["Nomenclature", "Heat Treatment"],
+        table_matrix=[["Nomenclature", "Heat Treatment"], ["HT", "up"]],
+    )
+    blocks = [
+        SimpleNamespace(
+            block_id="caption-57",
+            document_id="paper-hip",
+            block_type="caption",
+            text="Table 2",
+            block_order=57,
+            page=4,
+            heading_path="Methods",
+        ),
+        SimpleNamespace(
+            block_id="caption-description-58",
+            document_id="paper-hip",
+            block_type="paragraph",
+            text=(
+                "Nominal HIP conditions. Heating/cooling rates are in C/min. "
+                "Up and down arrows refer to the nominal heating rates and "
+                "cooling rates, respectively."
+            ),
+            block_order=58,
+            page=4,
+            heading_path="Methods",
+        ),
+        SimpleNamespace(
+            block_id="unrelated-59",
+            document_id="paper-hip",
+            block_type="paragraph",
+            text="Unrelated methods prose must not become part of the caption.",
+            block_order=59,
+            page=4,
+            heading_path="Methods",
+        ),
+    ]
+
+    payload = source_extraction._build_objective_route_source_payload(
+        route=route,
+        blocks=blocks,
+        tables=[table],
+    )
+
+    assert payload["caption_text"] == (
+        "Table 2. Nominal HIP conditions. Heating/cooling rates are in C/min. "
+        "Up and down arrows refer to the nominal heating rates and cooling "
+        "rates, respectively."
+    )
+
+
 def test_research_objective_text_source_payload_uses_document_tree():
     route = EvidenceCandidate.from_mapping(
         {
@@ -1854,7 +1922,7 @@ def test_llm_objective_evidence_preserves_zero_extraction_confidence():
     assert records[0]["confidence"] == 0.0
 
 
-def test_source_validation_recovers_explicit_unchanged_named_condition_series():
+def test_source_validation_preserves_unchanged_result_for_paper_level_binding():
     objective = _research_objective(
         {
             "objective_id": "obj-hip-elongation",
@@ -1913,15 +1981,10 @@ def test_source_validation_recovers_explicit_unchanged_named_condition_series():
 
     assert len(records) == 1
     assert records[0]["changed_variables"] == []
-    assert records[0]["comparison"] == {
-        "baseline_label": "800 SC",
-        "target_label": "800 RQ",
-        "axis_names": ["cooling rate"],
-        "comparable": True,
-        "incomparability_reasons": [],
-    }
+    assert records[0]["comparison"] is None
     assert records[0]["reported_result"]["direction"] == "no_change"
-    assert records[0]["attribution_scope"] == "association_only"
+    assert records[0]["attribution_scope"] == "not_attributable"
+    assert "800 SC condition" in records[0]["source_refs"][0]["source_excerpt"]
     assert records[0]["confidence"] == 0.0
 
 

@@ -63,12 +63,21 @@ The UI keeps internal IDs out of presentation while retaining them for API
 identity and source navigation. Evidence displays the exact returned
 `source_excerpt` once, shows baseline/target/result fields structurally, uses
 document profile titles for paper labels, and links to the stable Source
-locator. Only papers with matched Evidence receive full source groups; papers
-without Evidence are reduced to one aggregate status line, and an entirely
-empty result uses one collection-level empty state. Jointly changed variables
-remain one Evidence row, direct rows identify support or contradiction and
-direction, empty context categories are omitted, and mechanisms link to their
-exact supporting Evidence.
+locator. Within each paper, Evidence is grouped by Source kind and stable
+`source_ref`; the UI reports Source and comparison counts separately, identifies
+a shared baseline across repeated comparisons, and collapses multi-comparison
+Sources by default without removing their row-level traceback. A shared-baseline
+matrix is shown only when the Source, comparison axes, baseline label, baseline
+result, outcome, unit, and comparability all agree. It shows the baseline once,
+then target condition, reported result, signed delta, direction, source link, and
+an on-demand excerpt per comparison; conflicting baselines remain separate
+Evidence records. On narrow screens, matrix rows become labeled vertical fields
+instead of relying on horizontal scrolling. Only papers with matched Evidence
+receive full source groups; papers without Evidence are reduced to one aggregate
+status line, and an entirely empty result uses one collection-level empty state.
+Jointly changed variables remain one Evidence row, direct rows identify support
+or contradiction and direction, empty context categories are omitted, and
+mechanisms link to their exact supporting Evidence.
 
 ## Product Boundary
 

@@ -315,6 +315,26 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
                     "left": "porosity",
                     "right": "relative density",
                 },
+                {
+                    "pair_id": "axis_pair_0003",
+                    "axis_type": "variable",
+                    "left": "build orientation",
+                    "right": "laser speed",
+                    "left_observations": [
+                        {
+                            "varied_factors": ["build orientation", "laser speed"],
+                            "process_context": ["laser powder bed fusion"],
+                            "sample_context": ["vertical and horizontal coupons"],
+                        }
+                    ],
+                    "right_observations": [
+                        {
+                            "varied_factors": ["build orientation", "laser speed"],
+                            "process_context": ["laser powder bed fusion"],
+                            "sample_context": ["vertical and horizontal coupons"],
+                        }
+                    ],
+                },
             ],
         }
     )
@@ -323,6 +343,9 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
     assert "pair classification" in user_prompt
     assert "`decisions` array" in user_prompt
     assert "every input pair" in user_prompt
+    assert "bounded PaperStudy observations" in user_prompt
+    assert "co-occurrence is not topic evidence" in user_prompt
+    assert "build orientation and laser speed" in user_prompt.casefold()
     assert "boolean `equivalent`" in user_prompt
     assert "SS316L and 316L stainless steel" in user_prompt
     assert "SS316 and 316L stainless steel are different grades" in user_prompt
@@ -1934,8 +1957,11 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
         }
     ]
     prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
-    assert "one focused researcher-facing intervention" in prompt
+    assert "one focused experimental intervention" in prompt
     assert "does not mean directly comparable" in prompt
+    assert "Shared material, shared measured outcome" in prompt
+    assert "Build orientation and laser power" in prompt
+    assert "different processing stages" in prompt
 
 
 def test_axis_canonicalization_repairs_ungrounded_and_overlapping_groups():

@@ -128,11 +128,16 @@ Objective analysis.
   Owns the bounded model judgment that classifies backend-proposed material,
   variable, and outcome label pairs at two distinct levels: exact equivalence
   and, for variables only, membership in one researcher-facing intervention
-  topic. Topic membership proposes a shared question only; it is not a
-  direct-comparability judgment. The module
-  keeps pair accounting, prompt, repair, budget, and calls together. It cannot
-  return canonical labels, groups, Objective questions, confidence, lineage,
-  or dispositions; those remain backend-owned.
+  topic. Variable pairs carry bounded process, sample, and joint-factor
+  observations from the PaperStudy records where each label occurred. Those
+  observations disambiguate the controlled quantity and processing stage;
+  co-occurrence or a shared outcome is not topic evidence. Topic membership
+  proposed in a multi-pair batch is confirmed once as a single-pair judgment;
+  an unconfirmed or failed topic relation is conservatively rejected. Topic
+  membership proposes a shared question only; it is not a direct-comparability
+  judgment. The module keeps pair accounting, prompt, repair, budget, and calls
+  together. It cannot return canonical labels, groups, Objective questions,
+  confidence, lineage, or dispositions; those remain backend-owned.
 - `objective_candidate_service.py`
   Owns collection-level Objective discovery from `PaperStudyRelationship`
   records. The backend proposes exact-equivalence candidates plus topic pairs
@@ -145,9 +150,11 @@ Objective analysis.
   normalized view is transient: persisted studies retain their
   extracted labels and exact Source lineage. Objective membership requires one
   coherent topic and a non-conflicting material scope, not identical complete
-  factor tuples. The Objective retains the union of every source relationship's
-  concrete factors and one focused outcome; processing-stage and joint-factor
-  differences therefore remain visible for later comparison. Common stainless steel grade
+  factor tuples. The Objective question retains only factors with an equivalent
+  or same-topic factor in another supporting paper. Paper-specific jointly
+  varied factors remain on their source `PaperStudyRelationship` for later
+  confounding and comparability decisions instead of widening the collection
+  question. Common stainless steel grade
   spellings and established Ti-6Al-4V forms have one deterministic material
   identity. A relationship
   with missing material scope may join a known-material group only when exactly
@@ -302,11 +309,17 @@ still fails, the whole collection keeps its source labels rather than applying a
 partial mapping. Only `equivalent=true` decisions form alias edges, and a label
 joins an alias group only when it has an explicit edge to every current member.
 `same_research_topic=true` may connect non-equivalent variables for candidate
-discovery, but it never renames them or asserts direct comparability. Outcomes
-must be exactly equivalent after accepted alias normalization.
-Every source relationship keeps its complete jointly varied factor tuple and one
-specific outcome; the Objective presents their union as the scope of the common
-question. Explicit material conflicts remain a hard boundary. Other study-context
+discovery, but it never renames them or asserts direct comparability. Each
+variable pair includes at most two bounded PaperStudy observations, each with
+the original joint-factor list and process/sample context. These snapshots are
+interpretive context, not proof that jointly varied factors belong to one
+intervention topic. A topic-only edge from a batch is used only after one
+single-pair confirmation; exact-equivalence decisions do not require this
+second judgment. Outcomes must be exactly equivalent after accepted alias
+normalization. Every source relationship keeps its complete jointly varied
+factor tuple and one specific outcome; the Objective presents only the focused
+factor topic shared across supporting papers. Explicit material conflicts
+remain a hard boundary. Other study-context
 differences are retained, not flattened, and are evaluated downstream when
 Evidence is compared. The backend turns each cross-paper topic group into one
 Objective. A

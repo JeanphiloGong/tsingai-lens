@@ -36,6 +36,10 @@ AxisPair = tuple[str, str, str]
 AxisTopicRelation = tuple[str, str, str]
 
 _AXIS_PAIR_BATCH_SIZE = 16
+_AXIS_OBSERVATION_LIMIT = 2
+_AXIS_OBSERVATION_FACTOR_LIMIT = 6
+_AXIS_OBSERVATION_CONTEXT_LIMIT = 2
+_AXIS_OBSERVATION_TEXT_CHARS = 120
 _MISSING_CONTEXT_VALUES = frozenset(
     {"", "missing", "not reported", "not specified", "unknown", "uncertain"}
 )
@@ -107,13 +111,12 @@ class ObjectiveCandidateService:
         )
 
         accepted_objectives: list[ResearchObjective] = []
-        require_cross_paper_support = len(
-            {skim.document_id for skim in paper_skims}
-        ) > 1
+        require_cross_paper_support = (
+            len({skim.document_id for skim in paper_skims}) > 1
+        )
         for group_number, group in enumerate(relationship_groups, start=1):
             relationship_ids = tuple(
-                str(record["relationship"]["relationship_id"])
-                for record in group
+                str(record["relationship"]["relationship_id"]) for record in group
             )
             objective, rejection_reason = self._objective_from_relationship_group(
                 collection_id,
@@ -132,6 +135,13 @@ class ObjectiveCandidateService:
                 objective = None
             if objective is not None:
                 accepted_objectives.append(objective)
+                focused_relationship_ids = set(objective.source_relationship_ids)
+                for relationship_id in relationship_ids:
+                    if relationship_id not in focused_relationship_ids:
+                        terminal_rejections[relationship_id] = (
+                            "Relationship supports a different local variable topic "
+                            "than the selected cross-paper objective focus."
+                        )
             else:
                 for relationship_id in relationship_ids:
                     terminal_rejections[relationship_id] = rejection_reason or (
@@ -152,9 +162,7 @@ class ObjectiveCandidateService:
             relationship_inventory=relationship_inventory,
         )
         research_objectives = tuple(
-            ResearchObjective.from_mapping(
-                {**objective.to_record(), "rank": rank}
-            )
+            ResearchObjective.from_mapping({**objective.to_record(), "rank": rank})
             for rank, objective in enumerate(research_objectives, start=1)
         )
         dispositions = self._study_dispositions(
@@ -280,12 +288,8 @@ class ObjectiveCandidateService:
                 for relationship_id in group
             )
 
-        anchored_groups = [
-            group for group in groups if has_known_material(group)
-        ]
-        unanchored_groups = [
-            group for group in groups if not has_known_material(group)
-        ]
+        anchored_groups = [group for group in groups if has_known_material(group)]
+        unanchored_groups = [group for group in groups if not has_known_material(group)]
         retained_unanchored: list[list[str]] = []
         for group in unanchored_groups:
             candidates = [
@@ -542,10 +546,19 @@ class ObjectiveCandidateService:
         relationship_inventory: RelationshipInventory,
         topic_relations: frozenset[AxisTopicRelation] = frozenset(),
     ) -> tuple[ResearchObjective | None, str | None]:
-        if not relationship_ids or not self._relationships_are_compatible(
+        relationship_ids, variables = self._focused_relationship_topic(
             relationship_ids,
             relationship_inventory=relationship_inventory,
             topic_relations=topic_relations,
+        )
+        if (
+            not relationship_ids
+            or not variables
+            or not self._relationships_are_compatible(
+                relationship_ids,
+                relationship_inventory=relationship_inventory,
+                topic_relations=topic_relations,
+            )
         ):
             return None, "Study relationships do not form one compatible objective."
         seed_document_ids = self._unique_text_values(
@@ -559,13 +572,6 @@ class ObjectiveCandidateService:
         relationships = tuple(
             relationship_inventory[relationship_id][2]
             for relationship_id in relationship_ids
-        )
-        variables = tuple(
-            self._unique_axis_values(
-                factor
-                for relationship in relationships
-                for factor in relationship.varied_factors
-            )
         )
         outcomes: list[str] = []
         outcome_keys: set[str] = set()
@@ -584,8 +590,10 @@ class ObjectiveCandidateService:
             ):
                 return (
                     None,
-                    f"Outcome '{source_outcome}' requires a specific measurable "
-                    "outcome before it can seed a research objective.",
+                    (
+                        f"Outcome '{source_outcome}' requires a specific measurable "
+                        "outcome before it can seed a research objective."
+                    ),
                 )
             self._append_unique_axis(
                 outcomes,
@@ -602,8 +610,10 @@ class ObjectiveCandidateService:
             not self._known_material_keys(study.material_scope) for study in studies
         )
         reason_parts = [
-            "Supported by one backend-validated research-topic group; direct "
-            "comparability remains a later evidence decision.",
+            (
+                "Supported by one backend-validated research-topic group; direct "
+                "comparability remains a later evidence decision."
+            ),
             (
                 "Confidence is the minimum available non-zero source confidence."
                 if confidence > 0
@@ -611,9 +621,7 @@ class ObjectiveCandidateService:
             ),
         ]
         if not material_scope:
-            reason_parts.append(
-                "No unambiguous shared material scope was available."
-            )
+            reason_parts.append("No unambiguous shared material scope was available.")
         elif material_scope_was_missing:
             reason_parts.append(
                 "Material scope was retained from the unambiguous non-conflicting "
@@ -642,7 +650,116 @@ class ObjectiveCandidateService:
         try:
             return ResearchObjective.from_mapping(objective_payload), None
         except (TypeError, ValueError) as exc:
-            return None, f"Study relationship group cannot form a valid objective: {exc}"
+            return (
+                None,
+                f"Study relationship group cannot form a valid objective: {exc}",
+            )
+
+    def _focused_relationship_topic(
+        self,
+        relationship_ids: tuple[str, ...],
+        *,
+        relationship_inventory: RelationshipInventory,
+        topic_relations: frozenset[AxisTopicRelation],
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        records = tuple(
+            relationship_inventory[relationship_id]
+            for relationship_id in relationship_ids
+        )
+        if len({document_id for document_id, _study, _relationship in records}) < 2:
+            return (
+                relationship_ids,
+                tuple(
+                    self._unique_axis_values(
+                        factor
+                        for _document_id, _study, relationship in records
+                        for factor in relationship.varied_factors
+                    )
+                ),
+            )
+
+        factors = self._unique_axis_values(
+            factor
+            for _document_id, _study, relationship in records
+            for factor in relationship.varied_factors
+        )
+        document_support = {
+            factor: len(
+                {
+                    document_id
+                    for document_id, _study, relationship in records
+                    if any(
+                        self._axis_values_are_equivalent(factor, candidate)
+                        for candidate in relationship.varied_factors
+                    )
+                }
+            )
+            for factor in factors
+        }
+        topic_groups: list[list[str]] = []
+        for factor in sorted(
+            factors,
+            key=lambda value: (
+                -document_support[value],
+                self._axis_record_key(value),
+            ),
+        ):
+            compatible_group = next(
+                (
+                    group
+                    for group in topic_groups
+                    if all(
+                        self._axis_values_share_topic(
+                            "variable",
+                            factor,
+                            other,
+                            topic_relations=topic_relations,
+                        )
+                        for other in group
+                    )
+                ),
+                None,
+            )
+            if compatible_group is None:
+                topic_groups.append([factor])
+            else:
+                compatible_group.append(factor)
+
+        candidates: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
+        for group in topic_groups:
+            supporting_relationship_ids = tuple(
+                relationship_id
+                for relationship_id in relationship_ids
+                if any(
+                    self._axis_values_are_equivalent(factor, group_factor)
+                    for factor in relationship_inventory[relationship_id][
+                        2
+                    ].varied_factors
+                    for group_factor in group
+                )
+            )
+            supporting_documents = {
+                relationship_inventory[relationship_id][0]
+                for relationship_id in supporting_relationship_ids
+            }
+            if len(supporting_documents) >= 2:
+                candidates.append((supporting_relationship_ids, tuple(group)))
+        if not candidates:
+            return (), ()
+        return min(
+            candidates,
+            key=lambda candidate: (
+                -len(
+                    {
+                        relationship_inventory[relationship_id][0]
+                        for relationship_id in candidate[0]
+                    }
+                ),
+                -len(candidate[0]),
+                len(candidate[1]),
+                tuple(self._axis_record_key(value) for value in candidate[1]),
+            ),
+        )
 
     @staticmethod
     def _objective_question(
@@ -671,9 +788,9 @@ class ObjectiveCandidateService:
     ) -> bool:
         ids = tuple(relationship_ids)
         for position, left_id in enumerate(ids):
-            _left_document_id, left_study, left_relationship = (
-                relationship_inventory[left_id]
-            )
+            _left_document_id, left_study, left_relationship = relationship_inventory[
+                left_id
+            ]
             for right_id in ids[position + 1 :]:
                 _right_document_id, right_study, right_relationship = (
                     relationship_inventory[right_id]
@@ -713,10 +830,7 @@ class ObjectiveCandidateService:
         studies: tuple[PaperStudy, ...],
         field_name: str,
     ) -> list[str]:
-        values_by_study = [
-            tuple(getattr(study, field_name))
-            for study in studies
-        ]
+        values_by_study = [tuple(getattr(study, field_name)) for study in studies]
         material_scope_was_missing = False
         if field_name == "material_scope":
             values_by_study = [
@@ -727,9 +841,7 @@ class ObjectiveCandidateService:
                 )
                 for values in values_by_study
             ]
-            material_scope_was_missing = any(
-                not values for values in values_by_study
-            )
+            material_scope_was_missing = any(not values for values in values_by_study)
             values_by_study = [values for values in values_by_study if values]
         if not values_by_study or (
             field_name != "material_scope"
@@ -750,10 +862,7 @@ class ObjectiveCandidateService:
             value
             for value in first
             if all(
-                any(
-                    values_match(value, candidate)
-                    for candidate in values
-                )
+                any(values_match(value, candidate) for candidate in values)
                 for values in remaining
             )
         )
@@ -823,8 +932,7 @@ class ObjectiveCandidateService:
             value
             for value in constraints
             if not any(
-                self._axis_values_are_equivalent(value, axis)
-                for axis in excluded
+                self._axis_values_are_equivalent(value, axis) for axis in excluded
             )
         )
 
@@ -864,12 +972,27 @@ class ObjectiveCandidateService:
         )
         if not axis_pairs:
             return dict(relationship_inventory), frozenset()
+        variable_observations = self._variable_axis_observations(
+            eligible_relationship_inventory
+        )
         pair_records = [
             {
                 "pair_id": pair_id,
                 "axis_type": axis_type,
                 "left": left,
                 "right": right,
+                **(
+                    {
+                        "left_observations": variable_observations.get(
+                            self._axis_record_key(left), []
+                        ),
+                        "right_observations": variable_observations.get(
+                            self._axis_record_key(right), []
+                        ),
+                    }
+                    if axis_type == "variable"
+                    else {}
+                ),
             }
             for pair_id, (axis_type, left, right) in axis_pairs.items()
         ]
@@ -884,13 +1007,11 @@ class ObjectiveCandidateService:
                         ],
                     }
                 )
-                decisions.extend(
-                    decision.model_dump() for decision in plan.decisions
-                )
+                decisions.extend(decision.model_dump() for decision in plan.decisions)
             canonicalization_plan = StructuredAxisCanonicalizationPlan(
                 decisions=decisions
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "Research relationship axis canonicalization failed; using source axes "
                 "collection_id=%s",
@@ -913,6 +1034,12 @@ class ObjectiveCandidateService:
                 collection_id,
             )
             return dict(relationship_inventory), frozenset()
+        canonicalization_plan = self._confirm_topic_only_relations(
+            collection_id=collection_id,
+            axis_equivalence_classifier=axis_equivalence_classifier,
+            canonicalization_plan=canonicalization_plan,
+            pair_records=pair_records,
+        )
         topic_relations = self._topic_relations_from_plan(
             canonicalization_plan,
             axis_pairs=axis_pairs,
@@ -954,6 +1081,56 @@ class ObjectiveCandidateService:
             ) in relationship_inventory.items()
         }
         return canonicalized_inventory, topic_relations
+
+    @classmethod
+    def _confirm_topic_only_relations(
+        cls,
+        *,
+        collection_id: str,
+        axis_equivalence_classifier: ResearchAxisEquivalenceClassifier,
+        canonicalization_plan: StructuredAxisCanonicalizationPlan,
+        pair_records: list[dict[str, Any]],
+    ) -> StructuredAxisCanonicalizationPlan:
+        records_by_id = {str(item["pair_id"]): item for item in pair_records}
+        decisions: list[dict[str, Any]] = []
+        for decision in canonicalization_plan.decisions:
+            pair_record = records_by_id[decision.pair_id]
+            if (
+                decision.equivalent
+                or not decision.same_research_topic
+                or cls._axis_values_are_equivalent(
+                    pair_record["left"], pair_record["right"]
+                )
+            ):
+                decisions.append(decision.model_dump())
+                continue
+            if pair_record["axis_type"] != "variable":
+                decisions.append(decision.model_dump())
+                continue
+            try:
+                confirmation = axis_equivalence_classifier.classify(
+                    {
+                        "collection_id": collection_id,
+                        "axis_pairs": [pair_record],
+                    }
+                ).decisions[0]
+                confirmed = confirmation.same_research_topic
+            except Exception:
+                logger.warning(
+                    "Research variable-topic confirmation failed; rejecting relation "
+                    "collection_id=%s pair_id=%s",
+                    collection_id,
+                    decision.pair_id,
+                    exc_info=True,
+                )
+                confirmed = False
+            decisions.append(
+                {
+                    **decision.model_dump(),
+                    "same_research_topic": confirmed,
+                }
+            )
+        return StructuredAxisCanonicalizationPlan(decisions=decisions)
 
     def _build_relationship_axis_candidates(
         self,
@@ -1020,6 +1197,67 @@ class ObjectiveCandidateService:
         return pairs
 
     @classmethod
+    def _variable_axis_observations(
+        cls,
+        relationship_inventory: RelationshipInventory,
+    ) -> dict[str, list[dict[str, list[str]]]]:
+        observations: dict[str, list[dict[str, list[str]]]] = {}
+        records = sorted(
+            relationship_inventory.values(),
+            key=lambda record: (
+                record[0],
+                record[1].study_id,
+                record[2].relationship_id,
+            ),
+        )
+        for _document_id, study, relationship in records:
+            for factor in relationship.varied_factors:
+                key = cls._axis_record_key(factor)
+                if not key:
+                    continue
+                factor_context = (
+                    factor,
+                    *(
+                        candidate
+                        for candidate in relationship.varied_factors
+                        if cls._axis_record_key(candidate) != key
+                    ),
+                )
+                observation = {
+                    "varied_factors": cls._bounded_axis_observation_values(
+                        factor_context,
+                        limit=_AXIS_OBSERVATION_FACTOR_LIMIT,
+                    ),
+                    "process_context": cls._bounded_axis_observation_values(
+                        study.process_context,
+                        limit=_AXIS_OBSERVATION_CONTEXT_LIMIT,
+                    ),
+                    "sample_context": cls._bounded_axis_observation_values(
+                        study.sample_context,
+                        limit=_AXIS_OBSERVATION_CONTEXT_LIMIT,
+                    ),
+                }
+                axis_observations = observations.setdefault(key, [])
+                if (
+                    observation not in axis_observations
+                    and len(axis_observations) < _AXIS_OBSERVATION_LIMIT
+                ):
+                    axis_observations.append(observation)
+        return observations
+
+    @staticmethod
+    def _bounded_axis_observation_values(
+        values: Iterable[str],
+        *,
+        limit: int,
+    ) -> list[str]:
+        return [
+            text[:_AXIS_OBSERVATION_TEXT_CHARS]
+            for value in values
+            if (text := " ".join(str(value).strip().split()))
+        ][:limit]
+
+    @classmethod
     def _axis_pair_might_be_equivalent(
         cls,
         axis_type: str,
@@ -1038,10 +1276,9 @@ class ObjectiveCandidateService:
             return bool(
                 cls._material_grade_keys(left) & cls._material_grade_keys(right)
             )
-        if (
-            property_matching.source_text_mentions_axis(left, right)
-            or property_matching.source_text_mentions_axis(right, left)
-        ):
+        if property_matching.source_text_mentions_axis(
+            left, right
+        ) or property_matching.source_text_mentions_axis(right, left):
             return True
         left_key = cls._axis_record_key(left)
         right_key = cls._axis_record_key(right)
@@ -1144,9 +1381,7 @@ class ObjectiveCandidateService:
         selected_edges = {
             (
                 axis_type,
-                frozenset(
-                    (cls._axis_record_key(left), cls._axis_record_key(right))
-                ),
+                frozenset((cls._axis_record_key(left), cls._axis_record_key(right))),
             )
             for decision in canonicalization_plan.decisions
             for axis_type, left, right in (axis_pairs[decision.pair_id],)
@@ -1166,9 +1401,7 @@ class ObjectiveCandidateService:
             for value in sorted(
                 values,
                 key=lambda item: (
-                    -label_counts.get(axis_type, {}).get(
-                        cls._axis_record_key(item), 0
-                    ),
+                    -label_counts.get(axis_type, {}).get(cls._axis_record_key(item), 0),
                     cls._axis_record_key(item),
                 ),
             ):

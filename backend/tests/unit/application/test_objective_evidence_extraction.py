@@ -3307,7 +3307,7 @@ def test_research_objective_service_uses_objective_scientific_intent_directly(
     }
 
 
-def test_research_objective_service_enriches_missing_source_backed_scope_context(
+def test_research_objective_service_enriches_only_source_linked_material_context(
 ):
     objective = _research_objective(
         {
@@ -3408,14 +3408,75 @@ def test_research_objective_service_enriches_missing_source_backed_scope_context
         "sample": [],
         "process": [
             {"name": "hatch space", "value": 0.1, "unit": "mm"},
-            {
-                "name": "process",
-                "value": "selective laser melting",
-                "unit": None,
-            }
         ],
         "test": [],
     }
+
+
+def test_research_objective_service_does_not_copy_another_study_context():
+    paper_skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "doc_role": "experimental",
+            "studies": [
+                {
+                    "study_id": "study-other-source",
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "material_scope": ["unrelated reference material"],
+                    "process_context": ["unrelated treatment"],
+                    "relationships": [
+                        {
+                            "relationship_id": "relationship-other-source",
+                            "varied_factors": ["heat treatment"],
+                            "outcome": "hardness",
+                            "source_refs": [
+                                {
+                                    "source_kind": "table",
+                                    "source_ref": "table-other",
+                                }
+                            ],
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "confidence": 0.9,
+                }
+            ],
+            "evidence_density": "high",
+            "confidence": 0.9,
+        }
+    )
+    evidence = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "density-result",
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-density",
+            "evidence_role": "direct_result",
+            "reported_result": {
+                "outcome": "relative density",
+                "value": 99.2,
+                "unit": "%",
+                "direction": "unknown",
+                "result_text": "Relative density was 99.2%.",
+            },
+            "attribution_scope": "descriptive_only",
+            "source_refs": [
+                {"source_kind": "table", "source_ref": "table-density"}
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+    enriched = paper_experiment._enrich_objective_scope_context(
+        (evidence,),
+        paper_skims=(paper_skim,),
+    )[0]
+
+    assert enriched.scientific_context.material == ()
+    assert enriched.scientific_context.process == ()
 
 
 def test_research_objective_service_does_not_invent_material_without_document_skim(
@@ -3759,6 +3820,211 @@ def test_real_p001_density_table_retains_complete_changed_factor_tuple():
         "scan strategy",
         "scanning speed",
         "energy density",
+    }
+
+
+def test_real_ti64_hip_condition_table_builds_comparable_uts_contrast():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-ti64-hip-uts",
+            "question": (
+                "How do HIP cooling rate, HIP temperature, HIP treatment, "
+                "cooling rate, and post-processing condition affect ultimate "
+                "tensile strength?"
+            ),
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": [
+                "HIP cooling rate",
+                "HIP temperature",
+                "HIP treatment",
+                "cooling rate",
+                "post-processing condition",
+            ],
+            "outcomes": ["ultimate tensile strength"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-ti64-hip",
+            "source_kind": "table",
+            "source_ref": "table-8",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Condition": "sample condition",
+                "UTS (MPa)": "result_property",
+            },
+            "confidence": 0.95,
+        }
+    )
+    measurements = tuple(
+        ExtractedEvidenceDraft.from_mapping(record)
+        for record in source_extraction._objective_table_matrix_evidence_records(
+            route=route,
+            objective_context=objective,
+            source={
+                "source_kind": "table",
+                "source_ref": "table-8",
+                "caption_text": (
+                    "Table 8 Summary of tensile properties for the vertical "
+                    "tensile specimen direction. UTS = ultimate tensile strength."
+                ),
+                "heading_path": (
+                    "Microstructure and mechanical properties of laser powder bed "
+                    "fusion Ti-6Al-4V after HIP treatments"
+                ),
+                "column_headers": ["Condition", "UTS (MPa)"],
+                "table_matrix": [
+                    ["Condition", "UTS (MPa)"],
+                    ["AB", "1294.20 +/- 6.69"],
+                    ["800 SC", "1082.43 +/- 1.19"],
+                ],
+            },
+        )
+    )
+
+    comparisons = paper_experiment._build_objective_pairwise_comparison_units(
+        measurements,
+        objectives=(objective,),
+    )
+
+    assert len(comparisons) == 1
+    comparison = comparisons[0]
+    assert [item.name for item in comparison.changed_variables] == [
+        "post-processing condition"
+    ]
+    assert comparison.changed_variables[0].baseline_value == "AB"
+    assert comparison.changed_variables[0].target_value == "800 SC"
+    assert comparison.comparison is not None
+    assert comparison.comparison.comparable
+    assert comparison.reported_result is not None
+    assert comparison.reported_result.baseline_value == 1294.2
+    assert comparison.reported_result.target_value == 1082.43
+    assert comparison.reported_result.direction == "decrease"
+    assert comparison.attribution_scope == "isolated_effect"
+    assert comparison.scientific_context.to_record() == {
+        "material": [
+            {"name": "material", "value": "Ti-6Al-4V", "unit": None}
+        ],
+        "sample": [
+            {"name": "build orientation", "value": "vertical", "unit": None}
+        ],
+        "process": [
+            {
+                "name": "manufacturing process",
+                "value": "laser powder bed fusion",
+                "unit": None,
+            }
+        ],
+        "test": [],
+    }
+
+
+def test_real_ti64_compound_sample_labels_preserve_orientation_for_hip_contrasts():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-ti64-post-processing-uts",
+            "question": (
+                "How does post-processing condition affect ultimate tensile "
+                "strength in Ti-6Al-4V?"
+            ),
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["post-processing condition"],
+            "outcomes": ["ultimate tensile strength"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-ti64-post-processing",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "column_roles": {
+                "Alloy": "material or sample label",
+                "UTS (MPa)": "result_property",
+            },
+            "confidence": 0.95,
+        }
+    )
+    measurements = tuple(
+        ExtractedEvidenceDraft.from_mapping(record)
+        for record in source_extraction._objective_table_matrix_evidence_records(
+            route=route,
+            objective_context=objective,
+            source={
+                "source_kind": "table",
+                "source_ref": "table-1",
+                "page": 9,
+                "caption_text": (
+                    "Table 1. Comparison of the tensile properties of SLM "
+                    "Ti-6Al-4V produced in this study built in the as-fabricated "
+                    "(AF) and post-processed with HIP and polishing (PL) in two "
+                    "orientations of vertical (V) and horizontal (H) with wrought "
+                    "Ti-6Al-4V, wrought and annealed Ti-6Al-4V, and the ISO standard "
+                    "available in the literature."
+                ),
+                "column_headers": ["Alloy", "UTS (MPa)"],
+                "table_matrix": [
+                    ["Alloy", "UTS (MPa)"],
+                    ["AF-V", "1006.7 6.3"],
+                    ["AF-H", "961.3 50.2"],
+                    ["HIP-PL-V", "936 3.6"],
+                    ["HIP-PL-H", "937.9 43.3"],
+                    ["Wrought Ti-6Al-4V [24]", "1008"],
+                    ["Wrought and annealed Ti-6Al-4V [25]", "870 10"],
+                    ["Standard ISO 5832-3 for implants for surgery [25]", "> 860"],
+                ],
+            },
+        )
+    )
+
+    comparisons = paper_experiment._build_objective_pairwise_comparison_units(
+        measurements,
+        objectives=(objective,),
+    )
+    comparable = tuple(
+        item
+        for item in comparisons
+        if item.comparison is not None and item.comparison.comparable
+    )
+
+    assert len(measurements) == 4
+    assert len(comparable) == 2
+    assert {
+        (
+            item.changed_variables[0].baseline_value,
+            item.changed_variables[0].target_value,
+            item.comparison.baseline_label,
+            item.comparison.target_label,
+        )
+        for item in comparable
+    } == {
+        ("as-fabricated", "HIP + polishing", "vertical", "vertical"),
+        ("as-fabricated", "HIP + polishing", "horizontal", "horizontal"),
+    }
+    assert all(
+        [item.name for item in comparison.changed_variables]
+        == ["post-processing condition"]
+        for comparison in comparable
+    )
+    assert all(
+        comparison.reported_result is not None
+        and comparison.reported_result.direction == "decrease"
+        for comparison in comparable
+    )
+    assert {
+        (
+            item.scientific_context.material[0].value,
+            item.scientific_context.sample[0].value,
+            item.scientific_context.process[0].value,
+        )
+        for item in comparable
+    } == {
+        ("Ti-6Al-4V", "vertical", "laser powder bed fusion"),
+        ("Ti-6Al-4V", "horizontal", "laser powder bed fusion"),
     }
 
 

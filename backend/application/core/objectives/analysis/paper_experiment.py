@@ -59,48 +59,15 @@ def _enrich_objective_scope_context(
         paper_skim = skim_by_document_id.get(unit.document_id)
         context = unit.scientific_context.to_record()
         if not context["material"]:
-            material_values = _paper_skim_study_values(
+            material_values = _paper_skim_source_values(
                 paper_skim,
-                "material_scope",
+                unit=unit,
+                field_name="material_scope",
             )
             context["material"] = [
                 {"name": "material", "value": value, "unit": None}
                 for value in material_values
             ]
-        process_values = _paper_skim_study_values(
-            paper_skim,
-            "process_context",
-        )
-        if process_values:
-            process_identity_names = {
-                "fabrication process",
-                "manufacturing process",
-                "process",
-                "processing method",
-                "production process",
-            }
-            has_process_identity = any(
-                " ".join(
-                    str(item.get("name") or "")
-                    .casefold()
-                    .replace("_", " ")
-                    .split()
-                )
-                in process_identity_names
-                for item in context["process"]
-            )
-            if not has_process_identity:
-                context["process"] = [
-                    *context["process"],
-                    *(
-                        {
-                            "name": "process",
-                            "value": value,
-                            "unit": None,
-                        }
-                        for value in process_values
-                    ),
-                ]
         if context == unit.scientific_context.to_record():
             enriched.append(unit)
             continue
@@ -827,6 +794,9 @@ def _objective_sample_identity_key(
         "condition_number",
         "condition_no",
         "condition",
+        "build_orientation",
+        "specimen_orientation",
+        "orientation",
     )
     normalized_items = {
         _objective_column_key(key): str(value).strip()
@@ -905,15 +875,33 @@ def _coerce_number(value: Any) -> float | None:
     return float(match.group(0))
 
 
-def _paper_skim_study_values(
+def _paper_skim_source_values(
     paper_skim: PaperSkim | None,
+    *,
+    unit: ExtractedEvidenceDraft,
     field_name: str,
 ) -> tuple[str, ...]:
     if paper_skim is None:
         return ()
+    unit_source_refs = {
+        (unit.source_kind or "", unit.source_ref or ""),
+        *(
+            (
+                str(item.get("source_kind") or ""),
+                str(item.get("source_ref") or ""),
+            )
+            for item in unit.source_refs
+        ),
+    }
     values: list[str] = []
     seen: set[str] = set()
     for study in paper_skim.studies:
+        if study.claim_scope != "current_work" or not any(
+            (source_ref.source_kind, source_ref.source_ref) in unit_source_refs
+            for relationship in study.relationships
+            for source_ref in relationship.source_refs
+        ):
+            continue
         for value in getattr(study, field_name):
             text = str(value or "").strip()
             key = text.casefold()

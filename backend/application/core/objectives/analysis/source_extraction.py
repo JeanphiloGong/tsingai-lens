@@ -2290,6 +2290,7 @@ def _objective_result_table_matrix_records(
         row_values = _objective_table_row_values(headers=headers, row=row)
         row_attributes = _objective_table_row_attributes(
             route=route,
+            source=source,
             row_values=row_values,
             result_columns=result_columns,
             objective_context=objective_context,
@@ -2398,6 +2399,7 @@ def _objective_process_table_matrix_records(
         row_values = _objective_table_row_values(headers=headers, row=row)
         row_attributes = _objective_table_row_attributes(
             route=route,
+            source=source,
             row_values=row_values,
             result_columns=result_columns,
             objective_context=objective_context,
@@ -2466,6 +2468,7 @@ def _objective_process_table_matrix_records(
 def _objective_table_row_attributes(
     *,
     route: EvidenceCandidate,
+    source: Mapping[str, Any],
     row_values: dict[str, str],
     result_columns: set[str],
     objective_context: ResearchObjective | None,
@@ -2477,6 +2480,16 @@ def _objective_table_row_attributes(
     for column, value in row_values.items():
         role = str(route.column_roles.get(column) or "").lower()
         column_key = _objective_column_key(column)
+        process_attribute_label = _objective_process_attribute_label(
+            column=column,
+            role=role,
+            objective_context=objective_context,
+        )
+        is_objective_condition_axis = bool(
+            objective_context is not None
+            and column_key == "condition"
+            and process_attribute_label != column
+        )
         is_objective_symbol_axis = bool(
             objective_context is not None
             and column not in result_columns
@@ -2487,14 +2500,22 @@ def _objective_table_row_attributes(
                 objective_context=objective_context,
             )
         )
-        if is_objective_symbol_axis:
-            process_attributes[
-                _objective_process_attribute_label(
-                    column=column,
-                    role=role,
-                    objective_context=objective_context,
-                )
-            ] = value
+        compound_label_attributes = _objective_caption_compound_label_attributes(
+            column=column,
+            value=value,
+            role=role,
+            caption=str(source.get("caption_text") or ""),
+            objective_context=objective_context,
+        )
+        if compound_label_attributes is not None:
+            for context_name, attributes in compound_label_attributes.items():
+                {
+                    "material": material_attributes,
+                    "sample": sample_attributes,
+                    "process": process_attributes,
+                }[context_name].update(attributes)
+        elif is_objective_symbol_axis or is_objective_condition_axis:
+            process_attributes[process_attribute_label] = value
         elif any(
             term in role for term in ("material", "alloy", "composition")
         ) or column_key in {
@@ -2531,11 +2552,150 @@ def _objective_table_row_attributes(
             if route.role == "current_experimental_evidence":
                 sample_attributes[column] = value
             test_attributes[column] = value
+    source_scope = _objective_table_source_scope_attributes(
+        source=source,
+        objective_context=objective_context,
+    )
+    for key, value in source_scope["material"].items():
+        material_attributes.setdefault(key, value)
+    for key, value in source_scope["sample"].items():
+        sample_attributes.setdefault(key, value)
+    for key, value in source_scope["process"].items():
+        process_attributes.setdefault(key, value)
     return {
         "material": material_attributes,
         "sample": sample_attributes,
         "process": process_attributes,
         "test": test_attributes,
+    }
+
+
+def _objective_table_source_scope_attributes(
+    *,
+    source: Mapping[str, Any],
+    objective_context: ResearchObjective | None,
+) -> dict[str, dict[str, str]]:
+    source_context = " ".join(
+        str(source.get(key) or "").strip()
+        for key in ("caption_text", "heading_path")
+        if str(source.get(key) or "").strip()
+    )
+    if not source_context:
+        return {"material": {}, "sample": {}, "process": {}}
+
+    material: dict[str, str] = {}
+    if objective_context is not None:
+        material_matches = tuple(
+            value
+            for value in objective_context.material_scope
+            if property_matching.source_text_mentions_axis(source_context, value)
+        )
+        if len(material_matches) == 1:
+            material["material"] = material_matches[0]
+
+    orientations = tuple(
+        value
+        for value in ("horizontal", "longitudinal", "transverse", "vertical")
+        if re.search(rf"\b{value}\b", source_context, flags=re.IGNORECASE)
+    )
+    sample = (
+        {"build orientation": orientations[0]}
+        if len(orientations) == 1
+        else {}
+    )
+    process = (
+        {"manufacturing process": "laser powder bed fusion"}
+        if re.search(
+            r"\b(?:laser\s+powder[-\s]bed\s+fusion|selective\s+laser\s+melting|LPBF|PBF-L|SLM)\b",
+            source_context,
+            flags=re.IGNORECASE,
+        )
+        else {}
+    )
+    return {"material": material, "sample": sample, "process": process}
+
+
+def _objective_caption_compound_label_attributes(
+    *,
+    column: str,
+    value: str,
+    role: str,
+    caption: str,
+    objective_context: ResearchObjective | None,
+) -> dict[str, dict[str, str]] | None:
+    if objective_context is None or not caption.strip():
+        return None
+    column_key = _objective_column_key(column)
+    is_material_or_sample_label = (
+        any(term in role for term in ("material", "alloy", "sample", "label"))
+        or column_key in {
+            "alloy",
+            "alloy_name",
+            "alloy_type",
+            "material",
+            "material_system",
+            "sample",
+            "sample_label",
+        }
+    )
+    condition_axes = tuple(
+        axis
+        for axis in objective_context.variables
+        if _objective_column_key(axis).endswith("_condition")
+    )
+    label_parts = tuple(part.strip() for part in value.split("-") if part.strip())
+    if (
+        not is_material_or_sample_label
+        or len(condition_axes) != 1
+        or len(label_parts) < 2
+        or any(not re.fullmatch(r"[A-Z]{1,8}", part) for part in label_parts)
+    ):
+        return None
+
+    definitions = {
+        abbreviation.upper(): term
+        for term, abbreviation in re.findall(
+            r"\b([A-Za-z]+(?:-[A-Za-z]+)*)\s*\(([A-Z]{1,8})\)",
+            caption,
+        )
+    }
+    expanded_parts: list[tuple[str, str]] = []
+    for part in label_parts:
+        expansion = definitions.get(part)
+        if expansion is None:
+            if re.search(rf"\b{re.escape(part)}\b", caption) is None:
+                return None
+            expansion = part
+        expanded_parts.append((part, expansion))
+
+    orientation_parts = tuple(
+        expansion.casefold()
+        for _part, expansion in expanded_parts
+        if expansion.casefold()
+        in {"horizontal", "longitudinal", "transverse", "vertical"}
+    )
+    process_parts = tuple(
+        expansion if expansion.isupper() else expansion.casefold()
+        for _part, expansion in expanded_parts
+        if expansion.casefold() not in orientation_parts
+    )
+    if len(orientation_parts) != 1 or not process_parts:
+        return None
+
+    material_matches = tuple(
+        material
+        for material in objective_context.material_scope
+        if property_matching.source_text_mentions_axis(caption, material)
+    )
+    material_attributes = (
+        {"material": material_matches[0]}
+        if len(material_matches) == 1
+        else {}
+    )
+    return {
+        "material": material_attributes,
+        "sample": {"build orientation": orientation_parts[0]},
+        "process": {condition_axes[0]: " + ".join(process_parts)},
     }
 
 
@@ -2546,6 +2706,14 @@ def _objective_process_attribute_label(
     objective_context: ResearchObjective | None,
 ) -> str:
     if objective_context is not None:
+        condition_axes = tuple(
+            axis
+            for axis in objective_context.variables
+            if _objective_column_key(column) == "condition"
+            and _objective_column_key(axis).endswith("_condition")
+        )
+        if len(condition_axes) == 1:
+            return condition_axes[0]
         symbol_axes = {
             axis
             for axis in property_matching.process_column_axis_keys(column)
@@ -2740,13 +2908,16 @@ def _objective_sample_attributes_have_stable_label(
     for key in sample_attributes:
         column_key = _objective_column_key(str(key))
         if column_key in {
+            "build_orientation",
             "id",
             "label",
             "material",
+            "orientation",
             "printed_316l",
             "sample",
             "sample_id",
             "sample_label",
+            "specimen_orientation",
         }:
             return True
         if "sample" in column_key and "condition" not in column_key:

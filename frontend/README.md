@@ -12,6 +12,9 @@ to code.
 
 - `src/routes/+page.svelte`
   Home page and collection list flow
+- `src/routes/+layout.svelte`
+  Global Research Agent launcher; outside a collection it asks the user to
+  select the collection that defines the research workspace.
 - `src/routes/collections/`
   Collection workspace route family
 - `src/routes/_shared/`
@@ -64,6 +67,9 @@ npm run test:e2e
 ## Frontend Contract Rules
 
 - Browser requests must stay on same-origin `/api/*` and `/api/v1/*`.
+- Research Agent Chat requires a collection but does not wait for Objective
+  discovery or collection analysis to finish. Data-backed capabilities report
+  unavailable collection artifacts explicitly while processing continues.
 - Shared API helpers live under `src/routes/_shared/`.
 - Retired debug-style routes remain explanatory only and should not introduce
   alternate browser contracts.

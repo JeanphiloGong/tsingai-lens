@@ -189,7 +189,7 @@ const translations: Record<Language, Translations> = {
 				eyebrow: 'Locked view',
 				title: 'Processing required',
 				readyToProcess:
-					'Process this collection before opening research objectives, evidence, comparisons, materials, graph, or copilot views.',
+					'Process this collection before opening research objectives, evidence, comparisons, materials, or graph views.',
 				processing:
 					'This collection is still processing. Research views unlock after the current run completes.',
 				failed:
@@ -200,6 +200,18 @@ const translations: Record<Language, Translations> = {
 		},
 		researchAgent: {
 			title: 'Research Agent',
+			launcher: {
+				eyebrow: 'Research Agent',
+				title: 'Choose a research workspace',
+				description:
+					'Select the literature collection whose papers, Objectives, and published Findings the Agent may use.',
+				close: 'Close workspace selector',
+				loading: 'Loading research workspaces...',
+				retry: 'Try again',
+				empty: 'Create a literature collection before starting a collection-backed conversation.',
+				manageCollections: 'Manage collections',
+				paperCount: '{count} paper(s)'
+			},
 			sidebarLabel: 'Research Agent sessions',
 			chatLabel: 'Collection Research Agent conversation',
 			newSession: 'New session',
@@ -2447,7 +2459,7 @@ const translations: Record<Language, Translations> = {
 			lock: {
 				eyebrow: '页面已锁定',
 				title: '需要先完成处理',
-				readyToProcess: '请先处理该集合，再打开研究目标、证据、比较、材料、图谱或助手页面。',
+				readyToProcess: '请先处理该集合，再打开研究目标、证据、比较、材料或图谱页面。',
 				processing: '集合仍在处理中。当前任务完成后，研究页面会自动解锁。',
 				failed: '最近一次处理失败。请先在工作区查看状态或重新处理，再信任下游页面。',
 				empty: '请先上传文档并处理集合，再打开研究页面。',
@@ -2456,6 +2468,17 @@ const translations: Record<Language, Translations> = {
 		},
 		researchAgent: {
 			title: '研究 Agent',
+			launcher: {
+				eyebrow: '研究 Agent',
+				title: '选择研究工作区',
+				description: '选择一个文献集合，Agent 将在其论文、研究目标和已发布发现范围内工作。',
+				close: '关闭工作区选择器',
+				loading: '正在加载研究工作区...',
+				retry: '重试',
+				empty: '请先创建文献集合，再开始基于集合的研究对话。',
+				manageCollections: '管理文献集合',
+				paperCount: '{count} 篇文献'
+			},
 			sidebarLabel: '研究 Agent 会话',
 			chatLabel: '集合研究 Agent 对话',
 			newSession: '新建会话',

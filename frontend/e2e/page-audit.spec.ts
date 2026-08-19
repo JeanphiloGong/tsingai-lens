@@ -103,6 +103,45 @@ test.describe('page interaction audit', () => {
 		await expect(page.getByRole('link', { name: 'Enter comparison' })).toHaveCount(0);
 	});
 
+	test('global Research Agent entry asks for a collection workspace', async ({ page }) => {
+		const consoleErrors: string[] = [];
+		page.on('console', (message) => {
+			if (message.type() === 'error' || message.type() === 'warning') {
+				consoleErrors.push(message.text());
+			}
+		});
+		page.on('pageerror', (error) => consoleErrors.push(error.message));
+
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.goto('/');
+		await page.getByRole('button', { name: 'Research Agent' }).click();
+
+		const picker = page.getByRole('dialog', { name: 'Choose a research workspace' });
+		await expect(picker).toBeVisible();
+		await expect(picker.getByRole('link', { name: /316L LPBF evidence set/ })).toHaveAttribute(
+			'href',
+			`/collections/${collectionId}/assistant`
+		);
+		expect(await visibleElementsFitViewport(page, '.workspace-picker')).toBe(true);
+		expect(consoleErrors).toEqual([]);
+
+		if (screenshotDir) {
+			await page.screenshot({
+				path: join(screenshotDir, 'research-agent-workspace-picker-desktop.png'),
+				fullPage: true
+			});
+		}
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		expect(await visibleElementsFitViewport(page, '.workspace-picker')).toBe(true);
+		if (screenshotDir) {
+			await page.screenshot({
+				path: join(screenshotDir, 'research-agent-workspace-picker-mobile.png'),
+				fullPage: true
+			});
+		}
+	});
+
 	test('research agent completes conversation, capability, draft, and approved write states', async ({
 		page
 	}) => {
@@ -241,6 +280,23 @@ test.describe('page interaction audit', () => {
 			`/collections/${collectionId}`
 		);
 		expect(objectiveRequests).toEqual([]);
+	});
+
+	test('unprocessed collections still allow Research Agent conversation', async ({ page }) => {
+		const consoleErrors: string[] = [];
+		page.on('console', (message) => {
+			if (message.type() === 'error' || message.type() === 'warning') {
+				consoleErrors.push(message.text());
+			}
+		});
+		page.on('pageerror', (error) => consoleErrors.push(error.message));
+
+		await page.goto(`/collections/${collectionId}/assistant?audit_state=uploaded`);
+
+		await expect(page.getByRole('heading', { level: 1, name: 'Research Agent' })).toBeVisible();
+		await expect(page.getByLabel('Message')).toBeEnabled();
+		await expect(page.getByRole('heading', { name: 'Processing required' })).toHaveCount(0);
+		expect(consoleErrors).toEqual([]);
 	});
 
 	test('mobile app chrome keeps controls inside the viewport', async ({ page }) => {

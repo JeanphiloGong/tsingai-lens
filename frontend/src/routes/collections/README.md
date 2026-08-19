@@ -21,6 +21,9 @@ This node owns the collection workspace route family.
 - `collections/[id]/assistant/+page.svelte`
   Collection-bound Research Agent conversation, capability activity,
   structured results, canonical resource links, and exact write approval.
+  This route remains available before Objective discovery finishes so the
+  researcher can converse, inspect readiness, and form Objective proposals;
+  capabilities must still expose missing or incomplete collection artifacts.
 - `collections/[id]/graph/+page.svelte`
   Secondary graph projection.
 

@@ -9,6 +9,7 @@
   import { collections } from './_shared/collections';
   import { errorMessage } from './_shared/api';
   import { language, t } from './_shared/i18n';
+  import ResearchAgentLauncher from './_shared/ResearchAgentLauncher.svelte';
   import { themePreference } from './_shared/theme';
   import type { ThemePreference } from './_shared/theme';
 
@@ -179,6 +180,9 @@
     </form>
 
     <div class="header-actions">
+      {#if authenticatedUser}
+        <ResearchAgentLauncher collectionId={headerCollectionId} />
+      {/if}
       <button class="icon-button" type="button" aria-label={$t('header.notificationsLabel')}>
         <span class="notification-icon" aria-hidden="true"></span>
       </button>

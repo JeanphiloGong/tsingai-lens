@@ -9,6 +9,7 @@ from openai import APIConnectionError, BadRequestError
 
 from application.core.objectives.analysis import (
     evidence_materialization,
+    finding_synthesis,
     paper_experiment,
     source_extraction,
 )
@@ -1143,6 +1144,323 @@ def test_text_result_process_binding_requires_exact_groups_and_expands_axes(
     assert ungrounded.comparison.incomparability_reasons == (
         "comparison groups do not bind to source process conditions",
     )
+
+
+def test_total_elongation_column_is_result_not_process_context():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-hip-elongation",
+            "question": "How does cooling rate after HIP affect elongation?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["cooling rate after HIP"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-hip",
+            "source_kind": "table",
+            "source_ref": "table-tensile-properties",
+            "role": "process_or_treatment",
+            "extractable": True,
+            "column_roles": {
+                "Condition": "sample condition",
+                "TE (%)": "process variable",
+            },
+            "confidence": 0.95,
+        }
+    )
+
+    records = source_extraction._objective_table_matrix_evidence_records(
+        route=route,
+        objective_context=objective,
+        source={
+            "source_kind": "table",
+            "source_ref": route.source_ref,
+            "caption_text": (
+                "Tensile properties of laser powder bed fusion Ti-6Al-4V "
+                "after HIP treatments. TE = total elongation."
+            ),
+            "column_headers": ["Condition", "TE (%)"],
+            "table_matrix": [
+                ["Condition", "TE (%)"],
+                ["800 FC", "27.56 +/- 2.57"],
+                ["800 RQ", "28.86 +/- 0.92"],
+            ],
+        },
+    )
+
+    results = [record for record in records if record["reported_result"]]
+    contexts = [record for record in records if not record["reported_result"]]
+    assert [record["reported_result"]["outcome"] for record in results] == [
+        "elongation",
+        "elongation",
+    ]
+    assert all(
+        attribute["name"] != "TE (%)"
+        for record in contexts
+        for attribute in record["scientific_context"]["process"]
+    )
+
+
+def test_source_reported_hip_cooling_comparison_remains_an_association():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-hip-elongation",
+            "question": "How does cooling rate after HIP affect elongation?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["cooling rate after HIP"],
+            "outcomes": ["elongation"],
+        }
+    )
+
+    def condition_context(evidence_id: str, label: str) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": evidence_id,
+                "objective_id": "obj-hip-elongation",
+                "document_id": "paper-hip",
+                "source_kind": "table",
+                "source_ref": "table-tensile-properties",
+                "evidence_role": "condition_context",
+                "attribution_scope": "not_attributable",
+                "scientific_context": {
+                    "sample": [{"name": "Condition", "value": label}],
+                    "process": [
+                        {
+                            "name": "manufacturing process",
+                            "value": "laser powder bed fusion",
+                        }
+                    ],
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-tensile-properties",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.95,
+            }
+        )
+
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "result-hip-elongation",
+            "objective_id": "obj-hip-elongation",
+            "document_id": "paper-hip",
+            "source_kind": "text_window",
+            "source_ref": "results-cooling-rate",
+            "evidence_role": "direct_result",
+            "changed_variables": [],
+            "comparison": {
+                "baseline_label": "800 FC",
+                "target_label": "800 RQ",
+                "axis_names": ["cooling rate"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "elongation",
+                "direction": "no_change",
+                "result_text": (
+                    "With increased cooling rate, elongation of the 800 C HIP "
+                    "treatments remained relatively unchanged."
+                ),
+            },
+            "attribution_scope": "association_only",
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "results-cooling-rate",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+    bound = paper_experiment._bind_objective_result_process_context(
+        (
+            condition_context("condition-800-fc", "800 FC"),
+            condition_context("condition-800-rq", "800 RQ"),
+            result,
+        )
+    )[2]
+
+    assert bound.attribution_scope == "association_only"
+    assert [item.name for item in bound.changed_variables] == ["cooling rate"]
+    assert bound.comparison is not None
+    assert bound.comparison.comparable
+    assert {ref["source_ref"] for ref in bound.source_refs} == {
+        "results-cooling-rate",
+        "table-tensile-properties",
+    }
+
+    canonical = evidence_materialization._canonical_objective_evidence_axes(
+        bound,
+        objective=objective,
+    )
+    evidence = ObjectiveEvidence.from_mapping(
+        {
+            **canonical.to_record(),
+            "collection_id": objective.collection_id,
+            "analysis_version": 1,
+            "source_excerpt": (
+                "With increased cooling rate, elongation of the 800 C HIP "
+                "treatments remained relatively unchanged."
+            ),
+        }
+    )
+
+    assert [item.name for item in evidence.changed_variables] == ["cooling rate"]
+    assert finding_synthesis.FindingSynthesisService.is_comparable_result_evidence(
+        objective,
+        evidence,
+    )
+
+
+def test_hip_cooling_groups_bind_across_repeated_condition_tables():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-hip-elongation",
+            "question": "How does cooling rate after HIP affect elongation?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["cooling rate after HIP"],
+            "outcomes": ["elongation"],
+        }
+    )
+    tensile_route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-hip",
+            "source_kind": "table",
+            "source_ref": "table-tensile-properties",
+            "role": "process_or_treatment",
+            "extractable": True,
+            "column_roles": {
+                "Condition": "sample condition",
+                "TE (%)": "process variable",
+            },
+            "confidence": 0.95,
+        }
+    )
+    table_records = source_extraction._objective_table_matrix_evidence_records(
+        route=tensile_route,
+        objective_context=objective,
+        source={
+            "source_kind": "table",
+            "source_ref": tensile_route.source_ref,
+            "caption_text": (
+                "Tensile properties of laser powder bed fusion Ti-6Al-4V "
+                "after HIP treatments. TE = total elongation."
+            ),
+            "column_headers": ["Condition", "TE (%)"],
+            "table_matrix": [
+                ["Condition", "TE (%)"],
+                ["800 FC", "27.56 +/- 2.57"],
+                ["800 RQ", "28.86 +/- 0.92"],
+            ],
+        },
+    )
+    condition_contexts = tuple(
+        ExtractedEvidenceDraft.from_mapping(record)
+        for record in table_records
+        if record["reported_result"] is None
+    )
+
+    def repeated_context(evidence_id: str, label: str) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": evidence_id,
+                "objective_id": objective.objective_id,
+                "document_id": "paper-hip",
+                "source_kind": "table",
+                "source_ref": "table-microstructure",
+                "evidence_role": "condition_context",
+                "attribution_scope": "not_attributable",
+                "scientific_context": {
+                    "sample": [{"name": "Condition", "value": label}],
+                    "process": [
+                        {
+                            "name": "manufacturing process",
+                            "value": "laser powder bed fusion",
+                        }
+                    ],
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-microstructure",
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "result-hip-elongation",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-hip",
+            "source_kind": "text_window",
+            "source_ref": "results-cooling-rate",
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "cooling rate after HIP",
+                    "baseline_value": "800 FC",
+                    "target_value": "800 RQ",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "800 FC",
+                "target_label": "800 RQ",
+                "axis_names": ["cooling rate after HIP"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "elongation",
+                "direction": "no_change",
+                "result_text": (
+                    "With increased cooling rate, elongation of the 800 C HIP "
+                    "treatments remained relatively unchanged."
+                ),
+            },
+            "attribution_scope": "isolated_effect",
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "results-cooling-rate",
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+    bound = paper_experiment._bind_objective_result_process_context(
+        (
+            *condition_contexts,
+            repeated_context("condition-800-fc", "800 FC"),
+            repeated_context("condition-800-rq", "800 RQ"),
+            result,
+        )
+    )[-1]
+
+    assert bound.attribution_scope == "association_only"
+    assert [item.name for item in bound.changed_variables] == [
+        "cooling rate after HIP"
+    ]
+    assert bound.comparison is not None
+    assert bound.comparison.comparable
+    assert bound.reported_result is not None
+    assert bound.reported_result.direction == "no_change"
+    assert {ref["source_ref"] for ref in bound.source_refs} == {
+        "results-cooling-rate",
+        "table-tensile-properties",
+    }
 
 
 def test_process_result_table_join_rejects_conflicting_sample_context():

@@ -3068,7 +3068,10 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     assert "absent, off, or without condition to numeric 0" in contract
     assert "one baseline-to-target comparison interval" in contract
     assert "Never repeat a changed-variable name" in contract
-    assert "choose one complete source-supported pair" in contract
+    assert "choose one adjacent source-supported pair" in contract
+    assert "copy the exact group labels" in contract
+    assert "no statistically significant difference" in contract
+    assert "use association_only" in contract
     assert "Context source" in contract
     assert "numeric `confidence` for every extraction" in contract
     assert "Generic composition or background" in contract

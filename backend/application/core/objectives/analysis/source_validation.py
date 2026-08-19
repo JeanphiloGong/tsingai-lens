@@ -3,13 +3,29 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from application.core.objectives import property_matching
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from domain.core import ResearchObjective
 
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
+_NAMED_CONDITION_LABEL_PATTERN = re.compile(
+    r"\b(?P<prefix>\d+(?:\.\d+)?)\s+(?P<suffix>[A-Z]{2,5})\b"
+)
+_NO_CHANGE_RESULT_KEYS = (
+    "no_change",
+    "no_significant_change",
+    "no_significant_difference",
+    "no_statistically_significant_difference",
+    "not_significantly_different",
+    "not_statistically_different",
+    "remained_constant",
+    "remained_relatively_unchanged",
+    "remained_unchanged",
+    "unchanged",
+)
 
 
 def _objective_table_matrix_rows(
@@ -96,6 +112,11 @@ def validate_source_fact(
     record = _objective_retain_source_grounded_context(
         record,
         source=source,
+    )
+    record = _objective_recover_explicit_no_change_condition_series(
+        record,
+        source=source,
+        objective_context=objective_context,
     )
     reported_result = record.get("reported_result")
     if isinstance(reported_result, Mapping):
@@ -276,6 +297,103 @@ def validate_source_fact(
     if record.get("confidence") is None:
         record["confidence"] = route.confidence
     return (record,)
+
+
+def _objective_recover_explicit_no_change_condition_series(
+    record: Mapping[str, Any],
+    *,
+    source: Mapping[str, Any],
+    objective_context: ResearchObjective | None,
+) -> dict[str, Any]:
+    recovered = dict(record)
+    result = recovered.get("reported_result")
+    if not isinstance(result, Mapping):
+        return recovered
+
+    normalized_result = dict(result)
+    result_text = str(normalized_result.get("result_text") or "").strip()
+    result_key = _objective_column_key(result_text)
+    explicitly_unchanged = any(
+        phrase in result_key for phrase in _NO_CHANGE_RESULT_KEYS
+    )
+    if not explicitly_unchanged:
+        return recovered
+    if str(normalized_result.get("direction") or "unknown") == "unknown":
+        normalized_result["direction"] = "no_change"
+        recovered["reported_result"] = normalized_result
+
+    if (
+        recovered.get("comparison") is not None
+        or recovered.get("changed_variables")
+        or objective_context is None
+        or source.get("source_kind") != "text_window"
+    ):
+        return recovered
+
+    source_text = _objective_source_grounding_text(source)
+    axis = _objective_source_local_variable_phrase(
+        source_text,
+        objective_context=objective_context,
+    )
+    if axis is None:
+        return recovered
+
+    labels_by_prefix: dict[str, list[str]] = {}
+    for match in _NAMED_CONDITION_LABEL_PATTERN.finditer(source_text):
+        label = " ".join(match.group(0).split())
+        labels = labels_by_prefix.setdefault(match.group("prefix"), [])
+        if label not in labels:
+            labels.append(label)
+    result_numbers = {
+        match.group(0) for match in _NUMBER_PATTERN.finditer(result_text)
+    }
+    matching_series = [
+        labels
+        for prefix, labels in labels_by_prefix.items()
+        if prefix in result_numbers and len(labels) >= 2
+    ]
+    if len(matching_series) != 1:
+        return recovered
+
+    labels = matching_series[0]
+    recovered["comparison"] = {
+        "baseline_label": labels[0],
+        "target_label": labels[-1],
+        "axis_names": [axis],
+        "comparable": True,
+        "incomparability_reasons": [],
+    }
+    recovered["attribution_scope"] = "association_only"
+    recovered["resolution_status"] = "partial"
+    recovered["selection_reason"] = (
+        "Recovered an explicit unchanged named-condition series from the "
+        "owning Source; process values remain unresolved."
+    )
+    return recovered
+
+
+def _objective_source_local_variable_phrase(
+    source_text: str,
+    *,
+    objective_context: ResearchObjective,
+) -> str | None:
+    matches: list[str] = []
+    for variable in objective_context.variables:
+        tokens = re.findall(r"[A-Za-z0-9]+", str(variable))
+        variable_matches: list[str] = []
+        for width in range(len(tokens), 1, -1):
+            for start in range(len(tokens) - width + 1):
+                pattern = r"\b" + r"\s+".join(
+                    re.escape(token) for token in tokens[start : start + width]
+                ) + r"\b"
+                match = re.search(pattern, source_text, flags=re.IGNORECASE)
+                if match is not None:
+                    variable_matches.append(match.group(0).lower())
+            if variable_matches:
+                break
+        matches.extend(variable_matches)
+    unique = tuple(dict.fromkeys(matches))
+    return unique[0] if len(unique) == 1 else None
 
 
 def _objective_complete_extracted_variable_endpoints(

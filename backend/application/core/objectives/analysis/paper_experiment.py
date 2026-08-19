@@ -20,6 +20,30 @@ _OBJECTIVE_PAIRWISE_SCOPE_LIMIT = 48
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 
 
+def _objective_pairwise_attribution_scope(
+    changed_variables: list[dict[str, Any]],
+    *,
+    comparable: bool,
+) -> str:
+    if not comparable:
+        return "not_attributable"
+    if len(changed_variables) > 1:
+        return "joint_effect"
+
+    axis = property_matching.normalize_property_label(
+        changed_variables[0].get("name")
+    )
+    if axis in {
+        "condition",
+        "material state",
+        "post processing condition",
+        "processing condition",
+        "sample state",
+    }:
+        return "association_only"
+    return "isolated_effect"
+
+
 def reconstruct_paper_experiments(
     *,
     collection_id: str,
@@ -300,6 +324,68 @@ def _bind_objective_result_process_context(
                     }
                 )
             if not changed_variables:
+                source_group_variables = [
+                    {
+                        "name": axis,
+                        "baseline_value": comparison.baseline_label,
+                        "target_value": comparison.target_label,
+                        "unit": None,
+                    }
+                    for axis in comparison.axis_names
+                    if property_matching.normalize_property_label(axis)
+                    not in {
+                        "condition",
+                        "group",
+                        "sample",
+                        "sample condition",
+                        "sample id",
+                    }
+                ]
+                retain_source_group_comparison = bool(
+                    comparison.comparable
+                    and (
+                        source_claims_effect
+                        or (
+                            pending_process_binding
+                            and unit.attribution_scope == "association_only"
+                            and source_group_variables
+                        )
+                    )
+                )
+                if retain_source_group_comparison:
+                    payload = unit.to_record()
+                    if not payload["changed_variables"]:
+                        payload["changed_variables"] = source_group_variables
+                    payload["attribution_scope"] = "association_only"
+                    payload["selection_reason"] = (
+                        "Source-grounded result comparison retained as an "
+                        "association; linked groups share the recorded process "
+                        "context but do not expose quantified process values."
+                    )
+                    scientific_context = unit.scientific_context.to_record()
+                    scientific_context["process"] = (
+                        _objective_common_pairwise_context(
+                            baseline_context,
+                            target_context,
+                        )["process"]
+                    )
+                    payload["scientific_context"] = scientific_context
+                    payload["source_refs"] = list(
+                        _dedupe_objective_source_refs(
+                            (
+                                unit.source_refs,
+                                baseline_context.source_refs,
+                                target_context.source_refs,
+                            )
+                        )
+                    )
+                    payload["confidence"] = min(
+                        unit.confidence,
+                        baseline_context.confidence,
+                        target_context.confidence,
+                    )
+                    bound.append(ExtractedEvidenceDraft.from_mapping(payload))
+                    continue
                 incomparability_reasons.append(
                     "bound process conditions do not contain a changed variable"
                 )
@@ -315,14 +401,9 @@ def _bind_objective_result_process_context(
                 "comparable": comparable,
                 "incomparability_reasons": incomparability_reasons,
             }
-            payload["attribution_scope"] = (
-                "not_attributable"
-                if not comparable
-                else (
-                    "isolated_effect"
-                    if len(changed_variables) == 1
-                    else "joint_effect"
-                )
+            payload["attribution_scope"] = _objective_pairwise_attribution_scope(
+                changed_variables,
+                comparable=comparable,
             )
             scientific_context = unit.scientific_context.to_record()
             scientific_context["process"] = _objective_common_pairwise_context(
@@ -603,14 +684,9 @@ def _build_objective_pairwise_comparison_units(
                     and bool(changed_variables)
                     and result_values_comparable
                 )
-                attribution_scope = (
-                    "not_attributable"
-                    if not comparable
-                    else (
-                        "isolated_effect"
-                        if len(changed_variables) == 1
-                        else "joint_effect"
-                    )
+                attribution_scope = _objective_pairwise_attribution_scope(
+                    changed_variables,
+                    comparable=comparable,
                 )
                 source_refs = _dedupe_objective_source_refs(
                     (baseline.source_refs, target.source_refs)

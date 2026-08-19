@@ -1854,6 +1854,130 @@ def test_llm_objective_evidence_preserves_zero_extraction_confidence():
     assert records[0]["confidence"] == 0.0
 
 
+def test_source_validation_recovers_explicit_unchanged_named_condition_series():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-hip-elongation",
+            "question": "How does cooling rate after HIP affect elongation?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["cooling rate after HIP"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-hip",
+            "source_kind": "text_window",
+            "source_ref": "results-800-cooling",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.95,
+        }
+    )
+    result_text = (
+        "the elongation of the 800 C HIP treatments remained relatively unchanged"
+    )
+
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": (
+                "The 800 SC condition had the highest strength compared to the "
+                "800 FC and 800 RQ conditions, which had progressively lower "
+                "strengths as a result of the increased cooling rate. While the "
+                "decrease in strength was observed for the faster cooling rates, "
+                f"{result_text}."
+            ),
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "elongation",
+                "value": None,
+                "unit": None,
+                "direction": "unknown",
+                "result_text": result_text,
+            },
+            "attribution_scope": "not_attributable",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.0,
+        },
+    )
+
+    assert len(records) == 1
+    assert records[0]["changed_variables"] == []
+    assert records[0]["comparison"] == {
+        "baseline_label": "800 SC",
+        "target_label": "800 RQ",
+        "axis_names": ["cooling rate"],
+        "comparable": True,
+        "incomparability_reasons": [],
+    }
+    assert records[0]["reported_result"]["direction"] == "no_change"
+    assert records[0]["attribution_scope"] == "association_only"
+    assert records[0]["confidence"] == 0.0
+
+
+def test_source_validation_does_not_invent_series_from_generic_sample_labels():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-hip-elongation",
+            "question": "How does cooling rate after HIP affect elongation?",
+            "variables": ["cooling rate after HIP"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-hip",
+            "source_kind": "text_window",
+            "source_ref": "ambiguous-groups",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": (
+                "Samples S1 and S2 used different cooling rates. Their "
+                "elongation remained unchanged."
+            ),
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "elongation",
+                "direction": "unknown",
+                "result_text": "elongation remained unchanged",
+            },
+            "attribution_scope": "not_attributable",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.8,
+        },
+    )
+
+    assert records[0]["reported_result"]["direction"] == "no_change"
+    assert records[0]["comparison"] is None
+    assert records[0]["attribution_scope"] == "not_attributable"
+
+
 def test_llm_objective_evidence_accepts_source_grounded_axis_and_values():
     objective = _research_objective(
         {
@@ -3902,7 +4026,7 @@ def test_real_ti64_hip_condition_table_builds_comparable_uts_contrast():
     assert comparison.reported_result.baseline_value == 1294.2
     assert comparison.reported_result.target_value == 1082.43
     assert comparison.reported_result.direction == "decrease"
-    assert comparison.attribution_scope == "isolated_effect"
+    assert comparison.attribution_scope == "association_only"
     assert comparison.scientific_context.to_record() == {
         "material": [
             {"name": "material", "value": "Ti-6Al-4V", "unit": None}
@@ -4013,6 +4137,10 @@ def test_real_ti64_compound_sample_labels_preserve_orientation_for_hip_contrasts
     assert all(
         comparison.reported_result is not None
         and comparison.reported_result.direction == "decrease"
+        for comparison in comparable
+    )
+    assert all(
+        comparison.attribution_scope == "association_only"
         for comparison in comparable
     )
     assert {

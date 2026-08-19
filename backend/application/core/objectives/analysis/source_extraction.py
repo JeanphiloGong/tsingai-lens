@@ -73,7 +73,7 @@ _OBJECTIVE_NON_RESULT_VALUE_COLUMN_TERMS = (
 )
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _SOURCE_EXTRACTION_MAX_COMPLETION_TOKENS = 2048
-_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v4"
+_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v5"
 _SOURCE_EXTRACTION_ROLES = {
     "direct_result",
     "condition_context",
@@ -144,10 +144,15 @@ DECISION PROCESS
    labels in `comparison`, use only a SOURCE-local grouping axis such as `sample`,
    and use `association_only`. The backend may bind another grounded Source later.
 5. One extraction represents one baseline-to-target comparison interval. If SOURCE
-   reports a condition series, choose one complete source-supported pair. Never
-   convert an absent, off, or without condition to numeric 0; retain the exact
-   source phrase as a categorical endpoint with a null unit. A complete comparison
-   may bind endpoint phrases stated in separate sentences of the same SOURCE unit.
+   reports an ordered condition series and explicitly states how the objective
+   outcome changes with that order, choose one adjacent source-supported pair. For
+   named groups whose process definitions are elsewhere, copy the exact group labels,
+   keep changed variables empty, name only the SOURCE-local varied axis in comparison,
+   and use association_only. Use no_change when SOURCE explicitly reports no change or
+   no statistically significant difference across those groups. Never convert an
+   absent, off, or without condition to numeric 0; retain the exact source phrase as
+   a categorical endpoint with a null unit. A complete comparison may bind endpoint
+   phrases stated in separate sentences of the same SOURCE unit.
 6. Never repeat a changed-variable name. Use `isolated_effect` only for one
    distinct changed factor with a complete comparable baseline/target comparison.
    Use `joint_effect` for two or more distinct changed factors. Otherwise use
@@ -191,6 +196,12 @@ OBJECTIVE VARIABLES: laser power, scanning speed
 OBJECTIVE OUTCOME: microstructure
 SOURCE: Sample S1 showed equiaxed grains, whereas S2 displayed a cellular-dendritic microstructure.
 OUTPUT: {"extractions":[{"evidence_role":"direct_result","changed_variables":[],"comparison":{"baseline_label":"S1","target_label":"S2","axis_names":["sample"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"cellular-dendritic microstructure","value":null,"unit":null,"direction":"mixed","result_text":"S2 displayed a cellular-dendritic microstructure"},"attribution_scope":"association_only","scientific_context":{},"resolution_status":"partial","confidence":0.85}]}
+
+Ordered named groups with unchanged outcome:
+OBJECTIVE VARIABLES: cooling rate
+OBJECTIVE OUTCOME: total elongation
+SOURCE: At 800 C, groups 800-S, 800-M, and 800-F used progressively faster cooling. Total elongation was not statistically different between the three groups.
+OUTPUT: {"extractions":[{"evidence_role":"direct_result","changed_variables":[],"comparison":{"baseline_label":"800-M","target_label":"800-F","axis_names":["cooling rate"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"total elongation","value":null,"unit":null,"direction":"no_change","result_text":"Total elongation was not statistically different between the three groups"},"attribution_scope":"association_only","scientific_context":{},"resolution_status":"partial","confidence":0.85}]}
 
 Joint result source:
 {"extractions":[{"evidence_role":"direct_result","changed_variables":[{"name":"laser power","baseline_value":100,"target_value":200,"unit":"W"},{"name":"scan speed","baseline_value":500,"target_value":900,"unit":"mm/s"}],"comparison":{"baseline_label":"A","target_label":"B","axis_names":["laser power","scan speed"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"relative density","value":98.0,"unit":"%","direction":"increase","result_text":"relative density increased to 98.0%"},"attribution_scope":"joint_effect","scientific_context":{"material":[],"sample":[],"process":[],"test":[]},"resolution_status":"resolved","confidence":0.9}]}
@@ -2393,7 +2404,20 @@ def _objective_process_table_matrix_records(
     headers: tuple[str, ...],
     data_rows: tuple[tuple[int, tuple[str, ...]], ...],
 ) -> tuple[dict[str, Any], ...]:
-    result_columns = _objective_route_result_columns(route)
+    result_columns = _objective_route_result_columns(
+        route,
+        objective_context=objective_context,
+    )
+    if objective_context is not None:
+        result_columns.update(
+            header
+            for header in headers
+            if not _objective_value_column_is_non_result(header)
+            and _objective_result_column_matches_target(
+                header,
+                objective_context=objective_context,
+            )
+        )
     records: list[dict[str, Any]] = []
     for row_index, row in data_rows:
         row_values = _objective_table_row_values(headers=headers, row=row)

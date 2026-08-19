@@ -51,9 +51,12 @@ Objective analysis.
   Owns reconstruction after every routed Source in a paper has been inspected.
   It fills missing material or process scope only from the same paper's skim,
   binds Methods conditions to Results only through exact and unambiguous sample
-  identities, and derives the existing bounded pairwise comparisons. Missing or
-  conflicting sample identities remain descriptive, and reconstruction never
-  crosses a document boundary.
+  identities, and derives the existing bounded pairwise comparisons. A
+  Source-grounded author comparison whose exact groups bind but whose linked
+  context does not expose quantified process values remains association-only;
+  it is not promoted to an isolated effect. Missing or conflicting sample
+  identities remain descriptive, and reconstruction never crosses a document
+  boundary.
 - `analysis/evidence_materialization.py`
   Owns the boundary from reconstructed drafts to durable `ObjectiveEvidence`
   and auditable `PaperContribution` records. It retains confirmed-Objective
@@ -372,6 +375,13 @@ result and comparison labels from the result Source. Missing or conflicting
 sample bindings remain `descriptive_only`; no cross-document binding or semantic
 LLM repair is attempted.
 
+When one grounded text Source explicitly reports an unchanged outcome for one
+uniquely identifiable named-condition series but the model omits its comparison,
+Source validation may recover the first and last exact group labels and the
+Source-local variable phrase. This recovery remains `association_only`; it does
+not infer numeric process values, isolate causation, or run when the condition
+series or variable phrase is ambiguous.
+
 Every related Source locator records a `supports` list naming the scientific
 field families owned by that Source, such as `reported_result`,
 `comparison.labels`, `changed_variables`, or `scientific_context.process`.
@@ -481,6 +491,12 @@ comparisons (`AB`, `AF`, `as-built`, or `as-fabricated` to a treated state) from
 treated-state-to-treated-state comparisons. This preserves every extracted
 interval while preventing a treatment-series contrast from manufacturing a
 conflict inside a cross-paper reference-to-treatment Finding.
+An axis such as `post-processing condition`, `processing condition`, `condition`,
+`sample state`, or `material state` represents an unresolved condition package,
+not one isolated scientific factor. A pairwise comparison on one such axis is
+therefore `association_only`; an explicit single factor can remain
+`isolated_effect`, while multiple explicit changed factors remain one
+`joint_effect` tuple.
 Opposing directions across different ranges of the changed axis may therefore
 form one `condition_dependent` Finding when every fixed context field remains
 compatible; an opposing fixed material, sample, process, or test condition does

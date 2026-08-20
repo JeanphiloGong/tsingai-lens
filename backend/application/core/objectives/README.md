@@ -164,11 +164,12 @@ Objective analysis.
   normalized view is transient: persisted studies retain their
   extracted labels and exact Source lineage. Objective membership requires one
   coherent topic and a non-conflicting material scope, not identical complete
-  factor tuples. The Objective question retains only factors with an equivalent
-  or same-topic factor in another supporting paper. Paper-specific jointly
-  varied factors remain on their source `PaperStudyRelationship` for later
-  confounding and comparability decisions instead of widening the collection
-  question. Common stainless steel grade
+  factor tuples. The Objective question retains factors equivalent across every
+  supporting paper. If topic support has no such exact shared factor, one
+  deterministic source-backed factor names the candidate topic instead of
+  unioning every paper-specific factor. Paper-specific jointly varied factors
+  remain on their source `PaperStudyRelationship` for later confounding and
+  comparability decisions. Common stainless steel grade
   spellings and established Ti-6Al-4V forms have one deterministic material
   identity. A relationship
   with missing material scope may join a known-material group only when exactly
@@ -334,10 +335,12 @@ the original joint-factor list and process/sample context. These snapshots are
 interpretive context, not proof that jointly varied factors belong to one
 intervention topic. Topic-only edges enter one conservative confirmation pass in
 batches of at most 16; exact-equivalence decisions do not require this second
-judgment. Outcomes must be exactly equivalent after accepted alias
-normalization. Every source relationship keeps its complete jointly varied
-factor tuple and one specific outcome; the Objective presents only the focused
-factor topic shared across supporting papers. Explicit material conflicts
+  judgment. Outcomes must be exactly equivalent after accepted alias
+  normalization. Every source relationship keeps its complete jointly varied
+  factor tuple and one specific outcome. The Objective presents factors shared
+  by every supporting paper or one source-backed representative when the group
+  is topic-only, so specific paper conditions do not accumulate in its question.
+  Explicit material conflicts
 remain a hard boundary. Other study-context
 differences are retained, not flattened, and are evaluated downstream when
 Evidence is compared. The backend turns each cross-paper topic group into one

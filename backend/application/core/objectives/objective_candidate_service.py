@@ -675,6 +675,11 @@ class ObjectiveCandidateService:
                 "comparability remains a later evidence decision."
             ),
             (
+                "Objective variables are shared across every supporting paper, or "
+                "use one source-backed topic representative when no exact variable "
+                "spans them; paper-specific factors remain in relationship lineage."
+            ),
+            (
                 "Confidence is the minimum available non-zero source confidence."
                 if confidence > 0
                 else "No source supplied a non-zero confidence."
@@ -806,7 +811,7 @@ class ObjectiveCandidateService:
                 candidates.append((supporting_relationship_ids, tuple(group)))
         if not candidates:
             return (), ()
-        return min(
+        supporting_relationship_ids, topic_variables = min(
             candidates,
             key=lambda candidate: (
                 -len(
@@ -820,6 +825,56 @@ class ObjectiveCandidateService:
                 tuple(self._axis_record_key(value) for value in candidate[1]),
             ),
         )
+        return (
+            supporting_relationship_ids,
+            self._focused_objective_variables(
+                topic_variables,
+                relationship_ids=supporting_relationship_ids,
+                relationship_inventory=relationship_inventory,
+            ),
+        )
+
+    @classmethod
+    def _focused_objective_variables(
+        cls,
+        topic_variables: tuple[str, ...],
+        *,
+        relationship_ids: tuple[str, ...],
+        relationship_inventory: RelationshipInventory,
+    ) -> tuple[str, ...]:
+        document_ids = {
+            relationship_inventory[relationship_id][0]
+            for relationship_id in relationship_ids
+        }
+        documents_by_variable: dict[str, set[str]] = {}
+        for variable in topic_variables:
+            supporting_documents: set[str] = set()
+            for relationship_id in relationship_ids:
+                document_id, _study, relationship = relationship_inventory[
+                    relationship_id
+                ]
+                if any(
+                    cls._axis_values_are_equivalent(variable, factor)
+                    for factor in relationship.varied_factors
+                ):
+                    supporting_documents.add(document_id)
+            documents_by_variable[variable] = supporting_documents
+        shared_variables = tuple(
+            variable
+            for variable in topic_variables
+            if documents_by_variable[variable] == document_ids
+        )
+        if shared_variables:
+            return shared_variables
+        representative = min(
+            topic_variables,
+            key=lambda variable: (
+                -len(documents_by_variable[variable]),
+                len(cls._axis_record_key(variable)),
+                cls._axis_record_key(variable),
+            ),
+        )
+        return (representative,)
 
     @staticmethod
     def _objective_question(

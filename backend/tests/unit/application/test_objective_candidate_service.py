@@ -674,10 +674,7 @@ def test_objective_question_keeps_only_axes_supported_across_papers():
 
     assert len(facts.research_objectives) == 1
     objective = facts.research_objectives[0]
-    assert set(objective.variables) == {
-        "cooling rate after HIP",
-        "HIP cooling rate",
-    }
+    assert objective.variables == ("HIP cooling rate",)
     assert set(objective.source_relationship_ids) == {
         "relationship-hip-methods",
         "relationship-hip-results",
@@ -687,6 +684,66 @@ def test_objective_question_keeps_only_axes_supported_across_papers():
         "HIP temperature",
         "parent beta grain size",
     )
+
+
+def test_topic_only_cross_paper_objective_uses_one_source_backed_variable():
+    class HipTopicClassifier(_GroupingExtractor):
+        def classify(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredAxisCanonicalizationPlan:
+            self.canonicalization_payloads.append(payload)
+            return StructuredAxisCanonicalizationPlan(
+                decisions=[
+                    {
+                        "pair_id": pair["pair_id"],
+                        "equivalent": False,
+                        "same_research_topic": pair["axis_type"] == "variable",
+                    }
+                    for pair in payload["axis_pairs"]
+                ]
+            )
+
+    paper_factors = (
+        "HIP cooling rate",
+        "HIP pressure",
+        "HIP temperature",
+        "HIP hold time",
+        "HIP heating rate",
+        "HIP post-processing condition",
+    )
+    skims = tuple(
+        _paper_skim(
+            document_id=f"paper-hip-{position}",
+            relationship_id=f"relationship-hip-{position}",
+            factors=(factor,),
+            outcome="elongation",
+            material_scope=("Ti-6Al-4V",),
+        )
+        for position, factor in enumerate(paper_factors, start=1)
+    )
+
+    facts = ObjectiveCandidateService().discover_candidate_facts(
+        "collection-ti64-hip-topic",
+        paper_skims=skims,
+        axis_equivalence_classifier=HipTopicClassifier(),
+    )
+
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert len(objective.variables) == 1
+    assert objective.variables[0] in paper_factors
+    assert set(objective.seed_document_ids) == {
+        f"paper-hip-{position}" for position in range(1, 7)
+    }
+    assert set(objective.source_relationship_ids) == {
+        f"relationship-hip-{position}" for position in range(1, 7)
+    }
+    assert objective.reason is not None
+    assert "paper-specific factors remain in relationship lineage" in objective.reason
+    assert {
+        skim.studies[0].relationships[0].varied_factors[0] for skim in skims
+    } == set(paper_factors)
 
 
 def test_local_topic_bridges_do_not_form_one_multi_topic_objective():
@@ -748,7 +805,7 @@ def test_local_topic_bridges_do_not_form_one_multi_topic_objective():
 
     assert len(facts.research_objectives) == 1
     objective = facts.research_objectives[0]
-    assert len(objective.variables) == 2
+    assert objective.variables == ("HIP cooling rate",)
     assert len(objective.seed_document_ids) == 2
     assert len(objective.source_relationship_ids) == 2
     assert all(
@@ -845,7 +902,7 @@ def test_axis_topic_classifier_receives_bounded_study_usage_context():
 
     assert len(facts.research_objectives) == 1
     objective = facts.research_objectives[0]
-    assert set(objective.variables) == {"build orientation", "sample orientation"}
+    assert objective.variables == ("build orientation",)
     assert "laser speed" not in objective.question
     assert skims[0].studies[0].relationships[0].varied_factors == (
         "build orientation",
@@ -923,7 +980,7 @@ def test_topic_only_pairs_are_confirmed_in_bounded_batches():
     assert len(confirmation_payloads[0]["axis_pairs"]) == 3
     assert len(facts.research_objectives) == 1
     objective = facts.research_objectives[0]
-    assert set(objective.variables) == {"build orientation", "sample orientation"}
+    assert objective.variables == ("build orientation",)
     assert set(objective.seed_document_ids) == {"paper-build", "paper-sample"}
     assert (
         next(

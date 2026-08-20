@@ -2,10 +2,15 @@ import { page as browserPage } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 
+import type {
+	ChatMessage,
+	ChatToolCall,
+	ChatTrajectory,
+	ChatTurn
+} from '../../../_shared/chatSessions';
+
 type AssistantPageState = {
-	params: {
-		id: string;
-	};
+	params: { id: string };
 	url: URL;
 };
 
@@ -13,7 +18,7 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 	const subscribers = new Set<(value: AssistantPageState) => void>();
 	let current: AssistantPageState = {
 		params: { id: 'col_123' },
-		url: new URL('http://localhost/collections/col_123/assistant?objective_id=obj_1')
+		url: new URL('http://localhost/collections/col_123/assistant')
 	};
 
 	return {
@@ -32,1390 +37,517 @@ const { pageStore, setPage, fetchMock } = vi.hoisted(() => {
 	};
 });
 
-vi.mock('$app/stores', () => ({
-	page: pageStore
-}));
-
+vi.mock('$app/stores', () => ({ page: pageStore }));
 vi.stubGlobal('fetch', fetchMock);
 
 const Page = (await import('./+page.svelte')).default;
 
-function jsonResponse(body: unknown, status = 200, statusText = 'OK') {
+const createdAt = '2026-08-19T08:00:00+00:00';
+const session = {
+	session_id: 'chat_1',
+	user_id: 'researcher_1',
+	collection_id: 'col_123',
+	created_at: createdAt,
+	updated_at: createdAt
+};
+
+function jsonResponse(body: unknown, status = 200) {
 	return new Response(JSON.stringify(body), {
 		status,
-		statusText,
-		headers: {
-			'Content-Type': 'application/json'
-		}
+		headers: { 'Content-Type': 'application/json' }
 	});
 }
 
 function requestPath(input: string | URL | Request) {
-	const rawUrl =
+	const raw =
 		typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-	return new URL(rawUrl, 'http://localhost').pathname;
-}
-
-function requestUrl(input: string | URL | Request) {
-	const rawUrl =
-		typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-	return new URL(rawUrl, 'http://localhost');
+	return new URL(raw, 'http://localhost').pathname;
 }
 
 function requestMethod(input: string | URL | Request, init?: RequestInit) {
 	return input instanceof Request ? input.method : (init?.method ?? 'GET');
 }
 
-function datasetResponse({
-	trainingReady = 1,
-	trainingMessages = 1,
-	reviewCandidate = 0
-}: {
-	trainingReady?: number;
-	trainingMessages?: number;
-	reviewCandidate?: number;
-} = {}) {
-	const trainingItems = Array.from({ length: trainingReady }, (_, index) => ({
-		sample_id: `sample_training_${index + 1}`,
-		objective_id: 'obj_1',
-		analysis_version: 1,
-		finding_id: `finding_training_${index + 1}`,
-		research_objective: 'How does VED affect fatigue strength?',
-		document_ids: ['paper-1'],
-		label_status: 'gold',
-		dataset_use_status: 'training_ready',
-		finding_fingerprint: `finding-fingerprint-${index + 1}`,
-		evidence_fingerprint: `evidence-fingerprint-${index + 1}`,
-		system_prediction: {},
-		expert_target: {},
-		training_target: {},
-		evidence: [],
-		training_schema_version: 'objective_finding_training.v2',
-		training_prompt_version: 'objective_finding_training_prompt.v2',
-		training_messages:
-			index < trainingMessages
-				? [
-						{ role: 'user', content: 'Research objective and exact evidence.' },
-						{ role: 'assistant', content: '{"finding_id":"finding_training"}' }
-					]
-				: [],
-		metadata: {}
-	}));
-	const reviewItems = Array.from({ length: reviewCandidate }, (_, index) => ({
-		sample_id: `sample_review_${index + 1}`,
-		objective_id: 'obj_1',
-		analysis_version: 1,
-		finding_id: `finding_review_${index + 1}`,
-		research_objective: 'How does VED affect fatigue strength?',
-		document_ids: ['paper-1'],
-		label_status: 'candidate',
-		dataset_use_status: 'review_candidate',
-		finding_fingerprint: `finding-review-fingerprint-${index + 1}`,
-		evidence_fingerprint: `evidence-review-fingerprint-${index + 1}`,
-		system_prediction: {},
-		expert_target: null,
-		training_target: {},
-		evidence: [],
-		training_schema_version: 'objective_finding_training.v2',
-		training_prompt_version: 'objective_finding_training_prompt.v2',
-		training_messages: [],
-		metadata: {}
-	}));
+function requestBody(input: string | URL | Request, init?: RequestInit) {
+	const body = input instanceof Request ? null : init?.body;
+	return typeof body === 'string' ? JSON.parse(body) : null;
+}
+
+function message(
+	messageId: string,
+	role: ChatMessage['role'],
+	content: string,
+	overrides: Partial<ChatMessage> = {}
+): ChatMessage {
 	return {
-		schema_version: 'objective_finding_dataset.v2',
-		collection_id: 'col_123',
-		objective_id: 'obj_1',
-		items: [...trainingItems, ...reviewItems],
-		warnings: []
+		message_id: messageId,
+		session_id: session.session_id,
+		role,
+		content,
+		created_at: createdAt,
+		tool_call_id: null,
+		tool_name: null,
+		tool_arguments: null,
+		tool_result: null,
+		...overrides
 	};
 }
 
-describe('collections/[id]/assistant/+page.svelte', () => {
+function pendingCall(overrides: Partial<ChatToolCall> = {}): ChatToolCall {
+	return {
+		tool_call_id: 'call_write_1',
+		session_id: session.session_id,
+		assistant_message_id: 'msg_call_write',
+		name: 'create_objective_candidate',
+		arguments: {
+			question: 'How does energy input affect grain morphology?',
+			variables: ['energy input'],
+			outcomes: ['grain morphology']
+		},
+		arguments_digest: 'digest_exact_1',
+		risk: 'write',
+		status: 'approval_required',
+		started_at: null,
+		finished_at: null,
+		error_code: null,
+		decision_user_id: null,
+		decision_arguments_digest: null,
+		decided_at: null,
+		...overrides
+	};
+}
+
+function installApi({
+	trajectory = { items: [], pending_approval: null },
+	messageTurn,
+	decisionTurn
+}: {
+	trajectory?: ChatTrajectory;
+	messageTurn?: ChatTurn;
+	decisionTurn?: ChatTurn;
+} = {}) {
+	fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+		const path = requestPath(input);
+		const method = requestMethod(input, init);
+		if (path === '/api/v1/chat-sessions' && method === 'POST') {
+			return Promise.resolve(jsonResponse(session, 201));
+		}
+		if (path === `/api/v1/chat-sessions/${session.session_id}` && method === 'GET') {
+			return Promise.resolve(jsonResponse(session));
+		}
+		if (path === `/api/v1/chat-sessions/${session.session_id}/messages` && method === 'GET') {
+			return Promise.resolve(jsonResponse(trajectory));
+		}
+		if (path === `/api/v1/chat-sessions/${session.session_id}/messages` && method === 'POST') {
+			return Promise.resolve(jsonResponse(messageTurn));
+		}
+		if (
+			path === `/api/v1/chat-sessions/${session.session_id}/tool-calls/call_write_1/decision` &&
+			method === 'POST'
+		) {
+			return Promise.resolve(jsonResponse(decisionTurn));
+		}
+		return Promise.resolve(jsonResponse({ detail: `Unexpected ${method} ${path}` }, 500));
+	});
+}
+
+async function renderReady() {
+	render(Page);
+	const composer = browserPage.getByLabelText('Message');
+	await expect.element(composer).toBeEnabled();
+	return composer;
+}
+
+async function send(text: string) {
+	const composer = await renderReady();
+	await composer.fill(text);
+	await browserPage.getByRole('button', { name: 'Send' }).click();
+}
+
+describe('collections/[id]/assistant Research Agent', () => {
 	beforeEach(() => {
 		localStorage.clear();
 		setPage({
 			params: { id: 'col_123' },
-			url: new URL('http://localhost/collections/col_123/assistant?objective_id=obj_1')
+			url: new URL('http://localhost/collections/col_123/assistant')
 		});
 		fetchMock.mockReset();
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (
-				path === '/api/v1/collections/col_123/objectives/obj_1/finding-dataset' &&
-				method === 'GET'
-			) {
-				return Promise.resolve(jsonResponse(datasetResponse()));
-			}
-			if (path === '/api/v1/goal-sessions' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						session_id: 'session_1',
-						user_id: 'test-user',
-						collection_id: 'col_123',
-						focused_material_id: null,
-						focused_paper_id: null,
-						focused_objective_id: 'obj_1',
-						goal_text: null,
-						goal_brief_json: {},
-						answer_mode: 'hybrid',
-						rolling_summary: '',
-						last_evidence_ids: [],
-						last_material_ids: [],
-						last_paper_ids: [],
-						collection_data_version: null,
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T00:00:00+00:00'
-					})
-				);
-			}
-			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						message_id: 'msg_assistant_1',
-						session_id: 'session_1',
-						role: 'assistant',
-						content:
-							'**Hypothesis**\n' +
-							'VED changes defect fraction and fatigue strength [Source 1].\n\n' +
-							'**Variable matrix**\nCompare L-VED, M-VED, and H-VED builds.\n\n' +
-							'**Measurements**\nDefect fraction and fatigue strength.\n\n' +
-							'**Controls**\nKeep alloy, powder, and heat treatment fixed.\n\n' +
-							'**Risks or limits**\nSingle-paper evidence should be validated.',
-						answer:
-							'**Hypothesis**\n' +
-							'VED changes defect fraction and fatigue strength [Source 1].\n\n' +
-							'**Variable matrix**\nCompare L-VED, M-VED, and H-VED builds.\n\n' +
-							'**Measurements**\nDefect fraction and fatigue strength.\n\n' +
-							'**Controls**\nKeep alloy, powder, and heat treatment fixed.\n\n' +
-							'**Risks or limits**\nSingle-paper evidence should be validated.',
-						source_mode: 'collection_grounded',
-						used_evidence_ids: ['ev_1'],
-						warnings: [],
-						links: {},
-						review_gate: 'reviewed_findings',
-						source_validity: 'current',
-						source_links: [
-							{
-								kind: 'evidence',
-								label: 'Source 1',
-								href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
-							}
-						],
-						created_at: '2026-07-13T00:01:00+00:00'
-					})
-				);
-			}
-			if (
-				path === '/api/v1/collections/col_123/objectives/obj_1/experiment-plans' &&
-				method === 'POST'
-			) {
-				return Promise.resolve(
-					jsonResponse({
-						plan_id: 'plan_1',
-						collection_id: 'col_123',
-						objective_id: 'obj_1',
-						title: 'Hypothesis: VED changes defect fraction and fatigue strength [Source 1].',
-						content:
-							'**Hypothesis**\n' +
-							'VED changes defect fraction and fatigue strength [Source 1].\n\n' +
-							'**Variable matrix**\nCompare L-VED, M-VED, and H-VED builds.\n\n' +
-							'**Measurements**\nDefect fraction and fatigue strength.\n\n' +
-							'**Controls**\nKeep alloy, powder, and heat treatment fixed.\n\n' +
-							'**Risks or limits**\nSingle-paper evidence should be validated.',
-						status: 'draft',
-						source_message_id: 'msg_assistant_1',
-						source_links: [
-							{
-								kind: 'evidence',
-								label: 'Source 1',
-								href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
-							}
-						],
-						metadata: { source: 'goal_copilot', source_mode: 'collection_grounded' },
-						created_by: 'test-user',
-						created_at: '2026-07-13T00:02:00+00:00',
-						updated_at: '2026-07-13T00:02:00+00:00'
-					})
-				);
-			}
-			return Promise.resolve(
-				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
-			);
-		});
 	});
 
-	it('shows protocol readiness for goals with training-ready message samples', async () => {
-		render(Page);
+	it('handles ordinary conversation without showing capability activity', async () => {
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_1', 'user', 'Hello'),
+					message('msg_assistant_1', 'assistant', 'Hello. I can help inspect this collection.')
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
 
-		await expect.element(browserPage.getByText('Experiment readiness')).toBeInTheDocument();
+		await send('Hello');
+
 		await expect
-			.element(
-				browserPage.getByText(
-					'1 training-ready finding(s) and 1 message-ready sample(s) are available for traceable protocol drafts.'
-				)
-			)
+			.element(browserPage.getByText('Hello. I can help inspect this collection.'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Research activity')).not.toBeInTheDocument();
+	});
+
+	it('renders a read capability result separately from the final answer', async () => {
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_1', 'user', 'What findings are available?'),
+					message('msg_call_1', 'assistant', '', {
+						tool_call_id: 'call_read_1',
+						tool_name: 'query_published_findings',
+						tool_arguments: { query: 'energy input' }
+					}),
+					message('msg_result_1', 'tool', '', {
+						tool_call_id: 'call_read_1',
+						tool_result: {
+							tool_call_id: 'call_read_1',
+							status: 'succeeded',
+							data: { finding_count: 2, evidence_count: 8 },
+							resource_refs: [
+								{
+									resource_type: 'finding',
+									resource_id: 'finding_1',
+									href: '/collections/col_123/objectives/obj_1?finding_id=finding_1'
+								}
+							],
+							warnings: ['One paper used a different heat treatment.'],
+							error_code: null,
+							error_message: null
+						}
+					}),
+					message('msg_assistant_2', 'assistant', 'Two published findings address this question.')
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		await send('What findings are available?');
+
+		await expect.element(browserPage.getByText('Published findings completed')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('2 findings · 8 evidence records'))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('link', { name: 'Open objective review' }))
-			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1?review=training_ready');
+			.element(browserPage.getByText('One paper used a different heat treatment.'))
+			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('button', { name: 'Draft protocol' }))
+			.element(browserPage.getByRole('link', { name: 'Open finding' }))
+			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1?finding_id=finding_1');
+		await expect
+			.element(browserPage.getByText('Two published findings address this question.'))
 			.toBeInTheDocument();
 	});
 
-	it('uses the assistant goal deep link for the goal session and curated dataset', async () => {
+	it('renders a queued capability as started with a traceable resource', async () => {
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_1', 'user', 'Start the analysis'),
+					message('msg_call_1', 'assistant', '', {
+						tool_call_id: 'call_queued_1',
+						tool_name: 'start_objective_analysis',
+						tool_arguments: { objective_id: 'obj_1' }
+					}),
+					message('msg_result_1', 'tool', '', {
+						tool_call_id: 'call_queued_1',
+						tool_result: {
+							tool_call_id: 'call_queued_1',
+							status: 'queued',
+							data: {},
+							resource_refs: [
+								{
+									resource_type: 'objective_analysis',
+									resource_id: 'obj_1:1',
+									href: '/collections/col_123/objectives/obj_1'
+								}
+							],
+							warnings: [],
+							error_code: null,
+							error_message: null
+						}
+					}),
+					message('msg_assistant_2', 'assistant', 'The analysis has started.')
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		await send('Start the analysis');
+
+		await expect.element(browserPage.getByText('Research capability started')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Task queued. You can continue while it runs.'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Open analysis' }))
+			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1');
+	});
+
+	it('shows objective drafts as proposals without creating Core records', async () => {
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_1', 'user', 'Suggest objectives'),
+					message('msg_call_1', 'assistant', '', {
+						tool_call_id: 'call_draft_1',
+						tool_name: 'propose_objective_drafts',
+						tool_arguments: { question: 'energy input effects' }
+					}),
+					message('msg_result_1', 'tool', '', {
+						tool_call_id: 'call_draft_1',
+						tool_result: {
+							tool_call_id: 'call_draft_1',
+							status: 'succeeded',
+							data: {
+								draft_count: 1,
+								drafts: [
+									{
+										question: 'How does energy input affect grain morphology?',
+										variables: ['energy input'],
+										outcomes: ['grain morphology'],
+										support_status: 'collection_supported'
+									}
+								]
+							},
+							resource_refs: [],
+							warnings: [],
+							error_code: null,
+							error_message: null
+						}
+					}),
+					message('msg_assistant_2', 'assistant', 'I found one focused candidate for review.')
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		await send('Suggest objectives');
+
+		await expect
+			.element(browserPage.getByText('How does energy input affect grain morphology?'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Proposal context: collection_supported'))
+			.toBeInTheDocument();
+		expect(
+			fetchMock.mock.calls.some(([input]) =>
+				requestPath(input as string | URL | Request).includes('/objectives')
+			)
+		).toBe(false);
+	});
+
+	it('shows exact write arguments and blocks new messages while approval is pending', async () => {
+		const call = pendingCall();
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Create the grain objective'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Create the grain objective');
+
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Approval required' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('How does energy input affect grain morphology?'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('energy input', { exact: true }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
+		await expect.element(browserPage.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and create' }))
+			.toBeInTheDocument();
+	});
+
+	it('records an exact rejection and creates no objective resource', async () => {
+		const call = pendingCall();
+		installApi({
+			trajectory: {
+				items: [
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call
+			},
+			decisionTurn: {
+				status: 'rejected',
+				messages: [],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+		localStorage.setItem('lens.chatSession.col_123', session.session_id);
 		render(Page);
+
+		await browserPage.getByRole('button', { name: 'Reject' }).click();
 
 		await expect
 			.element(
-				browserPage.getByText(
-					'1 training-ready finding(s) and 1 message-ready sample(s) are available for traceable protocol drafts.'
-				)
+				browserPage.getByText('The proposed write was rejected. No research objective was created.')
 			)
 			.toBeInTheDocument();
-
-		const [, sessionInit] = fetchMock.mock.calls.find(([input, init]) => {
-			return (
-				requestPath(input as string | URL | Request) === '/api/v1/goal-sessions' &&
-				requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
-			);
-		}) as [string | URL | Request, RequestInit];
-		expect(JSON.parse(sessionInit.body as string)).toMatchObject({
-			collection_id: 'col_123',
-			focused_objective_id: 'obj_1',
-			answer_mode: 'hybrid'
-		});
-
-		const [datasetRequest] = fetchMock.mock.calls.find(([input, init]) => {
-			return (
-				requestPath(input as string | URL | Request) ===
-					'/api/v1/collections/col_123/objectives/obj_1/finding-dataset' &&
-				requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'GET'
-			);
-		}) as [string | URL | Request, RequestInit | undefined];
-		const datasetUrl = requestUrl(datasetRequest);
-		expect(datasetUrl.pathname).toBe(
-			'/api/v1/collections/col_123/objectives/obj_1/finding-dataset'
+		const decisionRequest = fetchMock.mock.calls.find(
+			([input, init]) =>
+				requestPath(input as string | URL | Request).endsWith('/decision') &&
+				requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
 		);
-	});
-
-	it('shows review backlog before protocol drafts are ready', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (
-				path === '/api/v1/collections/col_123/objectives/obj_1/finding-dataset' &&
-				method === 'GET'
-			) {
-				return Promise.resolve(
-					jsonResponse(
-						datasetResponse({
-							trainingReady: 0,
-							trainingMessages: 0,
-							reviewCandidate: 3
-						})
-					)
-				);
-			}
-			if (path === '/api/v1/goal-sessions' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						session_id: 'session_1',
-						user_id: 'test-user',
-						collection_id: 'col_123',
-						focused_material_id: null,
-						focused_paper_id: null,
-						focused_objective_id: 'obj_1',
-						goal_text: null,
-						goal_brief_json: {},
-						answer_mode: 'hybrid',
-						rolling_summary: '',
-						last_evidence_ids: [],
-						last_material_ids: [],
-						last_paper_ids: [],
-						collection_data_version: null,
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T00:00:00+00:00'
-					})
-				);
-			}
-			return Promise.resolve(
-				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
-			);
+		expect(requestBody(decisionRequest![0], decisionRequest![1])).toEqual({
+			decision: 'rejected',
+			arguments_digest: 'digest_exact_1'
 		});
-
-		render(Page);
-
 		await expect
-			.element(
-				browserPage.getByText(
-					'3 finding(s) still need expert review before protocol drafts can be saved. Next: Review findings first.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('link', { name: 'Review findings first' }))
-			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1?review=queue');
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Draft protocol' }))
+			.element(browserPage.getByRole('link', { name: 'Open research objective' }))
 			.not.toBeInTheDocument();
 	});
 
-	it('shows pending training messages before protocol drafts are ready', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (
-				path === '/api/v1/collections/col_123/objectives/obj_1/finding-dataset' &&
-				method === 'GET'
-			) {
-				return Promise.resolve(
-					jsonResponse(
-						datasetResponse({
-							trainingReady: 1,
-							trainingMessages: 0,
-							reviewCandidate: 0
-						})
-					)
-				);
-			}
-			if (path === '/api/v1/goal-sessions' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						session_id: 'session_1',
-						user_id: 'test-user',
-						collection_id: 'col_123',
-						focused_material_id: null,
-						focused_paper_id: null,
-						focused_objective_id: 'obj_1',
-						goal_text: null,
-						goal_brief_json: {},
-						answer_mode: 'hybrid',
-						rolling_summary: '',
-						last_evidence_ids: [],
-						last_material_ids: [],
-						last_paper_ids: [],
-						collection_data_version: null,
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T00:00:00+00:00'
+	it('executes an approved write and links the canonical objective', async () => {
+		const call = pendingCall();
+		installApi({
+			trajectory: {
+				items: [
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
 					})
-				);
+				],
+				pending_approval: call
+			},
+			decisionTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_result_write', 'tool', '', {
+						tool_call_id: call.tool_call_id,
+						tool_result: {
+							tool_call_id: call.tool_call_id,
+							status: 'succeeded',
+							data: { objective_id: 'obj_new_1' },
+							resource_refs: [
+								{
+									resource_type: 'research_objective',
+									resource_id: 'obj_new_1',
+									href: '/collections/col_123/objectives/obj_new_1'
+								}
+							],
+							warnings: [],
+							error_code: null,
+							error_message: null
+						}
+					}),
+					message(
+						'msg_final_write',
+						'assistant',
+						'The objective candidate was created for your review.'
+					)
+				],
+				pending_approval: null,
+				error_code: null
 			}
-			return Promise.resolve(
-				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
-			);
 		});
-
+		localStorage.setItem('lens.chatSession.col_123', session.session_id);
 		render(Page);
 
+		await browserPage.getByRole('button', { name: 'Approve and create' }).click();
+
+		const objectiveLink = browserPage.getByRole('link', { name: 'Open research objective' });
 		await expect
-			.element(
-				browserPage.getByText(
-					'1 training-ready finding(s) exist, but only 0 training message sample(s) are exportable. Check dataset export quality before drafting a protocol.'
-				)
-			)
+			.element(objectiveLink)
+			.toHaveAttribute('href', '/collections/col_123/objectives/obj_new_1');
+		await expect
+			.element(browserPage.getByText('The objective candidate was created for your review.'))
 			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('link', { name: 'Check objective readiness' }))
-			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1?review=training_ready');
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Draft protocol' }))
-			.not.toBeInTheDocument();
-	});
-
-	it('starts a protocol draft from reviewed goal findings', async () => {
-		render(Page);
-
-		await browserPage.getByRole('button', { name: 'Draft protocol' }).click();
-
-		const [, messageInit] = fetchMock.mock.calls.find(([input, init]) => {
-			return (
-				requestPath(input as string | URL | Request) ===
-					'/api/v1/goal-sessions/session_1/messages' &&
-				requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
-			);
-		}) as [string | URL | Request, RequestInit];
-		const payload = JSON.parse(messageInit.body as string);
-		expect(payload.message).toContain('protocol-ready findings');
-		expect(payload.message).toContain('Hypothesis');
-		expect(payload.message).toContain('Variable matrix');
-		expect(payload.message).toContain('Measurements');
-		expect(payload.message).toContain('Controls');
-		expect(payload.message).toContain('Risks or limits');
-		expect(payload.message).toContain('visible source labels');
-	});
-
-	it('saves grounded copilot answers as traceable experiment plans', async () => {
-		render(Page);
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
-			.toBeInTheDocument();
-		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
-		await browserPage.getByRole('button', { name: 'Send' }).click();
-
-		await expect.element(browserPage.getByText(/VED changes defect fraction/)).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('link', { name: 'Source 1' }))
-			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_1');
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Copy answer' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Like answer' }))
-			.not.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Dislike answer' }))
-			.not.toBeInTheDocument();
-
-		await browserPage.getByRole('button', { name: 'Save plan' }).click();
-
-		const [, planInit] = fetchMock.mock.calls.find(([input, init]) => {
-			return (
-				requestPath(input as string | URL | Request) ===
-					'/api/v1/collections/col_123/objectives/obj_1/experiment-plans' &&
-				requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
-			);
-		}) as [string | URL | Request, RequestInit];
-		const payload = JSON.parse(planInit.body as string);
-		expect(payload.title).toBe(
-			'Hypothesis: VED changes defect fraction and fatigue strength [Source 1].'
+		const decisionRequest = fetchMock.mock.calls.find(
+			([input, init]) =>
+				requestPath(input as string | URL | Request).endsWith('/decision') &&
+				requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
 		);
-		expect(payload.source_message_id).toBe('msg_assistant_1');
-		expect(payload.source_links).toEqual([
-			{
-				kind: 'evidence',
-				label: 'Source 1',
-				href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
-			}
-		]);
-		expect(payload.metadata).toEqual({
-			source: 'goal_copilot',
-			source_mode: 'collection_grounded',
-			review_gate: 'reviewed_findings',
-			source_validity: 'current',
-			used_evidence_ids: ['ev_1'],
-			source_link_count: 1
+		expect(requestBody(decisionRequest![0], decisionRequest![1])).toEqual({
+			decision: 'approved',
+			arguments_digest: 'digest_exact_1'
 		});
-		await expect
-			.element(browserPage.getByRole('link', { name: 'Open plan' }))
-			.toHaveAttribute(
-				'href',
-				'/collections/col_123/objectives/obj_1?plan_id=plan_1#experiment-plans-title'
-			);
 	});
 
-	it('shows a stale-source warning and hides Save plan for a historical answer', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (
-				path === '/api/v1/collections/col_123/objectives/obj_1/finding-dataset' &&
-				method === 'GET'
-			) {
-				return Promise.resolve(jsonResponse(datasetResponse()));
-			}
-			if (path === '/api/v1/goal-sessions' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						session_id: 'session_1',
-						user_id: 'test-user',
-						collection_id: 'col_123',
-						focused_material_id: null,
-						focused_paper_id: null,
-						focused_objective_id: 'obj_1',
-						goal_text: null,
-						goal_brief_json: {},
-						answer_mode: 'hybrid',
-						rolling_summary: '',
-						last_evidence_ids: [],
-						last_material_ids: [],
-						last_paper_ids: [],
-						collection_data_version: null,
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T00:00:00+00:00'
+	it('restores a persisted pending approval after refresh', async () => {
+		const call = pendingCall();
+		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+		installApi({
+			trajectory: {
+				items: [
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
 					})
-				);
+				],
+				pending_approval: call
 			}
-			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						message_id: 'msg_assistant_stale',
-						session_id: 'session_1',
-						role: 'assistant',
-						content:
-							'Hypothesis\nReviewed result [Source 1].\n\n' +
-							'Variable matrix\nCompare conditions.\n\n' +
-							'Measurements\nMeasure strength.\n\n' +
-							'Controls\nHold other variables fixed.\n\n' +
-							'Risks or limits\nEvidence has changed.',
-						source_mode: 'collection_grounded',
-						used_evidence_ids: ['ev_1'],
-						warnings: ['source_finding_snapshot_stale'],
-						links: {},
-						review_gate: null,
-						source_validity: 'stale',
-						source_validity_reasons: ['source_evidence_changed'],
-						source_links: [
-							{
-								kind: 'evidence',
-								label: 'Source 1',
-								href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
-							}
-						],
-						created_at: '2026-07-13T00:01:00+00:00'
-					})
-				);
-			}
-			return Promise.resolve(
-				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
-			);
-		});
-
-		render(Page);
-
-		await browserPage.getByLabelText('Message').fill('Show the historical plan.');
-		await browserPage.getByRole('button', { name: 'Send' }).click();
-		await expect
-			.element(
-				browserPage.getByText(
-					'The reviewed Finding or Evidence used by this answer has changed. Generate a new answer before saving a plan.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Save plan' }))
-			.not.toBeInTheDocument();
-	});
-
-	it('does not save grounded answers without visible source links as experiment plans', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (path === '/api/v1/goal-sessions' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						session_id: 'session_1',
-						user_id: 'test-user',
-						collection_id: 'col_123',
-						focused_material_id: null,
-						focused_paper_id: null,
-						focused_objective_id: 'obj_1',
-						goal_text: null,
-						goal_brief_json: {},
-						answer_mode: 'hybrid',
-						rolling_summary: '',
-						last_evidence_ids: [],
-						last_material_ids: [],
-						last_paper_ids: [],
-						collection_data_version: null,
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T00:00:00+00:00'
-					})
-				);
-			}
-			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						message_id: 'msg_assistant_unlinked',
-						session_id: 'session_1',
-						role: 'assistant',
-						content: 'This grounded draft has no source links.',
-						answer: 'This grounded draft has no source links.',
-						source_mode: 'collection_grounded',
-						used_evidence_ids: [],
-						warnings: [],
-						links: {},
-						review_gate: 'reviewed_findings',
-						source_validity: 'current',
-						source_links: [],
-						created_at: '2026-07-13T00:01:00+00:00'
-					})
-				);
-			}
-			return Promise.resolve(
-				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
-			);
 		});
 
 		render(Page);
 
 		await expect
-			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
+			.element(browserPage.getByRole('heading', { name: 'Approval required' }))
 			.toBeInTheDocument();
-		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
-		await browserPage.getByRole('button', { name: 'Send' }).click();
-
-		await expect
-			.element(browserPage.getByText('This grounded draft has no source links.'))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Save plan' }))
-			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByLabelText('Message')).toBeDisabled();
 		expect(
-			fetchMock.mock.calls.some(([input, init]) => {
-				return (
-					requestPath(input as string | URL | Request).endsWith('/experiment-plans') &&
-					requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
-				);
-			})
-		).toBe(false);
+			fetchMock.mock.calls.some(
+				([input, init]) =>
+					requestPath(input as string | URL | Request).endsWith('/messages') &&
+					requestMethod(input as string | URL | Request, init as RequestInit) === 'GET'
+			)
+		).toBe(true);
 	});
 
-	it('does not save unstructured grounded answers as experiment plans', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (path === '/api/v1/goal-sessions' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						session_id: 'session_1',
-						user_id: 'test-user',
-						collection_id: 'col_123',
-						focused_material_id: null,
-						focused_paper_id: null,
-						focused_objective_id: 'obj_1',
-						goal_text: null,
-						goal_brief_json: {},
-						answer_mode: 'hybrid',
-						rolling_summary: '',
-						last_evidence_ids: [],
-						last_material_ids: [],
-						last_paper_ids: [],
-						collection_data_version: null,
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T00:00:00+00:00'
-					})
-				);
-			}
-			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						message_id: 'msg_assistant_unstructured_protocol',
-						session_id: 'session_1',
-						role: 'assistant',
-						content: 'Run 25 C and 150 C LPBF 316L builds [Source 1].',
-						answer: 'Run 25 C and 150 C LPBF 316L builds [Source 1].',
-						source_mode: 'collection_grounded',
-						used_evidence_ids: ['ev_1'],
-						warnings: [],
-						links: {},
-						review_gate: 'reviewed_findings',
-						source_validity: 'current',
-						source_links: [
-							{
-								kind: 'evidence',
-								label: 'Source 1',
-								href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
-							}
-						],
-						created_at: '2026-07-13T00:01:00+00:00'
-					})
-				);
-			}
-			return Promise.resolve(
-				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
-			);
-		});
+	it('discards stale Goal storage and starts Chat without a compatibility request', async () => {
+		localStorage.setItem('lens.goalSession.col_123', 'goal_legacy_1');
+		localStorage.setItem('lens.goalSessionHistory.col_123', '[{"session_id":"goal_legacy_1"}]');
+		installApi();
 
-		render(Page);
+		await renderReady();
 
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
-			.toBeInTheDocument();
-		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
-		await browserPage.getByRole('button', { name: 'Send' }).click();
-
-		await expect
-			.element(browserPage.getByText('Run 25 C and 150 C LPBF 316L builds'))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Save is disabled until the answer includes a hypothesis, variable matrix, measurements, controls, and risks or limits.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Save plan' }))
-			.not.toBeInTheDocument();
+		expect(localStorage.getItem('lens.goalSession.col_123')).toBeNull();
+		expect(localStorage.getItem('lens.goalSessionHistory.col_123')).toBeNull();
 		expect(
-			fetchMock.mock.calls.some(([input, init]) => {
-				return (
-					requestPath(input as string | URL | Request).endsWith('/experiment-plans') &&
-					requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
-				);
-			})
-		).toBe(false);
-	});
-
-	it('explains when a limited answer is missing auditable source citations', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (path === '/api/v1/goal-sessions' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						session_id: 'session_1',
-						user_id: 'test-user',
-						collection_id: 'col_123',
-						focused_material_id: null,
-						focused_paper_id: null,
-						focused_objective_id: 'obj_1',
-						goal_text: null,
-						goal_brief_json: {},
-						answer_mode: 'hybrid',
-						rolling_summary: '',
-						last_evidence_ids: [],
-						last_material_ids: [],
-						last_paper_ids: [],
-						collection_data_version: null,
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T00:00:00+00:00'
-					})
-				);
-			}
-			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						message_id: 'msg_assistant_missing_source_trace',
-						session_id: 'session_1',
-						role: 'assistant',
-						content:
-							'Lens could not verify source citations in the generated answer, so do not treat it as a traceable collection conclusion.',
-						answer:
-							'Lens could not verify source citations in the generated answer, so do not treat it as a traceable collection conclusion.',
-						source_mode: 'collection_limited',
-						used_evidence_ids: [],
-						warnings: ['goal_copilot_missing_source_citation'],
-						links: {},
-						source_links: [],
-						created_at: '2026-07-13T00:01:00+00:00'
-					})
-				);
-			}
-			return Promise.resolve(
-				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
-			);
-		});
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
-			.toBeInTheDocument();
-		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
-		await browserPage.getByRole('button', { name: 'Send' }).click();
-
-		await expect
-			.element(browserPage.getByText(/could not verify source citations/))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'This answer is limited because Lens could not verify a visible source citation. Review the findings and evidence before using it for a protocol.'
-				)
+			fetchMock.mock.calls.some(([input]) =>
+				requestPath(input as string | URL | Request).includes('/goal-sessions')
 			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Save plan' }))
-			.not.toBeInTheDocument();
+		).toBe(false);
 		expect(
-			fetchMock.mock.calls.some(([input, init]) => {
-				return (
-					requestPath(input as string | URL | Request).endsWith('/experiment-plans') &&
-					requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
-				);
-			})
-		).toBe(false);
-	});
-
-	it('explains when a protocol draft fails the source and design contract', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (path === '/api/v1/goal-sessions' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						session_id: 'session_1',
-						user_id: 'test-user',
-						collection_id: 'col_123',
-						focused_material_id: null,
-						focused_paper_id: null,
-						focused_objective_id: 'obj_1',
-						goal_text: null,
-						goal_brief_json: {},
-						answer_mode: 'hybrid',
-						rolling_summary: '',
-						last_evidence_ids: [],
-						last_material_ids: [],
-						last_paper_ids: [],
-						collection_data_version: null,
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T00:00:00+00:00'
-					})
-				);
-			}
-			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						message_id: 'msg_assistant_invalid_protocol_contract',
-						session_id: 'session_1',
-						role: 'assistant',
-						content:
-							'Lens could not verify the protocol draft contract. Review the protocol-ready findings and source evidence directly, then retry.',
-						answer:
-							'Lens could not verify the protocol draft contract. Review the protocol-ready findings and source evidence directly, then retry.',
-						source_mode: 'collection_limited',
-						used_evidence_ids: [],
-						warnings: ['goal_copilot_protocol_contract_invalid'],
-						links: {},
-						source_links: [],
-						created_at: '2026-07-13T00:01:00+00:00'
-					})
-				);
-			}
-			return Promise.resolve(
-				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
-			);
-		});
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
-			.toBeInTheDocument();
-		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
-		await browserPage.getByRole('button', { name: 'Send' }).click();
-
-		await expect
-			.element(browserPage.getByText(/could not verify the protocol draft contract/))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'This draft failed the source/design contract and cannot be saved. Review the Findings and regenerate it.'
-				)
+			fetchMock.mock.calls.some(
+				([input, init]) =>
+					requestPath(input as string | URL | Request) === '/api/v1/chat-sessions' &&
+					requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
 			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Save plan' }))
-			.not.toBeInTheDocument();
-	});
-
-	it('does not save grounded answers without evidence citations as experiment plans', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (path === '/api/v1/goal-sessions' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						session_id: 'session_1',
-						user_id: 'test-user',
-						collection_id: 'col_123',
-						focused_material_id: null,
-						focused_paper_id: null,
-						focused_objective_id: 'obj_1',
-						goal_text: null,
-						goal_brief_json: {},
-						answer_mode: 'hybrid',
-						rolling_summary: '',
-						last_evidence_ids: [],
-						last_material_ids: [],
-						last_paper_ids: [],
-						collection_data_version: null,
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T00:00:00+00:00'
-					})
-				);
-			}
-			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						message_id: 'msg_assistant_uncited',
-						session_id: 'session_1',
-						role: 'assistant',
-						content: 'This draft links a source but does not cite reviewed evidence [Source 1].',
-						answer: 'This draft links a source but does not cite reviewed evidence [Source 1].',
-						source_mode: 'collection_grounded',
-						used_evidence_ids: [],
-						warnings: [],
-						links: {},
-						review_gate: 'reviewed_findings',
-						source_validity: 'current',
-						source_links: [
-							{
-								kind: 'evidence',
-								label: 'Source 1',
-								href: '/collections/col_123/documents/paper-a?evidence_id=ev_uncited'
-							}
-						],
-						created_at: '2026-07-13T00:01:00+00:00'
-					})
-				);
-			}
-			return Promise.resolve(
-				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
-			);
-		});
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
-			.toBeInTheDocument();
-		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
-		await browserPage.getByRole('button', { name: 'Send' }).click();
-
-		await expect
-			.element(browserPage.getByText(/does not cite reviewed evidence/))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Save is disabled until the answer cites the exact reviewed evidence used for the plan.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('link', { name: 'Source 1' }))
-			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_uncited');
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Save plan' }))
-			.not.toBeInTheDocument();
-		expect(
-			fetchMock.mock.calls.some(([input, init]) => {
-				return (
-					requestPath(input as string | URL | Request).endsWith('/experiment-plans') &&
-					requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
-				);
-			})
-		).toBe(false);
-	});
-
-	it('does not save grounded answers without the protocol-ready review gate', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (path === '/api/v1/goal-sessions' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						session_id: 'session_1',
-						user_id: 'test-user',
-						collection_id: 'col_123',
-						focused_material_id: null,
-						focused_paper_id: null,
-						focused_objective_id: 'obj_1',
-						goal_text: null,
-						goal_brief_json: {},
-						answer_mode: 'hybrid',
-						rolling_summary: '',
-						last_evidence_ids: [],
-						last_material_ids: [],
-						last_paper_ids: [],
-						collection_data_version: null,
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T00:00:00+00:00'
-					})
-				);
-			}
-			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						message_id: 'msg_assistant_no_review_gate',
-						session_id: 'session_1',
-						role: 'assistant',
-						content: 'Use the accepted finding to plan a validation build [Source 1].',
-						answer: 'Use the accepted finding to plan a validation build [Source 1].',
-						source_mode: 'collection_grounded',
-						used_evidence_ids: ['ev_1'],
-						warnings: [],
-						links: {},
-						source_links: [
-							{
-								kind: 'evidence',
-								label: 'Source 1',
-								href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
-							}
-						],
-						created_at: '2026-07-13T00:01:00+00:00'
-					})
-				);
-			}
-			return Promise.resolve(
-				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
-			);
-		});
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
-			.toBeInTheDocument();
-		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
-		await browserPage.getByRole('button', { name: 'Send' }).click();
-
-		await expect.element(browserPage.getByText(/accepted finding/)).toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText('Save is disabled until this objective has expert-reviewed Findings.')
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Save plan' }))
-			.not.toBeInTheDocument();
-		expect(
-			fetchMock.mock.calls.some(([input, init]) => {
-				return (
-					requestPath(input as string | URL | Request).endsWith('/experiment-plans') &&
-					requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
-				);
-			})
-		).toBe(false);
-	});
-
-	it('does not save grounded answers without source label citations as experiment plans', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (path === '/api/v1/goal-sessions' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						session_id: 'session_1',
-						user_id: 'test-user',
-						collection_id: 'col_123',
-						focused_material_id: null,
-						focused_paper_id: null,
-						focused_objective_id: 'obj_1',
-						goal_text: null,
-						goal_brief_json: {},
-						answer_mode: 'hybrid',
-						rolling_summary: '',
-						last_evidence_ids: [],
-						last_material_ids: [],
-						last_paper_ids: [],
-						collection_data_version: null,
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T00:00:00+00:00'
-					})
-				);
-			}
-			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						message_id: 'msg_assistant_unlabeled',
-						session_id: 'session_1',
-						role: 'assistant',
-						content: 'Use the accepted finding to plan a validation build.',
-						answer: 'Use the accepted finding to plan a validation build.',
-						source_mode: 'collection_grounded',
-						used_evidence_ids: ['ev_1'],
-						warnings: [],
-						links: {},
-						review_gate: 'reviewed_findings',
-						source_validity: 'current',
-						source_links: [
-							{
-								kind: 'evidence',
-								label: 'Source 1',
-								href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
-							}
-						],
-						created_at: '2026-07-13T00:01:00+00:00'
-					})
-				);
-			}
-			return Promise.resolve(
-				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
-			);
-		});
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
-			.toBeInTheDocument();
-		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
-		await browserPage.getByRole('button', { name: 'Send' }).click();
-
-		await expect.element(browserPage.getByText(/accepted finding/)).toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Save is disabled until the answer names the visible source label, such as [Source 1].'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('link', { name: 'Source 1' }))
-			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_1');
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Save plan' }))
-			.not.toBeInTheDocument();
-		expect(
-			fetchMock.mock.calls.some(([input, init]) => {
-				return (
-					requestPath(input as string | URL | Request).endsWith('/experiment-plans') &&
-					requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
-				);
-			})
-		).toBe(false);
-	});
-
-	it('does not save grounded answers when source links do not match evidence citations', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (path === '/api/v1/goal-sessions' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						session_id: 'session_1',
-						user_id: 'test-user',
-						collection_id: 'col_123',
-						focused_material_id: null,
-						focused_paper_id: null,
-						focused_objective_id: 'obj_1',
-						goal_text: null,
-						goal_brief_json: {},
-						answer_mode: 'hybrid',
-						rolling_summary: '',
-						last_evidence_ids: [],
-						last_material_ids: [],
-						last_paper_ids: [],
-						collection_data_version: null,
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T00:00:00+00:00'
-					})
-				);
-			}
-			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						message_id: 'msg_assistant_mismatch',
-						session_id: 'session_1',
-						role: 'assistant',
-						content: 'Use the accepted finding to plan a validation build [Source 1].',
-						answer: 'Use the accepted finding to plan a validation build [Source 1].',
-						source_mode: 'collection_grounded',
-						used_evidence_ids: ['ev_1'],
-						warnings: [],
-						links: {},
-						review_gate: 'reviewed_findings',
-						source_validity: 'current',
-						source_links: [
-							{
-								kind: 'evidence',
-								label: 'Source 1',
-								href: '/collections/col_123/documents/paper-a?evidence_id=ev_other'
-							}
-						],
-						created_at: '2026-07-13T00:01:00+00:00'
-					})
-				);
-			}
-			return Promise.resolve(
-				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
-			);
-		});
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
-			.toBeInTheDocument();
-		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
-		await browserPage.getByRole('button', { name: 'Send' }).click();
-
-		await expect.element(browserPage.getByText(/accepted finding/)).toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Save is disabled until source links match the reviewed evidence citations.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('link', { name: 'Source 1' }))
-			.toHaveAttribute('href', '/collections/col_123/documents/paper-a?evidence_id=ev_other');
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Save plan' }))
-			.not.toBeInTheDocument();
-		expect(
-			fetchMock.mock.calls.some(([input, init]) => {
-				return (
-					requestPath(input as string | URL | Request).endsWith('/experiment-plans') &&
-					requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
-				);
-			})
-		).toBe(false);
-	});
-
-	it('does not save grounded answers when a used evidence citation has no source link', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (path === '/api/v1/goal-sessions' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						session_id: 'session_1',
-						user_id: 'test-user',
-						collection_id: 'col_123',
-						focused_material_id: null,
-						focused_paper_id: null,
-						focused_objective_id: 'obj_1',
-						goal_text: null,
-						goal_brief_json: {},
-						answer_mode: 'hybrid',
-						rolling_summary: '',
-						last_evidence_ids: [],
-						last_material_ids: [],
-						last_paper_ids: [],
-						collection_data_version: null,
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T00:00:00+00:00'
-					})
-				);
-			}
-			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						message_id: 'msg_assistant_missing_link',
-						session_id: 'session_1',
-						role: 'assistant',
-						content: 'Use both accepted findings to plan a validation build [Source 1].',
-						answer: 'Use both accepted findings to plan a validation build [Source 1].',
-						source_mode: 'collection_grounded',
-						used_evidence_ids: ['ev_1', 'ev_2'],
-						warnings: [],
-						links: {},
-						review_gate: 'reviewed_findings',
-						source_validity: 'current',
-						source_links: [
-							{
-								kind: 'evidence',
-								label: 'Source 1',
-								href: '/collections/col_123/documents/paper-a?evidence_id=ev_1'
-							}
-						],
-						created_at: '2026-07-13T00:01:00+00:00'
-					})
-				);
-			}
-			return Promise.resolve(
-				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
-			);
-		});
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
-			.toBeInTheDocument();
-		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
-		await browserPage.getByRole('button', { name: 'Send' }).click();
-
-		await expect.element(browserPage.getByText(/both accepted findings/)).toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText(
-					'Save is disabled until every reviewed evidence citation has a visible source link.'
-				)
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Save plan' }))
-			.not.toBeInTheDocument();
-		expect(
-			fetchMock.mock.calls.some(([input, init]) => {
-				return (
-					requestPath(input as string | URL | Request).endsWith('/experiment-plans') &&
-					requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
-				);
-			})
-		).toBe(false);
-	});
-
-	it('does not save grounded answers before focused findings are expert-reviewed', async () => {
-		fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
-			const path = requestPath(input);
-			const method = requestMethod(input, init);
-			if (path === '/api/v1/goal-sessions' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						session_id: 'session_1',
-						user_id: 'test-user',
-						collection_id: 'col_123',
-						focused_material_id: null,
-						focused_paper_id: null,
-						focused_objective_id: 'obj_1',
-						goal_text: null,
-						goal_brief_json: {},
-						answer_mode: 'hybrid',
-						rolling_summary: '',
-						last_evidence_ids: [],
-						last_material_ids: [],
-						last_paper_ids: [],
-						collection_data_version: null,
-						created_at: '2026-07-13T00:00:00+00:00',
-						updated_at: '2026-07-13T00:00:00+00:00'
-					})
-				);
-			}
-			if (path === '/api/v1/goal-sessions/session_1/messages' && method === 'POST') {
-				return Promise.resolve(
-					jsonResponse({
-						message_id: 'msg_assistant_needs_review',
-						session_id: 'session_1',
-						role: 'assistant',
-						content: 'This draft cites unreviewed collection evidence [Source 1].',
-						answer: 'This draft cites unreviewed collection evidence [Source 1].',
-						source_mode: 'collection_grounded',
-						used_evidence_ids: ['ev_unreviewed'],
-						warnings: ['reviewed_findings_empty'],
-						links: {},
-						source_links: [
-							{
-								kind: 'evidence',
-								label: 'Source 1',
-								href: '/collections/col_123/documents/paper-a?evidence_id=ev_unreviewed'
-							}
-						],
-						created_at: '2026-07-13T00:01:00+00:00'
-					})
-				);
-			}
-			return Promise.resolve(
-				jsonResponse({ detail: `unexpected request: ${path}` }, 500, 'Unexpected')
-			);
-		});
-
-		render(Page);
-
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Ask this collection directly' }))
-			.toBeInTheDocument();
-		await browserPage.getByLabelText('Message').fill('Draft a next-step validation plan.');
-		await browserPage.getByRole('button', { name: 'Send' }).click();
-
-		await expect
-			.element(browserPage.getByText(/unreviewed collection evidence/))
-			.toBeInTheDocument();
-		await expect
-			.element(
-				browserPage.getByText('Save is disabled until this objective has expert-reviewed Findings.')
-			)
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Save plan' }))
-			.not.toBeInTheDocument();
-		expect(
-			fetchMock.mock.calls.some(([input, init]) => {
-				return (
-					requestPath(input as string | URL | Request).endsWith('/experiment-plans') &&
-					requestMethod(input as string | URL | Request, init as RequestInit | undefined) === 'POST'
-				);
-			})
-		).toBe(false);
+		).toBe(true);
 	});
 });

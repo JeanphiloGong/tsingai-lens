@@ -8,6 +8,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from application.auth import AuthSessionService, SessionNotFoundError
+from application.chat import (
+    CapabilityRegistry,
+    ChatSessionService,
+    ResearchAgentRunner,
+)
+from application.chat.capabilities import (
+    CreateObjectiveCandidateCapability,
+    GetCollectionContextCapability,
+    ProposeObjectiveDraftsCapability,
+    QueryPublishedFindingsCapability,
+)
 from application.core.comparison_service import ComparisonService
 from application.core.document_profiles.service import (
     DocumentProfileService,
@@ -33,7 +44,6 @@ from application.evaluation import (
 )
 from application.goal.brief_service import GoalService
 from application.goal.experiment_plan_service import ExperimentPlanService
-from application.goal.session_service import GoalSessionService
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.collection_service import CollectionService
@@ -42,6 +52,7 @@ from application.source.reference_workflow_service import SourceReferenceWorkflo
 from application.source.task_service import TaskService
 from config import DATA_DIR
 from controllers import auth
+from controllers.chat import sessions as chat_sessions
 from controllers.core import (
     comparable_results,
     comparisons,
@@ -56,17 +67,17 @@ from controllers.core import (
 from controllers.derived import graph
 from controllers.goal import experiment_plans
 from controllers.goal import intake as goals
-from controllers.goal import sessions as goal_sessions
 from controllers.source import collections, references, tasks
 from domain.ports import (
+    ChatRepository,
     ComparisonRepository,
     ExperimentPlanRepository,
     FindingReviewRepository,
-    GoalSessionRepository,
     ObjectiveRepository,
     PaperFactRepository,
     SourceArtifactRepository,
 )
+from infra.llm.chat_model import OpenAIChatModel
 from infra.persistence.database import (
     DatabaseSettings,
     build_database_engine,
@@ -75,6 +86,7 @@ from infra.persistence.database import (
 from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.build_repository import PostgresBuildRepository
+from infra.persistence.postgres.chat_repository import PostgresChatRepository
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
 )
@@ -87,8 +99,8 @@ from infra.persistence.postgres.finding_review_repository import (
 from infra.persistence.postgres.objective_repository import (
     PostgresObjectiveRepository,
 )
-from infra.persistence.postgres.objective_workspace_repository import (
-    PostgresObjectiveWorkspaceRepository,
+from infra.persistence.postgres.experiment_plan_repository import (
+    PostgresExperimentPlanRepository,
 )
 from infra.persistence.postgres.paper_fact_repository import (
     PostgresPaperFactRepository,
@@ -133,8 +145,9 @@ def create_app(
     finding_review_repository: (
         FindingReviewRepository | None
     ) = None,
-    goal_session_repository: GoalSessionRepository | None = None,
     experiment_plan_repository: ExperimentPlanRepository | None = None,
+    chat_repository: ChatRepository | None = None,
+    chat_session_service: ChatSessionService | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -150,8 +163,8 @@ def create_app(
                 or objective_repository is None
                 or comparison_repository is None
                 or finding_review_repository is None
-                or goal_session_repository is None
                 or experiment_plan_repository is None
+                or (chat_session_service is None and chat_repository is None)
             ):
                 engine = build_database_engine(DatabaseSettings())
                 session_factory = build_session_factory(engine)
@@ -186,16 +199,17 @@ def create_app(
                 finding_review_repository
                 or PostgresFindingReviewRepository(session_factory)
             )
-            default_workspace_repository = None
-            if goal_session_repository is None or experiment_plan_repository is None:
-                default_workspace_repository = PostgresObjectiveWorkspaceRepository(
-                    session_factory
-                )
-            active_goal_session_repository = (
-                goal_session_repository or default_workspace_repository
-            )
             active_experiment_plan_repository = (
-                experiment_plan_repository or default_workspace_repository
+                experiment_plan_repository
+                or PostgresExperimentPlanRepository(session_factory)
+            )
+            active_chat_repository = (
+                chat_repository
+                or (
+                    PostgresChatRepository(session_factory)
+                    if chat_session_service is None
+                    else None
+                )
             )
             artifact_registry_service = ArtifactRegistryService(
                 active_task_service.repository,
@@ -284,20 +298,45 @@ def create_app(
                 research_objective_service=research_objective_service,
             )
             application.state.goal_service = GoalService(active_collection_service)
-            application.state.goal_session_service = GoalSessionService(
-                collection_service=active_collection_service,
-                finding_feedback_service=finding_feedback_service,
-                goal_session_repository=active_goal_session_repository,
-            )
-            application.state.experiment_plan_service = ExperimentPlanService(
-                repository=active_experiment_plan_repository,
-                goal_session_repository=active_goal_session_repository,
-                finding_feedback_service=finding_feedback_service,
-            )
-            application.state.objective_analysis_service = ObjectiveAnalysisService(
+            objective_analysis_service = ObjectiveAnalysisService(
                 objective_repository=active_objective_repository,
                 research_objective_service=research_objective_service,
             )
+            application.state.chat_session_service = (
+                chat_session_service
+                or ChatSessionService(
+                    collection_service=active_collection_service,
+                    repository=active_chat_repository,
+                    runner=ResearchAgentRunner(
+                        model=OpenAIChatModel(),
+                        capabilities=CapabilityRegistry(
+                            (
+                                GetCollectionContextCapability(
+                                    collection_service=active_collection_service,
+                                    objective_repository=active_objective_repository,
+                                ),
+                                QueryPublishedFindingsCapability(
+                                    collection_service=active_collection_service,
+                                    objective_repository=active_objective_repository,
+                                    objective_analysis_service=objective_analysis_service,
+                                ),
+                                ProposeObjectiveDraftsCapability(
+                                    collection_service=active_collection_service,
+                                    objective_repository=active_objective_repository,
+                                ),
+                                CreateObjectiveCandidateCapability(
+                                    research_objective_service=research_objective_service,
+                                ),
+                            )
+                        ),
+                    ),
+                )
+            )
+            application.state.experiment_plan_service = ExperimentPlanService(
+                repository=active_experiment_plan_repository,
+                finding_feedback_service=finding_feedback_service,
+            )
+            application.state.objective_analysis_service = objective_analysis_service
             yield
         finally:
             if engine is not None:
@@ -413,7 +452,7 @@ def create_app(
     app.include_router(references.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(goals.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(experiment_plans.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(goal_sessions.router, prefix=PUBLIC_API_V1_PREFIX)
+    app.include_router(chat_sessions.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(graph.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(tasks.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(workspace.router, prefix=PUBLIC_API_V1_PREFIX)

@@ -116,6 +116,12 @@ class _WindowExtractor:
                 "microhardness",
                 ["heat treatment"],
             ),
+            (
+                "BROAD_OUTCOME_SIGNAL",
+                "outcome",
+                "tensile properties",
+                ["LPBF"],
+            ),
         ):
             if marker in markers:
                 unresolved_signals.append(
@@ -1773,6 +1779,29 @@ def test_signals_from_different_experiments_remain_unresolved():
         "corrosion potential",
     }
     assert all(signal.reason for signal in skim.unresolved_signals)
+
+
+def test_reconciliation_keeps_broad_outcome_and_candidate_variable_unresolved():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("methods", "Methods", 1),
+            _paragraph("variable", "VARIABLE_SIGNAL", 2, "Methods"),
+            _heading("results", "Results", 3),
+            _paragraph("outcome", "BROAD_OUTCOME_SIGNAL", 4, "Results"),
+        ]
+    )
+
+    skim = _build_skims(artifacts, tree, _WindowExtractor())[0]
+
+    assert skim.studies == ()
+    assert {signal.label for signal in skim.unresolved_signals} == {
+        "laser power",
+        "tensile properties",
+    }
+    assert all(
+        signal.reason == "outcome requires one specific measurable property"
+        for signal in skim.unresolved_signals
+    )
 
 
 def test_conflicting_relationship_does_not_discard_valid_reconciliation():

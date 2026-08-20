@@ -69,6 +69,7 @@ EVIDENCE_RESULT_DIRECTIONS: Final[frozenset[str]] = frozenset(
         "decrease",
         "improve",
         "worsen",
+        "changed",
         "no_change",
         "mixed",
         "unknown",
@@ -79,6 +80,9 @@ EVIDENCE_RESOLUTION_STATUS_VALUES: Final[frozenset[str]] = frozenset(
 )
 OBJECTIVE_CONFIRMATION_STATUSES: Final[frozenset[str]] = frozenset(
     {"candidate", "confirmed"}
+)
+OBJECTIVE_ORIGINS: Final[frozenset[str]] = frozenset(
+    {"system_discovered", "chat_assisted"}
 )
 OBJECTIVE_ANALYSIS_STATUSES: Final[frozenset[str]] = frozenset(
     {"queued", "running", "succeeded", "failed"}
@@ -781,6 +785,10 @@ class ResearchObjective:
     published_analysis_version: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    origin: str = "system_discovered"
+    source_build_id: str | None = None
+    created_by_user_id: str | None = None
+    created_by_tool_call_id: str | None = None
 
     def __post_init__(self) -> None:
         if not _text(self.collection_id):
@@ -817,6 +825,20 @@ class ResearchObjective:
         if self.confirmation_status not in OBJECTIVE_CONFIRMATION_STATUSES:
             raise ValueError(
                 f"unsupported objective confirmation status: {self.confirmation_status}"
+            )
+        if self.origin not in OBJECTIVE_ORIGINS:
+            raise ValueError(f"unsupported objective origin: {self.origin}")
+        creator_values = (
+            _text(self.created_by_user_id),
+            _text(self.created_by_tool_call_id),
+        )
+        if self.origin == "chat_assisted" and not all(creator_values):
+            raise ValueError(
+                "chat-assisted objective requires user and tool-call provenance"
+            )
+        if self.origin == "system_discovered" and any(creator_values):
+            raise ValueError(
+                "system-discovered objective cannot have Chat creator provenance"
             )
         overlap = set(self.seed_document_ids) & set(self.excluded_document_ids)
         if overlap:
@@ -895,6 +917,14 @@ class ResearchObjective:
             ),
             created_at=_datetime_or_none(payload.get("created_at")),
             updated_at=_datetime_or_none(payload.get("updated_at")),
+            origin=_choice(
+                payload.get("origin"),
+                OBJECTIVE_ORIGINS,
+                "system_discovered",
+            ),
+            source_build_id=_text(payload.get("source_build_id")),
+            created_by_user_id=_text(payload.get("created_by_user_id")),
+            created_by_tool_call_id=_text(payload.get("created_by_tool_call_id")),
         )
 
     def confirm(self) -> "ResearchObjective":
@@ -950,6 +980,10 @@ class ResearchObjective:
             "published_analysis_version": self.published_analysis_version,
             "created_at": _datetime_record(self.created_at),
             "updated_at": _datetime_record(self.updated_at),
+            "origin": self.origin,
+            "source_build_id": self.source_build_id,
+            "created_by_user_id": self.created_by_user_id,
+            "created_by_tool_call_id": self.created_by_tool_call_id,
         }
 
 
@@ -1410,6 +1444,8 @@ class ObjectiveEvidenceResult:
     unit: str | None
     direction: str
     result_text: str
+    baseline_value: EvidenceScalar | None = None
+    target_value: EvidenceScalar | None = None
 
     def __post_init__(self) -> None:
         if not _text(self.outcome) or not _text(self.result_text):
@@ -1427,12 +1463,16 @@ class ObjectiveEvidenceResult:
                 payload.get("direction"), EVIDENCE_RESULT_DIRECTIONS, "unknown"
             ),
             result_text=_text(payload.get("result_text")) or "",
+            baseline_value=_scientific_scalar(payload.get("baseline_value")),
+            target_value=_scientific_scalar(payload.get("target_value")),
         )
 
     def to_record(self) -> dict[str, Any]:
         return {
             "outcome": self.outcome,
             "value": self.value,
+            "baseline_value": self.baseline_value,
+            "target_value": self.target_value,
             "unit": self.unit,
             "direction": self.direction,
             "result_text": self.result_text,

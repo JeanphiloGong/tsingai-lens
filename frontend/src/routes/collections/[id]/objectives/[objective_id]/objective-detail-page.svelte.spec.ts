@@ -198,6 +198,8 @@ const evidence = {
 	reported_result: {
 		outcome: 'tensile strength',
 		value: 620,
+		baseline_value: null,
+		target_value: null,
 		unit: 'MPa',
 		direction: 'increase',
 		result_text: 'After annealing, tensile strength increased to 620 MPa.'
@@ -237,7 +239,11 @@ function deferredResponse() {
 	return { promise, resolve };
 }
 
-function installPublishedResponses(response = objectiveResponse()) {
+function installPublishedResponses(
+	response = objectiveResponse(),
+	findingItem: Record<string, unknown> | null = finding,
+	evidenceItems: Array<Record<string, unknown>> = [evidence, mechanismEvidence]
+) {
 	fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 		const current = request(input, init);
 		if (current.path.endsWith('/documents/profiles')) {
@@ -267,10 +273,10 @@ function installPublishedResponses(response = objectiveResponse()) {
 				collection_id: 'col_123',
 				objective_id: 'obj_1',
 				analysis_version: 1,
-				items: [finding],
+				items: findingItem ? [findingItem] : [],
 				offset: 0,
 				limit: 50,
-				total: 1
+				total: findingItem ? 1 : 0
 			});
 		}
 		if (current.path.endsWith('/objectives/obj_1/evidence')) {
@@ -279,10 +285,10 @@ function installPublishedResponses(response = objectiveResponse()) {
 				objective_id: 'obj_1',
 				analysis_version: 1,
 				finding_id: 'finding-1',
-				items: [evidence, mechanismEvidence],
+				items: evidenceItems,
 				offset: 0,
 				limit: 100,
-				total: 2
+				total: evidenceItems.length
 			});
 		}
 		throw new Error(`unexpected request: ${current.method} ${current.path}${current.search}`);
@@ -435,6 +441,50 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		expect(
 			fetchMock.mock.calls.some(([input]) => String(input).includes('/findings/finding-1'))
 		).toBe(false);
+	});
+
+	it('renders a categorical result transition and qualitative direction', async () => {
+		const phaseFinding = {
+			...finding,
+			statement: 'Heat treatment was associated with a phase-composition change.',
+			factors: ['heat treatment'],
+			outcome: 'phase composition',
+			direction: 'changed',
+			mechanisms: []
+		};
+		const phaseEvidence = {
+			...evidence,
+			source_excerpt: 'The phase changed from alpha-prime to alpha+beta after annealing.',
+			reported_result: {
+				outcome: 'phase composition',
+				value: 'alpha+beta',
+				baseline_value: 'alpha-prime',
+				target_value: 'alpha+beta',
+				unit: null,
+				direction: 'changed',
+				result_text: 'Phase composition changed from alpha-prime to alpha+beta.'
+			}
+		};
+		installPublishedResponses(objectiveResponse(), phaseFinding, [phaseEvidence]);
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByText('phase composition: alpha-prime → alpha+beta'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('发生变化').first()).toBeInTheDocument();
+	});
+
+	it('shows completed scientific abstention when no comparable Finding was formed', async () => {
+		installPublishedResponses(objectiveResponse(), null, []);
+
+		render(Page);
+
+		await expect
+			.element(browserPage.getByText('分析已完成，但当前证据未形成可直接比较的 Finding。'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('v1 · 模型 model-1')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('本次分析失败')).not.toBeInTheDocument();
 	});
 
 	it('loads every Finding and selected Evidence page', async () => {

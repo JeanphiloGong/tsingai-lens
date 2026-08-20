@@ -55,7 +55,8 @@ accidentally restore legacy ownership.
 | Collection builds and stage state | PostgreSQL `collection_builds` and `build_stages` | No | PostgreSQL |
 | Artifact readiness and active-build selection | PostgreSQL `artifact_versions` and `collection_active_builds` | No | PostgreSQL metadata; binary exports in object storage |
 | Users and auth sessions | PostgreSQL `auth_users` and `auth_sessions` | No | PostgreSQL |
-| Objective sessions, messages, and experiment plans | PostgreSQL `objective_sessions`, `objective_messages`, and `objective_experiment_plans` | No | PostgreSQL |
+| Research Agent sessions, messages, tool calls, and results | PostgreSQL `chat_sessions`, `chat_messages`, `chat_tool_calls`, and `chat_tool_results` | No | PostgreSQL |
+| Objective experiment plans | PostgreSQL `objective_experiment_plans` | No | PostgreSQL |
 | Source documents, text units, blocks, tables, rows, cells, figures, references, and associations | PostgreSQL build-versioned Source tables | No | PostgreSQL metadata |
 | Document profiles and reusable paper facts | PostgreSQL build-versioned paper-fact tables | No | PostgreSQL |
 | Research Objective candidates and paper skims | PostgreSQL `research_objectives`, `objective_builds`, and `objective_paper_skims` | No | PostgreSQL |
@@ -189,10 +190,11 @@ Source build, and writes `PaperContribution`, `ObjectiveEvidence`, `Finding`,
 `FindingPaperContribution` records under the same composite owner. A
 successful version and the root's published pointer
 commit atomically. A failed retry preserves the prior published version.
-Review state uses `PostgresFindingReviewRepository`, while sessions, messages,
-and plans use `PostgresObjectiveWorkspaceRepository`; all are composed once in
-the FastAPI lifespan with no runtime SQLite fallback. The workspace repository
-name describes the interaction surface and does not own analysis output.
+Review state uses `PostgresFindingReviewRepository`. Research Agent trajectories
+use `PostgresChatRepository`, while manual and retained historical experiment
+plans use `PostgresExperimentPlanRepository`. All are composed once in the
+FastAPI lifespan with no runtime SQLite fallback. Chat resource references point
+to Core records and do not own analysis output.
 
 Evaluation gold sets, prediction snapshots, runs, scores, and failures use the
 direct `PostgresEvaluationRepository`. Each service receives that repository

@@ -366,7 +366,11 @@ class FakeDomainModelExtractor:
     ) -> StructuredAxisCanonicalizationPlan:
         return StructuredAxisCanonicalizationPlan(
             decisions=[
-                {"pair_id": str(pair["pair_id"]), "equivalent": True}
+                {
+                    "pair_id": str(pair["pair_id"]),
+                    "equivalent": True,
+                    "same_research_topic": True,
+                }
                 for pair in payload.get("axis_pairs") or ()
                 if isinstance(pair, dict) and str(pair.get("pair_id") or "").strip()
             ]

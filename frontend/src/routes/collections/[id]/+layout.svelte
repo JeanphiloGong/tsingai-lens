@@ -42,6 +42,7 @@
 	$: storeReadinessState = readinessFromCollectionStatus(storeCollection?.status);
 	$: currentPath = $page.url.pathname;
 	$: isOverviewRoute = currentPath === `/collections/${collectionId}`;
+	$: isAssistantRoute = currentPath.startsWith(`/collections/${collectionId}/assistant`);
 	$: readinessState = stateWorkspace
 		? getOverviewReadinessState(stateWorkspace)
 		: storeReadinessState;
@@ -60,7 +61,10 @@
 	$: lockReason = buildLockReason(readinessState);
 	$: readinessKnown = Boolean(readinessState);
 	$: showLockedSurface =
-		collectionId && !isOverviewRoute && (!readinessKnown || !downstreamUnlocked);
+		collectionId &&
+		!isOverviewRoute &&
+		!isAssistantRoute &&
+		(!readinessKnown || !downstreamUnlocked);
 
 	$: if (collectionId && collectionId !== loadedWorkspaceId) {
 		loadedWorkspaceId = collectionId;
@@ -207,6 +211,12 @@
 		{$t('collection.tabs.overview')}
 	</a>
 	<a
+		href={`/collections/${collectionId}/assistant`}
+		class={tabClass(`/collections/${collectionId}/assistant`)}
+	>
+		{$t('collection.tabs.assistant')}
+	</a>
+	<a
 		href={resolve('/collections/[id]/objectives', { id: collectionId })}
 		class={`${tabClass(`/collections/${collectionId}/objectives`)} ${downstreamUnlocked ? '' : 'locked'}`}
 		aria-disabled={downstreamUnlocked ? undefined : 'true'}
@@ -225,16 +235,6 @@
 		on:click={handleLockedTabClick}
 	>
 		{$t('collection.tabs.papers')}
-	</a>
-	<a
-		href={`/collections/${collectionId}/assistant`}
-		class={`${tabClass(`/collections/${collectionId}/assistant`)} ${downstreamUnlocked ? '' : 'locked'}`}
-		aria-disabled={downstreamUnlocked ? undefined : 'true'}
-		tabindex={downstreamUnlocked ? undefined : -1}
-		title={downstreamUnlocked ? undefined : lockReason}
-		on:click={handleLockedTabClick}
-	>
-		{$t('collection.tabs.assistant')}
 	</a>
 	<a
 		href={`/collections/${collectionId}/graph`}

@@ -496,6 +496,91 @@ def test_synthesis_groups_comparison_intervals_as_one_condition_series() -> None
     assert [len(item["result_evidence"]) for item in result_sets] == [3]
 
 
+def test_synthesis_separates_reference_treatment_from_treatment_comparisons(
+) -> None:
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    objective = _objective(
+        variables=["post-processing condition"],
+        outcomes=["ultimate tensile strength"],
+        material_scope=["Ti-6Al-4V"],
+    )
+
+    def uts_comparison(
+        evidence_id: str,
+        document_id: str,
+        baseline: str,
+        target: str,
+        direction: str,
+    ) -> ObjectiveEvidence:
+        return _evidence(
+            evidence_id,
+            document_id,
+            factors=("post-processing condition",),
+            outcome="ultimate tensile strength",
+            direction=direction,
+            material="Ti-6Al-4V",
+            changed_variables=[
+                {
+                    "name": "post-processing condition",
+                    "baseline_value": baseline,
+                    "target_value": target,
+                }
+            ],
+            scientific_context={
+                "material": [{"name": "material", "value": "Ti-6Al-4V"}],
+                "sample": [{"name": "build orientation", "value": "vertical"}],
+                "process": [
+                    {
+                        "name": "manufacturing process",
+                        "value": "laser powder bed fusion",
+                    }
+                ],
+                "test": [],
+            },
+        )
+
+    result_sets = service._result_sets(
+        objective,
+        (
+            uts_comparison(
+                "2020-af-to-hip",
+                "paper-2020",
+                "as-fabricated",
+                "HIP + polishing",
+                "decrease",
+            ),
+            uts_comparison(
+                "2024-ab-to-800-sc",
+                "paper-2024",
+                "AB",
+                "800 SC",
+                "decrease",
+            ),
+            uts_comparison(
+                "2024-800-fc-to-920-rq",
+                "paper-2024",
+                "800 FC",
+                "920 RQ",
+                "increase",
+            ),
+        ),
+    )
+
+    evidence_ids_by_interval = {
+        result_set["comparison_interval"]: {
+            item["evidence_id"] for item in result_set["result_evidence"]
+        }
+        for result_set in result_sets
+    }
+    assert evidence_ids_by_interval == {
+        "reference_to_treatment": {
+            "2020-af-to-hip",
+            "2024-ab-to-800-sc",
+        },
+        "treatment_to_treatment": {"2024-800-fc-to-920-rq"},
+    }
+
+
 def test_synthesis_generates_uniform_no_change_statement_from_evidence() -> None:
     extractor = _Extractor([_candidate()])
     service = FindingSynthesisService(assertion_judge=extractor)
@@ -539,6 +624,45 @@ def test_synthesis_generates_uniform_no_change_statement_from_evidence() -> None
         "Joint changes in laser power and scan speed were associated with no "
         "reported change in relative density."
     )
+
+
+def test_synthesis_generates_categorical_changed_finding_from_evidence() -> None:
+    extractor = _Extractor([_candidate()])
+    service = FindingSynthesisService(assertion_judge=extractor)
+    evidence = _evidence(
+        "phase-change",
+        "paper-1",
+        outcome="phase composition",
+        factors=("heat treatment",),
+        direction="changed",
+        reported_result={
+            "outcome": "phase composition",
+            "value": "alpha+beta",
+            "baseline_value": "alpha-prime",
+            "target_value": "alpha+beta",
+            "unit": None,
+            "direction": "changed",
+            "result_text": "Phase composition changed from alpha-prime to alpha+beta.",
+        },
+    )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            variables=("heat treatment",),
+            outcomes=("phase composition",),
+        ),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(evidence,),
+    )[0]
+
+    assert finding.direction == "changed"
+    assert finding.statement == (
+        "Changes in heat treatment were associated with a qualitative change "
+        "in phase composition."
+    )
+    assert extractor.payloads[0]["result_set"]["primary_direction"] == "changed"
 
 
 def test_synthesis_accepts_source_supported_uniform_mixed_condition_series() -> None:
@@ -770,7 +894,7 @@ def test_synthesis_normalizes_scientific_unit_typography_for_display() -> None:
     ]
 
 
-def test_synthesis_does_not_use_complete_context_as_a_grouping_key() -> None:
+def test_synthesis_splits_cross_paper_results_at_process_context_boundary() -> None:
     service = FindingSynthesisService(assertion_judge=_Extractor([]))
     common = {"material": [], "sample": [], "test": []}
 
@@ -803,20 +927,295 @@ def test_synthesis_does_not_use_complete_context_as_a_grouping_key() -> None:
         ),
     )
 
+    assert len(result_sets) == 2
+    assert [len(item["result_evidence"]) for item in result_sets] == [1, 1]
+    assert len({item["result_set_id"] for item in result_sets}) == 2
+
+
+def test_synthesis_matches_cross_paper_stratum_when_one_paper_has_two_orientations(
+) -> None:
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+
+    def evidence(
+        evidence_id: str,
+        document_id: str,
+        orientation: str,
+    ) -> ObjectiveEvidence:
+        return _evidence(
+            evidence_id,
+            document_id,
+            factors=("post-processing condition",),
+            outcome="ultimate tensile strength",
+            direction="decrease",
+            material="Ti-6Al-4V",
+            scientific_context={
+                "material": [{"name": "material", "value": "Ti-6Al-4V"}],
+                "sample": [
+                    {"name": "build orientation", "value": orientation}
+                ],
+                "process": [
+                    {
+                        "name": "manufacturing process",
+                        "value": "laser powder bed fusion",
+                    }
+                ],
+                "test": [],
+            },
+        )
+
+    result_sets = service._result_sets(
+        _objective(
+            material_scope=["Ti-6Al-4V"],
+            variables=["post-processing condition"],
+            outcomes=["ultimate tensile strength"],
+        ),
+        (
+            evidence("paper-2020-vertical", "paper-2020", "vertical"),
+            evidence("paper-2020-horizontal", "paper-2020", "horizontal"),
+            evidence("paper-2024-vertical", "paper-2024", "vertical"),
+        ),
+    )
+
+    assert len(result_sets) == 2
+    assert {
+        tuple(
+            sorted(
+                item["document_id"]
+                for item in result_set["result_evidence"]
+            )
+        )
+        for result_set in result_sets
+    } == {("paper-2020",), ("paper-2020", "paper-2024")}
+
+
+@pytest.mark.parametrize(
+    ("section", "attribute_name", "left_value", "right_value"),
+    (
+        ("sample", "sample state", "as-built", "annealed"),
+        ("test", "test temperature", 25, 650),
+    ),
+)
+def test_synthesis_splits_cross_paper_results_at_scientific_context_boundary(
+    section: str,
+    attribute_name: str,
+    left_value: object,
+    right_value: object,
+) -> None:
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    base_context = {
+        "material": [{"name": "alloy", "value": "Ti-6Al-4V"}],
+        "sample": [],
+        "process": [{"name": "process", "value": "LPBF"}],
+        "test": [],
+    }
+
+    def context(value: object) -> dict:
+        return {
+            **base_context,
+            section: [{"name": attribute_name, "value": value}],
+        }
+
+    result_sets = service._result_sets(
+        _objective(
+            material_scope=["Ti-6Al-4V"],
+            variables=["heat treatment temperature"],
+            outcomes=["elongation"],
+        ),
+        (
+            _evidence(
+                "paper-1-result",
+                "paper-1",
+                factors=("heat treatment temperature",),
+                outcome="elongation",
+                material="Ti-6Al-4V",
+                scientific_context=context(left_value),
+            ),
+            _evidence(
+                "paper-2-result",
+                "paper-2",
+                factors=("heat treatment temperature",),
+                outcome="elongation",
+                material="Ti-6Al-4V",
+                scientific_context=context(right_value),
+            ),
+        ),
+    )
+
+    assert len(result_sets) == 2
+    assert {
+        tuple(item["document_id"] for item in result_set["result_evidence"])
+        for result_set in result_sets
+    } == {("paper-1",), ("paper-2",)}
+
+
+def test_synthesis_does_not_use_missing_context_to_bridge_known_states() -> None:
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+
+    def evidence(
+        evidence_id: str,
+        document_id: str,
+        sample_state: str | None,
+    ) -> ObjectiveEvidence:
+        return _evidence(
+            evidence_id,
+            document_id,
+            factors=("heat treatment temperature",),
+            outcome="elongation",
+            material="Ti-6Al-4V",
+            scientific_context={
+                "material": [{"name": "alloy", "value": "Ti-6Al-4V"}],
+                "sample": (
+                    [{"name": "sample state", "value": sample_state}]
+                    if sample_state is not None
+                    else []
+                ),
+                "process": [{"name": "process", "value": "LPBF"}],
+                "test": [{"name": "test temperature", "value": 25, "unit": "C"}],
+            },
+        )
+
+    result_sets = service._result_sets(
+        _objective(
+            material_scope=["Ti-6Al-4V"],
+            variables=["heat treatment temperature"],
+            outcomes=["elongation"],
+        ),
+        (
+            evidence("as-built-result", "paper-as-built", "as-built"),
+            evidence("annealed-result", "paper-annealed", "annealed"),
+            evidence("unknown-state-result", "paper-unknown", None),
+        ),
+    )
+
+    assert len(result_sets) == 3
+    assert all(len(item["result_evidence"]) == 1 for item in result_sets)
+
+
+def test_synthesis_does_not_claim_cross_paper_support_with_missing_fixed_context(
+) -> None:
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    shared = {
+        "material": [{"name": "alloy", "value": "Ti-6Al-4V"}],
+        "process": [{"name": "process", "value": "LPBF"}],
+        "test": [{"name": "test temperature", "value": 25, "unit": "C"}],
+    }
+
+    result_sets = service._result_sets(
+        _objective(
+            material_scope=["Ti-6Al-4V"],
+            variables=["heat treatment temperature"],
+            outcomes=["elongation"],
+        ),
+        (
+            _evidence(
+                "known-state-result",
+                "paper-known",
+                factors=("heat treatment temperature",),
+                outcome="elongation",
+                scientific_context={
+                    **shared,
+                    "sample": [{"name": "sample state", "value": "as-built"}],
+                },
+            ),
+            _evidence(
+                "unknown-state-result",
+                "paper-unknown",
+                factors=("heat treatment temperature",),
+                outcome="elongation",
+                scientific_context={**shared, "sample": []},
+            ),
+        ),
+    )
+
+    assert len(result_sets) == 2
+    assert all(len(item["result_evidence"]) == 1 for item in result_sets)
+
+
+def test_synthesis_normalizes_fixed_context_field_names_across_papers() -> None:
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+    contexts = (
+        {
+            "material": [{"name": "material", "value": "Ti-6Al-4V"}],
+            "sample": [{"name": "state", "value": "as-built"}],
+            "process": [{"name": "manufacturing process", "value": "LPBF"}],
+            "test": [
+                {"name": "testing temperature", "value": 25, "unit": "C"}
+            ],
+        },
+        {
+            "material": [{"name": "alloy", "value": "Ti-6Al-4V"}],
+            "sample": [{"name": "sample state", "value": "as-built"}],
+            "process": [{"name": "process", "value": "LPBF"}],
+            "test": [{"name": "test temperature", "value": 25, "unit": "C"}],
+        },
+    )
+
+    result_sets = service._result_sets(
+        _objective(
+            material_scope=["Ti-6Al-4V"],
+            variables=["heat treatment temperature"],
+            outcomes=["elongation"],
+        ),
+        tuple(
+            _evidence(
+                f"paper-{position}-result",
+                f"paper-{position}",
+                factors=("heat treatment temperature",),
+                outcome="elongation",
+                scientific_context=context,
+            )
+            for position, context in enumerate(contexts, start=1)
+        ),
+    )
+
     assert len(result_sets) == 1
     assert len(result_sets[0]["result_evidence"]) == 2
 
 
-def test_synthesis_keeps_context_inside_one_comparison_interval() -> None:
+def test_synthesis_excludes_changed_axis_from_fixed_context_boundary() -> None:
+    service = FindingSynthesisService(assertion_judge=_Extractor([]))
+
+    result_sets = service._result_sets(
+        _objective(
+            material_scope=["Ti-6Al-4V"],
+            variables=["heat treatment temperature"],
+            outcomes=["elongation"],
+        ),
+        tuple(
+            _evidence(
+                f"paper-{temperature}-result",
+                f"paper-{temperature}",
+                factors=("heat treatment temperature",),
+                outcome="elongation",
+                scientific_context={
+                    "material": [{"name": "alloy", "value": "Ti-6Al-4V"}],
+                    "sample": [{"name": "sample state", "value": "as-built"}],
+                    "process": [
+                        {"name": "process", "value": "LPBF"},
+                        {
+                            "name": "heat treatment temperature",
+                            "value": temperature,
+                            "unit": "C",
+                        },
+                    ],
+                    "test": [
+                        {"name": "test temperature", "value": 25, "unit": "C"}
+                    ],
+                },
+            )
+            for temperature in (800, 900)
+        ),
+    )
+
+    assert len(result_sets) == 1
+    assert len(result_sets[0]["result_evidence"]) == 2
+
+
+def test_synthesis_splits_same_paper_results_at_fixed_context_boundary() -> None:
     extractor = _Extractor(
         [
-            _heterogeneous_candidate(
-                statement=(
-                    "Scan strategy rotation angle showed heterogeneous yield strength "
-                    "responses across the reported conditions, with an increase and "
-                    "an opposing decrease."
-                ),
-            ),
+            _candidate(),
+            _candidate(),
         ]
     )
     service = FindingSynthesisService(assertion_judge=extractor)
@@ -878,14 +1277,26 @@ def test_synthesis_keeps_context_inside_one_comparison_interval() -> None:
         ),
     )
 
-    assert len(findings) == 1
-    assert len(extractor.payloads) == 1
-    assert findings[0].direction == "increase"
-    assert findings[0].contradicting_evidence_ids == ("alpha-45",)
-    assert findings[0].scientific_context.to_record()["process"] == [
-        {"name": "build orientation alpha angle", "value": 0, "unit": None},
-        {"name": "build orientation beta angle", "value": 0, "unit": None},
-    ]
+    assert len(findings) == 2
+    assert len(extractor.payloads) == 2
+    assert {finding.direction for finding in findings} == {"increase", "decrease"}
+    assert all(not finding.contradicting_evidence_ids for finding in findings)
+    assert {
+        tuple(
+            (item["name"], item["value"])
+            for item in finding.scientific_context.to_record()["process"]
+        )
+        for finding in findings
+    } == {
+        (
+            ("build orientation alpha angle", 0),
+            ("build orientation beta angle", 0),
+        ),
+        (
+            ("build orientation alpha angle", 45),
+            ("build orientation beta angle", 22.5),
+        ),
+    }
 
 
 def test_synthesis_splits_distinct_outcomes_into_distinct_findings() -> None:
@@ -1643,14 +2054,14 @@ def test_synthesis_direct_result_cannot_be_a_condition_boundary() -> None:
     assert finding.condition_boundary_evidence_ids == ()
 
 
-def test_synthesis_derives_condition_boundary_from_opposing_papers_with_disjoint_context(
+def test_synthesis_splits_opposing_papers_at_explicit_condition_boundary(
 ) -> None:
     service = FindingSynthesisService(
-        assertion_judge=_Extractor([_heterogeneous_candidate()])
+        assertion_judge=_Extractor([_candidate(), _candidate()])
     )
     shared = {"material": [], "sample": [], "test": []}
 
-    finding = service.synthesize(
+    findings = service.synthesize(
         collection_id="col-1",
         objective=_objective(),
         analysis=_analysis(),
@@ -1675,12 +2086,77 @@ def test_synthesis_derives_condition_boundary_from_opposing_papers_with_disjoint
                 },
             ),
         ),
+    )
+
+    assert len(findings) == 2
+    assert {finding.direction for finding in findings} == {"increase", "decrease"}
+    assert {finding.synthesis_status for finding in findings} == {
+        "insufficient_confirmation"
+    }
+    assert {
+        finding.supporting_evidence_ids for finding in findings
+    } == {("support-1",), ("conflict-1",)}
+    assert all(not finding.contradicting_evidence_ids for finding in findings)
+    assert all(not finding.condition_boundary_evidence_ids for finding in findings)
+
+
+def test_synthesis_keeps_changed_axis_boundary_inside_one_comparable_finding(
+) -> None:
+    service = FindingSynthesisService(
+        assertion_judge=_Extractor([_heterogeneous_candidate()])
+    )
+
+    def result(
+        evidence_id: str,
+        document_id: str,
+        temperature: int,
+        direction: str,
+    ) -> ObjectiveEvidence:
+        return _evidence(
+            evidence_id,
+            document_id,
+            factors=("heat treatment temperature",),
+            outcome="elongation",
+            direction=direction,
+            scientific_context={
+                "material": [{"name": "alloy", "value": "Ti-6Al-4V"}],
+                "sample": [{"name": "sample state", "value": "as-built"}],
+                "process": [
+                    {"name": "process", "value": "LPBF"},
+                    {
+                        "name": "heat treatment temperature",
+                        "value": temperature,
+                        "unit": "C",
+                    },
+                ],
+                "test": [
+                    {"name": "test method", "value": "tensile test"},
+                    {"name": "test temperature", "value": 25, "unit": "C"},
+                ],
+            },
+        )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(
+            material_scope=["Ti-6Al-4V"],
+            variables=["heat treatment temperature"],
+            outcomes=["elongation"],
+        ),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"), _contribution("paper-2")),
+        evidence_records=(
+            result("lower-range", "paper-1", 800, "increase"),
+            result("higher-range", "paper-2", 900, "decrease"),
+        ),
     )[0]
 
     assert finding.synthesis_status == "condition_dependent"
+    assert finding.supporting_evidence_ids == ("lower-range",)
+    assert finding.contradicting_evidence_ids == ("higher-range",)
     assert set(finding.condition_boundary_evidence_ids) == {
-        "support-1",
-        "conflict-1",
+        "lower-range",
+        "higher-range",
     }
 
 

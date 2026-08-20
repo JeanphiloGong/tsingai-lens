@@ -305,6 +305,51 @@ class ObjectiveResearchRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ObjectiveAuthoredCandidateRecord(Base):
+    """Durable provenance for a user-approved candidate outside generated lineage."""
+
+    __tablename__ = "objective_authored_candidates"
+    __table_args__ = (
+        CheckConstraint("origin = 'chat_assisted'", name="origin_valid"),
+        ForeignKeyConstraint(
+            ["collection_id", "objective_id"],
+            ["research_objectives.collection_id", "research_objectives.objective_id"],
+            name="fk_objective_authored_candidates_objective",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["collection_id", "source_build_id"],
+            ["objective_builds.collection_id", "objective_builds.build_id"],
+            name="fk_objective_authored_candidates_source_build",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "created_by_tool_call_id",
+            name="uq_objective_authored_candidates_tool_call",
+        ),
+    )
+
+    collection_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    objective_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    source_build_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    origin: Mapped[str] = mapped_column(String(32), nullable=False)
+    seed_document_ids: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False
+    )
+    excluded_document_ids: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT, nullable=False
+    )
+    created_by_user_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("auth_users.user_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    created_by_tool_call_id: Mapped[str] = mapped_column(
+        String(128), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 objective_build_candidates = Table(
     "objective_build_candidates",
     Base.metadata,
@@ -950,6 +995,7 @@ objective_finding_relation_evidence_links = Table(
 
 __all__ = [
     "ObjectiveAnalysisRecord",
+    "ObjectiveAuthoredCandidateRecord",
     "ObjectiveBuild",
     "ObjectiveEvidenceRecord",
     "ObjectiveFindingContextRecord",

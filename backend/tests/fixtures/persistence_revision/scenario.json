@@ -424,64 +424,28 @@
         ]
       }
     ],
-    "goal_sessions": [
+    "chat_sessions": [
       {
-        "session_id": "goal_session_baseline",
+        "session_id": "chat_session_baseline",
         "user_id": "user_baseline",
         "collection_id": "col_baseline",
-        "focused_material_id": null,
-        "focused_paper_id": null,
-        "focused_objective_id": "objective_strength",
-        "goal_text": "How does heat treatment affect yield strength?",
-        "goal_brief_json": {"objective_id": "objective_strength"},
-        "answer_mode": "grounded",
-        "rolling_summary": "",
-        "last_evidence_ids": ["evidence_strength"],
-        "last_material_ids": [],
-        "last_paper_ids": ["doc_strength"],
-        "collection_data_version": "baseline-v1",
         "created_at": "2026-01-01T00:03:00+00:00",
         "updated_at": "2026-01-01T00:04:00+00:00"
       }
     ],
-    "goal_messages": [
+    "chat_messages": [
       {
         "message_id": "message_user",
-        "session_id": "goal_session_baseline",
+        "session_id": "chat_session_baseline",
         "role": "user",
         "content": "What strength was reported?",
         "created_at": "2026-01-01T00:03:10+00:00"
       },
       {
         "message_id": "message_assistant",
-        "session_id": "goal_session_baseline",
+        "session_id": "chat_session_baseline",
         "role": "assistant",
         "content": "The synthetic result reports 620 MPa.",
-        "answer": "The synthetic result reports 620 MPa.",
-        "source_mode": "collection_grounded",
-        "used_evidence_ids": ["evidence_strength"],
-        "warnings": [],
-        "links": {"workspace": "/collections/col_baseline"},
-        "review_gate": "reviewed_findings",
-        "source_validity": "current",
-        "source_validity_reasons": [],
-        "source_links": [
-          {
-            "kind": "evidence",
-            "label": "Synthetic result paragraph",
-            "href": "/collections/col_baseline/documents/doc_strength?block_id=block_result"
-          }
-        ],
-        "source_finding_refs": [
-          {
-            "objective_id": "objective_strength",
-            "finding_id": "finding_strength",
-            "analysis_version": 1,
-            "finding_fingerprint": "finding.v2:fixture-strength",
-            "evidence_fingerprint": "evidence.v2:fixture-strength",
-            "evidence_ids": ["evidence_strength"]
-          }
-        ],
         "created_at": "2026-01-01T00:03:20+00:00"
       }
     ],

@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+from pydantic import BaseModel, ConfigDict
+
+from application.chat import ToolSpec
+from domain.chat import ChatMessage, ToolRisk
+from infra.llm.chat_model import OpenAIChatModel
+
+
+class _NoArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class _Completions:
+    def __init__(self, response) -> None:  # noqa: ANN001
+        self.response = response
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):  # noqa: ANN003, ANN201
+        self.calls.append(kwargs)
+        return self.response
+
+
+def _client(response):  # noqa: ANN001, ANN202
+    completions = _Completions(response)
+    return SimpleNamespace(chat=SimpleNamespace(completions=completions)), completions
+
+
+def _completion(*, content: str | None = None, tool_calls: list | None = None):
+    message = SimpleNamespace(content=content, tool_calls=tool_calls or [])
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=message)],
+        model="test-model",
+        usage=None,
+    )
+
+
+def _message() -> ChatMessage:
+    return ChatMessage.user(
+        message_id="msg-1",
+        session_id="chat-1",
+        content="你好",
+        created_at="2026-08-19T00:00:00+00:00",
+    )
+
+
+def test_openai_chat_model_returns_an_ordinary_answer_without_tools() -> None:
+    client, completions = _client(_completion(content="你好，我可以帮助分析文献。"))
+    model = OpenAIChatModel(client=client, model="test-model")
+
+    turn = model.respond(messages=(_message(),), tool_specs=())
+
+    assert turn.content == "你好，我可以帮助分析文献。"
+    assert turn.tool_call is None
+    request = completions.calls[0]
+    assert request["messages"][0]["role"] == "system"
+    assert request["messages"][1] == {"role": "user", "content": "你好"}
+    assert "tools" not in request
+
+
+def test_openai_chat_model_parses_one_typed_tool_call() -> None:
+    tool_call = SimpleNamespace(
+        id="call-1",
+        type="function",
+        function=SimpleNamespace(
+            name="get_collection_context",
+            arguments='{"include_documents":true}',
+        ),
+    )
+    client, completions = _client(_completion(tool_calls=[tool_call]))
+    model = OpenAIChatModel(client=client, model="test-model")
+    spec = ToolSpec(
+        name="get_collection_context",
+        description="Read bounded collection context.",
+        risk=ToolRisk.READ,
+        input_model=_NoArguments,
+    )
+
+    turn = model.respond(messages=(_message(),), tool_specs=(spec,))
+
+    assert turn.tool_call is not None
+    assert turn.tool_call.name == "get_collection_context"
+    assert turn.tool_call.arguments == {"include_documents": True}
+    request = completions.calls[0]
+    assert request["parallel_tool_calls"] is False
+    assert request["tools"][0]["function"]["name"] == "get_collection_context"
+
+
+def test_openai_chat_model_rejects_multiple_or_non_object_tool_arguments() -> None:
+    first = SimpleNamespace(
+        id="call-1",
+        type="function",
+        function=SimpleNamespace(name="one", arguments="{}"),
+    )
+    second = SimpleNamespace(
+        id="call-2",
+        type="function",
+        function=SimpleNamespace(name="two", arguments="{}"),
+    )
+    client, _completions = _client(_completion(tool_calls=[first, second]))
+    model = OpenAIChatModel(client=client, model="test-model")
+
+    with pytest.raises(ValueError, match="exactly one tool call"):
+        model.respond(messages=(_message(),), tool_specs=())
+
+    invalid = SimpleNamespace(
+        id="call-3",
+        type="function",
+        function=SimpleNamespace(name="one", arguments="[]"),
+    )
+    client, _completions = _client(_completion(tool_calls=[invalid]))
+    model = OpenAIChatModel(client=client, model="test-model")
+
+    with pytest.raises(ValueError, match="JSON object"):
+        model.respond(messages=(_message(),), tool_specs=())

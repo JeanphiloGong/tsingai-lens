@@ -178,7 +178,6 @@ def test_postgresql_enforces_auth_contract(monkeypatch) -> None:
             "main.FindingSynthesisService",
             lambda **_kwargs: object(),
         )
-        monkeypatch.setattr("main.GoalSessionService", lambda **_kwargs: object())
         with TestClient(create_app()) as client:
             login = client.post(
                 "/api/v1/auth/login",

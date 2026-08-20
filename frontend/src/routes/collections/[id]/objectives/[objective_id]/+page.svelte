@@ -377,7 +377,14 @@
 				</section>
 			</section>
 		{:else if published}
-			<p class="page-state">该版本没有可展示的 Findings。</p>
+			<div class="page-state page-state--complete">
+				<p>分析已完成，但当前证据未形成可直接比较的 Finding。</p>
+				<span
+					>v{published.analysis_version} · {published.model_name
+						? `模型 ${published.model_name}`
+						: '模型未记录'}</span
+				>
+			</div>
 		{:else if !isProcessing}
 			<p class="page-state">确认并开始分析后，这里将展示可追溯的 Findings。</p>
 		{/if}
@@ -560,6 +567,13 @@
 	.page-state {
 		padding: 30px 0;
 		color: var(--text-secondary);
+	}
+	.page-state--complete {
+		display: grid;
+		gap: 6px;
+	}
+	.page-state--complete span {
+		font-size: 12px;
 	}
 	@media (max-width: 1000px) {
 		.findings-workspace {

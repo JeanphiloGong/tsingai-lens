@@ -49,6 +49,7 @@ from domain.evaluation import (
     FindingFeedback,
 )
 from domain.goal import ExperimentPlanRecord
+from domain.chat import ChatMessage, ChatSession, ChatToolCall, ChatToolResult
 
 
 @dataclass(frozen=True)
@@ -165,22 +166,34 @@ class BuildRepository(Protocol):
     ) -> CollectionBuildRecord | None: ...
 
 
-class GoalSessionRepository(Protocol):
-    backend_name: str
+class ChatRepository(Protocol):
+    def add_session(self, record: ChatSession) -> None: ...
 
-    def read_session(self, session_id: str) -> dict[str, Any] | None: ...
+    def read_session(self, session_id: str) -> ChatSession | None: ...
 
-    def read_message_context(self, message_id: str) -> dict[str, Any] | None: ...
+    def read_messages(self, session_id: str) -> tuple[ChatMessage, ...]: ...
 
-    def write_session(self, payload: Mapping[str, Any]) -> None: ...
+    def read_tool_call(self, tool_call_id: str) -> ChatToolCall | None: ...
 
-    def read_messages(self, session_id: str) -> list[dict[str, Any]]: ...
-
-    def write_messages(
+    def save_trajectory(
         self,
-        session_id: str,
-        messages: list[Mapping[str, Any]],
+        *,
+        session: ChatSession,
+        messages: tuple[ChatMessage, ...],
+        tool_calls: tuple[ChatToolCall, ...],
+        tool_results: tuple[ChatToolResult, ...],
     ) -> None: ...
+
+    def decide_tool_call(
+        self,
+        *,
+        session_id: str,
+        tool_call_id: str,
+        user_id: str,
+        arguments_digest: str,
+        decision: str,
+        decided_at: str,
+    ) -> ChatToolCall: ...
 
 
 class ExperimentPlanRepository(Protocol):
@@ -339,6 +352,14 @@ class ObjectiveRepository(Protocol):
         self,
         collection_id: str,
     ) -> tuple[ResearchObjective, ...]: ...
+
+    def create_authored_candidate(
+        self,
+        objective: ResearchObjective,
+        *,
+        created_by_user_id: str,
+        created_by_tool_call_id: str,
+    ) -> ResearchObjective: ...
 
     def read_objective(
         self,

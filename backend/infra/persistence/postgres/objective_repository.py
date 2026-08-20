@@ -38,6 +38,7 @@ from infra.persistence.postgres.models.build import (
 )
 from infra.persistence.postgres.models.objective import (
     ObjectiveAnalysisRecord,
+    ObjectiveAuthoredCandidateRecord,
     ObjectiveBuild,
     ObjectiveEvidenceRecord,
     ObjectiveFindingContextRecord,
@@ -154,7 +155,11 @@ class PostgresObjectiveRepository:
                             "research objective identity collision: "
                             f"{collection_id}/{objective.objective_id}"
                         )
-                    if row.confirmation_status == "candidate":
+                    authored = session.get(
+                        ObjectiveAuthoredCandidateRecord,
+                        (collection_id, objective.objective_id),
+                    )
+                    if row.confirmation_status == "candidate" and authored is None:
                         row.question = objective.question
                         row.material_scope = list(objective.material_scope)
                         row.variables = list(objective.variables)
@@ -330,63 +335,246 @@ class PostgresObjectiveRepository:
     def list_objectives(self, collection_id: str) -> tuple[ResearchObjective, ...]:
         with self.session_factory() as session:
             build_id = self._resolve_read_build(session, collection_id, None)
-            if build_id is None:
-                return ()
-            marker = session.get(ObjectiveBuild, build_id)
+            generated_rows: list[tuple[ObjectiveResearchRecord, int]] = []
+            marker = session.get(ObjectiveBuild, build_id) if build_id else None
             if (
-                marker is None
-                or marker.collection_id != collection_id
-                or not marker.research_objectives_ready
+                build_id is not None
+                and marker is not None
+                and marker.collection_id == collection_id
+                and marker.research_objectives_ready
             ):
-                return ()
-            scope = self._scope_by_objective(
-                session,
-                collection_id,
-                build_id=build_id,
+                generated_rows = list(
+                    session.execute(
+                        select(
+                            ObjectiveResearchRecord,
+                            objective_build_candidates.c.objective_order,
+                        )
+                        .join(
+                            objective_build_candidates,
+                            (
+                                objective_build_candidates.c.collection_id
+                                == ObjectiveResearchRecord.collection_id
+                            )
+                            & (
+                                objective_build_candidates.c.objective_id
+                                == ObjectiveResearchRecord.objective_id
+                            ),
+                        )
+                        .where(
+                            objective_build_candidates.c.collection_id == collection_id,
+                            objective_build_candidates.c.build_id == build_id,
+                        )
+                        .order_by(objective_build_candidates.c.objective_order)
+                    ).all()
+                )
+            authored_rows = list(
+                session.scalars(
+                    select(ObjectiveAuthoredCandidateRecord)
+                    .where(
+                        ObjectiveAuthoredCandidateRecord.collection_id == collection_id
+                    )
+                    .order_by(
+                        ObjectiveAuthoredCandidateRecord.created_at,
+                        ObjectiveAuthoredCandidateRecord.objective_id,
+                    )
+                )
             )
-            relationship_ids_by_objective = self._relationship_ids_by_objective(
-                session, build_id
-            )
-            analysis_versions_by_objective = self._analysis_versions_by_objective(
-                session,
-                collection_id,
-                build_id,
-            )
-            return tuple(
-                self._objective_record(
-                    row,
-                    scope.get(row.objective_id, {}),
-                    source_relationship_ids=relationship_ids_by_objective.get(
-                        row.objective_id, ()
-                    ),
-                    rank=int(objective_order) + 1,
-                    analysis_versions=analysis_versions_by_objective.get(
-                        row.objective_id, (None, None)
+            authored_by_id = {row.objective_id: row for row in authored_rows}
+            ordered_rows: list[
+                tuple[ObjectiveResearchRecord, ObjectiveAuthoredCandidateRecord | None]
+            ] = []
+            seen: set[str] = set()
+            for row, _objective_order in generated_rows:
+                ordered_rows.append((row, authored_by_id.get(row.objective_id)))
+                seen.add(row.objective_id)
+            for authored in authored_rows:
+                if authored.objective_id in seen:
+                    continue
+                row = session.get(
+                    ObjectiveResearchRecord,
+                    (collection_id, authored.objective_id),
+                )
+                if row is not None:
+                    ordered_rows.append((row, authored))
+
+            scopes: dict[str, dict[str, dict[str, tuple[str, ...]]]] = {}
+            relationships: dict[str, dict[str, tuple[str, ...]]] = {}
+            versions: dict[str, dict[str, tuple[int | None, int | None]]] = {}
+            records: list[ResearchObjective] = []
+            for position, (row, authored) in enumerate(ordered_rows, start=1):
+                source_build_id = authored.source_build_id if authored else build_id
+                if source_build_id is None:
+                    continue
+                scopes.setdefault(
+                    source_build_id,
+                    self._scope_by_objective(
+                        session,
+                        collection_id,
+                        build_id=source_build_id,
                     ),
                 )
-                for row, objective_order in session.execute(
-                    select(
-                        ObjectiveResearchRecord,
-                        objective_build_candidates.c.objective_order,
-                    )
-                    .join(
-                        objective_build_candidates,
-                        (
-                            objective_build_candidates.c.collection_id
-                            == ObjectiveResearchRecord.collection_id
-                        )
-                        & (
-                            objective_build_candidates.c.objective_id
-                            == ObjectiveResearchRecord.objective_id
+                relationships.setdefault(
+                    source_build_id,
+                    self._relationship_ids_by_objective(session, source_build_id),
+                )
+                versions.setdefault(
+                    source_build_id,
+                    self._analysis_versions_by_objective(
+                        session,
+                        collection_id,
+                        source_build_id,
+                    ),
+                )
+                records.append(
+                    self._objective_record(
+                        row,
+                        scopes[source_build_id].get(row.objective_id, {}),
+                        source_relationship_ids=(
+                            ()
+                            if authored is not None
+                            else relationships[source_build_id].get(row.objective_id, ())
                         ),
+                        rank=position,
+                        analysis_versions=versions[source_build_id].get(
+                            row.objective_id, (None, None)
+                        ),
+                        authored=authored,
+                    )
+                )
+            return tuple(records)
+
+    def create_authored_candidate(
+        self,
+        objective: ResearchObjective,
+        *,
+        created_by_user_id: str,
+        created_by_tool_call_id: str,
+    ) -> ResearchObjective:
+        if objective.origin != "chat_assisted":
+            raise ValueError("authored candidate must have chat_assisted origin")
+        if objective.created_by_user_id != created_by_user_id or (
+            objective.created_by_tool_call_id != created_by_tool_call_id
+        ):
+            raise ValueError("authored candidate provenance does not match the request")
+        with self.session_factory.begin() as session:
+            existing_call = session.scalar(
+                select(ObjectiveAuthoredCandidateRecord).where(
+                    ObjectiveAuthoredCandidateRecord.created_by_tool_call_id
+                    == created_by_tool_call_id
+                )
+            )
+            if existing_call is not None:
+                if (
+                    existing_call.collection_id != objective.collection_id
+                    or existing_call.objective_id != objective.objective_id
+                    or existing_call.created_by_user_id != created_by_user_id
+                ):
+                    raise ValueError(
+                        "authored candidate tool call already created a different objective"
+                    )
+                row = self._locked_objective(
+                    session,
+                    objective.collection_id,
+                    objective.objective_id,
+                )
+                return self._authored_objective_record(
+                    session,
+                    row,
+                    existing_call,
+                )
+
+            build_id = self._resolve_read_build(
+                session,
+                objective.collection_id,
+                None,
+            )
+            marker = session.get(ObjectiveBuild, build_id) if build_id else None
+            if (
+                build_id is None
+                or marker is None
+                or marker.collection_id != objective.collection_id
+                or not marker.research_objectives_ready
+            ):
+                raise FileNotFoundError(
+                    f"research objectives not ready: {objective.collection_id}"
+                )
+            requested_document_ids = set(objective.seed_document_ids) | set(
+                objective.excluded_document_ids
+            )
+            available_document_ids = set(
+                session.scalars(
+                    select(
+                        SourceDocument.source_document_id,
                     )
                     .where(
-                        objective_build_candidates.c.collection_id == collection_id,
-                        objective_build_candidates.c.build_id == build_id,
+                        SourceDocument.collection_id == objective.collection_id,
+                        SourceDocument.build_id == build_id,
+                        SourceDocument.source_document_id.in_(requested_document_ids),
                     )
-                    .order_by(objective_build_candidates.c.objective_order)
-                ).all()
+                )
             )
+            missing = requested_document_ids - available_document_ids
+            if missing:
+                raise FileNotFoundError(
+                    "authored candidate Source document not found: "
+                    + ", ".join(sorted(missing))
+                )
+
+            row = session.get(
+                ObjectiveResearchRecord,
+                (objective.collection_id, objective.objective_id),
+            )
+            now = datetime.now(timezone.utc)
+            if row is None:
+                row = ObjectiveResearchRecord(
+                    collection_id=objective.collection_id,
+                    objective_id=objective.objective_id,
+                    question=objective.question,
+                    material_scope=list(objective.material_scope),
+                    variables=list(objective.variables),
+                    outcomes=list(objective.outcomes),
+                    mechanisms=list(objective.mechanisms),
+                    constraints=list(objective.constraints),
+                    requested_comparator=objective.requested_comparator,
+                    confidence=objective.confidence,
+                    reason=objective.reason,
+                    confirmation_status="candidate",
+                    active_analysis_version=None,
+                    published_analysis_version=None,
+                    created_at=objective.created_at or now,
+                    updated_at=objective.updated_at or now,
+                )
+                session.add(row)
+                session.flush()
+            elif self._objective_definition_id(row) != self._objective_definition_id(
+                objective
+            ):
+                raise ValueError(
+                    "research objective identity collision: "
+                    f"{objective.collection_id}/{objective.objective_id}"
+                )
+
+            existing_authored = session.get(
+                ObjectiveAuthoredCandidateRecord,
+                (objective.collection_id, objective.objective_id),
+            )
+            if existing_authored is None:
+                existing_authored = ObjectiveAuthoredCandidateRecord(
+                    collection_id=objective.collection_id,
+                    objective_id=objective.objective_id,
+                    source_build_id=build_id,
+                    origin="chat_assisted",
+                    seed_document_ids=list(objective.seed_document_ids),
+                    excluded_document_ids=list(objective.excluded_document_ids),
+                    created_by_user_id=created_by_user_id,
+                    created_by_tool_call_id=created_by_tool_call_id,
+                    created_at=now,
+                )
+                session.add(existing_authored)
+                session.flush()
+            session.refresh(row)
+            session.refresh(existing_authored)
+            return self._authored_objective_record(session, row, existing_authored)
 
     def read_objective(
         self,
@@ -405,11 +593,18 @@ class PostgresObjectiveRepository:
             if row is None:
                 return None
             source_relationship_ids, rank, build_id = link
-            scope = self._scope_by_objective(
+            authored = self._authored_candidate(
                 session,
                 collection_id,
+                objective_id,
+            )
+            scope = self._objective_scope(
+                session,
+                collection_id,
+                objective_id,
                 build_id=build_id,
-            ).get(objective_id, {})
+                authored=authored,
+            )
             return self._objective_record(
                 row,
                 scope,
@@ -420,6 +615,7 @@ class PostgresObjectiveRepository:
                     collection_id,
                     build_id,
                 ).get(objective_id, (None, None)),
+                authored=authored,
             )
 
     def confirm_objective(
@@ -438,11 +634,18 @@ class PostgresObjectiveRepository:
                 row.confirmation_status = "confirmed"
                 row.updated_at = datetime.now(timezone.utc)
             source_relationship_ids, rank, build_id = link
-            scope = self._scope_by_objective(
+            authored = self._authored_candidate(
                 session,
                 collection_id,
+                objective_id,
+            )
+            scope = self._objective_scope(
+                session,
+                collection_id,
+                objective_id,
                 build_id=build_id,
-            ).get(objective_id, {})
+                authored=authored,
+            )
             return self._objective_record(
                 row,
                 scope,
@@ -453,6 +656,7 @@ class PostgresObjectiveRepository:
                     collection_id,
                     build_id,
                 ).get(objective_id, (None, None)),
+                authored=authored,
             )
 
     def queue_analysis(
@@ -472,6 +676,11 @@ class PostgresObjectiveRepository:
             )
             source_relationship_ids, rank, source_build_id = link
             row = self._locked_objective(session, collection_id, objective_id)
+            authored = self._authored_candidate(
+                session,
+                collection_id,
+                objective_id,
+            )
             if row.confirmation_status != "confirmed":
                 raise ValueError("objective must be confirmed before analysis")
             existing = session.scalar(
@@ -483,11 +692,13 @@ class PostgresObjectiveRepository:
                 )
             )
             if existing is not None:
-                scope = self._scope_by_objective(
+                scope = self._objective_scope(
                     session,
                     collection_id,
+                    objective_id,
                     build_id=source_build_id,
-                ).get(objective_id, {})
+                    authored=authored,
+                )
                 return self._objective_record(
                     row,
                     scope,
@@ -498,6 +709,7 @@ class PostgresObjectiveRepository:
                         collection_id,
                         source_build_id,
                     ).get(objective_id, (None, None)),
+                    authored=authored,
                 ), self._analysis_record(existing)
             next_version = (
                 session.scalar(
@@ -508,15 +720,14 @@ class PostgresObjectiveRepository:
                 )
                 or 0
             ) + 1
-            total_documents = len(
-                self._scope_by_objective(
-                    session,
-                    collection_id,
-                    build_id=source_build_id,
-                )
-                .get(objective_id, {})
-                .get("seed", ())
+            scope = self._objective_scope(
+                session,
+                collection_id,
+                objective_id,
+                build_id=source_build_id,
+                authored=authored,
             )
+            total_documents = len(scope.get("seed", ()))
             now = datetime.now(timezone.utc)
             analysis_row = ObjectiveAnalysisRecord(
                 collection_id=collection_id,
@@ -542,11 +753,6 @@ class PostgresObjectiveRepository:
             session.add(analysis_row)
             row.active_analysis_version = next_version
             row.updated_at = now
-            scope = self._scope_by_objective(
-                session,
-                collection_id,
-                build_id=source_build_id,
-            ).get(objective_id, {})
             return self._objective_record(
                 row,
                 scope,
@@ -560,6 +766,7 @@ class PostgresObjectiveRepository:
                         source_build_id,
                     ).get(objective_id, (None, None))[1],
                 ),
+                authored=authored,
             ), self._analysis_record(analysis_row)
 
     def claim_analysis(
@@ -719,16 +926,24 @@ class PostgresObjectiveRepository:
                 objective_id,
                 build_id=analysis_row.source_build_id,
             )
+            authored = self._authored_candidate(
+                session,
+                collection_id,
+                objective_id,
+            )
             objective = self._objective_record(
                 objective_row,
-                self._scope_by_objective(
+                self._objective_scope(
                     session,
                     collection_id,
+                    objective_id,
                     build_id=analysis_row.source_build_id,
-                ).get(objective_id, {}),
+                    authored=authored,
+                ),
                 source_relationship_ids=source_relationship_ids,
                 rank=rank,
                 analysis_versions=(analysis_version, analysis_version),
+                authored=authored,
             ).publish_analysis(succeeded)
             objective_row.published_analysis_version = analysis_version
             objective_row.updated_at = datetime.now(timezone.utc)
@@ -1432,8 +1647,19 @@ class PostgresObjectiveRepository:
         source_relationship_ids: tuple[str, ...] = (),
         rank: int | None = None,
         analysis_versions: tuple[int | None, int | None],
+        authored: ObjectiveAuthoredCandidateRecord | None = None,
     ) -> ResearchObjective:
         active_analysis_version, published_analysis_version = analysis_versions
+        seed_document_ids = (
+            tuple(authored.seed_document_ids)
+            if authored is not None
+            else tuple(scope.get("seed", ()))
+        )
+        excluded_document_ids = (
+            tuple(authored.excluded_document_ids)
+            if authored is not None
+            else tuple(scope.get("excluded", ()))
+        )
         return ResearchObjective(
             collection_id=row.collection_id,
             objective_id=row.objective_id,
@@ -1444,8 +1670,8 @@ class PostgresObjectiveRepository:
             mechanisms=tuple(row.mechanisms),
             constraints=tuple(row.constraints),
             requested_comparator=row.requested_comparator,
-            seed_document_ids=tuple(scope.get("seed", ())),
-            excluded_document_ids=tuple(scope.get("excluded", ())),
+            seed_document_ids=seed_document_ids,
+            excluded_document_ids=excluded_document_ids,
             confidence=row.confidence,
             reason=row.reason,
             source_relationship_ids=source_relationship_ids,
@@ -1455,6 +1681,39 @@ class PostgresObjectiveRepository:
             published_analysis_version=published_analysis_version,
             created_at=row.created_at,
             updated_at=row.updated_at,
+            origin=authored.origin if authored is not None else "system_discovered",
+            source_build_id=(
+                authored.source_build_id if authored is not None else None
+            ),
+            created_by_user_id=(
+                authored.created_by_user_id if authored is not None else None
+            ),
+            created_by_tool_call_id=(
+                authored.created_by_tool_call_id if authored is not None else None
+            ),
+        )
+
+    @classmethod
+    def _authored_objective_record(
+        cls,
+        session: Session,
+        row: ObjectiveResearchRecord,
+        authored: ObjectiveAuthoredCandidateRecord,
+    ) -> ResearchObjective:
+        return cls._objective_record(
+            row,
+            {},
+            rank=cls._objective_rank(
+                session,
+                authored.collection_id,
+                authored.objective_id,
+            ),
+            analysis_versions=cls._analysis_versions_by_objective(
+                session,
+                authored.collection_id,
+                authored.source_build_id,
+            ).get(authored.objective_id, (None, None)),
+            authored=authored,
         )
 
     @staticmethod
@@ -1866,6 +2125,92 @@ class PostgresObjectiveRepository:
         }
 
     @staticmethod
+    def _authored_candidate(
+        session: Session,
+        collection_id: str,
+        objective_id: str,
+    ) -> ObjectiveAuthoredCandidateRecord | None:
+        return session.get(
+            ObjectiveAuthoredCandidateRecord,
+            (collection_id, objective_id),
+        )
+
+    @classmethod
+    def _objective_scope(
+        cls,
+        session: Session,
+        collection_id: str,
+        objective_id: str,
+        *,
+        build_id: str,
+        authored: ObjectiveAuthoredCandidateRecord | None,
+    ) -> dict[str, tuple[str, ...]]:
+        if authored is not None:
+            if authored.source_build_id != build_id:
+                raise ValueError("authored candidate is bound to another Source build")
+            return {
+                "seed": tuple(authored.seed_document_ids),
+                "excluded": tuple(authored.excluded_document_ids),
+            }
+        return cls._scope_by_objective(
+            session,
+            collection_id,
+            build_id=build_id,
+        ).get(objective_id, {})
+
+    @classmethod
+    def _objective_rank(
+        cls,
+        session: Session,
+        collection_id: str,
+        objective_id: str,
+    ) -> int:
+        active_build_id = cls._resolve_read_build(session, collection_id, None)
+        generated_ids: list[str] = []
+        if active_build_id is not None:
+            marker = session.get(ObjectiveBuild, active_build_id)
+            if (
+                marker is not None
+                and marker.collection_id == collection_id
+                and marker.research_objectives_ready
+            ):
+                generated_ids = [
+                    str(row.objective_id)
+                    for row in session.execute(
+                        select(objective_build_candidates.c.objective_id)
+                        .where(
+                            objective_build_candidates.c.collection_id
+                            == collection_id,
+                            objective_build_candidates.c.build_id == active_build_id,
+                        )
+                        .order_by(objective_build_candidates.c.objective_order)
+                    )
+                ]
+        if objective_id in generated_ids:
+            return generated_ids.index(objective_id) + 1
+
+        authored_ids = [
+            row.objective_id
+            for row in session.scalars(
+                select(ObjectiveAuthoredCandidateRecord)
+                .where(
+                    ObjectiveAuthoredCandidateRecord.collection_id == collection_id
+                )
+                .order_by(
+                    ObjectiveAuthoredCandidateRecord.created_at,
+                    ObjectiveAuthoredCandidateRecord.objective_id,
+                )
+            )
+            if row.objective_id not in generated_ids
+        ]
+        try:
+            return len(generated_ids) + authored_ids.index(objective_id) + 1
+        except ValueError as exc:
+            raise FileNotFoundError(
+                f"research objective not found: {collection_id}/{objective_id}"
+            ) from exc
+
+    @staticmethod
     def _analysis_versions_by_objective(
         session: Session,
         collection_id: str,
@@ -2039,6 +2384,21 @@ class PostgresObjectiveRepository:
         *,
         build_id: str | None = None,
     ) -> tuple[tuple[str, ...], int, str] | None:
+        authored = cls._authored_candidate(session, collection_id, objective_id)
+        if authored is not None and (
+            build_id is None or build_id == authored.source_build_id
+        ):
+            marker = session.get(ObjectiveBuild, authored.source_build_id)
+            if (
+                marker is not None
+                and marker.collection_id == collection_id
+                and marker.research_objectives_ready
+            ):
+                return (
+                    (),
+                    cls._objective_rank(session, collection_id, objective_id),
+                    authored.source_build_id,
+                )
         resolved_build_id = cls._resolve_read_build(session, collection_id, build_id)
         if resolved_build_id is None:
             return None

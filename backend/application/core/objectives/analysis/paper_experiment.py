@@ -20,6 +20,30 @@ _OBJECTIVE_PAIRWISE_SCOPE_LIMIT = 48
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 
 
+def _objective_pairwise_attribution_scope(
+    changed_variables: list[dict[str, Any]],
+    *,
+    comparable: bool,
+) -> str:
+    if not comparable:
+        return "not_attributable"
+    if len(changed_variables) > 1:
+        return "joint_effect"
+
+    axis = property_matching.normalize_property_label(
+        changed_variables[0].get("name")
+    )
+    if axis in {
+        "condition",
+        "material state",
+        "post processing condition",
+        "processing condition",
+        "sample state",
+    }:
+        return "association_only"
+    return "isolated_effect"
+
+
 def reconstruct_paper_experiments(
     *,
     collection_id: str,
@@ -59,48 +83,15 @@ def _enrich_objective_scope_context(
         paper_skim = skim_by_document_id.get(unit.document_id)
         context = unit.scientific_context.to_record()
         if not context["material"]:
-            material_values = _paper_skim_study_values(
+            material_values = _paper_skim_source_values(
                 paper_skim,
-                "material_scope",
+                unit=unit,
+                field_name="material_scope",
             )
             context["material"] = [
                 {"name": "material", "value": value, "unit": None}
                 for value in material_values
             ]
-        process_values = _paper_skim_study_values(
-            paper_skim,
-            "process_context",
-        )
-        if process_values:
-            process_identity_names = {
-                "fabrication process",
-                "manufacturing process",
-                "process",
-                "processing method",
-                "production process",
-            }
-            has_process_identity = any(
-                " ".join(
-                    str(item.get("name") or "")
-                    .casefold()
-                    .replace("_", " ")
-                    .split()
-                )
-                in process_identity_names
-                for item in context["process"]
-            )
-            if not has_process_identity:
-                context["process"] = [
-                    *context["process"],
-                    *(
-                        {
-                            "name": "process",
-                            "value": value,
-                            "unit": None,
-                        }
-                        for value in process_values
-                    ),
-                ]
         if context == unit.scientific_context.to_record():
             enriched.append(unit)
             continue
@@ -177,35 +168,21 @@ def _objective_descriptive_result(
 def _bind_objective_result_process_context(
     units: tuple[ExtractedEvidenceDraft, ...],
 ) -> tuple[ExtractedEvidenceDraft, ...]:
-    process_context_by_sample: dict[
-        tuple[str, str, str], ExtractedEvidenceDraft
-    ] = {}
-    process_context_scopes: set[tuple[str, str]] = set()
-    conflicting_samples: set[tuple[str, str, str]] = set()
-    for unit in units:
-        if (
-            unit.evidence_role != "condition_context"
-            or not unit.scientific_context.process
-        ):
-            continue
-        sample_identity = _objective_explicit_sample_identity(unit)
-        if not sample_identity:
-            continue
-        key = (unit.objective_id, unit.document_id, sample_identity)
-        process_context_scopes.add((unit.objective_id, unit.document_id))
-        existing = process_context_by_sample.get(key)
-        if existing is None:
-            process_context_by_sample[key] = unit
-            continue
-        if _objective_process_context_signature(
-            existing
-        ) != _objective_process_context_signature(unit):
-            conflicting_samples.add(key)
+    (
+        process_context_by_sample,
+        process_context_scopes,
+        conflicting_samples,
+    ) = _objective_condition_registry(units)
 
     bound: list[ExtractedEvidenceDraft] = []
     for unit in units:
-        comparison = unit.comparison
         scope = (unit.objective_id, unit.document_id)
+        unit = _objective_result_with_registered_condition_comparison(
+            unit,
+            process_context_by_sample=process_context_by_sample,
+            conflicting_samples=conflicting_samples,
+        )
+        comparison = unit.comparison
         pending_process_binding = bool(
             unit.source_kind == "text_window"
             and unit.reported_result is not None
@@ -333,6 +310,68 @@ def _bind_objective_result_process_context(
                     }
                 )
             if not changed_variables:
+                source_group_variables = [
+                    {
+                        "name": axis,
+                        "baseline_value": comparison.baseline_label,
+                        "target_value": comparison.target_label,
+                        "unit": None,
+                    }
+                    for axis in comparison.axis_names
+                    if property_matching.normalize_property_label(axis)
+                    not in {
+                        "condition",
+                        "group",
+                        "sample",
+                        "sample condition",
+                        "sample id",
+                    }
+                ]
+                retain_source_group_comparison = bool(
+                    comparison.comparable
+                    and (
+                        source_claims_effect
+                        or (
+                            pending_process_binding
+                            and unit.attribution_scope == "association_only"
+                            and source_group_variables
+                        )
+                    )
+                )
+                if retain_source_group_comparison:
+                    payload = unit.to_record()
+                    if not payload["changed_variables"]:
+                        payload["changed_variables"] = source_group_variables
+                    payload["attribution_scope"] = "association_only"
+                    payload["selection_reason"] = (
+                        "Source-grounded result comparison retained as an "
+                        "association; linked groups share the recorded process "
+                        "context but do not expose quantified process values."
+                    )
+                    scientific_context = unit.scientific_context.to_record()
+                    scientific_context["process"] = (
+                        _objective_common_pairwise_context(
+                            baseline_context,
+                            target_context,
+                        )["process"]
+                    )
+                    payload["scientific_context"] = scientific_context
+                    payload["source_refs"] = list(
+                        _dedupe_objective_source_refs(
+                            (
+                                unit.source_refs,
+                                baseline_context.source_refs,
+                                target_context.source_refs,
+                            )
+                        )
+                    )
+                    payload["confidence"] = min(
+                        unit.confidence,
+                        baseline_context.confidence,
+                        target_context.confidence,
+                    )
+                    bound.append(ExtractedEvidenceDraft.from_mapping(payload))
+                    continue
                 incomparability_reasons.append(
                     "bound process conditions do not contain a changed variable"
                 )
@@ -348,14 +387,9 @@ def _bind_objective_result_process_context(
                 "comparable": comparable,
                 "incomparability_reasons": incomparability_reasons,
             }
-            payload["attribution_scope"] = (
-                "not_attributable"
-                if not comparable
-                else (
-                    "isolated_effect"
-                    if len(changed_variables) == 1
-                    else "joint_effect"
-                )
+            payload["attribution_scope"] = _objective_pairwise_attribution_scope(
+                changed_variables,
+                comparable=comparable,
             )
             scientific_context = unit.scientific_context.to_record()
             scientific_context["process"] = _objective_common_pairwise_context(
@@ -421,6 +455,218 @@ def _bind_objective_result_process_context(
     return tuple(bound)
 
 
+def _objective_condition_registry(
+    units: tuple[ExtractedEvidenceDraft, ...],
+) -> tuple[
+    dict[tuple[str, str, str], ExtractedEvidenceDraft],
+    set[tuple[str, str]],
+    set[tuple[str, str, str]],
+]:
+    registry: dict[tuple[str, str, str], ExtractedEvidenceDraft] = {}
+    scopes: set[tuple[str, str]] = set()
+    conflicts: set[tuple[str, str, str]] = set()
+    for unit in units:
+        if (
+            unit.evidence_role != "condition_context"
+            or not unit.scientific_context.process
+        ):
+            continue
+        sample_identity = _objective_explicit_sample_identity(unit)
+        if not sample_identity:
+            continue
+        key = (unit.objective_id, unit.document_id, sample_identity)
+        scopes.add((unit.objective_id, unit.document_id))
+        if key in conflicts:
+            continue
+        existing = registry.get(key)
+        if existing is None:
+            registry[key] = unit
+            continue
+        merged = _objective_merge_condition_context(existing, unit)
+        if merged is None:
+            conflicts.add(key)
+            registry.pop(key, None)
+        else:
+            registry[key] = merged
+    return registry, scopes, conflicts
+
+
+def _objective_merge_condition_context(
+    existing: ExtractedEvidenceDraft,
+    incoming: ExtractedEvidenceDraft,
+) -> ExtractedEvidenceDraft | None:
+    context: dict[str, list[dict[str, Any]]] = {}
+    added_context = False
+    for context_name in ("material", "sample", "process", "test"):
+        attributes = [
+            item.to_record()
+            for item in getattr(existing.scientific_context, context_name)
+        ]
+        by_name = {
+            property_matching.normalize_property_label(item["name"])
+            or _objective_column_key(item["name"]): item
+            for item in attributes
+        }
+        for attribute in getattr(incoming.scientific_context, context_name):
+            record = attribute.to_record()
+            key = (
+                property_matching.normalize_property_label(attribute.name)
+                or _objective_column_key(attribute.name)
+            )
+            prior = by_name.get(key)
+            if prior is None:
+                attributes.append(record)
+                by_name[key] = record
+                added_context = True
+                continue
+            if (
+                str(prior.get("value")).casefold()
+                != str(record.get("value")).casefold()
+                or str(prior.get("unit") or "").casefold()
+                != str(record.get("unit") or "").casefold()
+            ):
+                return None
+        context[context_name] = attributes
+
+    if not added_context:
+        return existing
+
+    payload = existing.to_record()
+    payload["scientific_context"] = context
+    payload["source_refs"] = list(
+        _dedupe_objective_source_refs((existing.source_refs, incoming.source_refs))
+    )
+    payload["confidence"] = min(existing.confidence, incoming.confidence)
+    return ExtractedEvidenceDraft.from_mapping(payload)
+
+
+def _objective_result_with_registered_condition_comparison(
+    unit: ExtractedEvidenceDraft,
+    *,
+    process_context_by_sample: dict[
+        tuple[str, str, str], ExtractedEvidenceDraft
+    ],
+    conflicting_samples: set[tuple[str, str, str]],
+) -> ExtractedEvidenceDraft:
+    if (
+        unit.source_kind != "text_window"
+        or unit.reported_result is None
+        or unit.reported_result.direction != "no_change"
+        or unit.comparison is not None
+        or unit.changed_variables
+    ):
+        return unit
+
+    source_text = "\n".join(
+        str(ref.get("source_excerpt") or "").strip()
+        for ref in unit.source_refs
+        if str(ref.get("source_excerpt") or "").strip()
+    )
+    if not source_text:
+        return unit
+    result_position = _objective_exact_label_position(
+        source_text,
+        unit.reported_result.result_text,
+    )
+    if result_position < 0:
+        return unit
+    claim_context = source_text[
+        max(0, result_position - 800) : result_position
+        + len(unit.reported_result.result_text)
+        + 400
+    ]
+
+    scope = (unit.objective_id, unit.document_id)
+    if any(
+        key[:2] == scope
+        and _objective_exact_label_position(claim_context, key[2]) >= 0
+        for key in conflicting_samples
+    ):
+        return unit
+
+    mentioned: list[tuple[int, str, ExtractedEvidenceDraft]] = []
+    for key, condition in process_context_by_sample.items():
+        if key[:2] != scope:
+            continue
+        label = _objective_explicit_sample_label(condition)
+        if label is None:
+            continue
+        position = _objective_exact_label_position(claim_context, label)
+        if position >= 0:
+            mentioned.append((position, label, condition))
+    mentioned.sort(key=lambda item: item[0])
+    if len(mentioned) < 2:
+        return unit
+
+    _baseline_position, baseline_label, baseline = mentioned[0]
+    _target_position, target_label, target = mentioned[-1]
+    baseline_process = {
+        property_matching.normalize_property_label(item.name)
+        or _objective_column_key(item.name): item
+        for item in baseline.scientific_context.process
+    }
+    target_process = {
+        property_matching.normalize_property_label(item.name)
+        or _objective_column_key(item.name): item
+        for item in target.scientific_context.process
+    }
+    if set(baseline_process) != set(target_process):
+        return unit
+    changed = [
+        target_process[key]
+        for key in sorted(baseline_process)
+        if (
+            baseline_process[key].value != target_process[key].value
+            or baseline_process[key].unit != target_process[key].unit
+        )
+    ]
+    if len(changed) != 1:
+        return unit
+
+    payload = unit.to_record()
+    payload["comparison"] = {
+        "baseline_label": baseline_label,
+        "target_label": target_label,
+        "axis_names": [changed[0].name],
+        "comparable": True,
+        "incomparability_reasons": [],
+    }
+    payload["attribution_scope"] = "association_only"
+    payload["resolution_status"] = "partial"
+    payload["selection_reason"] = (
+        "Result groups were bound to unambiguous same-document experimental "
+        "conditions; process attribution awaits deterministic comparison."
+    )
+    return ExtractedEvidenceDraft.from_mapping(payload)
+
+
+def _objective_explicit_sample_label(
+    unit: ExtractedEvidenceDraft,
+) -> str | None:
+    identity = _objective_explicit_sample_identity(unit)
+    if identity is None:
+        return None
+    for attribute in unit.scientific_context.sample:
+        if (
+            attribute.name != "sample_number"
+            and str(attribute.value).strip().casefold() == identity
+        ):
+            return str(attribute.value).strip()
+    return None
+
+
+def _objective_exact_label_position(source_text: str, label: str) -> int:
+    parts = tuple(str(label).split())
+    if not parts:
+        return -1
+    match = re.search(
+        r"(?<!\w)" + r"\s+".join(re.escape(part) for part in parts) + r"(?!\w)",
+        source_text,
+        flags=re.IGNORECASE,
+    )
+    return match.start() if match is not None else -1
+
+
 def _objective_explicit_sample_identity(
     unit: ExtractedEvidenceDraft,
 ) -> str | None:
@@ -430,21 +676,6 @@ def _objective_explicit_sample_identity(
         if item.name != "sample_number"
     }
     return _objective_sample_identity_key(sample_values) or None
-
-
-def _objective_process_context_signature(
-    unit: ExtractedEvidenceDraft,
-) -> tuple[tuple[str, str, str], ...]:
-    return tuple(
-        sorted(
-            (
-                item.name.casefold(),
-                str(item.value).casefold(),
-                str(item.unit or "").casefold(),
-            )
-            for item in unit.scientific_context.process
-        )
-    )
 
 
 def _build_objective_pairwise_comparison_units(
@@ -461,7 +692,7 @@ def _build_objective_pairwise_comparison_units(
         result = unit.reported_result
         if result is None or unit.attribution_scope != "descriptive_only":
             continue
-        if _coerce_number(result.value) is None or not unit.source_refs:
+        if result.value in (None, "") or not unit.source_refs:
             continue
         primary_source = unit.source_refs[0]
         results_by_scope.setdefault(
@@ -619,32 +850,26 @@ def _build_objective_pairwise_comparison_units(
                     _objective_sample_identity_key(target_sample_values)
                     or target.evidence_id
                 )
-                comparable = not incomparability_reasons and bool(
-                    changed_variables
-                )
-                attribution_scope = (
-                    "not_attributable"
-                    if not comparable
-                    else (
-                        "isolated_effect"
-                        if len(changed_variables) == 1
-                        else "joint_effect"
-                    )
-                )
                 baseline_result = baseline.reported_result
                 target_result = target.reported_result
                 if baseline_result is None or target_result is None:
                     continue
-                baseline_value = _coerce_number(baseline_result.value)
-                target_value = _coerce_number(target_result.value)
-                if baseline_value is None or target_value is None:
-                    continue
-                direction = (
-                    "increase"
-                    if target_value > baseline_value
-                    else "decrease"
-                    if target_value < baseline_value
-                    else "no_change"
+                direction, result_values_comparable, result_reason = (
+                    _objective_pairwise_result_direction(
+                        baseline_result.value,
+                        target_result.value,
+                    )
+                )
+                if result_reason is not None:
+                    incomparability_reasons.append(result_reason)
+                comparable = (
+                    not incomparability_reasons
+                    and bool(changed_variables)
+                    and result_values_comparable
+                )
+                attribution_scope = _objective_pairwise_attribution_scope(
+                    changed_variables,
+                    comparable=comparable,
                 )
                 source_refs = _dedupe_objective_source_refs(
                     (baseline.source_refs, target.source_refs)
@@ -689,6 +914,8 @@ def _build_objective_pairwise_comparison_units(
                             "reported_result": {
                                 "outcome": target_result.outcome,
                                 "value": target_result.value,
+                                "baseline_value": baseline_result.value,
+                                "target_value": target_result.value,
                                 "unit": target_result.unit,
                                 "direction": direction,
                                 "result_text": (
@@ -731,6 +958,46 @@ def _build_objective_pairwise_comparison_units(
                     generated_by_scope.get(scope_key, 0) + 1
                 )
     return tuple(generated)
+
+
+def _objective_pairwise_result_direction(
+    baseline_value: Any,
+    target_value: Any,
+) -> tuple[str, bool, str | None]:
+    numeric_types = (int, float)
+    baseline_is_number = isinstance(baseline_value, numeric_types) and not isinstance(
+        baseline_value, bool
+    )
+    target_is_number = isinstance(target_value, numeric_types) and not isinstance(
+        target_value, bool
+    )
+    if baseline_is_number and target_is_number:
+        direction = (
+            "increase"
+            if target_value > baseline_value
+            else "decrease"
+            if target_value < baseline_value
+            else "no_change"
+        )
+        return direction, True, None
+
+    if isinstance(baseline_value, str) and isinstance(target_value, str):
+        baseline_text = " ".join(baseline_value.split())
+        target_text = " ".join(target_value.split())
+        if baseline_text and target_text:
+            direction = (
+                "no_change"
+                if baseline_text.casefold() == target_text.casefold()
+                else "changed"
+            )
+            return direction, True, None
+
+    return (
+        "unknown",
+        False,
+        "result value types differ between baseline and target: "
+        f"{type(baseline_value).__name__} vs {type(target_value).__name__}",
+    )
 
 
 def _objective_common_pairwise_context(
@@ -786,6 +1053,9 @@ def _objective_sample_identity_key(
         "condition_number",
         "condition_no",
         "condition",
+        "build_orientation",
+        "specimen_orientation",
+        "orientation",
     )
     normalized_items = {
         _objective_column_key(key): str(value).strip()
@@ -864,15 +1134,33 @@ def _coerce_number(value: Any) -> float | None:
     return float(match.group(0))
 
 
-def _paper_skim_study_values(
+def _paper_skim_source_values(
     paper_skim: PaperSkim | None,
+    *,
+    unit: ExtractedEvidenceDraft,
     field_name: str,
 ) -> tuple[str, ...]:
     if paper_skim is None:
         return ()
+    unit_source_refs = {
+        (unit.source_kind or "", unit.source_ref or ""),
+        *(
+            (
+                str(item.get("source_kind") or ""),
+                str(item.get("source_ref") or ""),
+            )
+            for item in unit.source_refs
+        ),
+    }
     values: list[str] = []
     seen: set[str] = set()
     for study in paper_skim.studies:
+        if study.claim_scope != "current_work" or not any(
+            (source_ref.source_kind, source_ref.source_ref) in unit_source_refs
+            for relationship in study.relationships
+            for source_ref in relationship.source_refs
+        ):
+            continue
         for value in getattr(study, field_name):
             text = str(value or "").strip()
             key = text.casefold()

@@ -8,6 +8,12 @@ from infra.persistence.postgres.models.build import (
     CollectionBuild,
     Task,
 )
+from infra.persistence.postgres.models.chat import (
+    ChatMessageRow,
+    ChatSessionRow,
+    ChatToolCallRow,
+    ChatToolResultRow,
+)
 from infra.persistence.postgres.models.comparison import (
     CollectionComparableResultRecord,
     ComparableResultRecord,
@@ -52,6 +58,7 @@ from infra.persistence.postgres.models.paper_fact import (
 )
 from infra.persistence.postgres.models.objective import (
     ObjectiveAnalysisRecord,
+    ObjectiveAuthoredCandidateRecord,
     ObjectiveBuild,
     ObjectiveEvidenceRecord,
     ObjectiveFindingContextRecord,
@@ -67,11 +74,7 @@ from infra.persistence.postgres.models.objective import (
     ObjectivePaperStudySignal,
     ObjectiveResearchRecord,
 )
-from infra.persistence.postgres.models.objective_workspace import (
-    ObjectiveExperimentPlan,
-    ObjectiveMessage,
-    ObjectiveSession,
-)
+from infra.persistence.postgres.models.objective_workspace import ObjectiveExperimentPlan
 from infra.persistence.postgres.models.source import (
     SourceBlock,
     SourceBlockTextUnit,
@@ -92,6 +95,10 @@ __all__ = [
     "AuthSession",
     "AuthUser",
     "BuildStage",
+    "ChatMessageRow",
+    "ChatSessionRow",
+    "ChatToolCallRow",
+    "ChatToolResultRow",
     "Collection",
     "CollectionActiveBuild",
     "CollectionComparableResultRecord",
@@ -115,9 +122,9 @@ __all__ = [
     "FindingCurationRecord",
     "FindingFeedbackRecord",
     "ObjectiveAnalysisRecord",
+    "ObjectiveAuthoredCandidateRecord",
     "ObjectiveBuild",
     "ObjectiveExperimentPlan",
-    "ObjectiveMessage",
     "ObjectiveEvidenceRecord",
     "ObjectiveFindingContextRecord",
     "ObjectiveFindingPaperContributionRecord",
@@ -131,7 +138,6 @@ __all__ = [
     "ObjectivePaperStudyRelationship",
     "ObjectivePaperStudySignal",
     "ObjectiveResearchRecord",
-    "ObjectiveSession",
     "PairwiseComparisonRelationRecord",
     "PaperFactBaselineReference",
     "PaperFactBuild",

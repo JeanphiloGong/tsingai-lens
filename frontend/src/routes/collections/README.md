@@ -19,7 +19,11 @@ This node owns the collection workspace route family.
 - `collections/[id]/materials/*`
   Material and sample-matrix projections.
 - `collections/[id]/assistant/+page.svelte`
-  Collection-bound assistant grounded on published, reviewed Findings.
+  Collection-bound Research Agent conversation, capability activity,
+  structured results, canonical resource links, and exact write approval.
+  This route remains available before Objective discovery finishes so the
+  researcher can converse, inspect readiness, and form Objective proposals;
+  capabilities must still expose missing or incomplete collection artifacts.
 - `collections/[id]/graph/+page.svelte`
   Secondary graph projection.
 
@@ -48,7 +52,9 @@ page handles these states explicitly:
 - failed without a published result: retry;
 - failed with a published result: identify both the displayed published version
   and failed retry version, keep the prior Findings visible, and offer retry;
-- succeeded: show Findings from the published analysis version.
+- succeeded with Findings: show Findings from the published analysis version;
+- succeeded without Findings: state that analysis completed but the inspected
+  Evidence did not form a directly comparable Finding.
 
 Published Finding metadata shows the model recorded for that published analysis,
 not the model attached to a newer active or failed retry. Historical analyses
@@ -61,21 +67,32 @@ The UI keeps internal IDs out of presentation while retaining them for API
 identity and source navigation. Evidence displays the exact returned
 `source_excerpt` once, shows baseline/target/result fields structurally, uses
 document profile titles for paper labels, and links to the stable Source
-locator. Only papers with matched Evidence receive full source groups; papers
-without Evidence are reduced to one aggregate status line, and an entirely
-empty result uses one collection-level empty state. Jointly changed variables
-remain one Evidence row, direct rows identify support or contradiction and
-direction, empty context categories are omitted, and mechanisms link to their
-exact supporting Evidence.
+locator. Within each paper, Evidence is grouped by Source kind and stable
+`source_ref`; the UI reports Source and comparison counts separately, identifies
+a shared baseline across repeated comparisons, and collapses multi-comparison
+Sources by default without removing their row-level traceback. A shared-baseline
+matrix is shown only when the Source, comparison axes, baseline label, baseline
+result, outcome, unit, and comparability all agree. It shows the baseline once,
+then target condition, reported result, signed delta, direction, source link, and
+an on-demand excerpt per comparison; conflicting baselines remain separate
+Evidence records. On narrow screens, matrix rows become labeled vertical fields
+instead of relying on horizontal scrolling. Only papers with matched Evidence
+receive full source groups; papers without Evidence are reduced to one aggregate
+status line, and an entirely empty result uses one collection-level empty state.
+Jointly changed variables remain one Evidence row, direct rows identify support
+or contradiction and direction, empty context categories are omitted, and
+mechanisms link to their exact supporting Evidence.
 
 ## Product Boundary
 
 The collection comparison workspace remains the Lens v1 primary analysis
 surface. Objective Findings are the expert review and downstream grounding
 surface; they do not introduce a second Goal/Task/Workspace product concept.
-Materials, graph, assistant, and experiment plans consume published Findings or
-other canonical Core artifacts and do not reconstruct an alternate conclusion
-model.
+Materials, graph, the Research Agent, and experiment plans consume published
+Findings or other canonical Core artifacts and do not reconstruct an alternate
+conclusion model. The Agent may draft Objective proposals from bounded
+PaperSkim context, but only an exact user-approved write creates an unconfirmed
+candidate; confirmation and analysis stay in the Objective workspace.
 
 ## Current Contract Docs
 

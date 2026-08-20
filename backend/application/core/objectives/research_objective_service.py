@@ -58,6 +58,8 @@ from domain.core import (
     PaperContribution,
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
+    ResearchObjective,
+    is_question_shaped_objective,
 )
 from domain.ports import (
     ObjectiveRepository,
@@ -209,6 +211,126 @@ class ResearchObjectiveService:
         )
         return candidate_facts
 
+    def create_chat_assisted_candidate(
+        self,
+        *,
+        collection_id: str,
+        user_id: str,
+        tool_call_id: str,
+        question: str,
+        material_scope: list[str],
+        variables: list[str],
+        outcomes: list[str],
+        mechanisms: list[str],
+        constraints: list[str],
+        requested_comparator: str | None,
+        seed_document_ids: list[str],
+        excluded_document_ids: list[str],
+    ) -> ResearchObjective:
+        """Persist one user-approved candidate supported by PaperSkim context."""
+
+        self.collection_service.get_collection_for_user(collection_id, user_id)
+        if len(outcomes) != 1:
+            raise ValueError("chat-assisted objective requires exactly one outcome")
+        if not seed_document_ids:
+            raise ValueError("chat-assisted objective requires seed documents")
+
+        objective = ResearchObjective.from_mapping(
+            {
+                "collection_id": collection_id,
+                "question": question,
+                "material_scope": material_scope,
+                "variables": variables,
+                "outcomes": outcomes,
+                "mechanisms": mechanisms,
+                "constraints": constraints,
+                "requested_comparator": requested_comparator,
+                "seed_document_ids": seed_document_ids,
+                "excluded_document_ids": excluded_document_ids,
+                "confidence": 0,
+                "origin": "chat_assisted",
+                "created_by_user_id": user_id,
+                "created_by_tool_call_id": tool_call_id,
+            }
+        )
+        if not is_question_shaped_objective(objective):
+            raise ValueError("chat-assisted objective question is not question-shaped")
+
+        facts = self.objective_repository.read(collection_id)
+        if not facts.research_objectives_ready:
+            raise ResearchObjectivesNotReadyError(collection_id)
+        skims_by_document_id = {
+            skim.document_id: skim for skim in facts.paper_skims
+        }
+        support_confidences: list[float] = []
+        for document_id in objective.seed_document_ids:
+            skim = skims_by_document_id.get(document_id)
+            matches = (
+                [
+                    relationship.confidence
+                    for study in skim.studies
+                    for relationship in study.relationships
+                    if self._paper_relationship_supports_objective(
+                        objective,
+                        study.material_scope,
+                        relationship.varied_factors,
+                        relationship.outcome,
+                    )
+                ]
+                if skim is not None
+                else []
+            )
+            if not matches:
+                raise ValueError(
+                    "seed PaperSkim context does not support the Objective axes: "
+                    f"{document_id}"
+                )
+            support_confidences.append(max(matches))
+
+        objective = replace(
+            objective,
+            confidence=sum(support_confidences) / len(support_confidences),
+            reason=(
+                "User-approved candidate supported by PaperSkim relationship context "
+                f"from {len(support_confidences)} seed document(s); support is not "
+                "extracted Evidence."
+            ),
+        )
+        return self.objective_repository.create_authored_candidate(
+            objective,
+            created_by_user_id=user_id,
+            created_by_tool_call_id=tool_call_id,
+        )
+
+    @staticmethod
+    def _paper_relationship_supports_objective(
+        objective: ResearchObjective,
+        study_materials: tuple[str, ...],
+        varied_factors: tuple[str, ...],
+        outcome: str,
+    ) -> bool:
+        material_matches = (
+            not objective.material_scope
+            or not study_materials
+            or any(
+                property_matching.axis_values_match(target, observed)
+                for target in objective.material_scope
+                for observed in study_materials
+            )
+        )
+        variables_match = all(
+            any(
+                property_matching.axis_values_match(variable, factor)
+                for factor in varied_factors
+            )
+            for variable in objective.variables
+        )
+        return (
+            material_matches
+            and variables_match
+            and property_matching.axis_values_match(objective.outcomes[0], outcome)
+        )
+
     def generate_objective_analysis_artifacts(
         self,
         collection_id: str,
@@ -228,13 +350,18 @@ class ResearchObjectiveService:
             collection_id,
             build_id=analysis.source_build_id,
         )
-        source_objective = next(
-            (
-                item
-                for item in objective_inputs["research_objectives"]
-                if item.objective_id == analysis.objective_id
-            ),
-            None,
+        source_objective = (
+            active_objective
+            if active_objective.origin == "chat_assisted"
+            and active_objective.source_build_id == analysis.source_build_id
+            else next(
+                (
+                    item
+                    for item in objective_inputs["research_objectives"]
+                    if item.objective_id == analysis.objective_id
+                ),
+                None,
+            )
         )
         if source_objective is None:
             raise ResearchObjectiveNotFoundError(collection_id, analysis.objective_id)

@@ -56,6 +56,11 @@ _OBJECTIVE_PROGRESS_STAGE_PERCENT = {
     "objective_paper_skim_started": 72,
     "objective_discovery_started": 73,
 }
+_OBJECTIVE_PROGRESS_PUBLIC_STAGE = {
+    "objective_paper_skim_started": "objective_paper_skim_started",
+    "objective_discovery_started": "objective_discovery_started",
+    "objective_discovery_batch_finished": "objective_discovery_started",
+}
 _OBJECTIVE_PROGRESS_UPDATE_INTERVAL = 5
 
 
@@ -319,10 +324,17 @@ class CollectionBuildPipelineService:
             if not should_update:
                 return
             last_update["value"] = (phase, current, total, window_position)
+            public_stage = _OBJECTIVE_PROGRESS_PUBLIC_STAGE.get(
+                phase,
+                "objective_discovery_started",
+            )
             record = self.task_service.update_task(
                 task_id,
-                current_stage=phase,
-                progress_percent=_OBJECTIVE_PROGRESS_STAGE_PERCENT.get(phase, 76),
+                current_stage=public_stage,
+                progress_percent=_OBJECTIVE_PROGRESS_STAGE_PERCENT.get(
+                    public_stage,
+                    76,
+                ),
                 progress_detail=progress_detail,
             )
             logger.info(

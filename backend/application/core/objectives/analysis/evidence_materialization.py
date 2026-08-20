@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import Any, Mapping
 
 from application.core.objectives import property_matching
@@ -18,9 +17,6 @@ from domain.core import (
     PaperContribution,
     ResearchObjective,
 )
-
-logger = logging.getLogger(__name__)
-
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
@@ -249,7 +245,6 @@ def _analysis_evidence_records(
 ) -> tuple[ObjectiveEvidence, ...]:
     records: list[ObjectiveEvidence] = []
     seen_evidence_ids: set[str] = set()
-    record_index_by_source: dict[tuple[str, str, str, str], int] = {}
     for source_draft in drafts:
         try:
             draft = _canonical_objective_evidence_axes(
@@ -322,73 +317,8 @@ def _analysis_evidence_records(
             failure_reason=draft.failure_reason,
             confidence=draft.confidence,
         )
-        source_key = (
-            candidate.objective_id,
-            candidate.document_id,
-            candidate.source_kind,
-            candidate.source_ref,
-        )
-        existing_index = record_index_by_source.get(source_key)
-        if existing_index is None:
-            record_index_by_source[source_key] = len(records)
-            records.append(candidate)
-            continue
-        existing = records[existing_index]
-        if _objective_evidence_source_preference(
-            candidate
-        ) > _objective_evidence_source_preference(existing):
-            records[existing_index] = candidate
-            kept, discarded = candidate, existing
-        else:
-            kept, discarded = existing, candidate
-        logger.warning(
-            "Duplicate Objective Evidence Source resolved "
-            "objective_id=%s document_id=%s source_kind=%s source_ref=%s "
-            "kept_evidence_id=%s discarded_evidence_id=%s",
-            candidate.objective_id,
-            candidate.document_id,
-            candidate.source_kind,
-            candidate.source_ref,
-            kept.evidence_id,
-            discarded.evidence_id,
-        )
+        records.append(candidate)
     return tuple(records)
-
-
-def _objective_evidence_source_preference(
-    evidence: ObjectiveEvidence,
-) -> tuple[int, int, int, int, int, int, int, int, float]:
-    role_rank = {
-        "direct_result": 6,
-        "contradictory_result": 6,
-        "mechanism_context": 5,
-        "condition_context": 4,
-        "characterization_context": 3,
-        "background_context": 2,
-        "irrelevant": 1,
-    }
-    context_count = sum(
-        len(getattr(evidence.scientific_context, group))
-        for group in ("material", "sample", "process", "test")
-    )
-    resolution_rank = {
-        "resolved": 3,
-        "partial": 2,
-        "unknown": 1,
-        "unresolved": 1,
-        "skipped": 0,
-    }
-    return (
-        1 if evidence.selection_status == "extracted" else 0,
-        role_rank.get(evidence.evidence_role, 0),
-        1 if evidence.reported_result is not None else 0,
-        1 if evidence.comparison is not None else 0,
-        len(evidence.changed_variables),
-        context_count,
-        resolution_rank.get(evidence.resolution_status, 0),
-        len(evidence.failure_reason or ""),
-        evidence.confidence,
-    )
 
 
 def _canonical_objective_evidence_axes(

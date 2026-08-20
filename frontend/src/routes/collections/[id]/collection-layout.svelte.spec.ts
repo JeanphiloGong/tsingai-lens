@@ -136,8 +136,14 @@ describe('collections/[id]/+layout.svelte', () => {
 
 		const nav = browserPage.getByRole('navigation', { name: 'Collection navigation' });
 		const objectives = nav.getByRole('link', { name: 'Objectives' });
+		const researchAgent = nav.getByRole('link', { name: 'AI Copilot' });
 
 		await expect.element(objectives).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(researchAgent).not.toHaveAttribute('aria-disabled');
+		await expect.element(researchAgent).toHaveAttribute(
+			'href',
+			'/collections/col_123/assistant'
+		);
 		expect(document.querySelector('a[href="/collections/col_123/objectives"]')?.className).toContain(
 			'locked'
 		);
@@ -147,6 +153,18 @@ describe('collections/[id]/+layout.svelte', () => {
 			'aria-disabled',
 			'true'
 		);
+	});
+
+	it('keeps the Research Agent route open before objective discovery is ready', async () => {
+		setCollectionStatus('uploaded');
+		setPage({
+			params: { id: 'col_123' },
+			url: new URL('http://localhost/collections/col_123/assistant')
+		});
+
+		render(Layout);
+
+		expect(document.querySelector('.collection-locked-surface')).toBeNull();
 	});
 
 	it('shows a locked surface for direct downstream routes before processing', async () => {

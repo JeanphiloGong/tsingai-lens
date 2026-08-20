@@ -149,7 +149,23 @@
 	{:else if error}
 		<p class="state state--error" role="alert">{error}</p>
 	{:else if !objectives.length}
-		<p class="state">当前 collection 尚未生成研究目标。</p>
+		<section class="empty-state">
+			<h3>没有可供确认的研究目标</h3>
+			<p>
+				当前没有候选同时满足材料范围、研究变量、结果指标和来源支持规则。这不表示目标级证据分析已经完成。
+			</p>
+			<div class="actions">
+				<a class="btn btn--ghost btn--small" href={resolve('/collections/[id]', { id: collectionId })}>
+					返回集合概览
+				</a>
+				<a
+					class="btn btn--primary btn--small"
+					href={resolve('/collections/[id]/documents', { id: collectionId })}
+				>
+					检查文献
+				</a>
+			</div>
+		</section>
 	{:else}
 		<div class="summary" aria-label="研究目标概览">
 			<div><strong>{objectives.length}</strong><span>研究目标</span></div>
@@ -255,6 +271,17 @@
 	}
 	.state--error {
 		color: var(--danger, #b42318);
+	}
+	.empty-state {
+		display: grid;
+		gap: 10px;
+		padding: 28px 0;
+		border-bottom: 1px solid var(--border-default);
+	}
+	.empty-state p {
+		max-width: 720px;
+		color: var(--text-secondary);
+		line-height: 1.6;
 	}
 	.summary {
 		display: grid;

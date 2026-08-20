@@ -73,7 +73,7 @@ _OBJECTIVE_NON_RESULT_VALUE_COLUMN_TERMS = (
 )
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _SOURCE_EXTRACTION_MAX_COMPLETION_TOKENS = 2048
-_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v4"
+_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v5"
 _SOURCE_EXTRACTION_ROLES = {
     "direct_result",
     "condition_context",
@@ -144,10 +144,15 @@ DECISION PROCESS
    labels in `comparison`, use only a SOURCE-local grouping axis such as `sample`,
    and use `association_only`. The backend may bind another grounded Source later.
 5. One extraction represents one baseline-to-target comparison interval. If SOURCE
-   reports a condition series, choose one complete source-supported pair. Never
-   convert an absent, off, or without condition to numeric 0; retain the exact
-   source phrase as a categorical endpoint with a null unit. A complete comparison
-   may bind endpoint phrases stated in separate sentences of the same SOURCE unit.
+   reports an ordered condition series and explicitly states how the objective
+   outcome changes with that order, choose one adjacent source-supported pair. For
+   named groups whose process definitions are elsewhere, copy the exact group labels,
+   keep changed variables empty, name only the SOURCE-local varied axis in comparison,
+   and use association_only. Use no_change when SOURCE explicitly reports no change or
+   no statistically significant difference across those groups. Never convert an
+   absent, off, or without condition to numeric 0; retain the exact source phrase as
+   a categorical endpoint with a null unit. A complete comparison may bind endpoint
+   phrases stated in separate sentences of the same SOURCE unit.
 6. Never repeat a changed-variable name. Use `isolated_effect` only for one
    distinct changed factor with a complete comparable baseline/target comparison.
    Use `joint_effect` for two or more distinct changed factors. Otherwise use
@@ -191,6 +196,12 @@ OBJECTIVE VARIABLES: laser power, scanning speed
 OBJECTIVE OUTCOME: microstructure
 SOURCE: Sample S1 showed equiaxed grains, whereas S2 displayed a cellular-dendritic microstructure.
 OUTPUT: {"extractions":[{"evidence_role":"direct_result","changed_variables":[],"comparison":{"baseline_label":"S1","target_label":"S2","axis_names":["sample"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"cellular-dendritic microstructure","value":null,"unit":null,"direction":"mixed","result_text":"S2 displayed a cellular-dendritic microstructure"},"attribution_scope":"association_only","scientific_context":{},"resolution_status":"partial","confidence":0.85}]}
+
+Ordered named groups with unchanged outcome:
+OBJECTIVE VARIABLES: cooling rate
+OBJECTIVE OUTCOME: total elongation
+SOURCE: At 800 C, groups 800-S, 800-M, and 800-F used progressively faster cooling. Total elongation was not statistically different between the three groups.
+OUTPUT: {"extractions":[{"evidence_role":"direct_result","changed_variables":[],"comparison":{"baseline_label":"800-M","target_label":"800-F","axis_names":["cooling rate"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"total elongation","value":null,"unit":null,"direction":"no_change","result_text":"Total elongation was not statistically different between the three groups"},"attribution_scope":"association_only","scientific_context":{},"resolution_status":"partial","confidence":0.85}]}
 
 Joint result source:
 {"extractions":[{"evidence_role":"direct_result","changed_variables":[{"name":"laser power","baseline_value":100,"target_value":200,"unit":"W"},{"name":"scan speed","baseline_value":500,"target_value":900,"unit":"mm/s"}],"comparison":{"baseline_label":"A","target_label":"B","axis_names":["laser power","scan speed"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"relative density","value":98.0,"unit":"%","direction":"increase","result_text":"relative density increased to 98.0%"},"attribution_scope":"joint_effect","scientific_context":{"material":[],"sample":[],"process":[],"test":[]},"resolution_status":"resolved","confidence":0.9}]}
@@ -2098,7 +2109,10 @@ def _build_objective_route_source_payload(
             "source_ref": route.source_ref,
             "document_id": route.document_id,
             "page": getattr(table, "page", None),
-            "caption_text": getattr(table, "caption_text", None),
+            "caption_text": _objective_table_caption_text(
+                table=table,
+                blocks=blocks,
+            ),
             "heading_path": getattr(table, "heading_path", None),
             "column_headers": [
                 str(value) for value in getattr(table, "column_headers", ()) or ()
@@ -2153,6 +2167,50 @@ def _build_objective_route_source_payload(
             "text": text[:_OBJECTIVE_EVIDENCE_TEXT_CHARS],
         }
     return {}
+
+
+def _objective_table_caption_text(*, table: Any, blocks: list[Any]) -> str | None:
+    caption = str(getattr(table, "caption_text", "") or "").strip()
+    if not re.fullmatch(r"table\s+[A-Za-z0-9.\-]+", caption, flags=re.IGNORECASE):
+        return caption or None
+
+    caption_block_id = str(getattr(table, "caption_block_id", "") or "").strip()
+    if not caption_block_id:
+        return caption
+    caption_block = next(
+        (
+            block
+            for block in blocks
+            if str(getattr(block, "block_id", "") or "") == caption_block_id
+        ),
+        None,
+    )
+    if caption_block is None:
+        return caption
+
+    document_id = str(getattr(table, "document_id", "") or "")
+    caption_order = int(getattr(caption_block, "block_order", 0) or 0)
+    following = sorted(
+        (
+            block
+            for block in blocks
+            if str(getattr(block, "document_id", "") or "") == document_id
+            and int(getattr(block, "block_order", 0) or 0) > caption_order
+        ),
+        key=lambda block: int(getattr(block, "block_order", 0) or 0),
+    )
+    if not following:
+        return caption
+    description = following[0]
+    if (
+        int(getattr(description, "block_order", 0) or 0) != caption_order + 1
+        or str(getattr(description, "block_type", "") or "").casefold()
+        != "paragraph"
+        or getattr(description, "page", None) != getattr(table, "page", None)
+    ):
+        return caption
+    description_text = str(getattr(description, "text", "") or "").strip()
+    return f"{caption}. {description_text}" if description_text else caption
 
 
 def _route_text_block_id(
@@ -2225,6 +2283,13 @@ def _objective_table_matrix_evidence_records(
             data_rows=data_rows,
         )
     if route.role == "process_or_treatment":
+        multilevel_records = _objective_multilevel_process_table_records(
+            route=route,
+            source=source,
+            objective_context=objective_context,
+        )
+        if multilevel_records is not None:
+            return multilevel_records
         process_records = _objective_process_table_matrix_records(
             route=route,
             source=source,
@@ -2254,10 +2319,202 @@ def _objective_table_matrix_evidence_records(
     return ()
 
 
+def _objective_multilevel_process_table_records(
+    *,
+    route: EvidenceCandidate,
+    source: dict[str, Any],
+    objective_context: ResearchObjective | None,
+) -> tuple[dict[str, Any], ...] | None:
+    headers = tuple(str(value).strip() for value in source.get("column_headers", ()))
+    matrix = tuple(
+        tuple(str(cell).strip() for cell in row)
+        for row in source.get("table_matrix", ())
+        if isinstance(row, (list, tuple))
+    )
+    if not headers or len(matrix) < 3 or len(set(headers)) == len(headers):
+        return None
+
+    first_data_position = 1 if _objective_row_matches_headers(matrix[0], headers) else 0
+    if first_data_position >= len(matrix):
+        return None
+    leaf_headers = matrix[first_data_position]
+    columns = _objective_condition_table_columns(
+        route=route,
+        caption=str(source.get("caption_text") or ""),
+        parent_headers=headers,
+        leaf_headers=leaf_headers,
+    )
+    label_columns = [
+        index for index, column in columns.items() if column[0] == "condition"
+    ]
+    process_columns = {
+        index: column for index, column in columns.items() if column[0] == "process"
+    }
+    if len(label_columns) != 1 or not process_columns:
+        return None
+
+    label_index = label_columns[0]
+    records: list[dict[str, Any]] = []
+    for row_index, row in enumerate(
+        matrix[first_data_position + 1 :],
+        start=first_data_position + 1,
+    ):
+        label = str(row[label_index] if label_index < len(row) else "").strip()
+        if not label or label == "-":
+            continue
+        process = [
+            {"name": name, "value": value, "unit": unit}
+            for index, (_kind, name, unit) in process_columns.items()
+            if index < len(row)
+            and (value := str(row[index]).strip())
+            and value != "-"
+        ]
+        if not process:
+            continue
+        context = _objective_table_source_scope_attributes(
+            source=source,
+            objective_context=objective_context,
+        )
+        records.append(
+            {
+                "evidence_id": _objective_matrix_unit_id(
+                    route=route,
+                    row_index=row_index,
+                    column="scientific_context",
+                ),
+                "objective_id": route.objective_id,
+                "document_id": route.document_id,
+                "evidence_role": "condition_context",
+                "changed_variables": [],
+                "comparison": None,
+                "reported_result": None,
+                "attribution_scope": "not_attributable",
+                "scientific_context": {
+                    "material": [
+                        {"name": name, "value": value}
+                        for name, value in context["material"].items()
+                    ],
+                    "sample": [
+                        {"name": "condition", "value": label},
+                        *(
+                            {"name": name, "value": value}
+                            for name, value in context["sample"].items()
+                        ),
+                    ],
+                    "process": [
+                        *process,
+                        *(
+                            {"name": name, "value": value}
+                            for name, value in context["process"].items()
+                        ),
+                    ],
+                    "test": [],
+                },
+                "source_refs": _objective_route_source_refs(
+                    route=route,
+                    source=source,
+                    row_index=row_index,
+                    source_excerpt=" | ".join(
+                        f"{headers[index]} > {leaf_headers[index]}: {row[index]}"
+                        for index in range(
+                            min(len(headers), len(leaf_headers), len(row))
+                        )
+                        if str(row[index]).strip()
+                    ),
+                ),
+                "resolution_status": "resolved",
+                "confidence": route.confidence,
+            }
+        )
+    return tuple(records)
 
 
+def _objective_condition_table_columns(
+    *,
+    route: EvidenceCandidate,
+    caption: str,
+    parent_headers: tuple[str, ...],
+    leaf_headers: tuple[str, ...],
+) -> dict[int, tuple[str, str, str | None]]:
+    rate_unit = _objective_condition_rate_unit(caption)
+    columns: dict[int, tuple[str, str, str | None]] = {}
+    active_stage: str | None = None
+    for index, parent in enumerate(parent_headers):
+        if index >= len(leaf_headers):
+            continue
+        leaf = leaf_headers[index]
+        parent_key = _objective_column_key(parent)
+        leaf_key = _objective_column_key(leaf)
+        role = str(route.column_roles.get(parent) or "").casefold()
+        if (
+            "sample" in role
+            or "condition" in role
+            or parent_key in {"condition", "nomenclature", "sample", "specimen"}
+        ):
+            columns[index] = ("condition", "condition", None)
+            continue
+
+        property_name, unit = _split_property_unit(leaf)
+        parent_stage = property_matching.normalize_property_label(parent) or parent_key
+        if leaf_key in {"up", "heating_rate"} or leaf == "↑":
+            active_stage = parent_stage
+        stage = active_stage or parent_stage
+        is_heat_treatment = stage == "heat treatment"
+        if property_name == "T":
+            columns[index] = (
+                "process",
+                (
+                    "heat treatment temperature"
+                    if is_heat_treatment
+                    else f"{stage} temperature"
+                ),
+                _objective_condition_unit(unit),
+            )
+        elif property_name == "P":
+            columns[index] = (
+                "process",
+                "heat treatment pressure" if is_heat_treatment else f"{stage} pressure",
+                _objective_condition_unit(unit),
+            )
+        elif property_name == "t":
+            columns[index] = (
+                "process",
+                "heat treatment duration" if is_heat_treatment else f"{stage} duration",
+                _objective_condition_unit(unit),
+            )
+        elif (leaf_key in {"up", "heating_rate"} or leaf == "↑") and (
+            rate_unit is not None
+        ):
+            columns[index] = (
+                "process",
+                "heating rate" if is_heat_treatment else f"{stage} heating rate",
+                rate_unit,
+            )
+        elif (leaf_key in {"down", "cooling_rate"} or leaf == "↓") and (
+            rate_unit is not None
+        ):
+            columns[index] = (
+                "process",
+                "cooling rate" if is_heat_treatment else f"{stage} cooling rate",
+                rate_unit,
+            )
+    return columns
 
 
+def _objective_condition_rate_unit(caption: str) -> str | None:
+    if not re.search(r"heating\s*/?\s*cooling\s+rates?", caption, re.IGNORECASE):
+        return None
+    match = re.search(
+        r"(?:are\s+)?in\s+([°º]?[A-Za-z]+\s*/\s*(?:min|s|h|hr))",
+        caption,
+        re.IGNORECASE,
+    )
+    return _objective_condition_unit(match.group(1)) if match else None
+
+
+def _objective_condition_unit(value: str | None) -> str | None:
+    unit = re.sub(r"\s+", "", str(value or "")).replace("°", "").replace("º", "")
+    return unit or None
 
 
 def _objective_result_table_matrix_records(
@@ -2277,8 +2534,9 @@ def _objective_result_table_matrix_records(
             header
             for header in headers
             if not _objective_value_column_is_non_result(header)
-            and _objective_result_column_matches_target(
+            and _objective_result_column_matches_source_target(
                 header,
+                source=source,
                 objective_context=objective_context,
             )
         )
@@ -2290,6 +2548,7 @@ def _objective_result_table_matrix_records(
         row_values = _objective_table_row_values(headers=headers, row=row)
         row_attributes = _objective_table_row_attributes(
             route=route,
+            source=source,
             row_values=row_values,
             result_columns=result_columns,
             objective_context=objective_context,
@@ -2310,6 +2569,7 @@ def _objective_result_table_matrix_records(
                 continue
             property_source = _objective_result_column_property_label(
                 route=route,
+                source=source,
                 result_column=result_column,
                 objective_context=objective_context,
             )
@@ -2322,6 +2582,9 @@ def _objective_result_table_matrix_records(
                 or property_source
             )
             numeric_value = _coerce_result_cell_number(raw_value)
+            result_value = (
+                numeric_value if numeric_value is not None else str(raw_value).strip()
+            )
             records.append(
                 {
                     "evidence_id": _objective_matrix_unit_id(
@@ -2336,7 +2599,7 @@ def _objective_result_table_matrix_records(
                     "comparison": None,
                     "reported_result": {
                         "outcome": outcome,
-                        "value": numeric_value,
+                        "value": result_value,
                         "unit": unit,
                         "direction": "unknown",
                         "result_text": (
@@ -2389,12 +2652,27 @@ def _objective_process_table_matrix_records(
     headers: tuple[str, ...],
     data_rows: tuple[tuple[int, tuple[str, ...]], ...],
 ) -> tuple[dict[str, Any], ...]:
-    result_columns = _objective_route_result_columns(route)
+    result_columns = _objective_route_result_columns(
+        route,
+        objective_context=objective_context,
+    )
+    if objective_context is not None:
+        result_columns.update(
+            header
+            for header in headers
+            if not _objective_value_column_is_non_result(header)
+            and _objective_result_column_matches_source_target(
+                header,
+                source=source,
+                objective_context=objective_context,
+            )
+        )
     records: list[dict[str, Any]] = []
     for row_index, row in data_rows:
         row_values = _objective_table_row_values(headers=headers, row=row)
         row_attributes = _objective_table_row_attributes(
             route=route,
+            source=source,
             row_values=row_values,
             result_columns=result_columns,
             objective_context=objective_context,
@@ -2463,6 +2741,7 @@ def _objective_process_table_matrix_records(
 def _objective_table_row_attributes(
     *,
     route: EvidenceCandidate,
+    source: Mapping[str, Any],
     row_values: dict[str, str],
     result_columns: set[str],
     objective_context: ResearchObjective | None,
@@ -2474,6 +2753,16 @@ def _objective_table_row_attributes(
     for column, value in row_values.items():
         role = str(route.column_roles.get(column) or "").lower()
         column_key = _objective_column_key(column)
+        process_attribute_label = _objective_process_attribute_label(
+            column=column,
+            role=role,
+            objective_context=objective_context,
+        )
+        is_objective_condition_axis = bool(
+            objective_context is not None
+            and column_key == "condition"
+            and process_attribute_label != column
+        )
         is_objective_symbol_axis = bool(
             objective_context is not None
             and column not in result_columns
@@ -2484,14 +2773,22 @@ def _objective_table_row_attributes(
                 objective_context=objective_context,
             )
         )
-        if is_objective_symbol_axis:
-            process_attributes[
-                _objective_process_attribute_label(
-                    column=column,
-                    role=role,
-                    objective_context=objective_context,
-                )
-            ] = value
+        compound_label_attributes = _objective_caption_compound_label_attributes(
+            column=column,
+            value=value,
+            role=role,
+            caption=str(source.get("caption_text") or ""),
+            objective_context=objective_context,
+        )
+        if compound_label_attributes is not None:
+            for context_name, attributes in compound_label_attributes.items():
+                {
+                    "material": material_attributes,
+                    "sample": sample_attributes,
+                    "process": process_attributes,
+                }[context_name].update(attributes)
+        elif is_objective_symbol_axis or is_objective_condition_axis:
+            process_attributes[process_attribute_label] = value
         elif any(
             term in role for term in ("material", "alloy", "composition")
         ) or column_key in {
@@ -2528,11 +2825,150 @@ def _objective_table_row_attributes(
             if route.role == "current_experimental_evidence":
                 sample_attributes[column] = value
             test_attributes[column] = value
+    source_scope = _objective_table_source_scope_attributes(
+        source=source,
+        objective_context=objective_context,
+    )
+    for key, value in source_scope["material"].items():
+        material_attributes.setdefault(key, value)
+    for key, value in source_scope["sample"].items():
+        sample_attributes.setdefault(key, value)
+    for key, value in source_scope["process"].items():
+        process_attributes.setdefault(key, value)
     return {
         "material": material_attributes,
         "sample": sample_attributes,
         "process": process_attributes,
         "test": test_attributes,
+    }
+
+
+def _objective_table_source_scope_attributes(
+    *,
+    source: Mapping[str, Any],
+    objective_context: ResearchObjective | None,
+) -> dict[str, dict[str, str]]:
+    source_context = " ".join(
+        str(source.get(key) or "").strip()
+        for key in ("caption_text", "heading_path")
+        if str(source.get(key) or "").strip()
+    )
+    if not source_context:
+        return {"material": {}, "sample": {}, "process": {}}
+
+    material: dict[str, str] = {}
+    if objective_context is not None:
+        material_matches = tuple(
+            value
+            for value in objective_context.material_scope
+            if property_matching.source_text_mentions_axis(source_context, value)
+        )
+        if len(material_matches) == 1:
+            material["material"] = material_matches[0]
+
+    orientations = tuple(
+        value
+        for value in ("horizontal", "longitudinal", "transverse", "vertical")
+        if re.search(rf"\b{value}\b", source_context, flags=re.IGNORECASE)
+    )
+    sample = (
+        {"build orientation": orientations[0]}
+        if len(orientations) == 1
+        else {}
+    )
+    process = (
+        {"manufacturing process": "laser powder bed fusion"}
+        if re.search(
+            r"\b(?:laser\s+powder[-\s]bed\s+fusion|selective\s+laser\s+melting|LPBF|PBF-L|SLM)\b",
+            source_context,
+            flags=re.IGNORECASE,
+        )
+        else {}
+    )
+    return {"material": material, "sample": sample, "process": process}
+
+
+def _objective_caption_compound_label_attributes(
+    *,
+    column: str,
+    value: str,
+    role: str,
+    caption: str,
+    objective_context: ResearchObjective | None,
+) -> dict[str, dict[str, str]] | None:
+    if objective_context is None or not caption.strip():
+        return None
+    column_key = _objective_column_key(column)
+    is_material_or_sample_label = (
+        any(term in role for term in ("material", "alloy", "sample", "label"))
+        or column_key in {
+            "alloy",
+            "alloy_name",
+            "alloy_type",
+            "material",
+            "material_system",
+            "sample",
+            "sample_label",
+        }
+    )
+    condition_axes = tuple(
+        axis
+        for axis in objective_context.variables
+        if _objective_column_key(axis).endswith("_condition")
+    )
+    label_parts = tuple(part.strip() for part in value.split("-") if part.strip())
+    if (
+        not is_material_or_sample_label
+        or len(condition_axes) != 1
+        or len(label_parts) < 2
+        or any(not re.fullmatch(r"[A-Z]{1,8}", part) for part in label_parts)
+    ):
+        return None
+
+    definitions = {
+        abbreviation.upper(): term
+        for term, abbreviation in re.findall(
+            r"\b([A-Za-z]+(?:-[A-Za-z]+)*)\s*\(([A-Z]{1,8})\)",
+            caption,
+        )
+    }
+    expanded_parts: list[tuple[str, str]] = []
+    for part in label_parts:
+        expansion = definitions.get(part)
+        if expansion is None:
+            if re.search(rf"\b{re.escape(part)}\b", caption) is None:
+                return None
+            expansion = part
+        expanded_parts.append((part, expansion))
+
+    orientation_parts = tuple(
+        expansion.casefold()
+        for _part, expansion in expanded_parts
+        if expansion.casefold()
+        in {"horizontal", "longitudinal", "transverse", "vertical"}
+    )
+    process_parts = tuple(
+        expansion if expansion.isupper() else expansion.casefold()
+        for _part, expansion in expanded_parts
+        if expansion.casefold() not in orientation_parts
+    )
+    if len(orientation_parts) != 1 or not process_parts:
+        return None
+
+    material_matches = tuple(
+        material
+        for material in objective_context.material_scope
+        if property_matching.source_text_mentions_axis(caption, material)
+    )
+    material_attributes = (
+        {"material": material_matches[0]}
+        if len(material_matches) == 1
+        else {}
+    )
+    return {
+        "material": material_attributes,
+        "sample": {"build orientation": orientation_parts[0]},
+        "process": {condition_axes[0]: " + ".join(process_parts)},
     }
 
 
@@ -2543,6 +2979,14 @@ def _objective_process_attribute_label(
     objective_context: ResearchObjective | None,
 ) -> str:
     if objective_context is not None:
+        condition_axes = tuple(
+            axis
+            for axis in objective_context.variables
+            if _objective_column_key(column) == "condition"
+            and _objective_column_key(axis).endswith("_condition")
+        )
+        if len(condition_axes) == 1:
+            return condition_axes[0]
         symbol_axes = {
             axis
             for axis in property_matching.process_column_axis_keys(column)
@@ -2737,13 +3181,16 @@ def _objective_sample_attributes_have_stable_label(
     for key in sample_attributes:
         column_key = _objective_column_key(str(key))
         if column_key in {
+            "build_orientation",
             "id",
             "label",
             "material",
+            "orientation",
             "printed_316l",
             "sample",
             "sample_id",
             "sample_label",
+            "specimen_orientation",
         }:
             return True
         if "sample" in column_key and "condition" not in column_key:
@@ -2873,9 +3320,17 @@ def _objective_route_result_columns(
 def _objective_result_column_property_label(
     *,
     route: EvidenceCandidate,
+    source: Mapping[str, Any],
     result_column: str,
     objective_context: ResearchObjective | None,
 ) -> str:
+    source_defined_property = _objective_source_defined_result_property(
+        result_column,
+        source=source,
+        objective_context=objective_context,
+    )
+    if source_defined_property is not None:
+        return source_defined_property
     role_label = property_matching.normalize_property_label(
         route.column_roles.get(result_column)
     )
@@ -2933,6 +3388,52 @@ def _objective_result_column_matches_target(
         or property_matching.axis_label_is_mentioned(column_text, axis)
         for axis in target_axes
     )
+
+
+def _objective_result_column_matches_source_target(
+    column_text: str,
+    *,
+    source: Mapping[str, Any],
+    objective_context: ResearchObjective | None,
+) -> bool:
+    return _objective_result_column_matches_target(
+        column_text,
+        objective_context=objective_context,
+    ) or _objective_source_defined_result_property(
+        column_text,
+        source=source,
+        objective_context=objective_context,
+    ) is not None
+
+
+def _objective_source_defined_result_property(
+    column_text: str,
+    *,
+    source: Mapping[str, Any],
+    objective_context: ResearchObjective | None,
+) -> str | None:
+    if objective_context is None or not objective_context.outcomes:
+        return None
+    property_name, _unit = _split_property_unit(column_text)
+    property_key = _objective_column_key(property_name)
+    caption = str(source.get("caption_text") or "")
+    if not property_key or not caption:
+        return None
+    for match in re.finditer(
+        r"\b(?P<label>[A-Za-z][A-Za-z0-9._-]{0,15})\s*"
+        r"(?:=|means?|denotes?)\s*(?P<definition>[^,;.\n]+)",
+        caption,
+        flags=re.IGNORECASE,
+    ):
+        if _objective_column_key(match.group("label")) != property_key:
+            continue
+        definition = match.group("definition").strip()
+        if _objective_result_column_matches_target(
+            definition,
+            objective_context=objective_context,
+        ):
+            return property_matching.normalize_property_label(definition) or definition
+    return None
 
 
 def _objective_value_column_is_non_result(value: str) -> bool:

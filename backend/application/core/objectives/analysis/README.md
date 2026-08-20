@@ -26,8 +26,9 @@ Read the analysis responsibilities in real research order:
    fills only missing scope from the same paper, binds Methods and Results only
    through exact sample identities, and derives bounded pairwise comparisons.
 6. `evidence_materialization.py` turns reconstructed drafts into durable
-   `ObjectiveEvidence`, resolves duplicate candidates by stable Source identity,
-   and derives each paper's `PaperContribution` from that final Evidence set.
+   `ObjectiveEvidence`, deduplicates replayed scientific claims by stable
+   Evidence identity, and derives each paper's `PaperContribution` from that
+   final Evidence set.
 7. `finding_synthesis.py` groups durable Evidence into backend-owned result
    sets, asks the bounded assertion judge only for claim strength and supported
    context, and publishes traceable cross-paper `Finding` records.
@@ -58,22 +59,37 @@ scientific responsibility.
 `source_validation.py` owns deterministic source-local acceptance, demotion,
 or abstention. It checks the reported result, comparison labels, changed
 variables, and scientific context independently and records which field
-families each Source supports. It does not call the model or bind information
-from another Source.
+families each Source supports. For a grounded text result whose comparison is
+still absent, it keeps the exact Source excerpt as transient reconstruction
+input. It does not identify experiment groups, call the model, or bind
+information from another Source.
 
 `paper_experiment.py` owns same-document reconstruction after Source inspection
-finishes. It may join process conditions from Methods to a result only when the
-baseline and target sample identities resolve unambiguously inside that paper.
-Missing or conflicting identities remain descriptive, and no cross-document
-binding is allowed.
+finishes. Deterministic parsing may reconstruct an experiment condition from a
+multi-level Methods table only when the table's parent headers, leaf headers,
+caption-defined symbols, units, and row values jointly define it. The paper
+reconstruction then builds a registry keyed by exact condition label, merges
+complementary same-label context, and rejects conflicting definitions. A result
+may join registered conditions only when its own Source mentions those exact
+labels. An unchanged series becomes an isolated effect only when its first and
+last registered conditions have complete process context and differ by exactly
+one factor; incomplete, multi-factor, missing, or conflicting conditions remain
+associative or descriptive. No label spelling convention and no cross-document
+binding supplies scientific meaning. For same-table row comparisons, numeric
+results retain ordered increase/decrease semantics, while categorical results
+retain both raw endpoints and report only `changed` or `no_change`. A
+numeric/category mismatch or any incompatible material, sample, or test context
+remains explicitly non-comparable.
 
 `evidence_materialization.py` owns the trust boundary from transient paper
 facts to durable Evidence. It keeps the confirmed Objective's result details,
 canonicalizes uniquely matching axes, resolves exact Source excerpts and
-related locators, and retains at most one winner for each Objective, document,
-Source kind, and Source ref. `PaperContribution` route, extracted, failed, and
-comparable counts are computed from that same final Source-keyed set. It does
-not persist artifacts or synthesize a cross-paper claim.
+related locators, and deduplicates only replayed drafts with the same stable
+`evidence_id`. Distinct claims from one Source remain separate because a table,
+figure, or paragraph can support several measurements or comparisons.
+`PaperContribution` route, extracted, failed, and comparable counts are computed
+from that complete claim set. It does not persist artifacts or synthesize a
+cross-paper claim.
 
 `finding_synthesis.py` owns cross-paper comparison after durable Evidence and
 paper outcomes exist. `FindingSynthesisService` deterministically selects

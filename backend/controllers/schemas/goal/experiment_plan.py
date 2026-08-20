@@ -16,18 +16,12 @@ class ExperimentPlanSourceLink(BaseModel):
 
 
 class ExperimentPlanCreateRequest(BaseModel):
-    """Save one Objective-scoped experiment plan draft."""
+    """Save one manual Objective-scoped experiment plan draft."""
 
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(..., min_length=1, max_length=400)
     content: str = Field(..., min_length=1, max_length=20000)
-    source_message_id: str | None = Field(default=None, max_length=200)
-    source_links: list[ExperimentPlanSourceLink] = Field(
-        default_factory=list,
-        max_length=20,
-    )
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExperimentPlanUpdateRequest(BaseModel):

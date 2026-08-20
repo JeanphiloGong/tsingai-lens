@@ -23,13 +23,17 @@ from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260814_0030"
+HEAD_REVISION = "20260819_0033"
 EXPECTED_TABLES = {
     "alembic_version",
     "artifact_versions",
     "auth_sessions",
     "auth_users",
     "build_stages",
+    "chat_messages",
+    "chat_sessions",
+    "chat_tool_calls",
+    "chat_tool_results",
     "collection_active_builds",
     "collection_builds",
     "collection_comparable_results",
@@ -57,6 +61,7 @@ EXPECTED_TABLES = {
     "finding_curation_records",
     "finding_feedback_records",
     "objective_analyses",
+    "objective_authored_candidates",
     "objective_build_candidates",
     "objective_builds",
     "objective_document_scope",
@@ -68,7 +73,6 @@ EXPECTED_TABLES = {
     "objective_finding_relation_evidence_links",
     "objective_finding_relations",
     "objective_findings",
-    "objective_messages",
     "objective_paper_contributions",
     "objective_paper_source_unit_coverage",
     "objective_paper_skims",
@@ -77,7 +81,6 @@ EXPECTED_TABLES = {
     "objective_paper_study_relationships",
     "objective_paper_study_signals",
     "objective_build_relationship_links",
-    "objective_sessions",
     "paper_fact_baseline_evidence_anchors",
     "paper_fact_baseline_references",
     "paper_fact_builds",
@@ -224,6 +227,40 @@ def test_empty_database_upgrades_and_rejects_irreversible_downgrade(
                 "reason",
             }.issubset(coverage_columns)
             assert isinstance(coverage_columns["source_ref"]["type"], Text)
+            chat_tool_call_columns = {
+                column["name"]
+                for column in inspect(connection).get_columns("chat_tool_calls")
+            }
+            assert {
+                "tool_call_id",
+                "session_id",
+                "assistant_message_id",
+                "name",
+                "arguments",
+                "arguments_digest",
+                "risk",
+                "status",
+                "decision_user_id",
+                "decision_arguments_digest",
+                "decided_at",
+            }.issubset(chat_tool_call_columns)
+            authored_candidate_columns = {
+                column["name"]
+                for column in inspect(connection).get_columns(
+                    "objective_authored_candidates"
+                )
+            }
+            assert {
+                "collection_id",
+                "objective_id",
+                "source_build_id",
+                "origin",
+                "seed_document_ids",
+                "excluded_document_ids",
+                "created_by_user_id",
+                "created_by_tool_call_id",
+                "created_at",
+            }.issubset(authored_candidate_columns)
             command.check(config)
 
             with pytest.raises(NotImplementedError, match="irreversible"):
@@ -916,18 +953,38 @@ def test_objective_contract_migration_rebuilds_results_without_deleting_sessions
                     "WHERE build_id = 'build-objective'"
                 )
             ).scalar_one() in (False, 0)
+            assert "objective_sessions" not in inspect(connection).get_table_names()
+            assert "objective_messages" not in inspect(connection).get_table_names()
             assert connection.execute(
                 text(
-                    "SELECT session_id, focused_objective_id "
-                    "FROM objective_sessions ORDER BY session_id"
+                    "SELECT session_id, collection_id "
+                    "FROM chat_sessions ORDER BY session_id"
                 )
             ).all() == [
-                ("session-focused", None),
-                ("session-unfocused", None),
+                ("session-focused", "col-objective"),
+                ("session-unfocused", "col-objective"),
             ]
             assert connection.execute(
-                text("SELECT count(*) FROM objective_messages")
-            ).scalar_one() == 2
+                text(
+                    "SELECT message_id, session_id, position, role, content "
+                    "FROM chat_messages ORDER BY session_id, position"
+                )
+            ).all() == [
+                (
+                    "message-session-focused",
+                    "session-focused",
+                    0,
+                    "user",
+                    "Question",
+                ),
+                (
+                    "message-session-unfocused",
+                    "session-unfocused",
+                    0,
+                    "user",
+                    "Question",
+                ),
+            ]
             assert {
                 column["name"]
                 for column in inspect(connection).get_columns("research_objectives")
@@ -938,6 +995,204 @@ def test_objective_contract_migration_rebuilds_results_without_deleting_sessions
                 "constraints",
                 "requested_comparator",
             }
+    finally:
+        engine.dispose()
+
+
+def test_goal_chat_cutover_preserves_historical_plan_provenance_across_round_trip(
+    tmp_path,
+) -> None:
+    engine = create_engine(
+        URL.create(
+            "sqlite+pysqlite",
+            database=str(tmp_path / "goal-chat-cutover.sqlite"),
+        )
+    )
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    created_at = "2026-08-19 08:00:00+00:00"
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+            config.attributes["connection"] = connection
+            command.upgrade(config, "20260819_0032")
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO auth_users (
+                        user_id, email, display_name, password_hash, created_at
+                    ) VALUES (
+                        'user-chat-cutover', 'chat-cutover@example.com', NULL,
+                        'synthetic-password-hash', :created_at
+                    )
+                    """
+                ),
+                {"created_at": created_at},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO collections (
+                        collection_id, owner_user_id, name, description, status,
+                        paper_count, created_at, updated_at
+                    ) VALUES (
+                        'col-chat-cutover', 'user-chat-cutover', 'Chat cutover',
+                        NULL, 'ready', 1, :created_at, :created_at
+                    )
+                    """
+                ),
+                {"created_at": created_at},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO research_objectives (
+                        collection_id, objective_id, question, material_scope,
+                        variables, outcomes, mechanisms, constraints,
+                        requested_comparator, confidence, reason,
+                        confirmation_status, active_analysis_version,
+                        published_analysis_version, created_at, updated_at
+                    ) VALUES (
+                        'col-chat-cutover', 'objective-chat-cutover',
+                        'How does heat treatment affect strength?', :material_scope,
+                        :variables, :outcomes, :empty_json, :empty_json, NULL,
+                        0.8, 'migration fixture', 'confirmed', NULL, NULL,
+                        :created_at, :created_at
+                    )
+                    """
+                ),
+                {
+                    "material_scope": '["316L"]',
+                    "variables": '["heat treatment"]',
+                    "outcomes": '["strength"]',
+                    "empty_json": "[]",
+                    "created_at": created_at,
+                },
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO objective_sessions (
+                        session_id, user_id, collection_id, focused_material_id,
+                        focused_paper_id, focused_objective_id, goal_text,
+                        intent_brief, answer_mode, rolling_summary,
+                        last_evidence_ids, last_material_ids, last_paper_ids,
+                        collection_data_version, created_at, updated_at
+                    ) VALUES (
+                        'session-chat-cutover', 'user-chat-cutover',
+                        'col-chat-cutover', NULL, NULL, 'objective-chat-cutover',
+                        'Compare heat treatment.', :empty_object, 'evidence', '',
+                        :empty_json, :empty_json, :empty_json, 'build-1',
+                        :created_at, :created_at
+                    )
+                    """
+                ),
+                {
+                    "empty_object": "{}",
+                    "empty_json": "[]",
+                    "created_at": created_at,
+                },
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO objective_messages (
+                        message_id, session_id, position, role, content,
+                        source_mode, used_evidence_ids, warnings, links,
+                        source_links, review_gate, source_finding_refs, created_at
+                    ) VALUES (
+                        'message-chat-cutover', 'session-chat-cutover', 0,
+                        'assistant', 'Historical grounded answer.', 'evidence',
+                        :empty_json, :empty_json, :empty_object, :empty_json,
+                        'reviewed_findings', :empty_json, :created_at
+                    )
+                    """
+                ),
+                {
+                    "empty_object": "{}",
+                    "empty_json": "[]",
+                    "created_at": created_at,
+                },
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO objective_experiment_plans (
+                        plan_id, collection_id, objective_id, title, content,
+                        status, source_message_id, source_links, metadata_json,
+                        created_by, created_at, updated_at
+                    ) VALUES (
+                        'plan-chat-cutover', 'col-chat-cutover',
+                        'objective-chat-cutover', 'Historical plan',
+                        'Repeat the tensile test.', 'ready_for_review',
+                        'message-chat-cutover', :empty_json, :empty_object,
+                        'user-chat-cutover', :created_at, :created_at
+                    )
+                    """
+                ),
+                {
+                    "empty_object": "{}",
+                    "empty_json": "[]",
+                    "created_at": created_at,
+                },
+            )
+
+            command.upgrade(config, "20260819_0033")
+            assert connection.execute(
+                text(
+                    "SELECT session_id, role, content FROM chat_messages "
+                    "WHERE message_id = 'message-chat-cutover'"
+                )
+            ).one() == (
+                "session-chat-cutover",
+                "assistant",
+                "Historical grounded answer.",
+            )
+            assert connection.execute(
+                text(
+                    "SELECT source_message_id FROM objective_experiment_plans "
+                    "WHERE plan_id = 'plan-chat-cutover'"
+                )
+            ).scalar_one() == "message-chat-cutover"
+            assert {
+                foreign_key["referred_table"]
+                for foreign_key in inspect(connection).get_foreign_keys(
+                    "objective_experiment_plans"
+                )
+            } >= {"chat_messages"}
+
+            command.downgrade(config, "20260819_0032")
+            assert connection.execute(
+                text(
+                    "SELECT session_id, role, content FROM objective_messages "
+                    "WHERE message_id = 'message-chat-cutover'"
+                )
+            ).one() == (
+                "session-chat-cutover",
+                "assistant",
+                "Historical grounded answer.",
+            )
+            assert connection.execute(
+                text(
+                    "SELECT source_message_id FROM objective_experiment_plans "
+                    "WHERE plan_id = 'plan-chat-cutover'"
+                )
+            ).scalar_one() == "message-chat-cutover"
+
+            command.upgrade(config, "20260819_0033")
+            assert connection.execute(
+                text(
+                    "SELECT count(*) FROM chat_messages "
+                    "WHERE message_id = 'message-chat-cutover'"
+                )
+            ).scalar_one() == 1
+            assert connection.execute(
+                text(
+                    "SELECT source_message_id FROM objective_experiment_plans "
+                    "WHERE plan_id = 'plan-chat-cutover'"
+                )
+            ).scalar_one() == "message-chat-cutover"
+            assert "objective_sessions" not in inspect(connection).get_table_names()
+            assert "objective_messages" not in inspect(connection).get_table_names()
     finally:
         engine.dispose()
 

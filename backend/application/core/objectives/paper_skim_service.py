@@ -1546,6 +1546,13 @@ class PaperSkimService:
                             "paper signal relationship requires variables and one outcome",
                         )
                     continue
+                if property_matching.outcome_label_requires_resolution(outcomes[0]):
+                    for signal_id in signal_ids:
+                        rejected_reasons_by_id.setdefault(
+                            signal_id,
+                            "outcome requires one specific measurable property",
+                        )
+                    continue
                 context_conflicts = property_matching.paper_signal_context_conflicts(
                     signal.to_record() for signal in signals
                 )

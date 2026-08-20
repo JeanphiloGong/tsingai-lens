@@ -6,15 +6,20 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from application.core.objectives import property_matching
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 
-PAPER_SKIM_PROMPT_VERSION = "paper_skim.v2"
+PAPER_SKIM_PROMPT_VERSION = "paper_skim.v4"
 PAPER_SKIM_PROMPT_TOKEN_LIMIT = 12_288
 PAPER_SKIM_SOURCE_UNIT_LIMIT = 12
 PAPER_SKIM_WARNING_LIMIT = (2, 240)
 PAPER_SKIM_STUDY_LIMIT = 8
 PAPER_SKIM_RELATIONSHIP_LIMIT = 8
 PAPER_SKIM_UNRESOLVED_SIGNAL_LIMIT = 12
+
+_STUDY_CONTEXT_LIMIT = 12
+_STUDY_CONTEXT_VALUE_CHARS = 160
+_VARIED_FACTOR_LIMIT = 12
 
 _MAX_COMPLETION_TOKENS = 4096
 _DOC_ROLES = {"experimental", "review", "modeling", "mixed", "uncertain"}
@@ -55,7 +60,7 @@ class _PaperSkimResponse(BaseModel):
 class StructuredPaperStudyRelationship(_PaperSkimResponse):
     varied_factors: list[
         Annotated[str, Field(max_length=80)]
-    ] = Field(min_length=1, max_length=8)
+    ] = Field(min_length=1, max_length=_VARIED_FACTOR_LIMIT)
     outcome: Annotated[str, Field(min_length=1, max_length=80)]
     source_unit_ids: list[
         Annotated[str, Field(min_length=1, max_length=160)]
@@ -96,14 +101,14 @@ class StructuredPaperStudy(_PaperSkimResponse):
         Annotated[str, Field(max_length=80)]
     ] = Field(default_factory=list, max_length=8)
     process_context: list[
-        Annotated[str, Field(max_length=80)]
-    ] = Field(default_factory=list, max_length=4)
+        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
+    ] = Field(default_factory=list, max_length=_STUDY_CONTEXT_LIMIT)
     sample_context: list[
-        Annotated[str, Field(max_length=80)]
-    ] = Field(default_factory=list, max_length=4)
+        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
+    ] = Field(default_factory=list, max_length=_STUDY_CONTEXT_LIMIT)
     test_context: list[
-        Annotated[str, Field(max_length=80)]
-    ] = Field(default_factory=list, max_length=4)
+        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
+    ] = Field(default_factory=list, max_length=_STUDY_CONTEXT_LIMIT)
     comparator: str | None = Field(default=None, max_length=160)
     fixed_conditions: list[
         Annotated[str, Field(max_length=120)]
@@ -202,14 +207,14 @@ class StructuredPaperStudySignal(_PaperSkimResponse):
         Annotated[str, Field(max_length=80)]
     ] = Field(default_factory=list, max_length=8)
     process_context: list[
-        Annotated[str, Field(max_length=80)]
-    ] = Field(default_factory=list, max_length=4)
+        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
+    ] = Field(default_factory=list, max_length=_STUDY_CONTEXT_LIMIT)
     sample_context: list[
-        Annotated[str, Field(max_length=80)]
-    ] = Field(default_factory=list, max_length=4)
+        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
+    ] = Field(default_factory=list, max_length=_STUDY_CONTEXT_LIMIT)
     test_context: list[
-        Annotated[str, Field(max_length=80)]
-    ] = Field(default_factory=list, max_length=4)
+        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
+    ] = Field(default_factory=list, max_length=_STUDY_CONTEXT_LIMIT)
     comparator: str | None = Field(default=None, max_length=160)
     fixed_conditions: list[
         Annotated[str, Field(max_length=120)]
@@ -263,7 +268,7 @@ class StructuredPaperSkim(_PaperSkimResponse):
 
     @model_validator(mode="before")
     @classmethod
-    def _downgrade_relationships_without_factors(cls, value: object) -> object:
+    def _downgrade_unresolved_relationships(cls, value: object) -> object:
         if not isinstance(value, Mapping):
             return value
         studies = value.get("studies")
@@ -295,12 +300,15 @@ class StructuredPaperSkim(_PaperSkimResponse):
                     retained_relationships.append(relationship)
                     continue
                 varied_factors = relationship.get("varied_factors")
-                if not isinstance(varied_factors, list) or any(
+                has_varied_factor = not isinstance(varied_factors, list) or any(
                     str(item).strip() for item in varied_factors
+                )
+                outcome = str(relationship.get("outcome") or "").strip()
+                if has_varied_factor and not (
+                    property_matching.outcome_label_requires_resolution(outcome)
                 ):
                     retained_relationships.append(relationship)
                     continue
-                outcome = str(relationship.get("outcome") or "").strip()
                 source_unit_ids = relationship.get("source_unit_ids")
                 if (
                     not outcome
@@ -403,8 +411,13 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "background remain synthesis or background.\n"
         "4. Express every factor and outcome as a neutral scientific axis. A factor "
         "names what was varied, compared, or modeled, not its tested levels. An "
-        "outcome names what was measured or predicted, not the result direction, "
-        "value, or comparison sentence.\n"
+        "outcome names one specific outcome that was measured or predicted, not the "
+        "result direction, value, or comparison sentence; it must also not be a broad "
+        "property family or compound outcome. Split strength and ductility, for "
+        "example, into separate relationships with the same factor set and Source "
+        "lineage. If the Source does not support a specific component, retain the "
+        "supplied label as an outcome in `unresolved_signals` instead of inventing "
+        "one.\n"
         "5. Within each study, return one relationship per outcome. `varied_factors` "
         "must contain the full jointly varied, compared, or modeled factor set. Never "
         "split a joint-factor experiment into isolated effects.\n"
@@ -449,6 +462,11 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "subset.\n"
         "- Each relationship and unresolved signal returns at most 12 unique "
         "`source_unit_ids`, matching the maximum Source units in one input window.\n"
+        "- Each study or unresolved signal returns at most 12 process, sample, and "
+        "test context values; each context value is at most 160 characters. Each "
+        "relationship returns at most 12 varied-factor labels, each at most 80 "
+        "characters. Preserve distinct supported context and the full joint-factor "
+        "set within these bounds.\n"
         "- Return up to 2 `warnings`, each at most 240 characters.\n"
         "- Keep each value concise and preserve exact joint-factor-to-outcome links.\n\n"
         "BOUNDARY EXAMPLES\n"
@@ -490,12 +508,14 @@ class PaperStudyWindowExtractor:
                 f"{repair_detail}. Preserve every distinct supported study, "
                 "relationship, and unresolved signal. Copy only unique Source-unit "
                 f"IDs from the input, with at most {PAPER_SKIM_SOURCE_UNIT_LIMIT} IDs "
-                "per relationship or unresolved signal. Set output_saturated=true "
+                "per relationship or unresolved signal. Keep at most 12 process, "
+                "sample, and test context values and at most 12 varied factors per "
+                "relationship. Set output_saturated=true "
                 "instead of silently omitting a scientific item. Return only compact "
                 "schema-valid JSON."
             )
 
-        def validate_study_identities(response: BaseModel) -> None:
+        def validate_output_contract(response: BaseModel) -> None:
             if not isinstance(response, StructuredPaperSkim):
                 raise TypeError("unexpected paper skim response type")
             source_keys = {
@@ -512,12 +532,30 @@ class PaperStudyWindowExtractor:
             ]
             if len(study_identities) != len(set(study_identities)):
                 raise ValueError("studies contain duplicate study identities")
+            referenced_source_unit_ids = {
+                source_unit_id.strip()
+                for study in response.studies
+                for relationship in study.relationships
+                for source_unit_id in relationship.source_unit_ids
+            } | {
+                source_unit_id.strip()
+                for signal in response.unresolved_signals
+                for source_unit_id in signal.source_unit_ids
+            }
+            unknown_source_unit_ids = sorted(
+                referenced_source_unit_ids - source_keys.keys()
+            )
+            if unknown_source_unit_ids:
+                raise ValueError(
+                    "paper skim references unknown Source-unit ids: "
+                    f"{unknown_source_unit_ids}"
+                )
 
         def parse_json_text_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
             return self.response_client.complete_json(
                 **kwargs,
                 repair_instruction_builder=build_repair_instruction,
-                parsed_validator=validate_study_identities,
+                parsed_validator=validate_output_contract,
                 fail_on_output_saturation=True,
             )
 
@@ -527,7 +565,7 @@ class PaperStudyWindowExtractor:
             response_model=StructuredPaperSkim,
             max_completion_tokens=_MAX_COMPLETION_TOKENS,
             json_text_parser=parse_json_text_with_contract,
-            parsed_validator=validate_study_identities,
+            parsed_validator=validate_output_contract,
             fail_on_output_saturation=True,
             task_type="paper_skim",
             prompt_version=PAPER_SKIM_PROMPT_VERSION,

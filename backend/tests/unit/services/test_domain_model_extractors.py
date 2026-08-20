@@ -75,23 +75,83 @@ def test_paper_skim_contract_bounds_model_output():
         "StructuredPaperStudyRelationship"
     ]["properties"]
     assert study_schema["material_scope"]["maxItems"] == 8
-    assert study_schema["process_context"]["maxItems"] == 4
-    assert study_schema["sample_context"]["maxItems"] == 4
-    assert study_schema["test_context"]["maxItems"] == 4
+    assert study_schema["process_context"]["maxItems"] == 12
+    assert study_schema["process_context"]["items"]["maxLength"] == 160
+    assert study_schema["sample_context"]["maxItems"] == 12
+    assert study_schema["sample_context"]["items"]["maxLength"] == 160
+    assert study_schema["test_context"]["maxItems"] == 12
+    assert study_schema["test_context"]["items"]["maxLength"] == 160
     assert study_schema["fixed_conditions"]["maxItems"] == 12
     assert study_schema["relationships"]["maxItems"] == 8
-    assert relationship_schema["varied_factors"]["maxItems"] == 8
+    assert relationship_schema["varied_factors"]["maxItems"] == 12
     assert relationship_schema["source_unit_ids"]["minItems"] == 1
     assert relationship_schema["source_unit_ids"]["maxItems"] == 12
     signal_schema = model_schema["$defs"]["StructuredPaperStudySignal"][
         "properties"
     ]
     assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
+    assert signal_schema["process_context"]["maxItems"] == 12
+    assert signal_schema["process_context"]["items"]["maxLength"] == 160
+    assert signal_schema["sample_context"]["maxItems"] == 12
+    assert signal_schema["test_context"]["maxItems"] == 12
     assert signal_schema["source_unit_ids"]["minItems"] == 1
     assert signal_schema["source_unit_ids"]["maxItems"] == 12
     assert "source_unit_coverage" not in schema
     assert "StructuredPaperSourceUnitCoverage" not in model_schema.get("$defs", {})
     assert schema["warnings"]["items"]["maxLength"] == 240
+
+
+def test_paper_skim_contract_represents_a_full_bounded_experiment_context():
+    sample_context = [
+        f"HIP condition {index}: temperature, pressure, and cooling schedule"
+        for index in range(1, 12)
+    ]
+    varied_factors = [
+        "HIP temperature",
+        "HIP pressure",
+        "cooling rate",
+        "prior beta grain size",
+        "alpha lath thickness",
+        "alpha phase fraction",
+        "beta phase fraction",
+        "pore fraction",
+        "pore diameter",
+        "build orientation",
+    ]
+
+    parsed = StructuredPaperSkim.model_validate(
+        {
+            "studies": [
+                {
+                    "process_context": [
+                        "laser powder bed fusion",
+                        "hot isostatic pressing",
+                        "sandblasting",
+                        "mechanical polishing",
+                        "chemical etching",
+                    ],
+                    "sample_context": sample_context,
+                    "test_context": [
+                        "room-temperature tensile testing",
+                        "optical microscopy",
+                        "scanning electron microscopy",
+                        "electron backscatter diffraction",
+                        "X-ray computed tomography",
+                    ],
+                    "relationships": [
+                        {
+                            "varied_factors": varied_factors,
+                            "outcome": "yield strength",
+                            "source_unit_ids": ["table-8"],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert parsed.studies[0].sample_context == sample_context
+    assert parsed.studies[0].relationships[0].varied_factors == varied_factors
 
 
 def test_paper_signal_reconciliation_contract_requires_source_signal_ids():
@@ -228,6 +288,9 @@ def test_paper_skim_prompt_defines_structured_research_map_contract():
     assert "up to 12 unresolved signals" in user_prompt
     assert "output_saturated=true" in user_prompt
     assert "neutral scientific axis" in user_prompt
+    assert "at most 12 process, sample, and test context values" in user_prompt
+    assert "each context value is at most 160 characters" in user_prompt
+    assert "at most 12 varied-factor labels" in user_prompt
     assert "L-VED, M-VED, and H-VED" in user_prompt
     assert "varied_factors=['volumetric energy density']" in user_prompt
     assert "outcome='fatigue strength'" in user_prompt
@@ -252,6 +315,26 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
                     "left": "porosity",
                     "right": "relative density",
                 },
+                {
+                    "pair_id": "axis_pair_0003",
+                    "axis_type": "variable",
+                    "left": "build orientation",
+                    "right": "laser speed",
+                    "left_observations": [
+                        {
+                            "varied_factors": ["build orientation", "laser speed"],
+                            "process_context": ["laser powder bed fusion"],
+                            "sample_context": ["vertical and horizontal coupons"],
+                        }
+                    ],
+                    "right_observations": [
+                        {
+                            "varied_factors": ["build orientation", "laser speed"],
+                            "process_context": ["laser powder bed fusion"],
+                            "sample_context": ["vertical and horizontal coupons"],
+                        }
+                    ],
+                },
             ],
         }
     )
@@ -260,6 +343,9 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
     assert "pair classification" in user_prompt
     assert "`decisions` array" in user_prompt
     assert "every input pair" in user_prompt
+    assert "bounded PaperStudy observations" in user_prompt
+    assert "co-occurrence is not topic evidence" in user_prompt
+    assert "build orientation and laser speed" in user_prompt.casefold()
     assert "boolean `equivalent`" in user_prompt
     assert "SS316L and 316L stainless steel" in user_prompt
     assert "SS316 and 316L stainless steel are different grades" in user_prompt
@@ -498,7 +584,7 @@ def test_domain_model_extractors_record_provider_reported_usage() -> None:
     )
     assert usage.prompt_versions == {
         "document_profile": "document_profile.v1",
-        "finding_synthesis": "finding_synthesis.v12",
+        "finding_synthesis": "finding_synthesis.v13",
         "paper_fact_text_window": "paper_fact_text_window.v1",
     }
 
@@ -747,7 +833,7 @@ def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace()
     trace = extractor.consume_last_trace()
     assert trace is not None
     assert trace["task_type"] == "finding_synthesis"
-    assert trace["prompt_version"] == "finding_synthesis.v12"
+    assert trace["prompt_version"] == "finding_synthesis.v13"
     assert trace["parsed_output"] == {"findings": []}
 
 
@@ -1067,6 +1153,96 @@ def test_paper_skim_downgrades_empty_factor_relationship_without_losing_siblings
     assert unresolved.source_unit_ids == ["window-source-2"]
 
 
+def test_paper_skim_downgrades_compound_and_generic_outcomes_without_losing_siblings():
+    response = {
+        "doc_role": "experimental",
+        "studies": [
+            {
+                "experiment_label": "SLM Ti-6Al-4V annealing study",
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "material_scope": ["Ti-6Al-4V"],
+                "process_context": ["post-build annealing"],
+                "relationships": [
+                    {
+                        "varied_factors": ["annealing temperature"],
+                        "outcome": "microstructure",
+                        "source_unit_ids": ["window-source-1"],
+                        "confidence": 0.91,
+                    },
+                    {
+                        "varied_factors": ["annealing temperature"],
+                        "outcome": "strength and ductility of SLMed Ti-6Al-4V",
+                        "source_unit_ids": ["window-source-2"],
+                        "confidence": 0.86,
+                    },
+                    {
+                        "varied_factors": ["annealing temperature"],
+                        "outcome": "mechanical property combination",
+                        "source_unit_ids": ["window-source-3"],
+                        "confidence": 0.81,
+                    },
+                    {
+                        "varied_factors": ["annealing temperature"],
+                        "outcome": (
+                            "microstructure (grain size, shape, phase fraction, "
+                            "composition)"
+                        ),
+                        "source_unit_ids": ["window-source-4"],
+                        "confidence": 0.79,
+                    },
+                ],
+                "confidence": 0.9,
+            }
+        ],
+        "unresolved_signals": [],
+        "evidence_density": "high",
+        "confidence": 0.9,
+        "warnings": [],
+    }
+    client = _FakeOpenAIClient(json.dumps(response))
+
+    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+        {
+            "document_id": "paper-ti64",
+            "source_units": [
+                {
+                    "source_unit_id": f"window-source-{index}",
+                    "source_kind": "block",
+                    "source_ref": f"block-{index}",
+                    "content": "Annealing results for SLM Ti-6Al-4V.",
+                }
+                for index in range(1, 5)
+            ],
+        }
+    )
+
+    assert [
+        relationship.outcome
+        for study in skim.studies
+        for relationship in study.relationships
+    ] == ["microstructure"]
+    assert [signal.label for signal in skim.unresolved_signals] == [
+        "strength and ductility of SLMed Ti-6Al-4V",
+        "mechanical property combination",
+        "microstructure (grain size, shape, phase fraction, composition)",
+    ]
+    assert [signal.source_unit_ids for signal in skim.unresolved_signals] == [
+        ["window-source-2"],
+        ["window-source-3"],
+        ["window-source-4"],
+    ]
+    assert all(
+        signal.material_scope == ["Ti-6Al-4V"]
+        and signal.process_context == ["post-build annealing"]
+        for signal in skim.unresolved_signals
+    )
+    prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
+    assert "one specific outcome" in prompt
+    assert "compound outcome" in prompt
+    assert "unresolved_signals" in prompt
+
+
 def test_structured_paper_skim_rejects_duplicate_study_identities():
     study = {
         "experiment_label": "LPBF parameter study",
@@ -1172,6 +1348,105 @@ def test_paper_skim_retries_duplicate_study_identities_before_returning():
     assert "at most 12 IDs" in client.chat.completions.calls[1]["messages"][-1][
         "content"
     ]
+
+
+def test_paper_skim_repairs_unknown_source_unit_ids_before_returning():
+    invalid = {
+        "doc_role": "experimental",
+        "studies": [
+            {
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "relationships": [
+                    {
+                        "varied_factors": ["HIP temperature"],
+                        "outcome": "yield strength",
+                        "source_unit_ids": ["invented-source-unit"],
+                    }
+                ],
+            }
+        ],
+    }
+    valid = {
+        **invalid,
+        "studies": [
+            {
+                **invalid["studies"][0],
+                "relationships": [
+                    {
+                        **invalid["studies"][0]["relationships"][0],
+                        "source_unit_ids": ["window-source-1"],
+                    }
+                ],
+            }
+        ],
+    }
+    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
+
+    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+        {
+            "document_id": "paper-ti64",
+            "source_units": [
+                {
+                    "source_unit_id": "window-source-1",
+                    "source_kind": "table",
+                    "source_ref": "table-8",
+                    "content": "HIP temperature was varied and yield strength measured.",
+                }
+            ],
+        }
+    )
+
+    assert skim.studies[0].relationships[0].source_unit_ids == [
+        "window-source-1"
+    ]
+    assert len(client.chat.completions.calls) == 2
+    repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
+    assert "invented-source-unit" in repair_prompt
+    assert "Copy only unique Source-unit IDs from the input" in repair_prompt
+
+
+def test_paper_skim_repairs_unknown_signal_source_unit_ids_before_returning():
+    invalid = {
+        "doc_role": "experimental",
+        "unresolved_signals": [
+            {
+                "signal_type": "outcome",
+                "label": "elongation",
+                "source_unit_ids": ["invented-source-unit"],
+            }
+        ],
+    }
+    valid = {
+        **invalid,
+        "unresolved_signals": [
+            {
+                **invalid["unresolved_signals"][0],
+                "source_unit_ids": ["window-source-1"],
+            }
+        ],
+    }
+    client = _FakeOpenAIClient([json.dumps(invalid), json.dumps(valid)])
+
+    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+        {
+            "document_id": "paper-ti64",
+            "source_units": [
+                {
+                    "source_unit_id": "window-source-1",
+                    "source_kind": "table",
+                    "source_ref": "table-8",
+                    "content": "Total elongation was reported for each HIP condition.",
+                }
+            ],
+        }
+    )
+
+    assert skim.unresolved_signals[0].source_unit_ids == ["window-source-1"]
+    assert len(client.chat.completions.calls) == 2
+    assert "invented-source-unit" in client.chat.completions.calls[1]["messages"][
+        -1
+    ]["content"]
 
 
 def test_provider_parsed_paper_skim_repairs_duplicate_study_identities(monkeypatch):
@@ -1330,8 +1605,11 @@ def test_paper_skim_preserves_multi_material_multi_outcome_study():
         "crack formation",
         "internal stresses",
         "microstructure",
-        "mechanical properties",
     ]
+    assert [signal.label for signal in skim.unresolved_signals] == [
+        "mechanical properties"
+    ]
+    assert skim.unresolved_signals[0].source_unit_ids == ["window-source-1"]
     assert len(skim.warnings[0]) <= 240
 
 
@@ -1645,7 +1923,11 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
         """
         {
           "decisions": [
-            {"pair_id": "axis_pair_0001", "equivalent": true}
+            {
+              "pair_id": "axis_pair_0001",
+              "equivalent": true,
+              "same_research_topic": true
+            }
           ]
         }
         """
@@ -1668,24 +1950,50 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
 
     assert isinstance(canonicalization_plan, StructuredAxisCanonicalizationPlan)
     assert [item.model_dump() for item in canonicalization_plan.decisions] == [
-        {"pair_id": "axis_pair_0001", "equivalent": True}
+        {
+            "pair_id": "axis_pair_0001",
+            "equivalent": True,
+            "same_research_topic": True,
+        }
     ]
+    prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
+    assert "one focused experimental intervention" in prompt
+    assert "does not mean directly comparable" in prompt
+    assert "Shared material, shared measured outcome" in prompt
+    assert "Build orientation and laser power" in prompt
+    assert "different processing stages" in prompt
 
 
 def test_axis_canonicalization_repairs_ungrounded_and_overlapping_groups():
     invalid = json.dumps(
         {
             "decisions": [
-                {"pair_id": "axis_pair_9999", "equivalent": True},
-                {"pair_id": "axis_pair_9999", "equivalent": False},
+                {
+                    "pair_id": "axis_pair_9999",
+                    "equivalent": True,
+                    "same_research_topic": True,
+                },
+                {
+                    "pair_id": "axis_pair_9999",
+                    "equivalent": False,
+                    "same_research_topic": False,
+                },
             ]
         }
     )
     repaired = json.dumps(
         {
             "decisions": [
-                {"pair_id": "axis_pair_0001", "equivalent": True},
-                {"pair_id": "axis_pair_0002", "equivalent": False},
+                {
+                    "pair_id": "axis_pair_0001",
+                    "equivalent": True,
+                    "same_research_topic": True,
+                },
+                {
+                    "pair_id": "axis_pair_0002",
+                    "equivalent": False,
+                    "same_research_topic": False,
+                },
             ]
         }
     )
@@ -1714,12 +2022,20 @@ def test_axis_canonicalization_repairs_ungrounded_and_overlapping_groups():
 
     assert len(client.chat.completions.calls) == 2
     assert [item.model_dump() for item in plan.decisions] == [
-        {"pair_id": "axis_pair_0001", "equivalent": True},
-        {"pair_id": "axis_pair_0002", "equivalent": False},
+        {
+            "pair_id": "axis_pair_0001",
+            "equivalent": True,
+            "same_research_topic": True,
+        },
+        {
+            "pair_id": "axis_pair_0002",
+            "equivalent": False,
+            "same_research_topic": False,
+        },
     ]
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
     assert "axis pair classification" in repair_prompt
-    assert "equivalent=false" in repair_prompt
+    assert "require both booleans false" in repair_prompt
 
 
 def test_domain_model_extractors_validates_objective_paper_frame_response():
@@ -2752,7 +3068,10 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     assert "absent, off, or without condition to numeric 0" in contract
     assert "one baseline-to-target comparison interval" in contract
     assert "Never repeat a changed-variable name" in contract
-    assert "choose one complete source-supported pair" in contract
+    assert "choose one adjacent source-supported pair" in contract
+    assert "copy the exact group labels" in contract
+    assert "no statistically significant difference" in contract
+    assert "use association_only" in contract
     assert "Context source" in contract
     assert "numeric `confidence` for every extraction" in contract
     assert "Generic composition or background" in contract

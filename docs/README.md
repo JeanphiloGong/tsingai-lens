@@ -68,12 +68,12 @@ docs/
   [`decisions/rfc-comparable-result-substrate-and-materials-database-direction.md`](decisions/rfc-comparable-result-substrate-and-materials-database-direction.md),
   then
   [`decisions/rfc-research-objective-first-product-flow.md`](decisions/rfc-research-objective-first-product-flow.md)
-- Collection-bound goal copilot:
+- Collection-bound Research Agent:
   read
   [`decisions/rfc-collection-bound-goal-copilot.md`](decisions/rfc-collection-bound-goal-copilot.md)
   after
   [`decisions/rfc-lens-agent-era-positioning.md`](decisions/rfc-lens-agent-era-positioning.md)
-  when working on goal sessions, collection-bound chat, answer source modes,
+  when working on collection-bound Chat, Agent capabilities, write approval,
   or copilot memory.
 - Shared system understanding:
   start with [`overview/system-overview.md`](overview/system-overview.md), then

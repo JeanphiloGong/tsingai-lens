@@ -88,7 +88,7 @@ const finding = {
 		{
 			document_id: documentId,
 			analysis_status: 'analyzed',
-			supporting_evidence_ids: ['evidence-1'],
+			supporting_evidence_ids: ['evidence-1', 'evidence-2', 'evidence-3'],
 			contradicting_evidence_ids: [],
 			context_evidence_ids: ['evidence-mechanism'],
 			condition_boundary_evidence_ids: []
@@ -136,6 +136,8 @@ const evidence = {
 	reported_result: {
 		outcome: 'tensile strength',
 		value: 620,
+		baseline_value: 580,
+		target_value: 620,
 		unit: 'MPa',
 		direction: 'increase',
 		result_text: 'After annealing, tensile strength increased to 620 MPa.'
@@ -152,6 +154,49 @@ const evidence = {
 	failure_reason: null,
 	confidence: 0.92
 };
+
+const additionalTableEvidence = [
+	{
+		evidence_id: 'evidence-2',
+		target_label: 'solution-treated',
+		target_value: 600,
+		source_excerpt: 'After solution treatment, tensile strength was 600 MPa.'
+	},
+	{
+		evidence_id: 'evidence-3',
+		target_label: 'aged',
+		target_value: 640,
+		source_excerpt: 'After aging, tensile strength increased to 640 MPa.'
+	}
+].map((item) => ({
+	...evidence,
+	evidence_id: item.evidence_id,
+	source_excerpt: item.source_excerpt,
+	changed_variables: [
+		{
+			name: 'heat treatment',
+			baseline_value: 'as-built',
+			target_value: item.target_label,
+			unit: null
+		}
+	],
+	comparison: {
+		baseline_label: 'as-built',
+		target_label: item.target_label,
+		axis_names: ['heat treatment'],
+		comparable: true,
+		incomparability_reasons: []
+	},
+	reported_result: {
+		outcome: 'tensile strength',
+		value: item.target_value,
+		baseline_value: 580,
+		target_value: item.target_value,
+		unit: 'MPa',
+		direction: 'increase',
+		result_text: item.source_excerpt
+	}
+}));
 
 const mechanismEvidence = {
 	...evidence,
@@ -360,10 +405,10 @@ async function mockApis(page: Page) {
 					objective_id: objectiveId,
 					analysis_version: 1,
 					finding_id: 'finding-1',
-					items: [evidence, mechanismEvidence],
+					items: [evidence, ...additionalTableEvidence, mechanismEvidence],
 					offset: 0,
 					limit: 100,
-					total: 2
+					total: 4
 				})
 			);
 		}
@@ -394,12 +439,11 @@ for (const viewport of [
 		await expect(page.getByText('Evidence extraction failed.')).toBeVisible();
 		await expect(page.getByText('正在显示已发布的 v1；重试 v2 失败。')).toBeVisible();
 		await expect(page.getByText(finding.statement).first()).toBeVisible();
-		await expect(
-			page.getByRole('blockquote').filter({ hasText: evidence.source_excerpt })
-		).toHaveText(evidence.source_excerpt);
 		await expect(page.getByText('相关联', { exact: true })).toBeVisible();
 		await expect(page.getByRole('heading', { name: '证据对比' })).toBeVisible();
-		await expect(page.getByRole('cell', { name: 'tensile strength: 620 MPa' })).toBeVisible();
+		await expect(
+			page.getByRole('cell', { name: 'tensile strength: 580 MPa → 620 MPa' })
+		).toBeVisible();
 		await expect(page.getByRole('link', { name: 'LPBF 316L tensile study · p.7' })).toBeVisible();
 		await expect(page.getByRole('link', { name: 'LPBF 316L tensile study · p.8' })).toBeVisible();
 		await expect(
@@ -409,6 +453,24 @@ for (const viewport of [
 		await expect(page.getByText('tensile strength', { exact: true }).first()).toBeVisible();
 		await expect(page.getByRole('button', { name: '反馈' })).toBeVisible();
 		await expect(page.getByText('Single paper only.')).toBeVisible();
+		const evidenceScope = page.getByRole('group', { name: '证据范围' });
+		await expect(evidenceScope).toContainText('1篇直接文献');
+		await expect(evidenceScope).toContainText('2个原文来源');
+		await expect(evidenceScope).toContainText('3个结果比较');
+		const tableSource = page.getByRole('group', { name: '表格来源 · p.7' });
+		await expect(tableSource).not.toHaveAttribute('open');
+		await tableSource.getByText('表格来源 · p.7', { exact: true }).click();
+		await expect(tableSource).toHaveAttribute('open');
+		await expect(tableSource.getByRole('group', { name: '共享参照' })).toContainText('as-built');
+		await expect(tableSource.getByRole('group', { name: '共享参照' })).toContainText('580 MPa');
+		const sourceMatrix = tableSource.getByRole('table', { name: '共享参照比较' });
+		await expect(sourceMatrix.getByRole('row')).toHaveCount(4);
+		const annealedRow = sourceMatrix.locator('tbody tr').filter({ hasText: /^annealed/ });
+		await expect(annealedRow).toContainText('620 MPa');
+		await expect(annealedRow).toContainText('+40 MPa');
+		await expect(annealedRow.locator('blockquote')).not.toBeVisible();
+		await annealedRow.getByText('查看摘录', { exact: true }).click();
+		await expect(annealedRow.locator('blockquote')).toHaveText(evidence.source_excerpt);
 		const layout = await page.evaluate(() => {
 			const list = document
 				.querySelector<HTMLElement>('.findings-sidebar')
@@ -437,10 +499,7 @@ for (const viewport of [
 		} else {
 			expect(layout.list!.y + layout.list!.height).toBeLessThanOrEqual(layout.detail!.y);
 		}
-		const sourceLink = page
-			.locator('.evidence-item')
-			.filter({ hasText: evidence.source_excerpt })
-			.getByRole('link', { name: /打开原文|Open source/ });
+		const sourceLink = annealedRow.getByRole('link', { name: /打开原文|Open source/ });
 		await expect(sourceLink).toHaveAttribute(
 			'href',
 			`/collections/${collectionId}/documents/${documentId}?view=parsed-paper&evidence_id=evidence-1&source_ref=${tableSourceRef}&quote=After+annealing%2C+tensile+strength+increased+to+620+MPa.&return_to=%2Fcollections%2F${collectionId}%2Fobjectives%2F${objectiveId}%3Ffinding_id%3Dfinding-1&page=7`

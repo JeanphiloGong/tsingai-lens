@@ -36,9 +36,6 @@ async def create_experiment_plan(
             objective_id=objective_id,
             title=payload.title,
             content=payload.content,
-            source_message_id=payload.source_message_id,
-            source_links=[link.model_dump() for link in payload.source_links],
-            metadata=payload.metadata,
             created_by=current_user_id(request),
         )
     except ValueError as exc:

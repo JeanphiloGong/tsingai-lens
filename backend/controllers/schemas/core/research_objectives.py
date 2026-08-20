@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ConfirmationStatus = Literal["candidate", "confirmed"]
 AnalysisStatus = Literal["queued", "running", "succeeded", "failed"]
+ObjectiveOrigin = Literal["system_discovered", "chat_assisted"]
 EvidenceAttributionScope = Literal[
     "isolated_effect",
     "joint_effect",
@@ -19,6 +20,7 @@ EvidenceResultDirection = Literal[
     "decrease",
     "improve",
     "worsen",
+    "changed",
     "no_change",
     "mixed",
     "unknown",
@@ -45,6 +47,10 @@ class ObjectiveSummaryResponse(BaseModel):
     published_analysis_version: int | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    origin: ObjectiveOrigin = "system_discovered"
+    source_build_id: str | None = None
+    created_by_user_id: str | None = None
+    created_by_tool_call_id: str | None = None
 
 
 class TokenUsageResponse(BaseModel):
@@ -265,6 +271,8 @@ class ObjectiveEvidenceResultResponse(BaseModel):
 
     outcome: str
     value: str | int | float | bool | None = None
+    baseline_value: str | int | float | bool | None = None
+    target_value: str | int | float | bool | None = None
     unit: str | None = None
     direction: EvidenceResultDirection
     result_text: str

@@ -49,19 +49,77 @@ The build request accepts `mode: standard | fast` and defaults to `standard`.
 The selected mode is persisted before dispatch and determines the runtime
 dependency graph for that task.
 
-### Goal Intake And Assistant Sessions
+### Goal Intake
 
 - `POST /api/v1/goals/intake`
-- `POST /api/v1/goal-sessions`
-- `GET /api/v1/goal-sessions/{session_id}`
-- `PATCH /api/v1/goal-sessions/{session_id}`
-- `GET /api/v1/goal-sessions/{session_id}/messages`
-- `POST /api/v1/goal-sessions/{session_id}/messages`
 
 Goal intake seeds a collection; it is not a second research-result identity.
-An assistant session may set `focused_objective_id`. Objective-grounded answers
-consume bounded published Findings and exact Evidence links. The response
-distinguishes collection-grounded, collection-limited, and general content.
+
+### Research Agent Chat
+
+- `POST /api/v1/chat-sessions`
+- `GET /api/v1/chat-sessions/{session_id}`
+- `GET /api/v1/chat-sessions/{session_id}/messages`
+- `POST /api/v1/chat-sessions/{session_id}/messages`
+- `POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision`
+
+Chat is the independent conversation and Agent trajectory owner. A Chat session
+belongs to one authenticated user and one collection. Its ordered messages
+record ordinary user and assistant conversation, model tool intent, and bounded
+structured tool results. Chat references Core resources through stable resource
+references; it does not own or duplicate Objective, Evidence, Finding, or
+Analysis records.
+
+An ordinary message may return a final answer without calling a tool. Registered
+`read` and `draft` calls may execute automatically. A `write` call stops at
+`approval_required` before execution. The decision request must submit the
+stored 64-character `arguments_digest`; approval is bound to the tool call,
+exact stored arguments, authenticated user, and decision timestamp. Changed
+arguments, another user, or an incompatible call state return `409` or `404`
+and never execute the call. Rejection records a tool result and does not execute
+the capability. While a write remains `approval_required`, posting another
+message to that session returns `409 chat_tool_approval_pending`; the user must
+approve or reject the exact pending action before starting another turn.
+
+The production Research Agent currently exposes these automatic capabilities:
+
+- `get_collection_context` returns a bounded collection and Objective overview;
+- `query_published_findings` returns bounded Finding and Evidence summaries
+  only from published Objective analysis versions; an empty successful result
+  is a scientific absence, not a provider failure;
+- `propose_objective_drafts` records at most three focused, single-outcome
+  drafts in the Chat trajectory. PaperSkim relationships may be reported as
+  proposal context, but they are never presented as Evidence and this call does
+  not persist, confirm, analyze, or publish a Core Objective;
+- `create_objective_candidate` is a `write` capability. After exact-argument
+  approval, it creates one unconfirmed `chat_assisted` Core candidate supported
+  by PaperSkim relationship context. It never confirms the Objective or starts
+  analysis. Repeating the same approved tool call is idempotent.
+
+Model context is a bounded recent suffix of the durable trajectory. An
+assistant tool call and its following tool result are retained or omitted as one
+protocol unit, so context trimming never sends an orphan tool result to the
+provider.
+
+The server checkpoints the user message before the first model request, then
+checkpoints model tool intent, running call state, structured tool results, and
+the final assistant answer as separate append-only transitions. A process
+interruption therefore cannot erase an already requested action or make an
+approved write appear never to have started.
+
+Turn status is one of `completed`, `approval_required`,
+`step_limit_reached`, `failed`, or `rejected`. Tool call and result failures are
+technical trajectory outcomes; they are not scientific absence, uncertainty,
+or Evidence status. Provider response objects and internal exceptions are not
+part of the public contract. Reaching the step limit appends a final assistant
+message that explains how the researcher can continue; the trajectory never
+ends on an opaque tool message alone.
+
+Tool result status is `succeeded`, `queued`, or `failed`. A `queued` result is a
+successful asynchronous handoff, must include at least one canonical resource
+reference, and does not make the Agent wait for task completion. The final
+assistant response tells the researcher that work started and where its state
+can be inspected.
 
 ### Research Objectives
 
@@ -79,19 +137,24 @@ distinguishes collection-grounded, collection-limited, and general content.
 - included and excluded document IDs;
 - `confirmation_status`: `candidate | confirmed`;
 - `active_analysis_version` and `published_analysis_version`;
+- `origin`: `system_discovered | chat_assisted`, plus the immutable
+  `source_build_id` and Chat creator provenance for an assisted candidate;
 - ordered `source_relationship_ids` linking the Objective to paper-study
   relationships;
 - `active_analysis`, `published_analysis`, analysis-level
   `paper_contributions`, and warnings on detail responses.
 
-The Objective list is ordered by the persisted collection-build rank and
-supports `offset` and optional `limit`. When `limit` is omitted, the response
-contains every Objective from `offset` onward so lower-ranked candidates remain
-visible without client pagination. An explicit `limit` applies ordinary
-pagination. The response contains `total`, `offset`, and the applied `limit`
-(`null` when omitted), and each Objective contains its one-based `rank`. Rank is
-for researcher prioritization and never removes a paper-study relationship from
-the persisted inventory.
+The Objective list places active generated candidates in persisted
+collection-build rank, followed by durable Chat-assisted candidates in creation
+order. Assisted candidates remain visible across later collection rebuilds and
+retain the Source build inspected when the user approved them. The list supports
+`offset` and optional `limit`. When `limit` is omitted, the response contains
+every Objective from `offset` onward so lower-ranked candidates remain visible
+without client pagination. An explicit `limit` applies ordinary pagination. The
+response contains `total`, `offset`, and the applied `limit` (`null` when
+omitted), and each Objective contains its one-based `rank`. Rank is for
+researcher prioritization and never removes a paper-study relationship from the
+persisted inventory.
 
 The paper-study inventory reads the active persisted Objective build and
 supports `offset` and `limit`. Its response contains `total`, `offset`, `limit`,
@@ -148,7 +211,11 @@ allocates a new version. A failed active version leaves the prior published
 version readable. If the backend cannot dispatch a queued version to its local
 analysis worker, it records that version as failed and returns `503`, allowing
 the client to retry without leaving a permanently queued version. Only a
-complete succeeded version can become published.
+complete succeeded version can become published. A succeeded version may have
+zero Findings when paper contributions and source-backed Evidence were
+published but no defensible comparison survived; this is a scientific
+abstention, not a technical failure. The Finding list then returns `total=0`
+without a placeholder Finding.
 
 Objective document scope and current-analysis projection are build-scoped. A
 rebuild may preserve a confirmed Objective identity and all historical analysis
@@ -262,9 +329,10 @@ model input. The latest feedback or curation event controls dataset status.
 - `PATCH /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}`
 
 Plans are human-editable downstream drafts, not scientific source records.
-Assistant-created plans must reference a grounded message from the same user,
-collection, and Objective. The service records source Finding/Evidence lineage
-and rejects stale or ungrounded protocol input.
+New plans are manual and cannot claim Chat-message provenance. Historical plans
+that already reference a migrated Chat message retain their stored
+Finding/Evidence lineage. Reads report whether that snapshot is still current;
+stale historical plans cannot be promoted to `ready_for_review`.
 
 ### Research Aggregation
 
@@ -336,8 +404,9 @@ Errors use the status appropriate to the failure:
 - `400`: malformed input;
 - `401`: invalid or expired authentication;
 - `403`: authenticated user lacks access;
-- `404`: collection, Objective, Finding, Evidence, or source record is absent;
-- `409`: lifecycle conflict, unpublished/stale version, or artifact not ready;
+- `404`: collection, Chat, Objective, Finding, Evidence, or source record is absent;
+- `409`: lifecycle or Chat approval conflict, unpublished/stale version, or
+  artifact not ready;
 - `422`: request schema validation;
 - `500/502/503`: internal or upstream service failure.
 

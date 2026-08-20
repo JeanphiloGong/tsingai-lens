@@ -97,6 +97,8 @@ const evidence = [
 		reported_result: {
 			outcome: 'strength',
 			value: 620,
+			baseline_value: null,
+			target_value: null,
 			unit: 'MPa',
 			direction: 'increase' as const,
 			result_text: 'At 500 C, tensile strength increased to 620 MPa.'
@@ -135,7 +137,7 @@ describe('single Finding workbench', () => {
 		await expect
 			.element(browserPage.getByRole('columnheader', { name: '比较条件' }))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('400 C')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('400 C', { exact: true })).toBeInTheDocument();
 		await expect.element(browserPage.getByRole('cell', { name: '500 C' })).toBeInTheDocument();
 		await expect.element(browserPage.getByRole('cell', { name: '支持结果' })).toBeInTheDocument();
 		await expect.element(browserPage.getByRole('cell', { name: '增加' })).toBeInTheDocument();
@@ -183,6 +185,8 @@ describe('single Finding workbench', () => {
 			reported_result: {
 				outcome: 'relative density',
 				value: 99.1,
+				baseline_value: null,
+				target_value: null,
 				unit: '%',
 				direction: 'increase' as const,
 				result_text: 'Relative density increased to 99.1%.'
@@ -215,6 +219,171 @@ describe('single Finding workbench', () => {
 		await expect.element(comparisonRow).toHaveTextContent('laser power');
 		await expect.element(comparisonRow).toHaveTextContent('scan speed');
 		await expect.element(browserPage.getByText('relative density: 99.1 %')).toBeInTheDocument();
+	});
+
+	it('groups same-table treatment comparisons as one source with a shared reference', async () => {
+		const treatmentResults = [
+			['800 SC', 1082.43],
+			['800 FC', 1063.02],
+			['800 RQ', 1050.39],
+			['920 SC', 990.83],
+			['920 FC', 991.86],
+			['920 RQ', 1070.03],
+			['1050 SC', 906.94],
+			['1050 RQ', 1035.62],
+			['1050 RQ + 800 SC', 1028.26],
+			['1050 RQ + 920 FC', 961.53]
+		] as const;
+		const tableEvidence = treatmentResults.map(([condition, targetValue], index) => ({
+			...evidence[0],
+			evidence_id: `evidence-table-${index + 1}`,
+			source_kind: 'table',
+			source_ref: 'table-8',
+			source_excerpt: `Condition: AB | UTS: 1294.20 MPa\nCondition: ${condition} | UTS: ${targetValue} MPa`,
+			page_numbers: [20],
+			related_source_refs: [
+				{ source_kind: 'table', source_ref: 'table-8', row_index: 1, col_index: 5 },
+				{ source_kind: 'table', source_ref: 'table-8', row_index: index + 2, col_index: 5 }
+			],
+			changed_variables: [
+				{
+					name: 'post-processing condition',
+					baseline_value: 'AB',
+					target_value: condition,
+					unit: null
+				}
+			],
+			comparison: {
+				baseline_label: 'AB',
+				target_label: condition,
+				axis_names: ['post-processing condition'],
+				comparable: true,
+				incomparability_reasons: []
+			},
+			reported_result: {
+				outcome: 'ultimate tensile strength',
+				value: targetValue,
+				baseline_value: 1294.2,
+				target_value: targetValue,
+				unit: 'MPa',
+				direction: 'decrease' as const,
+				result_text: `UTS decreased from 1294.2 MPa to ${targetValue} MPa.`
+			},
+			attribution_scope: 'association_only' as const
+		}));
+		const evidenceIds = tableEvidence.map((item) => item.evidence_id);
+
+		render(Workbench, {
+			finding: {
+				...finding,
+				statement: 'Post-processing conditions were associated with lower UTS.',
+				factors: ['post-processing condition'],
+				outcome: 'ultimate tensile strength',
+				direction: 'decrease' as const,
+				attribution_scope: 'association_only' as const,
+				paper_contributions: [
+					{
+						...finding.paper_contributions[0],
+						supporting_evidence_ids: evidenceIds,
+						context_evidence_ids: [],
+						condition_boundary_evidence_ids: []
+					}
+				]
+			},
+			evidence: tableEvidence,
+			collectionId: 'col-1',
+			documentTitles: { 'paper-1': 'HIP treatment of Ti-6Al-4V' }
+		});
+
+		const evidenceScope = browserPage.getByRole('group', { name: '证据范围' });
+		await expect.element(evidenceScope).toHaveTextContent('1篇直接文献');
+		await expect.element(evidenceScope).toHaveTextContent('1个原文来源');
+		await expect.element(evidenceScope).toHaveTextContent('10个结果比较');
+		await expect.element(browserPage.getByText('表格来源 · p.20')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('共享参照 AB · 10 个组间比较', { exact: true }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('10 条证据')).not.toBeInTheDocument();
+		const tableSource = browserPage.getByRole('group', { name: '表格来源 · p.20' });
+		await expect.element(tableSource).not.toHaveAttribute('open');
+		await browserPage.getByText('表格来源 · p.20', { exact: true }).click();
+		await expect.element(tableSource).toHaveAttribute('open');
+		const sharedReference = tableSource.getByRole('group', { name: '共享参照' });
+		await expect.element(sharedReference).toHaveTextContent('AB');
+		await expect.element(sharedReference).toHaveTextContent('ultimate tensile strength');
+		await expect.element(sharedReference).toHaveTextContent('1294.2 MPa');
+		const matrix = tableSource.getByRole('table', { name: '共享参照比较' });
+		expect(matrix.getByRole('row').length).toBe(11);
+		const firstTreatment = matrix.getByRole('row', { name: /^比较条件 800 SC 报告结果/ });
+		await expect.element(firstTreatment).toHaveTextContent('1082.43 MPa');
+		await expect.element(firstTreatment).toHaveTextContent('-211.77 MPa');
+		await expect.element(firstTreatment).toHaveTextContent('降低');
+		await expect.element(firstTreatment.getByRole('link', { name: '打开原文' })).toBeVisible();
+		const excerpt = firstTreatment.getByText(tableEvidence[0].source_excerpt, { exact: true });
+		await expect.element(excerpt).not.toBeVisible();
+		await firstTreatment.getByText('查看摘录', { exact: true }).click();
+		await expect.element(excerpt).toBeVisible();
+	});
+
+	it('does not merge same-source comparisons whose reported baselines conflict', async () => {
+		const conflictingEvidence = [1294.2, 1200].map((baselineValue, index) => ({
+			...evidence[0],
+			evidence_id: `evidence-conflict-${index + 1}`,
+			source_kind: 'table',
+			source_ref: 'table-conflict',
+			source_excerpt: `AB baseline ${baselineValue} MPa; treatment ${index + 1}.`,
+			page_numbers: [20],
+			changed_variables: [
+				{
+					name: 'post-processing condition',
+					baseline_value: 'AB',
+					target_value: index === 0 ? '800 SC' : '920 SC',
+					unit: null
+				}
+			],
+			comparison: {
+				baseline_label: 'AB',
+				target_label: index === 0 ? '800 SC' : '920 SC',
+				axis_names: ['post-processing condition'],
+				comparable: true,
+				incomparability_reasons: []
+			},
+			reported_result: {
+				outcome: 'ultimate tensile strength',
+				value: index === 0 ? 1082.43 : 990.83,
+				baseline_value: baselineValue,
+				target_value: index === 0 ? 1082.43 : 990.83,
+				unit: 'MPa',
+				direction: 'decrease' as const,
+				result_text: 'Reported UTS comparison.'
+			},
+			attribution_scope: 'association_only' as const
+		}));
+
+		render(Workbench, {
+			finding: {
+				...finding,
+				paper_contributions: [
+					{
+						...finding.paper_contributions[0],
+						supporting_evidence_ids: conflictingEvidence.map((item) => item.evidence_id),
+						context_evidence_ids: [],
+						condition_boundary_evidence_ids: []
+					}
+				]
+			},
+			evidence: conflictingEvidence,
+			collectionId: 'col-1'
+		});
+
+		const tableSource = browserPage.getByRole('group', { name: '表格来源 · p.20' });
+		await expect.element(tableSource).not.toHaveTextContent('共享参照');
+		await browserPage.getByText('表格来源 · p.20', { exact: true }).click();
+		await expect
+			.element(tableSource.getByRole('table', { name: '共享参照比较' }))
+			.not.toBeInTheDocument();
+		await expect.element(tableSource.getByText('AB → 800 SC', { exact: true })).toBeVisible();
+		await expect.element(tableSource.getByText('AB → 920 SC', { exact: true })).toBeVisible();
 	});
 
 	it('links each mechanism to its exact supporting Evidence', async () => {
@@ -314,7 +483,10 @@ describe('single Finding workbench', () => {
 			}
 		});
 
-		await expect.element(browserPage.getByText('1 条证据 · 1 篇文献')).toBeInTheDocument();
+		const evidenceScope = browserPage.getByRole('group', { name: '证据范围' });
+		await expect.element(evidenceScope).toHaveTextContent('1篇直接文献');
+		await expect.element(evidenceScope).toHaveTextContent('1个原文来源');
+		await expect.element(evidenceScope).toHaveTextContent('1个结果比较');
 		await expect
 			.element(
 				browserPage.getByText(

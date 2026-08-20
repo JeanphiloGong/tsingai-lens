@@ -33,9 +33,10 @@
 - 图谱与 GraphML：`GET /api/v1/collections/{collection_id}/graph`、`GET /api/v1/collections/{collection_id}/graph/nodes/{node_id}/neighbors`、`GET /api/v1/collections/{collection_id}/graphml`
 - 图谱 drilldown 详情：`GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`、`GET /api/v1/collections/{collection_id}/evidence/{evidence_id}`、`GET /api/v1/collections/{collection_id}/comparisons/{row_id}`
 - 图谱聚合节点 drilldown：回到 `GET /api/v1/collections/{collection_id}/comparisons`，并使用 `material_system_normalized`、`property_normalized`、`test_condition_normalized`、`baseline_normalized` 过滤参数
-- Collection-bound AI 研究助手：`POST /api/v1/goal-sessions`、
-  `GET|PATCH /api/v1/goal-sessions/{session_id}`、
-  `POST|GET /api/v1/goal-sessions/{session_id}/messages`
+- Collection-bound Research Agent：`POST /api/v1/chat-sessions`、
+  `GET /api/v1/chat-sessions/{session_id}`、
+  `GET|POST /api/v1/chat-sessions/{session_id}/messages`、
+  `POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision`
 
 ## 前端实现约束
 
@@ -54,11 +55,11 @@
   `/collections/{collection_id}/objectives/{objective_id}` 是 objective-first
   工作区入口；确认、分析、Findings 复核、数据集、Assistant focus 和实验方案都使用同一个
   `objective_id`，不维护第二套持久化目标身份
-- `/collections/{collection_id}/assistant` 使用同源 `goal-sessions` API，是绑定当前
-  collection 的研究助手入口；它必须显示 `collection_grounded`、
-  `collection_limited`、`general_fallback`、`general_only` 来源边界，并把材料详情页传入的
-  `material_id` 或 Objective 详情页传入的 `objective_id` 作为显式 focus context；
-  goal-session 是对话容器，持久化研究焦点只使用 `focused_objective_id`
+- `/collections/{collection_id}/assistant` 使用同源 `chat-sessions` API，是绑定当前
+  collection 的 Research Agent 入口。普通对话不要求 capability；读取和草拟 capability
+  自动执行并将结构化结果与最终回答分开显示；Core 写入停在持久化的精确参数审批点。
+  Chat 是会话、消息、capability 轨迹和审批的唯一运行时权威，但不拥有 Objective、
+  Evidence、Finding 或 Analysis 真值。Objective 链接仅指向 Core 的规范记录。
 - 报告结果不再是当前浏览器主流程；frontend 不再维护 reports API 客户端或工作区占位入口
 - 遗留调试页 `/upload`、`/index`、`/configs`、`/export` 已从前端路由中移除；
   产品入口统一收敛到 collection workspace 和 `/api/docs`

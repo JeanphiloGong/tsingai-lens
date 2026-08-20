@@ -19,6 +19,32 @@
 	export let collectionId = '';
 	export let documentTitles: Record<string, string> = {};
 
+	type SharedComparisonRow = {
+		evidence: ObjectiveEvidence;
+		targetLabel: string;
+		targetResult: string;
+		delta: string;
+		direction: string;
+	};
+
+	type SharedComparisonMatrix = {
+		referenceLabel: string;
+		referenceResult: string;
+		outcome: string;
+		rows: SharedComparisonRow[];
+	};
+
+	type EvidenceSourceGroup = {
+		key: string;
+		sourceKind: string;
+		evidence: ObjectiveEvidence[];
+		otherEvidence: ObjectiveEvidence[];
+		pages: number[];
+		comparisonCount: number;
+		otherRecordCount: number;
+		matrix: SharedComparisonMatrix | null;
+	};
+
 	let feedbackOpen = false;
 	let feedbackStatus: FindingFeedbackStatus = 'correct';
 	let feedbackIssue: FindingFeedbackIssueType = 'none';
@@ -100,13 +126,23 @@
 			direction: item.reported_result ? directionLabel(item.reported_result.direction) : '方向未知',
 			comparability: comparabilityLabel(item)
 		}));
-	$: contributionGroups = finding.paper_contributions.map((contribution) => ({
-		contribution,
-		paperEvidence: evidenceFor(contribution)
-	}));
+	$: contributionGroups = finding.paper_contributions.map((contribution) => {
+		const paperEvidence = evidenceFor(contribution);
+		return {
+			contribution,
+			paperEvidence,
+			sourceGroups: groupEvidenceBySource(paperEvidence)
+		};
+	});
 	$: evidencedContributionGroups = contributionGroups.filter(
 		(group) => group.paperEvidence.length > 0
 	);
+	$: evidenceSourceCount = evidencedContributionGroups.reduce(
+		(total, group) => total + group.sourceGroups.length,
+		0
+	);
+	$: resultComparisonCount = comparisonRows.filter((row) => row.evidence.comparison).length;
+	$: otherResultRecordCount = comparisonRows.length - resultComparisonCount;
 	$: emptyContributions = contributionGroups
 		.filter((group) => group.paperEvidence.length === 0)
 		.map((group) => group.contribution);
@@ -171,6 +207,137 @@
 		return evidence.filter((item) => ids.has(item.evidence_id));
 	}
 
+	function isResultComparison(item: ObjectiveEvidence) {
+		return Boolean(
+			item.comparison &&
+			(item.evidence_role === 'direct_result' || item.evidence_role === 'contradictory_result')
+		);
+	}
+
+	function comparisonSideLabel(item: ObjectiveEvidence, side: 'baseline' | 'target') {
+		const values = item.changed_variables
+			.map((variable) =>
+				formatValue(
+					side === 'baseline' ? variable.baseline_value : variable.target_value,
+					variable.unit
+				)
+			)
+			.filter(Boolean);
+		if (values.length) return values.join(' + ');
+		return side === 'baseline'
+			? item.comparison?.baseline_label.trim() || ''
+			: item.comparison?.target_label.trim() || '';
+	}
+
+	function scientificValueKey(value: unknown) {
+		return String(value ?? '')
+			.trim()
+			.toLocaleLowerCase();
+	}
+
+	function comparisonAxisKey(item: ObjectiveEvidence) {
+		return (item.comparison?.axis_names ?? [])
+			.map(scientificValueKey)
+			.filter(Boolean)
+			.sort()
+			.join('\u001f');
+	}
+
+	function formattedDelta(item: ObjectiveEvidence) {
+		const baseline = item.reported_result?.baseline_value;
+		const target = item.reported_result?.target_value;
+		if (
+			typeof baseline !== 'number' ||
+			typeof target !== 'number' ||
+			!Number.isFinite(baseline) ||
+			!Number.isFinite(target)
+		) {
+			return '未计算';
+		}
+		const delta = Number((target - baseline).toFixed(6));
+		const sign = delta > 0 ? '+' : '';
+		return formatValue(`${sign}${delta}`, item.reported_result?.unit);
+	}
+
+	function sharedComparisonMatrix(items: ObjectiveEvidence[]): SharedComparisonMatrix | null {
+		const comparisons = items.filter(isResultComparison);
+		if (comparisons.length < 2) return null;
+		const first = comparisons[0];
+		const firstResult = first.reported_result;
+		const referenceLabel = comparisonSideLabel(first, 'baseline');
+		const axisKey = comparisonAxisKey(first);
+		if (
+			!first.comparison?.comparable ||
+			!firstResult ||
+			!referenceLabel ||
+			!axisKey ||
+			firstResult.baseline_value === null ||
+			firstResult.baseline_value === undefined ||
+			firstResult.target_value === null ||
+			firstResult.target_value === undefined
+		) {
+			return null;
+		}
+		const outcomeKey = scientificValueKey(firstResult.outcome);
+		const unitKey = scientificValueKey(firstResult.unit);
+		const baselineResultKey = scientificValueKey(firstResult.baseline_value);
+		for (const item of comparisons) {
+			const result = item.reported_result;
+			if (
+				!item.comparison?.comparable ||
+				!result ||
+				comparisonSideLabel(item, 'baseline') !== referenceLabel ||
+				comparisonAxisKey(item) !== axisKey ||
+				scientificValueKey(result.outcome) !== outcomeKey ||
+				scientificValueKey(result.unit) !== unitKey ||
+				scientificValueKey(result.baseline_value) !== baselineResultKey ||
+				result.target_value === null ||
+				result.target_value === undefined ||
+				!comparisonSideLabel(item, 'target')
+			) {
+				return null;
+			}
+		}
+		return {
+			referenceLabel,
+			referenceResult: formatValue(firstResult.baseline_value, firstResult.unit),
+			outcome: firstResult.outcome,
+			rows: comparisons.map((item) => ({
+				evidence: item,
+				targetLabel: comparisonSideLabel(item, 'target'),
+				targetResult: formatValue(item.reported_result?.target_value, item.reported_result?.unit),
+				delta: formattedDelta(item),
+				direction: item.reported_result
+					? directionLabel(item.reported_result.direction)
+					: '方向未知'
+			}))
+		};
+	}
+
+	function groupEvidenceBySource(items: ObjectiveEvidence[]): EvidenceSourceGroup[] {
+		const groups: Record<string, ObjectiveEvidence[]> = Object.create(null);
+		for (const item of items) {
+			const sourceKey = `${item.source_kind}\u001f${item.source_ref || item.evidence_id}`;
+			groups[sourceKey] = [...(groups[sourceKey] ?? []), item];
+		}
+		return Object.entries(groups).map(([key, sourceEvidence]) => {
+			const comparisonEvidence = sourceEvidence.filter(isResultComparison);
+			const otherEvidence = sourceEvidence.filter((item) => !isResultComparison(item));
+			return {
+				key,
+				sourceKind: sourceEvidence[0].source_kind,
+				evidence: sourceEvidence,
+				otherEvidence,
+				pages: [...new Set(sourceEvidence.flatMap((item) => item.page_numbers))].sort(
+					(left, right) => left - right
+				),
+				comparisonCount: comparisonEvidence.length,
+				otherRecordCount: otherEvidence.length,
+				matrix: sharedComparisonMatrix(sourceEvidence)
+			};
+		});
+	}
+
 	function paperTitle(documentId: string, index?: number) {
 		const title = documentTitles[documentId]?.trim();
 		if (title) return title;
@@ -193,6 +360,46 @@
 		return firstPage ? `${title} · p.${firstPage}` : title;
 	}
 
+	function sourceKindLabel(sourceKind: string) {
+		return (
+			{
+				table: '表格来源',
+				figure: '图表来源',
+				text_window: '正文来源'
+			}[sourceKind] ?? '原文来源'
+		);
+	}
+
+	function sourceGroupLabel(group: EvidenceSourceGroup) {
+		const pages = group.pages.length ? ` · p.${group.pages.join(', ')}` : '';
+		return `${sourceKindLabel(group.sourceKind)}${pages}`;
+	}
+
+	function evidenceRecordSummary(comparisonCount: number, otherRecordCount: number) {
+		return [
+			comparisonCount ? `${comparisonCount} 个组间比较` : '',
+			otherRecordCount ? `${otherRecordCount} 条原文记录` : ''
+		]
+			.filter(Boolean)
+			.join(' · ');
+	}
+
+	function paperSourceSummary(sourceGroups: EvidenceSourceGroup[]) {
+		const comparisonCount = sourceGroups.reduce((total, group) => total + group.comparisonCount, 0);
+		const otherRecordCount = sourceGroups.reduce(
+			(total, group) => total + group.otherRecordCount,
+			0
+		);
+		return `${sourceGroups.length} 个来源 · ${evidenceRecordSummary(comparisonCount, otherRecordCount)}`;
+	}
+
+	function evidenceComparisonLabel(item: ObjectiveEvidence) {
+		if (!item.comparison) return '';
+		const baseline = comparisonSideLabel(item, 'baseline');
+		const target = comparisonSideLabel(item, 'target');
+		return baseline && target ? `${baseline} → ${target}` : '';
+	}
+
 	function formatValue(
 		value: string | number | boolean | null | undefined,
 		unit: string | null | undefined
@@ -203,6 +410,11 @@
 
 	function resultLabel(item: ObjectiveEvidence) {
 		if (!item.reported_result) return '未报告';
+		const baseline = formatValue(item.reported_result.baseline_value, item.reported_result.unit);
+		const target = formatValue(item.reported_result.target_value, item.reported_result.unit);
+		if (baseline && target) {
+			return `${item.reported_result.outcome}: ${baseline} → ${target}`;
+		}
 		const value = formatValue(item.reported_result.value, item.reported_result.unit);
 		return `${item.reported_result.outcome}: ${value || item.reported_result.result_text}`;
 	}
@@ -244,6 +456,7 @@
 			decrease: '降低',
 			improve: '改善',
 			worsen: '恶化',
+			changed: '发生变化',
 			no_change: '无变化',
 			mixed: '结果不一致',
 			unknown: '方向未知'
@@ -523,40 +736,121 @@
 	<section>
 		<div class="section-heading">
 			<h3>文献贡献与原文证据</h3>
-			<span>{evidence.length} 条证据 · {evidencedContributionGroups.length} 篇文献</span>
+		</div>
+		<div class="evidence-scope" role="group" aria-label="证据范围">
+			<div><strong>{directPaperCount}</strong><span>篇直接文献</span></div>
+			<div><strong>{evidenceSourceCount}</strong><span>个原文来源</span></div>
+			{#if resultComparisonCount}
+				<div><strong>{resultComparisonCount}</strong><span>个结果比较</span></div>
+			{/if}
+			{#if otherResultRecordCount}
+				<div><strong>{otherResultRecordCount}</strong><span>条结果记录</span></div>
+			{/if}
 		</div>
 		{#if evidencedContributionGroups.length}
 			<div class="paper-groups">
 				{#each evidencedContributionGroups as group, index (group.contribution.document_id)}
 					{@const contribution = group.contribution}
 					{@const paperEvidence = group.paperEvidence}
+					{@const sourceGroups = group.sourceGroups}
 					<section class="paper-group">
 						<header>
 							<a href={resolve(sourceHref(paperEvidence[0]))}
 								>{paperLabel(contribution, index, paperEvidence)}</a
 							>
 							<span
-								>{contributionStatus(contribution.analysis_status)} · {paperEvidence.length} 条证据</span
+								>{contributionStatus(contribution.analysis_status)} · {paperSourceSummary(
+									sourceGroups
+								)}</span
 							>
 						</header>
-						<div class="evidence-list">
-							{#each paperEvidence as item (item.evidence_id)}
-								<article class="evidence-item">
-									<div class="evidence-meta">
-										{#each evidenceBindings(contribution, item.evidence_id) as binding (binding)}
-											<strong>{binding}</strong>
-										{/each}
-										<span>{evidenceRoleLabel(item.evidence_role)}</span>
-										<span>{evidenceAttributionLabel(item.attribution_scope)}</span>
-										<span
-											>{item.page_numbers.length
-												? `p.${item.page_numbers.join(', ')}`
-												: '页码未知'}</span
-										>
-										<a href={resolve(sourceHref(item))}>打开原文</a>
-									</div>
-									<blockquote>{item.source_excerpt}</blockquote>
-								</article>
+						<div class="source-groups">
+							{#each sourceGroups as sourceGroup (sourceGroup.key)}
+								{@const detailedEvidence = sourceGroup.matrix
+									? sourceGroup.otherEvidence
+									: sourceGroup.evidence}
+								<details
+									class="source-group"
+									open={sourceGroup.evidence.length === 1}
+									aria-label={sourceGroupLabel(sourceGroup)}
+								>
+									<summary>
+										<strong>{sourceGroupLabel(sourceGroup)}</strong>
+										<span>
+											{sourceGroup.matrix
+												? `共享参照 ${sourceGroup.matrix.referenceLabel} · `
+												: ''}{evidenceRecordSummary(
+												sourceGroup.comparisonCount,
+												sourceGroup.otherRecordCount
+											)}
+										</span>
+									</summary>
+									{#if sourceGroup.matrix}
+										<div class="shared-reference" role="group" aria-label="共享参照">
+											<span>共享参照</span>
+											<strong>{sourceGroup.matrix.referenceLabel}</strong>
+											<div>
+												<span>{sourceGroup.matrix.outcome}</span>
+												<strong>{sourceGroup.matrix.referenceResult}</strong>
+											</div>
+										</div>
+										<div class="source-matrix-wrap">
+											<table class="source-matrix" aria-label="共享参照比较">
+												<thead>
+													<tr>
+														<th scope="col">比较条件</th>
+														<th scope="col">报告结果</th>
+														<th scope="col">相对基准</th>
+														<th scope="col">方向</th>
+														<th scope="col">证据</th>
+													</tr>
+												</thead>
+												<tbody>
+													{#each sourceGroup.matrix.rows as row (row.evidence.evidence_id)}
+														<tr>
+															<td data-label="比较条件"><strong>{row.targetLabel}</strong></td>
+															<td data-label="报告结果">{row.targetResult}</td>
+															<td data-label="相对基准">{row.delta}</td>
+															<td data-label="方向">{row.direction}</td>
+															<td data-label="证据">
+																<div class="matrix-evidence-actions">
+																	{#each evidenceBindings(contribution, row.evidence.evidence_id) as binding (binding)}
+																		<strong>{binding}</strong>
+																	{/each}
+																	<a href={resolve(sourceHref(row.evidence))}>打开原文</a>
+																	<details class="matrix-excerpt">
+																		<summary>查看摘录</summary>
+																		<blockquote>{row.evidence.source_excerpt}</blockquote>
+																	</details>
+																</div>
+															</td>
+														</tr>
+													{/each}
+												</tbody>
+											</table>
+										</div>
+									{/if}
+									{#if detailedEvidence.length}
+										<div class="evidence-list">
+											{#each detailedEvidence as item (item.evidence_id)}
+												<article class="evidence-item">
+													<div class="evidence-meta">
+														{#each evidenceBindings(contribution, item.evidence_id) as binding (binding)}
+															<strong>{binding}</strong>
+														{/each}
+														{#if evidenceComparisonLabel(item)}<span class="comparison-label"
+																>{evidenceComparisonLabel(item)}</span
+															>{/if}
+														<span>{evidenceRoleLabel(item.evidence_role)}</span>
+														<span>{evidenceAttributionLabel(item.attribution_scope)}</span>
+														<a href={resolve(sourceHref(item))}>打开原文</a>
+													</div>
+													<blockquote>{item.source_excerpt}</blockquote>
+												</article>
+											{/each}
+										</div>
+									{/if}
+								</details>
 							{/each}
 						</div>
 					</section>
@@ -840,6 +1134,32 @@
 	.paper-groups {
 		border-top: 1px solid var(--border-default);
 	}
+	.evidence-scope {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+		margin-bottom: 16px;
+		border-block: 1px solid var(--border-default);
+	}
+	.evidence-scope > div {
+		display: flex;
+		align-items: baseline;
+		gap: 6px;
+		padding: 12px 14px;
+		border-right: 1px solid var(--border-default);
+	}
+	.evidence-scope > div:first-child {
+		padding-left: 4px;
+	}
+	.evidence-scope > div:last-child {
+		border-right: 0;
+	}
+	.evidence-scope strong {
+		font-size: 18px;
+	}
+	.evidence-scope span {
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
 	.paper-group {
 		padding: 14px 0 18px;
 		border-bottom: 1px solid var(--border-default);
@@ -851,9 +1171,100 @@
 		color: var(--accent);
 		font-weight: 600;
 	}
+	.source-groups {
+		display: grid;
+		gap: 8px;
+	}
+	.source-group {
+		border-block: 1px solid var(--border-default);
+	}
+	.source-group + .source-group {
+		border-top: 0;
+	}
+	.source-group > summary {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 16px;
+		padding: 10px 4px;
+		cursor: pointer;
+	}
+	.source-group > summary > span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		text-align: right;
+	}
+	.shared-reference {
+		display: grid;
+		grid-template-columns: auto minmax(100px, 0.5fr) minmax(180px, 1fr);
+		align-items: center;
+		gap: 8px 18px;
+		padding: 12px 14px;
+		border-left: 3px solid #3a7d5d;
+		background: var(--surface-subtle);
+	}
+	.shared-reference > span,
+	.shared-reference > div > span {
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+	.shared-reference > div {
+		display: flex;
+		justify-content: space-between;
+		gap: 12px;
+	}
+	.source-matrix-wrap {
+		min-width: 0;
+		overflow-x: auto;
+	}
+	.source-matrix {
+		width: 100%;
+		min-width: 720px;
+		border-collapse: collapse;
+		font-size: 13px;
+	}
+	.source-matrix th,
+	.source-matrix td {
+		padding: 10px 12px;
+		border-bottom: 1px solid var(--border-default);
+		text-align: left;
+		vertical-align: top;
+	}
+	.source-matrix th {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 500;
+	}
+	.source-matrix th:first-child,
+	.source-matrix td:first-child {
+		padding-left: 14px;
+	}
+	.matrix-evidence-actions {
+		display: flex;
+		align-items: center;
+		gap: 8px 12px;
+		flex-wrap: wrap;
+	}
+	.matrix-evidence-actions > strong {
+		font-size: 12px;
+	}
+	.matrix-evidence-actions a,
+	.matrix-excerpt > summary {
+		color: var(--accent);
+		font-size: 12px;
+	}
+	.matrix-excerpt > summary {
+		cursor: pointer;
+	}
+	.matrix-excerpt blockquote {
+		min-width: 260px;
+		max-width: 520px;
+		color: var(--text-primary);
+	}
 	.evidence-list {
 		display: grid;
 		gap: 10px;
+		padding-bottom: 10px;
 	}
 	.evidence-item {
 		border-left: 3px solid #3a7d5d;
@@ -868,6 +1279,10 @@
 	}
 	.evidence-meta strong {
 		color: var(--text-primary);
+	}
+	.evidence-meta .comparison-label {
+		color: var(--text-primary);
+		font-weight: 600;
 	}
 	.evidence-meta a {
 		margin-left: auto;
@@ -926,6 +1341,62 @@
 		.evidence-meta a {
 			margin-left: 0;
 			width: 100%;
+		}
+		.source-group > summary {
+			align-items: flex-start;
+			flex-direction: column;
+			gap: 4px;
+		}
+		.source-group > summary > span {
+			text-align: left;
+		}
+		.shared-reference {
+			grid-template-columns: auto 1fr;
+		}
+		.shared-reference > div {
+			grid-column: 1 / -1;
+		}
+		.source-matrix {
+			min-width: 0;
+		}
+		.source-matrix thead {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			overflow: hidden;
+			clip: rect(0 0 0 0);
+			white-space: nowrap;
+		}
+		.source-matrix,
+		.source-matrix tbody,
+		.source-matrix tr,
+		.source-matrix td {
+			display: block;
+		}
+		.source-matrix tr {
+			display: grid;
+			grid-template-columns: 1fr 1fr;
+			padding: 10px 0;
+			border-bottom: 1px solid var(--border-default);
+		}
+		.source-matrix td,
+		.source-matrix td:first-child {
+			display: grid;
+			gap: 3px;
+			padding: 5px 12px;
+			border-bottom: 0;
+		}
+		.source-matrix td::before {
+			content: attr(data-label);
+			color: var(--text-secondary);
+			font-size: 11px;
+		}
+		.source-matrix td:last-child {
+			grid-column: 1 / -1;
+		}
+		.matrix-excerpt blockquote {
+			min-width: 0;
+			max-width: none;
 		}
 	}
 </style>

@@ -25,11 +25,12 @@ This node owns browser-side helpers shared across frontend routes.
 - `graph.ts`
   Browser graph projection for Objective, document, Evidence, comparison,
   material, property, test-condition, and baseline nodes.
-- `goalSessions.ts`
-  Collection-bound assistant sessions and Finding-grounded messages.
+- `chatSessions.ts`
+  Collection-bound Research Agent sessions, typed trajectories, capability
+  results, and exact write decisions.
 - `experimentPlans.ts`
-  Objective-scoped, human-editable experiment-plan drafts grounded in reviewed
-  Finding Evidence.
+  Objective-scoped, human-authored experiment-plan drafts. Historical plans
+  may retain source provenance returned by the API.
 - `i18n.ts`
   Shared labels for active routes and states.
 

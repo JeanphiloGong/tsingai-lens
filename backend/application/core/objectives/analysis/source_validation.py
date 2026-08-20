@@ -3,13 +3,26 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from application.core.objectives import property_matching
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from domain.core import ResearchObjective
 
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
+_NO_CHANGE_RESULT_KEYS = (
+    "no_change",
+    "no_significant_change",
+    "no_significant_difference",
+    "no_statistically_significant_difference",
+    "not_significantly_different",
+    "not_statistically_different",
+    "remained_constant",
+    "remained_relatively_unchanged",
+    "remained_unchanged",
+    "unchanged",
+)
 
 
 def _objective_table_matrix_rows(
@@ -97,6 +110,7 @@ def validate_source_fact(
         record,
         source=source,
     )
+    record = _objective_normalize_explicit_no_change_direction(record)
     reported_result = record.get("reported_result")
     if isinstance(reported_result, Mapping):
         normalized_result = dict(reported_result)
@@ -269,6 +283,13 @@ def validate_source_fact(
             "source_refs": _objective_route_source_refs(
                 route=route,
                 source=source,
+                source_excerpt=(
+                    _objective_source_grounding_text(source)
+                    if source.get("source_kind") == "text_window"
+                    and isinstance(record.get("reported_result"), Mapping)
+                    and not isinstance(record.get("comparison"), Mapping)
+                    else None
+                ),
                 supports=tuple(supported_fields),
             ),
         }
@@ -276,6 +297,28 @@ def validate_source_fact(
     if record.get("confidence") is None:
         record["confidence"] = route.confidence
     return (record,)
+
+
+def _objective_normalize_explicit_no_change_direction(
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
+    normalized = dict(record)
+    result = normalized.get("reported_result")
+    if not isinstance(result, Mapping):
+        return normalized
+
+    normalized_result = dict(result)
+    result_text = str(normalized_result.get("result_text") or "").strip()
+    result_key = _objective_column_key(result_text)
+    explicitly_unchanged = any(
+        phrase in result_key for phrase in _NO_CHANGE_RESULT_KEYS
+    )
+    if not explicitly_unchanged:
+        return normalized
+    if str(normalized_result.get("direction") or "unknown") == "unknown":
+        normalized_result["direction"] = "no_change"
+        normalized["reported_result"] = normalized_result
+    return normalized
 
 
 def _objective_complete_extracted_variable_endpoints(

@@ -118,8 +118,14 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			.element(browserPage.getByRole('heading', { name: '研究目标' }))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByText('当前 collection 尚未生成研究目标。'))
+			.element(browserPage.getByRole('heading', { name: '没有可供确认的研究目标' }))
 			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText(/不表示目标级证据分析已经完成/))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: '检查文献' }))
+			.toHaveAttribute('href', '/collections/col_123/documents');
 	});
 
 	it('confirms and queues analysis under the same Objective identity', async () => {

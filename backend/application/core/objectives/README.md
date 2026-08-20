@@ -82,24 +82,32 @@ Objective analysis.
   non-reference text node, table row, and table/figure caption to one full
   section-path group. `overview`, `methods`, `results`, `conclusion`, and
   `unknown` remain window metadata; they no longer collect unrelated sections
-  into one global role bucket. Each section group is packed without sampling or
-  truncation, then screened independently. Every table row repeats its table
-  caption, heading path, and column headers while retaining the row locator as
-  Source authority. The complete serialized prompt, including the response
-  schema, is preflighted against a 12,288-token prompt budget before the model
-  receives it; PaperSkim generation has a separate 4,096-token completion
-  budget. A relationship or unresolved signal may reference at most the same 12
-  unique Source-unit ids available in one input batch. Duplicate or non-input
-  ids are invalid and enter one bounded structured repair. Prompt overflow
+  into one global role bucket. Oversized Source units are split losslessly at
+  4,000 characters; units in one section are then packed by the 12-unit limit
+  and complete prompt-token preflight rather than a second character limit.
+  Independent windows execute with bounded extraction concurrency and their
+  results return to Source order before paper-level reconciliation. Every table
+  row repeats its table caption, heading path, and column headers while retaining
+  the row locator as Source authority. The complete serialized prompt, including
+  the response schema, is preflighted against a 12,288-token prompt budget
+  before the model receives it; PaperSkim generation has a separate 4,096-token
+  completion budget. A relationship or unresolved signal may reference at most
+  the same 12 unique Source-unit ids available in one input batch. The prompt and repair
+  instruction both repeat that batch's exact allowed-ID list so the model cannot
+  continue a document-wide numeric sequence. Duplicate or non-input ids remain
+  invalid and enter one bounded structured repair. Prompt overflow
   splits before execution. Provider length termination or model-declared output
   saturation enters the same recursive Source-unit subdivision path as a failed
   multi-unit batch, preserving stable Source-unit ids until only a terminal
   singleton can become `extraction_failed`. A relationship with no varied
-  factor is retained as an unresolved outcome signal when its outcome and
-  Source lineage are valid. Compound outcomes and broad property-family labels
-  are also retained as unresolved signals until the Source supports one
-  specific measured outcome. The backend does not invent a missing factor or
-  outcome and does not discard valid sibling relationships.
+  factor, or with a descriptive factor clause that cannot be a bounded neutral
+  axis, is retained as an unresolved outcome signal when its outcome and Source
+  lineage are valid. Compound outcomes and broad property-family labels are also
+  retained as unresolved signals until the Source supports one specific measured
+  outcome. Diagnostic warnings are stripped, limited to two, and bounded to 240
+  characters without retrying otherwise valid scientific output. The backend
+  does not invent a missing factor or outcome and does not discard valid sibling
+  relationships.
   Successful siblings are retained. Duplicate studies are consolidated and
   unresolved study signals are reconciled only after every terminal batch has
   finished. The resulting one `PaperSkim` per document retains every distinct
@@ -207,10 +215,13 @@ build, allocates a new `analysis_version`, and returns:
 - `Finding[]`
 
 Objective discovery has separate prompt and output bounds. Per-paper screening
-uses as many full-section-path batches as the paper requires. Source units in a
-section are packed at 4,000 characters and 12 units, then the exact system
-message, user message, input payload, and response schema are counted against a
-12,288-token prompt budget. Every eligible non-reference text node, table row,
+uses as many full-section-path batches as the paper requires. One oversized
+Source unit is split losslessly at 4,000 characters. Units in one section are
+packed up to 12 at a time, then the exact system message, user message, input
+payload, and response schema are counted against a 12,288-token prompt budget.
+Prompt overflow splits before execution. Independent windows run with
+`CORE_EXTRACTION_MAX_CONCURRENCY` (default `4`) and merge back in Source order.
+Every eligible non-reference text node, table row,
 and caption is assigned once, so later Methods, Results, Conclusions, and later
 figure/table content are not dropped merely by position. Unusually long text
 and structured Source content are split into contiguous bounded pieces without

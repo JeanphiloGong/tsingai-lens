@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -36,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
-_SKIM_WINDOW_CHARS = 4000
+_SKIM_SOURCE_UNIT_CHARS = 4000
 _SKIM_HEADING_LIMIT = 16
 _SKIM_WARNING_LIMIT = 2
 _SKIM_WINDOW_ROLES = ("overview", "methods", "results", "conclusion", "unknown")
@@ -50,6 +53,7 @@ _SKIM_ROLE_BY_SEMANTIC_ROLE = {
 _EVIDENCE_DENSITY_RANK = {"unknown": 0, "low": 1, "medium": 2, "high": 3}
 _SIGNAL_RECONCILIATION_SIGNAL_LIMIT = 12
 _SIGNAL_RECONCILIATION_NEARBY_SOURCE_UNIT_DISTANCE = 12
+_DEFAULT_MAX_EXTRACTION_CONCURRENCY = 4
 
 
 @dataclass(frozen=True)
@@ -168,12 +172,12 @@ class PaperSkimService:
                     active_window_count=window_count,
                     active_window_role=payload["window_role"],
                 )
-                batch_skims, batch_signals = self._extract_window_batch(
-                    collection_id=collection_id,
-                    document_id=document.document_id,
-                    payload=payload,
-                    study_window_extractor=study_window_extractor,
-                )
+            for batch_skims, batch_signals in self._extract_window_payloads(
+                collection_id=collection_id,
+                document_id=document.document_id,
+                payloads=payloads,
+                study_window_extractor=study_window_extractor,
+            ):
                 window_skims.extend(batch_skims)
                 paper_signals.extend(batch_signals)
             paper_skim = self._consolidate_window_skims(
@@ -207,6 +211,67 @@ class PaperSkimService:
                 max(document_count - document_position, 0),
             )
         return tuple(paper_skims)
+
+    def _extract_window_payloads(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        payloads: list[dict[str, Any]],
+        study_window_extractor: PaperStudyWindowExtractor,
+    ) -> tuple[
+        tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]],
+        ...,
+    ]:
+        if len(payloads) <= 1 or self._max_extraction_concurrency() == 1:
+            return tuple(
+                self._extract_window_batch(
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    payload=payload,
+                    study_window_extractor=study_window_extractor,
+                )
+                for payload in payloads
+            )
+
+        with ThreadPoolExecutor(
+            max_workers=min(self._max_extraction_concurrency(), len(payloads)),
+        ) as executor:
+            futures = [
+                executor.submit(
+                    copy_context().run,
+                    self._extract_window_batch,
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    payload=payload,
+                    study_window_extractor=study_window_extractor,
+                )
+                for payload in payloads
+            ]
+            return tuple(future.result() for future in futures)
+
+    @staticmethod
+    def _max_extraction_concurrency() -> int:
+        raw_value = os.getenv("CORE_EXTRACTION_MAX_CONCURRENCY", "").strip()
+        if not raw_value:
+            return _DEFAULT_MAX_EXTRACTION_CONCURRENCY
+        try:
+            value = int(raw_value)
+        except ValueError:
+            logger.warning(
+                "Invalid CORE_EXTRACTION_MAX_CONCURRENCY=%s; using default=%s",
+                raw_value,
+                _DEFAULT_MAX_EXTRACTION_CONCURRENCY,
+            )
+            return _DEFAULT_MAX_EXTRACTION_CONCURRENCY
+        if value < 1:
+            logger.warning(
+                "Non-positive CORE_EXTRACTION_MAX_CONCURRENCY=%s; using default=%s",
+                raw_value,
+                _DEFAULT_MAX_EXTRACTION_CONCURRENCY,
+            )
+            return _DEFAULT_MAX_EXTRACTION_CONCURRENCY
+        return value
 
     def _build_paper_skim_payloads(
         self,
@@ -491,19 +556,11 @@ class PaperSkimService:
     ) -> list[tuple[_SkimSourceItem, ...]]:
         windows: list[tuple[_SkimSourceItem, ...]] = []
         current: list[_SkimSourceItem] = []
-        current_size = 0
         for item in items:
-            separator_size = 2 if current else 0
-            if current and (
-                len(current) >= PAPER_SKIM_SOURCE_UNIT_LIMIT
-                or current_size + separator_size + item.size > _SKIM_WINDOW_CHARS
-            ):
+            if current and len(current) >= PAPER_SKIM_SOURCE_UNIT_LIMIT:
                 windows.append(tuple(current))
                 current = []
-                current_size = 0
-                separator_size = 0
             current.append(item)
-            current_size += separator_size + item.size
         if current:
             windows.append(tuple(current))
         return windows
@@ -512,7 +569,7 @@ class PaperSkimService:
     def _split_oversized_source_item(
         item: _SkimSourceItem,
     ) -> tuple[_SkimSourceItem, ...]:
-        if item.size <= _SKIM_WINDOW_CHARS:
+        if item.size <= _SKIM_SOURCE_UNIT_CHARS:
             return (item,)
         if isinstance(item.content, Mapping):
             if "row_text" in item.content:
@@ -525,8 +582,8 @@ class PaperSkimService:
         text = str(item.content)
         chunks: list[str] = []
         start = 0
-        while len(text) - start > _SKIM_WINDOW_CHARS:
-            hard_end = start + _SKIM_WINDOW_CHARS
+        while len(text) - start > _SKIM_SOURCE_UNIT_CHARS:
+            hard_end = start + _SKIM_SOURCE_UNIT_CHARS
             split_at = PaperSkimService._natural_text_split(text, start, hard_end)
             chunks.append(text[start:split_at])
             start = split_at
@@ -566,7 +623,7 @@ class PaperSkimService:
                         "fragment": row_text[start:candidate_end],
                     },
                 )
-                if candidate.size <= _SKIM_WINDOW_CHARS:
+                if candidate.size <= _SKIM_SOURCE_UNIT_CHARS:
                     end = candidate_end
                     low = candidate_end + 1
                 else:
@@ -613,7 +670,7 @@ class PaperSkimService:
                     "value": value,
                 },
             )
-            if chunk.size > _SKIM_WINDOW_CHARS:
+            if chunk.size > _SKIM_SOURCE_UNIT_CHARS:
                 raise ValueError(
                     "paper skim structured Source value cannot fit in a bounded "
                     "window"
@@ -685,7 +742,7 @@ class PaperSkimService:
                         "fragment": value[start:candidate_end],
                     },
                 )
-                if candidate.size <= _SKIM_WINDOW_CHARS:
+                if candidate.size <= _SKIM_SOURCE_UNIT_CHARS:
                     end = candidate_end
                     low = candidate_end + 1
                 else:

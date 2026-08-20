@@ -204,16 +204,12 @@ def test_paper_signal_reconciliation_contract_is_bounded_to_one_neighborhood():
     assert study_schema["relationships"]["maxItems"] == 11
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("warnings", ["warning-1", "warning-2", "warning-3"]),
-        ("warnings", ["w" * 241]),
-    ],
-)
-def test_paper_skim_contract_rejects_oversized_values(field, value):
-    with pytest.raises(ValidationError):
-        StructuredPaperSkim.model_validate({field: value})
+def test_paper_skim_contract_bounds_diagnostic_warnings():
+    parsed = StructuredPaperSkim.model_validate(
+        {"warnings": ["w" * 241, "second", "third"]}
+    )
+
+    assert parsed.warnings == ["w" * 240, "second"]
 
 
 @pytest.mark.parametrize(
@@ -1086,6 +1082,28 @@ def test_domain_model_extractors_validates_paper_skim_response():
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 4096
 
 
+def test_paper_skim_bounds_diagnostic_warnings_without_retrying_scientific_output():
+    response = {
+        "doc_role": "experimental",
+        "studies": [],
+        "unresolved_signals": [],
+        "warnings": ["  " + ("diagnostic " * 30) + "  "],
+    }
+    client = _FakeOpenAIClient(json.dumps(response))
+
+    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+        {
+            "document_id": "paper-ti64",
+            "source_units": [],
+        }
+    )
+
+    assert len(client.chat.completions.calls) == 1
+    assert len(skim.warnings) == 1
+    assert len(skim.warnings[0]) == 240
+    assert skim.warnings[0].startswith("diagnostic diagnostic")
+
+
 def test_paper_skim_downgrades_empty_factor_relationship_without_losing_siblings():
     response = {
         "doc_role": "experimental",
@@ -1151,6 +1169,53 @@ def test_paper_skim_downgrades_empty_factor_relationship_without_losing_siblings
     assert unresolved.material_scope == ["316L stainless steel"]
     assert unresolved.process_context == ["LPBF"]
     assert unresolved.source_unit_ids == ["window-source-2"]
+
+
+def test_paper_skim_downgrades_descriptive_factor_clause_to_unresolved_outcome():
+    response = {
+        "doc_role": "experimental",
+        "studies": [
+            {
+                "experiment_label": "microstructure characterization",
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "relationships": [
+                    {
+                        "varied_factors": [
+                            "microstructural features including grain morphology, "
+                            "phase distribution, and crystallographic texture from "
+                            "pole figures"
+                        ],
+                        "outcome": "alpha phase fraction",
+                        "source_unit_ids": ["window-source-1"],
+                    }
+                ],
+            }
+        ],
+        "unresolved_signals": [],
+    }
+    client = _FakeOpenAIClient(json.dumps(response))
+
+    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+        {
+            "document_id": "paper-ti64",
+            "source_units": [
+                {
+                    "source_unit_id": "window-source-1",
+                    "source_kind": "figure",
+                    "source_ref": "figure-7",
+                    "content": "Alpha phase fraction was quantified from imaging.",
+                }
+            ],
+        }
+    )
+
+    assert len(client.chat.completions.calls) == 1
+    assert skim.studies == []
+    assert len(skim.unresolved_signals) == 1
+    assert skim.unresolved_signals[0].signal_type == "outcome"
+    assert skim.unresolved_signals[0].label == "alpha phase fraction"
+    assert skim.unresolved_signals[0].source_unit_ids == ["window-source-1"]
 
 
 def test_paper_skim_downgrades_compound_and_generic_outcomes_without_losing_siblings():
@@ -1404,6 +1469,11 @@ def test_paper_skim_repairs_unknown_source_unit_ids_before_returning():
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
     assert "invented-source-unit" in repair_prompt
     assert "Copy only unique Source-unit IDs from the input" in repair_prompt
+    assert (
+        'ALLOWED SOURCE-UNIT IDS: ["window-source-1"]'
+        in client.chat.completions.calls[0]["messages"][-1]["content"]
+    )
+    assert 'ALLOWED SOURCE-UNIT IDS: ["window-source-1"]' in repair_prompt
 
 
 def test_paper_skim_repairs_unknown_signal_source_unit_ids_before_returning():

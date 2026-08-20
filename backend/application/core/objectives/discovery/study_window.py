@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from application.core.objectives import property_matching
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 
-PAPER_SKIM_PROMPT_VERSION = "paper_skim.v4"
+PAPER_SKIM_PROMPT_VERSION = "paper_skim.v5"
 PAPER_SKIM_PROMPT_TOKEN_LIMIT = 12_288
 PAPER_SKIM_SOURCE_UNIT_LIMIT = 12
 PAPER_SKIM_WARNING_LIMIT = (2, 240)
@@ -300,8 +300,12 @@ class StructuredPaperSkim(_PaperSkimResponse):
                     retained_relationships.append(relationship)
                     continue
                 varied_factors = relationship.get("varied_factors")
-                has_varied_factor = not isinstance(varied_factors, list) or any(
-                    str(item).strip() for item in varied_factors
+                has_varied_factor = not isinstance(varied_factors, list) or (
+                    bool(varied_factors)
+                    and all(
+                        0 < len(str(item).strip()) <= 80
+                        for item in varied_factors
+                    )
                 )
                 outcome = str(relationship.get("outcome") or "").strip()
                 if has_varied_factor and not (
@@ -312,6 +316,7 @@ class StructuredPaperSkim(_PaperSkimResponse):
                 source_unit_ids = relationship.get("source_unit_ids")
                 if (
                     not outcome
+                    or len(outcome) > 80
                     or not isinstance(source_unit_ids, list)
                     or not any(str(item).strip() for item in source_unit_ids)
                 ):
@@ -359,10 +364,27 @@ class StructuredPaperSkim(_PaperSkimResponse):
         ]
         return normalized
 
-    @field_validator("studies", "unresolved_signals", "warnings", mode="before")
+    @field_validator("studies", "unresolved_signals", mode="before")
     @classmethod
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list(value)
+
+    @field_validator("warnings", mode="before")
+    @classmethod
+    def _normalize_warnings(cls, value: object) -> object:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            return value
+        normalized: list[object] = []
+        for item in value[: PAPER_SKIM_WARNING_LIMIT[0]]:
+            if not isinstance(item, str):
+                normalized.append(item)
+                continue
+            text = item.strip()
+            if text:
+                normalized.append(text[: PAPER_SKIM_WARNING_LIMIT[1]])
+        return normalized
 
     @field_validator("doc_role", mode="before")
     @classmethod
@@ -383,6 +405,17 @@ class StructuredPaperSkim(_PaperSkimResponse):
 
 
 def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    allowed_source_unit_ids = [
+        str(source_unit.get("source_unit_id") or "").strip()
+        for source_unit in payload.get("source_units") or ()
+        if isinstance(source_unit, Mapping)
+        and str(source_unit.get("source_unit_id") or "").strip()
+    ]
+    allowed_source_unit_ids_json = json.dumps(
+        allowed_source_unit_ids,
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
     user_prompt = (
         "TASK MODEL\n"
         "Extract source-supported paper studies from one bounded Source window. "
@@ -488,7 +521,11 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "- No study signal: a unit contains only general background. Return no study "
         "or unresolved signal for that unit.\n"
         "- Separate relationships: one experiment links scan speed to porosity and "
-        "another links heat treatment to yield strength. Return two studies."
+        "another links heat treatment to yield strength. Return two studies.\n\n"
+        "BATCH LINEAGE CONTRACT\n"
+        f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}\n"
+        "Copy IDs only from this exact list. Do not continue its numbering or cite "
+        "a Source unit from another window."
     )
     return _SYSTEM_PROMPT, user_prompt
 
@@ -501,6 +538,17 @@ class PaperStudyWindowExtractor:
 
     def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         system_prompt, user_prompt = build_paper_skim_prompt(payload)
+        allowed_source_unit_ids = [
+            str(source_unit.get("source_unit_id") or "").strip()
+            for source_unit in payload.get("source_units") or ()
+            if isinstance(source_unit, Mapping)
+            and str(source_unit.get("source_unit_id") or "").strip()
+        ]
+        allowed_source_unit_ids_json = json.dumps(
+            allowed_source_unit_ids,
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
 
         def build_repair_instruction(repair_detail: str) -> str:
             return (
@@ -512,7 +560,8 @@ class PaperStudyWindowExtractor:
                 "sample, and test context values and at most 12 varied factors per "
                 "relationship. Set output_saturated=true "
                 "instead of silently omitting a scientific item. Return only compact "
-                "schema-valid JSON."
+                "schema-valid JSON.\n"
+                f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}"
             )
 
         def validate_output_contract(response: BaseModel) -> None:

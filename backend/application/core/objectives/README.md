@@ -52,7 +52,11 @@ Objective analysis.
   It fills missing material or process scope only from the same paper's skim,
   binds Methods conditions to Results only through unambiguous sample identities;
   spacing and punctuation variants of the same alphanumeric label share one
-  identity. It derives the existing bounded pairwise comparisons. A
+  identity. Repeated Source reports of one measured comparison become one
+  paper-owned fact with all Source locators retained when their scientific
+  contexts are equal or uniquely compatible; missing context cannot bridge
+  conflicting experimental states. It derives the existing bounded pairwise
+  comparisons. A
   Source-grounded author comparison whose groups bind but whose linked
   context does not expose quantified process values remains association-only;
   it is not promoted to an isolated effect. Missing or conflicting sample

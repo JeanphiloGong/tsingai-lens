@@ -2928,3 +2928,195 @@ def test_condition_registry_does_not_bind_labels_from_a_remote_claim():
 
     assert bound.comparison is None
     assert bound.attribution_scope == "descriptive_only"
+
+
+def _reported_build_orientation_fact(
+    evidence_id: str,
+    source_ref: str,
+    scientific_context: dict[str, Any],
+    *,
+    result_value: Any = 1006.7,
+) -> ExtractedEvidenceDraft:
+    return ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": evidence_id,
+            "objective_id": "obj-build-orientation-uts",
+            "document_id": "paper-ti64",
+            "source_kind": "text_window",
+            "source_ref": source_ref,
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "build orientation",
+                    "baseline_value": "horizontal",
+                    "target_value": "vertical",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "horizontal",
+                "target_label": "vertical",
+                "axis_names": ["build orientation"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "ultimate tensile strength",
+                "value": result_value,
+                "unit": "MPa",
+                "direction": "increase",
+                "result_text": (
+                    "Ultimate tensile strength increased from 961.3 MPa "
+                    "for horizontal samples to 1006.7 MPa for vertical samples."
+                ),
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": scientific_context,
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": source_ref,
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+
+def test_paper_reconstruction_merges_duplicate_reports_of_one_scientific_fact():
+    reconstructed = paper_experiment.reconstruct_paper_experiments(
+        collection_id="collection-ti64",
+        source_facts=(
+            _reported_build_orientation_fact("evidence-abstract", "abstract", {}),
+            _reported_build_orientation_fact(
+                "evidence-results",
+                "results",
+                {
+                    "material": [
+                        {"name": "material", "value": "Ti-6Al-4V"}
+                    ],
+                    "process": [
+                        {"name": "condition", "value": "as-fabricated"}
+                    ],
+                },
+            ),
+        ),
+        paper_skims=(),
+        objectives=(),
+    )
+
+    assert len(reconstructed) == 1
+    fact = reconstructed[0]
+    assert fact.evidence_id == "evidence-results"
+    assert fact.scientific_context.to_record() == {
+        "material": [
+            {"name": "material", "value": "Ti-6Al-4V", "unit": None}
+        ],
+        "sample": [],
+        "process": [
+            {"name": "condition", "value": "as-fabricated", "unit": None}
+        ],
+        "test": [],
+    }
+    assert {item["source_ref"] for item in fact.source_refs} == {
+        "abstract",
+        "results",
+    }
+
+
+def test_paper_reconstruction_does_not_bridge_conflicting_context_with_unknown():
+    ambiguous = paper_experiment.reconstruct_paper_experiments(
+        collection_id="collection-ti64",
+        source_facts=(
+            _reported_build_orientation_fact(
+                "evidence-as-fabricated",
+                "results-as-fabricated",
+                {
+                    "process": [
+                        {"name": "condition", "value": "as-fabricated"}
+                    ]
+                },
+            ),
+            _reported_build_orientation_fact(
+                "evidence-hip",
+                "results-hip",
+                {
+                    "process": [
+                        {"name": "condition", "value": "HIP-treated"}
+                    ]
+                },
+            ),
+            _reported_build_orientation_fact(
+                "evidence-unspecified",
+                "abstract",
+                {},
+            ),
+        ),
+        paper_skims=(),
+        objectives=(),
+    )
+
+    assert {item.evidence_id for item in ambiguous} == {
+        "evidence-as-fabricated",
+        "evidence-hip",
+        "evidence-unspecified",
+    }
+
+
+def test_paper_reconstruction_requires_one_context_to_enrich_the_other():
+    complementary = paper_experiment.reconstruct_paper_experiments(
+        collection_id="collection-ti64",
+        source_facts=(
+            _reported_build_orientation_fact(
+                "evidence-material-only",
+                "material-source",
+                {
+                    "material": [
+                        {"name": "material", "value": "Ti-6Al-4V"}
+                    ]
+                },
+            ),
+            _reported_build_orientation_fact(
+                "evidence-condition-only",
+                "condition-source",
+                {
+                    "process": [
+                        {"name": "condition", "value": "as-fabricated"}
+                    ]
+                },
+            ),
+        ),
+        paper_skims=(),
+        objectives=(),
+    )
+
+    assert {item.evidence_id for item in complementary} == {
+        "evidence-material-only",
+        "evidence-condition-only",
+    }
+
+
+def test_paper_reconstruction_preserves_distinct_reported_values():
+    distinct_values = paper_experiment.reconstruct_paper_experiments(
+        collection_id="collection-ti64",
+        source_facts=(
+            _reported_build_orientation_fact(
+                "evidence-value-1",
+                "value-source-1",
+                {},
+                result_value="1.0",
+            ),
+            _reported_build_orientation_fact(
+                "evidence-value-10",
+                "value-source-10",
+                {},
+                result_value="10",
+            ),
+        ),
+        paper_skims=(),
+        objectives=(),
+    )
+
+    assert {item.evidence_id for item in distinct_values} == {
+        "evidence-value-1",
+        "evidence-value-10",
+    }

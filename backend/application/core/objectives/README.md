@@ -363,7 +363,16 @@ group into one Objective. A paper-local group is promoted only when the
 collection itself contains one
 document; otherwise it remains traceable through its rejection disposition.
 Accepted Objectives are ranked and persisted; the HTTP list returns all ranked
-Objectives by default and supports explicit pagination when requested. Every
+Objectives by default and supports explicit pagination when requested. Ranking
+prefers independent paper support first, then Source-backed structured result
+locators such as tables, table rows, and figures across independent papers,
+then structured Source count, relationship count, and confidence. Multiple
+tables in one paper cannot outrank structured result support distributed across
+multiple papers. This ordering is an inspection priority only: a structured
+Source locator does not establish a grounded or comparable result, and
+downstream analysis may correctly publish an abstention for the highest-ranked
+Objective.
+Every
 relationship is
 persisted as `pending`, `promoted`, or `rejected`; rejection is a backend
 eligibility or schema decision, never a model disposition. Partial Source

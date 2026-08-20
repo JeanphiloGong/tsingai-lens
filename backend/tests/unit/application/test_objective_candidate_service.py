@@ -2009,6 +2009,158 @@ def test_ranking_prefers_cross_paper_support_then_relationship_count():
     ]
 
 
+def test_ranking_prefers_structured_result_sources_before_relationship_count():
+    skims = (
+        _paper_skim(
+            document_id="paper-table-a",
+            relationship_id="relationship-table-a",
+            source_kind="table",
+        ),
+        _paper_skim(
+            document_id="paper-table-b",
+            relationship_id="relationship-table-b",
+            source_kind="table",
+        ),
+        _paper_skim(
+            document_id="paper-block-a",
+            relationship_id="relationship-block-a",
+        ),
+        _paper_skim(
+            document_id="paper-block-b",
+            relationship_id="relationship-block-b",
+        ),
+    )
+    inventory = ObjectiveCandidateService._relationship_inventory(skims)
+    objectives = (
+        ResearchObjective.from_mapping(
+            {
+                "collection_id": "collection-test",
+                "objective_id": "objective-block",
+                "question": "How does laser power affect relative density?",
+                "variables": ["laser power"],
+                "outcomes": ["relative density"],
+                "seed_document_ids": ["paper-block-a", "paper-block-b"],
+                "source_relationship_ids": [
+                    "relationship-block-a",
+                    "relationship-block-b",
+                ],
+            }
+        ),
+        ResearchObjective.from_mapping(
+            {
+                "collection_id": "collection-test",
+                "objective_id": "objective-table",
+                "question": "How does laser power affect relative density?",
+                "variables": ["laser power"],
+                "outcomes": ["relative density"],
+                "seed_document_ids": ["paper-table-a", "paper-table-b"],
+                "source_relationship_ids": [
+                    "relationship-table-a",
+                    "relationship-table-b",
+                ],
+            }
+        ),
+    )
+
+    ranked = ObjectiveCandidateService._rank_objectives(
+        objectives,
+        relationship_inventory=inventory,
+    )
+
+    assert [item.objective_id for item in ranked] == [
+        "objective-table",
+        "objective-block",
+    ]
+
+
+def test_ranking_prefers_structured_results_from_independent_papers():
+    concentrated_extra_relationships = tuple(
+        {
+            "relationship_id": f"relationship-concentrated-table-{index}",
+            "varied_factors": ["laser power"],
+            "outcome": "relative density",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": f"paper-concentrated-a-table-{index}",
+                }
+            ],
+            "confidence": 0.9,
+        }
+        for index in (1, 2)
+    )
+    skims = (
+        _paper_skim(
+            document_id="paper-distributed-a",
+            relationship_id="relationship-distributed-a",
+            source_kind="table",
+        ),
+        _paper_skim(
+            document_id="paper-distributed-b",
+            relationship_id="relationship-distributed-b",
+            source_kind="table",
+        ),
+        _paper_skim(
+            document_id="paper-concentrated-a",
+            relationship_id="relationship-concentrated-a",
+            extra_relationships=concentrated_extra_relationships,
+        ),
+        _paper_skim(
+            document_id="paper-concentrated-b",
+            relationship_id="relationship-concentrated-b",
+        ),
+    )
+    inventory = ObjectiveCandidateService._relationship_inventory(skims)
+    objectives = (
+        ResearchObjective.from_mapping(
+            {
+                "collection_id": "collection-test",
+                "objective_id": "objective-concentrated",
+                "question": "How does laser power affect relative density?",
+                "variables": ["laser power"],
+                "outcomes": ["relative density"],
+                "seed_document_ids": [
+                    "paper-concentrated-a",
+                    "paper-concentrated-b",
+                ],
+                "source_relationship_ids": [
+                    "relationship-concentrated-a",
+                    "relationship-concentrated-b",
+                    "relationship-concentrated-table-1",
+                    "relationship-concentrated-table-2",
+                ],
+            }
+        ),
+        ResearchObjective.from_mapping(
+            {
+                "collection_id": "collection-test",
+                "objective_id": "objective-distributed",
+                "question": "How does laser power affect relative density?",
+                "variables": ["laser power"],
+                "outcomes": ["relative density"],
+                "seed_document_ids": [
+                    "paper-distributed-a",
+                    "paper-distributed-b",
+                ],
+                "source_relationship_ids": [
+                    "relationship-distributed-a",
+                    "relationship-distributed-b",
+                ],
+            }
+        ),
+    )
+
+    ranked = ObjectiveCandidateService._rank_objectives(
+        objectives,
+        relationship_inventory=inventory,
+    )
+
+    assert [item.objective_id for item in ranked] == [
+        "objective-distributed",
+        "objective-concentrated",
+    ]
+
+
 def _group_relationship_ids(
     groups: list[list[dict[str, Any]]],
 ) -> list[tuple[str, ...]]:
@@ -2024,6 +2176,7 @@ def _paper_skim(
     relationship_id: str,
     factors: tuple[str, ...] = ("laser power",),
     outcome: str = "relative density",
+    source_kind: str = "block",
     material_scope: tuple[str, ...] = ("316L stainless steel",),
     process_context: tuple[str, ...] = ("LPBF",),
     sample_context: tuple[str, ...] = ("vertical coupon",),
@@ -2059,7 +2212,7 @@ def _paper_skim(
                             "outcome": outcome,
                             "source_refs": [
                                 {
-                                    "source_kind": "block",
+                                    "source_kind": source_kind,
                                     "source_ref": f"{document_id}-results",
                                 }
                             ],

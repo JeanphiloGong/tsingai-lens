@@ -1426,11 +1426,30 @@ class ObjectiveCandidateService:
         *,
         relationship_inventory: RelationshipInventory,
     ) -> tuple[ResearchObjective, ...]:
-        def rank(objective: ResearchObjective) -> tuple[float, float, float, str]:
-            supporting_relationships = [
-                relationship_inventory[relationship_id][2]
+        def rank(
+            objective: ResearchObjective,
+        ) -> tuple[float, float, float, float, float, str]:
+            supporting_records = [
+                relationship_inventory[relationship_id]
                 for relationship_id in objective.source_relationship_ids
             ]
+            supporting_relationships = [
+                relationship
+                for _document_id, _study, relationship in supporting_records
+            ]
+            structured_result_document_count = len(
+                {
+                    document_id
+                    for document_id, _study, relationship in supporting_records
+                    if ObjectiveCandidateService._structured_result_source_count(
+                        relationship
+                    )
+                }
+            )
+            structured_result_source_count = sum(
+                ObjectiveCandidateService._structured_result_source_count(item)
+                for item in supporting_relationships
+            )
             mean_confidence = (
                 sum(item.confidence for item in supporting_relationships)
                 / len(supporting_relationships)
@@ -1439,12 +1458,30 @@ class ObjectiveCandidateService:
             )
             return (
                 -float(len(objective.seed_document_ids)),
+                -float(structured_result_document_count),
+                -float(structured_result_source_count),
                 -float(len(objective.source_relationship_ids)),
                 -mean_confidence,
                 objective.objective_id,
             )
 
         return tuple(sorted(objectives, key=rank))
+
+    @staticmethod
+    def _structured_result_source_count(
+        relationship: PaperStudyRelationship,
+    ) -> int:
+        """Count structured Source locators that can carry measured results.
+
+        This is only a ranking signal. Tables and figures remain subject to
+        downstream framing, extraction, and comparability checks; their
+        presence must never be treated as scientific proof.
+        """
+
+        return sum(
+            source_ref.source_kind in {"table", "table_row", "figure"}
+            for source_ref in relationship.source_refs
+        )
 
     @staticmethod
     def _study_dispositions(

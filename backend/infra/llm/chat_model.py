@@ -28,7 +28,6 @@ class OpenAIChatModel:
     ) -> None:
         self.model = (
             model
-            or os.getenv("RESEARCH_AGENT_LLM_MODEL")
             or os.getenv("LLM_MODEL")
             or "gpt-4o-mini"
         ).strip()

@@ -66,6 +66,16 @@ def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None
     assert "研究方案生成和验证闭环仍在开发中" in RESEARCH_AGENT_SYSTEM_PROMPT
 
 
+def test_openai_chat_model_uses_the_global_model_setting(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_MODEL", "global-model")
+    monkeypatch.setenv("RESEARCH_AGENT_LLM_MODEL", "retired-agent-model")
+    client, _completions = _client(_completion(content="ok"))
+
+    model = OpenAIChatModel(client=client)
+
+    assert model.model == "global-model"
+
+
 def test_openai_chat_model_returns_an_ordinary_answer_without_tools() -> None:
     client, completions = _client(_completion(content="你好，我可以帮助分析文献。"))
     model = OpenAIChatModel(client=client, model="test-model")

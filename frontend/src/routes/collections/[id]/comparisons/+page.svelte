@@ -4,84 +4,88 @@
 	import { errorMessage } from '../../../_shared/api';
 	import { t } from '../../../_shared/i18n';
 	import {
-		fetchCollectionResearchView,
-		formatEvidenceBackedValue,
-		getResearchViewStateTone,
-		type CollectionAggregation,
-		type ComparableGroup,
-		type CrossPaperMatrixRow,
-		type EvidenceBackedValue
+		fetchCollectionObjectives,
+		fetchObjectiveFindings,
+		type ObjectiveFinding,
+		type ObjectiveSummary
 	} from '../../../_shared/researchView';
 
-	let researchView: CollectionAggregation | null = null;
-	let selectedGroupId = '';
-	let selectedEvidenceValue: EvidenceBackedValue | null = null;
+	type PublishedFindingGroup = {
+		objective: ObjectiveSummary;
+		findings: ObjectiveFinding[];
+	};
+
+	let groups: PublishedFindingGroup[] = [];
+	let publishedObjectiveCount = 0;
+	let failedObjectiveCount = 0;
 	let loading = false;
 	let error = '';
 	let loadedCollectionId = '';
 
 	$: collectionId = $page.params.id ?? '';
-	$: researchGroups = researchView?.comparable_groups ?? [];
-	$: comparisonArtifactsPending =
-		Boolean(researchView) &&
-		!researchGroups.length &&
-		Boolean(
-			researchView?.warnings.some((warning) => warning.code === 'comparison_projection_unavailable')
-		);
-	$: activeGroup =
-		researchGroups.find((group) => group.group_id === selectedGroupId) ?? researchGroups[0] ?? null;
+	$: findingCount = groups.reduce((count, group) => count + group.findings.length, 0);
 	$: if (collectionId && collectionId !== loadedCollectionId) {
 		loadedCollectionId = collectionId;
-		void loadResearchComparison();
+		void loadPublishedFindings();
 	}
 
-	async function loadResearchComparison() {
+	async function loadPublishedFindings() {
 		loading = true;
 		error = '';
-		selectedEvidenceValue = null;
+		groups = [];
+		failedObjectiveCount = 0;
 		try {
-			researchView = await fetchCollectionResearchView(collectionId);
-			if (
-				researchView.comparable_groups.length &&
-				!researchView.comparable_groups.some((group) => group.group_id === selectedGroupId)
-			) {
-				selectedGroupId = researchView.comparable_groups[0].group_id;
+			const objectiveList = await fetchCollectionObjectives(collectionId);
+			const publishedObjectives = objectiveList.objectives.filter(
+				(objective) => objective.published_analysis_version !== null
+			);
+			publishedObjectiveCount = publishedObjectives.length;
+			const results = await Promise.allSettled(
+				publishedObjectives.map(async (objective) => ({
+					objective,
+					findings: (
+						await fetchObjectiveFindings(
+							collectionId,
+							objective.objective_id,
+							objective.published_analysis_version as number,
+							0,
+							200
+						)
+					).items
+				}))
+			);
+			groups = results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
+			failedObjectiveCount = results.length - groups.length;
+			if (publishedObjectives.length && failedObjectiveCount === publishedObjectives.length) {
+				const firstFailure = results.find((result) => result.status === 'rejected');
+				throw firstFailure?.status === 'rejected'
+					? firstFailure.reason
+					: new Error($t('research.comparison.errorTitle'));
 			}
 		} catch (err) {
-			researchView = null;
-			selectedGroupId = '';
+			groups = [];
+			publishedObjectiveCount = 0;
+			failedObjectiveCount = 0;
 			error = errorMessage(err);
 		} finally {
 			loading = false;
 		}
 	}
 
-	function groupStatusTone(group: ComparableGroup) {
-		if (group.comparability_status === 'comparable') return 'success';
-		if (group.comparability_status === 'limited') return 'warning';
-		return 'danger';
+	function joined(items: string[]) {
+		return items.length ? items.join(', ') : $t('research.emptyValue');
 	}
 
-	function matrixRows(group: ComparableGroup): CrossPaperMatrixRow[] {
-		if (group.matrix.rows.length) return group.matrix.rows;
-		return (
-			researchView?.cross_paper_matrices.find((matrix) => matrix.group_id === group.group_id)
-				?.rows ?? []
-		);
+	function directPaperCount(finding: ObjectiveFinding) {
+		return finding.paper_contributions.filter(
+			(contribution) =>
+				contribution.supporting_evidence_ids.length ||
+				contribution.contradicting_evidence_ids.length
+		).length;
 	}
 
-	function recordSummary(record: Record<string, string>) {
-		const entries = Object.entries(record);
-		if (!entries.length) return $t('research.emptyValue');
-		return entries.map(([key, value]) => `${key}: ${value}`).join(' | ');
-	}
-
-	function openEvidenceDrawer(value: EvidenceBackedValue) {
-		selectedEvidenceValue = value;
-	}
-
-	function closeEvidenceDrawer() {
-		selectedEvidenceValue = null;
+	function findingHref(objectiveId: string, findingId: string) {
+		return `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}?finding_id=${encodeURIComponent(findingId)}`;
 	}
 </script>
 
@@ -89,571 +93,385 @@
 	<title>{$t('research.comparison.title')}</title>
 </svelte:head>
 
-<section class="research-comparison-page fade-up">
-	<header class="research-comparison-header">
+<section class="comparison-page fade-up">
+	<header class="comparison-header">
 		<div>
+			<p class="comparison-eyebrow">{$t('research.comparison.eyebrow')}</p>
 			<h2>{$t('research.comparison.title')}</h2>
 			<p>{$t('research.comparison.directBody')}</p>
-			{#if researchView}
-				<div class="comparison-meta-row">
-					<span
-						class={`status-badge status-badge--${getResearchViewStateTone(researchView.state)}`}
-					>
-						{$t(`research.state.${researchView.state}`)}
-					</span>
-					<span>{$t('research.comparison.groupCount', { count: researchGroups.length })}</span>
-				</div>
-			{/if}
 		</div>
-		<button class="btn btn--ghost" type="button" on:click={loadResearchComparison}>
-			<span class="refresh-icon" aria-hidden="true"></span>
-			{$t('research.comparison.refresh')}
-		</button>
+		{#if !loading && !error && publishedObjectiveCount}
+			<div class="comparison-summary" aria-label={$t('research.comparison.summaryLabel')}>
+				<strong>{findingCount}</strong>
+				<span>{$t('research.comparison.findingsCount')}</span>
+				<small
+					>{$t('research.comparison.publishedObjectiveCount', {
+						count: publishedObjectiveCount
+					})}</small
+				>
+			</div>
+		{/if}
 	</header>
 
 	{#if loading}
-		<section class="comparison-state-card" aria-busy="true" aria-live="polite">
-			<div class="status" role="status">{$t('research.comparison.loading')}</div>
+		<section class="page-state" aria-busy="true" aria-live="polite">
+			<p>{$t('research.comparison.loading')}</p>
 		</section>
 	{:else if error}
-		<section class="comparison-state-card comparison-state-card--error" role="alert">
+		<section class="page-state page-state--error" role="alert">
 			<h3>{$t('research.comparison.errorTitle')}</h3>
 			<p>{error}</p>
+			<button class="btn btn--ghost btn--small" type="button" on:click={loadPublishedFindings}>
+				{$t('research.comparison.retry')}
+			</button>
 		</section>
-	{:else if comparisonArtifactsPending}
-		<section class="comparison-state-card comparison-state-card--pending" role="status">
-			<h3>{$t('research.comparison.pendingTitle')}</h3>
-			<p>{$t('research.comparison.pendingBody')}</p>
-			<div class="comparison-state-card__actions">
-				<a class="btn btn--primary btn--small" href={resolve('/collections/[id]', { id: collectionId })}>
-					{$t('research.comparison.openOverview')}
-				</a>
-				<button class="btn btn--ghost btn--small" type="button" on:click={loadResearchComparison}>
-					{$t('research.comparison.refresh')}
-				</button>
-			</div>
-		</section>
-	{:else if !researchView || !researchGroups.length}
-		<section class="comparison-state-card">
+	{:else if !findingCount}
+		<section class="page-state page-state--empty">
 			<h3>{$t('research.comparison.emptyTitle')}</h3>
 			<p>{$t('research.comparison.emptyBody')}</p>
+			<a
+				class="btn btn--primary btn--small"
+				href={resolve('/collections/[id]/objectives', { id: collectionId })}
+			>
+				{$t('research.comparison.openObjectives')}
+			</a>
 		</section>
 	{:else}
-		<section class="research-comparison-layout" aria-label={$t('research.comparison.title')}>
-			<aside class="research-group-list" aria-label={$t('research.comparison.groups')}>
-				<div class="research-group-list__header">
-					<h3>{$t('research.comparison.groups')}</h3>
-					<span>{$t('research.comparison.groupCount', { count: researchGroups.length })}</span>
-				</div>
-				{#each researchGroups as group (group.group_id)}
-					<button
-						type="button"
-						class:selected={activeGroup?.group_id === group.group_id}
-						class="research-group-card"
-						on:click={() => (selectedGroupId = group.group_id)}
-					>
-						<span class={`comparison-badge comparison-badge--${groupStatusTone(group)}`}>
-							{$t(`research.comparison.status.${group.comparability_status}`)}
-						</span>
-						<strong>{group.title}</strong>
-						<small>{group.material_system} / {group.process_family}</small>
-						{#if group.variable_axis}
-							<small>{$t('research.comparison.variableAxis')}: {group.variable_axis}</small>
-						{/if}
-					</button>
-				{/each}
-			</aside>
+		{#if failedObjectiveCount}
+			<p class="partial-warning" role="status">
+				{$t('research.comparison.partialError', { count: failedObjectiveCount })}
+			</p>
+		{/if}
 
-			{#if activeGroup}
-				<section class="research-matrix-panel">
-					<div class="research-matrix-header">
-						<div>
-							<h3>{activeGroup.title}</h3>
-							<p>
-								{$t('research.comparison.fixedConditions')}:
-								{recordSummary(activeGroup.fixed_conditions)}
-							</p>
-						</div>
-						<span class={`comparison-badge comparison-badge--${groupStatusTone(activeGroup)}`}>
-							{$t(`research.comparison.status.${activeGroup.comparability_status}`)}
-						</span>
-					</div>
-
-					<div class="research-chip-row">
-						<span>{$t('research.comparison.material')}: {activeGroup.material_system}</span>
-						<span>{$t('research.comparison.process')}: {activeGroup.process_family}</span>
-						<span
-							>{$t('research.comparison.properties')}:
-							{activeGroup.properties.join(', ') || $t('research.emptyValue')}</span
-						>
-						<span>{$t('research.comparison.documents')}: {activeGroup.documents.length}</span>
-						<span>{$t('research.comparison.samples')}: {activeGroup.samples.length}</span>
-					</div>
-
-					{#if activeGroup.warnings.length}
-						<div class="comparison-alert comparison-alert--warning" role="status">
-							<strong>{$t('research.warnings')}</strong>
-							<span>{activeGroup.warnings.map((warning) => warning.message).join(' | ')}</span>
-						</div>
-					{/if}
-
-					{#if matrixRows(activeGroup).length}
-						<div class="research-matrix-table-wrapper">
-							<table class="research-matrix-table">
-								<thead>
-									<tr>
-										<th>{$t('research.documents.document')}</th>
-										<th>{$t('research.sampleMatrix.sample')}</th>
-										<th>{$t('research.comparison.material')}</th>
-										<th>{$t('research.comparison.process')}</th>
-										<th>{$t('research.comparison.variableValue')}</th>
-										<th>{$t('research.comparison.testCondition')}</th>
-										<th>{$t('research.comparison.result')}</th>
-										<th>{$t('research.comparison.evidence')}</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each matrixRows(activeGroup) as row (row.row_id)}
-										<tr>
-											<td>{row.document_id || '--'}</td>
-											<td>{row.sample_label ?? row.sample_id ?? '--'}</td>
-											<td>{row.material}</td>
-											<td>{recordSummary(row.process_context)}</td>
-											<td>{row.variable_value ?? '--'}</td>
-											<td>{row.test_condition ?? '--'}</td>
-											<td>
-												<button
-													type="button"
-													class={`matrix-value-button matrix-value-button--${row.result.status}`}
-													on:click={() => openEvidenceDrawer(row.result)}
-												>
-													{formatEvidenceBackedValue(row.result)}
-												</button>
-											</td>
-											<td>
-												<button
-													class="btn btn--ghost btn--small"
-													type="button"
-													on:click={() => openEvidenceDrawer(row.result)}
-												>
-													{$t('research.evidence.open')}
-												</button>
-											</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-						</div>
-					{:else}
-						<div class="comparison-empty-filter" role="status">
-							{$t('research.comparison.emptyMatrix')}
-						</div>
-					{/if}
-
-					{#if selectedEvidenceValue}
-						<aside class="research-evidence-drawer" aria-label={$t('research.evidence.title')}>
-							<div class="research-evidence-drawer__header">
-								<h3>{$t('research.evidence.title')}</h3>
-								<button type="button" on:click={closeEvidenceDrawer}>
-									{$t('research.evidence.close')}
-								</button>
+		<div class="finding-groups">
+			{#each groups as group (group.objective.objective_id)}
+				{#if group.findings.length}
+					<section class="finding-group" aria-labelledby={`objective-${group.objective.objective_id}`}>
+						<header class="objective-context">
+							<div>
+								<span>{$t('research.comparison.objectiveLabel')}</span>
+								<h3 id={`objective-${group.objective.objective_id}`}>{group.objective.question}</h3>
 							</div>
-							<dl>
-								<div>
-									<dt>{$t('research.comparison.result')}</dt>
-									<dd>{formatEvidenceBackedValue(selectedEvidenceValue)}</dd>
-								</div>
-								<div>
-									<dt>{$t('research.evidence.status')}</dt>
-									<dd>{$t(`research.valueStatus.${selectedEvidenceValue.status}`)}</dd>
-								</div>
-								<div>
-									<dt>{$t('research.evidence.confidence')}</dt>
-									<dd>{selectedEvidenceValue.confidence ?? '--'}</dd>
-								</div>
-								<div>
-									<dt>{$t('research.evidence.duplicates')}</dt>
-									<dd>{selectedEvidenceValue.duplicate_count}</dd>
-								</div>
-							</dl>
-							{#if selectedEvidenceValue.evidence_refs.length}
-								<ul class="research-evidence-list">
-									{#each selectedEvidenceValue.evidence_refs as ref (ref.evidence_ref_id)}
-										<li>
-											<strong>{ref.evidence_ref_id}</strong>
-											<span>{ref.document_id ?? '--'} / {ref.locator ?? '--'}</span>
-										</li>
-									{/each}
-								</ul>
-							{:else}
-								<p>{$t('research.evidence.missing')}</p>
-							{/if}
-						</aside>
-					{/if}
-				</section>
-			{/if}
-		</section>
+							<p>
+								{$t('research.comparison.materialScope')}:
+								<strong>{joined(group.objective.material_scope)}</strong>
+							</p>
+						</header>
+
+						<div class="finding-list">
+							{#each group.findings as finding (finding.finding_id)}
+								<article class="finding-item">
+									<div class="finding-item__main">
+										<div class="finding-status">
+											<span class={`status-badge status-badge--${finding.synthesis_status}`}>
+												{$t(`research.comparison.synthesis.${finding.synthesis_status}`)}
+											</span>
+											<span>{$t('research.comparison.certainty', { value: Math.round(finding.certainty * 100) })}</span>
+										</div>
+										<h4>{finding.statement}</h4>
+										<dl>
+											<div>
+												<dt>{$t('research.comparison.factors')}</dt>
+												<dd>{joined(finding.factors)}</dd>
+											</div>
+											<div>
+												<dt>{$t('research.comparison.outcome')}</dt>
+												<dd>{finding.outcome}</dd>
+											</div>
+										</dl>
+										{#if finding.limitations.length}
+											<p class="limitations">
+												<strong>{$t('research.comparison.limitations')}:</strong>
+												{finding.limitations.join(' ')}
+											</p>
+										{/if}
+									</div>
+									<div class="finding-item__action">
+										<strong
+											>{$t('research.comparison.supportingPapers', {
+												count: directPaperCount(finding)
+											})}</strong
+										>
+										<a
+											class="btn btn--primary btn--small"
+											href={findingHref(group.objective.objective_id, finding.finding_id)}
+										>
+											{$t('research.comparison.reviewEvidence')}
+										</a>
+									</div>
+								</article>
+							{/each}
+						</div>
+					</section>
+				{/if}
+			{/each}
+		</div>
 	{/if}
 </section>
 
 <style>
-	.research-comparison-page {
-		width: 100%;
-		max-width: 1280px;
+	.comparison-page {
+		width: min(1180px, 100%);
 		margin: 0 auto;
 		display: grid;
-		gap: 24px;
+		gap: 26px;
 	}
 
-	.research-comparison-header,
-	.comparison-state-card,
-	.research-group-list,
-	.research-matrix-panel,
-	.research-evidence-drawer {
-		border: 1px solid var(--border-default);
-		border-radius: var(--radius-lg);
-		background: var(--surface-card);
-		box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
-	}
-
-	.research-comparison-header {
+	.comparison-header {
 		display: flex;
-		align-items: flex-start;
+		align-items: flex-end;
 		justify-content: space-between;
-		gap: 20px;
-		padding: 24px;
+		gap: 32px;
+		padding-bottom: 22px;
+		border-bottom: 1px solid var(--border-default);
 	}
 
-	.research-comparison-header h2,
-	.comparison-state-card h3,
-	.research-group-list__header h3,
-	.research-matrix-header h3,
-	.research-evidence-drawer__header h3 {
+	.comparison-eyebrow,
+	.comparison-header h2,
+	.comparison-header p,
+	.objective-context h3,
+	.objective-context p,
+	.finding-item h4,
+	.finding-item p,
+	.page-state h3,
+	.page-state p {
 		margin: 0;
-		color: var(--text-primary);
 	}
 
-	.research-comparison-header h2 {
+	.comparison-eyebrow,
+	.objective-context span {
+		color: var(--text-secondary);
+		font-size: 12px;
+		font-weight: 700;
+		line-height: 18px;
+		text-transform: uppercase;
+	}
+
+	.comparison-header h2 {
+		margin-top: 4px;
 		font-size: 30px;
 		line-height: 38px;
 	}
 
-	.research-comparison-header p,
-	.comparison-state-card p,
-	.research-matrix-header p {
-		max-width: 780px;
-		margin: 8px 0 0;
+	.comparison-header p {
+		max-width: 720px;
+		margin-top: 8px;
 		color: var(--text-secondary);
 		font-size: 15px;
 		line-height: 23px;
 	}
 
-	.comparison-meta-row {
-		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 10px;
-		margin-top: 12px;
-		color: var(--text-secondary);
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.comparison-state-card {
+	.comparison-summary {
+		min-width: 150px;
 		display: grid;
-		gap: 8px;
-		padding: 24px;
+		justify-items: end;
+		color: var(--text-secondary);
 	}
 
-	.comparison-state-card--error {
-		border-color: var(--danger-border);
-		background: var(--danger-bg);
+	.comparison-summary strong {
+		color: var(--text-primary);
+		font-size: 32px;
+		line-height: 36px;
+	}
+
+	.comparison-summary span {
+		font-weight: 700;
+	}
+
+	.comparison-summary small {
+		margin-top: 2px;
+	}
+
+	.page-state {
+		display: grid;
+		justify-items: start;
+		gap: 10px;
+		padding: 28px 0;
+	}
+
+	.page-state h3 {
+		font-size: 20px;
+		line-height: 28px;
+	}
+
+	.page-state p {
+		max-width: 700px;
+		color: var(--text-secondary);
+		line-height: 22px;
+	}
+
+	.page-state--error,
+	.partial-warning {
 		color: var(--danger-text);
 	}
 
-	.comparison-state-card--pending {
-		border-color: var(--warning-border);
-		background: var(--warning-bg);
+	.partial-warning {
+		margin: 0;
+		padding: 10px 12px;
+		border-left: 3px solid var(--danger-border);
+		background: var(--danger-bg);
 	}
 
-	.comparison-state-card__actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 10px;
-		margin-top: 8px;
-	}
-
-	.research-comparison-layout {
+	.finding-groups,
+	.finding-group,
+	.finding-list {
 		display: grid;
-		grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
-		gap: 18px;
-		align-items: start;
 	}
 
-	.research-group-list {
-		display: grid;
-		gap: 10px;
-		padding: 14px;
+	.finding-groups {
+		gap: 34px;
 	}
 
-	.research-group-list__header,
-	.research-matrix-header,
-	.research-evidence-drawer__header {
+	.finding-group {
+		gap: 14px;
+	}
+
+	.objective-context {
 		display: flex;
-		align-items: flex-start;
+		align-items: end;
 		justify-content: space-between;
-		gap: 12px;
+		gap: 22px;
 	}
 
-	.research-group-list__header h3,
-	.research-matrix-header h3,
-	.research-evidence-drawer__header h3 {
+	.objective-context h3 {
+		max-width: 760px;
+		margin-top: 3px;
 		font-size: 18px;
-		line-height: 24px;
+		line-height: 26px;
 	}
 
-	.research-group-list__header span {
+	.objective-context p {
 		color: var(--text-secondary);
 		font-size: 13px;
 		line-height: 20px;
+		text-align: right;
 	}
 
-	.research-group-card {
+	.finding-list {
+		gap: 10px;
+	}
+
+	.finding-item {
 		display: grid;
-		gap: 8px;
-		width: 100%;
-		padding: 14px;
+		grid-template-columns: minmax(0, 1fr) 190px;
+		gap: 24px;
+		padding: 18px;
 		border: 1px solid var(--border-default);
-		border-radius: var(--radius-md);
+		border-radius: 8px;
 		background: var(--surface-card);
-		color: var(--text-primary);
-		text-align: left;
-		cursor: pointer;
 	}
 
-	.research-group-card:hover,
-	.research-group-card.selected {
-		border-color: var(--brand-border);
-		background: var(--brand-soft);
+	.finding-item__main {
+		min-width: 0;
+		display: grid;
+		gap: 12px;
 	}
 
-	.research-group-card strong {
-		overflow-wrap: anywhere;
-		font-size: 14px;
-		line-height: 20px;
-	}
-
-	.research-group-card small {
+	.finding-status {
+		display: flex;
+		align-items: center;
+		gap: 10px;
 		color: var(--text-secondary);
 		font-size: 12px;
-		line-height: 18px;
 	}
 
-	.research-matrix-panel {
-		display: grid;
-		gap: 16px;
-		padding: 18px;
-		min-width: 0;
-	}
-
-	.research-chip-row {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-	}
-
-	.research-chip-row span,
-	.comparison-badge {
-		display: inline-flex;
-		min-height: 26px;
-		align-items: center;
-		padding: 4px 9px;
+	.status-badge {
+		padding: 3px 8px;
 		border-radius: 999px;
 		background: var(--bg-subtle);
-		color: var(--text-secondary);
-		font-size: 12px;
 		font-weight: 700;
-		line-height: 18px;
 	}
 
-	.comparison-badge--success {
+	.status-badge--agreement {
 		background: var(--success-bg);
 		color: var(--success-text);
 	}
 
-	.comparison-badge--warning {
-		background: var(--warning-bg);
-		color: var(--warning-text);
-	}
-
-	.comparison-badge--danger {
+	.status-badge--conflict {
 		background: var(--danger-bg);
 		color: var(--danger-text);
 	}
 
-	.comparison-alert {
-		display: flex;
-		align-items: center;
-		flex-wrap: wrap;
-		gap: 8px;
-		padding: 10px 12px;
-		border: 1px solid var(--warning-border);
-		border-radius: var(--radius-md);
+	.status-badge--condition_dependent,
+	.status-badge--insufficient_confirmation {
 		background: var(--warning-bg);
 		color: var(--warning-text);
-		font-size: 14px;
-		line-height: 22px;
 	}
 
-	.research-matrix-table-wrapper {
-		max-width: 100%;
-		overflow-x: auto;
-		border: 1px solid var(--border-default);
-		border-radius: var(--radius-md);
-		background:
-			linear-gradient(90deg, var(--surface-card) 28%, rgba(255, 255, 255, 0)),
-			linear-gradient(270deg, var(--surface-card) 28%, rgba(255, 255, 255, 0)) 100% 0,
-			linear-gradient(90deg, rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0)),
-			linear-gradient(270deg, rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0)) 100% 0;
-		background-attachment: local, local, scroll, scroll;
-		background-repeat: no-repeat;
-		background-size:
-			32px 100%,
-			32px 100%,
-			12px 100%,
-			12px 100%;
+	.finding-item h4 {
+		font-size: 17px;
+		line-height: 25px;
 	}
 
-	.research-matrix-table {
-		width: 100%;
-		min-width: 980px;
-		border-collapse: collapse;
-		font-size: 14px;
-	}
-
-	.research-matrix-table th,
-	.research-matrix-table td {
-		padding: 12px 14px;
-		border-top: 1px solid var(--border-default);
-		text-align: left;
-		vertical-align: middle;
-	}
-
-	.research-matrix-table th {
-		color: var(--text-secondary);
-		font-size: 13px;
-		font-weight: 700;
-		background: var(--bg-subtle);
-	}
-
-	.matrix-value-button {
-		display: inline-flex;
-		min-height: 32px;
-		align-items: center;
-		justify-content: center;
-		padding: 4px 10px;
-		border: 1px solid var(--border-default);
-		border-radius: var(--radius-sm);
-		background: var(--surface-card);
-		color: var(--text-primary);
-		font-size: 13px;
-		font-weight: 700;
-		cursor: pointer;
-	}
-
-	.matrix-value-button--missing {
-		color: var(--text-secondary);
-		background: var(--bg-subtle);
-	}
-
-	.matrix-value-button--conflicted {
-		border-color: var(--danger-border);
-		background: var(--danger-bg);
-		color: var(--danger-text);
-	}
-
-	.research-evidence-drawer {
+	.finding-item dl {
 		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 12px;
-		padding: 14px;
-		border-color: var(--brand-border);
-	}
-
-	.research-evidence-drawer__header button {
-		border: 0;
-		background: transparent;
-		color: var(--brand-primary);
-		font-size: 13px;
-		font-weight: 700;
-		cursor: pointer;
-	}
-
-	.research-evidence-drawer dl {
-		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-		gap: 10px;
 		margin: 0;
 	}
 
-	.research-evidence-drawer dt {
+	.finding-item dl div {
+		display: grid;
+		gap: 2px;
+	}
+
+	.finding-item dt {
 		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 700;
-		line-height: 18px;
 	}
 
-	.research-evidence-drawer dd {
+	.finding-item dd {
 		margin: 0;
-		overflow-wrap: anywhere;
-		color: var(--text-primary);
 		font-size: 13px;
 		line-height: 20px;
 	}
 
-	.research-evidence-list {
-		display: grid;
-		gap: 8px;
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.research-evidence-list li {
-		display: grid;
-		gap: 3px;
-		padding: 10px;
-		border-radius: var(--radius-md);
-		background: var(--bg-subtle);
+	.limitations {
+		color: var(--text-secondary);
 		font-size: 13px;
 		line-height: 20px;
 	}
 
-	@media (max-width: 900px) {
-		.research-comparison-header,
-		.research-comparison-layout {
-			display: grid;
+	.finding-item__action {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		justify-content: space-between;
+		gap: 18px;
+		padding-left: 18px;
+		border-left: 1px solid var(--border-default);
+		color: var(--text-secondary);
+		font-size: 13px;
+		text-align: right;
+	}
+
+	@media (max-width: 760px) {
+		.comparison-header,
+		.objective-context {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+
+		.comparison-summary {
+			justify-items: start;
+		}
+
+		.objective-context p {
+			text-align: left;
+		}
+
+		.finding-item {
 			grid-template-columns: 1fr;
 		}
 
-		.research-matrix-panel {
-			width: 100%;
-			max-width: calc(100vw - 32px);
-		}
-
-		.research-matrix-table {
-			min-width: 760px;
-		}
-
-		.research-evidence-drawer dl {
-			grid-template-columns: 1fr 1fr;
-		}
-	}
-
-	@media (max-width: 520px) {
-		.research-comparison-header,
-		.research-matrix-panel,
-		.research-group-list {
-			padding: 16px;
+		.finding-item__action {
+			align-items: flex-start;
+			padding-top: 14px;
+			padding-left: 0;
+			border-top: 1px solid var(--border-default);
+			border-left: 0;
+			text-align: left;
 		}
 	}
 </style>

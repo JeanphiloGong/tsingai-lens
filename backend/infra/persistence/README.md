@@ -84,7 +84,8 @@ plans do not derive authority from general Chat text.
   Owns document profiles and reusable evidence-backed paper facts.
 - `PostgresComparisonRepository`
   Owns comparable results, collection assessments, pairwise relations, and
-  source/evidence links. Comparison rows are deterministic read projections.
+  source/evidence links retained for offline evaluation and export tooling.
+  These records are not exposed as the maintained collection comparison UI.
 - `PostgresEvaluationRepository`
   Owns gold sets, prediction snapshots, evaluation runs, scores, and failures.
 

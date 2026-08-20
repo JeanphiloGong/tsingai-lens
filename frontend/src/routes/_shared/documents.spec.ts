@@ -1,267 +1,134 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DocumentProfile } from './documents';
 
-const { requestJson } = vi.hoisted(() => ({
-	requestJson: vi.fn()
-}));
+const { requestJson } = vi.hoisted(() => ({ requestJson: vi.fn() }));
 
-vi.mock('./api', () => ({
+vi.mock('./api', async (importActual) => ({
+	...(await importActual<typeof import('./api')>()),
 	requestJson
 }));
 
-const {
-	buildDocumentTypeStats,
-	buildProfileConclusion,
-	fetchDocumentComparisonSemantics,
-	fetchDocumentMarkdown,
-	formatConfidence,
-	getDocumentNextActions,
-	getDocumentTypeBadge
-} = await import('./documents');
-
-function profile(overrides: Partial<DocumentProfile>): DocumentProfile {
-	return {
-		document_id: 'doc_1',
-		collection_id: 'col_123',
-		title: null,
-		source_filename: null,
-		doc_type: 'uncertain',
-		parsing_warnings: [],
-		confidence: null,
-		...overrides
-	};
-}
+const { buildDocumentWorkbenchModel, fetchDocumentMarkdown, fetchDocumentProfiles } = await import(
+	'./documents'
+);
 
 describe('documents shared helpers', () => {
-	beforeEach(() => {
-		requestJson.mockReset();
-	});
+	beforeEach(() => requestJson.mockReset());
 
-	it('normalizes grouped document comparison semantics into variant dossiers', async () => {
+	it('normalizes the maintained document profile contract', async () => {
 		requestJson.mockResolvedValue({
 			collection_id: 'col_123',
-			document_id: 'doc_1',
 			total: 1,
 			count: 1,
-			items: [],
-			variant_dossiers: [
+			summary: {
+				total_documents: 1,
+				by_doc_type: { experimental: 1 },
+				warnings: []
+			},
+			items: [
 				{
-					variant_id: 'var_1',
-					variant_label: 'optimized VED + HIP',
-					material: {
-						label: 'Ti-6Al-4V',
-						composition: 'Ti-6Al-4V'
-					},
-					shared_process_state: {
-						laser_power_w: 280
-					},
-					shared_missingness: ['surface state'],
-					series: [
-						{
-							series_key: 'yield_strength:test_temperature_c',
-							property_family: 'yield strength',
-							test_family: 'tensile',
-							varying_axis: {
-								axis_name: 'test_temperature_c',
-								axis_unit: 'C'
-							},
-							chains: [
-								{
-									result_id: 'cres_1',
-									source_result_id: 'mr_1',
-									measurement: {
-										property: 'yield strength',
-										value: 940,
-										unit: 'MPa',
-										result_type: 'scalar',
-										summary: 'YS = 940 MPa'
-									},
-									test_condition: {
-										test_method: 'tensile',
-										test_temperature_c: 25,
-										'strain_rate_s-1': 0.001
-									},
-									baseline: {
-										label: 'optimized VED without HIP',
-										reference: 'S2',
-										baseline_type: 'same_document',
-										resolved: true
-									},
-									assessment: {
-										comparability_status: 'limited',
-										warnings: ['orientation missing'],
-										basis: ['same paper'],
-										missing_context: ['sample orientation'],
-										requires_expert_review: true,
-										assessment_epistemic_status: 'grounded'
-									},
-									value_provenance: {
-										value_origin: 'reported',
-										source_value_text: '940',
-										source_unit_text: 'MPa'
-									},
-									evidence: {
-										evidence_ids: ['ev_1'],
-										direct_anchor_ids: ['anc_1'],
-										contextual_anchor_ids: [],
-										structure_feature_ids: ['sf_1'],
-										characterization_observation_ids: [],
-										traceability_status: 'direct'
-									}
-								}
-							]
-						}
-					]
+					document_id: 'doc_1',
+					collection_id: 'col_123',
+					title: 'Paper A',
+					source_filename: 'paper-a.pdf',
+					doc_type: 'experimental',
+					parsing_warnings: [],
+					confidence: 0.9
 				}
 			]
 		});
 
-		const response = await fetchDocumentComparisonSemantics('col_123', 'doc_1', {
-			includeGroupedProjections: true
-		});
+		const response = await fetchDocumentProfiles('col_123');
 
-		expect(requestJson).toHaveBeenCalledWith(
-			'/collections/col_123/documents/doc_1/comparison-semantics?include_grouped_projections=true',
-			{ method: 'GET' }
-		);
-		expect(response.variant_dossiers[0].variant_label).toBe('optimized VED + HIP');
-		expect(response.variant_dossiers[0].shared_process_state.laser_power_w).toBe(280);
-		expect(response.variant_dossiers[0].series[0].chains[0].test_condition.strain_rate_s_1).toBe(
-			0.001
-		);
-		expect(response.variant_dossiers[0].series[0].chains[0].assessment.comparability_status).toBe(
-			'limited'
-		);
+		expect(response.summary.doc_type_counts.experimental).toBe(1);
+		expect(response.items[0]).toMatchObject({
+			document_id: 'doc_1',
+			doc_type: 'experimental',
+			confidence: 0.9
+		});
 	});
 
-	it('fetches and normalizes document Markdown projections', async () => {
+	it('normalizes Markdown source mappings and rejects entries without stable anchors', async () => {
 		requestJson.mockResolvedValue({
 			collection_id: 'col_123',
 			document_id: 'doc_1',
 			title: 'Paper A',
 			source_filename: 'paper-a.pdf',
 			parser: 'docling',
-			markdown: '  # Paper A\n\n## Abstract\n\nText.  ',
+			markdown: '  # Paper A\n\nText.  ',
 			source_map: [
 				{
 					markdown_anchor: 'block-abstract',
 					artifact_type: 'block',
 					artifact_id: 'abstract',
 					block_id: 'abstract',
-					block_type: 'paragraph',
 					page: 1,
 					heading_path: 'Abstract',
 					text_unit_ids: ['tu-1']
 				},
-				{
-					markdown_anchor: '',
-					artifact_type: 'block',
-					artifact_id: 'invalid'
-				}
+				{ markdown_anchor: '', artifact_type: 'block', artifact_id: 'invalid' }
 			],
 			warnings: ['layout_warning']
 		});
 
 		const response = await fetchDocumentMarkdown('col_123', 'doc_1');
 
-		expect(requestJson).toHaveBeenCalledWith('/collections/col_123/documents/doc_1/markdown', {
-			method: 'GET'
-		});
-		expect(response.markdown).toBe('# Paper A\n\n## Abstract\n\nText.');
-		expect(response.parser).toBe('docling');
+		expect(response.markdown).toBe('# Paper A\n\nText.');
 		expect(response.source_map).toHaveLength(1);
 		expect(response.source_map[0]).toMatchObject({
 			artifact_id: 'abstract',
 			block_id: 'abstract',
 			page: 1,
-			heading_path: 'Abstract',
-			text_unit_ids: ['tu-1']
-		});
-		expect(response.warnings).toEqual(['layout_warning']);
-	});
-
-	it('builds document profile stats with percentages and dominant rows', () => {
-		const profiles = [
-			profile({ document_id: 'review', doc_type: 'review' }),
-			profile({ document_id: 'exp', doc_type: 'experimental' }),
-			profile({ document_id: 'method', doc_type: 'method' }),
-			profile({
-				document_id: 'computational',
-				doc_type: 'computational'
-			})
-		];
-
-		const documentTypes = buildDocumentTypeStats(profiles);
-
-		expect(documentTypes.find((item) => item.key === 'review')).toMatchObject({
-			count: 1,
-			percent: 25,
-			dominant: true
-		});
-		expect(documentTypes.find((item) => item.key === 'mixed')).toMatchObject({
-			count: 0,
-			percent: 0,
-			dominant: false
+			heading_path: 'Abstract'
 		});
 	});
 
-	it('chooses profile conclusions from collection-level usability signals', () => {
-		const reviewProfiles = [profile({ doc_type: 'review' })];
-		const reviewStats = {
-			total: reviewProfiles.length,
-			documentTypeStats: buildDocumentTypeStats(reviewProfiles)
-		};
-
-		expect(buildProfileConclusion(reviewStats)).toMatchObject({
-			tone: 'warning',
-			messageKey: 'profiles.conclusion.reviewRisk',
-			actionKeys: ['upload_more', 'view_evidence']
+	it('builds source navigation only from parsed Source blocks', () => {
+		const model = buildDocumentWorkbenchModel({
+			collectionId: 'col_123',
+			documentId: 'doc_1',
+			content: {
+				collection_id: 'col_123',
+				document_id: 'doc_1',
+				title: 'Paper A',
+				source_filename: 'paper-a.pdf',
+				content_text: 'Methods text. Results text.',
+				warnings: [],
+				blocks: [
+					{
+						block_id: 'methods-1',
+						block_type: 'paragraph',
+						heading_path: 'Methods',
+						heading_level: 2,
+						order: 1,
+						text: 'Methods text.',
+						text_unit_ids: ['tu-1'],
+						page: 2
+					},
+					{
+						block_id: 'results-1',
+						block_type: 'paragraph',
+						heading_path: 'Results',
+						heading_level: 2,
+						order: 2,
+						text: 'Results text.',
+						text_unit_ids: ['tu-2'],
+						page: 3
+					}
+				]
+			}
 		});
 
-		const readyProfiles = [profile({ doc_type: 'experimental' })];
-		const readyStats = {
-			total: readyProfiles.length,
-			documentTypeStats: buildDocumentTypeStats(readyProfiles)
-		};
-
-		expect(buildProfileConclusion(readyStats)).toMatchObject({
-			tone: 'ready',
-			messageKey: 'profiles.conclusion.ready',
-			actionKeys: ['view_evidence', 'open_comparison']
+		expect(model.source_spans.map((span) => span.block_id)).toEqual([
+			'methods-1',
+			'results-1'
+		]);
+		expect(model.pages.map((page) => page.page_number)).toEqual([2, 3]);
+		expect(model.source_anchors_by_span_id['source:results-1']).toMatchObject({
+			pageIndex: 2,
+			section: 'Results',
+			precision: 'block'
 		});
-	});
-
-	it('returns document-specific next actions instead of always opening comparisons', () => {
-		expect(getDocumentNextActions(profile({ doc_type: 'review' }))).toEqual([
-			'view_document',
-			'view_evidence'
-		]);
-		expect(getDocumentNextActions(profile({ doc_type: 'experimental' }))).toEqual([
-			'view_document',
-			'view_evidence',
-			'open_comparison'
-		]);
-		expect(getDocumentNextActions(profile({ doc_type: 'uncertain' }))).toEqual([
-			'view_document',
-			'manual_mark'
-		]);
-		expect(getDocumentNextActions(profile({ processing_status: 'processing' }))).toEqual([
-			'view_progress',
-			'refresh'
-		]);
-		expect(getDocumentNextActions(profile({ processing_status: 'failed' }))).toEqual([
-			'view_error',
-			'retry_processing'
-		]);
-	});
-
-	it('formats confidence and badge metadata for the profile page', () => {
-		expect(formatConfidence(0.904)).toBe('90%');
-		expect(formatConfidence(86)).toBe('86%');
-		expect(formatConfidence(null)).toBe('--');
-		expect(getDocumentTypeBadge('method')).toMatchObject({
-			labelKey: 'profiles.docTypes.method',
-			tone: 'method'
-		});
+		expect(model).not.toHaveProperty('result_rows');
+		expect(model).not.toHaveProperty('evidence_cards');
 	});
 });

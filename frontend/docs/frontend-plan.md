@@ -32,10 +32,10 @@
   `PATCH /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}`
 - 启动构建任务：`POST /api/v1/collections/{collection_id}/tasks/build`
 - 查询任务与产物：`GET /api/v1/collections/{collection_id}/tasks`、`GET /api/v1/tasks/{task_id}`、`GET /api/v1/tasks/{task_id}/artifacts`
-- 结果与文档证据链：`GET /api/v1/collections/{collection_id}/results/{result_id}`、`GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics?include_grouped_projections=true`
-- 图谱与 GraphML：`GET /api/v1/collections/{collection_id}/graph`、`GET /api/v1/collections/{collection_id}/graph/nodes/{node_id}/neighbors`、`GET /api/v1/collections/{collection_id}/graphml`
-- 图谱 drilldown 详情：`GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`、`GET /api/v1/collections/{collection_id}/evidence/{evidence_id}`、`GET /api/v1/collections/{collection_id}/comparisons/{row_id}`
-- 图谱聚合节点 drilldown：回到 `GET /api/v1/collections/{collection_id}/comparisons`，并使用 `material_system_normalized`、`property_normalized`、`test_condition_normalized`、`baseline_normalized` 过滤参数
+- 文档与 Source 核验：`GET /api/v1/collections/{collection_id}/documents/profiles`、
+  `GET /api/v1/collections/{collection_id}/documents/{document_id}/profile`、
+  `GET /api/v1/collections/{collection_id}/documents/{document_id}/content`、
+  `GET /api/v1/collections/{collection_id}/documents/{document_id}/markdown`
 - Collection-bound Research Agent：`POST /api/v1/chat-sessions`、
   `GET /api/v1/chat-sessions/{session_id}`、
   `GET|POST /api/v1/chat-sessions/{session_id}/messages`、
@@ -47,13 +47,8 @@
 - 遗留调试入口已从浏览器产品流程中退役
 - `frontend/nginx.conf` 只代理 `/api/` 到 `backend:8010`
 - collection workspace 与首页统一把任务启动视为 `build`，不再向浏览器公开旧的 `/tasks/index` 合同
-- 前端主合同不再依赖 `sections_ready` 或 `graphml_ready`；GraphML 导出能力统一看 `capabilities.can_download_graphml`
-- 集合图谱页使用 `Cytoscape.js` 在浏览器端本地布局；邻域扩展保留已有节点位置并只对新增节点做增量重排，不依赖服务端坐标
-- 集合图谱页默认使用前端 overview 投影：画布收起 `comparison / evidence`
-  细节点，展示 `document`、`material`、`property`、`process`、`variant`、
-  `test_condition`、`baseline`、`unknown` 结构节点，并用聚合边表达文献、材料、性能和上下文之间的 collection-level 导航关系
-- 单个材料的细粒度样品、工艺变量、性能、发现和证据关系由
-  `/collections/{collection_id}/materials/{material_id}` 材料档案内的 material-scoped graph 承载；集合图谱只提供进入材料档案的导航入口
+- task artifact registry 只报告 Source 构建产物；文档画像和 Objective
+  readiness 由 workspace 从各自领域仓储读取
 - `/collections/{collection_id}/objectives` 和
   `/collections/{collection_id}/objectives/{objective_id}` 是 objective-first
   工作区入口；确认、分析、Findings 复核、数据集、Assistant focus 和实验方案都使用同一个
@@ -63,12 +58,19 @@
   自动执行并将结构化结果与最终回答分开显示；Core 写入停在持久化的精确参数审批点。
   Chat 是会话、消息、capability 轨迹和审批的唯一运行时权威，但不拥有 Objective、
   Evidence、Finding 或 Analysis 真值。Objective 链接仅指向 Core 的规范记录。
+- `/collections/{collection_id}/comparisons` 只读取已发布 Objective analysis
+  的 Findings；它不读取或重建旧 comparison row、Evidence Card、Materials
+  或 Graph 投影
+- `/collections/{collection_id}/documents/{document_id}` 只展示解析后的 Source
+  内容，并通过 `source_ref` 与页码完成精确核验
 - 报告结果不再是当前浏览器主流程；frontend 不再维护 reports API 客户端或工作区占位入口
-- 遗留调试页 `/upload`、`/index`、`/configs`、`/export` 已从前端路由中移除；
+- 遗留 Graph、Materials、Results、Evidence Cards、`research-view` 以及调试页
+  `/upload`、`/index`、`/configs`、`/export` 已从前端路由中移除；
   产品入口统一收敛到 collection workspace 和 `/api/docs`
 
 ## 验收重点
 
 - Network 面板中的产品请求只出现 `/api/v1/*` 与 `/api/*`
-- 首页、集合工作区、文件上传、任务轮询、图谱、证据和比较都通过同源入口工作
+- 首页、集合工作区、文件上传、任务轮询、Objective、Published Findings、
+  ObjectiveEvidence 与 Source 核验都通过同源入口工作
 - 浏览器中的 API 文档入口固定为 `/api/docs`

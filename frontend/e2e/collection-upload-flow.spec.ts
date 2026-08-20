@@ -84,74 +84,71 @@ function workspacePayload(uploadedFiles: UploadedFile[], activeTask: BuildTask |
 			status: ready ? 'ready' : processing ? 'processing' : collectionPayload(fileCount).status
 		},
 		file_count: fileCount,
-		status_summary: ready ? 'ready' : processing ? 'processing' : fileCount > 0 ? 'ready_to_process' : 'empty',
+		status_summary: ready
+			? 'ready'
+			: processing
+				? 'processing'
+				: fileCount > 0
+					? 'ready_to_process'
+					: 'empty',
 		workflow: {
-			documents: ready ? 'ready' : processing ? 'processing' : 'not_started',
-			results: ready ? 'ready' : processing ? 'processing' : 'not_started',
-			evidence: ready ? 'ready' : processing ? 'processing' : 'not_started',
-			comparisons: ready ? 'ready' : processing ? 'processing' : 'not_started'
+			documents: {
+				status: ready ? 'ready' : processing ? 'processing' : 'not_started',
+				detail: ready ? 'Document profiles are available.' : 'Document profiling is pending.'
+			},
+			objectives: {
+				status: ready ? 'ready' : processing ? 'processing' : 'not_started',
+				detail: ready ? 'Objective discovery is complete.' : 'Objective discovery is pending.'
+			}
 		},
 		document_summary: {
 			total_documents: fileCount,
-			doc_type_counts: { experimental: 0, review: 0, mixed: 0, uncertain: fileCount },
-			warnings: []
+			by_doc_type: { experimental: 0, review: 0, mixed: 0, uncertain: fileCount }
 		},
 		warnings: [],
 		artifacts: {
-			documents_ready: ready,
+			source_documents_ready: ready,
 			document_profiles_ready: ready,
-			evidence_cards_ready: ready,
-			comparable_results_ready: ready,
-			collection_comparable_results_ready: ready,
-			comparison_rows_ready: ready,
-			graph_ready: false,
-			graph_stale: false,
+			objective_candidates_ready: ready,
 			updated_at: '2026-05-14T00:00:00Z'
 		},
 		latest_task: activeTask,
 		recent_tasks: activeTask ? [activeTask] : [],
 		capabilities: {
 			can_view_documents: ready,
-			can_view_results: ready,
-			can_view_evidence: ready,
-			can_view_comparisons: ready,
-			can_view_graph: false,
-			can_download_graphml: false
+			can_view_objectives: ready,
+			can_view_comparisons: ready
 		},
 		links: {
 			workspace: `/collections/${collectionId}`,
 			documents: `/collections/${collectionId}/documents`,
-			results: `/collections/${collectionId}/results`,
-			evidence: `/collections/${collectionId}/evidence`,
-			comparisons: `/collections/${collectionId}/comparisons`,
-			graph: `/collections/${collectionId}/graph`
+			objectives: `/collections/${collectionId}/objectives`,
+			comparisons: `/collections/${collectionId}/comparisons`
 		}
 	};
 }
 
-function researchViewPayload(uploadedFiles: UploadedFile[]) {
+function objectivePayload(ready: boolean) {
 	return {
 		collection_id: collectionId,
-		state: 'ready',
-		overview: {
-			document_count: uploadedFiles.length,
-			sample_count: 1,
-			measurement_count: 1,
-			evidence_count: 1,
-			material_systems: ['316L stainless steel'],
-			process_families: ['LPBF'],
-			variable_axes: ['heat treatment'],
-			measured_properties: ['yield strength'],
-			coverage_quality: 'ready'
-		},
-		materials: [],
-		paper_coverage: [],
-		comparable_groups: [],
-		cross_paper_matrices: [],
-		trend_series: [],
-		evidence_links: {},
-		debug_links: {},
-		warnings: []
+		objectives: ready
+			? [
+					{
+						collection_id: collectionId,
+						objective_id: 'obj_upload',
+						question: 'How does heat treatment affect LPBF 316L yield strength?',
+						material_scope: ['316L stainless steel'],
+						variables: ['heat treatment'],
+						outcomes: ['yield strength'],
+						mechanisms: [],
+						constraints: [],
+						seed_document_ids: ['doc_1'],
+						excluded_document_ids: [],
+						confidence: 0.8,
+						confirmation_status: 'candidate'
+					}
+				]
+			: []
 	};
 }
 
@@ -185,10 +182,16 @@ async function mockUploadApis(page: Page) {
 		if (path === `/api/v1/collections/${collectionId}/workspace`) {
 			return route.fulfill(json(workspacePayload(uploadedFiles, activeTask)));
 		}
-		if (path === `/api/v1/collections/${collectionId}/files` && route.request().method() === 'GET') {
+		if (
+			path === `/api/v1/collections/${collectionId}/files` &&
+			route.request().method() === 'GET'
+		) {
 			return route.fulfill(json({ count: uploadedFiles.length, items: uploadedFiles }));
 		}
-		if (path === `/api/v1/collections/${collectionId}/files` && route.request().method() === 'POST') {
+		if (
+			path === `/api/v1/collections/${collectionId}/files` &&
+			route.request().method() === 'POST'
+		) {
 			const nextFile: UploadedFile = {
 				file_id: `file_${uploadedFiles.length + 1}`,
 				collection_id: collectionId,
@@ -215,11 +218,8 @@ async function mockUploadApis(page: Page) {
 			activeTask = taskPollCount >= 2 ? taskPayload('completed', 100) : taskPayload('running', 42);
 			return route.fulfill(json(activeTask));
 		}
-		if (path === `/api/v1/collections/${collectionId}/research-view`) {
-			if (activeTask?.status === 'completed') {
-				return route.fulfill(json(researchViewPayload(uploadedFiles)));
-			}
-			return route.fulfill(json({ detail: 'research view not generated yet' }, 404));
+		if (path === `/api/v1/collections/${collectionId}/objectives`) {
+			return route.fulfill(json(objectivePayload(activeTask?.status === 'completed')));
 		}
 
 		return route.fulfill(json({ detail: `unhandled test route: ${path}` }, 404));
@@ -234,7 +234,9 @@ async function expectNoHorizontalOverflow(page: Page) {
 	expect(hasOverflow).toBe(false);
 }
 
-test('collection upload flow exposes the next usable workspace state', async ({ page }, testInfo) => {
+test('collection upload flow exposes the next usable workspace state', async ({
+	page
+}, testInfo) => {
 	await page.emulateMedia({ reducedMotion: 'reduce' });
 	await mockUploadApis(page);
 
@@ -247,7 +249,9 @@ test('collection upload flow exposes the next usable workspace state', async ({ 
 	await page.getByRole('button', { name: 'Create', exact: true }).click();
 
 	await expect(page).toHaveURL(`/collections/${collectionId}`);
-	await expect(page.getByRole('heading', { name: 'This collection has no documents yet' })).toBeVisible();
+	await expect(
+		page.getByRole('heading', { name: 'This collection has no documents yet' })
+	).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Add papers to this collection' })).toBeVisible();
 	await expectNoHorizontalOverflow(page);
 	await page.screenshot({
@@ -268,7 +272,9 @@ test('collection upload flow exposes the next usable workspace state', async ({ 
 
 	await page.locator('#upload').getByRole('button', { name: 'Upload' }).click();
 	await expect(page.getByText('Upload complete', { exact: true })).toBeVisible();
-	await expect(page.getByRole('heading', { name: 'Collection is waiting for processing' })).toBeVisible();
+	await expect(
+		page.getByRole('heading', { name: 'Collection is waiting for processing' })
+	).toBeVisible();
 	await expect(page.getByRole('button', { name: 'Start processing' }).first()).toBeEnabled();
 	await expect(page.getByText('1 document(s)').first()).toBeVisible();
 	await expect(page.getByText('1 document(s) uploaded')).toBeVisible();
@@ -285,11 +291,12 @@ test('collection upload flow exposes the next usable workspace state', async ({ 
 	await expect(page.getByRole('heading', { name: 'Collection is processing' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Processing in progress' })).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Enter comparison' })).toHaveCount(0);
-	await expect(page.locator('.collection-meta-row').getByText('Processing')).toBeVisible();
 	await expect(page.getByText('Estimated progress')).toBeVisible();
 	await expect(page.getByText('8%')).toBeVisible();
 	await expect(page.locator('#upload').getByRole('button', { name: 'Upload' })).toBeDisabled();
-	await expect(page.locator('#upload').getByRole('button', { name: 'Start processing' })).toBeDisabled();
+	await expect(
+		page.locator('#upload').getByRole('button', { name: 'Start processing' })
+	).toBeDisabled();
 	await expect(page.locator('#upload .dropzone')).toHaveAttribute('aria-disabled', 'true');
 	await page.waitForTimeout(2600);
 	await expect(page.getByText('42%')).toBeVisible();
@@ -304,11 +311,10 @@ test('collection upload flow exposes the next usable workspace state', async ({ 
 	await expect(page.locator('.collection-meta-row').getByText('Complete')).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Enter objectives' }).first()).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Trust reminder' })).toBeVisible();
-	await expect(page.getByRole('heading', { name: 'Research overview' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Processing pipeline' })).toBeVisible();
 	await expect(page.getByRole('heading', { name: 'Add papers to this collection' })).toHaveCount(0);
-	await expect(page.locator('.check-list li.complete').filter({ hasText: 'Document parsing complete' })).toBeVisible();
-	await expect(page.locator('.check-list li.complete').filter({ hasText: 'Evidence extraction complete' })).toBeVisible();
-	await expect(page.locator('.check-list li.complete').filter({ hasText: 'Comparison view available' })).toBeVisible();
+	await expect(page.getByText('Document profiling', { exact: true })).toBeVisible();
+	await expect(page.getByText('Objective discovery', { exact: true })).toBeVisible();
 	await expect(page.getByText('100%')).toBeVisible();
 	await expectNoHorizontalOverflow(page);
 	await page.screenshot({

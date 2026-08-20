@@ -17,9 +17,6 @@ BACKEND_ROOT = Path(__file__).resolve().parents[3]
 
 def _app_repository_dependencies(auth_session_service) -> dict[str, object]:
     from infra.persistence.postgres.chat_repository import PostgresChatRepository
-    from infra.persistence.postgres.comparison_repository import (
-        PostgresComparisonRepository,
-    )
     from infra.persistence.postgres.experiment_plan_repository import (
         PostgresExperimentPlanRepository,
     )
@@ -43,7 +40,6 @@ def _app_repository_dependencies(auth_session_service) -> dict[str, object]:
         ),
         "paper_fact_repository": PostgresPaperFactRepository(session_factory),
         "objective_repository": PostgresObjectiveRepository(session_factory),
-        "comparison_repository": PostgresComparisonRepository(session_factory),
         "finding_review_repository": PostgresFindingReviewRepository(session_factory),
         "experiment_plan_repository": PostgresExperimentPlanRepository(
             session_factory
@@ -160,14 +156,11 @@ def test_app_lifespan_composes_one_shared_collection_service(
         collection_service = state.collection_service
         collection_consumers = (
             state.build_pipeline_service,
-            state.comparison_service,
             state.document_markdown_service,
             state.document_profile_service,
             state.goal_service,
             state.chat_session_service,
-            state.paper_facts_service,
             state.research_objective_service,
-            state.research_view_service,
             state.workspace_service,
             state.objective_analysis_service.research_objective_service,
         )

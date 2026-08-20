@@ -6,9 +6,9 @@ This node owns browser-side helpers shared across frontend routes.
 
 - keep requests on the same-origin `/api/*` and `/api/v1/*` contract;
 - centralize authentication expiry and API error handling;
-- expose typed clients for collection, Source, Core, Objective, comparison,
+- expose typed clients for collection, Source, Objective/Finding,
   assistant, and workspace resources;
-- keep formatting, translations, graph projection, and task-state shaping out
+- keep formatting, translations, and task-state shaping out
   of route components.
 
 ## Important Files
@@ -18,13 +18,10 @@ This node owns browser-side helpers shared across frontend routes.
 - `collections.ts`, `files.ts`, `tasks.ts`
   Collection import, build, and progress contracts.
 - `researchView.ts`
-  Material/document aggregation plus the canonical Objective API client. The
-  Objective flow reads summary/analysis state, paginated Findings, one Finding
-  detail, and paginated versioned Evidence. Feedback, curation, and dataset
-  export use only `(collection_id, objective_id, analysis_version, finding_id)`.
-- `graph.ts`
-  Browser graph projection for Objective, document, Evidence, comparison,
-  material, property, test-condition, and baseline nodes.
+  Canonical Objective/Finding API client. The Objective flow reads
+  summary/analysis state, paginated Findings, one Finding detail, and paginated
+  versioned Evidence. Feedback, curation, and dataset export use only
+  `(collection_id, objective_id, analysis_version, finding_id)`.
 - `chatSessions.ts`
   Collection-bound Research Agent sessions, typed trajectories, capability
   results, and exact write decisions.

@@ -295,21 +295,6 @@ const translations: Record<Language, Translations> = {
 				missing: 'Missing',
 				conflicted: 'Conflicted'
 			},
-			overview: {
-				title: 'Research overview',
-				body: 'Aggregated view of papers, samples, variables, properties, and evidence readiness.',
-				pendingTitle: 'Research aggregation is not ready',
-				pendingBody:
-					'The collection is processed, but the research aggregation view is not available. Finish processing or retry the research-view build.',
-				documents: 'Documents',
-				samples: 'Samples',
-				measurements: 'Measurements',
-				evidence: 'Evidence',
-				materials: 'Materials',
-				processes: 'Processes',
-				variables: 'Variables',
-				properties: 'Properties'
-			},
 			materials: {
 				title: 'Materials',
 				body: 'Canonical materials detected in this collection, with paper coverage, sample counts, measured properties, and evidence status.',
@@ -530,80 +515,48 @@ const translations: Record<Language, Translations> = {
 			},
 			documents: {
 				title: 'Documents',
-				directBody:
-					'Review each paper by contribution readiness, extracted facts, and source access.',
-				loading: 'Loading paper coverage...',
-				errorTitle: 'Paper coverage is unavailable',
-				emptyTitle: 'No paper coverage rows',
-				emptyBody:
-					'The research-view endpoint returned no paper coverage rows for this collection.',
-				refresh: 'Refresh coverage',
+				profileLead: 'Open parsed papers and verify exact Source text used by published Findings.',
+				profileLoading: 'Loading parsed papers...',
+				profileErrorTitle: 'Parsed papers are unavailable',
+				profileEmptyTitle: 'No parsed papers yet',
+				profileEmptyBody: 'Process the uploaded collection before opening paper Sources.',
+				profileConfidence: 'Profile confidence {value}%',
+				pageCount: '{count} pages',
 				documentCount: '{count} paper(s)',
-				document: 'Paper',
-				coverageTitle: 'Paper coverage',
-				factCoverageTitle: 'Fact coverage',
-				coverageReady: 'Paper coverage is ready for review.',
-				coverageFailed: 'This paper failed during research-view aggregation.',
-				coverageNoEvidence: 'No extracted evidence is available for this paper yet.',
-				coverageNeedsConditions:
-					'Measurements are available, but test-condition evidence still needs review.',
-				tableTitle: 'Paper review list',
 				shortId: 'Short ID',
 				untitledPaper: 'Paper {number}',
-				state: 'State',
-				processParams: 'Process params',
-				conditions: 'Conditions',
-				evidence: 'Evidence',
-				issues: 'Issues',
-				openPaper: 'Open paper',
-				next: 'Next',
-				issueCount: '{count} issue(s)',
-				noIssues: 'No issues'
+				openPaper: 'Open paper'
 			},
 			comparison: {
-				title: 'All comparisons',
+				eyebrow: 'Published analysis',
+				title: 'Cross-paper findings',
 				directBody:
-					'Advanced browser for comparable groups and cross-paper matrices built by the research-view aggregation layer.',
-				loading: 'Loading research comparison...',
-				errorTitle: 'Research comparison is unavailable',
-				pendingTitle: 'Comparison artifacts are not ready',
-				pendingBody:
-					'Paper coverage is available, but comparable groups need generated comparison artifacts before this page can be used.',
-				emptyTitle: 'No comparable groups',
-				emptyBody: 'The research-view endpoint returned no comparable groups for this collection.',
-				refresh: 'Refresh comparison',
-				openOverview: 'Open collection overview',
-				groupCount: '{count} group(s)',
-				groups: 'Comparable groups',
-				variableAxis: 'Variable axis',
-				fixedConditions: 'Fixed conditions',
-				material: 'Material',
-				process: 'Process',
-				properties: 'Properties',
-				documents: 'Documents',
-				samples: 'Samples',
-				variableValue: 'Variable value',
-				testCondition: 'Test condition',
-				result: 'Result',
-				evidence: 'Evidence',
-				emptyMatrix: 'This group does not have matrix rows yet.',
-				status: {
-					comparable: 'Comparable',
-					limited: 'Limited',
-					blocked: 'Blocked'
+					'Review conclusions synthesized from published Objective analyses, then open the exact Evidence and Sources behind each Finding.',
+				loading: 'Loading published findings...',
+				errorTitle: 'Published findings are unavailable',
+				retry: 'Retry',
+				emptyTitle: 'No published findings yet',
+				emptyBody:
+					'Confirm and analyze a research objective first. Only published Findings with traceable Evidence appear here.',
+				openObjectives: 'Open research objectives',
+				summaryLabel: 'Published finding summary',
+				findingsCount: 'published findings',
+				publishedObjectiveCount: 'Across {count} analyzed objective(s)',
+				partialError: '{count} published objective(s) could not be loaded. Available Findings remain visible.',
+				objectiveLabel: 'Research objective',
+				materialScope: 'Material scope',
+				factors: 'Factors',
+				outcome: 'Outcome',
+				limitations: 'Limitations',
+				certainty: '{value}% certainty',
+				supportingPapers: '{count} supporting papers',
+				reviewEvidence: 'Review finding evidence',
+				synthesis: {
+					agreement: 'Agreement',
+					conflict: 'Conflict',
+					condition_dependent: 'Condition dependent',
+					insufficient_confirmation: 'Needs confirmation'
 				}
-			},
-			sampleMatrix: {
-				title: 'Sample matrix',
-				sample: 'Sample'
-			},
-			conditionSeries: {
-				title: 'Condition series'
-			},
-			paper: {
-				title: 'Paper research view',
-				unavailableTitle: 'Paper research view is unavailable',
-				unavailableBody: 'The paper aggregation endpoint is required for this page.'
 			},
 			evidence: {
 				title: 'Evidence detail',
@@ -637,15 +590,15 @@ const translations: Record<Language, Translations> = {
 				},
 				processing: {
 					title: 'Collection is processing',
-					body: 'Document parsing, evidence extraction, or comparison generation is still running. Comparison and graph views become useful after processing completes.'
+					body: 'Document profiling or research objective discovery is still running. Objective analysis starts only after a researcher confirms a candidate.'
 				},
 				ready_to_process: {
 					title: 'Collection is waiting for processing',
-					body: 'Documents are uploaded, but Lens still needs to parse them, extract evidence, and prepare comparison results.'
+					body: 'Documents are uploaded, but Lens still needs to profile them and discover candidate research objectives.'
 				},
 				empty: {
 					title: 'This collection has no documents yet',
-					body: 'Upload papers or technical documents, then Lens will prepare parsing, evidence extraction, and comparison readiness.'
+					body: 'Upload papers or technical documents, then Lens will profile them and discover candidate research objectives.'
 				},
 				failed: {
 					title: 'Processing ran into a problem',
@@ -671,10 +624,8 @@ const translations: Record<Language, Translations> = {
 				title: 'Processing pipeline',
 				steps: {
 					upload: 'Document upload',
-					parse: 'Document parsing',
-					evidence: 'Reusable paper evidence',
-					comparisons: 'Comparison generation',
-					graph: 'Graph construction'
+					documents: 'Document profiling',
+					objectives: 'Objective discovery'
 				},
 				statuses: {
 					completed: 'Completed',
@@ -687,10 +638,8 @@ const translations: Record<Language, Translations> = {
 				currentStatus: {
 					title: 'Current status',
 					uploaded: '{count} document(s) uploaded',
-					parsed: 'Document parsing complete',
-					evidence: 'Reusable paper evidence available',
-					comparison: 'Comparison view available',
-					graph: 'Graph construction pending',
+					parsed: 'Document profiles available',
+					objectives: 'Objective discovery complete',
 					logs: 'View processing log'
 				},
 				trust: {
@@ -2562,20 +2511,6 @@ const translations: Record<Language, Translations> = {
 				missing: '缺失',
 				conflicted: '冲突'
 			},
-			overview: {
-				title: '研究概览',
-				body: '按文献、样品、变量、性能和证据状态聚合后的视图。',
-				pendingTitle: '研究聚合视图尚未就绪',
-				pendingBody: '集合已经处理完成，但研究聚合视图不可用。请完成或重试 research-view 构建。',
-				documents: '文档',
-				samples: '样品',
-				measurements: '性能结果',
-				evidence: '证据',
-				materials: '材料体系',
-				processes: '工艺',
-				variables: '变量',
-				properties: '性能'
-			},
 			materials: {
 				title: '材料',
 				body: '集合中识别出的规范材料，包含文献覆盖、样品数量、已测性能和证据状态。',
@@ -2789,75 +2724,46 @@ const translations: Record<Language, Translations> = {
 			},
 			documents: {
 				title: '文档',
-				directBody: '按贡献成熟度、已抽取事实和来源入口审阅每篇文献。',
-				loading: '正在加载文献覆盖...',
-				errorTitle: '文献覆盖不可用',
-				emptyTitle: '暂无文献覆盖行',
-				emptyBody: 'research-view 接口没有返回该集合的文献覆盖结果。',
-				refresh: '刷新覆盖',
+				profileLead: '打开已解析论文，核对 Published Finding 使用的精确 Source 原文。',
+				profileLoading: '正在加载已解析论文...',
+				profileErrorTitle: '无法加载已解析论文',
+				profileEmptyTitle: '尚无已解析论文',
+				profileEmptyBody: '请先处理已上传的集合，再打开论文 Source。',
+				profileConfidence: '文献画像置信度 {value}%',
+				pageCount: '{count} 页',
 				documentCount: '{count} 篇文献',
-				document: '文献',
-				coverageTitle: '文献覆盖',
-				factCoverageTitle: '事实覆盖',
-				coverageReady: '文献覆盖结果可查看。',
-				coverageFailed: '该文献的 research-view 聚合失败。',
-				coverageNoEvidence: '该文献暂未抽到可用证据。',
-				coverageNeedsConditions: '已抽到测量结果，但测试条件证据仍需审查。',
-				tableTitle: '文献审阅列表',
 				shortId: '短 ID',
 				untitledPaper: '文献 {number}',
-				state: '状态',
-				processParams: '工艺参数',
-				conditions: '条件',
-				evidence: '证据',
-				issues: '问题',
-				openPaper: '打开文献',
-				next: '下一步',
-				issueCount: '{count} 个问题',
-				noIssues: '无明显问题'
+				openPaper: '打开文献'
 			},
 			comparison: {
-				title: '全部比较',
-				directBody: '高级浏览入口，用于查看 research-view 聚合层生成的可比较组和跨文献矩阵。',
-				loading: '正在加载研究比较...',
-				errorTitle: '研究比较不可用',
-				pendingTitle: '比较产物尚未生成',
-				pendingBody: '文献覆盖已经可用，但该页面需要先生成比较产物，才能查看可比较组。',
-				emptyTitle: '暂无可比较组',
-				emptyBody: 'research-view 接口没有返回该集合的可比较组。',
-				refresh: '刷新比较',
-				openOverview: '打开集合概览',
-				groupCount: '{count} 个比较组',
-				groups: '可比较组',
-				variableAxis: '变化变量',
-				fixedConditions: '固定条件',
-				material: '材料',
-				process: '工艺',
-				properties: '性能',
-				documents: '文档',
-				samples: '样品',
-				variableValue: '变量值',
-				testCondition: '测试条件',
-				result: '结果',
-				evidence: '证据',
-				emptyMatrix: '这个比较组还没有矩阵行。',
-				status: {
-					comparable: '可比较',
-					limited: '有限可比',
-					blocked: '暂不应比较'
+				eyebrow: '已发布分析',
+				title: '跨文献 Findings',
+				directBody: '审阅已发布 Objective 分析形成的结论，并进入每条 Finding 的原文证据与 Source。',
+				loading: '正在加载已发布 Findings...',
+				errorTitle: '无法加载已发布 Findings',
+				retry: '重试',
+				emptyTitle: '尚无已发布 Finding',
+				emptyBody: '请先确认并分析研究目标。这里只展示具有可追溯 Evidence 的已发布 Finding。',
+				openObjectives: '打开研究目标',
+				summaryLabel: '已发布 Finding 概览',
+				findingsCount: '条已发布 Findings',
+				publishedObjectiveCount: '来自 {count} 个已分析目标',
+				partialError: '有 {count} 个已发布目标加载失败；其余可用 Findings 仍保留显示。',
+				objectiveLabel: '研究目标',
+				materialScope: '材料范围',
+				factors: '影响因素',
+				outcome: '结果指标',
+				limitations: '限制',
+				certainty: '确定性 {value}%',
+				supportingPapers: '{count} 篇支持文献',
+				reviewEvidence: '审阅 Finding 证据',
+				synthesis: {
+					agreement: '多文献一致',
+					conflict: '文献冲突',
+					condition_dependent: '条件依赖',
+					insufficient_confirmation: '证据待确认'
 				}
-			},
-			sampleMatrix: {
-				title: '样品矩阵',
-				sample: '样品'
-			},
-			conditionSeries: {
-				title: '条件序列'
-			},
-			paper: {
-				title: '文献研究视图',
-				unavailableTitle: '文献研究视图不可用',
-				unavailableBody: '该页面需要单篇文献 research-view 聚合接口。'
 			},
 			evidence: {
 				title: '证据详情',
@@ -2891,15 +2797,15 @@ const translations: Record<Language, Translations> = {
 				},
 				processing: {
 					title: '集合正在处理中',
-					body: '文档解析、证据提取或比较结果生成仍在进行中。完成后即可进入比较和图谱视图。'
+					body: '文档画像或研究目标发现仍在进行中。研究者确认候选目标后，系统才会开始目标级分析。'
 				},
 				ready_to_process: {
 					title: '集合等待处理',
-					body: '文档已经上传，但 Lens 还需要完成解析、证据提取与比较结果准备。'
+					body: '文档已经上传，但 Lens 还需要生成文档画像并发现候选研究目标。'
 				},
 				empty: {
 					title: '集合还没有文档',
-					body: '上传论文或技术文档后，Lens 会进行解析、证据提取与比较准备。'
+					body: '上传论文或技术文档后，Lens 会生成文档画像并发现候选研究目标。'
 				},
 				failed: {
 					title: '处理遇到问题',
@@ -2925,10 +2831,8 @@ const translations: Record<Language, Translations> = {
 				title: '处理流程',
 				steps: {
 					upload: '文档上传',
-					parse: '文档解析',
-					evidence: '可复用的论文证据',
-					comparisons: '比较结果生成',
-					graph: '图谱构建'
+					documents: '文档画像',
+					objectives: '研究目标发现'
 				},
 				statuses: {
 					completed: '已完成',
@@ -2941,10 +2845,8 @@ const translations: Record<Language, Translations> = {
 				currentStatus: {
 					title: '当前状态',
 					uploaded: '{count} 篇文档已上传',
-					parsed: '文档解析完成',
-					evidence: '可复用的论文证据可用',
-					comparison: '比较视图可用',
-					graph: '图谱构建待生成',
+					parsed: '文档画像可用',
+					objectives: '研究目标发现完成',
 					logs: '查看处理日志'
 				},
 				trust: {

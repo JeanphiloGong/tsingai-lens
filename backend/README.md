@@ -1,14 +1,14 @@
 # TsingAI-Lens Backend
 
 FastAPI backend for collection ingestion, indexing orchestration, workspace
-assembly, evidence/comparison browsing, graph browsing, and the browser-facing
-API contract.
+assembly, Objective analysis, published Finding review, Source verification,
+and the browser-facing API contract.
 
 ## Module Purpose
 
 The backend owns collection-oriented ingestion, indexing orchestration,
-workspace state, artifact generation, evidence/comparison retrieval, and the
-browser-facing API contract.
+workspace state, Source artifact generation, Objective/Finding retrieval, and
+the browser-facing API contract.
 
 This file is the backend module entry page. Formal backend source-of-truth docs
 live in `backend/docs/`. Narrower ownership seams use local `README.md` files
@@ -92,8 +92,7 @@ uvicorn main:app --reload --port 8010
 ## Notes
 
 - The current Lens v1 backbone order is
-  `document_profiles -> paper facts family -> comparison_rows /
-  evidence_cards`.
+  `Source -> Objective -> published analysis -> Finding -> ObjectiveEvidence`.
 - Collection-facing `/api/v1/*` surfaces are currently hosted through
   `controllers/source/*`, `controllers/core/*`, `controllers/derived/*`, and
   `controllers/goal/*`.

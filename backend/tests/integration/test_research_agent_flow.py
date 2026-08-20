@@ -150,7 +150,6 @@ def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         source_artifact_repository=object(),
         paper_fact_repository=object(),
         objective_repository=objective_repository,
-        comparison_repository=object(),
         finding_review_repository=object(),
         experiment_plan_repository=object(),
         chat_session_service=chat_service,

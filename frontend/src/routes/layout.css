@@ -450,13 +450,6 @@ textarea {
   gap: 48px;
 }
 
-.page--wide {
-  width: min(1800px, 100%);
-  max-width: none;
-  margin-top: 20px;
-  gap: 16px;
-}
-
 .empty-state {
   text-align: center;
 }

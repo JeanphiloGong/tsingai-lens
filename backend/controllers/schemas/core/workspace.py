@@ -12,158 +12,78 @@ WorkflowStageStatus = Literal[
     "not_started",
     "processing",
     "ready",
-    "limited",
-    "not_applicable",
     "failed",
 ]
 
 
 class WorkspaceArtifactStatusResponse(BaseModel):
-    """Collection-scoped artifact readiness summary."""
+    """Readiness of the maintained collection-build outputs."""
 
-    documents_generated: bool = Field(default=False, description="documents 是否已生成")
-    documents_ready: bool = Field(default=False, description="documents 是否已生成且非空")
-    document_profiles_generated: bool = Field(default=False, description="document_profiles 是否已生成")
-    document_profiles_ready: bool = Field(default=False, description="document_profiles 是否已生成且非空")
-    evidence_anchors_generated: bool = Field(default=False, description="evidence_anchors 是否已生成")
-    evidence_anchors_ready: bool = Field(default=False, description="evidence_anchors 是否已生成且非空")
-    method_facts_generated: bool = Field(default=False, description="method_facts 是否已生成")
-    method_facts_ready: bool = Field(default=False, description="method_facts 是否已生成且非空")
-    evidence_cards_generated: bool = Field(default=False, description="evidence_cards 是否已生成")
-    evidence_cards_ready: bool = Field(default=False, description="evidence_cards 是否已生成且非空")
-    characterization_observations_generated: bool = Field(default=False, description="characterization_observations 是否已生成")
-    characterization_observations_ready: bool = Field(default=False, description="characterization_observations 是否已生成且非空")
-    structure_features_generated: bool = Field(default=False, description="structure_features 是否已生成")
-    structure_features_ready: bool = Field(default=False, description="structure_features 是否已生成且非空")
-    test_conditions_generated: bool = Field(default=False, description="test_conditions 是否已生成")
-    test_conditions_ready: bool = Field(default=False, description="test_conditions 是否已生成且非空")
-    baseline_references_generated: bool = Field(default=False, description="baseline_references 是否已生成")
-    baseline_references_ready: bool = Field(default=False, description="baseline_references 是否已生成且非空")
-    sample_variants_generated: bool = Field(default=False, description="sample_variants 是否已生成")
-    sample_variants_ready: bool = Field(default=False, description="sample_variants 是否已生成且非空")
-    measurement_results_generated: bool = Field(default=False, description="measurement_results 是否已生成")
-    measurement_results_ready: bool = Field(default=False, description="measurement_results 是否已生成且非空")
-    comparable_results_generated: bool = Field(default=False, description="comparable_results 是否已生成")
-    comparable_results_ready: bool = Field(default=False, description="comparable_results 是否已生成且非空")
-    collection_comparable_results_generated: bool = Field(default=False, description="collection_comparable_results 是否已生成")
-    collection_comparable_results_ready: bool = Field(default=False, description="collection_comparable_results 是否已生成且非空")
-    collection_comparable_results_stale: bool = Field(
-        default=False,
-        description="collection_comparable_results 是否已因 policy/version drift 而过期",
-    )
-    comparison_rows_generated: bool = Field(default=False, description="comparison_rows 是否已生成")
-    comparison_rows_ready: bool = Field(default=False, description="comparison_rows 是否已生成且非空")
-    comparison_rows_stale: bool = Field(
-        default=False,
-        description="comparison_rows 是否因上游 scope artifact 过期而失效",
-    )
-    graph_generated: bool = Field(default=False, description="Core graph 所需 backbone 与 comparison semantic 输入是否均已生成")
-    graph_ready: bool = Field(default=False, description="Core graph 视图是否可按需投影")
-    graph_stale: bool = Field(
-        default=False,
-        description="Core graph 语义输入是否因 collection scope artifact 过期而不再 current",
-    )
-    blocks_generated: bool = Field(default=False, description="blocks 是否已生成")
-    blocks_ready: bool = Field(default=False, description="blocks 是否已生成且非空")
-    figures_generated: bool = Field(default=False, description="figures 是否已生成")
-    figures_ready: bool = Field(default=False, description="figures 是否已生成且非空")
-    table_rows_generated: bool = Field(default=False, description="table_rows 是否已生成")
-    table_rows_ready: bool = Field(default=False, description="table_rows 是否已生成且非空")
-    table_cells_generated: bool = Field(default=False, description="table_cells 是否已生成")
-    table_cells_ready: bool = Field(default=False, description="table_cells 是否已生成且非空")
-    updated_at: str = Field(..., description="更新时间")
-
-
-class WorkspaceCapabilitiesResponse(BaseModel):
-    """Feature gates exposed to the frontend workspace."""
-
-    can_view_graph: bool = Field(default=False, description="是否可查看图谱")
-    can_view_results: bool = Field(default=False, description="是否可查看 collection 结果页")
-    can_view_comparable_results: bool = Field(
-        default=False,
-        description="是否可查看 collection-filtered corpus comparable results",
-    )
-    can_view_research_view: bool = Field(default=False, description="是否可查看 research view 聚合")
-    can_download_graphml: bool = Field(default=False, description="是否可导出 GraphML")
+    source_documents_ready: bool = False
+    document_profiles_ready: bool = False
+    objective_candidates_ready: bool = False
+    updated_at: str
 
 
 class WorkspaceStageResponse(BaseModel):
-    """Single workflow stage status."""
+    """Readiness of one maintained research step."""
 
-    status: WorkflowStageStatus = Field(..., description="workflow 阶段状态")
-    detail: str | None = Field(default=None, description="状态说明")
+    status: WorkflowStageStatus
+    detail: str
 
 
 class WorkspaceWorkflowResponse(BaseModel):
-    """Primary workflow readiness model for Lens v1."""
+    """Research steps exposed by the collection workspace."""
 
-    documents: WorkspaceStageResponse = Field(..., description="documents 阶段")
-    results: WorkspaceStageResponse = Field(..., description="results 阶段")
-    evidence: WorkspaceStageResponse = Field(..., description="evidence 阶段")
-    comparisons: WorkspaceStageResponse = Field(..., description="comparisons 阶段")
-    graph: WorkspaceStageResponse = Field(..., description="graph 阶段")
+    documents: WorkspaceStageResponse
+    objectives: WorkspaceStageResponse
 
 
 class WorkspaceDocumentSummaryResponse(BaseModel):
-    """Collection-level document rollup."""
+    """Collection-level document profile rollup."""
 
-    total_documents: int = Field(default=0, description="文档总数")
-    by_doc_type: dict[str, int] = Field(default_factory=dict, description="按文档类型统计")
+    total_documents: int = 0
+    by_doc_type: dict[str, int] = Field(default_factory=dict)
 
 
 class WorkspaceWarningResponse(BaseModel):
-    """Collection-facing warning for the workspace."""
+    """Collection-facing warning derived from document profiles."""
 
-    code: str = Field(..., description="稳定 warning code")
-    severity: Literal["info", "warning", "error"] = Field(..., description="警告级别")
-    message: str = Field(..., description="警告说明")
+    code: str
+    severity: Literal["info", "warning", "error"]
+    message: str
+
+
+class WorkspaceCapabilitiesResponse(BaseModel):
+    """Maintained collection surfaces that currently have data."""
+
+    can_view_documents: bool = False
+    can_view_objectives: bool = False
+    can_view_comparisons: bool = False
 
 
 class WorkspaceLinksResponse(BaseModel):
-    """Primary navigation links for the frontend workspace."""
+    """Browser routes for maintained collection surfaces."""
 
-    documents: str | None = Field(default=None, description="documents 主路径")
-    documents_profiles: str | None = Field(default=None, description="documents/profiles 路径")
-    evidence: str | None = Field(default=None, description="evidence 主路径")
-    evidence_cards: str | None = Field(default=None, description="evidence/cards 路径")
-    research_view: str | None = Field(default=None, description="collection research-view 路径")
-    research_materials: str | None = Field(default=None, description="materials research-view 路径")
-    research_material: str | None = Field(default=None, description="material profile 路径模板")
-    research_documents: str | None = Field(
-        default=None,
-        description="document research-view 路径模板",
-    )
-    research_document_materials: str | None = Field(
-        default=None,
-        description="document material summaries 路径模板",
-    )
-    research_document_material: str | None = Field(
-        default=None,
-        description="document material profile 路径模板",
-    )
-    comparisons: str | None = Field(default=None, description="comparisons 路径")
-    results: str | None = Field(default=None, description="results 路径")
-    comparable_results: str | None = Field(
-        default=None,
-        description="comparable-results 路径",
-    )
-    graph: str | None = Field(default=None, description="graph 主路径")
+    workspace: str
+    documents: str
+    objectives: str
+    comparisons: str
 
 
 class WorkspaceOverviewResponse(BaseModel):
     """Top-level collection workspace payload."""
 
-    collection: CollectionResponse = Field(..., description="集合元数据")
-    file_count: int = Field(default=0, description="集合文件数")
-    status_summary: str = Field(..., description="工作区摘要状态")
-    artifacts: WorkspaceArtifactStatusResponse = Field(..., description="产物状态")
-    workflow: WorkspaceWorkflowResponse | None = Field(default=None, description="主 workflow 状态")
+    collection: CollectionResponse
+    file_count: int = 0
+    status_summary: str
+    artifacts: WorkspaceArtifactStatusResponse
+    workflow: WorkspaceWorkflowResponse
     document_summary: WorkspaceDocumentSummaryResponse = Field(
-        default_factory=WorkspaceDocumentSummaryResponse,
-        description="document profile 汇总",
+        default_factory=WorkspaceDocumentSummaryResponse
     )
-    warnings: list[WorkspaceWarningResponse] = Field(default_factory=list, description="集合级风险提示")
-    latest_task: TaskResponse | None = Field(default=None, description="最近一次任务")
-    recent_tasks: list[TaskResponse] = Field(default_factory=list, description="最近任务列表")
-    capabilities: WorkspaceCapabilitiesResponse = Field(..., description="工作区能力开关")
-    links: WorkspaceLinksResponse = Field(default_factory=WorkspaceLinksResponse, description="主资源跳转")
+    warnings: list[WorkspaceWarningResponse] = Field(default_factory=list)
+    latest_task: TaskResponse | None = None
+    recent_tasks: list[TaskResponse] = Field(default_factory=list)
+    capabilities: WorkspaceCapabilitiesResponse
+    links: WorkspaceLinksResponse

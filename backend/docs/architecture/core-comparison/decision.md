@@ -1,25 +1,25 @@
-# Core Comparison Semantic Center
+# Retired Core Comparison Decision
 
 ## Summary
 
-This page records the accepted backend-local comparison-semantic boundaries for
-Lens v1.
+This page records why the old comparison-semantic substrate is no longer a
+Lens v1 product surface.
 
-The stable rule is:
+The maintained rule is:
 
-`paper facts -> comparable results -> collection-scoped overlays -> row projection`
+`Source -> Objective -> published analysis -> Finding -> ObjectiveEvidence`
 
-Collection-facing rows remain useful product surfaces, but they are not the
-semantic center of the comparison model.
+Comparison rows, comparable results, Evidence cards, Materials, and Graph
+projections cannot become a parallel conclusion identity.
 
 ## Accepted Boundaries
 
-- paper facts remain the canonical one-document semantic foundation
-- `ComparableResult` is the first reusable comparison-semantic unit
-- `CollectionComparableResult` owns collection-scoped assessment, inclusion,
-  ordering, and policy metadata
-- `ComparisonRowRecord` is a collection-facing projection or cache record, not
-  the primary domain object
+- Source owns parsed paper content and exact locators.
+- Objective analysis owns scientific comparison and uncertainty.
+- Finding owns the published conclusion.
+- ObjectiveEvidence owns versioned support and Source traceback.
+- Legacy comparison records may remain in offline evaluation storage but are
+  not browser resources.
 
 ## Object Responsibilities
 
@@ -61,11 +61,10 @@ It owns:
 
 ### Row Projection
 
-`ComparisonRowRecord` exists to support collection-facing row rendering and
-other downstream views.
+`ComparisonRowRecord` remains for offline evaluation and export projections.
 
-It may be rebuilt from semantic and scope artifacts. It must not become the
-only durable comparison truth.
+It may be rebuilt from semantic and scope artifacts. It must not become a
+product conclusion or browser contract.
 
 ## Identity Rules
 
@@ -80,21 +79,19 @@ only durable comparison truth.
 
 - domain invariants and comparison dataclasses stay in
   [`../../../domain/core/comparison.py`](../../../domain/core/comparison.py)
-- assembly, overlay refresh, corpus retrieval, and projection orchestration stay
-  in [`../../../application/core/comparison_service.py`](../../../application/core/comparison_service.py)
-- collection-facing row routes, document-first comparison-semantic inspection,
-  and corpus comparable-result routes consume that owned substrate instead of
-  rebuilding semantics ad hoc
+- offline comparison persistence remains isolated in
+  [`../../../infra/persistence/postgres/comparison_repository.py`](../../../infra/persistence/postgres/comparison_repository.py)
+- current HTTP resources are defined only by
+  [`../../specs/api.md`](../../specs/api.md)
 
 ## Guardrails
 
-- no row-first compatibility path as the semantic source of truth
-- no `collection_id` on `ComparableResult`
-- no hidden semantic rebuild inside graph, report, or export readers
-- no generic service layer added only to rename existing ownership
+- no compatibility route for retired comparison resources
+- no hidden Finding reconstruction in exports or browser clients
+- no generic service layer added only to preserve old ownership
 
-This page is the current semantic authority. Earlier rollout details remain
-available in Git history when they are needed for archaeology.
+Earlier field-level boundaries remain available in Git history when needed for
+offline data archaeology.
 
 ## Related Docs
 

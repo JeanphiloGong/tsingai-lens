@@ -52,10 +52,7 @@
     "artifacts": [
       {
         "collection_id": "col_baseline",
-        "documents_ready": true,
-        "document_profiles_ready": true,
-        "evidence_cards_ready": true,
-        "comparison_rows_ready": false
+        "documents_ready": true
       }
     ],
     "auth_users": [

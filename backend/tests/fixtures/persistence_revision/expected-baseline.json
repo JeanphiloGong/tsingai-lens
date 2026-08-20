@@ -30,10 +30,9 @@
     },
     "workspace": {
       "artifacts": {
-        "comparison_rows_ready": false,
         "document_profiles_ready": true,
-        "documents_ready": true,
-        "evidence_cards_ready": true
+        "objective_candidates_ready": true,
+        "source_documents_ready": true
       },
       "collection_id": "col_baseline",
       "endpoint": "/api/v1/collections/col_baseline/workspace",

@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from application.core.objectives import property_matching
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 
-PAPER_SKIM_PROMPT_VERSION = "paper_skim.v4"
+PAPER_SKIM_PROMPT_VERSION = "paper_skim.v6"
 PAPER_SKIM_PROMPT_TOKEN_LIMIT = 12_288
 PAPER_SKIM_SOURCE_UNIT_LIMIT = 12
 PAPER_SKIM_WARNING_LIMIT = (2, 240)
@@ -300,8 +300,12 @@ class StructuredPaperSkim(_PaperSkimResponse):
                     retained_relationships.append(relationship)
                     continue
                 varied_factors = relationship.get("varied_factors")
-                has_varied_factor = not isinstance(varied_factors, list) or any(
-                    str(item).strip() for item in varied_factors
+                has_varied_factor = not isinstance(varied_factors, list) or (
+                    bool(varied_factors)
+                    and all(
+                        0 < len(str(item).strip()) <= 80
+                        for item in varied_factors
+                    )
                 )
                 outcome = str(relationship.get("outcome") or "").strip()
                 if has_varied_factor and not (
@@ -312,6 +316,7 @@ class StructuredPaperSkim(_PaperSkimResponse):
                 source_unit_ids = relationship.get("source_unit_ids")
                 if (
                     not outcome
+                    or len(outcome) > 80
                     or not isinstance(source_unit_ids, list)
                     or not any(str(item).strip() for item in source_unit_ids)
                 ):
@@ -359,10 +364,27 @@ class StructuredPaperSkim(_PaperSkimResponse):
         ]
         return normalized
 
-    @field_validator("studies", "unresolved_signals", "warnings", mode="before")
+    @field_validator("studies", "unresolved_signals", mode="before")
     @classmethod
     def _normalize_lists(cls, value: object) -> object:
         return _normalize_list(value)
+
+    @field_validator("warnings", mode="before")
+    @classmethod
+    def _normalize_warnings(cls, value: object) -> object:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            return value
+        normalized: list[object] = []
+        for item in value[: PAPER_SKIM_WARNING_LIMIT[0]]:
+            if not isinstance(item, str):
+                normalized.append(item)
+                continue
+            text = item.strip()
+            if text:
+                normalized.append(text[: PAPER_SKIM_WARNING_LIMIT[1]])
+        return normalized
 
     @field_validator("doc_role", mode="before")
     @classmethod
@@ -383,6 +405,17 @@ class StructuredPaperSkim(_PaperSkimResponse):
 
 
 def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    allowed_source_unit_ids = [
+        str(source_unit.get("source_unit_id") or "").strip()
+        for source_unit in payload.get("source_units") or ()
+        if isinstance(source_unit, Mapping)
+        and str(source_unit.get("source_unit_id") or "").strip()
+    ]
+    allowed_source_unit_ids_json = json.dumps(
+        allowed_source_unit_ids,
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
     user_prompt = (
         "TASK MODEL\n"
         "Extract source-supported paper studies from one bounded Source window. "
@@ -403,12 +436,18 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
         "DECISION PROCESS\n"
         "1. Classify the paper role from explicit study-design signals.\n"
-        "2. Identify each distinct experiment, observation, or model represented in "
-        "this window. Keep different specimens, tests, processes, comparators, or "
-        "experiment labels as separate studies.\n"
+        "2. Reconstruct each distinct experiment, observational design, or model "
+        "represented in this window. One study is the paper-owned design, not one "
+        "sentence, Source unit, treatment level, specimen group, response metric, or "
+        "section mention. Keep fragments separate only when the Source establishes "
+        "different experiment identities or incompatible process, sample, test, or "
+        "comparator boundaries. Use one stable concise `experiment_label` for the same "
+        "design within this window; prefer an explicit author label or group identity.\n"
         "3. For each study, record design_type and claim_scope. Only claims about the "
         "paper's own work use claim_scope=current_work; review synthesis and cited "
-        "background remain synthesis or background.\n"
+        "background remain synthesis or background. When a Source window mixes the "
+        "paper's experiment with named prior authors or numbered citations, keep them "
+        "as separate studies and never label the cited study current_work.\n"
         "4. Express every factor and outcome as a neutral scientific axis. A factor "
         "names what was varied, compared, or modeled, not its tested levels. An "
         "outcome names one specific outcome that was measured or predicted, not the "
@@ -417,7 +456,8 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "example, into separate relationships with the same factor set and Source "
         "lineage. If the Source does not support a specific component, retain the "
         "supplied label as an outcome in `unresolved_signals` instead of inventing "
-        "one.\n"
+        "one. A research theme such as microstructure is not itself a completed "
+        "outcome when the Source does not identify the measured or observed feature.\n"
         "5. Within each study, return one relationship per outcome. `varied_factors` "
         "must contain the full jointly varied, compared, or modeled factor set. Never "
         "split a joint-factor experiment into isolated effects.\n"
@@ -439,6 +479,9 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "another section may contain. Repeating a study fragment found in another "
         "window is acceptable; backend consolidation is authoritative.\n"
         "- Never move a factor, outcome, or context between studies.\n"
+        "- A fixed process, sample, or test condition is not a varied factor. Never "
+        "return the same axis in `varied_factors` when the study records that axis in "
+        "`fixed_conditions`; a listed Methods setting alone is not an intervention.\n"
         "- Every relationship and unresolved signal must copy `source_unit_ids` that "
         "directly support it. Do not return an id absent from `source_units`, repeat an "
         "id inside one item, or return more than 12 IDs for one item.\n"
@@ -481,14 +524,36 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "- Result clause: text says fatigue strength decreases with lower VED. Return "
         "outcome='fatigue strength'; the decrease and condition belong to later "
         "Evidence extraction, not the outcome axis.\n"
+        "- Broad theme only: text says heat treatment changed the microstructure but "
+        "does not identify what was observed. Return outcome signal "
+        "label='microstructure' in `unresolved_signals`; do not guess grain size, "
+        "texture, morphology, or phase fraction.\n"
+        "- Specific microstructural observations: text explicitly reports that heat "
+        "treatment removed the cellular structure and increased grain size. Return "
+        "separate outcomes 'cellular structure' and 'grain size' with the same full "
+        "factor set and Source lineage.\n"
         "- Incomplete relationship: a Methods window names laser power but no "
         "measured or predicted response. Return `studies=[]`; do not "
         "borrow an outcome from another section. Return the explicit axis in "
         "`unresolved_signals` with its supporting Source-unit id.\n"
         "- No study signal: a unit contains only general background. Return no study "
         "or unresolved signal for that unit.\n"
+        "- Cited result: text says 'Miranda et al. [20] increased laser power and "
+        "reduced porosity.' This is a background study, not the current paper's "
+        "experiment; use claim_scope=background and do not merge it with current work.\n"
+        "- Fixed setting: Methods says all specimens used 200 W laser power while build "
+        "platform temperature was varied. Laser power belongs only in fixed_conditions; "
+        "the varied factor is build platform temperature.\n"
         "- Separate relationships: one experiment links scan speed to porosity and "
-        "another links heat treatment to yield strength. Return two studies."
+        "another links heat treatment to yield strength. Return two studies.\n\n"
+        "- Repeated experiment mentions: Methods defines heat-treated coupon groups, "
+        "a table reports grain size, and Results reports phase fraction for those same "
+        "groups. These are complementary relationships inside one experiment, not "
+        "three studies; attach each relationship only to its direct Source ids.\n\n"
+        "BATCH LINEAGE CONTRACT\n"
+        f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}\n"
+        "Copy IDs only from this exact list. Do not continue its numbering or cite "
+        "a Source unit from another window."
     )
     return _SYSTEM_PROMPT, user_prompt
 
@@ -501,6 +566,17 @@ class PaperStudyWindowExtractor:
 
     def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
         system_prompt, user_prompt = build_paper_skim_prompt(payload)
+        allowed_source_unit_ids = [
+            str(source_unit.get("source_unit_id") or "").strip()
+            for source_unit in payload.get("source_units") or ()
+            if isinstance(source_unit, Mapping)
+            and str(source_unit.get("source_unit_id") or "").strip()
+        ]
+        allowed_source_unit_ids_json = json.dumps(
+            allowed_source_unit_ids,
+            ensure_ascii=True,
+            separators=(",", ":"),
+        )
 
         def build_repair_instruction(repair_detail: str) -> str:
             return (
@@ -512,7 +588,8 @@ class PaperStudyWindowExtractor:
                 "sample, and test context values and at most 12 varied factors per "
                 "relationship. Set output_saturated=true "
                 "instead of silently omitting a scientific item. Return only compact "
-                "schema-valid JSON."
+                "schema-valid JSON.\n"
+                f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}"
             )
 
         def validate_output_contract(response: BaseModel) -> None:

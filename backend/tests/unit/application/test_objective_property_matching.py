@@ -7,6 +7,7 @@ from application.core.objectives import property_matching
     ("source_label", "canonical_label"),
     (
         ("UTS [MPa]", "ultimate tensile strength"),
+        ("TE (%)", "total elongation"),
         ("\u03c3y (MPa)", "yield strength"),
         ("Icorr (A/cm2)", "corrosion current density"),
         ("Max. defect diameter (LCSM)", "max defect diameter"),
@@ -29,6 +30,27 @@ def test_broad_objective_matches_specific_measurement() -> None:
     assert property_matching.source_text_mentions_axis(
         "The measured relative density was 99.2%.",
         "densification",
+    )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "requires_resolution"),
+    (
+        ("microstructure", True),
+        ("defect structure", True),
+        ("corrosion resistance", True),
+        ("grain morphology", False),
+        ("fatigue strength", False),
+        ("relative density", False),
+    ),
+)
+def test_only_multi_measurement_outcome_families_require_resolution(
+    outcome: str,
+    requires_resolution: bool,
+) -> None:
+    assert (
+        property_matching.outcome_label_requires_resolution(outcome)
+        is requires_resolution
     )
 
 
@@ -62,6 +84,54 @@ def test_axis_matching_preserves_explicit_synonyms_and_source_aliases() -> None:
         "crack formation",
     )
     assert property_matching.source_text_mentions_axis("E p", "pitting potential")
+
+
+def test_variable_theme_membership_does_not_create_axis_equivalence() -> None:
+    assert property_matching.shared_variable_theme(
+        (
+            ("annealing temperature",),
+            ("solution temperature", "aging temperature"),
+            ("HIP temperature",),
+        )
+    ) == "thermal post-processing condition"
+    assert property_matching.variable_matches_objective_scope(
+        "annealing temperature",
+        "thermal post-processing condition",
+    )
+    assert property_matching.variable_matches_objective_scope(
+        "HIP temperature",
+        "thermal post-processing condition",
+    )
+    assert property_matching.variable_matches_objective_scope(
+        "Solubility temperatures ° C",
+        "thermal post-processing condition",
+    )
+    assert not property_matching.axis_values_match(
+        "annealing temperature",
+        "HIP temperature",
+    )
+    assert (
+        property_matching.resolve_objective_axis(
+            "annealing temperature",
+            ("thermal post-processing condition",),
+        )
+        is None
+    )
+
+
+def test_build_preheating_is_outside_the_thermal_post_processing_theme() -> None:
+    assert not property_matching.variable_matches_objective_scope(
+        "base plate preheating temperature",
+        "thermal post-processing condition",
+    )
+    assert property_matching.variable_matches_objective_scope(
+        "base plate preheating temperature",
+        "build preheating condition",
+    )
+    assert property_matching.source_text_mentions_objective_variable(
+        "The annealing temperature was increased to 850 C.",
+        "thermal post-processing condition",
+    )
 
 
 @pytest.mark.parametrize(

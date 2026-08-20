@@ -1,141 +1,94 @@
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 from application.core.workspace_overview_service import WorkspaceService
-from domain.core import (
-    CollectionComparableResult,
-    ComparableResult,
-    ComparisonFactSet,
-    EvidenceAnchor,
-)
-from domain.core.paper_fact import PaperFactSet
-from tests.support.comparison_repository import MemoryComparisonRepository
-from tests.support.paper_fact_repository import MemoryPaperFactRepository
-from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+from domain.core import ObjectiveFactSet
+from tests.support.objective_repository import MemoryObjectiveRepository
 
 
 def _service(
     *,
-    paper_repository: MemoryPaperFactRepository | None = None,
-    comparison_repository: MemoryComparisonRepository | None = None,
+    source_documents: tuple[object, ...] = (),
+    objective_facts: ObjectiveFactSet | None = None,
 ) -> WorkspaceService:
+    source_repository = Mock()
+    source_repository.read_collection_documents.return_value = source_documents
+    objective_repository = MemoryObjectiveRepository()
+    if objective_facts is not None:
+        objective_repository.replace("col_test", "build_test", objective_facts)
     return WorkspaceService(
-        collection_service=None,  # type: ignore[arg-type]
-        task_service=None,  # type: ignore[arg-type]
-        source_artifact_repository=MemorySourceArtifactRepository(),
-        paper_fact_repository=paper_repository or MemoryPaperFactRepository(),
-        comparison_repository=comparison_repository or MemoryComparisonRepository(),
-        document_profile_service=None,  # type: ignore[arg-type]
+        collection_service=Mock(),
+        task_service=Mock(),
+        source_artifact_repository=source_repository,
+        objective_repository=objective_repository,
+        document_profile_service=Mock(),
     )
 
 
-def test_workspace_artifacts_are_empty_before_paper_facts_exist():
-    artifacts = _service()._build_artifacts(
-        "col-empty",
-        {"updated_at": "2026-07-20T00:00:00+00:00"},
+def test_workspace_artifacts_only_report_the_maintained_build_outputs():
+    service = _service(
+        source_documents=(object(),),
+        objective_facts=ObjectiveFactSet(research_objectives_ready=True),
     )
 
-    assert artifacts["evidence_cards_ready"] is False
-    assert artifacts["comparison_rows_ready"] is False
-    assert artifacts["graph_ready"] is False
-
-
-def test_workspace_readiness_comes_from_paper_facts_and_comparisons():
-    collection_id = "col-ready"
-    paper_repository = MemoryPaperFactRepository()
-    paper_repository.replace_paper_facts(
-        collection_id,
-        "build_test",
-        PaperFactSet(
-            paper_facts_ready=True,
-            evidence_anchors=(
-                EvidenceAnchor.from_mapping(
-                    {
-                        "anchor_id": "anchor-1",
-                        "document_id": "paper-1",
-                        "source_kind": "block",
-                        "source_ref": "measured-result",
-                        "source_type": "text",
-                        "quote": "A measured result.",
-                    }
-                ),
-            ),
-        ),
-    )
-    comparison_repository = MemoryComparisonRepository()
-    comparison_repository.replace(
-        collection_id,
-        "build_test",
-        ComparisonFactSet(
-            comparison_artifacts_ready=True,
-            comparable_results=(
-                ComparableResult.from_mapping(
-                    {
-                        "comparable_result_id": "result-1",
-                        "source_result_id": "measurement-1",
-                        "source_document_id": "paper-1",
-                    }
-                ),
-            ),
-            collection_comparable_results=(
-                CollectionComparableResult.from_mapping(
-                    {
-                        "collection_id": collection_id,
-                        "comparable_result_id": "result-1",
-                        "included": True,
-                    }
-                ),
-            ),
-        ),
+    artifacts = service._build_artifacts(
+        "col_test",
+        {"updated_at": "2026-08-20T00:00:00Z"},
+        {"total_documents": 1},
     )
 
-    artifacts = _service(
-        paper_repository=paper_repository,
-        comparison_repository=comparison_repository,
-    )._build_artifacts(
-        collection_id,
-        {"updated_at": "2026-07-20T00:00:00+00:00"},
+    assert artifacts == {
+        "source_documents_ready": True,
+        "document_profiles_ready": True,
+        "objective_candidates_ready": True,
+        "updated_at": "2026-08-20T00:00:00Z",
+    }
+
+
+def test_workspace_marks_zero_candidate_objective_discovery_as_completed():
+    service = _service(
+        source_documents=(object(),),
+        objective_facts=ObjectiveFactSet(research_objectives_ready=True),
+    )
+    artifacts = service._build_artifacts(
+        "col_test",
+        {"updated_at": "2026-08-20T00:00:00Z"},
+        {"total_documents": 1},
     )
 
-    assert artifacts["evidence_cards_ready"] is True
-    assert artifacts["comparison_rows_ready"] is True
-    assert artifacts["graph_ready"] is False
-
-
-def test_workspace_excluded_comparisons_are_not_ready():
-    collection_id = "col-excluded"
-    comparison_repository = MemoryComparisonRepository()
-    comparison_repository.replace(
-        collection_id,
-        "build_test",
-        ComparisonFactSet(
-            comparison_artifacts_ready=True,
-            comparable_results=(
-                ComparableResult.from_mapping(
-                    {
-                        "comparable_result_id": "result-1",
-                        "source_result_id": "measurement-1",
-                        "source_document_id": "paper-1",
-                    }
-                ),
-            ),
-            collection_comparable_results=(
-                CollectionComparableResult.from_mapping(
-                    {
-                        "collection_id": collection_id,
-                        "comparable_result_id": "result-1",
-                        "included": False,
-                    }
-                ),
-            ),
-        ),
+    workflow = service._build_workflow(
+        file_count=1,
+        latest_task=None,
+        artifacts=artifacts,
+        document_summary={"total_documents": 1},
     )
 
-    artifacts = _service(
-        comparison_repository=comparison_repository
-    )._build_artifacts(
-        collection_id,
-        {"updated_at": "2026-07-20T00:00:00+00:00"},
+    assert workflow == {
+        "documents": {
+            "status": "ready",
+            "detail": "Document profiles are available.",
+        },
+        "objectives": {
+            "status": "ready",
+            "detail": "Objective candidate discovery is complete.",
+        },
+    }
+
+
+def test_workspace_does_not_report_retired_graph_or_result_capabilities():
+    service = _service()
+
+    capabilities = service._build_capabilities(
+        {
+            "source_documents_ready": True,
+            "document_profiles_ready": True,
+            "objective_candidates_ready": True,
+        }
     )
 
-    assert artifacts["comparison_rows_generated"] is True
-    assert artifacts["comparison_rows_ready"] is False
+    assert capabilities == {
+        "can_view_documents": True,
+        "can_view_objectives": True,
+        "can_view_comparisons": True,
+    }

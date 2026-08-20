@@ -1,23 +1,15 @@
-# Core Comparison
+# Retired Core Comparison Projection
 
-This family is the backend-local architecture authority for the Core
-comparison-semantic substrate.
-
-Use it when you need the current answer to:
-
-- what object is the comparison-semantic center
-- which artifacts are semantic truth versus scope truth versus projection
-- which read paths are current
-- how collection-facing rows relate to comparable-result semantics
+This family records the retired comparison-row architecture. It is retained as
+historical context for offline evaluation data, not as a current product or API
+authority.
 
 ## Reading Order
 
 - [`decision.md`](decision.md)
-  Accepted semantic boundaries for `ComparableResult`,
-  `CollectionComparableResult`, and `ComparisonRowRecord`
+  Historical semantic boundaries for persisted comparison records
 - [`current-state.md`](current-state.md)
-  Current implemented substrate, artifact chain, route surfaces, and code
-  ownership
+  Current retirement boundary and remaining offline ownership
 
 ## Related Docs
 
@@ -28,5 +20,4 @@ Use it when you need the current answer to:
 - [`../domain-architecture.md`](../domain-architecture.md)
   Backend-local business-domain package direction
 - [`../../specs/api.md`](../../specs/api.md)
-  Public API contract for document comparison semantics, corpus comparable
-  results, workspace readiness, and collection comparisons
+  Maintained public API contract

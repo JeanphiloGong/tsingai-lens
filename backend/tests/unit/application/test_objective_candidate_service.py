@@ -28,7 +28,6 @@ class _GroupingExtractor:
                 {
                     "pair_id": pair["pair_id"],
                     "equivalent": True,
-                    "same_research_topic": True,
                 }
                 for pair in payload.get("axis_pairs", ())
             ]
@@ -287,6 +286,36 @@ def test_broad_outcome_group_is_rejected_until_the_outcome_is_specific():
     )
 
 
+def test_microstructure_theme_group_is_rejected_until_an_observation_is_specific():
+    skims = (
+        _paper_skim(
+            document_id="paper-a",
+            relationship_id="relationship-a",
+            factors=("heat treatment",),
+            outcome="microstructure",
+        ),
+        _paper_skim(
+            document_id="paper-b",
+            relationship_id="relationship-b",
+            factors=("heat treatment",),
+            outcome="microstructure",
+        ),
+    )
+
+    facts = ObjectiveCandidateService().discover_candidate_facts(
+        "collection-test",
+        paper_skims=skims,
+        axis_equivalence_classifier=_GroupingExtractor(),
+    )
+
+    assert facts.research_objectives == ()
+    assert {item.status.value for item in facts.study_dispositions} == {"rejected"}
+    assert all(
+        "requires a specific measurable outcome" in (item.reason or "")
+        for item in facts.study_dispositions
+    )
+
+
 def test_single_measurement_broad_outcome_is_refined_for_the_candidate():
     skims = (
         _paper_skim(
@@ -352,7 +381,6 @@ def test_material_grade_word_order_preserves_shared_objective_material_scope():
                     {
                         "pair_id": pair["pair_id"],
                         "equivalent": False,
-                        "same_research_topic": False,
                     }
                     for pair in payload.get("axis_pairs", ())
                 ]
@@ -496,7 +524,7 @@ def test_different_fixed_condition_values_remain_in_one_objective_group():
     assert groups == [("relationship-200-c", "relationship-400-c")]
 
 
-def test_single_and_joint_factor_relationships_share_a_topic_without_losing_factors():
+def test_single_and_joint_factor_relationships_share_a_theme_without_axis_rewriting():
     skims = (
         _paper_skim(
             document_id="paper-single",
@@ -522,110 +550,85 @@ def test_single_and_joint_factor_relationships_share_a_topic_without_losing_fact
     )
 
 
-def test_topic_supported_thermal_relationships_form_one_focused_objective():
-    class ThermalTopicClassifier(_GroupingExtractor):
+def test_shared_thermal_processing_theme_creates_one_bounded_objective():
+    class DistinctAxisClassifier(_GroupingExtractor):
         def classify(
             self,
             payload: dict[str, Any],
         ) -> StructuredAxisCanonicalizationPlan:
             self.canonicalization_payloads.append(payload)
-            decisions = []
-            for pair in payload["axis_pairs"]:
-                labels = {pair["left"], pair["right"]}
-                equivalent = (
-                    labels
-                    in (
-                        {"Ti-6Al-4V", "Ti6Al4V"},
-                        {"microstructure", "microstructure morphology"},
-                    )
-                    and pair["axis_type"] == "material"
-                )
-                same_topic = (
-                    equivalent
-                    or (
-                        pair["axis_type"] == "variable"
-                        and labels
-                        <= {
-                            "heat treatment temperature",
-                            "heat treatment duration",
-                            "annealing temperature",
-                            "base plate preheating temperature",
-                        }
-                    )
-                    or (
-                        pair["axis_type"] == "outcome"
-                        and labels == {"microstructure", "microstructure morphology"}
-                    )
-                )
-                decisions.append(
+            return StructuredAxisCanonicalizationPlan(
+                decisions=[
                     {
                         "pair_id": pair["pair_id"],
-                        "equivalent": equivalent,
-                        "same_research_topic": same_topic,
+                        "equivalent": False,
                     }
-                )
-            return StructuredAxisCanonicalizationPlan(decisions=decisions)
+                    for pair in payload["axis_pairs"]
+                ]
+            )
 
     skims = (
-        _paper_skim(
-            document_id="paper-heat-treatment",
-            relationship_id="relationship-heat-treatment",
-            factors=("heat treatment temperature", "heat treatment duration"),
-            outcome="microstructure",
-            material_scope=("Ti-6Al-4V",),
-            process_context=("SLM", "post-build heat treatment"),
-        ),
         _paper_skim(
             document_id="paper-annealing",
             relationship_id="relationship-annealing",
             factors=("annealing temperature",),
-            outcome="microstructure",
-            material_scope=("Ti6Al4V",),
-            process_context=("SLM", "post-build annealing"),
+            outcome="elongation",
+            material_scope=("Ti-6Al-4V",),
         ),
         _paper_skim(
-            document_id="paper-preheating",
-            relationship_id="relationship-preheating",
-            factors=("base plate preheating temperature",),
-            outcome="microstructure",
+            document_id="paper-solution-aging",
+            relationship_id="relationship-solution-aging",
+            factors=("solution temperature", "aging temperature"),
+            outcome="elongation",
+            material_scope=("Ti6Al4V",),
+        ),
+        _paper_skim(
+            document_id="paper-hip",
+            relationship_id="relationship-hip",
+            factors=("HIP temperature",),
+            outcome="elongation",
             material_scope=("Ti-6Al-4V",),
-            process_context=("SLM", "in-process preheating"),
+        ),
+        _paper_skim(
+            document_id="paper-build-preheating",
+            relationship_id="relationship-build-preheating",
+            factors=("base plate preheating temperature",),
+            outcome="elongation",
+            material_scope=("Ti-6Al-4V",),
         ),
     )
 
     facts = ObjectiveCandidateService().discover_candidate_facts(
-        "collection-ti64",
+        "collection-ti64-thermal-processing",
         paper_skims=skims,
-        axis_equivalence_classifier=ThermalTopicClassifier(),
+        axis_equivalence_classifier=DistinctAxisClassifier(),
     )
 
     assert len(facts.research_objectives) == 1
     objective = facts.research_objectives[0]
+    assert objective.variables == ("thermal post-processing condition",)
+    assert objective.outcomes == ("elongation",)
     assert set(objective.seed_document_ids) == {
-        "paper-heat-treatment",
         "paper-annealing",
-        "paper-preheating",
+        "paper-solution-aging",
+        "paper-hip",
     }
     assert set(objective.source_relationship_ids) == {
-        "relationship-heat-treatment",
         "relationship-annealing",
-        "relationship-preheating",
+        "relationship-solution-aging",
+        "relationship-hip",
     }
-    assert set(objective.variables) == {
-        "heat treatment duration",
-        "annealing temperature",
-        "base plate preheating temperature",
+    dispositions = {
+        item.relationship_id: item for item in facts.study_dispositions
     }
-    assert objective.outcomes == ("microstructure",)
-    assert objective.material_scope == ("Ti-6Al-4V",)
-    assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
-    assert skims[0].studies[0].relationships[0].varied_factors == (
-        "heat treatment temperature",
-        "heat treatment duration",
+    assert dispositions["relationship-build-preheating"].status.value == "rejected"
+    assert skims[1].studies[0].relationships[0].varied_factors == (
+        "solution temperature",
+        "aging temperature",
     )
 
 
-def test_objective_question_keeps_only_axes_supported_across_papers():
+def test_shared_topic_objective_preserves_different_joint_interventions():
     class CoolingTopicClassifier(_GroupingExtractor):
         def classify(
             self,
@@ -637,11 +640,6 @@ def test_objective_question_keeps_only_axes_supported_across_papers():
                     {
                         "pair_id": pair["pair_id"],
                         "equivalent": False,
-                        "same_research_topic": (
-                            pair["axis_type"] == "variable"
-                            and {pair["left"], pair["right"]}
-                            == {"cooling rate after HIP", "HIP cooling rate"}
-                        ),
                     }
                     for pair in payload["axis_pairs"]
                 ]
@@ -676,14 +674,12 @@ def test_objective_question_keeps_only_axes_supported_across_papers():
 
     assert len(facts.research_objectives) == 1
     objective = facts.research_objectives[0]
-    assert set(objective.variables) == {
-        "cooling rate after HIP",
-        "HIP cooling rate",
-    }
+    assert objective.variables == ("hot isostatic pressing condition",)
     assert set(objective.source_relationship_ids) == {
         "relationship-hip-methods",
         "relationship-hip-results",
     }
+    assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
     assert skims[0].studies[0].relationships[0].varied_factors == (
         "cooling rate after HIP",
         "HIP temperature",
@@ -691,13 +687,182 @@ def test_objective_question_keeps_only_axes_supported_across_papers():
     )
 
 
-def test_local_topic_bridges_do_not_form_one_multi_topic_objective():
-    topic_pairs = {
-        frozenset(("cooling rate after HIP", "HIP cooling rate")),
-        frozenset(("HIP temperature", "heat treatment temperature")),
-        frozenset(("post-processing route", "scan strategy")),
-    }
+def test_hip_theme_relations_create_a_bounded_multi_paper_objective():
+    class HipTopicClassifier(_GroupingExtractor):
+        def classify(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredAxisCanonicalizationPlan:
+            self.canonicalization_payloads.append(payload)
+            return StructuredAxisCanonicalizationPlan(
+                decisions=[
+                    {
+                        "pair_id": pair["pair_id"],
+                        "equivalent": False,
+                    }
+                    for pair in payload["axis_pairs"]
+                ]
+            )
 
+    paper_factors = (
+        "HIP cooling rate",
+        "HIP pressure",
+        "HIP temperature",
+        "HIP hold time",
+        "HIP heating rate",
+        "HIP post-processing condition",
+    )
+    skims = tuple(
+        _paper_skim(
+            document_id=f"paper-hip-{position}",
+            relationship_id=f"relationship-hip-{position}",
+            factors=(factor,),
+            outcome="elongation",
+            material_scope=("Ti-6Al-4V",),
+        )
+        for position, factor in enumerate(paper_factors, start=1)
+    )
+
+    facts = ObjectiveCandidateService().discover_candidate_facts(
+        "collection-ti64-hip-topic",
+        paper_skims=skims,
+        axis_equivalence_classifier=HipTopicClassifier(),
+    )
+
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert objective.variables == ("hot isostatic pressing condition",)
+    assert len(objective.seed_document_ids) == len(paper_factors)
+    assert len(objective.source_relationship_ids) == len(paper_factors)
+    assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
+    assert {
+        skim.studies[0].relationships[0].varied_factors[0] for skim in skims
+    } == set(paper_factors)
+
+
+def test_laser_exposure_theme_does_not_claim_precise_axis_equivalence():
+    class LaserExposureTopicClassifier(_GroupingExtractor):
+        def classify(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredAxisCanonicalizationPlan:
+            self.canonicalization_payloads.append(payload)
+            return StructuredAxisCanonicalizationPlan(
+                decisions=[
+                    {
+                        "pair_id": pair["pair_id"],
+                        "equivalent": False,
+                    }
+                    for pair in payload["axis_pairs"]
+                ]
+            )
+
+    skims = (
+        _paper_skim(
+            document_id="paper-fixed-power",
+            relationship_id="relationship-fixed-power",
+            factors=("laser power",),
+            outcome="relative density",
+            fixed_conditions=("scan speed = 800 mm/s",),
+        ),
+        _paper_skim(
+            document_id="paper-ved",
+            relationship_id="relationship-ved",
+            factors=("volumetric energy density",),
+            outcome="relative density",
+            fixed_conditions=("layer thickness = 30 um",),
+        ),
+    )
+
+    facts = ObjectiveCandidateService().discover_candidate_facts(
+        "collection-316l-topic-only",
+        paper_skims=skims,
+        axis_equivalence_classifier=LaserExposureTopicClassifier(),
+    )
+
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert objective.variables == ("laser exposure condition",)
+    assert set(objective.source_relationship_ids) == {
+        "relationship-fixed-power",
+        "relationship-ved",
+    }
+    assert "direct comparability remains a later evidence decision" in str(
+        objective.reason
+    )
+    assert skims[0].studies[0].relationships[0].varied_factors == ("laser power",)
+    assert skims[1].studies[0].relationships[0].varied_factors == (
+        "volumetric energy density",
+    )
+
+
+def test_cross_paper_theme_keeps_joint_and_isolated_interventions_distinct():
+    class LaserFactorClassifier(_GroupingExtractor):
+        def classify(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredAxisCanonicalizationPlan:
+            self.canonicalization_payloads.append(payload)
+            return StructuredAxisCanonicalizationPlan(
+                decisions=[
+                    {
+                        "pair_id": pair["pair_id"],
+                        "equivalent": False,
+                    }
+                    for pair in payload["axis_pairs"]
+                ]
+            )
+
+    skims = (
+        _paper_skim(
+            document_id="paper-joint",
+            relationship_id="relationship-joint",
+            factors=("laser power", "scan speed"),
+            outcome="relative density",
+        ),
+        _paper_skim(
+            document_id="paper-isolated",
+            relationship_id="relationship-isolated",
+            factors=("laser power",),
+            outcome="relative density",
+        ),
+        _paper_skim(
+            document_id="paper-cited",
+            relationship_id="relationship-cited",
+            factors=("laser power",),
+            outcome="relative density",
+            claim_scope="background",
+        ),
+    )
+
+    facts = ObjectiveCandidateService().discover_candidate_facts(
+        "collection-316l-joint-factor",
+        paper_skims=skims,
+        axis_equivalence_classifier=LaserFactorClassifier(),
+    )
+
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert objective.variables == ("laser exposure condition",)
+    assert set(objective.source_relationship_ids) == {
+        "relationship-joint",
+        "relationship-isolated",
+    }
+    dispositions = {
+        item.relationship_id: item for item in facts.study_dispositions
+    }
+    assert dispositions["relationship-cited"].status.value == "rejected"
+    assert "claim_scope=background" in str(
+        dispositions["relationship-cited"].reason
+    )
+    assert skims[0].studies[0].relationships[0].varied_factors == (
+        "laser power",
+        "scan speed",
+    )
+    assert skims[1].studies[0].relationships[0].varied_factors == ("laser power",)
+
+
+def test_shared_parent_theme_keeps_each_papers_complete_intervention():
     class LocalTopicClassifier(_GroupingExtractor):
         def classify(
             self,
@@ -709,10 +874,6 @@ def test_local_topic_bridges_do_not_form_one_multi_topic_objective():
                     {
                         "pair_id": pair["pair_id"],
                         "equivalent": False,
-                        "same_research_topic": (
-                            pair["axis_type"] == "variable"
-                            and frozenset((pair["left"], pair["right"])) in topic_pairs
-                        ),
                     }
                     for pair in payload["axis_pairs"]
                 ]
@@ -750,20 +911,16 @@ def test_local_topic_bridges_do_not_form_one_multi_topic_objective():
 
     assert len(facts.research_objectives) == 1
     objective = facts.research_objectives[0]
-    assert len(objective.variables) == 2
-    assert len(objective.seed_document_ids) == 2
-    assert len(objective.source_relationship_ids) == 2
-    assert all(
-        disposition.status.value == "promoted"
-        for disposition in facts.study_dispositions
-        if disposition.relationship_id in objective.source_relationship_ids
-    )
-    assert (
-        sum(
-            disposition.status.value == "rejected"
-            for disposition in facts.study_dispositions
-        )
-        == 1
+    assert objective.variables == ("thermal post-processing condition",)
+    assert set(objective.source_relationship_ids) == {
+        "relationship-a",
+        "relationship-b",
+        "relationship-c",
+    }
+    assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
+    assert skims[2].studies[0].relationships[0].varied_factors == (
+        "heat treatment temperature",
+        "scan strategy",
     )
 
 
@@ -776,8 +933,6 @@ def test_axis_topic_classifier_receives_bounded_study_usage_context():
             self.canonicalization_payloads.append(payload)
             decisions = []
             for pair in payload["axis_pairs"]:
-                labels = {pair["left"], pair["right"]}
-                same_topic = labels == {"build orientation", "sample orientation"}
                 if pair["axis_type"] == "variable":
                     assert pair["left_observations"]
                     assert pair["right_observations"]
@@ -796,7 +951,6 @@ def test_axis_topic_classifier_receives_bounded_study_usage_context():
                     {
                         "pair_id": pair["pair_id"],
                         "equivalent": False,
-                        "same_research_topic": same_topic,
                     }
                 )
             return StructuredAxisCanonicalizationPlan(decisions=decisions)
@@ -845,10 +999,8 @@ def test_axis_topic_classifier_receives_bounded_study_usage_context():
         axis_equivalence_classifier=ContextAwareClassifier(),
     )
 
-    assert len(facts.research_objectives) == 1
-    objective = facts.research_objectives[0]
-    assert set(objective.variables) == {"build orientation", "sample orientation"}
-    assert "laser speed" not in objective.question
+    assert facts.research_objectives == ()
+    assert {item.status.value for item in facts.study_dispositions} == {"rejected"}
     assert skims[0].studies[0].relationships[0].varied_factors == (
         "build orientation",
         "laser speed",
@@ -860,30 +1012,24 @@ def test_axis_topic_classifier_receives_bounded_study_usage_context():
     )
 
 
-def test_topic_only_pairs_require_single_pair_confirmation():
-    class BatchBiasedClassifier(_GroupingExtractor):
+def test_topic_only_pairs_are_classified_once_without_affecting_objectives():
+    class TopicClassifier(_GroupingExtractor):
         def classify(
             self,
             payload: dict[str, Any],
         ) -> StructuredAxisCanonicalizationPlan:
             self.canonicalization_payloads.append(payload)
-            batch_is_ambiguous = len(payload["axis_pairs"]) > 1
             return StructuredAxisCanonicalizationPlan(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
                         "equivalent": False,
-                        "same_research_topic": (
-                            batch_is_ambiguous
-                            or {pair["left"], pair["right"]}
-                            == {"build orientation", "sample orientation"}
-                        ),
                     }
                     for pair in payload["axis_pairs"]
                 ]
             )
 
-    classifier = BatchBiasedClassifier()
+    classifier = TopicClassifier()
     facts = ObjectiveCandidateService().discover_candidate_facts(
         "collection-confirm-topic",
         paper_skims=(
@@ -896,7 +1042,7 @@ def test_topic_only_pairs_require_single_pair_confirmation():
             _paper_skim(
                 document_id="paper-laser",
                 relationship_id="relationship-laser",
-                factors=("laser speed",),
+                factors=("tensile orientation",),
                 outcome="ultimate tensile strength",
             ),
             _paper_skim(
@@ -909,29 +1055,11 @@ def test_topic_only_pairs_require_single_pair_confirmation():
         axis_equivalence_classifier=classifier,
     )
 
-    assert any(
-        len(payload["axis_pairs"]) > 1
-        for payload in classifier.canonicalization_payloads
-    )
-    assert (
-        sum(
-            len(payload["axis_pairs"]) == 1
-            for payload in classifier.canonicalization_payloads
-        )
-        == 3
-    )
-    assert len(facts.research_objectives) == 1
-    objective = facts.research_objectives[0]
-    assert set(objective.variables) == {"build orientation", "sample orientation"}
-    assert set(objective.seed_document_ids) == {"paper-build", "paper-sample"}
-    assert (
-        next(
-            item
-            for item in facts.study_dispositions
-            if item.relationship_id == "relationship-laser"
-        ).status.value
-        == "rejected"
-    )
+    assert len(classifier.canonicalization_payloads) == 1
+    assert len(classifier.canonicalization_payloads[0]["axis_pairs"]) == 3
+    assert "decision_stage" not in classifier.canonicalization_payloads[0]
+    assert facts.research_objectives == ()
+    assert {item.status.value for item in facts.study_dispositions} == {"rejected"}
 
 
 def test_different_measured_outcomes_never_share_an_objective_group():
@@ -970,7 +1098,6 @@ def test_topic_related_but_distinct_outcomes_do_not_form_one_objective():
                     {
                         "pair_id": pair["pair_id"],
                         "equivalent": False,
-                        "same_research_topic": True,
                     }
                     for pair in payload["axis_pairs"]
                 ]
@@ -1015,7 +1142,6 @@ def test_cross_paper_outcome_alias_can_be_canonicalized_without_topic_merging():
                     {
                         "pair_id": pair["pair_id"],
                         "equivalent": pair["axis_type"] == "outcome",
-                        "same_research_topic": pair["axis_type"] == "outcome",
                     }
                     for pair in payload["axis_pairs"]
                 ]
@@ -1056,6 +1182,51 @@ def test_cross_paper_outcome_alias_can_be_canonicalized_without_topic_merging():
         == {"alpha-prime fraction", "martensite fraction"}
         for payload in classifier.canonicalization_payloads
         for pair in payload["axis_pairs"]
+    )
+
+
+def test_property_aliases_are_not_repeated_in_the_objective_outcomes():
+    class RejectModelAliases(_GroupingExtractor):
+        def classify(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredAxisCanonicalizationPlan:
+            self.canonicalization_payloads.append(payload)
+            return StructuredAxisCanonicalizationPlan(
+                decisions=[
+                    {
+                        "pair_id": pair["pair_id"],
+                        "equivalent": False,
+                    }
+                    for pair in payload["axis_pairs"]
+                ]
+            )
+
+    facts = ObjectiveCandidateService().discover_candidate_facts(
+        "collection-ductility-alias",
+        paper_skims=(
+            _paper_skim(
+                document_id="paper-ductility",
+                relationship_id="relationship-ductility",
+                factors=("heat treatment temperature",),
+                outcome="ductility",
+                material_scope=("Ti-6Al-4V",),
+            ),
+            _paper_skim(
+                document_id="paper-elongation",
+                relationship_id="relationship-elongation",
+                factors=("heat treatment temperature",),
+                outcome="elongation",
+                material_scope=("Ti-6Al-4V",),
+            ),
+        ),
+        axis_equivalence_classifier=RejectModelAliases(),
+    )
+
+    assert len(facts.research_objectives) == 1
+    assert facts.research_objectives[0].outcomes == ("elongation",)
+    assert facts.research_objectives[0].question == (
+        "How does heat treatment temperature affect elongation?"
     )
 
 
@@ -1123,7 +1294,11 @@ def test_multi_paper_collection_does_not_promote_single_paper_relationships():
     assert facts.research_objectives == ()
     assert {item.status.value for item in facts.study_dispositions} == {"rejected"}
     assert all(
-        item.reason == "Relationship is not supported by multiple collection papers."
+        item.reason
+        == (
+            "Relationship does not have shared objective-scope support from multiple "
+            "collection papers."
+        )
         for item in facts.study_dispositions
     )
 
@@ -1251,7 +1426,7 @@ def test_non_current_work_relationships_remain_in_inventory_without_seeding_obje
     assert claim_scope in str(disposition.reason)
 
 
-def test_uncertain_claim_scope_is_retained_as_a_standalone_candidate():
+def test_uncertain_claim_scope_cannot_seed_a_precise_candidate():
     skim = _paper_skim(
         document_id="paper-uncertain",
         relationship_id="relationship-uncertain",
@@ -1264,10 +1439,9 @@ def test_uncertain_claim_scope_is_retained_as_a_standalone_candidate():
         axis_equivalence_classifier=_GroupingExtractor(),
     )
 
-    assert facts.research_objectives[0].source_relationship_ids == (
-        "relationship-uncertain",
-    )
-    assert facts.study_dispositions[0].status.value == "promoted"
+    assert facts.research_objectives == ()
+    assert facts.study_dispositions[0].status.value == "rejected"
+    assert "claim_scope=uncertain" in str(facts.study_dispositions[0].reason)
 
 
 def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
@@ -1288,7 +1462,6 @@ def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
                     {
                         "pair_id": pair["pair_id"],
                         "equivalent": pair["pair_id"] == diameter_pair,
-                        "same_research_topic": pair["pair_id"] == diameter_pair,
                     }
                     for pair in payload["axis_pairs"]
                 ]
@@ -1336,13 +1509,13 @@ def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
         if item.relationship_id == "relationship-3"
     )
     assert length_disposition.status.value == "rejected"
-    assert (
-        length_disposition.reason
-        == "Relationship is not supported by multiple collection papers."
+    assert length_disposition.reason == (
+        "Relationship does not have shared objective-scope support from multiple "
+        "collection papers."
     )
 
 
-def test_semantic_axis_aliases_are_canonicalized_before_relationship_grouping():
+def test_result_clause_outcome_is_not_promoted_as_an_axis_alias():
     class SemanticAxisExtractor(_GroupingExtractor):
         def classify(
             self,
@@ -1354,7 +1527,6 @@ def test_semantic_axis_aliases_are_canonicalized_before_relationship_grouping():
                     {
                         "pair_id": pair["pair_id"],
                         "equivalent": True,
-                        "same_research_topic": True,
                     }
                     for pair in payload["axis_pairs"]
                 ]
@@ -1384,17 +1556,10 @@ def test_semantic_axis_aliases_are_canonicalized_before_relationship_grouping():
         axis_equivalence_classifier=extractor,
     )
 
-    assert len(facts.research_objectives) == 1
-    objective = facts.research_objectives[0]
-    assert objective.variables == ("volumetric energy density",)
-    assert objective.outcomes == ("fatigue strength",)
-    assert set(objective.source_relationship_ids) == {
-        "relationship-result-clause",
-        "relationship-neutral-axis",
-    }
+    assert facts.research_objectives == ()
     assert facts.paper_skims == skims
     assert len(facts.study_dispositions) == 2
-    assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
+    assert {item.status.value for item in facts.study_dispositions} == {"rejected"}
 
 
 def test_material_and_axis_aliases_build_one_cross_paper_objective():
@@ -1413,7 +1578,6 @@ def test_material_and_axis_aliases_build_one_cross_paper_objective():
                             {"316L stainless steel", "SS316L"},
                             {"scan speed", "laser scanning speed"},
                         ),
-                        "same_research_topic": True,
                     }
                     for pair in payload["axis_pairs"]
                 ]
@@ -1471,9 +1635,9 @@ def test_objective_constraints_omit_the_relationship_axes():
         document_id="paper-heat-treatment",
         relationship_id="relationship-heat-treatment",
         factors=("heat treatment",),
-        outcome="microstructure",
+        outcome="grain morphology",
         process_context=("LPBF", "heat treatment"),
-        test_context=("microstructure", "EBSD"),
+        test_context=("grain morphology", "EBSD"),
     )
 
     facts = ObjectiveCandidateService().discover_candidate_facts(
@@ -1527,7 +1691,6 @@ def test_verified_aliases_are_consistent_through_context_and_canonicalization():
             {
                 "pair_id": pair_id,
                 "equivalent": True,
-                "same_research_topic": True,
             }
             for pair_id in axis_pairs
         ]
@@ -1597,7 +1760,6 @@ def test_axis_pair_selection_keeps_every_eligible_pair_and_complete_link_is_orde
             {
                 "pair_id": pair_id,
                 "equivalent": True,
-                "same_research_topic": True,
             }
             for pair_id in axis_pairs
         ]
@@ -1626,6 +1788,79 @@ def test_axis_pair_selection_keeps_every_eligible_pair_and_complete_link_is_orde
     assert len(set(mappings[0]["outcome"].values())) == 2
 
 
+def test_cross_paper_topic_candidates_require_a_focused_shared_signal():
+    skims = (
+        _paper_skim(
+            document_id="paper-heat",
+            relationship_id="relationship-heat",
+            factors=("heat treatment temperature",),
+            outcome="elongation",
+            process_context=("LPBF", "post-build heat treatment"),
+        ),
+        _paper_skim(
+            document_id="paper-anneal",
+            relationship_id="relationship-anneal",
+            factors=("annealing duration",),
+            outcome="elongation",
+            process_context=("SLM", "post-build annealing"),
+        ),
+        _paper_skim(
+            document_id="paper-preheat",
+            relationship_id="relationship-preheat",
+            factors=("base plate preheating temperature",),
+            outcome="elongation",
+            process_context=("LPBF", "in-process preheating"),
+        ),
+        _paper_skim(
+            document_id="paper-orientation",
+            relationship_id="relationship-orientation",
+            factors=("build orientation",),
+            outcome="elongation",
+            process_context=("LPBF",),
+        ),
+    )
+    service = ObjectiveCandidateService()
+
+    supported = service._supported_cross_paper_axis_pairs(
+        service._relationship_inventory(skims)
+    )
+
+    assert supported == {
+        service._axis_relation_key(
+            "variable",
+            "heat treatment temperature",
+            "annealing duration",
+        )
+    }
+
+
+def test_shared_variable_does_not_propose_unrelated_outcome_pairs():
+    skims = (
+        _paper_skim(
+            document_id="paper-strength",
+            relationship_id="relationship-strength",
+            outcome="yield strength",
+        ),
+        _paper_skim(
+            document_id="paper-ductility",
+            relationship_id="relationship-ductility",
+            outcome="elongation",
+        ),
+        _paper_skim(
+            document_id="paper-structure",
+            relationship_id="relationship-structure",
+            outcome="microstructure",
+        ),
+    )
+    service = ObjectiveCandidateService()
+
+    supported = service._supported_cross_paper_axis_pairs(
+        service._relationship_inventory(skims)
+    )
+
+    assert not {pair for pair in supported if pair[0] == "outcome"}
+
+
 def test_axis_pair_classification_batches_account_for_every_pair_once():
     class RecordingExtractor(_GroupingExtractor):
         pass
@@ -1634,7 +1869,7 @@ def test_axis_pair_classification_batches_account_for_every_pair_once():
         {
             "relationship_id": f"relationship-{index:02d}",
             "varied_factors": ["scan speed"],
-            "outcome": f"porosity variant {index:02d}",
+            "outcome": f"porosity measurement variant {index:02d}",
             "source_refs": [
                 {"source_kind": "block", "source_ref": f"source-{index:02d}"}
             ],
@@ -1646,7 +1881,7 @@ def test_axis_pair_classification_batches_account_for_every_pair_once():
         document_id="paper-many-pairs",
         relationship_id="relationship-base",
         factors=("scan speed",),
-        outcome="porosity variant base",
+        outcome="porosity measurement variant base",
         extra_relationships=extra_relationships,
     )
     extractor = RecordingExtractor()
@@ -1682,7 +1917,6 @@ def test_variable_alias_canonicalization_does_not_merge_different_outcomes():
                     {
                         "pair_id": pair["pair_id"],
                         "equivalent": pair["axis_type"] == "variable",
-                        "same_research_topic": pair["axis_type"] == "variable",
                     }
                     for pair in payload["axis_pairs"]
                 ]
@@ -1826,6 +2060,158 @@ def test_ranking_prefers_cross_paper_support_then_relationship_count():
     ]
 
 
+def test_ranking_prefers_structured_result_sources_before_relationship_count():
+    skims = (
+        _paper_skim(
+            document_id="paper-table-a",
+            relationship_id="relationship-table-a",
+            source_kind="table",
+        ),
+        _paper_skim(
+            document_id="paper-table-b",
+            relationship_id="relationship-table-b",
+            source_kind="table",
+        ),
+        _paper_skim(
+            document_id="paper-block-a",
+            relationship_id="relationship-block-a",
+        ),
+        _paper_skim(
+            document_id="paper-block-b",
+            relationship_id="relationship-block-b",
+        ),
+    )
+    inventory = ObjectiveCandidateService._relationship_inventory(skims)
+    objectives = (
+        ResearchObjective.from_mapping(
+            {
+                "collection_id": "collection-test",
+                "objective_id": "objective-block",
+                "question": "How does laser power affect relative density?",
+                "variables": ["laser power"],
+                "outcomes": ["relative density"],
+                "seed_document_ids": ["paper-block-a", "paper-block-b"],
+                "source_relationship_ids": [
+                    "relationship-block-a",
+                    "relationship-block-b",
+                ],
+            }
+        ),
+        ResearchObjective.from_mapping(
+            {
+                "collection_id": "collection-test",
+                "objective_id": "objective-table",
+                "question": "How does laser power affect relative density?",
+                "variables": ["laser power"],
+                "outcomes": ["relative density"],
+                "seed_document_ids": ["paper-table-a", "paper-table-b"],
+                "source_relationship_ids": [
+                    "relationship-table-a",
+                    "relationship-table-b",
+                ],
+            }
+        ),
+    )
+
+    ranked = ObjectiveCandidateService._rank_objectives(
+        objectives,
+        relationship_inventory=inventory,
+    )
+
+    assert [item.objective_id for item in ranked] == [
+        "objective-table",
+        "objective-block",
+    ]
+
+
+def test_ranking_prefers_structured_results_from_independent_papers():
+    concentrated_extra_relationships = tuple(
+        {
+            "relationship_id": f"relationship-concentrated-table-{index}",
+            "varied_factors": ["laser power"],
+            "outcome": "relative density",
+            "source_refs": [
+                {
+                    "source_kind": "table",
+                    "source_ref": f"paper-concentrated-a-table-{index}",
+                }
+            ],
+            "confidence": 0.9,
+        }
+        for index in (1, 2)
+    )
+    skims = (
+        _paper_skim(
+            document_id="paper-distributed-a",
+            relationship_id="relationship-distributed-a",
+            source_kind="table",
+        ),
+        _paper_skim(
+            document_id="paper-distributed-b",
+            relationship_id="relationship-distributed-b",
+            source_kind="table",
+        ),
+        _paper_skim(
+            document_id="paper-concentrated-a",
+            relationship_id="relationship-concentrated-a",
+            extra_relationships=concentrated_extra_relationships,
+        ),
+        _paper_skim(
+            document_id="paper-concentrated-b",
+            relationship_id="relationship-concentrated-b",
+        ),
+    )
+    inventory = ObjectiveCandidateService._relationship_inventory(skims)
+    objectives = (
+        ResearchObjective.from_mapping(
+            {
+                "collection_id": "collection-test",
+                "objective_id": "objective-concentrated",
+                "question": "How does laser power affect relative density?",
+                "variables": ["laser power"],
+                "outcomes": ["relative density"],
+                "seed_document_ids": [
+                    "paper-concentrated-a",
+                    "paper-concentrated-b",
+                ],
+                "source_relationship_ids": [
+                    "relationship-concentrated-a",
+                    "relationship-concentrated-b",
+                    "relationship-concentrated-table-1",
+                    "relationship-concentrated-table-2",
+                ],
+            }
+        ),
+        ResearchObjective.from_mapping(
+            {
+                "collection_id": "collection-test",
+                "objective_id": "objective-distributed",
+                "question": "How does laser power affect relative density?",
+                "variables": ["laser power"],
+                "outcomes": ["relative density"],
+                "seed_document_ids": [
+                    "paper-distributed-a",
+                    "paper-distributed-b",
+                ],
+                "source_relationship_ids": [
+                    "relationship-distributed-a",
+                    "relationship-distributed-b",
+                ],
+            }
+        ),
+    )
+
+    ranked = ObjectiveCandidateService._rank_objectives(
+        objectives,
+        relationship_inventory=inventory,
+    )
+
+    assert [item.objective_id for item in ranked] == [
+        "objective-distributed",
+        "objective-concentrated",
+    ]
+
+
 def _group_relationship_ids(
     groups: list[list[dict[str, Any]]],
 ) -> list[tuple[str, ...]]:
@@ -1841,6 +2227,7 @@ def _paper_skim(
     relationship_id: str,
     factors: tuple[str, ...] = ("laser power",),
     outcome: str = "relative density",
+    source_kind: str = "block",
     material_scope: tuple[str, ...] = ("316L stainless steel",),
     process_context: tuple[str, ...] = ("LPBF",),
     sample_context: tuple[str, ...] = ("vertical coupon",),
@@ -1876,7 +2263,7 @@ def _paper_skim(
                             "outcome": outcome,
                             "source_refs": [
                                 {
-                                    "source_kind": "block",
+                                    "source_kind": source_kind,
                                     "source_ref": f"{document_id}-results",
                                 }
                             ],

@@ -67,81 +67,10 @@ function requestPath(input: string | URL | Request) {
 	return new URL(rawUrl, 'http://localhost').pathname;
 }
 
-function tracebackCallPaths() {
-	return fetchMock.mock.calls
-		.map(([input]) => requestPath(input as string | URL | Request))
-		.filter((path) => path.endsWith('/traceback'));
-}
-
 function callPaths() {
 	return fetchMock.mock.calls.map(([input]) => requestPath(input as string | URL | Request));
 }
 
-function buildResearchPayload() {
-	return {
-		collection_id: 'col_123',
-		document_id: 'doc_1',
-		state: 'ready',
-		paper_title: 'Paper A',
-		overview: {
-			material_systems: ['oxide cathode'],
-			sample_variant_count: 1,
-			main_process_variables: ['anneal temperature'],
-			measured_properties: ['conductivity']
-		},
-		materials: [
-			{
-				material_id: 'oxide_cathode',
-				canonical_name: 'oxide cathode',
-				aliases: ['LiNiO2'],
-				sample_count: 1,
-				process_families: ['annealing'],
-				measured_properties: ['conductivity'],
-				comparison_count: 1
-			}
-		],
-		sample_matrix: {
-			matrix_id: 'sample_matrix',
-			columns: [{ value_key: 'conductivity', label: 'Conductivity' }],
-			rows: [
-				{
-					row_id: 'row_1',
-					sample_id: 'S1',
-					sample_label: 'Sample A',
-					material: 'oxide cathode',
-					process_context: { anneal: '700 C' },
-					values: {
-						conductivity: {
-							display_value: '12 mS/cm',
-							status: 'observed',
-							evidence_refs: [{ evidence_ref_id: 'ev_1', locator: 'Results' }]
-						}
-					}
-				}
-			]
-		},
-		condition_series: [
-			{
-				series_id: 'series_1',
-				property: 'conductivity',
-				condition_axis: { axis_name: 'temperature' },
-				points: [
-					{
-						point_id: 'point_1',
-						condition_value: 700,
-						condition_unit: 'C',
-						result: {
-							display_value: '12 mS/cm',
-							status: 'observed'
-						}
-					}
-				]
-			}
-		]
-	};
-}
-
-let researchPayload: unknown = null;
 let scrollIntoViewMock: ReturnType<typeof vi.fn<(arg?: boolean | ScrollIntoViewOptions) => void>>;
 
 describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
@@ -151,7 +80,6 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			url: new URL('http://localhost/collections/col_123/documents/doc_1')
 		});
 		fetchMock.mockReset();
-		researchPayload = buildResearchPayload();
 		scrollIntoViewMock = vi.fn();
 		Element.prototype.scrollIntoView = scrollIntoViewMock;
 		getDocumentMock.mockReset();
@@ -194,7 +122,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							order: 1,
 							text: 'Conductivity improved to 12 mS/cm.',
 							text_unit_ids: [],
-							page: 1,
+							page: 1
 						},
 						{
 							block_id: 'methods',
@@ -204,7 +132,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							order: 2,
 							text: 'The sample was annealed at 700 C.',
 							text_unit_ids: [],
-							page: 2,
+							page: 2
 						},
 						{
 							block_id: 'results',
@@ -214,7 +142,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							order: 3,
 							text: 'Conductivity improved to 12 mS/cm under EIS.',
 							text_unit_ids: [],
-							page: 3,
+							page: 3
 						},
 						{
 							block_id: 'list-first',
@@ -224,7 +152,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							order: 4,
 							text: 'First listed observation.',
 							text_unit_ids: [],
-							page: 3,
+							page: 3
 						},
 						{
 							block_id: 'list-second',
@@ -234,7 +162,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							order: 5,
 							text: 'Second listed observation.',
 							text_unit_ids: [],
-							page: 3,
+							page: 3
 						},
 						{
 							block_id: 'missing-results-block',
@@ -244,7 +172,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							order: 6,
 							text: 'This source block exists in parsed content but is absent from markdown.',
 							text_unit_ids: [],
-							page: 3,
+							page: 3
 						},
 						{
 							block_id: 'glyph-list',
@@ -252,10 +180,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							heading_path: 'Results',
 							heading_level: 1,
 							order: 7,
-							text:
-								'\ufffd The SLM samples processed at higher scanning speed exhibited better densification.',
+							text: '\ufffd The SLM samples processed at higher scanning speed exhibited better densification.',
 							text_unit_ids: [],
-							page: 3,
+							page: 3
 						},
 						{
 							block_id: 'missing-glyph-block',
@@ -265,7 +192,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							order: 8,
 							text: '\ufffd This fallback source block should be readable.',
 							text_unit_ids: [],
-							page: 3,
+							page: 3
 						},
 						{
 							block_id: 'conclusion-overview',
@@ -275,7 +202,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							order: 9,
 							text: 'The effect of SLM processing parameters has been investigated.',
 							text_unit_ids: [],
-							page: 12,
+							page: 12
 						},
 						{
 							block_id: 'conclusion-first',
@@ -285,7 +212,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							order: 10,
 							text: 'The highest densification was observed for alternate hatches.',
 							text_unit_ids: [],
-							page: 12,
+							page: 12
 						},
 						{
 							block_id: 'conclusion-third',
@@ -293,10 +220,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 							heading_path: '4. Conclusion',
 							heading_level: 2,
 							order: 11,
-							text:
-								'\ufffd The SLM samples processed at higher scanning speed exhibited better densification, refined microstructure, and excellent mechanical properties as compared to samples processed with lower scanning speed.',
+							text: '\ufffd The SLM samples processed at higher scanning speed exhibited better densification, refined microstructure, and excellent mechanical properties as compared to samples processed with lower scanning speed.',
 							text_unit_ids: [],
-							page: 12,
+							page: 12
 						}
 					],
 					warnings: []
@@ -420,231 +346,30 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					warnings: []
 				});
 			}
-			if (
-				url.pathname === '/api/v1/collections/col_123/documents/doc_1/research-view' &&
-				researchPayload
-			) {
-				return jsonResponse(researchPayload);
-			}
-			if (url.pathname === '/api/v1/collections/col_123/results') {
-				return jsonResponse({
-					collection_id: 'col_123',
-					total: 1,
-					count: 1,
-					items: [
-						{
-							result_id: 'cres_1',
-							document_id: 'doc_1',
-							document_title: 'Paper A',
-							material_label: 'oxide cathode',
-							variant_label: 'Sample A',
-							property: 'conductivity',
-							value: 12,
-							unit: 'mS/cm',
-							summary: '12 mS/cm',
-							baseline: 'as-prepared',
-							test_condition: 'EIS',
-							process: '700 C',
-							traceability_status: 'direct',
-							comparability_status: 'comparable',
-							requires_expert_review: false
-						}
-					]
-				});
-			}
-			if (
-				url.pathname === '/api/v1/collections/col_123/documents/doc_1/comparison-semantics' &&
-				url.searchParams.get('include_grouped_projections') === 'true'
-			) {
-				return jsonResponse({
-					collection_id: 'col_123',
-					document_id: 'doc_1',
-					total: 1,
-					count: 1,
-					items: [],
-					variant_dossiers: [
-						{
-							variant_id: 'var_1',
-							variant_label: 'optimized VED + HIP',
-							material: {
-								label: 'oxide cathode',
-								composition: 'LiNiO2'
-							},
-							shared_process_state: {
-								anneal_temperature_c: 700
-							},
-							shared_missingness: [],
-							series: [
-								{
-									series_key: 'conductivity:test_temperature_c',
-									property_family: 'conductivity',
-									test_family: 'EIS',
-									varying_axis: {
-										axis_name: 'test_temperature_c',
-										axis_unit: 'C'
-									},
-									chains: [
-										{
-											result_id: 'cres_1',
-											source_result_id: 'mr_1',
-											measurement: {
-												property: 'conductivity',
-												value: 12,
-												unit: 'mS/cm',
-												result_type: 'scalar',
-												summary: '12 mS/cm'
-											},
-											test_condition: {
-												test_method: 'EIS',
-												test_temperature_c: 25
-											},
-											baseline: {
-												label: 'as-prepared',
-												reference: 'same-paper control',
-												baseline_type: 'same_document',
-												resolved: true
-											},
-											assessment: {
-												comparability_status: 'comparable',
-												warnings: [],
-												basis: [],
-												missing_context: [],
-												requires_expert_review: false,
-												assessment_epistemic_status: 'grounded'
-											},
-											value_provenance: {
-												value_origin: 'reported',
-												source_value_text: '12',
-												source_unit_text: 'mS/cm'
-											},
-											evidence: {
-												evidence_ids: ['ev_1'],
-												direct_anchor_ids: ['anc_1'],
-												contextual_anchor_ids: [],
-												structure_feature_ids: [],
-												characterization_observation_ids: [],
-												traceability_status: 'direct'
-											}
-										},
-										{
-											result_id: 'cres_2',
-											source_result_id: 'mr_2',
-											measurement: {
-												property: 'capacity',
-												value: 145,
-												unit: 'mAh/g',
-												result_type: 'scalar',
-												summary: '145 mAh/g'
-											},
-											test_condition: {
-												test_method: 'cycling',
-												test_temperature_c: 25
-											},
-											baseline: {
-												label: 'as-prepared',
-												reference: 'same-paper control',
-												baseline_type: 'same_document',
-												resolved: true
-											},
-											assessment: {
-												comparability_status: 'limited',
-												warnings: ['Cycle count is not fully specified.'],
-												basis: [],
-												missing_context: ['cycle_count'],
-												requires_expert_review: true,
-												assessment_epistemic_status: 'partial'
-											},
-											value_provenance: {
-												value_origin: 'reported',
-												source_value_text: '145',
-												source_unit_text: 'mAh/g'
-											},
-											evidence: {
-												evidence_ids: ['ev_2'],
-												direct_anchor_ids: ['anc_2'],
-												contextual_anchor_ids: [],
-												structure_feature_ids: [],
-												characterization_observation_ids: [],
-												traceability_status: 'direct'
-											}
-										}
-									]
-								}
-							]
-						}
-					]
-				});
-			}
-			if (url.pathname === '/api/v1/collections/col_123/evidence/ev_1/traceback') {
-				return jsonResponse({
-					collection_id: 'col_123',
-					evidence_id: 'ev_1',
-					traceback_status: 'ready',
-					anchors: [
-						{
-							anchor_id: 'anc_1',
-							document_id: 'doc_1',
-							source_kind: 'block',
-							source_ref: 'results',
-							source_type: 'text',
-							page: 3,
-							quote: 'Conductivity improved to 12 mS/cm under EIS.',
-							deep_link: '/collections/col_123/documents/doc_1?evidence_id=ev_1&anchor_id=anc_1'
-						}
-					]
-				});
-			}
 
 			return jsonResponse({ detail: 'collection not found: col_123' }, 404, 'Not Found');
 		});
 	});
 
-	it('renders the paper reading workbench with tabs and local graph', async () => {
+	it('renders the paper reading workbench without a synthetic local graph', async () => {
 		render(Page);
 
-		await expect.element(browserPage.getByText('Lens')).toBeInTheDocument();
+		await expect.element(browserPage.getByRole('link', { name: 'Lens' })).toBeInTheDocument();
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
-		expect(tracebackCallPaths()).toEqual([]);
-		await browserPage.getByRole('button', { name: 'Show extraction details' }).click();
-		await expect.element(browserPage.getByRole('tab', { name: 'Overview' })).toBeInTheDocument();
-		await expect.element(browserPage.getByRole('tab', { name: 'Methods' })).not.toBeInTheDocument();
-		await expect.element(browserPage.getByRole('tab', { name: 'Q&A' })).not.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Graph').first()).toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Research question' }).first())
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Preparation / processing / treatment' }))
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Block results')).not.toBeInTheDocument();
+		expect(document.querySelector('.graph-column')).toBeNull();
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
-		await expect.element(browserPage.getByRole('heading', { name: 'Abstract' })).toBeInTheDocument();
-		await expect.element(browserPage.getByRole('img', { name: 'Fig. 1' })).toHaveAttribute(
-			'src',
-			'/api/v1/collections/col_123/documents/doc_1/figures/fig_1/image'
-		);
+		await expect
+			.element(browserPage.getByRole('heading', { name: 'Abstract' }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('img', { name: 'Fig. 1' }))
+			.toHaveAttribute('src', '/api/v1/collections/col_123/documents/doc_1/figures/fig_1/image');
 		await expect
 			.element(browserPage.getByText('Figure. Fig. 1. Microstructure after annealing.'))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).not.toBeInTheDocument();
-
-		await browserPage.getByRole('tab', { name: 'Results' }).click();
-		await expect.element(browserPage.getByText('oxide cathode').first()).toBeInTheDocument();
-		await expect.element(browserPage.getByText('Comparable').first()).toBeInTheDocument();
-		await browserPage.getByRole('button', { name: /oxide cathode.*conductivity/i }).click();
-		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
-		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
-		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
-
-		await browserPage.getByRole('tab', { name: 'Evidence' }).click();
-		await expect
-			.element(browserPage.getByText('conductivity is reported for oxide cathode.'))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: 'Jump to source' }).first())
-			.toBeInTheDocument();
-		await browserPage.getByRole('button', { name: 'Jump to source' }).first().click();
-		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
+		expect(callPaths()).toContain('/api/v1/collections/col_123/documents/doc_1/content');
+		expect(callPaths()).toContain('/api/v1/collections/col_123/documents/doc_1/markdown');
 	});
 
 	it('uses parsed source text when the PDF cannot be rendered', async () => {
@@ -660,7 +385,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('Conductivity improved to 12 mS/cm under EIS.'))
 			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('Source preview unavailable')).not.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Source preview unavailable'))
+			.not.toBeInTheDocument();
 	});
 
 	it('lets the user view parsed source text while the PDF is available', async () => {
@@ -673,7 +400,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await browserPage.getByRole('button', { name: 'View source text' }).click();
 
 		await expect.element(browserPage.getByTestId('parsed-source-fallback')).toBeInTheDocument();
-		await expect.element(browserPage.getByText('The sample was annealed at 700 C.')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('The sample was annealed at 700 C.'))
+			.toBeInTheDocument();
 
 		await browserPage.getByRole('button', { name: 'View PDF' }).click();
 
@@ -681,79 +410,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByTestId('parsed-source-fallback')).not.toBeInTheDocument();
 	});
 
-	it('renders paper research sample matrix when research view is ready', async () => {
-		render(Page);
-
-		await browserPage.getByRole('button', { name: 'Show extraction details' }).click();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Paper research view' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Materials in this paper' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Sample matrix' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('button', { name: '12 mS/cm' }).first())
-			.toBeInTheDocument();
-		await expect.element(browserPage.getByText('conductivity / temperature')).toBeInTheDocument();
-	});
-
-	it('organizes structured understanding in scientific reading order', async () => {
-		render(Page);
-
-		await browserPage.getByRole('button', { name: 'Show extraction details' }).click();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Paper scope' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Experimental objects' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Preparation / processing / treatment' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Test and characterization methods' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Measured results' }))
-			.toBeInTheDocument();
-	});
-
-	it('renders an unavailable state when paper research view is missing', async () => {
-		researchPayload = null;
-
-		render(Page);
-
-		await browserPage.getByRole('button', { name: 'Show extraction details' }).click();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Paper research view is unavailable' }))
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Research question' }).first())
-			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByRole('heading', { name: 'Sample matrix' }))
-			.not.toBeInTheDocument();
-	});
-
-	it('loads only the requested traceback for a document source deep link', async () => {
-		setPage({
-			params: { id: 'col_123', document_id: 'doc_1' },
-			url: new URL(
-				'http://localhost/collections/col_123/documents/doc_1?evidence_id=ev_1&anchor_id=anc_1'
-			)
-		});
-
-		render(Page);
-
-		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
-		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
-		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
-	});
-
-	it('keeps source evidence links in parsed paper mode', async () => {
+	it('keeps Objective Evidence source links in parsed paper mode', async () => {
 		setPage({
 			params: { id: 'col_123', document_id: 'doc_1' },
 			url: new URL(
@@ -766,7 +423,6 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('markdown-paper-reader')).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('pdf-current-page')).not.toBeInTheDocument();
-		expect(tracebackCallPaths()).toEqual(['/api/v1/collections/col_123/evidence/ev_1/traceback']);
 	});
 
 	it('highlights the parsed paper source when a source_ref deep link is present', async () => {
@@ -789,11 +445,6 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			.toHaveAttribute('aria-current', 'location');
 		await expect.poll(() => scrollIntoViewMock.mock.calls.length).toBeGreaterThan(0);
 		await expect.element(browserPage.getByTestId('pdf-current-page')).not.toBeInTheDocument();
-		expect(callPaths()).not.toContain('/api/v1/collections/col_123/results');
-		expect(callPaths()).not.toContain(
-			'/api/v1/collections/col_123/documents/doc_1/comparison-semantics'
-		);
-		expect(tracebackCallPaths()).toEqual([]);
 	});
 
 	it('targets a table artifact instead of the first text block on the same page', async () => {
@@ -838,7 +489,6 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			.element(browserPage.getByTestId('markdown-selected-evidence-quote'))
 			.toHaveTextContent('Conductivity improved to 12 mS/cm under EIS.');
 		await expect.element(browserPage.getByTestId('pdf-current-page')).not.toBeInTheDocument();
-		expect(tracebackCallPaths()).toEqual([]);
 	});
 
 	it('highlights parsed paper paragraph blocks from source_ref deep links', async () => {
@@ -894,9 +544,9 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 			.toHaveTextContent(
 				'The SLM samples processed at higher scanning speed exhibited better densification.'
 			);
-		await expect.element(browserPage.getByTestId('markdown-active-source')).not.toHaveTextContent(
-			'\ufffd'
-		);
+		await expect
+			.element(browserPage.getByTestId('markdown-active-source'))
+			.not.toHaveTextContent('\ufffd');
 		await expect
 			.element(browserPage.getByTestId('markdown-active-source-fallback'))
 			.not.toBeInTheDocument();
@@ -953,7 +603,10 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByTestId('markdown-active-source-fallback'))
 			.toHaveTextContent('Results');
-		await browserPage.getByTestId('markdown-active-source-fallback').getByRole('button', { name: 'View PDF' }).click();
+		await browserPage
+			.getByTestId('markdown-active-source-fallback')
+			.getByRole('button', { name: 'View PDF' })
+			.click();
 		await expect.element(browserPage.getByTestId('pdf-current-page')).toHaveTextContent('3');
 		await expect.poll(() => scrollIntoViewMock.mock.calls.length).toBeGreaterThan(0);
 		await expect.element(browserPage.getByTestId('markdown-active-source')).not.toBeInTheDocument();

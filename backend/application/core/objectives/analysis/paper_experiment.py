@@ -56,8 +56,9 @@ def reconstruct_paper_experiments(
         paper_skims=paper_skims,
     )
     bound = _bind_objective_result_process_context(enriched)
+    paper_facts = _merge_duplicate_paper_facts(bound)
     comparisons = _build_objective_pairwise_comparison_units(
-        bound,
+        paper_facts,
         objectives=objectives,
     )
     if comparisons:
@@ -66,7 +67,7 @@ def reconstruct_paper_experiments(
             collection_id,
             len(comparisons),
         )
-    return (*bound, *comparisons)
+    return (*paper_facts, *comparisons)
 
 
 def _enrich_objective_scope_context(
@@ -114,6 +115,172 @@ def _dedupe_objective_source_refs(
             seen.add(key)
             deduped.append(dict(ref))
     return tuple(deduped)
+
+
+def _merge_duplicate_paper_facts(
+    units: tuple[ExtractedEvidenceDraft, ...],
+) -> tuple[ExtractedEvidenceDraft, ...]:
+    candidates_by_fact: dict[
+        tuple[Any, ...],
+        list[tuple[int, ExtractedEvidenceDraft]],
+    ] = {}
+    merged_entries: list[tuple[int, ExtractedEvidenceDraft]] = []
+    for position, unit in enumerate(units):
+        fact_key = _objective_paper_fact_key(unit)
+        if fact_key is None:
+            merged_entries.append((position, unit))
+            continue
+        candidates_by_fact.setdefault(fact_key, []).append((position, unit))
+
+    for candidates in candidates_by_fact.values():
+        clusters: list[tuple[int, ExtractedEvidenceDraft]] = []
+        for position, unit in sorted(
+            candidates,
+            key=lambda item: (
+                -sum(
+                    len(values)
+                    for values in _objective_fact_context_values(item[1]).values()
+                ),
+                item[0],
+            ),
+        ):
+            incoming_context = _objective_fact_context_values(unit)
+            exact_matches = [
+                index
+                for index, (_first_position, existing) in enumerate(clusters)
+                if _objective_fact_context_values(existing) == incoming_context
+            ]
+            compatible_matches = [
+                index
+                for index, (_first_position, existing) in enumerate(clusters)
+                if _objective_fact_contexts_compatible(
+                    _objective_fact_context_values(existing),
+                    incoming_context,
+                )
+            ]
+            matches = exact_matches or compatible_matches
+            if len(matches) != 1:
+                clusters.append((position, unit))
+                continue
+            match = matches[0]
+            first_position, existing = clusters[match]
+            clusters[match] = (
+                min(first_position, position),
+                _objective_merge_duplicate_paper_fact(existing, unit),
+            )
+        merged_entries.extend(clusters)
+
+    return tuple(
+        unit
+        for _position, unit in sorted(
+            merged_entries,
+            key=lambda item: (item[0], item[1].evidence_id),
+        )
+    )
+
+
+def _objective_paper_fact_key(
+    unit: ExtractedEvidenceDraft,
+) -> tuple[Any, ...] | None:
+    result = unit.reported_result
+    comparison = unit.comparison
+    if (
+        unit.selection_status == "failed"
+        or result is None
+        or result.value in (None, "")
+        or comparison is None
+        or not comparison.comparable
+        or not unit.changed_variables
+        or unit.attribution_scope in {"descriptive_only", "not_attributable"}
+    ):
+        return None
+
+    variables = tuple(
+        sorted(
+            (
+                property_matching.axis_key(variable.name),
+                _objective_fact_scalar_key(variable.baseline_value),
+                _objective_fact_scalar_key(variable.target_value),
+                _objective_fact_text_key(variable.unit),
+            )
+            for variable in unit.changed_variables
+        )
+    )
+    return (
+        unit.objective_id,
+        unit.document_id,
+        variables,
+        _objective_fact_scalar_key(comparison.baseline_label),
+        _objective_fact_scalar_key(comparison.target_label),
+        tuple(
+            sorted(
+                property_matching.axis_key(name)
+                for name in comparison.axis_names
+            )
+        ),
+        property_matching.axis_key(result.outcome),
+        _objective_fact_scalar_key(result.value),
+        _objective_fact_scalar_key(result.baseline_value),
+        _objective_fact_scalar_key(result.target_value),
+        _objective_fact_text_key(result.unit),
+        result.direction,
+        unit.attribution_scope,
+    )
+
+
+def _objective_fact_context_values(
+    unit: ExtractedEvidenceDraft,
+) -> dict[tuple[str, str], frozenset[tuple[tuple[str, str], str]]]:
+    values: dict[tuple[str, str], set[tuple[tuple[str, str], str]]] = {}
+    for section in ("material", "sample", "process", "test"):
+        for attribute in getattr(unit.scientific_context, section):
+            name = (
+                property_matching.normalize_property_label(attribute.name)
+                or _objective_column_key(attribute.name)
+            )
+            values.setdefault((section, name), set()).add(
+                (
+                    _objective_fact_scalar_key(attribute.value),
+                    _objective_fact_text_key(attribute.unit),
+                )
+            )
+    return {key: frozenset(items) for key, items in values.items()}
+
+
+def _objective_fact_contexts_compatible(
+    left: dict[tuple[str, str], frozenset[tuple[tuple[str, str], str]]],
+    right: dict[tuple[str, str], frozenset[tuple[tuple[str, str], str]]],
+) -> bool:
+    return left.items() <= right.items() or right.items() <= left.items()
+
+
+def _objective_merge_duplicate_paper_fact(
+    existing: ExtractedEvidenceDraft,
+    incoming: ExtractedEvidenceDraft,
+) -> ExtractedEvidenceDraft:
+    payload = existing.to_record()
+    payload["source_refs"] = list(
+        _dedupe_objective_source_refs((existing.source_refs, incoming.source_refs))
+    )
+    payload["evidence_anchor_ids"] = list(
+        dict.fromkeys((*existing.evidence_anchor_ids, *incoming.evidence_anchor_ids))
+    )
+    payload["confidence"] = min(existing.confidence, incoming.confidence)
+    return ExtractedEvidenceDraft.from_mapping(payload)
+
+
+def _objective_fact_scalar_key(value: Any) -> tuple[str, str]:
+    if value is None:
+        return ("none", "")
+    if isinstance(value, bool):
+        return ("bool", str(value).lower())
+    if isinstance(value, (int, float)):
+        return ("number", format(float(value), ".12g"))
+    return ("text", _objective_fact_text_key(value))
+
+
+def _objective_fact_text_key(value: Any) -> str:
+    return " ".join(str(value or "").strip().casefold().split())
 
 
 def _objective_source_refs_with_supports(
@@ -211,12 +378,12 @@ def _bind_objective_result_process_context(
             baseline_key = (
                 unit.objective_id,
                 unit.document_id,
-                comparison.baseline_label.casefold(),
+                _objective_condition_label_key(comparison.baseline_label),
             )
             target_key = (
                 unit.objective_id,
                 unit.document_id,
-                comparison.target_label.casefold(),
+                _objective_condition_label_key(comparison.target_label),
             )
             baseline_context = process_context_by_sample.get(baseline_key)
             target_context = process_context_by_sample.get(target_key)
@@ -429,11 +596,17 @@ def _bind_objective_result_process_context(
             bound.append(unit)
             continue
         sample_identity = _objective_explicit_sample_identity(unit)
-        key = (unit.objective_id, unit.document_id, sample_identity)
+        if not sample_identity:
+            bound.append(unit)
+            continue
+        key = (
+            unit.objective_id,
+            unit.document_id,
+            _objective_condition_label_key(sample_identity),
+        )
         process_context = process_context_by_sample.get(key)
         if (
-            not sample_identity
-            or key in conflicting_samples
+            key in conflicting_samples
             or process_context is None
         ):
             bound.append(unit)
@@ -474,7 +647,11 @@ def _objective_condition_registry(
         sample_identity = _objective_explicit_sample_identity(unit)
         if not sample_identity:
             continue
-        key = (unit.objective_id, unit.document_id, sample_identity)
+        key = (
+            unit.objective_id,
+            unit.document_id,
+            _objective_condition_label_key(sample_identity),
+        )
         scopes.add((unit.objective_id, unit.document_id))
         if key in conflicts:
             continue
@@ -656,11 +833,11 @@ def _objective_explicit_sample_label(
 
 
 def _objective_exact_label_position(source_text: str, label: str) -> int:
-    parts = tuple(str(label).split())
+    parts = tuple(re.findall(r"[^\W\d_]+|\d+", str(label), flags=re.UNICODE))
     if not parts:
         return -1
     match = re.search(
-        r"(?<!\w)" + r"\s+".join(re.escape(part) for part in parts) + r"(?!\w)",
+        r"(?<!\w)" + r"[\W_]*".join(re.escape(part) for part in parts) + r"(?!\w)",
         source_text,
         flags=re.IGNORECASE,
     )
@@ -1070,6 +1247,14 @@ def _objective_sample_identity_key(
         f"{_objective_column_key(key)}={str(value).strip().casefold()}"
         for key, value in sorted(sample_attributes.items())
         if str(value).strip()
+    )
+
+
+def _objective_condition_label_key(value: Any) -> str:
+    return "".join(
+        character
+        for character in str(value or "").strip().casefold()
+        if character.isalnum()
     )
 
 

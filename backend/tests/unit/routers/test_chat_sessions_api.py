@@ -221,7 +221,6 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn() -> N
         source_artifact_repository=object(),
         paper_fact_repository=object(),
         objective_repository=object(),
-        comparison_repository=object(),
         finding_review_repository=object(),
         experiment_plan_repository=object(),
         chat_session_service=service,

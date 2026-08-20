@@ -74,20 +74,18 @@ Owns the collection-facing summary read model:
 - collection-level warnings
 - navigation links into profiles, evidence, comparisons, and graph
 
-### Goal
+### Chat
 
-Owns collection-bound conversation state and source-boundary records:
+Owns collection-bound Research Agent state and capability trajectory:
 
-- goal session state
-- user and assistant message records
-- answer source modes
-- user-navigable source links
-- rolling conversation summary metadata
+- Chat session identity and ownership
+- user, assistant, and tool messages
+- typed capability calls and structured results
+- exact write-approval decisions
+- user-navigable resource references
 
-This domain currently models the chat conversation only. It must not introduce
-Goal Consumer / Decision Layer concepts such as coverage assessment, gap
-detection, clue ranking, or next-step decision support until that product slice
-is explicitly added.
+This domain models Agent interaction only. It may read Core records through
+bounded capabilities, but it must not become a second scientific fact model.
 
 ### Documents
 

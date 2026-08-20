@@ -3,9 +3,8 @@
 ## Purpose
 
 This document owns the browser presentation contract for the collection-bound
-Research Agent. The historical filename is retained so existing documentation
-links remain stable; the retired Goal-session design is not a supported
-runtime.
+Research Agent. Chat is the only supported assistant-session runtime; the
+retired Goal-session design is not a compatibility contract.
 
 The Assistant route presents one durable interaction:
 
@@ -143,7 +142,7 @@ interaction names, horizontal overflow, and browser console errors.
   Current same-origin browser API contract.
 - [`../src/routes/collections/README.md`](../src/routes/collections/README.md)
   Collection route ownership and Objective interaction flow.
-- [`../../docs/decisions/rfc-collection-bound-goal-copilot.md`](../../docs/decisions/rfc-collection-bound-goal-copilot.md)
+- [`../../docs/decisions/rfc-collection-bound-research-agent.md`](../../docs/decisions/rfc-collection-bound-research-agent.md)
   Shared Research Agent product, scientific, and authorization decision.
 - [`../../backend/docs/specs/api.md`](../../backend/docs/specs/api.md)
   Backend Chat and capability contract.

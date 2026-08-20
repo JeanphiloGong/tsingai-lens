@@ -17,6 +17,7 @@ from domain.core import (
     FindingPaperContribution,
     ObjectiveAnalysis,
     ObjectiveEvidence,
+    ObjectiveEvidenceContext,
     PaperContribution,
     ResearchObjective,
     directions_contradict,
@@ -1001,6 +1002,10 @@ class FindingSynthesisService:
             factors
             and any(
                 _axis_matches(factor, objective_factor)
+                or property_matching.variable_matches_objective_scope(
+                    factor,
+                    objective_factor,
+                )
                 for factor in factors
                 for objective_factor in objective.variables
             )
@@ -1141,10 +1146,15 @@ class FindingSynthesisService:
                 "backend primary direction does not match one consistent supporting "
                 "Evidence direction"
             )
+        common_context = Finding.common_scientific_context_for(supporting_evidence)
         statement = self._finding_statement(
             factors=factors,
             outcome=outcome,
             direction=direction,
+            comparison_interval=(
+                _text(result_set.get("comparison_interval")) or "unspecified"
+            ),
+            common_context=common_context,
             contradicting_evidence=contradicting_evidence,
         )
         boundary_ids = self._condition_boundary_evidence_ids(
@@ -1164,37 +1174,11 @@ class FindingSynthesisService:
         attribution_scope = Finding.attribution_scope_for(
             factors, supporting_evidence
         )
-        assertion_strength = _text(candidate.get("assertion_strength")) or (
-            "descriptive"
+        assertion_strength = self._bounded_assertion_strength(
+            _text(candidate.get("assertion_strength")) or "descriptive",
+            attribution_scope=attribution_scope,
+            supporting_evidence=supporting_evidence,
         )
-        if assertion_strength == "causal" and attribution_scope != "isolated_effect":
-            raise ValueError(
-                "candidate causal assertion lacks isolated-effect attribution"
-            )
-        if assertion_strength == "causal" and any(
-            evidence.source_kind != "table"
-            or evidence.selection_reason
-            != "Deterministic comparison of rows from the same result table."
-            or evidence.comparison is None
-            or not evidence.comparison.comparable
-            or len(evidence.changed_variables) != 1
-            or len(
-                {
-                    ref.get("row_index")
-                    for ref in evidence.related_source_refs
-                    if isinstance(ref.get("row_index"), int)
-                }
-            )
-            < 2
-            for evidence in supporting_evidence
-        ):
-            assertion_strength = "associative"
-        if attribution_scope == "descriptive_only" and assertion_strength != (
-            "descriptive"
-        ):
-            raise ValueError(
-                "candidate assertion strength exceeds descriptive-only attribution"
-            )
         direct_evidence = supporting_evidence + contradicting_evidence
         certainty = Finding.certainty_for(synthesis_status, direct_evidence)
         limitations = self._limitations(
@@ -1229,9 +1213,7 @@ class FindingSynthesisService:
                     "certainty": certainty,
                     "display_rank": display_rank,
                     "mechanisms": mechanisms,
-                    "scientific_context": Finding.common_scientific_context_for(
-                        supporting_evidence
-                    ).to_record(),
+                    "scientific_context": common_context.to_record(),
                     "limitations": limitations,
                     "paper_contributions": [
                         item.to_record() for item in paper_bindings
@@ -1249,6 +1231,8 @@ class FindingSynthesisService:
         factors: tuple[str, ...],
         outcome: str,
         direction: str,
+        comparison_interval: str,
+        common_context: ObjectiveEvidenceContext,
         contradicting_evidence: tuple[ObjectiveEvidence, ...],
     ) -> str:
         factor_phrase = (
@@ -1271,6 +1255,35 @@ class FindingSynthesisService:
             "mixed": "a source-reported mixed change",
         }
         primary_phrase = direction_phrases[direction]
+        if comparison_interval == "reference_to_treatment" and not (
+            contradicting_evidence
+        ):
+            if len(factors) == 1 and factors[0].endswith("condition"):
+                evaluated_subject = f"{factors[0]}s"
+            elif len(factors) == 1 and factors[0].endswith("treatment"):
+                evaluated_subject = f"{factors[0]}s"
+            elif len(factors) == 1:
+                evaluated_subject = f"changes in {factors[0]}"
+            else:
+                evaluated_subject = f"joint changes in {factor_phrase}"
+            reference_outcomes = {
+                "increase": f"higher {outcome}",
+                "decrease": f"lower {outcome}",
+                "improve": f"improved {outcome}",
+                "worsen": f"worsened {outcome}",
+                "changed": f"a qualitative change in {outcome}",
+                "no_change": f"no reported difference in {outcome}",
+                "mixed": f"a source-reported mixed change in {outcome}",
+            }
+            context_prefix = FindingSynthesisService._finding_context_prefix(
+                common_context
+            )
+            lead = f"{context_prefix}relative" if context_prefix else "Relative"
+            return (
+                f"{lead} to as-built/as-fabricated reference "
+                f"conditions, the evaluated {evaluated_subject} were associated "
+                f"with {reference_outcomes[direction]}."
+            )
         if not contradicting_evidence:
             return f"{subject} were associated with {primary_phrase} in {outcome}."
 
@@ -1288,6 +1301,61 @@ class FindingSynthesisService:
             f"Across the reported comparisons, {subject[:1].lower() + subject[1:]} "
             "showed opposing "
             f"directions in {outcome}: {primary_phrase} versus {opposing_phrases}."
+        )
+
+    @staticmethod
+    def _finding_context_prefix(context: ObjectiveEvidenceContext) -> str:
+        material_values = tuple(
+            dict.fromkeys(str(item.value).strip() for item in context.material)
+        )
+        orientation_values = tuple(
+            f"{str(item.value).strip()} {item.name}"
+            for item in context.sample
+            if "orientation" in _normalize_term(item.name)
+        )
+        if not material_values and not orientation_values:
+            return ""
+
+        if material_values:
+            prefix = "For " + " and ".join(material_values)
+            if orientation_values:
+                prefix += " at " + " and ".join(orientation_values)
+            return prefix + ", "
+        return "At " + " and ".join(orientation_values) + ", "
+
+    @staticmethod
+    def _bounded_assertion_strength(
+        requested_strength: str,
+        *,
+        attribution_scope: str,
+        supporting_evidence: tuple[ObjectiveEvidence, ...],
+    ) -> str:
+        ceiling = "descriptive"
+        if attribution_scope != "descriptive_only":
+            ceiling = "associative"
+        if attribution_scope == "isolated_effect" and all(
+            evidence.source_kind == "table"
+            and evidence.selection_reason
+            == "Deterministic comparison of rows from the same result table."
+            and evidence.comparison is not None
+            and evidence.comparison.comparable
+            and len(evidence.changed_variables) == 1
+            and len(
+                {
+                    ref.get("row_index")
+                    for ref in evidence.related_source_refs
+                    if isinstance(ref.get("row_index"), int)
+                }
+            )
+            >= 2
+            for evidence in supporting_evidence
+        ):
+            ceiling = "causal"
+
+        strength_rank = {"descriptive": 0, "associative": 1, "causal": 2}
+        return min(
+            (requested_strength, ceiling),
+            key=lambda value: strength_rank[value],
         )
 
     @staticmethod

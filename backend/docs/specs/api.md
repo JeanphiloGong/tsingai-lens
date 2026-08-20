@@ -8,7 +8,8 @@ this file owns resource boundaries and cross-endpoint semantics.
 
 - Product APIs use `/api/v1/*`.
 - API documentation uses `/api/docs`, `/api/redoc`, and `/api/openapi.json`.
-- Browser requests use bearer authentication after `POST /api/v1/auth/login`.
+- `POST /api/v1/auth/login` establishes an HttpOnly session cookie. Browser
+  requests send that cookie through the same-origin `/api/v1/*` contract.
 - Every business response carries `X-Request-ID`.
 - A collection is the primary working scope; a document is a source inside it.
 - PostgreSQL is the structured runtime authority.
@@ -24,8 +25,9 @@ this file owns resource boundaries and cross-endpoint semantics.
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
 
-Invalid or expired credentials return `401`. The frontend clears local auth
-state and returns the user to login.
+Invalid credentials return `401`. A missing or expired session cookie also
+returns `401`; the frontend clears local auth state and returns the user to
+login.
 
 ### Collections, Files, And Builds
 
@@ -45,6 +47,10 @@ Collection build parses Source, creates document profiles and reusable paper
 facts, and discovers Objective candidates. It does not run confirmed Objective
 deep analysis. Task responses expose current stage, progress, terminal error,
 and retry-appropriate status; a failed task is never presented as a new task.
+The task artifact registry reports only persisted Source artifacts (documents,
+blocks, figures, table rows, and table cells). Workspace document-profile and
+Objective readiness is derived from their owning repositories rather than
+duplicated into the task artifact registry.
 The build request accepts `mode: standard | fast` and defaults to `standard`.
 The selected mode is persisted before dispatch and determines the runtime
 dependency graph for that task.
@@ -246,11 +252,24 @@ failure may have no reason.
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence`
+- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence-map`
 
 Finding and Evidence list endpoints support `offset` and `limit`. All responses
 include an explicit `analysis_version`. If omitted from the query, the backend
 uses the published Objective version. Evidence accepts an optional `finding_id`
 filter.
+
+The Evidence Map endpoint has no version query because it always projects the
+Objective's current `published_analysis_version`. It deterministically returns
+Objective, Finding, Evidence, exact Source, and Document nodes plus typed
+lineage edges. Support, contradiction, and context come only from published
+Finding Evidence bindings. Extraction failures and exclusions appear only in
+document coverage and `includes_document` edges; they are never converted into
+scientific contradiction. Multiple Evidence records with the same document,
+Source kind, and stable `source_ref` share one Source node. The endpoint performs
+no LLM call and persists no graph state. `projection_version` identifies the
+read model contract, while `analysis_version` identifies the published domain
+records from which it was produced.
 
 A Finding contains:
 
@@ -334,19 +353,6 @@ that already reference a migrated Chat message retain their stored
 Finding/Evidence lineage. Reads report whether that snapshot is still current;
 stale historical plans cannot be promoted to `ready_for_review`.
 
-### Research Aggregation
-
-- `GET /api/v1/collections/{collection_id}/research-view`
-- `GET /api/v1/collections/{collection_id}/materials`
-- `GET /api/v1/collections/{collection_id}/materials/{material_id}/research-view`
-- `GET /api/v1/collections/{collection_id}/documents/{document_id}/research-view`
-- `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials`
-- `GET /api/v1/collections/{collection_id}/documents/{document_id}/materials/{material_id}/research-view`
-
-These endpoints aggregate reusable paper facts and comparison projections into
-paper coverage, sample matrices, condition series, material profiles, and
-comparable groups. They do not own or duplicate Objective Findings.
-
 ### Documents And Source Verification
 
 - `GET /api/v1/collections/{collection_id}/documents/profiles`
@@ -363,39 +369,10 @@ navigation. A Finding Evidence link names the owning document, stable
 `source_ref`, and page when available. Internal Source IDs are audit/navigation
 parameters, not visible paper titles.
 
-### Comparable Results And Comparisons
-
-- `GET /api/v1/comparable-results`
-- `GET /api/v1/comparable-results/{comparable_result_id}`
-- `GET /api/v1/collections/{collection_id}/results`
-- `GET /api/v1/collections/{collection_id}/results/{result_id}`
-- `GET /api/v1/collections/{collection_id}/comparisons`
-- `GET /api/v1/collections/{collection_id}/comparisons/{row_id}`
-- `GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics`
-
-Comparable results are canonical normalized result objects. Collection
-comparisons are deterministic projections with source/evidence links. They do
-not create another Objective conclusion identity.
-
-### Evidence Cards
-
-- `GET /api/v1/collections/{collection_id}/evidence/cards`
-- `GET /api/v1/collections/{collection_id}/evidence/{evidence_id}`
-- `GET /api/v1/collections/{collection_id}/evidence/{evidence_id}/traceback`
-
-These endpoints expose reusable paper-fact Evidence cards and source traceback.
-They are distinct from versioned `ObjectiveEvidence` and are not accepted as a
-substitute for Finding-specific Evidence membership.
-
-### Graph
-
-- `GET /api/v1/collections/{collection_id}/graph`
-- `GET /api/v1/collections/{collection_id}/graph/nodes/{node_id}/neighbors`
-- `GET /api/v1/collections/{collection_id}/graphml`
-
-The graph is a secondary projection over canonical Objective, document,
-Evidence, comparison, material, property, test-condition, and baseline records.
-It has no independent scientific state.
+The browser comparison overview has no separate comparison aggregate endpoint.
+It reads the Objective list and each published Finding list described above.
+Legacy research-view, Materials, comparable-result, Evidence-card, and
+collection-wide Graph routes are not part of the maintained HTTP contract.
 
 ## Error Contract
 

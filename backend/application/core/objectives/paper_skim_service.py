@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable, Mapping
+import os
+from collections.abc import Callable, Iterable, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -18,6 +21,7 @@ from application.core.objectives.discovery.study_window import (
     PaperStudyWindowExtractor,
     StructuredPaperSkim,
     StructuredPaperStudy,
+    StructuredPaperStudyRelationship,
 )
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
@@ -36,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
-_SKIM_WINDOW_CHARS = 4000
+_SKIM_SOURCE_UNIT_CHARS = 4000
 _SKIM_HEADING_LIMIT = 16
 _SKIM_WARNING_LIMIT = 2
 _SKIM_WINDOW_ROLES = ("overview", "methods", "results", "conclusion", "unknown")
@@ -50,6 +54,7 @@ _SKIM_ROLE_BY_SEMANTIC_ROLE = {
 _EVIDENCE_DENSITY_RANK = {"unknown": 0, "low": 1, "medium": 2, "high": 3}
 _SIGNAL_RECONCILIATION_SIGNAL_LIMIT = 12
 _SIGNAL_RECONCILIATION_NEARBY_SOURCE_UNIT_DISTANCE = 12
+_DEFAULT_MAX_EXTRACTION_CONCURRENCY = 4
 
 
 @dataclass(frozen=True)
@@ -168,12 +173,12 @@ class PaperSkimService:
                     active_window_count=window_count,
                     active_window_role=payload["window_role"],
                 )
-                batch_skims, batch_signals = self._extract_window_batch(
-                    collection_id=collection_id,
-                    document_id=document.document_id,
-                    payload=payload,
-                    study_window_extractor=study_window_extractor,
-                )
+            for batch_skims, batch_signals in self._extract_window_payloads(
+                collection_id=collection_id,
+                document_id=document.document_id,
+                payloads=payloads,
+                study_window_extractor=study_window_extractor,
+            ):
                 window_skims.extend(batch_skims)
                 paper_signals.extend(batch_signals)
             paper_skim = self._consolidate_window_skims(
@@ -207,6 +212,67 @@ class PaperSkimService:
                 max(document_count - document_position, 0),
             )
         return tuple(paper_skims)
+
+    def _extract_window_payloads(
+        self,
+        *,
+        collection_id: str,
+        document_id: str,
+        payloads: list[dict[str, Any]],
+        study_window_extractor: PaperStudyWindowExtractor,
+    ) -> tuple[
+        tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]],
+        ...,
+    ]:
+        if len(payloads) <= 1 or self._max_extraction_concurrency() == 1:
+            return tuple(
+                self._extract_window_batch(
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    payload=payload,
+                    study_window_extractor=study_window_extractor,
+                )
+                for payload in payloads
+            )
+
+        with ThreadPoolExecutor(
+            max_workers=min(self._max_extraction_concurrency(), len(payloads)),
+        ) as executor:
+            futures = [
+                executor.submit(
+                    copy_context().run,
+                    self._extract_window_batch,
+                    collection_id=collection_id,
+                    document_id=document_id,
+                    payload=payload,
+                    study_window_extractor=study_window_extractor,
+                )
+                for payload in payloads
+            ]
+            return tuple(future.result() for future in futures)
+
+    @staticmethod
+    def _max_extraction_concurrency() -> int:
+        raw_value = os.getenv("CORE_EXTRACTION_MAX_CONCURRENCY", "").strip()
+        if not raw_value:
+            return _DEFAULT_MAX_EXTRACTION_CONCURRENCY
+        try:
+            value = int(raw_value)
+        except ValueError:
+            logger.warning(
+                "Invalid CORE_EXTRACTION_MAX_CONCURRENCY=%s; using default=%s",
+                raw_value,
+                _DEFAULT_MAX_EXTRACTION_CONCURRENCY,
+            )
+            return _DEFAULT_MAX_EXTRACTION_CONCURRENCY
+        if value < 1:
+            logger.warning(
+                "Non-positive CORE_EXTRACTION_MAX_CONCURRENCY=%s; using default=%s",
+                raw_value,
+                _DEFAULT_MAX_EXTRACTION_CONCURRENCY,
+            )
+            return _DEFAULT_MAX_EXTRACTION_CONCURRENCY
+        return value
 
     def _build_paper_skim_payloads(
         self,
@@ -491,19 +557,11 @@ class PaperSkimService:
     ) -> list[tuple[_SkimSourceItem, ...]]:
         windows: list[tuple[_SkimSourceItem, ...]] = []
         current: list[_SkimSourceItem] = []
-        current_size = 0
         for item in items:
-            separator_size = 2 if current else 0
-            if current and (
-                len(current) >= PAPER_SKIM_SOURCE_UNIT_LIMIT
-                or current_size + separator_size + item.size > _SKIM_WINDOW_CHARS
-            ):
+            if current and len(current) >= PAPER_SKIM_SOURCE_UNIT_LIMIT:
                 windows.append(tuple(current))
                 current = []
-                current_size = 0
-                separator_size = 0
             current.append(item)
-            current_size += separator_size + item.size
         if current:
             windows.append(tuple(current))
         return windows
@@ -512,7 +570,7 @@ class PaperSkimService:
     def _split_oversized_source_item(
         item: _SkimSourceItem,
     ) -> tuple[_SkimSourceItem, ...]:
-        if item.size <= _SKIM_WINDOW_CHARS:
+        if item.size <= _SKIM_SOURCE_UNIT_CHARS:
             return (item,)
         if isinstance(item.content, Mapping):
             if "row_text" in item.content:
@@ -525,8 +583,8 @@ class PaperSkimService:
         text = str(item.content)
         chunks: list[str] = []
         start = 0
-        while len(text) - start > _SKIM_WINDOW_CHARS:
-            hard_end = start + _SKIM_WINDOW_CHARS
+        while len(text) - start > _SKIM_SOURCE_UNIT_CHARS:
+            hard_end = start + _SKIM_SOURCE_UNIT_CHARS
             split_at = PaperSkimService._natural_text_split(text, start, hard_end)
             chunks.append(text[start:split_at])
             start = split_at
@@ -566,7 +624,7 @@ class PaperSkimService:
                         "fragment": row_text[start:candidate_end],
                     },
                 )
-                if candidate.size <= _SKIM_WINDOW_CHARS:
+                if candidate.size <= _SKIM_SOURCE_UNIT_CHARS:
                     end = candidate_end
                     low = candidate_end + 1
                 else:
@@ -613,7 +671,7 @@ class PaperSkimService:
                     "value": value,
                 },
             )
-            if chunk.size > _SKIM_WINDOW_CHARS:
+            if chunk.size > _SKIM_SOURCE_UNIT_CHARS:
                 raise ValueError(
                     "paper skim structured Source value cannot fit in a bounded "
                     "window"
@@ -685,7 +743,7 @@ class PaperSkimService:
                         "fragment": value[start:candidate_end],
                     },
                 )
-                if candidate.size <= _SKIM_WINDOW_CHARS:
+                if candidate.size <= _SKIM_SOURCE_UNIT_CHARS:
                     end = candidate_end
                     low = candidate_end + 1
                 else:
@@ -936,26 +994,75 @@ class PaperSkimService:
         study_identities = [study.identity_key() for study in parsed.studies]
         if len(study_identities) != len(set(study_identities)):
             raise ValueError("paper skim response contains duplicate study identities")
-        studies = tuple(
-            self._study_from_window_result(
-                item,
-                document_id=document_id,
-                source_units=source_units,
-            )
-            for item in parsed.studies
-        )
-        signals = tuple(
+        studies: list[PaperStudy] = []
+        signals = [
             self._signal_from_window_result(
                 item.model_dump(),
                 document_id=document_id,
                 source_units=source_units,
             )
             for item in parsed.unresolved_signals
-        )
+        ]
+        relationship_source_unit_ids: list[str] = []
+        signal_source_unit_ids = [
+            source_unit_id
+            for item in parsed.unresolved_signals
+            for source_unit_id in item.source_unit_ids
+        ]
+        for study in parsed.studies:
+            retained_relationships = []
+            for relationship in study.relationships:
+                if self._relationship_conflicts_with_fixed_conditions(
+                    study,
+                    relationship,
+                ):
+                    signal_payload = {
+                        "signal_type": "outcome",
+                        "label": relationship.outcome,
+                        "source_unit_ids": list(relationship.source_unit_ids),
+                        "reason": (
+                            "alleged varied factor is also recorded as fixed in the "
+                            "same study"
+                        ),
+                        "confidence": relationship.confidence,
+                    }
+                    for field_name in (
+                        "experiment_label",
+                        "design_type",
+                        "claim_scope",
+                        "material_scope",
+                        "process_context",
+                        "sample_context",
+                        "test_context",
+                        "comparator",
+                        "fixed_conditions",
+                    ):
+                        signal_payload[field_name] = getattr(study, field_name)
+                    signals.append(
+                        self._signal_from_window_result(
+                            signal_payload,
+                            document_id=document_id,
+                            source_units=source_units,
+                        )
+                    )
+                    signal_source_unit_ids.extend(relationship.source_unit_ids)
+                    continue
+                retained_relationships.append(relationship)
+                relationship_source_unit_ids.extend(relationship.source_unit_ids)
+            if retained_relationships:
+                studies.append(
+                    self._study_from_window_result(
+                        study,
+                        document_id=document_id,
+                        source_units=source_units,
+                        relationships=retained_relationships,
+                    )
+                )
         source_unit_coverage = self._derive_source_unit_coverage(
             payload=payload,
-            parsed=parsed,
             source_units=source_units,
+            relationship_source_unit_ids=relationship_source_unit_ids,
+            signal_source_unit_ids=signal_source_unit_ids,
         )
         return (
             PaperSkim.from_mapping(
@@ -971,15 +1078,16 @@ class PaperSkimService:
                     ],
                 }
             ),
-            signals,
+            tuple(signals),
         )
 
     @staticmethod
     def _derive_source_unit_coverage(
         *,
         payload: Mapping[str, Any],
-        parsed: StructuredPaperSkim,
         source_units: Mapping[str, Mapping[str, Any]],
+        relationship_source_unit_ids: Iterable[str],
+        signal_source_unit_ids: Iterable[str],
     ) -> tuple[PaperSourceUnitCoverage, ...]:
         input_ids = tuple(source_units)
         if len(input_ids) != len(payload.get("source_units") or ()):
@@ -987,14 +1095,11 @@ class PaperSkimService:
 
         relationship_ids = {
             str(source_unit_id).strip()
-            for study in parsed.studies
-            for relationship in study.relationships
-            for source_unit_id in relationship.source_unit_ids
+            for source_unit_id in relationship_source_unit_ids
         }
         signal_ids = {
             str(source_unit_id).strip()
-            for signal in parsed.unresolved_signals
-            for source_unit_id in signal.source_unit_ids
+            for source_unit_id in signal_source_unit_ids
         }
         unknown_ids = (relationship_ids | signal_ids) - set(input_ids)
         if unknown_ids:
@@ -1078,9 +1183,13 @@ class PaperSkimService:
         *,
         document_id: str,
         source_units: Mapping[str, Mapping[str, Any]],
+        relationships: Iterable[StructuredPaperStudyRelationship] | None = None,
     ) -> PaperStudy:
-        relationships: list[dict[str, Any]] = []
-        for relationship in study.relationships:
+        relationship_records: list[dict[str, Any]] = []
+        source_relationships = (
+            study.relationships if relationships is None else relationships
+        )
+        for relationship in source_relationships:
             resolved = cls._resolved_source_units(
                 relationship.source_unit_ids,
                 source_units=source_units,
@@ -1089,7 +1198,7 @@ class PaperSkimService:
                 raise ValueError(
                     "paper study relationship contains an unknown Source-unit id"
                 )
-            relationships.append(
+            relationship_records.append(
                 {
                     **relationship.model_dump(exclude={"source_unit_ids"}),
                     "source_refs": cls._source_refs_from_units(resolved),
@@ -1099,8 +1208,19 @@ class PaperSkimService:
             {
                 **study.model_dump(exclude={"relationships"}),
                 "document_id": document_id,
-                "relationships": relationships,
+                "relationships": relationship_records,
             }
+        )
+
+    @staticmethod
+    def _relationship_conflicts_with_fixed_conditions(
+        study: StructuredPaperStudy,
+        relationship: StructuredPaperStudyRelationship,
+    ) -> bool:
+        return any(
+            property_matching.axis_label_is_mentioned(fixed_condition, factor)
+            for fixed_condition in study.fixed_conditions
+            for factor in relationship.varied_factors
         )
 
     @classmethod
@@ -1792,10 +1912,23 @@ class PaperSkimService:
         left: PaperStudy,
         right: PaperStudy,
     ) -> bool:
-        return (
-            cls._study_identity_matches(left, right)
-            and cls._relationship_sets_overlap(left.relationships, right.relationships)
+        if not cls._study_identity_matches(left, right):
+            return False
+        if cls._relationship_sets_overlap(left.relationships, right.relationships):
+            return True
+        shared_factor_set = any(
+            cls._axis_collections_are_equivalent(
+                left_relationship.varied_factors,
+                right_relationship.varied_factors,
+            )
+            for left_relationship in left.relationships
+            for right_relationship in right.relationships
         )
+        if not shared_factor_set:
+            return False
+        if left.experiment_label and right.experiment_label:
+            return True
+        return cls._study_context_identifies_experiment(left, right)
 
     @classmethod
     def _study_identity_matches(cls, left: PaperStudy, right: PaperStudy) -> bool:
@@ -1839,7 +1972,38 @@ class PaperSkimService:
 
         if left.experiment_label and right.experiment_label:
             return True
-        return bool(cls._study_source_keys(left) & cls._study_source_keys(right))
+        return bool(
+            cls._study_source_keys(left) & cls._study_source_keys(right)
+        ) or cls._study_context_identifies_experiment(left, right)
+
+    @staticmethod
+    def _study_context_identifies_experiment(
+        left: PaperStudy,
+        right: PaperStudy,
+    ) -> bool:
+        if (
+            left.comparator
+            and right.comparator
+            and property_matching.axis_values_match(
+                left.comparator,
+                right.comparator,
+            )
+        ):
+            return True
+        return any(
+            left_values
+            and right_values
+            and any(
+                property_matching.axis_values_match(left_value, right_value)
+                for left_value in left_values
+                for right_value in right_values
+            )
+            for left_values, right_values in (
+                (left.sample_context, right.sample_context),
+                (left.test_context, right.test_context),
+                (left.fixed_conditions, right.fixed_conditions),
+            )
+        )
 
     @classmethod
     def _relationship_sets_overlap(

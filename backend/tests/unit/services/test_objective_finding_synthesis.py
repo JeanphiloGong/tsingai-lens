@@ -455,7 +455,7 @@ def test_synthesis_derives_cross_paper_agreement() -> None:
     )[0]
 
     assert finding.synthesis_status == "agreement"
-    assert finding.certainty == 0.84
+    assert finding.certainty == 0.75
     assert finding.support_scope == "cross_paper"
 
 
@@ -579,6 +579,112 @@ def test_synthesis_separates_reference_treatment_from_treatment_comparisons(
         },
         "treatment_to_treatment": {"2024-800-fc-to-920-rq"},
     }
+
+
+def test_synthesis_calibrates_reference_treatment_finding_to_paper_support(
+) -> None:
+    service = FindingSynthesisService(
+        assertion_judge=_Extractor([_candidate(assertion_strength="causal")])
+    )
+    objective = _objective(
+        variables=["post-processing condition"],
+        outcomes=["ultimate tensile strength"],
+        material_scope=["Ti-6Al-4V"],
+    )
+
+    def comparison(
+        evidence_id: str,
+        document_id: str,
+        baseline: str,
+        target: str,
+        baseline_uts: float,
+        target_uts: float,
+    ) -> ObjectiveEvidence:
+        return _evidence(
+            evidence_id,
+            document_id,
+            factors=("post-processing condition",),
+            outcome="ultimate tensile strength",
+            direction="decrease",
+            material="Ti-6Al-4V",
+            source_kind="table",
+            selection_reason=(
+                "Deterministic comparison of rows from the same result table."
+            ),
+            related_source_refs=[
+                {"row_index": 1, "col_index": 2},
+                {"row_index": 2, "col_index": 2},
+            ],
+            changed_variables=[
+                {
+                    "name": "post-processing condition",
+                    "baseline_value": baseline,
+                    "target_value": target,
+                }
+            ],
+            reported_result={
+                "outcome": "ultimate tensile strength",
+                "baseline_value": baseline_uts,
+                "target_value": target_uts,
+                "value": target_uts,
+                "unit": "MPa",
+                "direction": "decrease",
+                "result_text": (
+                    f"UTS changed from {baseline_uts} to {target_uts} MPa."
+                ),
+            },
+            attribution_scope="association_only",
+            confidence=0.92,
+            scientific_context={
+                "material": [{"name": "material", "value": "Ti-6Al-4V"}],
+                "sample": [
+                    {"name": "build orientation", "value": "vertical"}
+                ],
+                "process": [
+                    {
+                        "name": "manufacturing process",
+                        "value": "laser powder bed fusion",
+                    }
+                ],
+                "test": [],
+            },
+        )
+
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=objective,
+        analysis=_analysis(),
+        contributions=(_contribution("paper-2020"), _contribution("paper-2024")),
+        evidence_records=(
+            comparison(
+                "2020-af-to-hip",
+                "paper-2020",
+                "as-fabricated",
+                "HIP + polishing",
+                1006.7,
+                936.0,
+            ),
+            comparison(
+                "2024-ab-to-800-sc",
+                "paper-2024",
+                "AB",
+                "800 SC",
+                1294.2,
+                1082.43,
+            ),
+        ),
+    )[0]
+
+    assert finding.statement == (
+        "For Ti-6Al-4V at vertical build orientation, relative to "
+        "as-built/as-fabricated reference conditions, the evaluated "
+        "post-processing conditions were associated with lower ultimate "
+        "tensile strength."
+    )
+    assert finding.synthesis_status == "agreement"
+    assert finding.assertion_strength == "associative"
+    assert finding.attribution_scope == "association_only"
+    assert finding.certainty == 0.75
 
 
 def test_synthesis_generates_uniform_no_change_statement_from_evidence() -> None:
@@ -2511,23 +2617,23 @@ def test_synthesis_preserves_prediction_qualifier_in_backend_statement() -> None
     assert "yield strength prediction" in finding.statement
 
 
-def test_synthesis_rejects_causal_joint_factor_candidate() -> None:
+def test_synthesis_bounds_causal_joint_factor_candidate_to_associative() -> None:
     extractor = _Extractor([_candidate(assertion_strength="causal")])
     service = FindingSynthesisService(assertion_judge=extractor)
 
-    assert (
-        service.synthesize(
-            collection_id="col-1",
-            objective=_objective(),
-            analysis=_analysis(),
-            contributions=(_contribution("paper-1"),),
-            evidence_records=(_evidence("ev-1", "paper-1"),),
-        )
-        == ()
-    )
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(_evidence("ev-1", "paper-1"),),
+    )[0]
+
+    assert finding.attribution_scope == "joint_effect"
+    assert finding.assertion_strength == "associative"
 
 
-def test_synthesis_rejects_causal_descriptive_candidate() -> None:
+def test_synthesis_bounds_causal_descriptive_candidate_to_descriptive() -> None:
     extractor = _Extractor(
         [
             _candidate(
@@ -2545,16 +2651,16 @@ def test_synthesis_rejects_causal_descriptive_candidate() -> None:
         comparison=None,
         attribution_scope="descriptive_only",
     )
-    assert (
-        service.synthesize(
-            collection_id="col-1",
-            objective=_objective(variables=["laser power"]),
-            analysis=_analysis(),
-            contributions=(_contribution("paper-1"),),
-            evidence_records=(evidence,),
-        )
-        == ()
-    )
+    finding = service.synthesize(
+        collection_id="col-1",
+        objective=_objective(variables=["laser power"]),
+        analysis=_analysis(),
+        contributions=(_contribution("paper-1"),),
+        evidence_records=(evidence,),
+    )[0]
+
+    assert finding.attribution_scope == "descriptive_only"
+    assert finding.assertion_strength == "descriptive"
 
 
 def test_synthesis_downgrades_non_deterministic_isolated_result_to_associative() -> None:

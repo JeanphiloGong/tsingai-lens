@@ -4,7 +4,6 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from controllers.schemas.core.research_objectives import (
@@ -12,7 +11,8 @@ from controllers.schemas.core.research_objectives import (
     FindingListResponse,
     ObjectiveAnalysisResponse,
     ObjectiveEvidenceListResponse,
-    ObjectiveSummaryResponse,
+    ObjectiveEvidenceMapResponse,
+    PaginatedObjectiveListResponse,
     PaperStudyInventoryResponse,
 )
 
@@ -23,18 +23,6 @@ _objective_analysis_executor = ThreadPoolExecutor(
     max_workers=1,
     thread_name_prefix="objective-analysis",
 )
-
-
-class RankedObjectiveSummaryResponse(ObjectiveSummaryResponse):
-    rank: int = Field(..., ge=1)
-
-
-class PaginatedObjectiveListResponse(BaseModel):
-    collection_id: str
-    objectives: list[RankedObjectiveSummaryResponse] = Field(default_factory=list)
-    offset: int = Field(..., ge=0)
-    limit: int | None = Field(default=None, ge=1)
-    total: int = Field(..., ge=0)
 
 
 @router.get(
@@ -362,6 +350,29 @@ async def list_objective_evidence(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return ObjectiveEvidenceListResponse(**payload)
+
+
+@router.get(
+    "/{collection_id}/objectives/{objective_id}/evidence-map",
+    response_model=ObjectiveEvidenceMapResponse,
+    summary="Read the published Objective evidence map",
+)
+async def get_objective_evidence_map(
+    collection_id: str,
+    objective_id: str,
+    request: Request,
+) -> ObjectiveEvidenceMapResponse:
+    try:
+        payload = await run_in_threadpool(
+            request.app.state.objective_analysis_service.get_evidence_map,
+            collection_id,
+            objective_id,
+        )
+    except FileNotFoundError as exc:
+        raise _objective_not_found(collection_id, objective_id, exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ObjectiveEvidenceMapResponse(**payload)
 
 
 async def _read_objective_analysis_response(

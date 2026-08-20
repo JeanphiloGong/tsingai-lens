@@ -125,7 +125,6 @@
     return () => window.removeEventListener('click', handleClick);
   });
 
-  $: isGraphRoute = /^\/collections\/[^/]+\/graph\/?$/.test($page.url.pathname);
   $: collectionRouteMatch = /^\/collections\/([^/]+)/.exec($page.url.pathname);
   $: isCollectionRoute = Boolean(collectionRouteMatch);
   $: headerCollectionId = collectionRouteMatch?.[1]
@@ -270,7 +269,7 @@
     </div>
   </header>
 
-  <main class="page" class:page--wide={isGraphRoute}>
+  <main class="page">
     {#if authError}
       <div class="status status--error" role="status">{authError}</div>
     {/if}

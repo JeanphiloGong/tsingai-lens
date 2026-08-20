@@ -265,20 +265,6 @@ function documentMarkdown() {
 	};
 }
 
-function documentResearchView() {
-	return {
-		collection_id: collectionId,
-		document_id: documentId,
-		paper_title: 'LPBF 316L tensile study',
-		state: 'empty',
-		overview: {},
-		materials: [],
-		sample_matrix: { rows: [], columns: [] },
-		condition_series: [],
-		warnings: []
-	};
-}
-
 async function mockApis(page: Page) {
 	await page.route('**/*', async (route) => {
 		const url = new URL(route.request().url());
@@ -296,7 +282,7 @@ async function mockApis(page: Page) {
 					collection_id: collectionId,
 					id: collectionId,
 					name: 'LPBF 316L objective set',
-					status: 'failed',
+					status: 'ready',
 					paper_count: 1
 				})
 			);
@@ -308,28 +294,23 @@ async function mockApis(page: Page) {
 						collection_id: collectionId,
 						id: collectionId,
 						name: 'LPBF 316L objective set',
-						status: 'partial_success'
+						status: 'ready'
 					},
 					file_count: 1,
-					status_summary: 'partial_ready',
+					status_summary: 'ready',
 					workflow: {
-						documents: 'ready',
-						results: 'not_started',
-						evidence: 'not_started',
-						comparisons: 'not_started'
+						documents: { status: 'ready', detail: 'Document profiles are available.' },
+						objectives: { status: 'ready', detail: 'Objective discovery is complete.' }
 					},
 					document_summary: {
 						total_documents: 1,
-						doc_type_counts: { experimental: 1 },
-						warnings: []
+						by_doc_type: { experimental: 1 }
 					},
 					artifacts: {
-						documents_ready: true,
+						source_documents_ready: true,
 						document_profiles_ready: true,
-						evidence_cards_ready: false,
-						comparable_results_ready: false,
-						comparison_rows_ready: false,
-						graph_ready: false
+						objective_candidates_ready: true,
+						updated_at: '2026-05-14T00:00:00Z'
 					},
 					latest_task: {
 						task_id: 'task-2',
@@ -344,8 +325,17 @@ async function mockApis(page: Page) {
 						updated_at: null
 					},
 					recent_tasks: [],
-					capabilities: {},
-					links: {}
+					capabilities: {
+						can_view_documents: true,
+						can_view_objectives: true,
+						can_view_comparisons: true
+					},
+					links: {
+						workspace: `/collections/${collectionId}`,
+						documents: `/collections/${collectionId}/documents`,
+						objectives: `/collections/${collectionId}/objectives`,
+						comparisons: `/collections/${collectionId}/comparisons`
+					}
 				})
 			);
 		}
@@ -417,9 +407,6 @@ async function mockApis(page: Page) {
 		}
 		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/markdown`) {
 			return route.fulfill(json(documentMarkdown()));
-		}
-		if (path === `/api/v1/collections/${collectionId}/documents/${documentId}/research-view`) {
-			return route.fulfill(json(documentResearchView()));
 		}
 		return route.fulfill(json({ detail: `unhandled test route: ${path}` }, 404));
 	});
@@ -541,9 +528,11 @@ for (const viewport of [
 				})
 			)
 			.toBe(true);
-		expect(sourceApiPaths).not.toContain(`/api/v1/collections/${collectionId}/results`);
-		expect(sourceApiPaths).not.toContain(
-			`/api/v1/collections/${collectionId}/documents/${documentId}/comparison-semantics`
+		expect(sourceApiPaths).toContain(
+			`/api/v1/collections/${collectionId}/documents/${documentId}/content`
+		);
+		expect(sourceApiPaths).toContain(
+			`/api/v1/collections/${collectionId}/documents/${documentId}/markdown`
 		);
 	});
 }

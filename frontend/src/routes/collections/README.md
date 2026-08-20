@@ -11,21 +11,19 @@ This node owns the collection workspace route family.
 - `collections/[id]/objectives/[objective_id]/+page.svelte`
   Published Finding list and one selected Finding detail.
 - `collections/[id]/comparisons/+page.svelte`
-  Cross-paper comparison workspace.
-- `collections/[id]/results/*`
-  Comparable-result drilldown.
+  Published cross-paper Finding overview grouped by Objective.
+- `collections/[id]/graph/+page.svelte`
+  Secondary Objective Evidence Map. It selects one published Objective and
+  shows deterministic Finding, Evidence, exact Source, paper, and coverage
+  relationships without restoring the retired collection-wide Graph contract.
 - `collections/[id]/documents/*`
   Parsed-paper reading and exact Source verification.
-- `collections/[id]/materials/*`
-  Material and sample-matrix projections.
 - `collections/[id]/assistant/+page.svelte`
   Collection-bound Research Agent conversation, capability activity,
   structured results, canonical resource links, and exact write approval.
   This route remains available before Objective discovery finishes so the
   researcher can converse, inspect readiness, and form Objective proposals;
   capabilities must still expose missing or incomplete collection artifacts.
-- `collections/[id]/graph/+page.svelte`
-  Secondary graph projection.
 
 ## Objective Interaction
 
@@ -85,23 +83,20 @@ mechanisms link to their exact supporting Evidence.
 
 ## Product Boundary
 
-The collection comparison workspace remains the Lens v1 primary analysis
-surface. Objective Findings are the expert review and downstream grounding
-surface; they do not introduce a second Goal/Task/Workspace product concept.
-Materials, graph, the Research Agent, and experiment plans consume published
-Findings or other canonical Core artifacts and do not reconstruct an alternate
-conclusion model. The Agent may draft Objective proposals from bounded
-PaperSkim context, but only an exact user-approved write creates an unconfirmed
-candidate; confirmation and analysis stay in the Objective workspace.
+The collection comparison workspace is a read-only overview of published
+Objective Findings. It does not rebuild conclusions from legacy comparison
+rows, Evidence cards, material projections, or collection-wide graph
+projections. The Objective Evidence Map is a read-only view of those same
+published records, not another aggregate or analysis path. The Objective
+workspace owns confirmation and analysis; the Finding workspace owns expert
+review; the document reader owns Source verification. The Research Agent and
+experiment plans may consume published Findings, but they do not introduce a
+second conclusion identity.
 
 ## Current Contract Docs
 
 - [`../../../../docs/contracts/research-objective-workspace-contract.md`](../../../../docs/contracts/research-objective-workspace-contract.md)
   Canonical Objective, Finding, Evidence, lifecycle, and browser contract.
-- [`../../../../docs/contracts/research-view-aggregation-contract.md`](../../../../docs/contracts/research-view-aggregation-contract.md)
-  Material/document aggregation contract.
-- [`../../../../docs/decisions/rfc-comparison-result-document-product-flow.md`](../../../../docs/decisions/rfc-comparison-result-document-product-flow.md)
-  Comparison, result, and document product flow.
 - [`../../../../docs/decisions/rfc-pdf-backed-document-workbench.md`](../../../../docs/decisions/rfc-pdf-backed-document-workbench.md)
   PDF-backed Source verification behavior.
 

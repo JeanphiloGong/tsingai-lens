@@ -11,6 +11,7 @@ import {
 	fetchObjective,
 	fetchObjectiveAnalysis,
 	fetchObjectiveEvidence,
+	fetchObjectiveEvidenceMap,
 	fetchObjectiveFinding,
 	fetchObjectiveFindings,
 	runObjectiveAnalysis
@@ -190,6 +191,34 @@ describe('objective Finding API', () => {
 		expect(request.mock.calls[2][0]).toBe(
 			'/collections/col_123/objectives/obj_1/evidence?analysis_version=1&finding_id=finding-1&offset=0&limit=100'
 		);
+	});
+
+	it('loads the published Objective evidence map from the Objective subresource', async () => {
+		request.mockResolvedValue({
+			collection_id: 'col_123',
+			objective_id: 'obj_1',
+			analysis_version: 1,
+			projection_version: 'objective-evidence-map.v1',
+			complete: true,
+			nodes: [],
+			edges: [],
+			coverage: {
+				total_document_count: 0,
+				analyzed_document_count: 0,
+				excluded_document_count: 0,
+				failed_document_count: 0,
+				direct_evidence_document_count: 0,
+				finding_count: 0,
+				evidence_count: 0,
+				source_count: 0,
+				unlinked_evidence_count: 0
+			}
+		});
+
+		const result = await fetchObjectiveEvidenceMap('col_123', 'obj_1');
+
+		expect(request).toHaveBeenCalledWith('/collections/col_123/objectives/obj_1/evidence-map');
+		expect(result.projection_version).toBe('objective-evidence-map.v1');
 	});
 
 	it('records feedback using analysis_version and finding_id only', async () => {

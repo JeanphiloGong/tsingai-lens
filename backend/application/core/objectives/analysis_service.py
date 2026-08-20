@@ -4,6 +4,7 @@ import logging
 from time import perf_counter
 from typing import Any, Callable
 
+from application.core.objectives.evidence_map import build_objective_evidence_map
 from application.core.objectives.research_objective_service import (
     ObjectiveAnalysisArtifacts,
     ResearchObjectiveService,
@@ -167,6 +168,91 @@ class ObjectiveAnalysisService:
             "limit": limit,
             "total": total,
         }
+
+    def get_evidence_map(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> dict[str, Any]:
+        objective = self._require_objective(collection_id, objective_id)
+        version = self._published_version(collection_id, objective_id, None)
+        analysis = self.objective_repository.read_published_analysis(
+            collection_id,
+            objective_id,
+        )
+        if analysis is None:
+            raise ValueError("objective has no published analysis")
+
+        findings = self._all_published_findings(
+            collection_id,
+            objective_id,
+            version,
+        )
+        evidence_records = self._all_published_evidence(
+            collection_id,
+            objective_id,
+            version,
+        )
+        profiles = (
+            self.research_objective_service.document_profile_service.read_document_profiles(
+                collection_id,
+                build_id=analysis.source_build_id,
+            )
+        )
+        return build_objective_evidence_map(
+            objective=objective,
+            analysis=analysis,
+            contributions=self.objective_repository.list_contributions(
+                collection_id,
+                objective_id,
+                version,
+            ),
+            findings=findings,
+            evidence_records=evidence_records,
+            profiles=profiles,
+        )
+
+    def _all_published_findings(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> tuple[Any, ...]:
+        records: list[Any] = []
+        offset = 0
+        while True:
+            page, total = self.objective_repository.list_findings(
+                collection_id,
+                objective_id,
+                analysis_version,
+                offset=offset,
+                limit=200,
+            )
+            records.extend(page)
+            offset += len(page)
+            if offset >= total or not page:
+                return tuple(records)
+
+    def _all_published_evidence(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> tuple[Any, ...]:
+        records: list[Any] = []
+        offset = 0
+        while True:
+            page, total = self.objective_repository.list_evidence(
+                collection_id,
+                objective_id,
+                analysis_version,
+                offset=offset,
+                limit=500,
+            )
+            records.extend(page)
+            offset += len(page)
+            if offset >= total or not page:
+                return tuple(records)
 
     def execute_queued_analysis(
         self,

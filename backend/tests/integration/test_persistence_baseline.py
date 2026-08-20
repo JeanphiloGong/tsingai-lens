@@ -60,7 +60,6 @@ from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from scripts.persistence.capture_baseline import capture_baseline
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
-from tests.support.comparison_repository import MemoryComparisonRepository
 from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
 
 
@@ -108,12 +107,9 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     source_repository = SqliteSourceArtifactRepository(db_path)
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
-    comparison_repository = MemoryComparisonRepository()
     artifact_registry_service = ArtifactRegistryService(
         build_repository,
         source_artifact_repository=source_repository,
-        paper_fact_repository=paper_fact_repository,
-        comparison_repository=comparison_repository,
     )
     chat_repository = PostgresChatRepository(auth_repository.session_factory)
     experiment_plan_repository = PostgresExperimentPlanRepository(
@@ -216,8 +212,6 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
             )
             for artifact_kind in (
                 "documents",
-                "document_profiles",
-                "evidence_cards",
             )
         ),
     )

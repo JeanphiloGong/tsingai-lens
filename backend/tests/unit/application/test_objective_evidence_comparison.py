@@ -2752,9 +2752,9 @@ def test_real_hip_result_uses_condition_registry_when_model_omits_comparison():
 
     bound = paper_experiment._bind_objective_result_process_context(
         (
-            condition("800 SC", "12", 3),
-            condition("800 FC", "100", 4),
-            condition("800 RQ", "2000", 5),
+            condition("800SC", "12", 3),
+            condition("800FC", "100", 4),
+            condition("800RQ", "2000", 5),
             result,
         )
     )[-1]
@@ -2770,8 +2770,8 @@ def test_real_hip_result_uses_condition_registry_when_model_omits_comparison():
     ]
     assert bound.comparison is not None
     assert bound.comparison.to_record() == {
-        "baseline_label": "800 SC",
-        "target_label": "800 RQ",
+        "baseline_label": "800SC",
+        "target_label": "800RQ",
         "axis_names": ["cooling rate"],
         "comparable": True,
         "incomparability_reasons": [],
@@ -2852,7 +2852,7 @@ def test_condition_registry_does_not_bind_a_conflicting_condition_label():
     bound = paper_experiment._bind_objective_result_process_context(
         (
             condition("800 SC", "12", "condition-source-a"),
-            condition("800 SC", "20", "condition-source-b"),
+            condition("800SC", "20", "condition-source-b"),
             condition("800 RQ", "2000", "condition-source-rq"),
             result,
         )

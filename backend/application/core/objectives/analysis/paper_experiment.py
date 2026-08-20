@@ -211,12 +211,12 @@ def _bind_objective_result_process_context(
             baseline_key = (
                 unit.objective_id,
                 unit.document_id,
-                comparison.baseline_label.casefold(),
+                _objective_condition_label_key(comparison.baseline_label),
             )
             target_key = (
                 unit.objective_id,
                 unit.document_id,
-                comparison.target_label.casefold(),
+                _objective_condition_label_key(comparison.target_label),
             )
             baseline_context = process_context_by_sample.get(baseline_key)
             target_context = process_context_by_sample.get(target_key)
@@ -429,11 +429,17 @@ def _bind_objective_result_process_context(
             bound.append(unit)
             continue
         sample_identity = _objective_explicit_sample_identity(unit)
-        key = (unit.objective_id, unit.document_id, sample_identity)
+        if not sample_identity:
+            bound.append(unit)
+            continue
+        key = (
+            unit.objective_id,
+            unit.document_id,
+            _objective_condition_label_key(sample_identity),
+        )
         process_context = process_context_by_sample.get(key)
         if (
-            not sample_identity
-            or key in conflicting_samples
+            key in conflicting_samples
             or process_context is None
         ):
             bound.append(unit)
@@ -474,7 +480,11 @@ def _objective_condition_registry(
         sample_identity = _objective_explicit_sample_identity(unit)
         if not sample_identity:
             continue
-        key = (unit.objective_id, unit.document_id, sample_identity)
+        key = (
+            unit.objective_id,
+            unit.document_id,
+            _objective_condition_label_key(sample_identity),
+        )
         scopes.add((unit.objective_id, unit.document_id))
         if key in conflicts:
             continue
@@ -656,11 +666,11 @@ def _objective_explicit_sample_label(
 
 
 def _objective_exact_label_position(source_text: str, label: str) -> int:
-    parts = tuple(str(label).split())
+    parts = tuple(re.findall(r"[^\W\d_]+|\d+", str(label), flags=re.UNICODE))
     if not parts:
         return -1
     match = re.search(
-        r"(?<!\w)" + r"\s+".join(re.escape(part) for part in parts) + r"(?!\w)",
+        r"(?<!\w)" + r"[\W_]*".join(re.escape(part) for part in parts) + r"(?!\w)",
         source_text,
         flags=re.IGNORECASE,
     )
@@ -1070,6 +1080,14 @@ def _objective_sample_identity_key(
         f"{_objective_column_key(key)}={str(value).strip().casefold()}"
         for key, value in sorted(sample_attributes.items())
         if str(value).strip()
+    )
+
+
+def _objective_condition_label_key(value: Any) -> str:
+    return "".join(
+        character
+        for character in str(value or "").strip().casefold()
+        if character.isalnum()
     )
 
 

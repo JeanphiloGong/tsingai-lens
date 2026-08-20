@@ -50,9 +50,10 @@ Objective analysis.
 - `analysis/paper_experiment.py`
   Owns reconstruction after every routed Source in a paper has been inspected.
   It fills missing material or process scope only from the same paper's skim,
-  binds Methods conditions to Results only through exact and unambiguous sample
-  identities, and derives the existing bounded pairwise comparisons. A
-  Source-grounded author comparison whose exact groups bind but whose linked
+  binds Methods conditions to Results only through unambiguous sample identities;
+  spacing and punctuation variants of the same alphanumeric label share one
+  identity. It derives the existing bounded pairwise comparisons. A
+  Source-grounded author comparison whose groups bind but whose linked
   context does not expose quantified process values remains association-only;
   it is not promoted to an isolated effect. Missing or conflicting sample
   identities remain descriptive, and reconstruction never crosses a document
@@ -392,18 +393,20 @@ leaf headers, caption-defined symbols and units, and row values jointly define
 exact labeled conditions. The backend does not derive process meaning from a
 label such as `800 SC` itself.
 
-Paper reconstruction registers those exact labels within one Objective and
-document, merges complementary condition context, and marks conflicting
-same-label definitions ambiguous. A grounded result with no model-authored
-comparison may use registered labels mentioned verbatim in its own Source. For
-an explicit unchanged series, the first and last mentioned conditions form a
-comparison only when both have complete process context and exactly one process
-factor differs. The backend derives that factor's endpoints and fixed context
-from the condition Sources, retains the result Source, and may then classify the
-Evidence as `isolated_effect`. Missing fields, multiple changed factors,
-ambiguous labels, or conflicting definitions remain associative or
-`descriptive_only`; no cross-document binding, label-format heuristic, or
-semantic LLM repair is attempted.
+Paper reconstruction registers labels within one Objective and document using
+an alphanumeric identity, so `800SC`, `800 SC`, and `800-SC` resolve to the same
+condition while retaining the Source spelling for display and provenance. It
+merges complementary condition context and marks conflicting definitions of one
+normalized identity ambiguous. A grounded result with no model-authored
+comparison may use a registered label mentioned in its own Source with only
+separator differences. For an explicit unchanged series, the first and last
+mentioned conditions form a comparison only when both have complete process
+context and exactly one process factor differs. The backend derives that
+factor's endpoints and fixed context from the condition Sources, retains the
+result Source, and may then classify the Evidence as `isolated_effect`. Missing
+fields, multiple changed factors, ambiguous labels, or conflicting definitions
+remain associative or `descriptive_only`; no cross-document binding, fuzzy
+semantic matching, or LLM repair is attempted.
 
 Every related Source locator records a `supports` list naming the scientific
 field families owned by that Source, such as `reported_result`,

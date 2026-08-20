@@ -73,6 +73,13 @@ Objective analysis.
   provenance. Its bounded `FindingAssertionJudge` model call decides only
   assertion strength and optional context or mechanism annotations for one
   backend-owned result set.
+- `evidence_map.py`
+  Projects one published Objective analysis into the read-only
+  `Objective -> Finding -> Evidence -> Source -> Document` relationship map.
+  It reads existing domain records, preserves support, contradiction, context,
+  and exact Source lineage, and reports failed or excluded papers only as
+  coverage. It does not call a model, persist graph records, or restore the
+  retired collection-wide Graph aggregate.
 - `llm/structured_response.py`
   Owns the shared technical model boundary: provider invocation, schema-bearing
   messages, JSON parsing and bounded repair, trace capture, usage accounting,

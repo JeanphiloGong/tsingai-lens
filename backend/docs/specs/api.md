@@ -252,11 +252,24 @@ failure may have no reason.
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence`
+- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence-map`
 
 Finding and Evidence list endpoints support `offset` and `limit`. All responses
 include an explicit `analysis_version`. If omitted from the query, the backend
 uses the published Objective version. Evidence accepts an optional `finding_id`
 filter.
+
+The Evidence Map endpoint has no version query because it always projects the
+Objective's current `published_analysis_version`. It deterministically returns
+Objective, Finding, Evidence, exact Source, and Document nodes plus typed
+lineage edges. Support, contradiction, and context come only from published
+Finding Evidence bindings. Extraction failures and exclusions appear only in
+document coverage and `includes_document` edges; they are never converted into
+scientific contradiction. Multiple Evidence records with the same document,
+Source kind, and stable `source_ref` share one Source node. The endpoint performs
+no LLM call and persists no graph state. `projection_version` identifies the
+read model contract, while `analysis_version` identifies the published domain
+records from which it was produced.
 
 A Finding contains:
 
@@ -358,8 +371,8 @@ parameters, not visible paper titles.
 
 The browser comparison overview has no separate comparison aggregate endpoint.
 It reads the Objective list and each published Finding list described above.
-Legacy research-view, Materials, comparable-result, Evidence-card, and Graph
-routes are not part of the maintained HTTP contract.
+Legacy research-view, Materials, comparable-result, Evidence-card, and
+collection-wide Graph routes are not part of the maintained HTTP contract.
 
 ## Error Contract
 

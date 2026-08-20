@@ -117,8 +117,15 @@ describe('collections/[id]/+layout.svelte', () => {
 		const primaryTabs = Array.from(document.querySelectorAll('.collection-tabs > a')).map((tab) =>
 			tab.textContent?.trim()
 		);
-		expect(primaryTabs).toEqual(['Overview', 'Objectives', 'Comparisons', 'Papers', 'AI Copilot']);
-		for (const retiredLabel of ['Graph', 'More', 'Materials', 'Evidence', 'Extracted Facts']) {
+		expect(primaryTabs).toEqual([
+			'Overview',
+			'Objectives',
+			'Comparisons',
+			'Evidence Map',
+			'Papers',
+			'AI Copilot'
+		]);
+		for (const retiredLabel of ['More', 'Materials', 'Evidence Cards', 'Extracted Facts']) {
 			expect(nav.element().textContent).not.toContain(retiredLabel);
 		}
 		expect(document.querySelector('button[aria-label="Edit collection name"]')).toBeNull();

@@ -40,9 +40,11 @@ Source verification.
 - `/collections/[id]/protocol/*`
   Conditional downstream protocol views.
 
-No standalone graph, material matrix, comparison-row result, Evidence-card,
-report, Markdown answer, or alternate Goal-result page is part of the target
-interface.
+No standalone collection-wide graph, material matrix, comparison-row result,
+Evidence-card, report, Markdown answer, or alternate Goal-result page is part of
+the target interface. A secondary Objective Evidence Map may project one
+published analysis for lineage inspection; it does not restore a separate
+Graph domain, persistence, or analysis contract.
 
 ## Workspace
 

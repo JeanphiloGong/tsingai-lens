@@ -232,6 +232,16 @@
 		{$t('collection.tabs.comparisons')}
 	</a>
 	<a
+		href={resolve('/collections/[id]/graph', { id: collectionId })}
+		class={`${tabClass(`/collections/${collectionId}/graph`)} ${downstreamUnlocked ? '' : 'locked'}`}
+		aria-disabled={downstreamUnlocked ? undefined : 'true'}
+		tabindex={downstreamUnlocked ? undefined : -1}
+		title={downstreamUnlocked ? undefined : lockReason}
+		on:click={handleLockedTabClick}
+	>
+		{$t('collection.tabs.graph')}
+	</a>
+	<a
 		href={`/collections/${collectionId}/documents`}
 		class={`${tabClass(`/collections/${collectionId}/documents`)} ${downstreamUnlocked ? '' : 'locked'}`}
 		aria-disabled={downstreamUnlocked ? undefined : 'true'}

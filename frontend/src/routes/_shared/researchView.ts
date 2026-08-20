@@ -263,6 +263,79 @@ export type ObjectiveEvidencePage = {
 	limit: number;
 	total: number;
 };
+export type ObjectiveEvidenceMapNodeType =
+	| 'objective'
+	| 'finding'
+	| 'evidence'
+	| 'source'
+	| 'document';
+export type ObjectiveEvidenceMapNode = {
+	id: string;
+	type: ObjectiveEvidenceMapNodeType;
+	label: string;
+	objective_id?: string;
+	question?: string;
+	material_scope?: string[];
+	variables?: string[];
+	outcomes?: string[];
+	finding_id?: string;
+	statement?: string;
+	factors?: string[];
+	outcome?: string | null;
+	direction?: ObjectiveEvidenceResultDirection | null;
+	assertion_strength?: 'causal' | 'associative' | 'descriptive';
+	synthesis_status?: 'agreement' | 'conflict' | 'condition_dependent' | 'insufficient_confirmation';
+	certainty?: number;
+	limitations?: string[];
+	evidence_id?: string;
+	document_id?: string;
+	evidence_role?: string;
+	attribution_scope?: ObjectiveEvidenceAttributionScope;
+	confidence?: number;
+	source_excerpt?: string;
+	source_kind?: string;
+	source_ref?: string;
+	page_numbers?: number[];
+	evidence_ids?: string[];
+	analysis_status?: 'pending' | 'analyzed' | 'excluded' | 'failed';
+	evidence_disposition?: string | null;
+	evidence_disposition_reason?: string | null;
+};
+export type ObjectiveEvidenceMapEdge = {
+	id: string;
+	source: string;
+	target: string;
+	relation:
+		| 'has_finding'
+		| 'supports'
+		| 'contradicts'
+		| 'contextualizes'
+		| 'extracted_from'
+		| 'reported_in'
+		| 'includes_document';
+	condition_boundary: boolean;
+};
+export type ObjectiveEvidenceMapCoverage = {
+	total_document_count: number;
+	analyzed_document_count: number;
+	excluded_document_count: number;
+	failed_document_count: number;
+	direct_evidence_document_count: number;
+	finding_count: number;
+	evidence_count: number;
+	source_count: number;
+	unlinked_evidence_count: number;
+};
+export type ObjectiveEvidenceMap = {
+	collection_id: string;
+	objective_id: string;
+	analysis_version: number;
+	projection_version: 'objective-evidence-map.v1';
+	complete: boolean;
+	nodes: ObjectiveEvidenceMapNode[];
+	edges: ObjectiveEvidenceMapEdge[];
+	coverage: ObjectiveEvidenceMapCoverage;
+};
 
 function asRecord(value: unknown): Record<string, unknown> | null {
 	return value && typeof value === 'object' && !Array.isArray(value)
@@ -491,6 +564,14 @@ export async function fetchObjectiveEvidence(
 		limit: String(limit)
 	});
 	return requestJson(`${path}?${params.toString()}`) as Promise<ObjectiveEvidencePage>;
+}
+
+export async function fetchObjectiveEvidenceMap(
+	collectionId: string,
+	objectiveId: string
+): Promise<ObjectiveEvidenceMap> {
+	const path = `/collections/${encodeURIComponent(collectionId)}/objectives/${encodeURIComponent(objectiveId)}/evidence-map`;
+	return requestJson(path) as Promise<ObjectiveEvidenceMap>;
 }
 
 export async function confirmObjective(collectionId: string, objectiveId: string) {

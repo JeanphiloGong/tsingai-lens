@@ -11,6 +11,7 @@ from controllers.schemas.core.research_objectives import (
     FindingListResponse,
     ObjectiveAnalysisResponse,
     ObjectiveEvidenceListResponse,
+    ObjectiveEvidenceMapResponse,
     PaginatedObjectiveListResponse,
     PaperStudyInventoryResponse,
 )
@@ -349,6 +350,29 @@ async def list_objective_evidence(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return ObjectiveEvidenceListResponse(**payload)
+
+
+@router.get(
+    "/{collection_id}/objectives/{objective_id}/evidence-map",
+    response_model=ObjectiveEvidenceMapResponse,
+    summary="Read the published Objective evidence map",
+)
+async def get_objective_evidence_map(
+    collection_id: str,
+    objective_id: str,
+    request: Request,
+) -> ObjectiveEvidenceMapResponse:
+    try:
+        payload = await run_in_threadpool(
+            request.app.state.objective_analysis_service.get_evidence_map,
+            collection_id,
+            objective_id,
+        )
+    except FileNotFoundError as exc:
+        raise _objective_not_found(collection_id, objective_id, exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ObjectiveEvidenceMapResponse(**payload)
 
 
 async def _read_objective_analysis_response(

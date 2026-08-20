@@ -10,6 +10,7 @@ from application.core.objectives.research_objective_service import (
     ObjectiveAnalysisArtifacts,
 )
 from domain.core import (
+    DocumentProfile,
     Finding,
     ObjectiveAnalysis,
     ObjectiveEvidence,
@@ -182,6 +183,7 @@ class FakeObjectiveRepository:
             {1: _analysis(1, "succeeded")} if published else {}
         )
         self.findings = {1: (_finding(1),)} if published else {}
+        self.evidence = {1: (_evidence(1),)} if published else {}
         self.contributions = (
             {1: _artifacts(1).contributions} if published else {}
         )
@@ -263,6 +265,7 @@ class FakeObjectiveRepository:
         self.objective = self.objective.publish_analysis(analysis)
         self.findings[analysis_version] = artifacts["findings"]
         self.contributions[analysis_version] = artifacts["contributions"]
+        self.evidence[analysis_version] = artifacts["evidence_records"]
         self.published_calls += 1
         return self.objective, analysis
 
@@ -281,12 +284,31 @@ class FakeObjectiveRepository:
     def list_contributions(self, collection_id, objective_id, analysis_version):
         return self.contributions.get(analysis_version, ())
 
+    def list_evidence(self, collection_id, objective_id, analysis_version, **kwargs):
+        records = self.evidence.get(analysis_version, ())
+        offset = kwargs.get("offset", 0)
+        limit = kwargs.get("limit", 100)
+        return records[offset : offset + limit], len(records)
+
 
 class FakeResearchObjectiveService:
     def __init__(self, *, artifacts=None, error: Exception | None = None) -> None:
         self.artifacts = artifacts
         self.error = error
         self.calls = 0
+        self.document_profile_service = SimpleNamespace(
+            read_document_profiles=lambda collection_id, build_id=None: (
+                DocumentProfile.from_mapping(
+                    {
+                        "collection_id": collection_id,
+                        "document_id": "paper-1",
+                        "title": "Heat treatment paper",
+                        "doc_type": "experimental",
+                        "confidence": 0.9,
+                    }
+                ),
+            )
+        )
 
     def generate_objective_analysis_artifacts(
         self, collection_id, analysis, progress_callback=None
@@ -485,6 +507,22 @@ def test_failed_retry_keeps_previous_published_findings_readable() -> None:
     assert result["analysis"].status == "failed"
     assert result["published_analysis"].analysis_version == 1
     assert result["findings"] == (_finding(1),)
+
+
+def test_evidence_map_reads_only_the_published_analysis_version() -> None:
+    service, _repository, _analyzer = _service(
+        repository=FakeObjectiveRepository(published=True)
+    )
+
+    payload = service.get_evidence_map("collection-1", "objective-1")
+
+    assert payload["analysis_version"] == 1
+    assert payload["projection_version"] == "objective-evidence-map.v1"
+    assert payload["coverage"]["finding_count"] == 1
+    assert any(
+        node["type"] == "document" and node["label"] == "Heat treatment paper"
+        for node in payload["nodes"]
+    )
 
 
 def test_dispatch_failure_marks_the_queued_version_failed() -> None:

@@ -28,6 +28,7 @@
   `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`、
   `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}`、
   `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence`、
+  `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence-map`、
   `GET|POST /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans`、
   `PATCH /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}`
 - 启动构建任务：`POST /api/v1/collections/{collection_id}/tasks/build`
@@ -61,12 +62,18 @@
 - `/collections/{collection_id}/comparisons` 只读取已发布 Objective analysis
   的 Findings；它不读取或重建旧 comparison row、Evidence Card、Materials
   或 Graph 投影
+- `/collections/{collection_id}/graph` 是次级的 Objective Evidence Map：用户先选择
+  一个已有已发布 analysis 的 Objective，再按 `Objective -> Finding -> Evidence ->
+Source -> Document` 回溯关系。页面只调用 Objective 的 `evidence-map` 接口；失败
+  或排除论文只表示覆盖情况，不表示反对证据
 - `/collections/{collection_id}/documents/{document_id}` 只展示解析后的 Source
   内容，并通过 `source_ref` 与页码完成精确核验
 - 报告结果不再是当前浏览器主流程；frontend 不再维护 reports API 客户端或工作区占位入口
-- 遗留 Graph、Materials、Results、Evidence Cards、`research-view` 以及调试页
+- 遗留 collection-wide Graph API/模型、Materials、Results、Evidence Cards、
+  `research-view` 以及调试页
   `/upload`、`/index`、`/configs`、`/export` 已从前端路由中移除；
-  产品入口统一收敛到 collection workspace 和 `/api/docs`
+  新 Evidence Map 不兼容或恢复这些旧合同；产品入口统一收敛到 collection
+  workspace 和 `/api/docs`
 
 ## 验收重点
 

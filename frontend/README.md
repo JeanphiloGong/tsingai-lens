@@ -2,8 +2,8 @@
 
 The frontend is a SvelteKit browser application for collection creation,
 workspace browsing, file upload, task polling, Objective analysis, published
-Finding comparison, and exact Source verification through the same-origin
-`/api/*` and `/api/v1/*` contract.
+Finding comparison, Objective Evidence Map inspection, and exact Source
+verification through the same-origin `/api/*` and `/api/v1/*` contract.
 
 This file is the frontend module entry page. Formal frontend docs live in
 `frontend/docs/`. Shared route ownership seams use local `README.md` files next
@@ -69,5 +69,8 @@ npm run test:e2e
   discovery or collection analysis to finish. Data-backed capabilities report
   unavailable collection artifacts explicitly while processing continues.
 - Shared API helpers live under `src/routes/_shared/`.
+- The collection Evidence Map is a read-only projection of one published
+  Objective analysis. It does not use the retired collection-wide Graph API or
+  restore a Graph persistence model.
 - Retired debug-style routes remain explanatory only and should not introduce
   alternate browser contracts.

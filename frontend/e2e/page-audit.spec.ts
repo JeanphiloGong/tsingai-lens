@@ -23,6 +23,7 @@ const routes = [
 	[`/collections/${collectionId}/objectives`, '研究目标'],
 	[`/collections/${collectionId}/objectives/${objectiveId}`, 'Findings'],
 	[`/collections/${collectionId}/comparisons`, 'Cross-paper findings'],
+	[`/collections/${collectionId}/graph`, 'Objective evidence map'],
 	[`/collections/${collectionId}/assistant`, 'Research Agent']
 ] as const;
 
@@ -77,6 +78,29 @@ test.describe('page interaction audit', () => {
 			`/collections/${collectionId}/objectives`
 		);
 		await expect(page.getByRole('link', { name: 'Enter comparison' })).toHaveCount(0);
+	});
+
+	test('evidence map distinguishes scientific relations from failed paper coverage', async ({
+		page
+	}) => {
+		await page.goto(`/collections/${collectionId}/graph`);
+
+		await expect(page.getByText('Supports')).toBeVisible();
+		await expect(page.getByText('Contradicts')).toBeVisible();
+		await expect(page.getByText('1 failed paper')).toBeVisible();
+		await expect(page.getByText('Paper C extraction gap')).toBeVisible();
+
+		const sourceLink = page.getByRole('link', { name: 'Table · table-7' });
+		await expect(sourceLink).toHaveAttribute(
+			'href',
+			new RegExp(
+				`^/collections/${collectionId}/documents/${documentId}\\?view=parsed-paper&source_ref=table-7`
+			)
+		);
+		await sourceLink.click();
+		await page.waitForURL(`**/documents/${documentId}?view=parsed-paper&source_ref=table-7**`);
+		await expect(page.getByRole('heading', { name: 'Paper A' }).first()).toBeVisible();
+		await page.waitForLoadState('networkidle');
 	});
 
 	test('global Research Agent entry asks for a collection workspace', async ({ page }) => {
@@ -511,6 +535,9 @@ async function mockApis(page: Page) {
 					total: 1
 				})
 			);
+		}
+		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/evidence-map`) {
+			return route.fulfill(json(objectiveEvidenceMap()));
 		}
 		if (path === '/api/v1/chat-sessions') return route.fulfill(json(chatSession(), 201));
 		if (path === `/api/v1/chat-sessions/${sessionId}`) return route.fulfill(json(chatSession()));
@@ -1031,6 +1058,186 @@ function objectiveFinding() {
 				contradicting_evidence_ids: [],
 				context_evidence_ids: [],
 				condition_boundary_evidence_ids: []
+			}
+		]
+	};
+}
+
+function objectiveEvidenceMap() {
+	return {
+		collection_id: collectionId,
+		objective_id: objectiveId,
+		analysis_version: 1,
+		projection_version: 'objective-evidence-map.v1',
+		complete: true,
+		coverage: {
+			total_document_count: 3,
+			analyzed_document_count: 2,
+			excluded_document_count: 0,
+			failed_document_count: 1,
+			direct_evidence_document_count: 2,
+			finding_count: 1,
+			evidence_count: 2,
+			source_count: 2,
+			unlinked_evidence_count: 0
+		},
+		nodes: [
+			{
+				id: `objective:${objectiveId}`,
+				type: 'objective',
+				label: 'How does heat treatment affect LPBF 316L tensile strength?',
+				objective_id: objectiveId,
+				question: 'How does heat treatment affect LPBF 316L tensile strength?',
+				material_scope: ['316L stainless steel'],
+				variables: ['heat treatment'],
+				outcomes: ['tensile strength']
+			},
+			{
+				id: 'finding:finding-1',
+				type: 'finding',
+				label: 'Annealing was associated with higher tensile strength.',
+				finding_id: 'finding-1',
+				statement: 'Annealing was associated with higher tensile strength.',
+				factors: ['heat treatment'],
+				outcome: 'tensile strength',
+				direction: 'increase',
+				assertion_strength: 'associative',
+				synthesis_status: 'conflict',
+				certainty: 0.62,
+				limitations: ['One paper reported the opposing direction.']
+			},
+			{
+				id: 'evidence:evidence-1',
+				type: 'evidence',
+				label: 'Annealing increased tensile strength to 620 MPa.',
+				evidence_id: 'evidence-1',
+				document_id: documentId,
+				evidence_role: 'direct_result',
+				attribution_scope: 'isolated_effect',
+				confidence: 0.88,
+				direction: 'increase',
+				outcome: 'tensile strength',
+				source_excerpt: 'After annealing, tensile strength increased to 620 MPa.'
+			},
+			{
+				id: 'evidence:evidence-2',
+				type: 'evidence',
+				label: 'A second treatment decreased tensile strength.',
+				evidence_id: 'evidence-2',
+				document_id: 'doc_2',
+				evidence_role: 'contradictory_result',
+				attribution_scope: 'association_only',
+				confidence: 0.76,
+				direction: 'decrease',
+				outcome: 'tensile strength',
+				source_excerpt: 'The treated condition showed lower tensile strength.'
+			},
+			{
+				id: 'source:source-1',
+				type: 'source',
+				label: 'Table · table-7',
+				document_id: documentId,
+				source_kind: 'table',
+				source_ref: 'table-7',
+				source_excerpt: 'After annealing, tensile strength increased to 620 MPa.',
+				page_numbers: [7],
+				evidence_ids: ['evidence-1']
+			},
+			{
+				id: 'source:source-2',
+				type: 'source',
+				label: 'Results · result-2',
+				document_id: 'doc_2',
+				source_kind: 'block',
+				source_ref: 'result-2',
+				source_excerpt: 'The treated condition showed lower tensile strength.',
+				page_numbers: [5],
+				evidence_ids: ['evidence-2']
+			},
+			{
+				id: `document:${documentId}`,
+				type: 'document',
+				label: 'Paper A',
+				document_id: documentId,
+				analysis_status: 'analyzed',
+				evidence_disposition: 'comparable_evidence',
+				evidence_disposition_reason: null
+			},
+			{
+				id: 'document:doc_2',
+				type: 'document',
+				label: 'Paper B',
+				document_id: 'doc_2',
+				analysis_status: 'analyzed',
+				evidence_disposition: 'comparable_evidence',
+				evidence_disposition_reason: null
+			},
+			{
+				id: 'document:doc_3',
+				type: 'document',
+				label: 'Paper C extraction gap',
+				document_id: 'doc_3',
+				analysis_status: 'failed',
+				evidence_disposition: 'extraction_failed',
+				evidence_disposition_reason: 'Provider timeout during source extraction.'
+			}
+		],
+		edges: [
+			{
+				id: 'edge-1',
+				source: `objective:${objectiveId}`,
+				target: 'finding:finding-1',
+				relation: 'has_finding',
+				condition_boundary: false
+			},
+			{
+				id: 'edge-2',
+				source: 'finding:finding-1',
+				target: 'evidence:evidence-1',
+				relation: 'supports',
+				condition_boundary: false
+			},
+			{
+				id: 'edge-3',
+				source: 'finding:finding-1',
+				target: 'evidence:evidence-2',
+				relation: 'contradicts',
+				condition_boundary: true
+			},
+			{
+				id: 'edge-4',
+				source: 'evidence:evidence-1',
+				target: 'source:source-1',
+				relation: 'extracted_from',
+				condition_boundary: false
+			},
+			{
+				id: 'edge-5',
+				source: 'evidence:evidence-2',
+				target: 'source:source-2',
+				relation: 'extracted_from',
+				condition_boundary: false
+			},
+			{
+				id: 'edge-6',
+				source: 'source:source-1',
+				target: `document:${documentId}`,
+				relation: 'reported_in',
+				condition_boundary: false
+			},
+			{
+				id: 'edge-7',
+				source: 'source:source-2',
+				target: 'document:doc_2',
+				relation: 'reported_in',
+				condition_boundary: false
+			},
+			{
+				id: 'edge-8',
+				source: `objective:${objectiveId}`,
+				target: 'document:doc_3',
+				relation: 'includes_document',
+				condition_boundary: false
 			}
 		]
 	};

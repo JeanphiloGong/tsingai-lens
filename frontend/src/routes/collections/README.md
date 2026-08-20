@@ -12,6 +12,10 @@ This node owns the collection workspace route family.
   Published Finding list and one selected Finding detail.
 - `collections/[id]/comparisons/+page.svelte`
   Published cross-paper Finding overview grouped by Objective.
+- `collections/[id]/graph/+page.svelte`
+  Secondary Objective Evidence Map. It selects one published Objective and
+  shows deterministic Finding, Evidence, exact Source, paper, and coverage
+  relationships without restoring the retired collection-wide Graph contract.
 - `collections/[id]/documents/*`
   Parsed-paper reading and exact Source verification.
 - `collections/[id]/assistant/+page.svelte`
@@ -81,7 +85,9 @@ mechanisms link to their exact supporting Evidence.
 
 The collection comparison workspace is a read-only overview of published
 Objective Findings. It does not rebuild conclusions from legacy comparison
-rows, Evidence cards, material projections, or graph projections. The Objective
+rows, Evidence cards, material projections, or collection-wide graph
+projections. The Objective Evidence Map is a read-only view of those same
+published records, not another aggregate or analysis path. The Objective
 workspace owns confirmation and analysis; the Finding workspace owns expert
 review; the document reader owns Source verification. The Research Agent and
 experiment plans may consume published Findings, but they do not introduce a

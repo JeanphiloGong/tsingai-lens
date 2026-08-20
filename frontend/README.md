@@ -28,7 +28,7 @@ to code.
 
 - [`docs/frontend-plan.md`](docs/frontend-plan.md)
   Frontend same-origin API integration guide
-- [`docs/goal-copilot-proposal.md`](docs/goal-copilot-proposal.md)
+- [`docs/research-agent-chat.md`](docs/research-agent-chat.md)
   Collection-bound Research Agent Chat and approval presentation contract
 - [`docs/research-view-aggregation/README.md`](docs/research-view-aggregation/README.md)
   Frontend implementation topic for collection research-view navigation,

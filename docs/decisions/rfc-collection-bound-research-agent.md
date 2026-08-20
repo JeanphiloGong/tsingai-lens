@@ -2,9 +2,8 @@
 
 ## Status
 
-Accepted and implemented for the first bounded Agent loop. The historical
-filename remains stable for documentation links; the superseded session design
-is not an active compatibility contract.
+Accepted and implemented for the first bounded Agent loop. The superseded
+Goal-session design is not an active compatibility contract.
 
 ## Decision
 
@@ -179,5 +178,5 @@ Acceptance requires:
 
 - [Lens V1 Definition](../contracts/lens-v1-definition.md)
 - [Lens V1 Architecture Boundary](../architecture/lens-v1-architecture-boundary.md)
-- [Research Agent Chat Interface](../../frontend/docs/goal-copilot-proposal.md)
+- [Research Agent Chat Interface](../../frontend/docs/research-agent-chat.md)
 - [Backend API](../../backend/docs/specs/api.md)

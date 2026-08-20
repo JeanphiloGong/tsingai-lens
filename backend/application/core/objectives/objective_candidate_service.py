@@ -59,27 +59,6 @@ _VARIABLE_TOPIC_GENERIC_LABEL_TOKENS = frozenset(
         "values",
     }
 )
-_VARIABLE_INTERVENTION_HINT_PATTERNS = (
-    (
-        "hot-isostatic-pressing",
-        r"\b(?:hip|hot isostatic press(?:ing|ed)?)\b",
-    ),
-    (
-        "heat-treatment",
-        r"\b(?:heat treatment|anneal(?:ing|ed)?|ag(?:e|ed|ing)|solution treatment)\b",
-    ),
-    (
-        "laser-exposure",
-        r"\b(?:laser (?:power|energy)|scann?ing (?:speed|strategy)|scan speed|"
-        r"hatch spacing|volumetric energy density|exposure time)\b",
-    ),
-    (
-        "build-preheating",
-        r"\b(?:(?:powder bed|base plate|build plate|substrate) pre[- ]?heat|"
-        r"pre[- ]?heat(?:ing)? (?:the )?(?:powder bed|base plate|build plate|substrate))\b",
-    ),
-    ("surface-treatment", r"\bsurface treatment\b"),
-)
 _OUTCOME_IDENTITY_HINT_TOKENS = frozenset(
     {
         "conductivity",
@@ -163,7 +142,7 @@ class ObjectiveCandidateService:
             current=0,
             total=len(relationship_groups),
             unit="groups",
-            message="Promoting compatible paper-study relationships to objectives.",
+            message="Promoting paper-study relationships with shared research scope.",
         )
 
         accepted_objectives: list[ResearchObjective] = []
@@ -185,8 +164,8 @@ class ObjectiveCandidateService:
                 and len(objective.seed_document_ids) < 2
             ):
                 rejection_reason = (
-                    "Relationship does not have the same precise intervention support "
-                    "from multiple collection papers."
+                    "Relationship does not have shared objective-scope support from "
+                    "multiple collection papers."
                 )
                 objective = None
             if objective is not None:
@@ -210,7 +189,7 @@ class ObjectiveCandidateService:
                 current=group_number,
                 total=len(relationship_groups),
                 unit="groups",
-                message="Promoted one compatible study-relationship group.",
+                message="Evaluated one shared-scope study-relationship group.",
             )
 
         research_objectives = self._rank_objectives(
@@ -430,10 +409,16 @@ class ObjectiveCandidateService:
         right_study: PaperStudy,
         right: PaperStudyRelationship,
     ) -> _Compatibility:
-        if not cls._axis_collections_are_equivalent(
+        factors_share_scope = cls._axis_collections_are_equivalent(
             left.varied_factors,
             right.varied_factors,
-        ) or not cls._axis_values_are_equivalent(left.outcome, right.outcome):
+        ) or property_matching.shared_variable_theme(
+            (left.varied_factors, right.varied_factors)
+        ) is not None
+        if not factors_share_scope or not cls._axis_values_are_equivalent(
+            left.outcome,
+            right.outcome,
+        ):
             return _Compatibility.INCOMPATIBLE
         return cls._context_collection_compatibility(
             left_study.material_scope,
@@ -555,7 +540,7 @@ class ObjectiveCandidateService:
         relationship_ids: tuple[str, ...],
         relationship_inventory: RelationshipInventory,
     ) -> tuple[ResearchObjective | None, str | None]:
-        relationship_ids, variables = self._precise_relationship_intervention(
+        relationship_ids, variables = self._relationship_objective_scope(
             relationship_ids,
             relationship_inventory=relationship_inventory,
         )
@@ -567,7 +552,7 @@ class ObjectiveCandidateService:
                 relationship_inventory=relationship_inventory,
             )
         ):
-            return None, "Study relationships do not form one compatible objective."
+            return None, "Study relationships do not form one bounded objective scope."
         seed_document_ids = self._unique_text_values(
             relationship_inventory[relationship_id][0]
             for relationship_id in relationship_ids
@@ -620,14 +605,30 @@ class ObjectiveCandidateService:
         material_scope_was_missing = any(
             not self._known_material_keys(study.material_scope) for study in studies
         )
+        uses_variable_theme = property_matching.shared_variable_theme(
+            relationship.varied_factors for relationship in relationships
+        ) in variables and any(
+            not self._axis_collections_are_equivalent(
+                relationships[0].varied_factors,
+                relationship.varied_factors,
+            )
+            for relationship in relationships[1:]
+        )
         reason_parts = [
             (
-                "Supported by one repeated paper-owned intervention and outcome; "
+                "Supported by a bounded paper-owned intervention theme and specific "
+                "outcome; direct comparability remains a later evidence decision."
+                if uses_variable_theme
+                else "Supported by one repeated paper-owned intervention and outcome; "
                 "direct comparability remains a later evidence decision."
             ),
             (
-                "The complete jointly varied factor set is equivalent across every "
-                "supporting paper; paper-specific Source lineage remains unchanged."
+                "Each paper's exact jointly varied factor set and Source lineage "
+                "remain unchanged."
+                if uses_variable_theme
+                else "The complete jointly varied factor set is equivalent across "
+                "every supporting paper; paper-specific Source lineage remains "
+                "unchanged."
             ),
             (
                 "Confidence is the minimum available non-zero source confidence."
@@ -670,7 +671,7 @@ class ObjectiveCandidateService:
                 f"Study relationship group cannot form a valid objective: {exc}",
             )
 
-    def _precise_relationship_intervention(
+    def _relationship_objective_scope(
         self,
         relationship_ids: tuple[str, ...],
         *,
@@ -682,19 +683,23 @@ class ObjectiveCandidateService:
         )
         if not records:
             return (), ()
-        variables = records[0][2].varied_factors
-        if any(
+        precise_variables = records[0][2].varied_factors
+        if not any(
             not self._axis_collections_are_equivalent(
-                variables,
+                precise_variables,
                 relationship.varied_factors,
             )
             for _document_id, _study, relationship in records[1:]
         ):
-            return (), ()
-        return (
-            relationship_ids,
-            tuple(self._unique_axis_values(variables)),
+            return (
+                relationship_ids,
+                tuple(self._unique_axis_values(precise_variables)),
+            )
+        shared_theme = property_matching.shared_variable_theme(
+            relationship.varied_factors
+            for _document_id, _study, relationship in records
         )
+        return (relationship_ids, (shared_theme,)) if shared_theme else ((), ())
 
     @staticmethod
     def _objective_question(
@@ -1262,9 +1267,8 @@ class ObjectiveCandidateService:
             for left, right in zip(label_tokens, label_tokens[1:])
         )
         hints.update(
-            f"intervention:{topic}"
-            for topic, pattern in _VARIABLE_INTERVENTION_HINT_PATTERNS
-            if re.search(pattern, factor_key)
+            f"intervention:{property_matching.axis_key(theme)}"
+            for theme in property_matching.variable_theme_labels(factor_key)
         )
         return frozenset(hints)
 

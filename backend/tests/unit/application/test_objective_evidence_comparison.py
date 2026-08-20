@@ -27,6 +27,99 @@ from tests.support.research_objective_service import (
 )
 
 
+def test_theme_objective_keeps_exact_interventions_in_separate_result_sets():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-thermal-elongation",
+            "question": (
+                "How does thermal post-processing condition affect elongation?"
+            ),
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["thermal post-processing condition"],
+            "outcomes": ["elongation"],
+        }
+    )
+
+    def evidence(
+        *,
+        evidence_id: str,
+        document_id: str,
+        factor: str,
+        baseline: int,
+        target: int,
+    ) -> ObjectiveEvidence:
+        return ObjectiveEvidence.from_mapping(
+            {
+                "collection_id": objective.collection_id,
+                "objective_id": objective.objective_id,
+                "analysis_version": 1,
+                "evidence_id": evidence_id,
+                "document_id": document_id,
+                "source_kind": "table_row",
+                "source_ref": f"{document_id}-result-row",
+                "source_excerpt": (
+                    f"{factor} changed from {baseline} C to {target} C and "
+                    "elongation increased."
+                ),
+                "evidence_role": "direct_result",
+                "selection_status": "extracted",
+                "changed_variables": [
+                    {
+                        "name": factor,
+                        "baseline_value": baseline,
+                        "target_value": target,
+                        "unit": "C",
+                    }
+                ],
+                "comparison": {
+                    "baseline_label": f"{baseline} C",
+                    "target_label": f"{target} C",
+                    "axis_names": [factor],
+                    "comparable": True,
+                },
+                "reported_result": {
+                    "outcome": "elongation",
+                    "value": 12.0,
+                    "unit": "%",
+                    "direction": "increase",
+                    "result_text": "Elongation increased.",
+                },
+                "attribution_scope": "isolated_effect",
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    evidence_records = (
+        evidence(
+            evidence_id="evidence-annealing",
+            document_id="paper-annealing",
+            factor="annealing temperature",
+            baseline=700,
+            target=850,
+        ),
+        evidence(
+            evidence_id="evidence-hip",
+            document_id="paper-hip",
+            factor="HIP temperature",
+            baseline=850,
+            target=920,
+        ),
+    )
+    service = finding_synthesis.FindingSynthesisService()
+
+    assert all(
+        service.is_comparable_result_evidence(objective, item)
+        for item in evidence_records
+    )
+    result_sets = service._result_sets(objective, evidence_records)
+    assert len(result_sets) == 2
+    assert {tuple(item["factors"]) for item in result_sets} == {
+        ("annealing temperature",),
+        ("HIP temperature",),
+    }
+
+
 def test_objective_evidence_document_state_is_typed_and_document_scoped():
     class RecordingExtractor:
         def __init__(self) -> None:

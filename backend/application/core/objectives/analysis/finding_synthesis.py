@@ -1002,6 +1002,10 @@ class FindingSynthesisService:
             factors
             and any(
                 _axis_matches(factor, objective_factor)
+                or property_matching.variable_matches_objective_scope(
+                    factor,
+                    objective_factor,
+                )
                 for factor in factors
                 for objective_factor in objective.variables
             )

@@ -86,6 +86,54 @@ def test_axis_matching_preserves_explicit_synonyms_and_source_aliases() -> None:
     assert property_matching.source_text_mentions_axis("E p", "pitting potential")
 
 
+def test_variable_theme_membership_does_not_create_axis_equivalence() -> None:
+    assert property_matching.shared_variable_theme(
+        (
+            ("annealing temperature",),
+            ("solution temperature", "aging temperature"),
+            ("HIP temperature",),
+        )
+    ) == "thermal post-processing condition"
+    assert property_matching.variable_matches_objective_scope(
+        "annealing temperature",
+        "thermal post-processing condition",
+    )
+    assert property_matching.variable_matches_objective_scope(
+        "HIP temperature",
+        "thermal post-processing condition",
+    )
+    assert property_matching.variable_matches_objective_scope(
+        "Solubility temperatures ° C",
+        "thermal post-processing condition",
+    )
+    assert not property_matching.axis_values_match(
+        "annealing temperature",
+        "HIP temperature",
+    )
+    assert (
+        property_matching.resolve_objective_axis(
+            "annealing temperature",
+            ("thermal post-processing condition",),
+        )
+        is None
+    )
+
+
+def test_build_preheating_is_outside_the_thermal_post_processing_theme() -> None:
+    assert not property_matching.variable_matches_objective_scope(
+        "base plate preheating temperature",
+        "thermal post-processing condition",
+    )
+    assert property_matching.variable_matches_objective_scope(
+        "base plate preheating temperature",
+        "build preheating condition",
+    )
+    assert property_matching.source_text_mentions_objective_variable(
+        "The annealing temperature was increased to 850 C.",
+        "thermal post-processing condition",
+    )
+
+
 @pytest.mark.parametrize(
     ("source_label", "objective_axes", "expected"),
     (

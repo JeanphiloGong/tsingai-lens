@@ -173,6 +173,63 @@ _EXPLICIT_AXIS_SYNONYMS = {
     "scan strategy": ("scanning strategy",),
     "scanning strategy": ("scan strategy",),
 }
+
+# Objective discovery may use these bounded intervention themes to collect
+# related paper-owned experiments. Theme membership is deliberately separate
+# from axis equivalence: an annealing temperature and a HIP temperature belong
+# to one thermal post-processing question, but remain different variables when
+# Evidence is compared.
+_VARIABLE_THEME_PATTERNS = (
+    (
+        "hot isostatic pressing condition",
+        re.compile(r"\b(?:hip|hot isostatic press(?:ing|ed)?)\b", re.IGNORECASE),
+    ),
+    (
+        "heat treatment condition",
+        re.compile(
+            r"\b(?:heat treatment|anneal(?:ing|ed)?|ag(?:e|ed|ing)|"
+            r"ageing|solution treatment|solutioniz(?:e|ed|ing)|"
+            r"solution (?:temperature|time|duration)|"
+            r"solubility (?:temperatures?|time|duration))\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "thermal post-processing condition",
+        re.compile(
+            r"\b(?:thermal post[- ]?process(?:ing)?|hip|"
+            r"hot isostatic press(?:ing|ed)?|heat treatment|"
+            r"anneal(?:ing|ed)?|ag(?:e|ed|ing)|ageing|solution treatment|"
+            r"solutioniz(?:e|ed|ing)|solution (?:temperature|time|duration)|"
+            r"solubility (?:temperatures?|time|duration))\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "laser exposure condition",
+        re.compile(
+            r"\b(?:laser (?:power|energy)|scann?ing (?:speed|strategy)|"
+            r"scan speed|hatch spacing|volumetric energy density|"
+            r"energy density|exposure time)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "build preheating condition",
+        re.compile(
+            r"\b(?:(?:powder bed|base plate|build plate|substrate) "
+            r"pre[- ]?heat(?:ing|ed)?|"
+            r"pre[- ]?heat(?:ing)? (?:the )?"
+            r"(?:powder bed|base plate|build plate|substrate))\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "surface treatment condition",
+        re.compile(r"\bsurface treatment\b", re.IGNORECASE),
+    ),
+)
+_VARIABLE_THEME_LABELS = frozenset(label for label, _ in _VARIABLE_THEME_PATTERNS)
 _STRUCTURAL_TARGET_AXES = frozenset(
     {"densification", "relative density", "microstructure"}
 )
@@ -453,6 +510,69 @@ def axis_values_match(left: str, right: str) -> bool:
     right_key = normalize_property_label(right) or axis_key(right)
     return right_key in _EXPLICIT_AXIS_SYNONYMS.get(left_key, ()) or (
         left_key in _EXPLICIT_AXIS_SYNONYMS.get(right_key, ())
+    )
+
+
+def variable_theme_labels(value: Any) -> tuple[str, ...]:
+    """Return bounded research themes containing one precise intervention."""
+
+    text = str(value or "").strip()
+    if not text:
+        return ()
+    return tuple(
+        label
+        for label, pattern in _VARIABLE_THEME_PATTERNS
+        if label == axis_key(text) or pattern.search(text)
+    )
+
+
+def shared_variable_theme(
+    factor_sets: Iterable[Iterable[str]],
+) -> str | None:
+    """Return the most specific intervention theme shared by every paper fact."""
+
+    groups = tuple(tuple(str(factor) for factor in factors) for factors in factor_sets)
+    if not groups or any(not group for group in groups):
+        return None
+    return next(
+        (
+            label
+            for label, _pattern in _VARIABLE_THEME_PATTERNS
+            if all(
+                any(label in variable_theme_labels(factor) for factor in group)
+                for group in groups
+            )
+        ),
+        None,
+    )
+
+
+def variable_matches_objective_scope(
+    source_variable: Any,
+    objective_variable: Any,
+) -> bool:
+    """Match a precise Source variable to an Objective without equating themes."""
+
+    source = str(source_variable or "").strip()
+    objective = str(objective_variable or "").strip()
+    if not source or not objective:
+        return False
+    if axis_values_match(source, objective):
+        return True
+    objective_key = axis_key(objective)
+    return (
+        objective_key in _VARIABLE_THEME_LABELS
+        and objective_key in variable_theme_labels(source)
+    )
+
+
+def source_text_mentions_objective_variable(text: str, objective_variable: str) -> bool:
+    if source_text_mentions_axis(text, objective_variable):
+        return True
+    objective_key = axis_key(objective_variable)
+    return any(
+        label == objective_key and pattern.search(text) is not None
+        for label, pattern in _VARIABLE_THEME_PATTERNS
     )
 
 

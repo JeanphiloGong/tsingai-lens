@@ -524,7 +524,7 @@ def test_different_fixed_condition_values_remain_in_one_objective_group():
     assert groups == [("relationship-200-c", "relationship-400-c")]
 
 
-def test_single_and_joint_factor_relationships_remain_separate_precise_interventions():
+def test_single_and_joint_factor_relationships_share_a_theme_without_axis_rewriting():
     skims = (
         _paper_skim(
             document_id="paper-single",
@@ -542,7 +542,7 @@ def test_single_and_joint_factor_relationships_remain_separate_precise_intervent
         ObjectiveCandidateService()._build_relationship_groups(skims)
     )
 
-    assert groups == [("relationship-joint",), ("relationship-single",)]
+    assert groups == [("relationship-joint", "relationship-single")]
     assert skims[0].studies[0].relationships[0].varied_factors == ("laser power",)
     assert skims[1].studies[0].relationships[0].varied_factors == (
         "laser power",
@@ -550,74 +550,85 @@ def test_single_and_joint_factor_relationships_remain_separate_precise_intervent
     )
 
 
-def test_topic_supported_thermal_relationships_do_not_create_a_precise_objective():
-    class ThermalTopicClassifier(_GroupingExtractor):
+def test_shared_thermal_processing_theme_creates_one_bounded_objective():
+    class DistinctAxisClassifier(_GroupingExtractor):
         def classify(
             self,
             payload: dict[str, Any],
         ) -> StructuredAxisCanonicalizationPlan:
             self.canonicalization_payloads.append(payload)
-            decisions = []
-            for pair in payload["axis_pairs"]:
-                labels = {pair["left"], pair["right"]}
-                equivalent = (
-                    labels
-                    in (
-                        {"Ti-6Al-4V", "Ti6Al4V"},
-                        {"microstructure", "microstructure morphology"},
-                    )
-                    and pair["axis_type"] == "material"
-                )
-                decisions.append(
+            return StructuredAxisCanonicalizationPlan(
+                decisions=[
                     {
                         "pair_id": pair["pair_id"],
-                        "equivalent": equivalent,
+                        "equivalent": False,
                     }
-                )
-            return StructuredAxisCanonicalizationPlan(decisions=decisions)
+                    for pair in payload["axis_pairs"]
+                ]
+            )
 
     skims = (
-        _paper_skim(
-            document_id="paper-heat-treatment",
-            relationship_id="relationship-heat-treatment",
-            factors=("heat treatment temperature", "heat treatment duration"),
-            outcome="microstructure",
-            material_scope=("Ti-6Al-4V",),
-            process_context=("SLM", "post-build heat treatment"),
-        ),
         _paper_skim(
             document_id="paper-annealing",
             relationship_id="relationship-annealing",
             factors=("annealing temperature",),
-            outcome="microstructure",
-            material_scope=("Ti6Al4V",),
-            process_context=("SLM", "post-build annealing"),
+            outcome="elongation",
+            material_scope=("Ti-6Al-4V",),
         ),
         _paper_skim(
-            document_id="paper-preheating",
-            relationship_id="relationship-preheating",
-            factors=("base plate preheating temperature",),
-            outcome="microstructure",
+            document_id="paper-solution-aging",
+            relationship_id="relationship-solution-aging",
+            factors=("solution temperature", "aging temperature"),
+            outcome="elongation",
+            material_scope=("Ti6Al4V",),
+        ),
+        _paper_skim(
+            document_id="paper-hip",
+            relationship_id="relationship-hip",
+            factors=("HIP temperature",),
+            outcome="elongation",
             material_scope=("Ti-6Al-4V",),
-            process_context=("SLM", "in-process preheating"),
+        ),
+        _paper_skim(
+            document_id="paper-build-preheating",
+            relationship_id="relationship-build-preheating",
+            factors=("base plate preheating temperature",),
+            outcome="elongation",
+            material_scope=("Ti-6Al-4V",),
         ),
     )
 
     facts = ObjectiveCandidateService().discover_candidate_facts(
-        "collection-ti64",
+        "collection-ti64-thermal-processing",
         paper_skims=skims,
-        axis_equivalence_classifier=ThermalTopicClassifier(),
+        axis_equivalence_classifier=DistinctAxisClassifier(),
     )
 
-    assert facts.research_objectives == ()
-    assert {item.status.value for item in facts.study_dispositions} == {"rejected"}
-    assert skims[0].studies[0].relationships[0].varied_factors == (
-        "heat treatment temperature",
-        "heat treatment duration",
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert objective.variables == ("thermal post-processing condition",)
+    assert objective.outcomes == ("elongation",)
+    assert set(objective.seed_document_ids) == {
+        "paper-annealing",
+        "paper-solution-aging",
+        "paper-hip",
+    }
+    assert set(objective.source_relationship_ids) == {
+        "relationship-annealing",
+        "relationship-solution-aging",
+        "relationship-hip",
+    }
+    dispositions = {
+        item.relationship_id: item for item in facts.study_dispositions
+    }
+    assert dispositions["relationship-build-preheating"].status.value == "rejected"
+    assert skims[1].studies[0].relationships[0].varied_factors == (
+        "solution temperature",
+        "aging temperature",
     )
 
 
-def test_shared_topic_member_does_not_hide_different_joint_interventions():
+def test_shared_topic_objective_preserves_different_joint_interventions():
     class CoolingTopicClassifier(_GroupingExtractor):
         def classify(
             self,
@@ -661,8 +672,14 @@ def test_shared_topic_member_does_not_hide_different_joint_interventions():
         axis_equivalence_classifier=CoolingTopicClassifier(),
     )
 
-    assert facts.research_objectives == ()
-    assert {item.status.value for item in facts.study_dispositions} == {"rejected"}
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert objective.variables == ("hot isostatic pressing condition",)
+    assert set(objective.source_relationship_ids) == {
+        "relationship-hip-methods",
+        "relationship-hip-results",
+    }
+    assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
     assert skims[0].studies[0].relationships[0].varied_factors == (
         "cooling rate after HIP",
         "HIP temperature",
@@ -670,7 +687,7 @@ def test_shared_topic_member_does_not_hide_different_joint_interventions():
     )
 
 
-def test_topic_only_cross_paper_relationships_abstain_from_a_precise_objective():
+def test_hip_theme_relations_create_a_bounded_multi_paper_objective():
     class HipTopicClassifier(_GroupingExtractor):
         def classify(
             self,
@@ -712,14 +729,18 @@ def test_topic_only_cross_paper_relationships_abstain_from_a_precise_objective()
         axis_equivalence_classifier=HipTopicClassifier(),
     )
 
-    assert facts.research_objectives == ()
-    assert {item.status.value for item in facts.study_dispositions} == {"rejected"}
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert objective.variables == ("hot isostatic pressing condition",)
+    assert len(objective.seed_document_ids) == len(paper_factors)
+    assert len(objective.source_relationship_ids) == len(paper_factors)
+    assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
     assert {
         skim.studies[0].relationships[0].varied_factors[0] for skim in skims
     } == set(paper_factors)
 
 
-def test_topic_similarity_does_not_create_a_precise_cross_paper_intervention():
+def test_laser_exposure_theme_does_not_claim_precise_axis_equivalence():
     class LaserExposureTopicClassifier(_GroupingExtractor):
         def classify(
             self,
@@ -759,15 +780,23 @@ def test_topic_similarity_does_not_create_a_precise_cross_paper_intervention():
         axis_equivalence_classifier=LaserExposureTopicClassifier(),
     )
 
-    assert facts.research_objectives == ()
-    assert {item.status.value for item in facts.study_dispositions} == {"rejected"}
-    assert all(
-        "precise intervention" in str(item.reason)
-        for item in facts.study_dispositions
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert objective.variables == ("laser exposure condition",)
+    assert set(objective.source_relationship_ids) == {
+        "relationship-fixed-power",
+        "relationship-ved",
+    }
+    assert "direct comparability remains a later evidence decision" in str(
+        objective.reason
+    )
+    assert skims[0].studies[0].relationships[0].varied_factors == ("laser power",)
+    assert skims[1].studies[0].relationships[0].varied_factors == (
+        "volumetric energy density",
     )
 
 
-def test_cross_paper_objective_requires_the_complete_joint_intervention_to_repeat():
+def test_cross_paper_theme_keeps_joint_and_isolated_interventions_distinct():
     class LaserFactorClassifier(_GroupingExtractor):
         def classify(
             self,
@@ -812,7 +841,13 @@ def test_cross_paper_objective_requires_the_complete_joint_intervention_to_repea
         axis_equivalence_classifier=LaserFactorClassifier(),
     )
 
-    assert facts.research_objectives == ()
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert objective.variables == ("laser exposure condition",)
+    assert set(objective.source_relationship_ids) == {
+        "relationship-joint",
+        "relationship-isolated",
+    }
     dispositions = {
         item.relationship_id: item for item in facts.study_dispositions
     }
@@ -820,9 +855,14 @@ def test_cross_paper_objective_requires_the_complete_joint_intervention_to_repea
     assert "claim_scope=background" in str(
         dispositions["relationship-cited"].reason
     )
+    assert skims[0].studies[0].relationships[0].varied_factors == (
+        "laser power",
+        "scan speed",
+    )
+    assert skims[1].studies[0].relationships[0].varied_factors == ("laser power",)
 
 
-def test_local_topic_bridges_do_not_form_one_multi_topic_objective():
+def test_shared_parent_theme_keeps_each_papers_complete_intervention():
     class LocalTopicClassifier(_GroupingExtractor):
         def classify(
             self,
@@ -869,8 +909,19 @@ def test_local_topic_bridges_do_not_form_one_multi_topic_objective():
         axis_equivalence_classifier=LocalTopicClassifier(),
     )
 
-    assert facts.research_objectives == ()
-    assert {item.status.value for item in facts.study_dispositions} == {"rejected"}
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert objective.variables == ("thermal post-processing condition",)
+    assert set(objective.source_relationship_ids) == {
+        "relationship-a",
+        "relationship-b",
+        "relationship-c",
+    }
+    assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
+    assert skims[2].studies[0].relationships[0].varied_factors == (
+        "heat treatment temperature",
+        "scan strategy",
+    )
 
 
 def test_axis_topic_classifier_receives_bounded_study_usage_context():
@@ -1245,8 +1296,8 @@ def test_multi_paper_collection_does_not_promote_single_paper_relationships():
     assert all(
         item.reason
         == (
-            "Relationship does not have the same precise intervention support from "
-            "multiple collection papers."
+            "Relationship does not have shared objective-scope support from multiple "
+            "collection papers."
         )
         for item in facts.study_dispositions
     )
@@ -1459,8 +1510,8 @@ def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
     )
     assert length_disposition.status.value == "rejected"
     assert length_disposition.reason == (
-        "Relationship does not have the same precise intervention support from "
-        "multiple collection papers."
+        "Relationship does not have shared objective-scope support from multiple "
+        "collection papers."
     )
 
 

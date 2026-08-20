@@ -181,15 +181,20 @@ Objective analysis.
   measurement-identity hint. The model classifies every proposed pair for exact
   equivalence; it cannot invent labels or groups. Exact-equivalence edges build
   conservative complete-link alias groups. Related but non-equivalent axes do
-  not enter precise Objective grouping.
+  not become aliases.
   Outcomes must remain one exact measurement identity or an accepted synonym;
   related but distinct outcomes seed separate candidate questions. This
   normalized view is transient: persisted studies retain their
-  extracted labels and exact Source lineage. A precise Objective requires an
-  equivalent complete jointly varied factor set, one outcome identity, and
-  non-conflicting material scope across every supporting paper. Topic-only
-  relationships remain unpromoted rather than borrowing one paper's factor to
-  name a shared intervention. Only `current_work` relationships may seed an
+  extracted labels and exact Source lineage. Relationships may support one
+  bounded Objective when they have non-conflicting material scope, one specific
+  outcome identity, and one explicit intervention theme such as heat treatment,
+  hot isostatic pressing, thermal post-processing, laser exposure, or build
+  preheating. The Objective uses the most specific theme shared by every member;
+  it never borrows one paper's precise factor as the group variable. Theme
+  membership is not axis equivalence: each relationship retains its complete
+  jointly varied factor set, and downstream Evidence comparison decides whether
+  exact interventions, material states, methods, and test conditions are
+  comparable. Only `current_work` relationships may seed an
   Objective; background, synthesis, uncertain, and varied-versus-fixed
   inconsistent relationships receive rejection dispositions. Common stainless steel grade
   spellings and established Ti-6Al-4V forms have one deterministic material
@@ -209,7 +214,7 @@ Objective analysis.
   sample, test, comparator, design, and fixed-condition differences remain on
   each `PaperStudy`; they do not fragment a candidate Objective because later
   Evidence and Comparison own scientific comparability. For a multi-document
-  collection, the backend promotes only compatible groups supported by at least
+  collection, the backend promotes only bounded groups supported by at least
   two papers; a single-document collection may still produce paper-local
   candidates. The backend derives each accepted Objective question, seed
   documents, shared scope, and lineage, then ranks cross-paper support before
@@ -225,8 +230,11 @@ Objective analysis.
 - `property_matching.py`
   Owns application-layer matching from noisy Source labels to Objective axes,
   including observed OCR aliases, materials-specific broad outcome hints,
-  contextual process-symbol hints, and deterministic method-family selection.
-  These rules guide extraction and do not define universal domain equivalence.
+  bounded intervention-theme membership, contextual process-symbol hints, and
+  deterministic method-family selection. Theme membership is exposed separately
+  from exact axis matching so it can widen Objective inspection without
+  canonicalizing distinct Source variables or comparison groups. These rules
+  guide extraction and do not define universal domain equivalence.
 - `analysis_service.py`
   Queues, claims, fails, and atomically publishes one Objective analysis
   version.
@@ -357,13 +365,17 @@ context. These snapshots are
 interpretive context, not proof that jointly varied factors are the same
 intervention. Outcomes must be exactly equivalent after accepted alias
 normalization. Every source relationship keeps its complete jointly varied
-factor tuple and one specific outcome. A precise Objective is created only when
-the complete varied-factor tuple and outcome repeat across at least two
-paper-owned current-work relationships; no topic representative is selected.
-Explicit material conflicts remain a hard boundary. Other study-context
-differences are retained, not flattened, and are evaluated downstream when
-Evidence is compared. The backend turns each repeated precise intervention
-group into one Objective. A paper-local group is promoted only when the
+factor tuple and one specific outcome. A collection Objective is created when
+at least two paper-owned current-work relationships have compatible material
+scope, the same specific outcome, and either the same exact factor tuple or one
+bounded shared intervention theme. The Objective variable is the precise tuple
+when that tuple repeats; otherwise it is the most specific shared theme.
+Explicit material conflicts remain a hard boundary. Other study-context and
+exact-factor differences are retained, not flattened, and are evaluated
+downstream when Evidence is compared. A theme-level Objective admits each
+member's exact Evidence into analysis, while Finding result sets continue to
+group by the exact extracted variables and compatible scientific context. A
+paper-local group is promoted only when the
 collection itself contains one
 document; otherwise it remains traceable through its rejection disposition.
 Accepted Objectives are ranked and persisted; the HTTP list returns all ranked

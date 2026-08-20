@@ -6,6 +6,10 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 
 from application.chat import ToolSpec
+from application.chat.model import (
+    RESEARCH_AGENT_PROMPT_VERSION,
+    RESEARCH_AGENT_SYSTEM_PROMPT,
+)
 from domain.chat import ChatMessage, ToolRisk
 from infra.llm.chat_model import OpenAIChatModel
 
@@ -45,6 +49,21 @@ def _message() -> ChatMessage:
         content="你好",
         created_at="2026-08-19T00:00:00+00:00",
     )
+
+
+def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v4"
+    assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "supporting source" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "Never expose registered tool names" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "我是 TsingAI-Lens 科研研究智能体" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "形成研究目标" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "分析已有论文和证据" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "设计研究方案" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "验证研究判断" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "研究方案生成和验证闭环仍在开发中" in RESEARCH_AGENT_SYSTEM_PROMPT
 
 
 def test_openai_chat_model_returns_an_ordinary_answer_without_tools() -> None:

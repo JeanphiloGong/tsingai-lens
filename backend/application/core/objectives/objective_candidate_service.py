@@ -33,7 +33,6 @@ RelationshipInventory = Mapping[
 ]
 AxisMapping = Mapping[str, Mapping[str, str]]
 AxisPair = tuple[str, str, str]
-AxisTopicRelation = tuple[str, str, str]
 
 _AXIS_PAIR_BATCH_SIZE = 16
 _AXIS_OBSERVATION_LIMIT = 2
@@ -136,12 +135,10 @@ class ObjectiveCandidateService:
         progress_callback: ProgressCallback | None = None,
     ) -> ObjectiveFactSet:
         source_relationship_inventory = self._relationship_inventory(paper_skims)
-        relationship_inventory, topic_relations = (
-            self._canonicalize_relationship_inventory_axes(
-                collection_id=collection_id,
-                axis_equivalence_classifier=axis_equivalence_classifier,
-                relationship_inventory=source_relationship_inventory,
-            )
+        relationship_inventory = self._canonicalize_relationship_inventory_axes(
+            collection_id=collection_id,
+            axis_equivalence_classifier=axis_equivalence_classifier,
+            relationship_inventory=source_relationship_inventory,
         )
         terminal_rejections = {
             relationship_id: rejection_reason
@@ -159,7 +156,6 @@ class ObjectiveCandidateService:
         relationship_groups = self._build_relationship_groups(
             paper_skims,
             relationship_inventory=relationship_inventory,
-            topic_relations=topic_relations,
         )
         self._notify_progress(
             progress_callback,
@@ -182,7 +178,6 @@ class ObjectiveCandidateService:
                 collection_id,
                 relationship_ids=relationship_ids,
                 relationship_inventory=relationship_inventory,
-                topic_relations=topic_relations,
             )
             if (
                 objective is not None
@@ -190,7 +185,8 @@ class ObjectiveCandidateService:
                 and len(objective.seed_document_ids) < 2
             ):
                 rejection_reason = (
-                    "Relationship is not supported by multiple collection papers."
+                    "Relationship does not have the same precise intervention support "
+                    "from multiple collection papers."
                 )
                 objective = None
             if objective is not None:
@@ -278,7 +274,6 @@ class ObjectiveCandidateService:
         paper_skims: tuple[PaperSkim, ...],
         *,
         relationship_inventory: RelationshipInventory | None = None,
-        topic_relations: frozenset[AxisTopicRelation] = frozenset(),
     ) -> list[list[dict[str, Any]]]:
         inventory = relationship_inventory or self._relationship_inventory(paper_skims)
         skims_by_document_id = {skim.document_id: skim for skim in paper_skims}
@@ -308,7 +303,6 @@ class ObjectiveCandidateService:
                         self._record_compatibility(
                             record,
                             records_by_id[other_id],
-                            topic_relations=topic_relations,
                         )
                         is _Compatibility.COMPATIBLE
                         for other_id in group
@@ -324,7 +318,6 @@ class ObjectiveCandidateService:
         base_groups = self._attach_unambiguous_missing_material_groups(
             base_groups,
             relationship_inventory=inventory,
-            topic_relations=topic_relations,
         )
 
         return [
@@ -338,7 +331,6 @@ class ObjectiveCandidateService:
         groups: list[list[str]],
         *,
         relationship_inventory: RelationshipInventory,
-        topic_relations: frozenset[AxisTopicRelation] = frozenset(),
     ) -> list[list[str]]:
         def has_known_material(group: Iterable[str]) -> bool:
             return any(
@@ -361,7 +353,6 @@ class ObjectiveCandidateService:
                         relationship_inventory[relationship_id][2],
                         relationship_inventory[anchor_id][1],
                         relationship_inventory[anchor_id][2],
-                        topic_relations=topic_relations,
                     )
                     is _Compatibility.POSSIBLE
                     for relationship_id in group
@@ -405,8 +396,6 @@ class ObjectiveCandidateService:
         cls,
         left: Mapping[str, Any],
         right: Mapping[str, Any],
-        *,
-        topic_relations: frozenset[AxisTopicRelation] = frozenset(),
     ) -> _Compatibility:
         left_study = left.get("study")
         right_study = right.get("study")
@@ -431,7 +420,6 @@ class ObjectiveCandidateService:
                 {**dict(right_study), "relationships": [dict(right_relationship)]}
             ),
             PaperStudyRelationship.from_mapping(right_relationship),
-            topic_relations=topic_relations,
         )
 
     @classmethod
@@ -441,13 +429,10 @@ class ObjectiveCandidateService:
         left: PaperStudyRelationship,
         right_study: PaperStudy,
         right: PaperStudyRelationship,
-        *,
-        topic_relations: frozenset[AxisTopicRelation] = frozenset(),
     ) -> _Compatibility:
-        if not cls._axis_collections_support_same_topic(
+        if not cls._axis_collections_are_equivalent(
             left.varied_factors,
             right.varied_factors,
-            topic_relations=topic_relations,
         ) or not cls._axis_values_are_equivalent(left.outcome, right.outcome):
             return _Compatibility.INCOMPATIBLE
         return cls._context_collection_compatibility(
@@ -540,22 +525,6 @@ class ObjectiveCandidateService:
         )
 
     @classmethod
-    def _axis_values_share_topic(
-        cls,
-        axis_type: str,
-        left: Any,
-        right: Any,
-        *,
-        topic_relations: frozenset[AxisTopicRelation],
-    ) -> bool:
-        if cls._axis_values_are_equivalent(left, right):
-            return True
-        left_key, right_key = sorted(
-            (cls._axis_record_key(left), cls._axis_record_key(right))
-        )
-        return (axis_type, left_key, right_key) in topic_relations
-
-    @classmethod
     def _axis_collections_are_equivalent(
         cls,
         left: Iterable[str],
@@ -579,37 +548,16 @@ class ObjectiveCandidateService:
             remaining_right.pop(matching_position)
         return True
 
-    @classmethod
-    def _axis_collections_support_same_topic(
-        cls,
-        left: Iterable[str],
-        right: Iterable[str],
-        *,
-        topic_relations: frozenset[AxisTopicRelation],
-    ) -> bool:
-        return any(
-            cls._axis_values_share_topic(
-                "variable",
-                left_value,
-                right_value,
-                topic_relations=topic_relations,
-            )
-            for left_value in left
-            for right_value in right
-        )
-
     def _objective_from_relationship_group(
         self,
         collection_id: str,
         *,
         relationship_ids: tuple[str, ...],
         relationship_inventory: RelationshipInventory,
-        topic_relations: frozenset[AxisTopicRelation] = frozenset(),
     ) -> tuple[ResearchObjective | None, str | None]:
-        relationship_ids, variables = self._focused_relationship_topic(
+        relationship_ids, variables = self._precise_relationship_intervention(
             relationship_ids,
             relationship_inventory=relationship_inventory,
-            topic_relations=topic_relations,
         )
         if (
             not relationship_ids
@@ -617,7 +565,6 @@ class ObjectiveCandidateService:
             or not self._relationships_are_compatible(
                 relationship_ids,
                 relationship_inventory=relationship_inventory,
-                topic_relations=topic_relations,
             )
         ):
             return None, "Study relationships do not form one compatible objective."
@@ -655,15 +602,19 @@ class ObjectiveCandidateService:
                         "outcome before it can seed a research objective."
                     ),
                 )
-            self._append_unique_axis(
-                outcomes,
-                outcome_keys,
-                (
-                    outcome_expansions[0]
-                    if len(outcome_expansions) == 1
-                    else source_outcome
-                ),
+            objective_outcome = (
+                outcome_expansions[0]
+                if len(outcome_expansions) == 1
+                else (normalized_outcome or source_outcome)
             )
+            objective_outcome_key = (
+                property_matching.normalize_property_label(objective_outcome)
+                or self._axis_record_key(objective_outcome)
+            )
+            if objective_outcome_key in outcome_keys:
+                continue
+            outcome_keys.add(objective_outcome_key)
+            outcomes.append(objective_outcome)
         confidence = self._objective_confidence(studies, relationships)
         material_scope = self._shared_study_values(studies, "material_scope")
         material_scope_was_missing = any(
@@ -671,13 +622,12 @@ class ObjectiveCandidateService:
         )
         reason_parts = [
             (
-                "Supported by one backend-validated research-topic group; direct "
-                "comparability remains a later evidence decision."
+                "Supported by one repeated paper-owned intervention and outcome; "
+                "direct comparability remains a later evidence decision."
             ),
             (
-                "Objective variables are shared across every supporting paper, or "
-                "use one source-backed topic representative when no exact variable "
-                "spans them; paper-specific factors remain in relationship lineage."
+                "The complete jointly varied factor set is equivalent across every "
+                "supporting paper; paper-specific Source lineage remains unchanged."
             ),
             (
                 "Confidence is the minimum available non-zero source confidence."
@@ -720,161 +670,31 @@ class ObjectiveCandidateService:
                 f"Study relationship group cannot form a valid objective: {exc}",
             )
 
-    def _focused_relationship_topic(
+    def _precise_relationship_intervention(
         self,
         relationship_ids: tuple[str, ...],
         *,
         relationship_inventory: RelationshipInventory,
-        topic_relations: frozenset[AxisTopicRelation],
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         records = tuple(
             relationship_inventory[relationship_id]
             for relationship_id in relationship_ids
         )
-        if len({document_id for document_id, _study, _relationship in records}) < 2:
-            return (
-                relationship_ids,
-                tuple(
-                    self._unique_axis_values(
-                        factor
-                        for _document_id, _study, relationship in records
-                        for factor in relationship.varied_factors
-                    )
-                ),
-            )
-
-        factors = self._unique_axis_values(
-            factor
-            for _document_id, _study, relationship in records
-            for factor in relationship.varied_factors
-        )
-        document_support = {
-            factor: len(
-                {
-                    document_id
-                    for document_id, _study, relationship in records
-                    if any(
-                        self._axis_values_are_equivalent(factor, candidate)
-                        for candidate in relationship.varied_factors
-                    )
-                }
-            )
-            for factor in factors
-        }
-        topic_groups: list[list[str]] = []
-        for factor in sorted(
-            factors,
-            key=lambda value: (
-                -document_support[value],
-                self._axis_record_key(value),
-            ),
-        ):
-            compatible_group = next(
-                (
-                    group
-                    for group in topic_groups
-                    if all(
-                        self._axis_values_share_topic(
-                            "variable",
-                            factor,
-                            other,
-                            topic_relations=topic_relations,
-                        )
-                        for other in group
-                    )
-                ),
-                None,
-            )
-            if compatible_group is None:
-                topic_groups.append([factor])
-            else:
-                compatible_group.append(factor)
-
-        candidates: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
-        for group in topic_groups:
-            supporting_relationship_ids = tuple(
-                relationship_id
-                for relationship_id in relationship_ids
-                if any(
-                    self._axis_values_are_equivalent(factor, group_factor)
-                    for factor in relationship_inventory[relationship_id][
-                        2
-                    ].varied_factors
-                    for group_factor in group
-                )
-            )
-            supporting_documents = {
-                relationship_inventory[relationship_id][0]
-                for relationship_id in supporting_relationship_ids
-            }
-            if len(supporting_documents) >= 2:
-                candidates.append((supporting_relationship_ids, tuple(group)))
-        if not candidates:
+        if not records:
             return (), ()
-        supporting_relationship_ids, topic_variables = min(
-            candidates,
-            key=lambda candidate: (
-                -len(
-                    {
-                        relationship_inventory[relationship_id][0]
-                        for relationship_id in candidate[0]
-                    }
-                ),
-                -len(candidate[0]),
-                len(candidate[1]),
-                tuple(self._axis_record_key(value) for value in candidate[1]),
-            ),
-        )
+        variables = records[0][2].varied_factors
+        if any(
+            not self._axis_collections_are_equivalent(
+                variables,
+                relationship.varied_factors,
+            )
+            for _document_id, _study, relationship in records[1:]
+        ):
+            return (), ()
         return (
-            supporting_relationship_ids,
-            self._focused_objective_variables(
-                topic_variables,
-                relationship_ids=supporting_relationship_ids,
-                relationship_inventory=relationship_inventory,
-            ),
+            relationship_ids,
+            tuple(self._unique_axis_values(variables)),
         )
-
-    @classmethod
-    def _focused_objective_variables(
-        cls,
-        topic_variables: tuple[str, ...],
-        *,
-        relationship_ids: tuple[str, ...],
-        relationship_inventory: RelationshipInventory,
-    ) -> tuple[str, ...]:
-        document_ids = {
-            relationship_inventory[relationship_id][0]
-            for relationship_id in relationship_ids
-        }
-        documents_by_variable: dict[str, set[str]] = {}
-        for variable in topic_variables:
-            supporting_documents: set[str] = set()
-            for relationship_id in relationship_ids:
-                document_id, _study, relationship = relationship_inventory[
-                    relationship_id
-                ]
-                if any(
-                    cls._axis_values_are_equivalent(variable, factor)
-                    for factor in relationship.varied_factors
-                ):
-                    supporting_documents.add(document_id)
-            documents_by_variable[variable] = supporting_documents
-        shared_variables = tuple(
-            variable
-            for variable in topic_variables
-            if documents_by_variable[variable] == document_ids
-        )
-        if shared_variables:
-            return shared_variables
-        representative = min(
-            topic_variables,
-            key=lambda variable: (
-                -len(documents_by_variable[variable]),
-                len(cls._axis_record_key(variable)),
-                cls._axis_record_key(variable),
-            ),
-        )
-        return (representative,)
 
     @staticmethod
     def _objective_question(
@@ -899,7 +719,6 @@ class ObjectiveCandidateService:
         relationship_ids: Iterable[str],
         *,
         relationship_inventory: RelationshipInventory,
-        topic_relations: frozenset[AxisTopicRelation] = frozenset(),
     ) -> bool:
         ids = tuple(relationship_ids)
         for position, left_id in enumerate(ids):
@@ -916,7 +735,6 @@ class ObjectiveCandidateService:
                         left_relationship,
                         right_study,
                         right_relationship,
-                        topic_relations=topic_relations,
                     )
                     is _Compatibility.INCOMPATIBLE
                 ):
@@ -928,10 +746,19 @@ class ObjectiveCandidateService:
         study: PaperStudy,
         relationship: PaperStudyRelationship,
     ) -> str | None:
-        if study.claim_scope in {"synthesis", "background"}:
+        if study.claim_scope != "current_work":
             return (
                 f"Study relationship has claim_scope={study.claim_scope} and cannot "
                 "directly seed a research objective."
+            )
+        if any(
+            property_matching.axis_label_is_mentioned(fixed_condition, factor)
+            for fixed_condition in study.fixed_conditions
+            for factor in relationship.varied_factors
+        ):
+            return (
+                "Study relationship cannot seed an objective because an alleged "
+                "varied factor is recorded as fixed in the same study."
             )
         if property_matching.outcome_label_requires_resolution(relationship.outcome):
             return (
@@ -1069,10 +896,7 @@ class ObjectiveCandidateService:
         collection_id: str,
         axis_equivalence_classifier: ResearchAxisEquivalenceClassifier,
         relationship_inventory: RelationshipInventory,
-    ) -> tuple[
-        dict[str, tuple[str, PaperStudy, PaperStudyRelationship]],
-        frozenset[AxisTopicRelation],
-    ]:
+    ) -> dict[str, tuple[str, PaperStudy, PaperStudyRelationship]]:
         eligible_relationship_inventory = {
             relationship_id: record
             for relationship_id, record in relationship_inventory.items()
@@ -1086,7 +910,7 @@ class ObjectiveCandidateService:
             relationship_inventory=eligible_relationship_inventory,
         )
         if not axis_pairs:
-            return dict(relationship_inventory), frozenset()
+            return dict(relationship_inventory)
         variable_observations = self._variable_axis_observations(
             eligible_relationship_inventory
         )
@@ -1133,7 +957,7 @@ class ObjectiveCandidateService:
                 collection_id,
                 exc_info=True,
             )
-            return dict(relationship_inventory), frozenset()
+            return dict(relationship_inventory)
 
         axis_mapping = self._axis_mapping_from_plan(
             canonicalization_plan,
@@ -1148,18 +972,7 @@ class ObjectiveCandidateService:
                 "collection_id=%s",
                 collection_id,
             )
-            return dict(relationship_inventory), frozenset()
-        canonicalization_plan = self._confirm_topic_only_relations(
-            collection_id=collection_id,
-            axis_equivalence_classifier=axis_equivalence_classifier,
-            canonicalization_plan=canonicalization_plan,
-            pair_records=pair_records,
-        )
-        topic_relations = self._topic_relations_from_plan(
-            canonicalization_plan,
-            axis_pairs=axis_pairs,
-            axis_mapping=axis_mapping,
-        )
+            return dict(relationship_inventory)
         canonicalized_inventory = {
             relationship_id: (
                 document_id,
@@ -1195,75 +1008,7 @@ class ObjectiveCandidateService:
                 relationship,
             ) in relationship_inventory.items()
         }
-        return canonicalized_inventory, topic_relations
-
-    @classmethod
-    def _confirm_topic_only_relations(
-        cls,
-        *,
-        collection_id: str,
-        axis_equivalence_classifier: ResearchAxisEquivalenceClassifier,
-        canonicalization_plan: StructuredAxisCanonicalizationPlan,
-        pair_records: list[dict[str, Any]],
-    ) -> StructuredAxisCanonicalizationPlan:
-        records_by_id = {str(item["pair_id"]): item for item in pair_records}
-        topic_records = [
-            records_by_id[decision.pair_id]
-            for decision in canonicalization_plan.decisions
-            if not decision.equivalent
-            and decision.same_research_topic
-            and records_by_id[decision.pair_id]["axis_type"] == "variable"
-            and not cls._axis_values_are_equivalent(
-                records_by_id[decision.pair_id]["left"],
-                records_by_id[decision.pair_id]["right"],
-            )
-        ]
-        confirmed_topic_ids: set[str] = set()
-        for start in range(0, len(topic_records), _AXIS_PAIR_BATCH_SIZE):
-            confirmation_batch = topic_records[start : start + _AXIS_PAIR_BATCH_SIZE]
-            try:
-                confirmation = axis_equivalence_classifier.classify(
-                    {
-                        "collection_id": collection_id,
-                        "decision_stage": "topic_confirmation",
-                        "axis_pairs": confirmation_batch,
-                    }
-                )
-                confirmed_topic_ids.update(
-                    decision.pair_id
-                    for decision in confirmation.decisions
-                    if decision.same_research_topic
-                )
-            except Exception:
-                logger.warning(
-                    "Research variable-topic confirmation batch failed; rejecting "
-                    "relations collection_id=%s pair_ids=%s",
-                    collection_id,
-                    [record["pair_id"] for record in confirmation_batch],
-                    exc_info=True,
-                )
-
-        decisions: list[dict[str, Any]] = []
-        for decision in canonicalization_plan.decisions:
-            pair_record = records_by_id[decision.pair_id]
-            requires_confirmation = not (
-                decision.equivalent
-                or not decision.same_research_topic
-                or cls._axis_values_are_equivalent(
-                    pair_record["left"], pair_record["right"]
-                )
-            ) and pair_record["axis_type"] == "variable"
-            decisions.append(
-                {
-                    **decision.model_dump(),
-                    "same_research_topic": (
-                        decision.pair_id in confirmed_topic_ids
-                        if requires_confirmation
-                        else decision.same_research_topic
-                    ),
-                }
-            )
-        return StructuredAxisCanonicalizationPlan(decisions=decisions)
+        return canonicalized_inventory
 
     def _build_relationship_axis_candidates(
         self,
@@ -1636,34 +1381,6 @@ class ObjectiveCandidateService:
                 for value in group:
                     axis_mapping[axis_type][cls._axis_record_key(value)] = canonical
         return axis_mapping
-
-    @classmethod
-    def _topic_relations_from_plan(
-        cls,
-        canonicalization_plan: StructuredAxisCanonicalizationPlan,
-        *,
-        axis_pairs: Mapping[str, AxisPair],
-        axis_mapping: AxisMapping,
-    ) -> frozenset[AxisTopicRelation]:
-        relations: set[AxisTopicRelation] = set()
-        for decision in canonicalization_plan.decisions:
-            if not decision.same_research_topic:
-                continue
-            axis_type, left, right = axis_pairs[decision.pair_id]
-            if axis_type != "variable":
-                continue
-            mapping = axis_mapping.get(axis_type, {})
-            left_key, right_key = sorted(
-                (
-                    cls._axis_record_key(mapping.get(cls._axis_record_key(left), left)),
-                    cls._axis_record_key(
-                        mapping.get(cls._axis_record_key(right), right)
-                    ),
-                )
-            )
-            if left_key and right_key and left_key != right_key:
-                relations.add((axis_type, left_key, right_key))
-        return frozenset(relations)
 
     @classmethod
     def _axis_label_counts(

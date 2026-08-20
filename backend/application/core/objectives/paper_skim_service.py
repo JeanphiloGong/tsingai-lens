@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import dataclass, replace
@@ -21,6 +21,7 @@ from application.core.objectives.discovery.study_window import (
     PaperStudyWindowExtractor,
     StructuredPaperSkim,
     StructuredPaperStudy,
+    StructuredPaperStudyRelationship,
 )
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
@@ -993,26 +994,75 @@ class PaperSkimService:
         study_identities = [study.identity_key() for study in parsed.studies]
         if len(study_identities) != len(set(study_identities)):
             raise ValueError("paper skim response contains duplicate study identities")
-        studies = tuple(
-            self._study_from_window_result(
-                item,
-                document_id=document_id,
-                source_units=source_units,
-            )
-            for item in parsed.studies
-        )
-        signals = tuple(
+        studies: list[PaperStudy] = []
+        signals = [
             self._signal_from_window_result(
                 item.model_dump(),
                 document_id=document_id,
                 source_units=source_units,
             )
             for item in parsed.unresolved_signals
-        )
+        ]
+        relationship_source_unit_ids: list[str] = []
+        signal_source_unit_ids = [
+            source_unit_id
+            for item in parsed.unresolved_signals
+            for source_unit_id in item.source_unit_ids
+        ]
+        for study in parsed.studies:
+            retained_relationships = []
+            for relationship in study.relationships:
+                if self._relationship_conflicts_with_fixed_conditions(
+                    study,
+                    relationship,
+                ):
+                    signal_payload = {
+                        "signal_type": "outcome",
+                        "label": relationship.outcome,
+                        "source_unit_ids": list(relationship.source_unit_ids),
+                        "reason": (
+                            "alleged varied factor is also recorded as fixed in the "
+                            "same study"
+                        ),
+                        "confidence": relationship.confidence,
+                    }
+                    for field_name in (
+                        "experiment_label",
+                        "design_type",
+                        "claim_scope",
+                        "material_scope",
+                        "process_context",
+                        "sample_context",
+                        "test_context",
+                        "comparator",
+                        "fixed_conditions",
+                    ):
+                        signal_payload[field_name] = getattr(study, field_name)
+                    signals.append(
+                        self._signal_from_window_result(
+                            signal_payload,
+                            document_id=document_id,
+                            source_units=source_units,
+                        )
+                    )
+                    signal_source_unit_ids.extend(relationship.source_unit_ids)
+                    continue
+                retained_relationships.append(relationship)
+                relationship_source_unit_ids.extend(relationship.source_unit_ids)
+            if retained_relationships:
+                studies.append(
+                    self._study_from_window_result(
+                        study,
+                        document_id=document_id,
+                        source_units=source_units,
+                        relationships=retained_relationships,
+                    )
+                )
         source_unit_coverage = self._derive_source_unit_coverage(
             payload=payload,
-            parsed=parsed,
             source_units=source_units,
+            relationship_source_unit_ids=relationship_source_unit_ids,
+            signal_source_unit_ids=signal_source_unit_ids,
         )
         return (
             PaperSkim.from_mapping(
@@ -1028,15 +1078,16 @@ class PaperSkimService:
                     ],
                 }
             ),
-            signals,
+            tuple(signals),
         )
 
     @staticmethod
     def _derive_source_unit_coverage(
         *,
         payload: Mapping[str, Any],
-        parsed: StructuredPaperSkim,
         source_units: Mapping[str, Mapping[str, Any]],
+        relationship_source_unit_ids: Iterable[str],
+        signal_source_unit_ids: Iterable[str],
     ) -> tuple[PaperSourceUnitCoverage, ...]:
         input_ids = tuple(source_units)
         if len(input_ids) != len(payload.get("source_units") or ()):
@@ -1044,14 +1095,11 @@ class PaperSkimService:
 
         relationship_ids = {
             str(source_unit_id).strip()
-            for study in parsed.studies
-            for relationship in study.relationships
-            for source_unit_id in relationship.source_unit_ids
+            for source_unit_id in relationship_source_unit_ids
         }
         signal_ids = {
             str(source_unit_id).strip()
-            for signal in parsed.unresolved_signals
-            for source_unit_id in signal.source_unit_ids
+            for source_unit_id in signal_source_unit_ids
         }
         unknown_ids = (relationship_ids | signal_ids) - set(input_ids)
         if unknown_ids:
@@ -1135,9 +1183,13 @@ class PaperSkimService:
         *,
         document_id: str,
         source_units: Mapping[str, Mapping[str, Any]],
+        relationships: Iterable[StructuredPaperStudyRelationship] | None = None,
     ) -> PaperStudy:
-        relationships: list[dict[str, Any]] = []
-        for relationship in study.relationships:
+        relationship_records: list[dict[str, Any]] = []
+        source_relationships = (
+            study.relationships if relationships is None else relationships
+        )
+        for relationship in source_relationships:
             resolved = cls._resolved_source_units(
                 relationship.source_unit_ids,
                 source_units=source_units,
@@ -1146,7 +1198,7 @@ class PaperSkimService:
                 raise ValueError(
                     "paper study relationship contains an unknown Source-unit id"
                 )
-            relationships.append(
+            relationship_records.append(
                 {
                     **relationship.model_dump(exclude={"source_unit_ids"}),
                     "source_refs": cls._source_refs_from_units(resolved),
@@ -1156,8 +1208,19 @@ class PaperSkimService:
             {
                 **study.model_dump(exclude={"relationships"}),
                 "document_id": document_id,
-                "relationships": relationships,
+                "relationships": relationship_records,
             }
+        )
+
+    @staticmethod
+    def _relationship_conflicts_with_fixed_conditions(
+        study: StructuredPaperStudy,
+        relationship: StructuredPaperStudyRelationship,
+    ) -> bool:
+        return any(
+            property_matching.axis_label_is_mentioned(fixed_condition, factor)
+            for fixed_condition in study.fixed_conditions
+            for factor in relationship.varied_factors
         )
 
     @classmethod
@@ -1849,10 +1912,23 @@ class PaperSkimService:
         left: PaperStudy,
         right: PaperStudy,
     ) -> bool:
-        return (
-            cls._study_identity_matches(left, right)
-            and cls._relationship_sets_overlap(left.relationships, right.relationships)
+        if not cls._study_identity_matches(left, right):
+            return False
+        if cls._relationship_sets_overlap(left.relationships, right.relationships):
+            return True
+        shared_factor_set = any(
+            cls._axis_collections_are_equivalent(
+                left_relationship.varied_factors,
+                right_relationship.varied_factors,
+            )
+            for left_relationship in left.relationships
+            for right_relationship in right.relationships
         )
+        if not shared_factor_set:
+            return False
+        if left.experiment_label and right.experiment_label:
+            return True
+        return cls._study_context_identifies_experiment(left, right)
 
     @classmethod
     def _study_identity_matches(cls, left: PaperStudy, right: PaperStudy) -> bool:
@@ -1896,7 +1972,38 @@ class PaperSkimService:
 
         if left.experiment_label and right.experiment_label:
             return True
-        return bool(cls._study_source_keys(left) & cls._study_source_keys(right))
+        return bool(
+            cls._study_source_keys(left) & cls._study_source_keys(right)
+        ) or cls._study_context_identifies_experiment(left, right)
+
+    @staticmethod
+    def _study_context_identifies_experiment(
+        left: PaperStudy,
+        right: PaperStudy,
+    ) -> bool:
+        if (
+            left.comparator
+            and right.comparator
+            and property_matching.axis_values_match(
+                left.comparator,
+                right.comparator,
+            )
+        ):
+            return True
+        return any(
+            left_values
+            and right_values
+            and any(
+                property_matching.axis_values_match(left_value, right_value)
+                for left_value in left_values
+                for right_value in right_values
+            )
+            for left_values, right_values in (
+                (left.sample_context, right.sample_context),
+                (left.test_context, right.test_context),
+                (left.fixed_conditions, right.fixed_conditions),
+            )
+        )
 
     @classmethod
     def _relationship_sets_overlap(

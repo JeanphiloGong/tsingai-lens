@@ -271,6 +271,10 @@ def test_paper_skim_prompt_defines_structured_research_map_contract():
     assert "absence from this window is not evidence of absence elsewhere" in user_prompt
     assert "return one relationship per outcome" in user_prompt
     assert "full jointly varied, compared, or modeled factor set" in user_prompt
+    assert "never label the cited study current_work" in user_prompt
+    assert "listed Methods setting alone is not an intervention" in user_prompt
+    assert "Miranda et al. [20]" in user_prompt
+    assert "Laser power belongs only in fixed_conditions" in user_prompt
     assert "Return empty arrays rather than guessing" in user_prompt
     assert "Return every distinct, explicitly supported study and relationship" in user_prompt
     assert "Return `studies=[]`; do not" in user_prompt
@@ -340,14 +344,14 @@ def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
     assert "`decisions` array" in user_prompt
     assert "every input pair" in user_prompt
     assert "bounded PaperStudy observations" in user_prompt
-    assert "co-occurrence is not topic evidence" in user_prompt
+    assert "co-occurrence is not equivalence evidence" in user_prompt
     assert "build orientation and laser speed" in user_prompt.casefold()
     assert "boolean `equivalent`" in user_prompt
     assert "SS316L and 316L stainless steel" in user_prompt
     assert "SS316 and 316L stainless steel are different grades" in user_prompt
     assert "porosity" in user_prompt
     assert "relative density" in user_prompt
-    assert "reject" in user_prompt
+    assert "equivalent=false" in user_prompt
     assert "tensile strength and ultimate tensile strength" in user_prompt
     assert "surface hardness and hardness" in user_prompt
 
@@ -1043,7 +1047,7 @@ def test_domain_model_extractors_validates_paper_skim_response():
               "relationships": [
                 {
                   "varied_factors": ["heat treatment"],
-                  "outcome": "corrosion resistance",
+                      "outcome": "corrosion current density",
                   "source_unit_ids": ["window-source-1"],
                   "confidence": 0.91
                 }
@@ -1078,7 +1082,7 @@ def test_domain_model_extractors_validates_paper_skim_response():
     assert isinstance(skim, StructuredPaperSkim)
     assert skim.doc_role == "experimental"
     assert skim.studies[0].material_scope == ["316L stainless steel"]
-    assert skim.studies[0].relationships[0].outcome == "corrosion resistance"
+    assert skim.studies[0].relationships[0].outcome == "corrosion current density"
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 4096
 
 
@@ -1286,13 +1290,15 @@ def test_paper_skim_downgrades_compound_and_generic_outcomes_without_losing_sibl
         relationship.outcome
         for study in skim.studies
         for relationship in study.relationships
-    ] == ["microstructure"]
+    ] == []
     assert [signal.label for signal in skim.unresolved_signals] == [
+        "microstructure",
         "strength and ductility of SLMed Ti-6Al-4V",
         "mechanical property combination",
         "microstructure (grain size, shape, phase fraction, composition)",
     ]
     assert [signal.source_unit_ids for signal in skim.unresolved_signals] == [
+        ["window-source-1"],
         ["window-source-2"],
         ["window-source-3"],
         ["window-source-4"],
@@ -1674,9 +1680,9 @@ def test_paper_skim_preserves_multi_material_multi_outcome_study():
         "part density",
         "crack formation",
         "internal stresses",
-        "microstructure",
     ]
     assert [signal.label for signal in skim.unresolved_signals] == [
+        "microstructure",
         "mechanical properties"
     ]
     assert skim.unresolved_signals[0].source_unit_ids == ["window-source-1"]
@@ -1995,8 +2001,7 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
           "decisions": [
             {
               "pair_id": "axis_pair_0001",
-              "equivalent": true,
-              "same_research_topic": true
+              "equivalent": true
             }
           ]
         }
@@ -2023,12 +2028,11 @@ def test_domain_model_extractors_validates_axis_canonicalization_response():
         {
             "pair_id": "axis_pair_0001",
             "equivalent": True,
-            "same_research_topic": True,
         }
     ]
     prompt = client.chat.completions.calls[0]["messages"][-1]["content"]
-    assert "one focused experimental intervention" in prompt
-    assert "does not mean directly comparable" in prompt
+    assert "exact scientific question" in prompt
+    assert "Different settings or components" in prompt
     assert "Shared material, shared measured outcome" in prompt
     assert "Build orientation and laser power" in prompt
     assert "different processing stages" in prompt
@@ -2041,12 +2045,10 @@ def test_axis_canonicalization_repairs_ungrounded_and_overlapping_groups():
                 {
                     "pair_id": "axis_pair_9999",
                     "equivalent": True,
-                    "same_research_topic": True,
                 },
                 {
                     "pair_id": "axis_pair_9999",
                     "equivalent": False,
-                    "same_research_topic": False,
                 },
             ]
         }
@@ -2057,12 +2059,10 @@ def test_axis_canonicalization_repairs_ungrounded_and_overlapping_groups():
                 {
                     "pair_id": "axis_pair_0001",
                     "equivalent": True,
-                    "same_research_topic": True,
                 },
                 {
                     "pair_id": "axis_pair_0002",
                     "equivalent": False,
-                    "same_research_topic": False,
                 },
             ]
         }
@@ -2095,17 +2095,15 @@ def test_axis_canonicalization_repairs_ungrounded_and_overlapping_groups():
         {
             "pair_id": "axis_pair_0001",
             "equivalent": True,
-            "same_research_topic": True,
         },
         {
             "pair_id": "axis_pair_0002",
             "equivalent": False,
-            "same_research_topic": False,
         },
     ]
     repair_prompt = client.chat.completions.calls[1]["messages"][-1]["content"]
     assert "axis pair classification" in repair_prompt
-    assert "require both booleans false" in repair_prompt
+    assert "exact same scientific axis" in repair_prompt
 
 
 def test_domain_model_extractors_validates_objective_paper_frame_response():

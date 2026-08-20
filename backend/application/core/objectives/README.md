@@ -103,16 +103,30 @@ Objective analysis.
   singleton can become `extraction_failed`. A relationship with no varied
   factor, or with a descriptive factor clause that cannot be a bounded neutral
   axis, is retained as an unresolved outcome signal when its outcome and Source
-  lineage are valid. Compound outcomes and broad property-family labels are also
-  retained as unresolved signals until the Source supports one specific measured
-  outcome. Diagnostic warnings are stripped, limited to two, and bounded to 240
+  lineage are valid. Compound outcomes and multi-measurement family labels such
+  as `microstructure` are also retained as unresolved signals until the Source
+  supports one specific measurement or observed feature. The backend preserves
+  the broad label and lineage; it does not guess grain size, texture, morphology,
+  or phase fraction. Diagnostic warnings are stripped, limited to two, and bounded to 240
   characters without retrying otherwise valid scientific output. The backend
   does not invent a missing factor or outcome and does not discard valid sibling
   relationships.
-  Successful siblings are retained. Duplicate studies are consolidated and
+  Successful siblings are retained. Paper-level consolidation treats window
+  output as experiment fragments rather than independent claims. Compatible
+  fragments with the same explicit experiment label are merged even when they
+  contribute different outcomes for the same complete varied-factor set. A
+  repeated relationship with one missing label
+  can merge only with positive non-material experiment identity such as a shared
+  sample, test, comparator, fixed condition, or Source. Material, generic process,
+  or matching axes alone never authorize a merge. Duplicate studies are consolidated and
   unresolved study signals are reconciled only after every terminal batch has
-  finished. The resulting one `PaperSkim` per document retains every distinct
-  schema-valid `PaperStudy` and its complete `PaperStudyRelationship` records.
+  finished. Before a window becomes domain data, a relationship whose alleged
+  varied factor is also recorded as fixed in the same study is downgraded to an
+  unresolved outcome signal; valid sibling relationships remain intact. The
+  extraction contract also separates the paper's current experiment from named
+  authors and numbered citations. The resulting one `PaperSkim` per document
+  retains every distinct internally consistent `PaperStudy` and its complete
+  `PaperStudyRelationship` records.
   The backend derives one first-stage
   extraction outcome for every eligible Source unit from validated relationship
   and signal references: `relationship_emitted`, `unresolved_signal_emitted`,
@@ -138,39 +152,35 @@ Objective analysis.
   when reconciliation tries to link it to candidate variables.
 - `discovery/axis_equivalence.py`
   Owns the bounded model judgment that classifies backend-proposed material,
-  variable, and outcome label pairs at two distinct levels: exact equivalence
-  and, for variables only, membership in one researcher-facing intervention
-  topic. Variable pairs carry bounded process, sample, and joint-factor
+  variable, and outcome label pairs for exact scientific-axis equivalence.
+  Variable pairs carry bounded process, sample, and joint-factor
   observations from the PaperStudy records where each label occurred. Those
   observations disambiguate the controlled quantity and processing stage;
-  co-occurrence or a shared outcome is not topic evidence. Topic membership
-  proposed in a multi-pair batch enters one conservative confirmation pass,
-  also in batches of at most 16; an unconfirmed or failed topic relation is
-  rejected. Topic
-  membership proposes a shared question only; it is not a direct-comparability
-  judgment. The module keeps pair accounting, prompt, repair, budget, and calls
-  together. It cannot return canonical labels, groups, Objective questions,
-  confidence, lineage, or dispositions; those remain backend-owned.
+  co-occurrence or a shared outcome is not equivalence evidence. The module
+  keeps pair accounting, prompt, repair, budget, and calls together. It cannot
+  return canonical labels, groups, Objective questions, confidence, lineage, or
+  dispositions; those remain backend-owned.
 - `objective_candidate_service.py`
   Owns collection-level Objective discovery from `PaperStudyRelationship`
-  records. The backend proposes high-overlap alias candidates plus sparse topic
-  pairs indexed by one exact outcome, a focused factor/intervention hint,
+  records. The backend proposes high-overlap alias candidates plus sparse
+  low-overlap alias pairs indexed by one exact outcome, a focused
+  factor/intervention hint,
   different papers, and non-conflicting material scope. Outcome alias candidates
   without high label overlap require an exact shared variable and a shared
-  measurement-identity hint. The model classifies every proposed pair at both
-  relation levels; it cannot invent labels or groups. Exact-equivalence edges build conservative complete-link alias groups,
-  while topic edges may connect distinct variables without renaming them.
+  measurement-identity hint. The model classifies every proposed pair for exact
+  equivalence; it cannot invent labels or groups. Exact-equivalence edges build
+  conservative complete-link alias groups. Related but non-equivalent axes do
+  not enter precise Objective grouping.
   Outcomes must remain one exact measurement identity or an accepted synonym;
   related but distinct outcomes seed separate candidate questions. This
   normalized view is transient: persisted studies retain their
-  extracted labels and exact Source lineage. Objective membership requires one
-  coherent topic and a non-conflicting material scope, not identical complete
-  factor tuples. The Objective question retains factors equivalent across every
-  supporting paper. If topic support has no such exact shared factor, one
-  deterministic source-backed factor names the candidate topic instead of
-  unioning every paper-specific factor. Paper-specific jointly varied factors
-  remain on their source `PaperStudyRelationship` for later confounding and
-  comparability decisions. Common stainless steel grade
+  extracted labels and exact Source lineage. A precise Objective requires an
+  equivalent complete jointly varied factor set, one outcome identity, and
+  non-conflicting material scope across every supporting paper. Topic-only
+  relationships remain unpromoted rather than borrowing one paper's factor to
+  name a shared intervention. Only `current_work` relationships may seed an
+  Objective; background, synthesis, uncertain, and varied-versus-fixed
+  inconsistent relationships receive rejection dispositions. Common stainless steel grade
   spellings and established Ti-6Al-4V forms have one deterministic material
   identity. A relationship
   with missing material scope may join a known-material group only when exactly
@@ -317,36 +327,33 @@ After screening, the backend persists extracted studies, relationships,
 unresolved signals, and Source-unit coverage before collection grouping. It
 normalizes material, variable, and outcome labels before computing candidate
 membership. Exact-equivalence candidates require high label overlap. Additional
-variable-topic candidates come from a sparse index over one exact outcome,
+low-overlap alias candidates come from a sparse index over one exact outcome,
 focused factor or intervention hints, different papers, and compatible material
 scope; a shared outcome alone never creates a factor Cartesian product. Outcome
 labels with weak lexical overlap enter alias classification only when compatible
 cross-paper facts share an exact variable and a measurement-identity hint. Only
-`equivalent=true`, never topic membership, can merge those outcomes. All eligible
+`equivalent=true` can merge those outcomes. All eligible
 pairs are processed in batches of at most 16. Every
 response must classify every input pair exactly once and in order. Missing,
 duplicate, unknown, or reordered IDs trigger one bounded repair; if any batch
 still fails, the whole collection keeps its source labels rather than applying a
 partial mapping. Only `equivalent=true` decisions form alias edges, and a label
 joins an alias group only when it has an explicit edge to every current member.
-`same_research_topic=true` may connect non-equivalent variables for candidate
-discovery, but it never renames them or asserts direct comparability. Each
-variable pair includes at most two bounded PaperStudy observations, each with
-the original joint-factor list and process/sample context. These snapshots are
-interpretive context, not proof that jointly varied factors belong to one
-intervention topic. Topic-only edges enter one conservative confirmation pass in
-batches of at most 16; exact-equivalence decisions do not require this second
-  judgment. Outcomes must be exactly equivalent after accepted alias
-  normalization. Every source relationship keeps its complete jointly varied
-  factor tuple and one specific outcome. The Objective presents factors shared
-  by every supporting paper or one source-backed representative when the group
-  is topic-only, so specific paper conditions do not accumulate in its question.
-  Explicit material conflicts
-remain a hard boundary. Other study-context
+The classifier returns only exact equivalence; it does not emit or confirm a
+topic relation. Each variable pair includes at most two bounded PaperStudy
+observations, each with the original joint-factor list and process/sample
+context. These snapshots are
+interpretive context, not proof that jointly varied factors are the same
+intervention. Outcomes must be exactly equivalent after accepted alias
+normalization. Every source relationship keeps its complete jointly varied
+factor tuple and one specific outcome. A precise Objective is created only when
+the complete varied-factor tuple and outcome repeat across at least two
+paper-owned current-work relationships; no topic representative is selected.
+Explicit material conflicts remain a hard boundary. Other study-context
 differences are retained, not flattened, and are evaluated downstream when
-Evidence is compared. The backend turns each cross-paper topic group into one
-Objective. A
-paper-local group is promoted only when the collection itself contains one
+Evidence is compared. The backend turns each repeated precise intervention
+group into one Objective. A paper-local group is promoted only when the
+collection itself contains one
 document; otherwise it remains traceable through its rejection disposition.
 Accepted Objectives are ranked and persisted; the HTTP list returns all ranked
 Objectives by default and supports explicit pagination when requested. Every
@@ -541,9 +548,22 @@ statement contains only the complete factor tuple, one outcome, backend-owned
 direction, and explicit opposing directions; it cannot copy model-authored
 numbers or silently omit a coupled factor. The model decides only assertion
 strength and optional context or subordinate mechanisms backed by supplied
-context Evidence. Published condition boundaries and analysis limitations are
+context Evidence. For a reference-to-treatment result set, the statement also
+names the untreated reference contrast and any common material and orientation
+context retained across supporting papers. The backend bounds the model's
+assertion strength: the model may choose a weaker claim, but only a deterministic
+controlled single-factor table comparison can remain `causal`; compound or
+unresolved conditions are at most `associative`, and descriptive Evidence is at
+most `descriptive`. Published condition boundaries and analysis limitations are
 derived deterministically from validated factor coupling, direct-Evidence
 coverage, contradiction, condition state, and attribution scope.
+
+Finding certainty starts from the weakest direct Evidence confidence and is then
+capped by independent document support: one document at `0.50`, two at `0.75`,
+and three or more at `0.85`. `conflict` is capped at `0.60`,
+`condition_dependent` at `0.70`, and `insufficient_confirmation` at `0.50`.
+Additional Evidence rows from an already counted document preserve traceback but
+do not raise the independence tier.
 
 When a schema-valid candidate fails a backend semantic guard, synthesis records
 the concrete rejection reason and permits one bounded provider repair against

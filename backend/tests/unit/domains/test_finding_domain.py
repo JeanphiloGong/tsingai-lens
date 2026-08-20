@@ -211,7 +211,7 @@ def test_context_evidence_cannot_replace_direct_result() -> None:
 def test_cross_paper_agreement_is_derived_from_independent_direct_results() -> None:
     finding = _finding(
         synthesis_status="agreement",
-        certainty=0.9,
+        certainty=0.75,
         paper_contributions=[
             {
                 "document_id": "paper-1",
@@ -332,7 +332,7 @@ def test_finding_rejects_support_or_contradiction_with_wrong_direction() -> None
     )
     finding = _finding(
         synthesis_status="conflict",
-        certainty=0.9,
+        certainty=0.6,
         paper_contributions=[
             {
                 "document_id": "paper-1",
@@ -378,11 +378,23 @@ def test_common_scientific_context_keeps_only_exact_shared_attributes() -> None:
     assert len(different.test) == 1
 
 
-def test_certainty_is_evidence_derived_and_single_paper_capped() -> None:
-    evidence = (_evidence("evidence-1", "paper-1", confidence=0.93),)
+def test_certainty_is_capped_by_independent_document_support() -> None:
+    one_paper = (_evidence("evidence-1", "paper-1", confidence=0.93),)
+    two_papers = (
+        *one_paper,
+        _evidence("evidence-2", "paper-2", confidence=0.91),
+    )
+    three_papers = (
+        *two_papers,
+        _evidence("evidence-3", "paper-3", confidence=0.9),
+    )
 
-    assert Finding.certainty_for("insufficient_confirmation", evidence) == 0.5
-    assert Finding.certainty_for("agreement", evidence) == 0.93
+    assert Finding.certainty_for("insufficient_confirmation", one_paper) == 0.5
+    assert Finding.certainty_for("agreement", one_paper) == 0.5
+    assert Finding.certainty_for("agreement", two_papers) == 0.75
+    assert Finding.certainty_for("agreement", three_papers) == 0.85
+    assert Finding.certainty_for("conflict", three_papers) == 0.6
+    assert Finding.certainty_for("condition_dependent", three_papers) == 0.7
 
 
 def test_finding_subordinates_have_no_independent_business_ids() -> None:

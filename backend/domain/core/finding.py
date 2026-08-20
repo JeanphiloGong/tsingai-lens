@@ -423,9 +423,14 @@ class Finding:
         if not direct_evidence:
             raise ValueError("Finding certainty requires direct evidence")
         certainty = round(min(item.confidence for item in direct_evidence), 2)
-        if synthesis_status == "insufficient_confirmation":
-            certainty = min(certainty, 0.5)
-        return certainty
+        document_count = len({item.document_id for item in direct_evidence})
+        document_cap = 0.5 if document_count == 1 else 0.75 if document_count == 2 else 0.85
+        status_cap = {
+            "conflict": 0.6,
+            "condition_dependent": 0.7,
+            "insufficient_confirmation": 0.5,
+        }.get(synthesis_status, 1.0)
+        return min(certainty, document_cap, status_cap)
 
     @staticmethod
     def common_scientific_context_for(

@@ -1467,6 +1467,130 @@ def test_complete_window_candidate_keeps_its_stable_source_reference():
     ]
 
 
+def test_fixed_process_setting_is_not_retained_as_a_varied_factor_relationship():
+    payload = {
+        "window_id": "methods-results-1",
+        "source_units": [
+            {
+                "source_unit_id": "source-fixed-power",
+                "source_kind": "block",
+                "source_ref": "methods-power",
+                "section_path": "Methods",
+                "content": "All specimens were fabricated at a fixed laser power of 200 W.",
+            },
+            {
+                "source_unit_id": "source-preheating-result",
+                "source_kind": "block",
+                "source_ref": "results-preheating",
+                "section_path": "Results",
+                "content": (
+                    "Build-platform preheating temperature was varied and porosity "
+                    "was measured for every condition."
+                ),
+            },
+        ],
+    }
+    parsed = StructuredPaperSkim(
+        studies=[
+            {
+                "experiment_label": "316L build-platform preheating experiment",
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "material_scope": ["316L stainless steel"],
+                "process_context": ["laser powder bed fusion"],
+                "comparator": "preheated versus unheated build platform",
+                "fixed_conditions": ["laser power = 200 W"],
+                "relationships": [
+                    {
+                        "varied_factors": ["laser power"],
+                        "outcome": "relative density",
+                        "source_unit_ids": ["source-fixed-power"],
+                        "confidence": 0.91,
+                    },
+                    {
+                        "varied_factors": ["build platform preheating temperature"],
+                        "outcome": "porosity",
+                        "source_unit_ids": ["source-preheating-result"],
+                        "confidence": 0.93,
+                    },
+                ],
+                "confidence": 0.9,
+            }
+        ]
+    )
+
+    skim, signals = PaperSkimService()._resolve_window_result(
+        document_id="paper-preheating",
+        payload=payload,
+        parsed=parsed,
+    )
+
+    assert len(skim.studies) == 1
+    assert [relationship.varied_factors for relationship in skim.studies[0].relationships] == [
+        ("build platform preheating temperature",)
+    ]
+    assert len(signals) == 1
+    assert signals[0].signal.signal_type == "outcome"
+    assert signals[0].signal.label == "relative density"
+    assert signals[0].signal.reason == (
+        "alleged varied factor is also recorded as fixed in the same study"
+    )
+    assert [item.status.value for item in skim.source_unit_coverage] == [
+        "unresolved_signal_emitted",
+        "relationship_emitted",
+    ]
+
+
+def test_broad_microstructure_theme_is_not_retained_as_a_relationship():
+    payload = {
+        "window_id": "results-1",
+        "source_units": [
+            {
+                "source_unit_id": "source-microstructure",
+                "source_kind": "block",
+                "source_ref": "results-microstructure",
+                "section_path": "Results",
+                "content": "Heat treatment changed the microstructure.",
+            }
+        ],
+    }
+    parsed = StructuredPaperSkim(
+        studies=[
+            {
+                "experiment_label": "heat-treatment experiment",
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "material_scope": ["Ti-6Al-4V"],
+                "process_context": ["heat treatment"],
+                "relationships": [
+                    {
+                        "varied_factors": ["heat treatment"],
+                        "outcome": "microstructure",
+                        "source_unit_ids": ["source-microstructure"],
+                        "confidence": 0.8,
+                    }
+                ],
+                "confidence": 0.8,
+            }
+        ]
+    )
+
+    skim, signals = PaperSkimService()._resolve_window_result(
+        document_id="paper-heat-treatment",
+        payload=payload,
+        parsed=parsed,
+    )
+
+    assert skim.studies == ()
+    assert len(signals) == 1
+    assert signals[0].signal.signal_type == "outcome"
+    assert signals[0].signal.label == "microstructure"
+    assert signals[0].signal.source_refs[0].source_ref == "results-microstructure"
+    assert [item.status.value for item in skim.source_unit_coverage] == [
+        "unresolved_signal_emitted"
+    ]
+
+
 def test_unknown_source_unit_id_marks_the_window_failed():
     artifacts, tree = _artifacts(
         blocks=[
@@ -2034,6 +2158,199 @@ def test_equivalent_candidates_from_multiple_windows_are_consolidated_once():
     assert study.material_scope == ("316L stainless steel",)
     assert study.process_context == ("LPBF", "laser powder bed fusion")
     assert study.confidence == 0.97
+
+
+def test_complementary_outcomes_with_one_experiment_identity_share_a_study():
+    service = PaperSkimService()
+    window_skims = [
+        PaperSkim.from_mapping(
+            {
+                "document_id": "paper-1",
+                "studies": [
+                    {
+                        "document_id": "paper-1",
+                        "experiment_label": "Ti-6Al-4V heat-treatment experiment",
+                        "design_type": "experimental",
+                        "claim_scope": "current_work",
+                        "material_scope": ["Ti-6Al-4V"],
+                        "process_context": ["heat treatment at 920 C"],
+                        "sample_context": ["heat-treated coupons"],
+                        "relationships": [
+                            {
+                                "varied_factors": ["heat treatment temperature"],
+                                "outcome": "grain size",
+                                "source_refs": [
+                                    {
+                                        "source_kind": "block",
+                                        "source_ref": "results-grain-size",
+                                    }
+                                ],
+                                "confidence": 0.9,
+                            }
+                        ],
+                        "confidence": 0.9,
+                    }
+                ],
+            }
+        ),
+        PaperSkim.from_mapping(
+            {
+                "document_id": "paper-1",
+                "studies": [
+                    {
+                        "document_id": "paper-1",
+                        "experiment_label": "Ti-6Al-4V heat-treatment experiment",
+                        "design_type": "experimental",
+                        "claim_scope": "current_work",
+                        "material_scope": ["Ti-6Al-4V"],
+                        "process_context": ["heat treatment at 920 C"],
+                        "sample_context": ["heat-treated coupons"],
+                        "relationships": [
+                            {
+                                "varied_factors": ["heat treatment temperature"],
+                                "outcome": "alpha phase fraction",
+                                "source_refs": [
+                                    {
+                                        "source_kind": "table",
+                                        "source_ref": "phase-fraction-table",
+                                    }
+                                ],
+                                "confidence": 0.85,
+                            }
+                        ],
+                        "confidence": 0.85,
+                    }
+                ],
+            }
+        ),
+    ]
+
+    skim = service._consolidate_window_skims(
+        "paper-1",
+        window_skims,
+        profile=None,
+    )
+
+    assert len(skim.studies) == 1
+    assert {
+        relationship.outcome for relationship in skim.studies[0].relationships
+    } == {"grain size", "alpha phase fraction"}
+
+
+def test_labeled_and_unlabeled_repeated_claims_need_identifying_context_to_merge():
+    service = PaperSkimService()
+    window_skims = [
+        PaperSkim.from_mapping(
+            {
+                "document_id": "paper-1",
+                "studies": [
+                    {
+                        "document_id": "paper-1",
+                        "experiment_label": "Ti-6Al-4V heat-treatment experiment",
+                        "design_type": "experimental",
+                        "claim_scope": "current_work",
+                        "material_scope": ["Ti-6Al-4V"],
+                        "process_context": ["heat treatment"],
+                        "sample_context": ["heat-treated coupons"],
+                        "relationships": [
+                            {
+                                "varied_factors": ["heat treatment temperature"],
+                                "outcome": "grain size",
+                                "source_refs": [
+                                    {
+                                        "source_kind": "block",
+                                        "source_ref": "abstract-claim",
+                                    }
+                                ],
+                                "confidence": 0.8,
+                            }
+                        ],
+                        "confidence": 0.8,
+                    }
+                ],
+            }
+        ),
+        PaperSkim.from_mapping(
+            {
+                "document_id": "paper-1",
+                "studies": [
+                    {
+                        "document_id": "paper-1",
+                        "experiment_label": None,
+                        "design_type": "experimental",
+                        "claim_scope": "current_work",
+                        "material_scope": ["Ti-6Al-4V"],
+                        "process_context": ["heat treatment"],
+                        "sample_context": ["heat-treated coupons"],
+                        "relationships": [
+                            {
+                                "varied_factors": ["heat treatment temperature"],
+                                "outcome": "grain size",
+                                "source_refs": [
+                                    {
+                                        "source_kind": "block",
+                                        "source_ref": "results-claim",
+                                    }
+                                ],
+                                "confidence": 0.9,
+                            }
+                        ],
+                        "confidence": 0.9,
+                    }
+                ],
+            }
+        ),
+    ]
+
+    skim = service._consolidate_window_skims(
+        "paper-1",
+        window_skims,
+        profile=None,
+    )
+
+    assert len(skim.studies) == 1
+    relationship = skim.studies[0].relationships[0]
+    assert relationship.confidence == 0.9
+    assert {
+        (source_ref.source_kind, source_ref.source_ref)
+        for source_ref in relationship.source_refs
+    } == {
+        ("block", "abstract-claim"),
+        ("block", "results-claim"),
+    }
+
+
+def test_different_experiment_labels_keep_equal_relationship_axes_separate():
+    service = PaperSkimService()
+    window_skims = [
+        PaperSkim.from_mapping(
+            {
+                "document_id": "paper-1",
+                "studies": [
+                    {
+                        **_study(
+                            varied_factors=["heat treatment temperature"],
+                            outcome="grain size",
+                            material_scope=["Ti-6Al-4V"],
+                            process_context=["heat treatment"],
+                            confidence=0.9,
+                        ),
+                        "experiment_label": experiment_label,
+                        "sample_context": ["heat-treated coupons"],
+                    }
+                ],
+            }
+        )
+        for experiment_label in ("experiment A", "experiment B")
+    ]
+
+    skim = service._consolidate_window_skims(
+        "paper-1",
+        window_skims,
+        profile=None,
+    )
+
+    assert len(skim.studies) == 2
 
 
 def test_merged_relationship_identity_keeps_its_final_study_boundary():

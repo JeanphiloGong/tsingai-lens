@@ -81,12 +81,30 @@ _BROAD_OUTCOME_EXPANSIONS = {
     ),
 }
 
+# These labels describe multiple scientifically distinct measurements or
+# observations. They are useful for screening, but not precise outcome axes.
+_MULTI_MEASUREMENT_OUTCOME_FAMILIES = frozenset(
+    {
+        "mechanical properties",
+        "mechanical property",
+        "corrosion properties",
+        "corrosion property",
+        "corrosion resistance",
+        "pitting corrosion behavior",
+        "pitting corrosion",
+        "defect structure",
+        "microstructure",
+    }
+)
+
 # Source labels include abbreviations, scientific symbols, and observed OCR forms.
 _PROPERTY_LABEL_ALIASES = {
     "ductility": "elongation",
     "el": "elongation",
     "el%": "elongation",
     "elongation to failure": "elongation",
+    "te": "total elongation",
+    "te%": "total elongation",
     "e corr": "corrosion potential",
     "ecorr": "corrosion potential",
     "e p": "pitting potential",
@@ -228,11 +246,14 @@ def outcome_label_requires_resolution(value: Any) -> bool:
     outcome = " ".join(str(value or "").strip().casefold().split())
     if not outcome:
         return False
+    normalized = normalize_property_label(outcome) or outcome
+    if normalized in _MULTI_MEASUREMENT_OUTCOME_FAMILIES:
+        return True
     if re.search(r"\b(?:and|versus)\b|\s[&/]\s", outcome):
         return True
     if re.search(r"\([^)]*(?:,|;|\band\b)[^)]*\)", outcome):
         return True
-    words = outcome.split()
+    words = normalized.split()
     return words[-1] in {
         "combination",
         "performance",

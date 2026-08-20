@@ -7,6 +7,7 @@ from application.core.objectives import property_matching
     ("source_label", "canonical_label"),
     (
         ("UTS [MPa]", "ultimate tensile strength"),
+        ("TE (%)", "total elongation"),
         ("\u03c3y (MPa)", "yield strength"),
         ("Icorr (A/cm2)", "corrosion current density"),
         ("Max. defect diameter (LCSM)", "max defect diameter"),
@@ -29,6 +30,27 @@ def test_broad_objective_matches_specific_measurement() -> None:
     assert property_matching.source_text_mentions_axis(
         "The measured relative density was 99.2%.",
         "densification",
+    )
+
+
+@pytest.mark.parametrize(
+    ("outcome", "requires_resolution"),
+    (
+        ("microstructure", True),
+        ("defect structure", True),
+        ("corrosion resistance", True),
+        ("grain morphology", False),
+        ("fatigue strength", False),
+        ("relative density", False),
+    ),
+)
+def test_only_multi_measurement_outcome_families_require_resolution(
+    outcome: str,
+    requires_resolution: bool,
+) -> None:
+    assert (
+        property_matching.outcome_label_requires_resolution(outcome)
+        is requires_resolution
     )
 
 

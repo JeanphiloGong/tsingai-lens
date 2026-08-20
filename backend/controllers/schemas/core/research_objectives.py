@@ -53,6 +53,18 @@ class ObjectiveSummaryResponse(BaseModel):
     created_by_tool_call_id: str | None = None
 
 
+class RankedObjectiveSummaryResponse(ObjectiveSummaryResponse):
+    rank: int = Field(..., ge=1)
+
+
+class PaginatedObjectiveListResponse(BaseModel):
+    collection_id: str
+    objectives: list[RankedObjectiveSummaryResponse] = Field(default_factory=list)
+    offset: int = Field(..., ge=0)
+    limit: int | None = Field(default=None, ge=1)
+    total: int = Field(..., ge=0)
+
+
 class TokenUsageResponse(BaseModel):
     input_tokens: int = Field(..., ge=0)
     output_tokens: int = Field(..., ge=0)
@@ -348,11 +360,6 @@ class ObjectiveEvidenceResponse(BaseModel):
     resolution_status: str
     failure_reason: str | None = None
     confidence: float
-
-
-class ObjectiveListResponse(BaseModel):
-    collection_id: str
-    objectives: list[ObjectiveSummaryResponse] = Field(default_factory=list)
 
 
 class PaperContributionResponse(BaseModel):

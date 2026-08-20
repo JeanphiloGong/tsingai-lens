@@ -4,7 +4,6 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from controllers.schemas.core.research_objectives import (
@@ -12,7 +11,7 @@ from controllers.schemas.core.research_objectives import (
     FindingListResponse,
     ObjectiveAnalysisResponse,
     ObjectiveEvidenceListResponse,
-    ObjectiveSummaryResponse,
+    PaginatedObjectiveListResponse,
     PaperStudyInventoryResponse,
 )
 
@@ -23,18 +22,6 @@ _objective_analysis_executor = ThreadPoolExecutor(
     max_workers=1,
     thread_name_prefix="objective-analysis",
 )
-
-
-class RankedObjectiveSummaryResponse(ObjectiveSummaryResponse):
-    rank: int = Field(..., ge=1)
-
-
-class PaginatedObjectiveListResponse(BaseModel):
-    collection_id: str
-    objectives: list[RankedObjectiveSummaryResponse] = Field(default_factory=list)
-    offset: int = Field(..., ge=0)
-    limit: int | None = Field(default=None, ge=1)
-    total: int = Field(..., ge=0)
 
 
 @router.get(

@@ -22,9 +22,12 @@
 - 集合文件：`GET|POST /api/v1/collections/{collection_id}/files`
 - 工作区概览：`GET /api/v1/collections/{collection_id}/workspace`
 - 研究目标工作区：`GET /api/v1/collections/{collection_id}/objectives`、
+  `GET /api/v1/collections/{collection_id}/objectives/{objective_id}`、
   `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/confirm`、
   `GET|POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`、
-  `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/research-view`、
+  `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`、
+  `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}`、
+  `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence`、
   `GET|POST /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans`、
   `PATCH /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}`
 - 启动构建任务：`POST /api/v1/collections/{collection_id}/tasks/build`

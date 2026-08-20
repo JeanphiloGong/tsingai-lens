@@ -8,7 +8,8 @@ this file owns resource boundaries and cross-endpoint semantics.
 
 - Product APIs use `/api/v1/*`.
 - API documentation uses `/api/docs`, `/api/redoc`, and `/api/openapi.json`.
-- Browser requests use bearer authentication after `POST /api/v1/auth/login`.
+- `POST /api/v1/auth/login` establishes an HttpOnly session cookie. Browser
+  requests send that cookie through the same-origin `/api/v1/*` contract.
 - Every business response carries `X-Request-ID`.
 - A collection is the primary working scope; a document is a source inside it.
 - PostgreSQL is the structured runtime authority.
@@ -24,8 +25,9 @@ this file owns resource boundaries and cross-endpoint semantics.
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
 
-Invalid or expired credentials return `401`. The frontend clears local auth
-state and returns the user to login.
+Invalid credentials return `401`. A missing or expired session cookie also
+returns `401`; the frontend clears local auth state and returns the user to
+login.
 
 ### Collections, Files, And Builds
 

@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 
-RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = "research_axis_canonicalization.v4"
+RESEARCH_AXIS_CANONICALIZATION_PROMPT_VERSION = "research_axis_canonicalization.v5"
 
 _MAX_COMPLETION_TOKENS = 1024
 _SYSTEM_PROMPT = """
@@ -58,6 +58,9 @@ def build_research_axis_canonicalization_prompt(
         "evidence synthesis.\n\n"
         "INPUT SCHEMA\n"
         "- `collection_id` identifies the request and must not appear in output.\n"
+        "- `decision_stage`, when present as `topic_confirmation`, means the backend "
+        "is asking for a conservative second judgment of preliminary variable-topic "
+        "matches. Reject every pair that lacks a focused shared intervention stage.\n"
         "- `axis_pairs` contains backend-selected possible aliases. Each item has an "
         "opaque `pair_id`, one `axis_type`, and exact `left` and `right` labels.\n"
         "- `material` pairs are material identities; `variable` pairs are changed "

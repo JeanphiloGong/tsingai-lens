@@ -143,18 +143,21 @@ Objective analysis.
   observations from the PaperStudy records where each label occurred. Those
   observations disambiguate the controlled quantity and processing stage;
   co-occurrence or a shared outcome is not topic evidence. Topic membership
-  proposed in a multi-pair batch is confirmed once as a single-pair judgment;
-  an unconfirmed or failed topic relation is conservatively rejected. Topic
+  proposed in a multi-pair batch enters one conservative confirmation pass,
+  also in batches of at most 16; an unconfirmed or failed topic relation is
+  rejected. Topic
   membership proposes a shared question only; it is not a direct-comparability
   judgment. The module keeps pair accounting, prompt, repair, budget, and calls
   together. It cannot return canonical labels, groups, Objective questions,
   confidence, lineage, or dispositions; those remain backend-owned.
 - `objective_candidate_service.py`
   Owns collection-level Objective discovery from `PaperStudyRelationship`
-  records. The backend proposes exact-equivalence candidates plus topic pairs
-  supported by compatible facts from different papers. The model classifies
-  every proposed pair at both relation levels; it cannot invent labels or
-  groups. Exact-equivalence edges build conservative complete-link alias groups,
+  records. The backend proposes high-overlap alias candidates plus sparse topic
+  pairs indexed by one exact outcome, a focused factor/intervention hint,
+  different papers, and non-conflicting material scope. Outcome alias candidates
+  without high label overlap require an exact shared variable and a shared
+  measurement-identity hint. The model classifies every proposed pair at both
+  relation levels; it cannot invent labels or groups. Exact-equivalence edges build conservative complete-link alias groups,
   while topic edges may connect distinct variables without renaming them.
   Outcomes must remain one exact measurement identity or an accepted synonym;
   related but distinct outcomes seed separate candidate questions. This
@@ -311,12 +314,14 @@ source unit was explicitly excluded by a model or repaired decision.
 After screening, the backend persists extracted studies, relationships,
 unresolved signals, and Source-unit coverage before collection grouping. It
 normalizes material, variable, and outcome labels before computing candidate
-membership. Exact-equivalence candidates come from label similarity; additional
-variable-topic candidates require supporting, material-compatible facts from
-different papers that report the same outcome. When compatible cross-paper facts
-share a variable, their otherwise dissimilar outcome labels may also enter exact
-alias classification; only `equivalent=true`, never topic membership, can merge
-those outcomes. All eligible pairs are processed in batches of at most 16. Every
+membership. Exact-equivalence candidates require high label overlap. Additional
+variable-topic candidates come from a sparse index over one exact outcome,
+focused factor or intervention hints, different papers, and compatible material
+scope; a shared outcome alone never creates a factor Cartesian product. Outcome
+labels with weak lexical overlap enter alias classification only when compatible
+cross-paper facts share an exact variable and a measurement-identity hint. Only
+`equivalent=true`, never topic membership, can merge those outcomes. All eligible
+pairs are processed in batches of at most 16. Every
 response must classify every input pair exactly once and in order. Missing,
 duplicate, unknown, or reordered IDs trigger one bounded repair; if any batch
 still fails, the whole collection keeps its source labels rather than applying a
@@ -327,9 +332,9 @@ discovery, but it never renames them or asserts direct comparability. Each
 variable pair includes at most two bounded PaperStudy observations, each with
 the original joint-factor list and process/sample context. These snapshots are
 interpretive context, not proof that jointly varied factors belong to one
-intervention topic. A topic-only edge from a batch is used only after one
-single-pair confirmation; exact-equivalence decisions do not require this
-second judgment. Outcomes must be exactly equivalent after accepted alias
+intervention topic. Topic-only edges enter one conservative confirmation pass in
+batches of at most 16; exact-equivalence decisions do not require this second
+judgment. Outcomes must be exactly equivalent after accepted alias
 normalization. Every source relationship keeps its complete jointly varied
 factor tuple and one specific outcome; the Objective presents only the focused
 factor topic shared across supporting papers. Explicit material conflicts

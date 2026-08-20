@@ -40,6 +40,66 @@ _AXIS_OBSERVATION_LIMIT = 2
 _AXIS_OBSERVATION_FACTOR_LIMIT = 6
 _AXIS_OBSERVATION_CONTEXT_LIMIT = 2
 _AXIS_OBSERVATION_TEXT_CHARS = 120
+_VARIABLE_TOPIC_GENERIC_LABEL_TOKENS = frozenset(
+    {
+        "condition",
+        "conditions",
+        "duration",
+        "effect",
+        "effects",
+        "level",
+        "levels",
+        "parameter",
+        "parameters",
+        "rate",
+        "setting",
+        "settings",
+        "temperature",
+        "time",
+        "value",
+        "values",
+    }
+)
+_VARIABLE_INTERVENTION_HINT_PATTERNS = (
+    (
+        "hot-isostatic-pressing",
+        r"\b(?:hip|hot isostatic press(?:ing|ed)?)\b",
+    ),
+    (
+        "heat-treatment",
+        r"\b(?:heat treatment|anneal(?:ing|ed)?|ag(?:e|ed|ing)|solution treatment)\b",
+    ),
+    (
+        "laser-exposure",
+        r"\b(?:laser (?:power|energy)|scann?ing (?:speed|strategy)|scan speed|"
+        r"hatch spacing|volumetric energy density|exposure time)\b",
+    ),
+    (
+        "build-preheating",
+        r"\b(?:(?:powder bed|base plate|build plate|substrate) pre[- ]?heat|"
+        r"pre[- ]?heat(?:ing)? (?:the )?(?:powder bed|base plate|build plate|substrate))\b",
+    ),
+    ("surface-treatment", r"\bsurface treatment\b"),
+)
+_OUTCOME_IDENTITY_HINT_TOKENS = frozenset(
+    {
+        "conductivity",
+        "current",
+        "density",
+        "diameter",
+        "elongation",
+        "fraction",
+        "hardness",
+        "length",
+        "modulus",
+        "porosity",
+        "potential",
+        "resistance",
+        "roughness",
+        "size",
+        "strength",
+    }
+)
 _MISSING_CONTEXT_VALUES = frozenset(
     {"", "missing", "not reported", "not specified", "unknown", "uncertain"}
 )
@@ -1092,42 +1152,60 @@ class ObjectiveCandidateService:
         pair_records: list[dict[str, Any]],
     ) -> StructuredAxisCanonicalizationPlan:
         records_by_id = {str(item["pair_id"]): item for item in pair_records}
+        topic_records = [
+            records_by_id[decision.pair_id]
+            for decision in canonicalization_plan.decisions
+            if not decision.equivalent
+            and decision.same_research_topic
+            and records_by_id[decision.pair_id]["axis_type"] == "variable"
+            and not cls._axis_values_are_equivalent(
+                records_by_id[decision.pair_id]["left"],
+                records_by_id[decision.pair_id]["right"],
+            )
+        ]
+        confirmed_topic_ids: set[str] = set()
+        for start in range(0, len(topic_records), _AXIS_PAIR_BATCH_SIZE):
+            confirmation_batch = topic_records[start : start + _AXIS_PAIR_BATCH_SIZE]
+            try:
+                confirmation = axis_equivalence_classifier.classify(
+                    {
+                        "collection_id": collection_id,
+                        "decision_stage": "topic_confirmation",
+                        "axis_pairs": confirmation_batch,
+                    }
+                )
+                confirmed_topic_ids.update(
+                    decision.pair_id
+                    for decision in confirmation.decisions
+                    if decision.same_research_topic
+                )
+            except Exception:
+                logger.warning(
+                    "Research variable-topic confirmation batch failed; rejecting "
+                    "relations collection_id=%s pair_ids=%s",
+                    collection_id,
+                    [record["pair_id"] for record in confirmation_batch],
+                    exc_info=True,
+                )
+
         decisions: list[dict[str, Any]] = []
         for decision in canonicalization_plan.decisions:
             pair_record = records_by_id[decision.pair_id]
-            if (
+            requires_confirmation = not (
                 decision.equivalent
                 or not decision.same_research_topic
                 or cls._axis_values_are_equivalent(
                     pair_record["left"], pair_record["right"]
                 )
-            ):
-                decisions.append(decision.model_dump())
-                continue
-            if pair_record["axis_type"] != "variable":
-                decisions.append(decision.model_dump())
-                continue
-            try:
-                confirmation = axis_equivalence_classifier.classify(
-                    {
-                        "collection_id": collection_id,
-                        "axis_pairs": [pair_record],
-                    }
-                ).decisions[0]
-                confirmed = confirmation.same_research_topic
-            except Exception:
-                logger.warning(
-                    "Research variable-topic confirmation failed; rejecting relation "
-                    "collection_id=%s pair_id=%s",
-                    collection_id,
-                    decision.pair_id,
-                    exc_info=True,
-                )
-                confirmed = False
+            ) and pair_record["axis_type"] == "variable"
             decisions.append(
                 {
                     **decision.model_dump(),
-                    "same_research_topic": confirmed,
+                    "same_research_topic": (
+                        decision.pair_id in confirmed_topic_ids
+                        if requires_confirmation
+                        else decision.same_research_topic
+                    ),
                 }
             )
         return StructuredAxisCanonicalizationPlan(decisions=decisions)
@@ -1276,68 +1354,127 @@ class ObjectiveCandidateService:
             return bool(
                 cls._material_grade_keys(left) & cls._material_grade_keys(right)
             )
-        if property_matching.source_text_mentions_axis(
+        return property_matching.axis_alias_matches_canonical(
             left, right
-        ) or property_matching.source_text_mentions_axis(right, left):
-            return True
-        left_key = cls._axis_record_key(left)
-        right_key = cls._axis_record_key(right)
-        return SequenceMatcher(a=left_key, b=right_key).ratio() >= 0.78
+        ) or property_matching.axis_alias_matches_canonical(right, left)
 
     @classmethod
     def _supported_cross_paper_axis_pairs(
         cls,
         relationship_inventory: RelationshipInventory,
     ) -> frozenset[AxisPair]:
-        supported: set[AxisPair] = set()
-        relationships = tuple(relationship_inventory.values())
-        for position, (
-            left_document_id,
-            left_study,
-            left_relationship,
-        ) in enumerate(relationships):
-            for (
-                right_document_id,
-                right_study,
-                right_relationship,
-            ) in relationships[position + 1 :]:
-                if left_document_id == right_document_id or (
-                    cls._context_collection_compatibility(
-                        left_study.material_scope,
-                        right_study.material_scope,
-                    )
-                    is _Compatibility.INCOMPATIBLE
-                ):
+        indexed_occurrences: dict[
+            tuple[str, str],
+            dict[str, list[tuple[str, PaperStudy, str]]],
+        ] = {}
+        indexed_outcomes: dict[
+            tuple[str, str],
+            dict[str, list[tuple[str, PaperStudy, str]]],
+        ] = {}
+        for document_id, study, relationship in relationship_inventory.values():
+            outcome_key = cls._axis_identity(relationship.outcome)
+            if not outcome_key:
+                continue
+            for factor in relationship.varied_factors:
+                factor_key = cls._axis_record_key(factor)
+                if not factor_key:
                     continue
-                if cls._axis_values_are_equivalent(
-                    left_relationship.outcome,
-                    right_relationship.outcome,
-                ):
-                    supported.update(
-                        cls._axis_relation_key("variable", left_factor, right_factor)
-                        for left_factor in left_relationship.varied_factors
-                        for right_factor in right_relationship.varied_factors
-                        if not cls._axis_values_are_equivalent(
-                            left_factor,
-                            right_factor,
-                        )
+                for topic_hint in cls._variable_topic_hints(factor):
+                    indexed_occurrences.setdefault(
+                        (outcome_key, topic_hint), {}
+                    ).setdefault(factor_key, []).append(
+                        (document_id, study, factor)
                     )
-                if any(
-                    cls._axis_values_are_equivalent(left_factor, right_factor)
-                    for left_factor in left_relationship.varied_factors
-                    for right_factor in right_relationship.varied_factors
-                ) and not cls._axis_values_are_equivalent(
-                    left_relationship.outcome,
-                    right_relationship.outcome,
+                for outcome_hint in cls._outcome_identity_hints(
+                    relationship.outcome
                 ):
-                    supported.add(
-                        cls._axis_relation_key(
-                            "outcome",
-                            left_relationship.outcome,
-                            right_relationship.outcome,
+                    indexed_outcomes.setdefault(
+                        (cls._axis_identity(factor), outcome_hint), {}
+                    ).setdefault(outcome_key, []).append(
+                        (document_id, study, relationship.outcome)
+                    )
+
+        supported: set[AxisPair] = set()
+        for occurrences_by_factor in indexed_occurrences.values():
+            for left_records, right_records in combinations(
+                occurrences_by_factor.values(), 2
+            ):
+                compatible_pair = next(
+                    (
+                        (left_factor, right_factor)
+                        for left_document_id, left_study, left_factor in left_records
+                        for right_document_id, right_study, right_factor in right_records
+                        if left_document_id != right_document_id
+                        and cls._context_collection_compatibility(
+                            left_study.material_scope,
+                            right_study.material_scope,
                         )
+                        is not _Compatibility.INCOMPATIBLE
+                    ),
+                    None,
+                )
+                if compatible_pair is not None:
+                    supported.add(
+                        cls._axis_relation_key("variable", *compatible_pair)
+                    )
+        for occurrences_by_outcome in indexed_outcomes.values():
+            for left_records, right_records in combinations(
+                occurrences_by_outcome.values(), 2
+            ):
+                compatible_pair = next(
+                    (
+                        (left_outcome, right_outcome)
+                        for left_document_id, left_study, left_outcome in left_records
+                        for right_document_id, right_study, right_outcome in right_records
+                        if left_document_id != right_document_id
+                        and cls._context_collection_compatibility(
+                            left_study.material_scope,
+                            right_study.material_scope,
+                        )
+                        is not _Compatibility.INCOMPATIBLE
+                    ),
+                    None,
+                )
+                if compatible_pair is not None:
+                    supported.add(
+                        cls._axis_relation_key("outcome", *compatible_pair)
                     )
         return frozenset(supported)
+
+    @classmethod
+    def _variable_topic_hints(
+        cls,
+        factor: str,
+    ) -> frozenset[str]:
+        factor_key = cls._axis_record_key(factor)
+        label_tokens = [
+            token
+            for token in re.findall(r"[a-z0-9]+", factor_key)
+            if token not in _VARIABLE_TOPIC_GENERIC_LABEL_TOKENS
+        ]
+        hints = (
+            {f"head:{label_tokens[-1]}"}
+            if label_tokens
+            else set()
+        )
+        hints.update(
+            f"phrase:{left} {right}"
+            for left, right in zip(label_tokens, label_tokens[1:])
+        )
+        hints.update(
+            f"intervention:{topic}"
+            for topic, pattern in _VARIABLE_INTERVENTION_HINT_PATTERNS
+            if re.search(pattern, factor_key)
+        )
+        return frozenset(hints)
+
+    @classmethod
+    def _outcome_identity_hints(cls, outcome: str) -> frozenset[str]:
+        return frozenset(
+            token
+            for token in re.findall(r"[a-z0-9]+", cls._axis_record_key(outcome))
+            if token in _OUTCOME_IDENTITY_HINT_TOKENS
+        )
 
     @classmethod
     def _axis_relation_key(

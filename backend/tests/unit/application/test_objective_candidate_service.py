@@ -522,7 +522,7 @@ def test_single_and_joint_factor_relationships_share_a_topic_without_losing_fact
     )
 
 
-def test_topic_supported_thermal_relationships_form_one_focused_objective():
+def test_topic_supported_thermal_relationships_do_not_cross_processing_stage():
     class ThermalTopicClassifier(_GroupingExtractor):
         def classify(
             self,
@@ -604,21 +604,19 @@ def test_topic_supported_thermal_relationships_form_one_focused_objective():
     assert set(objective.seed_document_ids) == {
         "paper-heat-treatment",
         "paper-annealing",
-        "paper-preheating",
     }
     assert set(objective.source_relationship_ids) == {
         "relationship-heat-treatment",
         "relationship-annealing",
-        "relationship-preheating",
     }
-    assert set(objective.variables) == {
-        "heat treatment duration",
-        "annealing temperature",
-        "base plate preheating temperature",
-    }
+    assert "base plate preheating temperature" not in objective.variables
     assert objective.outcomes == ("microstructure",)
-    assert objective.material_scope == ("Ti-6Al-4V",)
-    assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
+    assert objective.material_scope in (("Ti-6Al-4V",), ("Ti6Al4V",))
+    assert {
+        item.status.value
+        for item in facts.study_dispositions
+        if item.relationship_id == "relationship-preheating"
+    } == {"rejected"}
     assert skims[0].studies[0].relationships[0].varied_factors == (
         "heat treatment temperature",
         "heat treatment duration",
@@ -860,21 +858,21 @@ def test_axis_topic_classifier_receives_bounded_study_usage_context():
     )
 
 
-def test_topic_only_pairs_require_single_pair_confirmation():
+def test_topic_only_pairs_are_confirmed_in_bounded_batches():
     class BatchBiasedClassifier(_GroupingExtractor):
         def classify(
             self,
             payload: dict[str, Any],
         ) -> StructuredAxisCanonicalizationPlan:
             self.canonicalization_payloads.append(payload)
-            batch_is_ambiguous = len(payload["axis_pairs"]) > 1
+            is_confirmation = payload.get("decision_stage") == "topic_confirmation"
             return StructuredAxisCanonicalizationPlan(
                 decisions=[
                     {
                         "pair_id": pair["pair_id"],
                         "equivalent": False,
                         "same_research_topic": (
-                            batch_is_ambiguous
+                            not is_confirmation
                             or {pair["left"], pair["right"]}
                             == {"build orientation", "sample orientation"}
                         ),
@@ -896,7 +894,7 @@ def test_topic_only_pairs_require_single_pair_confirmation():
             _paper_skim(
                 document_id="paper-laser",
                 relationship_id="relationship-laser",
-                factors=("laser speed",),
+                factors=("tensile orientation",),
                 outcome="ultimate tensile strength",
             ),
             _paper_skim(
@@ -909,17 +907,20 @@ def test_topic_only_pairs_require_single_pair_confirmation():
         axis_equivalence_classifier=classifier,
     )
 
-    assert any(
-        len(payload["axis_pairs"]) > 1
+    initial_payloads = [
+        payload
         for payload in classifier.canonicalization_payloads
-    )
-    assert (
-        sum(
-            len(payload["axis_pairs"]) == 1
-            for payload in classifier.canonicalization_payloads
-        )
-        == 3
-    )
+        if payload.get("decision_stage") != "topic_confirmation"
+    ]
+    confirmation_payloads = [
+        payload
+        for payload in classifier.canonicalization_payloads
+        if payload.get("decision_stage") == "topic_confirmation"
+    ]
+    assert len(initial_payloads) == 1
+    assert len(initial_payloads[0]["axis_pairs"]) == 3
+    assert len(confirmation_payloads) == 1
+    assert len(confirmation_payloads[0]["axis_pairs"]) == 3
     assert len(facts.research_objectives) == 1
     objective = facts.research_objectives[0]
     assert set(objective.variables) == {"build orientation", "sample orientation"}
@@ -1342,7 +1343,7 @@ def test_axis_canonicalization_retains_valid_groups_and_defaults_missing_axes():
     )
 
 
-def test_semantic_axis_aliases_are_canonicalized_before_relationship_grouping():
+def test_result_clause_outcome_is_not_promoted_as_an_axis_alias():
     class SemanticAxisExtractor(_GroupingExtractor):
         def classify(
             self,
@@ -1384,17 +1385,10 @@ def test_semantic_axis_aliases_are_canonicalized_before_relationship_grouping():
         axis_equivalence_classifier=extractor,
     )
 
-    assert len(facts.research_objectives) == 1
-    objective = facts.research_objectives[0]
-    assert objective.variables == ("volumetric energy density",)
-    assert objective.outcomes == ("fatigue strength",)
-    assert set(objective.source_relationship_ids) == {
-        "relationship-result-clause",
-        "relationship-neutral-axis",
-    }
+    assert facts.research_objectives == ()
     assert facts.paper_skims == skims
     assert len(facts.study_dispositions) == 2
-    assert {item.status.value for item in facts.study_dispositions} == {"promoted"}
+    assert {item.status.value for item in facts.study_dispositions} == {"rejected"}
 
 
 def test_material_and_axis_aliases_build_one_cross_paper_objective():
@@ -1626,6 +1620,79 @@ def test_axis_pair_selection_keeps_every_eligible_pair_and_complete_link_is_orde
     assert len(set(mappings[0]["outcome"].values())) == 2
 
 
+def test_cross_paper_topic_candidates_require_a_focused_shared_signal():
+    skims = (
+        _paper_skim(
+            document_id="paper-heat",
+            relationship_id="relationship-heat",
+            factors=("heat treatment temperature",),
+            outcome="elongation",
+            process_context=("LPBF", "post-build heat treatment"),
+        ),
+        _paper_skim(
+            document_id="paper-anneal",
+            relationship_id="relationship-anneal",
+            factors=("annealing duration",),
+            outcome="elongation",
+            process_context=("SLM", "post-build annealing"),
+        ),
+        _paper_skim(
+            document_id="paper-preheat",
+            relationship_id="relationship-preheat",
+            factors=("base plate preheating temperature",),
+            outcome="elongation",
+            process_context=("LPBF", "in-process preheating"),
+        ),
+        _paper_skim(
+            document_id="paper-orientation",
+            relationship_id="relationship-orientation",
+            factors=("build orientation",),
+            outcome="elongation",
+            process_context=("LPBF",),
+        ),
+    )
+    service = ObjectiveCandidateService()
+
+    supported = service._supported_cross_paper_axis_pairs(
+        service._relationship_inventory(skims)
+    )
+
+    assert supported == {
+        service._axis_relation_key(
+            "variable",
+            "heat treatment temperature",
+            "annealing duration",
+        )
+    }
+
+
+def test_shared_variable_does_not_propose_unrelated_outcome_pairs():
+    skims = (
+        _paper_skim(
+            document_id="paper-strength",
+            relationship_id="relationship-strength",
+            outcome="yield strength",
+        ),
+        _paper_skim(
+            document_id="paper-ductility",
+            relationship_id="relationship-ductility",
+            outcome="elongation",
+        ),
+        _paper_skim(
+            document_id="paper-structure",
+            relationship_id="relationship-structure",
+            outcome="microstructure",
+        ),
+    )
+    service = ObjectiveCandidateService()
+
+    supported = service._supported_cross_paper_axis_pairs(
+        service._relationship_inventory(skims)
+    )
+
+    assert not {pair for pair in supported if pair[0] == "outcome"}
+
+
 def test_axis_pair_classification_batches_account_for_every_pair_once():
     class RecordingExtractor(_GroupingExtractor):
         pass
@@ -1634,7 +1701,7 @@ def test_axis_pair_classification_batches_account_for_every_pair_once():
         {
             "relationship_id": f"relationship-{index:02d}",
             "varied_factors": ["scan speed"],
-            "outcome": f"porosity variant {index:02d}",
+            "outcome": f"porosity measurement variant {index:02d}",
             "source_refs": [
                 {"source_kind": "block", "source_ref": f"source-{index:02d}"}
             ],
@@ -1646,7 +1713,7 @@ def test_axis_pair_classification_batches_account_for_every_pair_once():
         document_id="paper-many-pairs",
         relationship_id="relationship-base",
         factors=("scan speed",),
-        outcome="porosity variant base",
+        outcome="porosity measurement variant base",
         extra_relationships=extra_relationships,
     )
     extractor = RecordingExtractor()

@@ -5,7 +5,7 @@ from typing import Any
 
 PAPER_FACT_TEXT_WINDOW_PROMPT_VERSION = "paper_fact_text_window.v1"
 PAPER_FACT_TABLE_BATCH_PROMPT_VERSION = "paper_fact_table_batch.v1"
-PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION = "paper_fact_table_matrix_repair.v1"
+PAPER_FACT_TABLE_MATRIX_REPAIR_PROMPT_VERSION = "paper_fact_table_matrix_repair.v2"
 
 _COMMON_SYSTEM_PROMPT = """
 You are extracting structured research facts for a materials-literature backend.
@@ -372,11 +372,14 @@ def build_table_matrix_repair_prompt(payload: dict[str, Any]) -> tuple[str, str]
         "`repairs`, `confidence`, and `warnings`.\n"
         "Repair structure only. Do not extract measurements, comparisons, or "
         "interpretations.\n"
-        "`repaired_table_matrix` must keep the same logical columns as "
-        "`source.column_headers` and should keep the header row when present in "
-        "`source.table_matrix`.\n"
-        "Use `source.table_cells` to identify parser-split cells by row_index, "
-        "col_index, header_path, and cell_text. Nearby row labels can support "
+        "Read the complete continuous table or table slice from "
+        "`source.table_markdown`. Its first row is the canonical flattened header "
+        "from `source.column_headers`; caption and heading context apply to every "
+        "row in the slice.\n"
+        "`repaired_table_matrix` must contain that header followed by every data "
+        "row in the Markdown, in the same order and with the same logical columns. "
+        "Do not add, remove, reorder, summarize, or truncate rows.\n"
+        "Nearby complete rows can support "
         "repairs such as `as-SLM (100/` plus following `100)` fragments becoming "
         "`as-SLM (100/100)` and `100) HT-SLM (100/` becoming "
         "`HT-SLM (100/100)`. Preserve numeric result cells exactly.\n"
@@ -393,8 +396,9 @@ def build_table_matrix_repair_prompt(payload: dict[str, Any]) -> tuple[str, str]
         "`100) HIP-SLM (100/100)`: the leading `100)` is a carried-over "
         "closing fragment from the previous row label, not part of the current "
         "specimen name.\n"
-        "Record each changed cell in `repairs` with its row_index, column, before, "
-        "after, and reason. If no confident repair is possible, return the original "
-        "matrix and explain the uncertainty in `warnings`."
+        "Record each changed cell in `repairs` with its Markdown-local row_index "
+        "(header is row 0), column, before, after, and reason. If no confident "
+        "repair is possible, return the Markdown matrix unchanged and explain the "
+        "uncertainty in `warnings`."
     )
     return _TABLE_MATRIX_REPAIR_SYSTEM_PROMPT, user_prompt

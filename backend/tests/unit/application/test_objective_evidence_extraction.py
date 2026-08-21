@@ -2831,7 +2831,7 @@ def test_research_objective_text_source_payload_resolves_tree_node_to_block():
     }
 
 
-def test_research_objective_prompt_source_uses_cells_without_duplicate_matrix():
+def test_research_objective_prompt_source_uses_complete_markdown_without_raw_cells():
     source = {
         "source_kind": "table",
         "source_ref": "table-1",
@@ -2854,12 +2854,21 @@ def test_research_objective_prompt_source_uses_cells_without_duplicate_matrix():
     projected = source_extraction._objective_evidence_prompt_source(source)
 
     assert "table_matrix" not in projected
-    assert projected["table_cells"] == source["table_cells"]
-
-    fallback = source_extraction._objective_evidence_prompt_source(
-        {key: value for key, value in source.items() if key != "table_cells"}
+    assert "table_cells" not in projected
+    assert projected["table_markdown"] == (
+        "| sample | density |\n"
+        "| --- | --- |\n"
+        "| A | 99.6 |"
     )
-    assert fallback["table_matrix"] == [["sample", "density"], ["A", "99.6"]]
+    _, prompt = source_extraction.build_objective_evidence_prompt(
+        {
+            "objective": {"question": "How does processing affect density?"},
+            "evidence_route": {"source_kind": "table"},
+            "source": projected,
+        }
+    )
+    assert "CAPTION: Measured density" in prompt
+    assert "| A | 99.6 |" in prompt
 
 
 def test_research_objective_evidence_prompt_compacts_long_text_source(
@@ -3021,6 +3030,155 @@ def test_research_objective_repairs_fragmented_table_with_paper_facts_extractor(
     assert repaired_source["table_matrix_structural_repair_applied"] is True
 
 
+def test_research_objective_repairs_long_table_as_complete_markdown_row_slices():
+    class BoundedRepairExtractor:
+        def __init__(self) -> None:
+            self.payloads: list[dict[str, Any]] = []
+
+        def estimate_table_matrix_repair_prompt_tokens(
+            self,
+            payload: dict[str, Any],
+        ) -> int:
+            markdown = str(payload["source"]["table_markdown"])
+            data_row_count = sum(
+                1
+                for line in markdown.splitlines()
+                if line.startswith("| sample-") or line.startswith("| HIP-SLM")
+            )
+            return 20_000 if data_row_count > 4 else 1_000
+
+        def repair_table_matrix(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredTableMatrixRepair:
+            self.payloads.append(payload)
+            markdown = str(payload["source"]["table_markdown"])
+            rows = [
+                [cell.strip().replace(r"\|", "|") for cell in line.strip("|").split("|")]
+                for line in markdown.splitlines()
+                if line.startswith("|") and "---" not in line
+            ]
+            rows = [
+                ["HIP-SLM (100/100)" if cell == "HIP-SLM (100/" else cell for cell in row]
+                for row in rows
+            ]
+            return StructuredTableMatrixRepair(
+                repaired_table_matrix=rows,
+                confidence=0.9,
+            )
+
+    extractor = BoundedRepairExtractor()
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+        }
+    )
+    source = {
+        "source_kind": "table",
+        "source_ref": "table-1",
+        "document_id": "paper-1",
+        "caption_text": "Density for every processing condition.",
+        "column_headers": ["Specimen", "Density (%)"],
+        "header_row_count": 1,
+        "table_matrix": [
+            ["Specimen", "Density (%)"],
+            *[
+                [
+                    "HIP-SLM (100/" if row_index == 5 else f"sample-{row_index}",
+                    f"{98 + row_index / 100:.2f}",
+                ]
+                for row_index in range(10)
+            ],
+        ],
+    }
+
+    repaired_source, repair_error = (
+        source_extraction._repair_objective_table_source_if_needed(
+            collection_id="col-test",
+            route=route,
+            source=source,
+            paper_facts_extractor=extractor,
+        )
+    )
+
+    assert repair_error is None
+    assert len(extractor.payloads) == 4
+    assert all(
+        payload["source"]["caption_text"]
+        == "Density for every processing condition."
+        for payload in extractor.payloads
+    )
+    assert all(
+        payload["source"]["table_markdown"].startswith(
+            "| Specimen | Density (%) |\n| --- | --- |"
+        )
+        for payload in extractor.payloads
+    )
+    assert all("table_cells" not in payload["source"] for payload in extractor.payloads)
+    assert repaired_source["table_matrix"] == [
+        ["Specimen", "Density (%)"],
+        *[
+            [
+                "HIP-SLM (100/100)" if row_index == 5 else f"sample-{row_index}",
+                f"{98 + row_index / 100:.2f}",
+            ]
+            for row_index in range(10)
+        ],
+    ]
+
+
+def test_research_objective_table_repair_rejects_changed_numeric_source_cell():
+    class NumericChangingRepairExtractor:
+        def repair_table_matrix(self, _payload):
+            return StructuredTableMatrixRepair(
+                repaired_table_matrix=[
+                    ["Specimens", "Density (%)"],
+                    ["HIP-SLM (100/100)", "98.25"],
+                ],
+                confidence=0.9,
+            )
+
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "source_kind": "table",
+            "source_ref": "table-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+        }
+    )
+    source = {
+        "source_kind": "table",
+        "source_ref": "table-1",
+        "document_id": "paper-1",
+        "column_headers": ["Specimens", "Density (%)"],
+        "table_matrix": [
+            ["Specimens", "Density (%)"],
+            ["HIP-SLM (100/", "98.15"],
+        ],
+    }
+
+    repaired_source, repair_error = (
+        source_extraction._repair_objective_table_source_if_needed(
+            collection_id="col-test",
+            route=route,
+            source=source,
+            paper_facts_extractor=NumericChangingRepairExtractor(),
+        )
+    )
+
+    assert repaired_source is source
+    assert str(repair_error) == (
+        "table matrix repair changed an intact numeric source cell"
+    )
+
+
 def test_research_objective_table_repair_bad_request_is_route_scoped():
     class RouteScopedRepairExtractor:
         def __init__(self) -> None:
@@ -3042,7 +3200,7 @@ def test_research_objective_table_repair_bad_request_is_route_scoped():
             return StructuredTableMatrixRepair(
                 repaired_table_matrix=[
                     ["Specimens", "Density (%)"],
-                    ["HIP-SLM (100/100)", "98.25"],
+                    ["HIP-SLM (100/100)", "98.15"],
                 ],
                 confidence=0.9,
             )
@@ -3125,7 +3283,7 @@ def test_research_objective_table_repair_bad_request_is_route_scoped():
         unit.source_ref == "table-b"
         and unit.selection_status == "extracted"
         and unit.reported_result is not None
-        and unit.reported_result.value == 98.25
+        and unit.reported_result.value == 98.15
         for unit in units
     )
 

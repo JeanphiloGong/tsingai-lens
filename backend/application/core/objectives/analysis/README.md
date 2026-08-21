@@ -13,9 +13,12 @@ Read the analysis responsibilities in real research order:
    instruction to inspect a Source, not a scientific finding.
 3. `source_extraction.py` exposes `extract_and_validate_source_facts`, which
    inspects routed Sources one at a time and produces transient, source-local
-   `ExtractedEvidenceDraft` records. It owns text and table payload construction,
-   structural table repair, deterministic table parsing, model extraction, and
-   route-scoped technical failures.
+   `ExtractedEvidenceDraft` records. It owns text and complete Markdown table
+   payload construction, bounded continuous-row structural table repair,
+   deterministic table parsing, model extraction, and route-scoped technical
+   failures. Oversized repair inputs repeat the caption and flattened header on
+   every slice, then merge in Source row order; missing, reordered, or changed
+   numeric cells invalidate the repair.
 4. `source_validation.py` immediately checks each model-authored draft against
    the exact Source being inspected. Extraction and validation therefore
    alternate per Source; they are not two collection-wide passes. Unsupported

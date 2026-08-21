@@ -8,6 +8,7 @@ from typing import Any, TypeVar
 
 from openai import OpenAI
 from pydantic import BaseModel, ValidationError
+import tiktoken
 
 from application.core.paper_facts.prompts import (
     PAPER_FACT_TABLE_BATCH_PROMPT_VERSION,
@@ -38,6 +39,7 @@ _PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _PROVIDER_PARSE
 _SUPPORTED_EXTRACTION_MODES = {_JSON_TEXT, _PROVIDER_PARSE}
 _TABLE_BATCH_PROVIDER_MAX_COMPLETION_TOKENS = 4096
+_TABLE_MATRIX_REPAIR_PROVIDER_MAX_COMPLETION_TOKENS = 4096
 
 ResponseModel = TypeVar("ResponseModel", bound=BaseModel)
 
@@ -113,6 +115,30 @@ class PaperFactsExtractor:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_model=StructuredTableMatrixRepair,
+            provider_max_completion_tokens=(
+                _TABLE_MATRIX_REPAIR_PROVIDER_MAX_COMPLETION_TOKENS
+            ),
+        )
+
+    def estimate_table_matrix_repair_prompt_tokens(
+        self,
+        payload: dict[str, Any],
+    ) -> int:
+        system_prompt, user_prompt = build_table_matrix_repair_prompt(payload)
+        messages = self._build_messages(
+            system_prompt,
+            user_prompt,
+            StructuredTableMatrixRepair,
+            include_schema=True,
+        )
+        try:
+            encoding = tiktoken.encoding_for_model(self.model)
+        except KeyError:
+            encoding = tiktoken.get_encoding("cl100k_base")
+        return len(
+            encoding.encode(
+                json.dumps(messages, ensure_ascii=False, separators=(",", ":"))
+            )
         )
 
     def _extract(

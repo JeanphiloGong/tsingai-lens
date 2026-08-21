@@ -1739,6 +1739,7 @@ def test_research_objective_binds_same_study_methods_and_results_sources():
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
+        paper_skims=(),
         frames=(frame,),
         routes=routes,
         evidence_records=evidence_records,

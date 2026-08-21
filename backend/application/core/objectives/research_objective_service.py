@@ -435,6 +435,7 @@ class ResearchObjectiveService:
             analysis=analysis,
             objective=objective,
             drafts=paper_evidence_drafts,
+            paper_skims=objective_inputs["paper_skims"],
             frames=screened_sources,
             routes=source_inspection_routes,
             blocks_by_document_id=objective_inputs["blocks_by_document_id"],

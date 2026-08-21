@@ -88,7 +88,9 @@ related locators, and deduplicates only replayed drafts with the same stable
 `evidence_id`. Distinct claims from one Source remain separate because a table,
 figure, or paragraph can support several measurements or comparisons.
 `PaperContribution` route, extracted, failed, and comparable counts are computed
-from that complete claim set. It does not persist artifacts or synthesize a
+from that complete claim set. Contribution warnings count only final framing
+fallback, PaperSkim coverage gaps, and failed Evidence Sources; successful
+repair is not a warning. It does not persist artifacts or synthesize a
 cross-paper claim.
 
 `finding_synthesis.py` owns cross-paper comparison after durable Evidence and

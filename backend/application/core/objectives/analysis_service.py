@@ -350,6 +350,7 @@ class ObjectiveAnalysisService:
         )
         findings = ()
         paper_contributions = ()
+        warnings: list[str] = []
         if published is not None:
             paper_contributions = self.objective_repository.list_contributions(
                 collection_id,
@@ -363,6 +364,14 @@ class ObjectiveAnalysisService:
                 offset=0,
                 limit=50,
             )
+            seen_warnings: set[str] = set()
+            for contribution in paper_contributions:
+                for warning in contribution.warnings:
+                    scoped_warning = f"{contribution.document_id}: {warning}"
+                    if scoped_warning in seen_warnings:
+                        continue
+                    seen_warnings.add(scoped_warning)
+                    warnings.append(scoped_warning)
         return {
             "collection_id": collection_id,
             "objective": objective,
@@ -370,7 +379,7 @@ class ObjectiveAnalysisService:
             "published_analysis": published,
             "findings": findings,
             "paper_contributions": paper_contributions,
-            "warnings": [],
+            "warnings": warnings,
         }
 
     def _require_objective(

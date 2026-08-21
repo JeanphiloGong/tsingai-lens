@@ -383,7 +383,34 @@ def test_objective_analysis_publishes_one_complete_version() -> None:
     assert result["objective"].published_analysis_version == 1
     assert result["findings"] == (_finding(1),)
     assert result["paper_contributions"] == _artifacts(1).contributions
+    assert result["warnings"] == []
     assert repository.published_calls == 1
+
+
+def test_objective_analysis_aggregates_persisted_contribution_warnings() -> None:
+    repository = FakeObjectiveRepository(published=True)
+    contribution = _artifacts(1).contributions[0]
+    warning = "1 selected source(s) failed extraction."
+    repository.contributions[1] = (
+        replace(contribution, warnings=(warning, warning)),
+        replace(
+            contribution,
+            document_id="paper-2",
+            warnings=(
+                warning,
+                "1 Source unit(s) used conservative paper framing fallback.",
+            ),
+        ),
+    )
+    service, _repository, _analyzer = _service(repository=repository)
+
+    result = service.get_analysis_state("collection-1", "objective-1")
+
+    assert result["warnings"] == [
+        f"paper-1: {warning}",
+        f"paper-2: {warning}",
+        "paper-2: 1 Source unit(s) used conservative paper framing fallback.",
+    ]
 
 
 def test_objective_analysis_persists_real_model_prompt_and_token_usage() -> None:

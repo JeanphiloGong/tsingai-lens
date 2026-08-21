@@ -251,6 +251,16 @@ persisted retain `null`, meaning unknown; clients must not interpret those
 values as zero. A successful `comparable_evidence` contribution with no partial
 failure may have no reason.
 
+Each published contribution's `warnings` reports only final degraded coverage:
+conservative paper-framing fallback, PaperSkim Source units whose extraction
+ultimately failed, and selected Objective Evidence Sources whose extraction
+ultimately failed. A successful bounded retry or framing repair is not a
+warning. Warning text contains bounded counts rather than provider errors or
+raw exceptions. `ObjectiveAnalysisResponse.warnings` aggregates those persisted
+contribution warnings in paper order, prefixes each entry with `document_id`,
+and removes duplicates within the same paper. A clean published analysis
+returns an empty list.
+
 ### Published Findings And Evidence
 
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`

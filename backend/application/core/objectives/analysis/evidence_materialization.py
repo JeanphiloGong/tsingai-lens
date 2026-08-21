@@ -15,6 +15,8 @@ from domain.core import (
     ObjectiveAnalysis,
     ObjectiveEvidence,
     PaperContribution,
+    PaperSkim,
+    PaperSourceUnitCoverageStatus,
     ResearchObjective,
 )
 
@@ -28,6 +30,7 @@ def materialize_evidence(
     analysis: ObjectiveAnalysis,
     objective: ResearchObjective,
     drafts: tuple[ExtractedEvidenceDraft, ...],
+    paper_skims: tuple[PaperSkim, ...],
     frames: tuple[PaperAnalysisFrame, ...],
     routes: tuple[EvidenceCandidate, ...],
     blocks_by_document_id: Mapping[str, list[Any]],
@@ -51,6 +54,7 @@ def materialize_evidence(
         collection_id=collection_id,
         analysis=analysis,
         objective=objective,
+        paper_skims=paper_skims,
         frames=frames,
         routes=routes,
         evidence_records=evidence_records,
@@ -118,10 +122,14 @@ def _analysis_contributions(
     collection_id: str,
     analysis: ObjectiveAnalysis,
     objective: ResearchObjective,
+    paper_skims: tuple[PaperSkim, ...],
     frames: tuple[PaperAnalysisFrame, ...],
     routes: tuple[EvidenceCandidate, ...],
     evidence_records: tuple[ObjectiveEvidence, ...],
 ) -> tuple[PaperContribution, ...]:
+    paper_skims_by_document_id = {
+        paper_skim.document_id: paper_skim for paper_skim in paper_skims
+    }
     routed_sources_by_document: dict[str, set[tuple[str, str]]] = {}
     for route in routes:
         if not route.extractable or route.role == "low_value_or_irrelevant":
@@ -200,11 +208,32 @@ def _analysis_contributions(
                     if failed_source_count
                     else None
                 )
-        warnings = (
-            (f"{failed_source_count} selected source(s) failed extraction.",)
-            if failed_source_count
-            else ()
+        fallback_source_count = sum(
+            disposition.disposition == "fallback_relevant"
+            for disposition in frame.source_dispositions
         )
+        paper_skim = paper_skims_by_document_id.get(frame.document_id)
+        paper_skim_failure_count = sum(
+            coverage.status is PaperSourceUnitCoverageStatus.EXTRACTION_FAILED
+            for coverage in (
+                paper_skim.source_unit_coverage if paper_skim is not None else ()
+            )
+        )
+        warnings: list[str] = []
+        if fallback_source_count:
+            warnings.append(
+                f"{fallback_source_count} Source unit(s) used conservative "
+                "paper framing fallback."
+            )
+        if paper_skim_failure_count:
+            warnings.append(
+                f"{paper_skim_failure_count} PaperSkim Source unit(s) failed "
+                "extraction before Objective analysis."
+            )
+        if failed_source_count:
+            warnings.append(
+                f"{failed_source_count} selected source(s) failed extraction."
+            )
         contributions.append(
             PaperContribution(
                 collection_id=collection_id,
@@ -220,7 +249,7 @@ def _analysis_contributions(
                 measured_property_scope=frame.measured_property_scope,
                 test_environment_scope=frame.test_environment_scope,
                 exclusion_reason=evidence_reason if excluded else None,
-                warnings=warnings,
+                warnings=tuple(warnings),
                 confidence=1.0 if frame.relevance == "high" else 0.7,
                 evidence_disposition=evidence_disposition,
                 routed_source_count=routed_source_count,

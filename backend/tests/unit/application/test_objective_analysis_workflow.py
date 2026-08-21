@@ -17,6 +17,7 @@ from application.core.objectives.analysis.source_screening import (
 )
 from domain.core import (
     ObjectiveAnalysis,
+    ObjectiveEvidence,
     ObjectiveFactSet,
     PaperSkim,
     PaperStudyDisposition,
@@ -432,6 +433,7 @@ def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids():
         collection_id="col-1",
         analysis=analysis,
         objective=objective,
+        paper_skims=(),
         frames=(frame,),
         routes=(),
         evidence_records=evidence_records,
@@ -440,6 +442,113 @@ def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids():
     assert contributions[0].routed_source_count == 2
     assert contributions[0].extracted_source_count == 1
     assert contributions[0].failed_source_count == 1
+
+
+def test_objective_contribution_reports_only_final_degraded_source_outcomes():
+    objective = _research_objective(
+        {
+            "collection_id": "col-1",
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    analysis = ObjectiveAnalysis(
+        collection_id="col-1",
+        objective_id=objective.objective_id,
+        analysis_version=1,
+        source_build_id="build-1",
+        pipeline_version="test.v1",
+        model_name="test-model",
+        prompt_versions={},
+    )
+    paper_skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "doc_role": "experimental",
+            "studies": [],
+            "evidence_density": "low",
+            "confidence": 0.6,
+            "warnings": [],
+            "source_unit_coverage": [
+                {
+                    "source_unit_id": "paper-1:source:1",
+                    "window_id": "paper-1:window:1",
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "status": "extraction_failed",
+                    "reason": "terminal singleton extraction failure",
+                },
+                {
+                    "source_unit_id": "paper-1:source:2",
+                    "window_id": "paper-1:window:2",
+                    "source_kind": "block",
+                    "source_ref": "block-2",
+                    "status": "no_study_signal",
+                    "reason": "no study signal",
+                },
+            ],
+        }
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "source_dispositions": [
+                {
+                    "source_unit_id": "frame-source-1",
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "disposition": "fallback_relevant",
+                    "accounting_errors": ["provider unavailable"],
+                },
+                {
+                    "source_unit_id": "frame-source-2",
+                    "source_kind": "block",
+                    "source_ref": "block-2",
+                    "disposition": "repaired_relevant",
+                    "accounting_errors": ["one missing Source decision was repaired"],
+                },
+            ],
+        }
+    )
+    failed_evidence = ObjectiveEvidence.from_mapping(
+        {
+            "collection_id": "col-1",
+            "objective_id": objective.objective_id,
+            "analysis_version": 1,
+            "evidence_id": "failed-evidence",
+            "document_id": "paper-1",
+            "source_kind": "block",
+            "source_ref": "block-3",
+            "source_excerpt": "Source extraction failed.",
+            "evidence_role": "irrelevant",
+            "selection_status": "failed",
+            "attribution_scope": "not_attributable",
+            "resolution_status": "unknown",
+            "failure_reason": "structured output remained invalid",
+            "confidence": 0.0,
+        }
+    )
+
+    contributions = evidence_materialization._analysis_contributions(
+        collection_id="col-1",
+        analysis=analysis,
+        objective=objective,
+        paper_skims=(paper_skim,),
+        frames=(frame,),
+        routes=(),
+        evidence_records=(failed_evidence,),
+    )
+
+    assert contributions[0].warnings == (
+        "1 Source unit(s) used conservative paper framing fallback.",
+        "1 PaperSkim Source unit(s) failed extraction before Objective analysis.",
+        "1 selected source(s) failed extraction.",
+    )
 
 
 def test_objective_analysis_uses_conservative_frame_batch_when_model_fails(

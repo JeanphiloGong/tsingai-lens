@@ -1084,7 +1084,7 @@ def _frame_relationship_supports_objective(
     objective: ResearchObjective,
 ) -> bool:
     variable_supported = any(
-        property_matching.axis_values_match(factor, variable)
+        property_matching.variable_matches_objective_scope(factor, variable)
         for factor in relationship.varied_factors
         for variable in objective.variables
     )

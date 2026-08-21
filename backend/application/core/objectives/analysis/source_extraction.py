@@ -3047,6 +3047,8 @@ def _objective_label_matches_variables(
         axis_text = str(axis or "").strip()
         if not axis_text:
             continue
+        if property_matching.variable_matches_objective_scope(label_text, axis_text):
+            return True
         axis_key = property_matching.normalize_property_label(axis_text)
         if axis_key and any(
             label_axis_key == axis_key

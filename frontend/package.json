@@ -1,7 +1,7 @@
 {
 	"name": "frontend",
 	"private": true,
-	"version": "0.11.20",
+	"version": "0.12.0",
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
@@ -45,8 +45,6 @@
 		"vitest-browser-svelte": "^2.0.1"
 	},
 	"dependencies": {
-		"cytoscape": "^3.33.2",
-		"cytoscape-fcose": "^2.2.0",
 		"pdfjs-dist": "^5.6.205"
 	}
 }

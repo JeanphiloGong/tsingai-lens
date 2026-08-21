@@ -63,9 +63,7 @@ function buildWorkspacePayload(overrides: Record<string, unknown> = {}) {
 		status_summary: 'ready',
 		workflow: {
 			documents: 'ready',
-			results: 'ready',
-			evidence: 'ready',
-			comparisons: 'ready'
+			objectives: 'ready'
 		},
 		document_summary: {
 			total_documents: 2,
@@ -79,43 +77,23 @@ function buildWorkspacePayload(overrides: Record<string, unknown> = {}) {
 		},
 		warnings: [],
 		artifacts: {
-			output_path: '/tmp/col_123',
-			documents_generated: true,
-			documents_ready: true,
-			document_profiles_generated: true,
+			source_documents_ready: true,
 			document_profiles_ready: true,
-			evidence_cards_generated: true,
-			evidence_cards_ready: true,
-			comparable_results_generated: true,
-			comparable_results_ready: true,
-			collection_comparable_results_generated: true,
-			collection_comparable_results_ready: true,
-			collection_comparable_results_stale: false,
-			comparison_rows_generated: true,
-			comparison_rows_ready: true,
-			comparison_rows_stale: false,
-			graph_generated: false,
-			graph_ready: false,
-			graph_stale: false,
+			objective_candidates_ready: true,
 			updated_at: '2026-04-22T00:00:00Z'
 		},
 		latest_task: null,
 		recent_tasks: [],
 		capabilities: {
 			can_view_documents: true,
-			can_view_results: true,
-			can_view_evidence: true,
-			can_view_comparisons: true,
-			can_view_graph: false,
-			can_download_graphml: false
+			can_view_objectives: true,
+			can_view_comparisons: true
 		},
 		links: {
 			workspace: '/collections/col_123',
 			documents: '/collections/col_123/documents',
-			results: '/collections/col_123/results',
-			evidence: '/collections/col_123/evidence',
-			comparisons: '/collections/col_123/comparisons',
-			graph: '/collections/col_123/graph'
+			objectives: '/collections/col_123/objectives',
+			comparisons: '/collections/col_123/comparisons'
 		},
 		...overrides
 	};
@@ -123,7 +101,6 @@ function buildWorkspacePayload(overrides: Record<string, unknown> = {}) {
 
 describe('collections/[id]/+page.svelte', () => {
 	let workspacePayload: Record<string, unknown>;
-	let researchViewPayload: Record<string, unknown> | null;
 	let objectivesPayload: Record<string, unknown> | null;
 
 	beforeEach(() => {
@@ -132,7 +109,6 @@ describe('collections/[id]/+page.svelte', () => {
 			url: new URL('http://localhost/collections/col_123')
 		});
 		workspacePayload = buildWorkspacePayload();
-		researchViewPayload = null;
 		objectivesPayload = null;
 		fetchMock.mockReset();
 		fetchMock.mockImplementation(async (input: string | URL | Request) => {
@@ -148,9 +124,6 @@ describe('collections/[id]/+page.svelte', () => {
 					count: 0,
 					items: []
 				});
-			}
-			if (url.pathname === '/api/v1/collections/col_123/research-view' && researchViewPayload) {
-				return jsonResponse(researchViewPayload);
 			}
 			if (url.pathname === '/api/v1/collections/col_123/objectives' && objectivesPayload) {
 				return jsonResponse(objectivesPayload);
@@ -169,19 +142,10 @@ describe('collections/[id]/+page.svelte', () => {
 
 	it('keeps objectives as the primary research action when comparisons are unavailable', async () => {
 		workspacePayload = buildWorkspacePayload({
-			workflow: {
-				documents: 'ready',
-				results: 'ready',
-				evidence: 'ready',
-				comparisons: 'not_started'
-			},
 			capabilities: {
 				can_view_documents: true,
-				can_view_results: true,
-				can_view_evidence: true,
-				can_view_comparisons: false,
-				can_view_graph: false,
-				can_download_graphml: false
+				can_view_objectives: true,
+				can_view_comparisons: false
 			}
 		});
 
@@ -191,45 +155,36 @@ describe('collections/[id]/+page.svelte', () => {
 		await expect.element(primaryLink).toBeInTheDocument();
 	});
 
-	it('keeps objectives as the primary research action when only documents are available', async () => {
+	it('requires processing to finish when only document profiles are available', async () => {
 		workspacePayload = buildWorkspacePayload({
 			workflow: {
 				documents: 'ready',
-				results: 'not_started',
-				evidence: 'ready',
-				comparisons: 'not_started'
+				objectives: 'not_started'
 			},
 			capabilities: {
 				can_view_documents: true,
-				can_view_results: false,
-				can_view_evidence: true,
-				can_view_comparisons: false,
-				can_view_graph: false,
-				can_download_graphml: false
+				can_view_objectives: false,
+				can_view_comparisons: false
 			}
 		});
 
 		render(Page);
 
-		const primaryLink = browserPage.getByRole('link', { name: 'Enter objectives' }).first();
-		await expect.element(primaryLink).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Start processing' }).first())
+			.toBeInTheDocument();
 	});
 
 	it('distinguishes a completed build with zero Objective candidates from completed analysis', async () => {
 		workspacePayload = buildWorkspacePayload({
 			workflow: {
 				documents: 'ready',
-				results: 'not_started',
-				evidence: 'not_started',
-				comparisons: 'not_started'
+				objectives: 'ready'
 			},
 			capabilities: {
 				can_view_documents: true,
-				can_view_results: false,
-				can_view_evidence: false,
-				can_view_comparisons: false,
-				can_view_graph: false,
-				can_download_graphml: false
+				can_view_objectives: true,
+				can_view_comparisons: true
 			}
 		});
 		objectivesPayload = {
@@ -271,9 +226,7 @@ describe('collections/[id]/+page.svelte', () => {
 			},
 			workflow: {
 				documents: 'processing',
-				results: 'processing',
-				evidence: 'processing',
-				comparisons: 'processing'
+				objectives: 'processing'
 			},
 			latest_task: {
 				task_id: 'task_123',
@@ -313,9 +266,7 @@ describe('collections/[id]/+page.svelte', () => {
 			status_summary: 'partial_ready',
 			workflow: {
 				documents: 'not_started',
-				results: 'not_started',
-				evidence: 'not_started',
-				comparisons: 'not_started'
+				objectives: 'failed'
 			},
 			latest_task: {
 				task_id: 'task_partial',
@@ -349,48 +300,4 @@ describe('collections/[id]/+page.svelte', () => {
 			.not.toBeInTheDocument();
 	});
 
-	it('summarizes repeated research-view warnings in the overview', async () => {
-		researchViewPayload = {
-			collection_id: 'col_123',
-			state: 'empty',
-			overview: {
-				document_count: 2,
-				sample_count: 0,
-				measurement_count: 0,
-				evidence_count: 0,
-				material_systems: [],
-				process_families: [],
-				variable_axes: [],
-				measured_properties: []
-			},
-			paper_coverage: [],
-			comparable_groups: [],
-			warnings: [
-				{
-					warning_id: 'warning:no_measurement_results:paper:doc_1',
-					code: 'no_measurement_results',
-					severity: 'warning',
-					scope: 'paper',
-					message: 'No measurement results were detected for this paper.',
-					related_object_ids: ['doc_1']
-				},
-				{
-					warning_id: 'warning:no_measurement_results:paper:doc_2',
-					code: 'no_measurement_results',
-					severity: 'warning',
-					scope: 'paper',
-					message: 'No measurement results were detected for this paper.',
-					related_object_ids: ['doc_2']
-				}
-			]
-		};
-
-		render(Page);
-
-		await expect
-			.element(
-				browserPage.getByText('No measurement results were detected for this paper. (2 papers)')
-			)
-			.toBeInTheDocument();
-	});
 });

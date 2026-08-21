@@ -1999,7 +1999,10 @@ def _build_objective_table_routing_hints(
         matched_variable_axes = [
             axis
             for axis in objective.variables
-            if property_matching.source_text_mentions_axis(table_text, axis)
+            if property_matching.source_text_mentions_objective_variable(
+                table_text,
+                axis,
+            )
         ]
         if matched_outcomes:
             role = "result_table"

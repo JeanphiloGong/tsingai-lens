@@ -242,6 +242,101 @@ class _Service:
             "total": 1,
         }
 
+    def get_evidence_map(self, collection_id, objective_id):
+        return {
+            "collection_id": collection_id,
+            "objective_id": objective_id,
+            "analysis_version": 1,
+            "projection_version": "objective-evidence-map.v1",
+            "complete": True,
+            "coverage": {
+                "total_document_count": 1,
+                "analyzed_document_count": 1,
+                "excluded_document_count": 0,
+                "failed_document_count": 0,
+                "direct_evidence_document_count": 1,
+                "finding_count": 1,
+                "evidence_count": 1,
+                "source_count": 1,
+                "unlinked_evidence_count": 0,
+            },
+            "nodes": [
+                {
+                    "id": "objective:obj-1",
+                    "type": "objective",
+                    "label": _objective().question,
+                    "objective_id": "obj-1",
+                    "question": _objective().question,
+                    "material_scope": ["Alloy A"],
+                    "variables": ["temperature"],
+                    "outcomes": ["strength"],
+                },
+                {
+                    "id": "finding:finding-1",
+                    "type": "finding",
+                    "label": _finding().statement,
+                    "finding_id": "finding-1",
+                    "statement": _finding().statement,
+                    "factors": ["temperature"],
+                    "outcome": "strength",
+                    "direction": "increase",
+                    "assertion_strength": "associative",
+                    "synthesis_status": "insufficient_confirmation",
+                    "certainty": 0.5,
+                    "limitations": ["Supported by one paper."],
+                },
+                {
+                    "id": "evidence:evidence-1",
+                    "type": "evidence",
+                    "label": "Tensile strength increased to 620 MPa.",
+                    "evidence_id": "evidence-1",
+                    "document_id": "paper-1",
+                    "evidence_role": "direct_result",
+                    "attribution_scope": "isolated_effect",
+                    "confidence": 0.9,
+                    "direction": "increase",
+                    "outcome": "strength",
+                    "source_excerpt": _evidence().source_excerpt,
+                },
+                {
+                    "id": "source:source-1",
+                    "type": "source",
+                    "label": "Text window · block-7",
+                    "document_id": "paper-1",
+                    "source_kind": "text_window",
+                    "source_ref": "block-7",
+                    "source_excerpt": _evidence().source_excerpt,
+                    "page_numbers": [7],
+                    "evidence_ids": ["evidence-1"],
+                },
+                {
+                    "id": "document:paper-1",
+                    "type": "document",
+                    "label": "Paper one",
+                    "document_id": "paper-1",
+                    "analysis_status": "analyzed",
+                    "evidence_disposition": "comparable_evidence",
+                    "evidence_disposition_reason": None,
+                },
+            ],
+            "edges": [
+                {
+                    "id": "edge-1",
+                    "source": "objective:obj-1",
+                    "target": "finding:finding-1",
+                    "relation": "has_finding",
+                    "condition_boundary": False,
+                },
+                {
+                    "id": "edge-2",
+                    "source": "finding:finding-1",
+                    "target": "evidence:evidence-1",
+                    "relation": "supports",
+                    "condition_boundary": False,
+                },
+            ],
+        }
+
 
 def _client(
     service: _Service | None = None,
@@ -746,3 +841,22 @@ def test_evidence_api_returns_exact_source_excerpt_and_locator() -> None:
     assert evidence["source_ref"] == "block-7"
     assert evidence["page_numbers"] == [7]
     assert "evidence_unit_id" not in evidence
+
+
+def test_evidence_map_api_returns_the_published_objective_projection() -> None:
+    response = _client().get(
+        "/collections/col-1/objectives/obj-1/evidence-map"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["projection_version"] == "objective-evidence-map.v1"
+    assert payload["analysis_version"] == 1
+    assert [node["type"] for node in payload["nodes"]] == [
+        "objective",
+        "finding",
+        "evidence",
+        "source",
+        "document",
+    ]
+    assert payload["edges"][1]["relation"] == "supports"

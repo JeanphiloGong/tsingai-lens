@@ -27,7 +27,6 @@ features:
 ```bash
 export LLM_BASE_URL=http://localhost:11434/v1
 export LLM_MODEL=qwen1.5-8b-chat
-export GOAL_COPILOT_LLM_MODEL=qwen1.5-8b-chat
 export LLM_API_KEY=sk-local
 export LLM_REASONING_EFFORT=none
 export CORE_LLM_EXTRACTION_MODE=json_text
@@ -42,19 +41,16 @@ export CORE_EXTRACTION_MAX_CONCURRENCY=4
 provider, such as `none`, when a reasoning model must reserve its bounded
 completion budget for structured JSON output. When unset, the provider default
 is used.
-`GOAL_COPILOT_LLM_MODEL` is optional. When unset, goal chat uses `LLM_MODEL`;
-when set, it must match one of the model ids returned by the configured
-OpenAI-compatible endpoint, for example:
+`LLM_MODEL` selects the model used by Core extraction and Research Agent Chat.
+It must match one of the model ids returned by the configured OpenAI-compatible
+endpoint, for example:
 
 ```bash
 curl "$LLM_BASE_URL/models"
 ```
 
-If the goal copilot model name does not match the served model id, goal chat
-returns `goal_copilot_model_unavailable`. In that state Lens deliberately
-refuses to save AI-generated experiment plans from the message, because those
-plans require a `collection_grounded` answer with source links and the
-`protocol_ready_findings` review gate.
+If the configured Research Agent model is unavailable, the turn returns
+`model_unavailable` and no capability executes for that turn.
 
 ## Initialize Or Upgrade The Schema
 

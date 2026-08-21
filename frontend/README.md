@@ -1,8 +1,9 @@
 # TsingAI-Lens Frontend
 
 The frontend is a SvelteKit browser application for collection creation,
-workspace browsing, file upload, task polling, graph export, and evidence access
-through the same-origin `/api/*` and `/api/v1/*` contract.
+workspace browsing, file upload, task polling, Objective analysis, published
+Finding comparison, Objective Evidence Map inspection, and exact Source
+verification through the same-origin `/api/*` and `/api/v1/*` contract.
 
 This file is the frontend module entry page. Formal frontend docs live in
 `frontend/docs/`. Shared route ownership seams use local `README.md` files next
@@ -18,7 +19,7 @@ to code.
 - `src/routes/collections/`
   Collection workspace route family
 - `src/routes/_shared/`
-  Shared browser-side API clients, i18n, graph helpers, and route support code
+  Shared browser-side API clients, i18n, and route support code
 - `docs/frontend-plan.md`
   Same-origin browser contract and product-flow guide
 - `e2e/`
@@ -28,14 +29,11 @@ to code.
 
 - [`docs/frontend-plan.md`](docs/frontend-plan.md)
   Frontend same-origin API integration guide
-- [`docs/goal-copilot-proposal.md`](docs/goal-copilot-proposal.md)
+- [`docs/research-agent-chat.md`](docs/research-agent-chat.md)
   Collection-bound Research Agent Chat and approval presentation contract
-- [`docs/research-view-aggregation/README.md`](docs/research-view-aggregation/README.md)
-  Frontend implementation topic for collection research-view navigation,
-  paper matrices, comparison matrices, evidence drawers, and debug placement
 - [`src/routes/collections/lens-v1-interface-spec.md`](src/routes/collections/lens-v1-interface-spec.md)
-  Lens v1 collection UI migration spec for workspace, comparisons, evidence,
-  documents, and graph surfaces
+  Maintained Lens v1 collection interface for workspace, Objectives, published
+  Findings, and Source documents
 - [`src/routes/collections/collection-ui-restructure-proposal.md`](src/routes/collections/collection-ui-restructure-proposal.md)
   Narrow proposal for collection UI information architecture, state machine,
   and page hierarchy cleanup after the first Lens v1 frontend wave
@@ -71,5 +69,8 @@ npm run test:e2e
   discovery or collection analysis to finish. Data-backed capabilities report
   unavailable collection artifacts explicitly while processing continues.
 - Shared API helpers live under `src/routes/_shared/`.
+- The collection Evidence Map is a read-only projection of one published
+  Objective analysis. It does not use the retired collection-wide Graph API or
+  restore a Graph persistence model.
 - Retired debug-style routes remain explanatory only and should not introduce
   alternate browser contracts.

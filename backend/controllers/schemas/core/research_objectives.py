@@ -53,6 +53,18 @@ class ObjectiveSummaryResponse(BaseModel):
     created_by_tool_call_id: str | None = None
 
 
+class RankedObjectiveSummaryResponse(ObjectiveSummaryResponse):
+    rank: int = Field(..., ge=1)
+
+
+class PaginatedObjectiveListResponse(BaseModel):
+    collection_id: str
+    objectives: list[RankedObjectiveSummaryResponse] = Field(default_factory=list)
+    offset: int = Field(..., ge=0)
+    limit: int | None = Field(default=None, ge=1)
+    total: int = Field(..., ge=0)
+
+
 class TokenUsageResponse(BaseModel):
     input_tokens: int = Field(..., ge=0)
     output_tokens: int = Field(..., ge=0)
@@ -350,9 +362,142 @@ class ObjectiveEvidenceResponse(BaseModel):
     confidence: float
 
 
-class ObjectiveListResponse(BaseModel):
+class ObjectiveEvidenceMapObjectiveNodeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    type: Literal["objective"]
+    label: str
+    objective_id: str
+    question: str
+    material_scope: list[str]
+    variables: list[str]
+    outcomes: list[str]
+
+
+class ObjectiveEvidenceMapFindingNodeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    type: Literal["finding"]
+    label: str
+    finding_id: str
+    statement: str
+    factors: list[str]
+    outcome: str
+    direction: EvidenceResultDirection
+    assertion_strength: Literal["causal", "associative", "descriptive"]
+    synthesis_status: Literal[
+        "agreement",
+        "conflict",
+        "condition_dependent",
+        "insufficient_confirmation",
+    ]
+    certainty: float = Field(..., ge=0, le=1)
+    limitations: list[str]
+
+
+class ObjectiveEvidenceMapEvidenceNodeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    type: Literal["evidence"]
+    label: str
+    evidence_id: str
+    document_id: str
+    evidence_role: str
+    attribution_scope: EvidenceAttributionScope
+    confidence: float = Field(..., ge=0, le=1)
+    direction: EvidenceResultDirection | None = None
+    outcome: str | None = None
+    source_excerpt: str
+
+
+class ObjectiveEvidenceMapSourceNodeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    type: Literal["source"]
+    label: str
+    document_id: str
+    source_kind: str
+    source_ref: str
+    source_excerpt: str
+    page_numbers: list[int]
+    evidence_ids: list[str]
+
+
+class ObjectiveEvidenceMapDocumentNodeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    type: Literal["document"]
+    label: str
+    document_id: str
+    analysis_status: Literal["pending", "analyzed", "excluded", "failed"]
+    evidence_disposition: Literal[
+        "excluded",
+        "no_routable_evidence",
+        "extraction_failed",
+        "no_comparable_evidence",
+        "comparable_evidence",
+    ] | None = None
+    evidence_disposition_reason: str | None = None
+
+
+ObjectiveEvidenceMapNodeResponse = Annotated[
+    ObjectiveEvidenceMapObjectiveNodeResponse
+    | ObjectiveEvidenceMapFindingNodeResponse
+    | ObjectiveEvidenceMapEvidenceNodeResponse
+    | ObjectiveEvidenceMapSourceNodeResponse
+    | ObjectiveEvidenceMapDocumentNodeResponse,
+    Field(discriminator="type"),
+]
+
+
+class ObjectiveEvidenceMapEdgeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    source: str
+    target: str
+    relation: Literal[
+        "has_finding",
+        "supports",
+        "contradicts",
+        "contextualizes",
+        "extracted_from",
+        "reported_in",
+        "includes_document",
+    ]
+    condition_boundary: bool = False
+
+
+class ObjectiveEvidenceMapCoverageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total_document_count: int = Field(..., ge=0)
+    analyzed_document_count: int = Field(..., ge=0)
+    excluded_document_count: int = Field(..., ge=0)
+    failed_document_count: int = Field(..., ge=0)
+    direct_evidence_document_count: int = Field(..., ge=0)
+    finding_count: int = Field(..., ge=0)
+    evidence_count: int = Field(..., ge=0)
+    source_count: int = Field(..., ge=0)
+    unlinked_evidence_count: int = Field(..., ge=0)
+
+
+class ObjectiveEvidenceMapResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     collection_id: str
-    objectives: list[ObjectiveSummaryResponse] = Field(default_factory=list)
+    objective_id: str
+    analysis_version: int = Field(..., ge=1)
+    projection_version: Literal["objective-evidence-map.v1"]
+    complete: bool
+    nodes: list[ObjectiveEvidenceMapNodeResponse]
+    edges: list[ObjectiveEvidenceMapEdgeResponse]
+    coverage: ObjectiveEvidenceMapCoverageResponse
 
 
 class PaperContributionResponse(BaseModel):

@@ -260,13 +260,13 @@ def capture_baseline(scenario: dict[str, Any]) -> dict[str, Any]:
                 "status_summary": collection["status"],
                 "latest_task_status": task["status"],
                 "artifacts": {
-                    key: artifacts[key]
-                    for key in (
-                        "documents_ready",
-                        "document_profiles_ready",
-                        "evidence_cards_ready",
-                        "comparison_rows_ready",
-                    )
+                    "source_documents_ready": artifacts["documents_ready"],
+                    "document_profiles_ready": bool(
+                        records["core_document_profiles"]
+                    ),
+                    "objective_candidates_ready": bool(
+                        records["research_objectives"]
+                    ),
                 },
             },
             "objective_analysis": {

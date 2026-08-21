@@ -4,231 +4,106 @@ const { requestJson } = vi.hoisted(() => ({
 	requestJson: vi.fn()
 }));
 
-vi.mock('./api', () => ({
-	requestJson
-}));
+vi.mock('./api', () => ({ requestJson }));
 
-const { fetchWorkspaceOverview, getCollectionWorkspaceState, getWorkspaceSurfaceState } =
-	await import('./workspace');
+const {
+	buildOverviewPipelineSteps,
+	fetchWorkspaceOverview,
+	getCollectionWorkspaceState,
+	getWorkspaceSurfaceState
+} = await import('./workspace');
 
-function buildWorkspacePayload(
-	overrides: {
-		workflow?: Record<string, unknown>;
-		artifacts?: Record<string, unknown>;
-		capabilities?: Record<string, unknown>;
-		latest_task?: Record<string, unknown> | null;
-	} = {}
-) {
+function buildWorkspacePayload(overrides: Record<string, unknown> = {}) {
 	return {
 		collection: {
 			collection_id: 'col_123',
-			name: 'Semantic rollout test'
+			name: 'Objective-first collection'
 		},
 		file_count: 2,
 		status_summary: 'ready',
-		warnings: [],
 		workflow: {
-			documents: 'ready',
-			results: 'ready',
-			evidence: 'ready',
-			comparisons: 'ready',
-			...overrides.workflow
+			documents: { status: 'ready', detail: 'Document profiles are available.' },
+			objectives: { status: 'ready', detail: 'Objective candidate discovery is complete.' }
 		},
+		document_summary: {
+			total_documents: 2,
+			by_doc_type: { experimental: 2 }
+		},
+		warnings: [],
 		artifacts: {
-			output_path: '/tmp/col_123',
-			documents_generated: true,
-			documents_ready: true,
-			document_profiles_generated: true,
+			source_documents_ready: true,
 			document_profiles_ready: true,
-			evidence_cards_generated: true,
-			evidence_cards_ready: true,
-			comparable_results_generated: false,
-			comparable_results_ready: false,
-			collection_comparable_results_generated: false,
-			collection_comparable_results_ready: false,
-			collection_comparable_results_stale: false,
-			comparison_rows_generated: false,
-			comparison_rows_ready: false,
-			comparison_rows_stale: false,
-			graph_generated: false,
-			graph_ready: false,
-			graph_stale: false,
-			updated_at: '2026-04-22T00:00:00Z',
-			...overrides.artifacts
+			objective_candidates_ready: true,
+			updated_at: '2026-08-20T00:00:00Z'
 		},
+		latest_task: null,
+		recent_tasks: [],
 		capabilities: {
 			can_view_documents: true,
-			can_view_results: true,
-			can_view_evidence: true,
-			can_view_comparisons: true,
-			can_view_graph: false,
-			can_download_graphml: false,
-			...overrides.capabilities
+			can_view_objectives: true,
+			can_view_comparisons: true
 		},
-		latest_task: overrides.latest_task ?? null,
-		recent_tasks: []
+		links: {
+			workspace: '/collections/col_123',
+			documents: '/collections/col_123/documents',
+			objectives: '/collections/col_123/objectives',
+			comparisons: '/collections/col_123/comparisons'
+		},
+		...overrides
 	};
 }
 
 describe('workspace shared helpers', () => {
-	beforeEach(() => {
-		requestJson.mockReset();
-	});
+	beforeEach(() => requestJson.mockReset());
 
-	it('preserves semantic comparison artifact fields from the backend payload', async () => {
-		requestJson.mockResolvedValue(
-			buildWorkspacePayload({
-				artifacts: {
-					comparable_results_generated: true,
-					comparable_results_ready: true,
-					collection_comparable_results_generated: true,
-					collection_comparable_results_ready: true,
-					collection_comparable_results_stale: true,
-					comparison_rows_generated: false,
-					comparison_rows_ready: false,
-					comparison_rows_stale: true,
-					graph_generated: true,
-					graph_ready: false,
-					graph_stale: true
-				}
-			})
-		);
+	it('preserves only maintained workspace artifacts, capabilities, and links', async () => {
+		requestJson.mockResolvedValue(buildWorkspacePayload());
 
 		const workspace = await fetchWorkspaceOverview('col_123');
 
-		expect(workspace.artifacts).toMatchObject({
-			comparable_results_generated: true,
-			comparable_results_ready: true,
-			collection_comparable_results_generated: true,
-			collection_comparable_results_ready: true,
-			collection_comparable_results_stale: true,
-			comparison_rows_generated: false,
-			comparison_rows_ready: false,
-			comparison_rows_stale: true,
-			graph_generated: true,
-			graph_ready: false,
-			graph_stale: true
+		expect(workspace.artifacts).toEqual({
+			source_documents_ready: true,
+			document_profiles_ready: true,
+			objective_candidates_ready: true,
+			updated_at: '2026-08-20T00:00:00Z'
 		});
-	});
-
-	it('normalizes workspace results workflow, capability, and link fields', async () => {
-		requestJson.mockResolvedValue({
-			...buildWorkspacePayload(),
-			links: {
-				results: '/api/v1/collections/col_123/results',
-				comparisons: '/api/v1/collections/col_123/comparisons',
-				documents: '/api/v1/collections/col_123/documents/profiles',
-				evidence: '/api/v1/collections/col_123/evidence/cards'
-			}
+		expect(workspace.capabilities).toEqual({
+			can_view_documents: true,
+			can_view_objectives: true,
+			can_view_comparisons: true
 		});
-
-		const workspace = await fetchWorkspaceOverview('col_123');
-
-		expect(workspace.workflow.results).toBe('ready');
-		expect(workspace.capabilities.can_view_results).toBe(true);
-		expect(workspace.links.results).toBe('/collections/col_123/results');
-		expect(workspace.links.evidence).toBe('/collections/col_123/evidence');
+		expect(workspace.links.objectives).toBe('/collections/col_123/objectives');
+		expect('graph' in workspace.links).toBe(false);
 	});
 
-	it('treats stale comparison artifacts as limited when workflow payload is missing', async () => {
-		requestJson.mockResolvedValue({
-			...buildWorkspacePayload({
-				artifacts: {
-					comparable_results_generated: true,
-					comparable_results_ready: true,
-					collection_comparable_results_generated: true,
-					collection_comparable_results_ready: false,
-					collection_comparable_results_stale: true,
-					comparison_rows_generated: false,
-					comparison_rows_ready: false,
-					comparison_rows_stale: false
-				}
-			}),
-			workflow: null
-		});
-
-		const workspace = await fetchWorkspaceOverview('col_123');
-
-		expect(workspace.artifacts.collection_comparable_results_stale).toBe(true);
-		expect(getWorkspaceSurfaceState(workspace, 'results')).toBe('limited');
-		expect(getWorkspaceSurfaceState(workspace, 'comparisons')).toBe('limited');
-		expect(getCollectionWorkspaceState(workspace)).toBe('ready_with_limits');
-	});
-
-	it('keeps the graph surface ready when graph artifacts are ready but row cache is not', async () => {
-		requestJson.mockResolvedValue(
-			buildWorkspacePayload({
-				artifacts: {
-					comparable_results_generated: true,
-					comparable_results_ready: true,
-					collection_comparable_results_generated: true,
-					collection_comparable_results_ready: true,
-					comparison_rows_generated: false,
-					comparison_rows_ready: false,
-					graph_generated: true,
-					graph_ready: true
-				}
-			})
-		);
-
-		const workspace = await fetchWorkspaceOverview('col_123');
-
-		expect(workspace.artifacts.comparison_rows_ready).toBe(false);
-		expect(workspace.artifacts.graph_ready).toBe(true);
-		expect(getWorkspaceSurfaceState(workspace, 'graph')).toBe('ready');
-	});
-
-	it('treats stale graph artifacts as limited instead of not_applicable', async () => {
-		requestJson.mockResolvedValue(
-			buildWorkspacePayload({
-				artifacts: {
-					comparable_results_generated: true,
-					comparable_results_ready: true,
-					collection_comparable_results_generated: true,
-					collection_comparable_results_ready: false,
-					collection_comparable_results_stale: true,
-					graph_generated: true,
-					graph_ready: false,
-					graph_stale: true
-				}
-			})
-		);
-
-		const workspace = await fetchWorkspaceOverview('col_123');
-
-		expect(workspace.artifacts.graph_stale).toBe(true);
-		expect(getWorkspaceSurfaceState(workspace, 'graph')).toBe('limited');
-	});
-
-	it('does not regress the collection workspace state when semantic artifact fields are present', async () => {
-		requestJson.mockResolvedValue(
-			buildWorkspacePayload({
-				artifacts: {
-					comparable_results_generated: true,
-					comparable_results_ready: true,
-					collection_comparable_results_generated: true,
-					collection_comparable_results_ready: true,
-					comparison_rows_generated: true,
-					comparison_rows_ready: true,
-					graph_generated: true,
-					graph_ready: true
-				}
-			})
-		);
+	it('treats completed Objective discovery as ready even when it produced zero candidates', async () => {
+		requestJson.mockResolvedValue(buildWorkspacePayload());
 
 		const workspace = await fetchWorkspaceOverview('col_123');
 
 		expect(getCollectionWorkspaceState(workspace)).toBe('ready');
+		expect(getWorkspaceSurfaceState(workspace, 'objectives')).toBe('ready');
+		expect(getWorkspaceSurfaceState(workspace, 'comparisons')).toBe('ready');
 	});
 
-	it('requires retry when a build only partially succeeds before primary views are ready', async () => {
+	it('requires retry when profiles exist but Objective discovery failed', async () => {
 		requestJson.mockResolvedValue(
 			buildWorkspacePayload({
+				status_summary: 'partial_ready',
 				workflow: {
-					documents: 'not_started',
-					results: 'not_started',
-					evidence: 'not_started',
-					comparisons: 'not_started'
+					documents: { status: 'ready', detail: 'Document profiles are available.' },
+					objectives: { status: 'failed', detail: 'Objective discovery failed.' }
+				},
+				artifacts: {
+					source_documents_ready: true,
+					document_profiles_ready: true,
+					objective_candidates_ready: false,
+					updated_at: '2026-08-20T00:00:00Z'
+				},
+				capabilities: {
+					can_view_documents: true,
+					can_view_objectives: false,
+					can_view_comparisons: false
 				},
 				latest_task: {
 					task_id: 'task_partial',
@@ -237,10 +112,10 @@ describe('workspace shared helpers', () => {
 					status: 'partial_success',
 					current_stage: 'artifacts_ready',
 					progress_percent: 100,
-					errors: ['document_profiles: Connection error.'],
+					errors: ['objective_candidates: provider timeout'],
 					warnings: [],
-					created_at: '2026-07-19T05:23:33Z',
-					updated_at: '2026-07-19T05:24:42Z'
+					created_at: '2026-08-20T00:00:00Z',
+					updated_at: '2026-08-20T00:01:00Z'
 				}
 			})
 		);
@@ -248,33 +123,18 @@ describe('workspace shared helpers', () => {
 		const workspace = await fetchWorkspaceOverview('col_123');
 
 		expect(getCollectionWorkspaceState(workspace)).toBe('failed');
+		expect(getWorkspaceSurfaceState(workspace, 'documents')).toBe('ready');
+		expect(getWorkspaceSurfaceState(workspace, 'objectives')).toBe('failed');
 	});
 
-	it('keeps active artifact views available after a later partial build', async () => {
-		requestJson.mockResolvedValue(
-			buildWorkspacePayload({
-				workflow: {
-					results: 'not_started',
-					evidence: 'not_started',
-					comparisons: 'not_started'
-				},
-				latest_task: {
-					task_id: 'task_partial',
-					collection_id: 'col_123',
-					task_type: 'build',
-					status: 'partial_success',
-					current_stage: 'artifacts_ready',
-					progress_percent: 100,
-					errors: ['document_profiles: stale retry failed.'],
-					warnings: [],
-					created_at: '2026-07-19T05:23:33Z',
-					updated_at: '2026-07-19T05:24:42Z'
-				}
-			})
-		);
-
+	it('shows only upload, document profiling, and Objective discovery in build progress', async () => {
+		requestJson.mockResolvedValue(buildWorkspacePayload());
 		const workspace = await fetchWorkspaceOverview('col_123');
 
-		expect(getCollectionWorkspaceState(workspace)).toBe('ready_with_limits');
+		expect(buildOverviewPipelineSteps(workspace)).toEqual([
+			{ key: 'upload', status: 'completed' },
+			{ key: 'documents', status: 'completed' },
+			{ key: 'objectives', status: 'completed' }
+		]);
 	});
 });

@@ -1,9 +1,9 @@
 # Derived Application Layer
 
-This package owns downstream views that consume Core outputs.
+This package owns offline projections that consume Core outputs. It does not
+provide collection-facing product routes.
 
-- `graph_service.py`
-  Core-derived graph read model and GraphML export
-- `graph_projection_service.py`
-  Graph projection from repository-backed Core facts: document profiles,
-  derived evidence-card records, and comparison rows
+- `core_fact_projection.py`
+  Legacy paper-fact projection used only by extraction-trace export tooling and
+  evaluation fixtures. It is not a browser Evidence, comparison, or graph
+  contract.

@@ -13,7 +13,6 @@ except ImportError:  # pragma: no cover
     pytest.skip("fastapi not installed", allow_module_level=True)
 
 from tests.support.collection_service import build_test_collection_service
-from application.core.comparison_service import ComparisonService
 from application.core.document_profiles.service import (
     DocumentProfileService,
 )
@@ -22,19 +21,7 @@ from infra.persistence.sqlite import (
     SqliteSourceArtifactRepository,
 )
 from controllers.core import documents as documents_controller
-from domain.core import (
-    BaselineReference,
-    CharacterizationObservation,
-    CollectionComparableResult,
-    ComparableResult,
-    ComparisonFactSet,
-    DocumentProfile,
-    MeasurementResult,
-    SampleVariant,
-    StructureFeature,
-    TestCondition as CoreTestCondition,
-)
-from domain.core.paper_fact import PaperFactSet
+from domain.core import DocumentProfile
 from domain.source import (
     CollectionFileRecord,
     CollectionImportDocumentRecord,
@@ -46,25 +33,8 @@ from infra.source.ingestion.normalized_import import (
     NormalizedImportDocument,
     NormalizedImportSourceMetadata,
 )
-from tests.support.pbf_acceptance_fixture import (
-    PBF_BASELINE_LABEL,
-    PBF_DOCUMENT_ID,
-    PBF_ELONGATION_COMPARABLE_ID,
-    PBF_S3_VARIANT_ID,
-    PBF_YIELD_25_COMPARABLE_ID,
-    PBF_YIELD_200_COMPARABLE_ID,
-    PBF_YIELD_SERIES_KEY,
-    pbf_acceptance_baseline_references,
-    pbf_acceptance_characterization_observations,
-    pbf_acceptance_comparison_records,
-    pbf_acceptance_measurement_results,
-    pbf_acceptance_sample_variants,
-    pbf_acceptance_structure_features,
-    pbf_acceptance_test_conditions,
-)
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
-from tests.support.comparison_repository import MemoryComparisonRepository
 
 
 def _store_document_profiles(
@@ -79,165 +49,15 @@ def _store_document_profiles(
     )
 
 
-def _build_semantic_comparison_record(
-    *,
-    collection_id: str,
-    comparable_result_id: str,
-    source_document_id: str,
-    sort_order: int = 0,
-) -> tuple[dict, dict]:
-    comparable_result = {
-        "comparable_result_id": comparable_result_id,
-        "source_result_id": f"res-{comparable_result_id}",
-        "source_document_id": source_document_id,
-        "binding": {
-            "variant_id": "var-1",
-            "baseline_id": "base-1",
-            "test_condition_id": "tc-1",
-        },
-        "normalized_context": {
-            "material_system_normalized": "epoxy composite",
-            "process_normalized": "80 C, 2 h, under Ar",
-            "baseline_normalized": "untreated baseline",
-            "test_condition_normalized": "SEM",
-        },
-        "axis": {
-            "axis_name": None,
-            "axis_value": None,
-            "axis_unit": None,
-        },
-        "value": {
-            "property_normalized": "flexural_strength",
-            "result_type": "scalar",
-            "numeric_value": 97.0,
-            "unit": "MPa",
-            "summary": "Flexural strength increased to 97 MPa.",
-            "statistic_type": None,
-            "uncertainty": None,
-        },
-        "evidence": {
-            "direct_anchor_ids": ["anchor-1"],
-            "contextual_anchor_ids": ["anchor-2"],
-            "evidence_ids": ["ev-result-1"],
-            "structure_feature_ids": [],
-            "characterization_observation_ids": [],
-            "traceability_status": "direct",
-        },
-        "variant_label": "epoxy composite",
-        "baseline_reference": "untreated baseline",
-        "result_source_type": "text",
-        "epistemic_status": "normalized_from_evidence",
-        "normalization_version": "comparable_result_v1",
-    }
-    scoped_result = {
-        "collection_id": collection_id,
-        "comparable_result_id": comparable_result_id,
-        "assessment": {
-            "missing_critical_context": [],
-            "comparability_basis": [
-                "variant_linked",
-                "baseline_resolved",
-                "test_condition_resolved",
-                "direct_traceability",
-                "numeric_value_available",
-                "result_type:scalar",
-            ],
-            "comparability_warnings": [],
-            "comparability_status": "comparable",
-            "requires_expert_review": False,
-            "assessment_epistemic_status": "normalized_from_evidence",
-        },
-        "epistemic_status": "normalized_from_evidence",
-        "included": True,
-        "sort_order": sort_order,
-        "policy_family": "default_collection_comparison_policy",
-        "policy_version": "comparison_policy_v1",
-        "comparable_result_normalization_version": "comparable_result_v1",
-        "assessment_input_fingerprint": f"cafp-{comparable_result_id}",
-        "reassessment_triggers": [
-            "policy_family_changed",
-            "policy_version_changed",
-            "comparable_result_normalization_version_changed",
-            "assessment_input_fingerprint_changed",
-        ],
-    }
-    return comparable_result, scoped_result
-
-
-def _store_core_document_semantics(
-    comparison_service: ComparisonService,
-    collection_id: str,
-    *,
-    comparable_results: list[dict] | None = None,
-    scoped_results: list[dict] | None = None,
-    sample_variants: list[dict] | None = None,
-    test_conditions: list[dict] | None = None,
-    baseline_references: list[dict] | None = None,
-    measurement_results: list[dict] | None = None,
-    characterization_observations: list[dict] | None = None,
-    structure_features: list[dict] | None = None,
-) -> None:
-    comparable_results = comparable_results or []
-    scoped_results = scoped_results or []
-    comparison_service.paper_fact_repository.replace_paper_facts(
-        collection_id,
-        "build_test",
-        PaperFactSet(
-            paper_facts_ready=True,
-            sample_variants=tuple(
-                SampleVariant.from_mapping(row) for row in (sample_variants or [])
-            ),
-            test_conditions=tuple(
-                CoreTestCondition.from_mapping(row) for row in (test_conditions or [])
-            ),
-            baseline_references=tuple(
-                BaselineReference.from_mapping(row)
-                for row in (baseline_references or [])
-            ),
-            measurement_results=tuple(
-                MeasurementResult.from_mapping(row)
-                for row in (measurement_results or [])
-            ),
-            characterization_observations=tuple(
-                CharacterizationObservation.from_mapping(row)
-                for row in (characterization_observations or [])
-            ),
-            structure_features=tuple(
-                StructureFeature.from_mapping(row) for row in (structure_features or [])
-            ),
-        ),
-    )
-    comparison_service.comparison_repository.replace(
-        collection_id,
-        "build_test",
-        ComparisonFactSet(
-            comparison_artifacts_ready=True,
-            comparable_results=tuple(
-                ComparableResult.from_mapping(row) for row in comparable_results
-            ),
-            collection_comparable_results=tuple(
-                CollectionComparableResult.from_mapping(row) for row in scoped_results
-            ),
-        ),
-    )
-
-
 @pytest.fixture()
 def document_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
     paper_fact_repository = MemoryPaperFactRepository()
-    comparison_repository = MemoryComparisonRepository()
     document_profile_service = DocumentProfileService(
         collection_service,
         source_artifact_repository=source_repository,
         paper_fact_repository=paper_fact_repository,
-    )
-    comparison_service = ComparisonService(
-        collection_service,
-        paper_fact_repository=paper_fact_repository,
-        comparison_repository=comparison_repository,
-        document_profile_service=document_profile_service,
     )
     document_markdown_service = DocumentMarkdownService(
         collection_service,
@@ -247,7 +67,6 @@ def document_services(tmp_path):
     return (
         collection_service,
         document_profile_service,
-        comparison_service,
         document_markdown_service,
     )
 
@@ -256,7 +75,6 @@ def _document_request(document_services):
     (
         collection_service,
         document_profile_service,
-        comparison_service,
         document_markdown_service,
     ) = document_services
     return SimpleNamespace(
@@ -264,7 +82,6 @@ def _document_request(document_services):
             state=SimpleNamespace(
                 collection_service=collection_service,
                 document_profile_service=document_profile_service,
-                comparison_service=comparison_service,
                 document_markdown_service=document_markdown_service,
             )
         )
@@ -275,7 +92,6 @@ def test_documents_route_returns_409_when_profiles_are_not_ready(document_servic
     (
         collection_service,
         _document_profile_service,
-        _comparison_service,
         _markdown_service,
     ) = document_services
     record = collection_service.create_collection(name="Pending Collection")
@@ -298,7 +114,6 @@ def test_documents_route_returns_404_for_missing_collection(document_services):
     (
         _collection_service,
         _document_profile_service,
-        _comparison_service,
         _markdown_service,
     ) = document_services
 
@@ -319,7 +134,6 @@ def test_document_profile_route_returns_single_profile(document_services):
     (
         collection_service,
         document_profile_service,
-        _comparison_service,
         _markdown_service,
     ) = document_services
     record = collection_service.create_collection(name="Single Profile Collection")
@@ -358,7 +172,6 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
     (
         collection_service,
         document_profile_service,
-        _comparison_service,
         _markdown_service,
     ) = document_services
     record = collection_service.create_collection(name="Invalid Profile Collection")
@@ -395,7 +208,6 @@ def test_document_content_route_uses_stable_block_locator(
     (
         collection_service,
         document_profile_service,
-        _comparison_service,
         _markdown_service,
     ) = document_services
     record = collection_service.create_collection(name="Document Locator Collection")
@@ -468,7 +280,6 @@ def test_document_markdown_route_returns_markdown_projection(document_services):
     (
         collection_service,
         _document_profile_service,
-        _comparison_service,
         markdown_service,
     ) = document_services
     record = collection_service.create_collection(name="Markdown Route Collection")
@@ -537,7 +348,6 @@ def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
     (
         collection_service,
         _document_profile_service,
-        _comparison_service,
         _markdown_service,
     ) = document_services
     record = collection_service.create_collection(name="Markdown Pending Collection")
@@ -561,7 +371,6 @@ def test_document_source_route_streams_manifest_source_file(document_services):
     (
         collection_service,
         _document_profile_service,
-        _comparison_service,
         _markdown_service,
     ) = document_services
     record = collection_service.create_collection(name="Source File Collection")
@@ -608,7 +417,6 @@ def test_document_source_route_resolves_profile_document_id_by_source_filename(
     (
         collection_service,
         document_profile_service,
-        _comparison_service,
         _markdown_service,
     ) = document_services
     record = collection_service.create_collection(name="Profile Source File Collection")
@@ -669,7 +477,6 @@ def test_document_source_route_returns_409_when_source_is_unavailable(
     (
         collection_service,
         _document_profile_service,
-        _comparison_service,
         _markdown_service,
     ) = document_services
     record = collection_service.create_collection(name="Missing Source Collection")
@@ -695,7 +502,6 @@ def test_document_source_route_rejects_manifest_path_outside_collection(
     (
         collection_service,
         _document_profile_service,
-        _comparison_service,
         _markdown_service,
     ) = document_services
     record = collection_service.create_collection(name="Unsafe Source Collection")
@@ -760,7 +566,6 @@ def test_document_source_route_rejects_another_collections_storage_key(
     (
         collection_service,
         _document_profile_service,
-        _comparison_service,
         _markdown_service,
     ) = document_services
     first = collection_service.create_collection(name="First source collection")
@@ -825,7 +630,6 @@ def test_document_figure_image_route_streams_extracted_asset(document_services):
     (
         collection_service,
         _document_profile_service,
-        _comparison_service,
         markdown_service,
     ) = document_services
     record = collection_service.create_collection(name="Figure Image Collection")
@@ -879,7 +683,6 @@ def test_document_figure_image_route_rejects_figure_from_other_document(
     (
         collection_service,
         _document_profile_service,
-        _comparison_service,
         markdown_service,
     ) = document_services
     record = collection_service.create_collection(
@@ -929,7 +732,6 @@ def test_document_figure_image_route_rejects_path_outside_collection(
     (
         collection_service,
         _document_profile_service,
-        _comparison_service,
         markdown_service,
     ) = document_services
     record = collection_service.create_collection(name="Unsafe Figure Image Collection")
@@ -974,7 +776,6 @@ def test_document_figure_image_route_rejects_another_collections_object_key(
     (
         collection_service,
         _document_profile_service,
-        _comparison_service,
         markdown_service,
     ) = document_services
     first = collection_service.create_collection(name="First Figure Collection")
@@ -1028,7 +829,6 @@ def test_document_figure_image_route_reports_unavailable_object_bytes(
     (
         collection_service,
         _document_profile_service,
-        _comparison_service,
         markdown_service,
     ) = document_services
     record = collection_service.create_collection(name="Unavailable Figure Collection")
@@ -1076,263 +876,3 @@ def test_document_figure_image_route_reports_unavailable_object_bytes(
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "figure_image_unavailable"
-
-
-def test_document_comparison_semantics_route_returns_409_when_semantics_are_not_ready(
-    document_services,
-):
-    (
-        collection_service,
-        _document_profile_service,
-        _comparison_service,
-        _markdown_service,
-    ) = document_services
-    record = collection_service.create_collection(name="Pending Semantic Collection")
-
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            documents_controller.get_collection_document_comparison_semantics(
-                record["collection_id"],
-                "paper-1",
-                _document_request(document_services),
-            )
-        )
-
-    exc = exc_info.value
-    assert exc.status_code == 409
-    assert exc.detail["code"] == "document_comparison_semantics_not_ready"
-    assert exc.detail["collection_id"] == record["collection_id"]
-
-
-def test_document_comparison_semantics_route_returns_404_for_missing_document(
-    document_services,
-):
-    (
-        collection_service,
-        _document_profile_service,
-        comparison_service,
-        _markdown_service,
-    ) = document_services
-    record = collection_service.create_collection(name="Missing Document Semantics")
-    collection_id = record["collection_id"]
-    comparison_service.paper_fact_repository.replace_document_profiles(
-        collection_id,
-        "build_test",
-        (
-            DocumentProfile.from_mapping(
-                {
-                    "document_id": "paper-2",
-                    "collection_id": collection_id,
-                    "title": "Other Paper",
-                    "source_filename": "other.txt",
-                    "doc_type": "experimental",
-                    "confidence": 0.9,
-                }
-            ),
-        ),
-    )
-    comparison_service.comparison_repository.replace(
-        collection_id,
-        "build_test",
-        ComparisonFactSet(comparison_artifacts_ready=True),
-    )
-    with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            documents_controller.get_collection_document_comparison_semantics(
-                collection_id,
-                "paper-1",
-                _document_request(document_services),
-            )
-        )
-
-    exc = exc_info.value
-    assert exc.status_code == 404
-    assert exc.detail["code"] == "document_not_found"
-    assert exc.detail["document_id"] == "paper-1"
-
-
-def test_document_comparison_semantics_route_returns_semantic_items_for_document(
-    document_services,
-):
-    (
-        collection_service,
-        _document_profile_service,
-        comparison_service,
-        _markdown_service,
-    ) = document_services
-    record = collection_service.create_collection(name="Document Semantic Drilldown")
-    collection_id = record["collection_id"]
-
-    comparable_result, scoped_result = _build_semantic_comparison_record(
-        collection_id=collection_id,
-        comparable_result_id="cres-1",
-        source_document_id="paper-1",
-    )
-    _store_core_document_semantics(
-        comparison_service,
-        collection_id,
-        comparable_results=[comparable_result],
-        scoped_results=[scoped_result],
-    )
-
-    payload = asyncio.run(
-        documents_controller.get_collection_document_comparison_semantics(
-            collection_id,
-            "paper-1",
-            _document_request(document_services),
-        )
-    )
-
-    assert payload.collection_id == collection_id
-    assert payload.document_id == "paper-1"
-    assert payload.total == 1
-    assert payload.count == 1
-    assert payload.items[0].comparable_result_id == "cres-1"
-    assert payload.items[0].source_document_id == "paper-1"
-    assert payload.items[0].collection_overlays[0].collection_id == collection_id
-    assert (
-        payload.items[0].collection_overlays[0].policy_version == "comparison_policy_v1"
-    )
-    assert payload.items[0].collection_overlays[0].reassessment_triggers == [
-        "policy_family_changed",
-        "policy_version_changed",
-        "comparable_result_normalization_version_changed",
-        "assessment_input_fingerprint_changed",
-    ]
-    assert payload.items[0].projected_rows is None
-
-
-def test_document_comparison_semantics_route_can_include_projected_rows(
-    document_services,
-):
-    (
-        collection_service,
-        _document_profile_service,
-        comparison_service,
-        _markdown_service,
-    ) = document_services
-    record = collection_service.create_collection(name="Document Semantic Projection")
-    collection_id = record["collection_id"]
-
-    comparable_result, scoped_result = _build_semantic_comparison_record(
-        collection_id=collection_id,
-        comparable_result_id="cres-1",
-        source_document_id="paper-1",
-    )
-    _store_core_document_semantics(
-        comparison_service,
-        collection_id,
-        comparable_results=[comparable_result],
-        scoped_results=[scoped_result],
-    )
-
-    payload = asyncio.run(
-        documents_controller.get_collection_document_comparison_semantics(
-            collection_id,
-            "paper-1",
-            _document_request(document_services),
-            include_row_projections=True,
-        )
-    )
-
-    assert payload.total == 1
-    assert payload.items[0].projected_rows is not None
-    assert len(payload.items[0].projected_rows) == 1
-    assert payload.items[0].projected_rows[0].row_id.startswith("cmp_")
-    assert payload.items[0].projected_rows[0].source_document_id == "paper-1"
-
-
-def test_document_comparison_semantics_route_returns_pbf_acceptance_chain(
-    document_services,
-):
-    (
-        collection_service,
-        _document_profile_service,
-        comparison_service,
-        _markdown_service,
-    ) = document_services
-    record = collection_service.create_collection(name="Document Evidence Chain")
-    collection_id = record["collection_id"]
-    sample_variants = pbf_acceptance_sample_variants(collection_id)
-    test_conditions = pbf_acceptance_test_conditions(collection_id)
-    baseline_references = pbf_acceptance_baseline_references(collection_id)
-    measurement_results = pbf_acceptance_measurement_results(collection_id)
-    characterization_observations = pbf_acceptance_characterization_observations(
-        collection_id
-    )
-    structure_features = pbf_acceptance_structure_features(collection_id)
-    comparable_results, scoped_results = pbf_acceptance_comparison_records(
-        collection_id,
-        sample_variants=sample_variants,
-        test_conditions=test_conditions,
-        baseline_references=baseline_references,
-        measurement_results=measurement_results,
-    )
-    _store_core_document_semantics(
-        comparison_service,
-        collection_id,
-        sample_variants=sample_variants,
-        test_conditions=test_conditions,
-        baseline_references=baseline_references,
-        measurement_results=measurement_results,
-        characterization_observations=characterization_observations,
-        structure_features=structure_features,
-        comparable_results=comparable_results,
-        scoped_results=scoped_results,
-    )
-
-    payload = asyncio.run(
-        documents_controller.get_collection_document_comparison_semantics(
-            collection_id,
-            PBF_DOCUMENT_ID,
-            _document_request(document_services),
-            include_grouped_projections=True,
-        )
-    )
-
-    assert payload.total == 3
-    assert payload.variant_dossiers is not None
-    assert len(payload.variant_dossiers) == 1
-    dossier = payload.variant_dossiers[0]
-    assert dossier.variant_id == PBF_S3_VARIANT_ID
-    assert dossier.variant_label == "S3 optimized VED + HIP"
-    assert dossier.material.label == "Ti-6Al-4V"
-    assert dossier.material.composition == "Ti-6Al-4V"
-    assert dossier.shared_process_state["laser_power_w"] == 280
-    assert dossier.shared_process_state["scan_speed_mm_s"] == 1200
-    assert dossier.shared_process_state["hatch_spacing_um"] == 100
-    assert dossier.shared_process_state["layer_thickness_um"] == 30
-    assert dossier.shared_process_state["energy_density_j_mm3"] == 78
-    assert dossier.shared_process_state["energy_density_origin"] == "reported"
-    assert dossier.shared_process_state["build_orientation"] == "vertical"
-    assert dossier.shared_process_state["post_treatment_summary"] == "HIP"
-    series_by_key = {series.series_key: series for series in dossier.series}
-    assert PBF_YIELD_SERIES_KEY in series_by_key
-    yield_series = series_by_key[PBF_YIELD_SERIES_KEY]
-    assert yield_series.varying_axis.axis_name == "test_temperature_c"
-    assert [chain.result_id for chain in yield_series.chains] == [
-        PBF_YIELD_25_COMPARABLE_ID,
-        PBF_YIELD_200_COMPARABLE_ID,
-    ]
-    assert [
-        chain.test_condition.test_temperature_c for chain in yield_series.chains
-    ] == [
-        25.0,
-        200.0,
-    ]
-    assert [chain.test_condition.strain_rate_s_1 for chain in yield_series.chains] == [
-        0.001,
-        0.001,
-    ]
-    assert [chain.measurement.value for chain in yield_series.chains] == [940.0, 820.0]
-    assert yield_series.chains[0].baseline.reference == PBF_BASELINE_LABEL
-    assert yield_series.chains[0].value_provenance.value_origin == "reported"
-    assert yield_series.chains[0].value_provenance.source_value_text == "940"
-    elongation_chain = next(
-        chain
-        for series in dossier.series
-        for chain in series.chains
-        if chain.result_id == PBF_ELONGATION_COMPARABLE_ID
-    )
-    assert elongation_chain.measurement.property == "elongation"
-    assert elongation_chain.measurement.value == 15.0

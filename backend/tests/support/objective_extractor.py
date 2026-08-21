@@ -111,7 +111,7 @@ class FakeObjectiveExtractor:
                         "relationships": [
                             {
                                 "varied_factors": ["heat treatment temperature"],
-                                "outcome": "corrosion resistance",
+                                "outcome": "corrosion current density",
                                 "confidence": 0.91,
                             }
                         ],

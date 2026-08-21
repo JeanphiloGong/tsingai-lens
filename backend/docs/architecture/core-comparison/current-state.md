@@ -1,18 +1,15 @@
-# Core Comparison Current State
+# Retired Core Comparison Current State
 
 ## Summary
 
-The comparable-result substrate is implemented.
+Comparable-result and comparison-row records remain only for offline evaluation
+and extraction-trace export. They are not maintained browser resources.
 
-Current implemented comparison semantics follow this chain:
+The product chain is:
 
-`document_profiles -> paper facts family -> comparable_results -> collection_comparable_results -> row projection and downstream views`
+`Source -> Objective -> published analysis -> Finding -> ObjectiveEvidence`
 
-Collection-facing `/comparisons` still serves rows, but those rows are now a
-projection over the semantic and scope artifacts rather than the primary source
-of truth.
-
-## Current Artifact Chain
+## Retained Offline Artifact Chain
 
 ### Semantic Truth
 
@@ -27,35 +24,15 @@ of truth.
 ### Deterministic Projection
 
 - `comparison_rows`
-  collection-facing row projection regenerated from semantic and scope
-  artifacts for every row-facing read; it is not persisted
+  offline projection regenerated from semantic and scope artifacts; it is not
+  persisted
 
-## Current Read Paths
+## Product Read Path
 
-### Collection Comparison Table
-
-`GET /api/v1/collections/{collection_id}/comparisons`
-
-This route remains the main collection-facing table surface, but it now reads
-from comparable-result artifacts and projects rows downstream.
-
-### Document-First Comparison Semantics
-
-`GET /api/v1/collections/{collection_id}/documents/{document_id}/comparison-semantics`
-
-This route reads:
-
-`document -> comparable_results -> collection_comparable_results -> optional row projection`
-
-It does not persist a row cache to expose the semantic substrate.
-
-### Corpus Comparable Results
-
-- `GET /api/v1/comparable-results`
-- `GET /api/v1/comparable-results/{comparable_result_id}`
-
-These routes expose `ComparableResult` as the corpus retrieval unit and attach
-current collection overlays only when scope-sensitive judgment is needed.
+The frontend comparison overview reads Objectives and their published Findings.
+Finding review reads versioned ObjectiveEvidence, whose stable Source locator
+opens the document reader. No comparison-row, comparable-result,
+comparison-semantics, or graph endpoint is registered.
 
 ## Current Ownership In Code
 
@@ -65,38 +42,23 @@ current collection overlays only when scope-sensitive judgment is needed.
   materialization of comparable-result and scope artifacts
 - [`../../../domain/core/comparison_projection.py`](../../../domain/core/comparison_projection.py)
   row projection from semantic artifacts
-- [`../../../application/core/comparison_service.py`](../../../application/core/comparison_service.py)
-  artifact IO, collection reads, document inspection, corpus retrieval, and row
-  projection orchestration
 - [`../../../infra/persistence/postgres/comparison_repository.py`](../../../infra/persistence/postgres/comparison_repository.py)
-  build-versioned PostgreSQL authority for semantic records and ordered lineage
-- [`../../../controllers/core/comparisons.py`](../../../controllers/core/comparisons.py)
-  collection-facing comparison row routes
-- [`../../../controllers/core/documents.py`](../../../controllers/core/documents.py)
-  document-first comparison-semantic drilldown route
-- [`../../../controllers/core/comparable_results.py`](../../../controllers/core/comparable_results.py)
-  corpus comparable-result routes
+  retained storage adapter used by offline evaluation and export tooling
+- [`../../../application/derived/core_fact_projection.py`](../../../application/derived/core_fact_projection.py)
+  retained legacy projection used by extraction-trace export tooling
 
 ## Current Contract Notes
 
-- public API authority remains [`../../specs/api.md`](../../specs/api.md)
-- workspace and readiness semantics use repository-backed `comparable_results`
-  plus `collection_comparable_results` as the comparison-semantic readiness basis
-- `comparison_rows` is never stored; `ComparisonService` regenerates it from
-  `ComparisonFactSet`
-- default semantic reads follow the active successful collection build, while
-  explicit build reads remain available for build processing and diagnostics
-- no SQLite comparison read, fallback, or dual write remains
-- graph and report semantics must continue to consume Core artifacts without
-  promoting row cache back into the semantic source of truth
+- public API authority is [`../../specs/api.md`](../../specs/api.md)
+- workspace readiness is based on Source documents, DocumentProfiles, and
+  Objective candidates
+- comparison records are not task artifacts or browser readiness signals
 
 ## Remaining Guardrails
 
-- do not reintroduce row-first semantic assembly
-- do not add collection identity to the base comparable-result object
-- do not let downstream readers become private semantic builders
-- keep architecture pages as current truth; use Git history for rollout
-  archaeology
+- do not reintroduce retired product routes or browser clients
+- do not rebuild Findings from comparison records
+- keep offline evaluation ownership isolated from the product read path
 
 ## Related Docs
 

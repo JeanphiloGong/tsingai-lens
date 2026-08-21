@@ -7,9 +7,6 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 
-from application.core.comparison_service import (
-    ComparisonRowsNotReadyError,
-)
 from application.core.document_profiles.service import (
     DocumentContentNotReadyError,
     DocumentNotFoundError,
@@ -25,7 +22,6 @@ from application.source.document_markdown_service import (
     SourceDocumentNotFoundError,
 )
 from controllers.schemas.core.documents import (
-    DocumentComparisonSemanticListResponse,
     DocumentContentResponse,
     DocumentMarkdownResponse,
     DocumentProfileItemResponse,
@@ -55,16 +51,6 @@ def _document_markdown_not_ready_detail(collection_id: str) -> dict[str, str]:
     return {
         "code": "document_markdown_not_ready",
         "message": "The collection does not have parsed Markdown content yet. Finish indexing first.",
-        "collection_id": collection_id,
-    }
-
-
-def _document_comparison_semantics_not_ready_detail(
-    collection_id: str,
-) -> dict[str, str]:
-    return {
-        "code": "document_comparison_semantics_not_ready",
-        "message": "The collection does not have document comparison semantics yet. Finish indexing first.",
         "collection_id": collection_id,
     }
 
@@ -311,7 +297,6 @@ async def get_collection_document_source(
         headers={"content-disposition": content_disposition},
     )
 
-
 @router.get(
     "/{collection_id}/documents/{document_id}/figures/{figure_id}/image",
     summary="Stream an extracted figure image for one parsed document",
@@ -358,60 +343,3 @@ async def get_collection_document_figure_image(
         media_type=media_type,
         headers={"content-disposition": content_disposition},
     )
-
-
-@router.get(
-    "/{collection_id}/documents/{document_id}/comparison-semantics",
-    response_model=DocumentComparisonSemanticListResponse,
-    summary="读取 collection 内单个文档的 comparison semantic drilldown",
-)
-async def get_collection_document_comparison_semantics(
-    collection_id: str,
-    document_id: str,
-    request: Request,
-    include_row_projections: Annotated[
-        bool,
-        Query(description="是否附带按需生成的 row projection"),
-    ] = False,
-    include_grouped_projections: Annotated[
-        bool,
-        Query(description="是否附带 variant dossier/result series grouped projection"),
-    ] = False,
-) -> DocumentComparisonSemanticListResponse:
-    comparison_service = request.app.state.comparison_service
-    document_profile_service = request.app.state.document_profile_service
-    try:
-        payload = comparison_service.inspect_document_comparison_semantics(
-            collection_id,
-            document_id,
-            include_row_projections=include_row_projections,
-            include_grouped_projections=include_grouped_projections,
-        )
-        if payload["count"] == 0:
-            document_profile_service.get_document_profile(collection_id, document_id)
-    except DocumentNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "document_not_found",
-                "message": str(exc),
-                "collection_id": exc.collection_id,
-                "document_id": exc.document_id,
-            },
-        ) from exc
-    except DocumentProfilesNotReadyError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=_document_profiles_not_ready_detail(exc.collection_id),
-        ) from exc
-    except ComparisonRowsNotReadyError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=_document_comparison_semantics_not_ready_detail(exc.collection_id),
-        ) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    payload["document_id"] = document_id
-    payload.pop("source_document_id", None)
-    return DocumentComparisonSemanticListResponse(**payload)

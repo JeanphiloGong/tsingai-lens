@@ -6,8 +6,6 @@ from uuid import uuid4
 
 from domain.ports import (
     BuildRepository,
-    ComparisonRepository,
-    PaperFactRepository,
     SourceArtifactRepository,
 )
 from domain.source import ArtifactStatusRecord, ArtifactVersionRecord
@@ -19,79 +17,6 @@ def _now_iso() -> str:
 
 _ARTIFACT_FIELDS = (
     ("documents", "documents_generated", "documents_ready", None),
-    (
-        "document_profiles",
-        "document_profiles_generated",
-        "document_profiles_ready",
-        None,
-    ),
-    (
-        "evidence_anchors",
-        "evidence_anchors_generated",
-        "evidence_anchors_ready",
-        None,
-    ),
-    ("method_facts", "method_facts_generated", "method_facts_ready", None),
-    (
-        "evidence_cards",
-        "evidence_cards_generated",
-        "evidence_cards_ready",
-        None,
-    ),
-    (
-        "characterization_observations",
-        "characterization_observations_generated",
-        "characterization_observations_ready",
-        None,
-    ),
-    (
-        "structure_features",
-        "structure_features_generated",
-        "structure_features_ready",
-        None,
-    ),
-    (
-        "test_conditions",
-        "test_conditions_generated",
-        "test_conditions_ready",
-        None,
-    ),
-    (
-        "baseline_references",
-        "baseline_references_generated",
-        "baseline_references_ready",
-        None,
-    ),
-    (
-        "sample_variants",
-        "sample_variants_generated",
-        "sample_variants_ready",
-        None,
-    ),
-    (
-        "measurement_results",
-        "measurement_results_generated",
-        "measurement_results_ready",
-        None,
-    ),
-    (
-        "comparable_results",
-        "comparable_results_generated",
-        "comparable_results_ready",
-        None,
-    ),
-    (
-        "collection_comparable_results",
-        "collection_comparable_results_generated",
-        "collection_comparable_results_ready",
-        "collection_comparable_results_stale",
-    ),
-    (
-        "comparison_rows",
-        "comparison_rows_generated",
-        "comparison_rows_ready",
-        "comparison_rows_stale",
-    ),
     ("blocks", "blocks_generated", "blocks_ready", None),
     ("figures", "figures_generated", "figures_ready", None),
     ("table_rows", "table_rows_generated", "table_rows_ready", None),
@@ -106,13 +31,9 @@ class ArtifactRegistryService:
         self,
         repository: BuildRepository,
         source_artifact_repository: SourceArtifactRepository,
-        paper_fact_repository: PaperFactRepository,
-        comparison_repository: ComparisonRepository,
     ) -> None:
         self.repository = repository
         self.source_artifact_repository = source_artifact_repository
-        self.paper_fact_repository = paper_fact_repository
-        self.comparison_repository = comparison_repository
 
     def build_registry(
         self,
@@ -132,64 +53,12 @@ class ArtifactRegistryService:
                 collection_id
             )
         )
-        paper_facts = self.paper_fact_repository.read(
-            collection_id,
-            build_id=build_id,
-        )
-        comparison_facts = self.comparison_repository.read(
-            collection_id,
-            build_id=build_id,
-        )
-        evidence_cards_generated = paper_facts.paper_facts_generated
-        evidence_cards_ready = paper_facts.evidence_cards_ready
-        comparison_rows_ready = bool(
-            comparison_facts.comparable_results
-            and any(
-                result.included
-                for result in comparison_facts.collection_comparable_results
-            )
-        )
         source_artifacts_generated = bool(source_documents)
         payload = ArtifactStatusRecord.build(
             collection_id=collection_id,
             output_path=str(base_dir),
             documents_generated=bool(source_documents),
             documents_ready=bool(source_documents),
-            document_profiles_generated=bool(paper_facts.document_profiles),
-            document_profiles_ready=bool(paper_facts.document_profiles),
-            evidence_anchors_generated=paper_facts.paper_facts_generated,
-            evidence_anchors_ready=bool(paper_facts.evidence_anchors),
-            method_facts_generated=paper_facts.paper_facts_generated,
-            method_facts_ready=bool(paper_facts.method_facts),
-            evidence_cards_generated=evidence_cards_generated,
-            evidence_cards_ready=evidence_cards_ready,
-            characterization_observations_generated=paper_facts.paper_facts_generated,
-            characterization_observations_ready=bool(
-                paper_facts.characterization_observations
-            ),
-            structure_features_generated=paper_facts.paper_facts_generated,
-            structure_features_ready=bool(paper_facts.structure_features),
-            test_conditions_generated=paper_facts.paper_facts_generated,
-            test_conditions_ready=bool(paper_facts.test_conditions),
-            baseline_references_generated=paper_facts.paper_facts_generated,
-            baseline_references_ready=bool(paper_facts.baseline_references),
-            sample_variants_generated=paper_facts.paper_facts_generated,
-            sample_variants_ready=bool(paper_facts.sample_variants),
-            measurement_results_generated=paper_facts.paper_facts_generated,
-            measurement_results_ready=bool(paper_facts.measurement_results),
-            comparable_results_generated=comparison_facts.comparison_artifacts_generated,
-            comparable_results_ready=bool(comparison_facts.comparable_results),
-            collection_comparable_results_generated=(
-                comparison_facts.comparison_artifacts_generated
-            ),
-            collection_comparable_results_ready=bool(
-                comparison_facts.collection_comparable_results
-            ),
-            collection_comparable_results_stale=False,
-            comparison_rows_generated=comparison_facts.comparison_artifacts_generated,
-            comparison_rows_ready=comparison_rows_ready,
-            comparison_rows_stale=False,
-            graph_stale=False,
             blocks_generated=source_artifacts_generated,
             blocks_ready=any(document.blocks for document in source_documents),
             figures_generated=source_artifacts_generated,

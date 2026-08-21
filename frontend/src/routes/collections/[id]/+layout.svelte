@@ -40,23 +40,27 @@
 	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveDocumentCount } : null;
 	$: documentCount = effectiveDocumentCount;
 	$: storeReadinessState = readinessFromCollectionStatus(storeCollection?.status);
+	$: workspaceUpdatedAt =
+		workspace?.latest_task?.updated_at ||
+		workspace?.collection.updated_at ||
+		workspace?.artifacts.updated_at ||
+		'';
+	$: storeHasNewerWorkspaceState = isLaterTimestamp(
+		storeCollection?.updated_at,
+		workspaceUpdatedAt
+	);
 	$: currentPath = $page.url.pathname;
 	$: isOverviewRoute = currentPath === `/collections/${collectionId}`;
 	$: isAssistantRoute = currentPath.startsWith(`/collections/${collectionId}/assistant`);
-	$: readinessState = stateWorkspace
-		? getOverviewReadinessState(stateWorkspace)
-		: storeReadinessState;
+	$: readinessState =
+		stateWorkspace && !(storeHasNewerWorkspaceState && storeReadinessState)
+			? getOverviewReadinessState(stateWorkspace)
+			: storeReadinessState;
 	$: statusLabel = readinessState
 		? $t(`overview.readinessLabels.${readinessState}`)
 		: formatStatus(collection?.status);
 	$: statusTone = readinessState ?? 'pending';
 	$: updatedAt = collection?.updated_at || workspace?.artifacts.updated_at || '';
-	$: evidenceHref = workspace?.links.evidence ?? `/collections/${collectionId}/evidence`;
-	$: moreActive =
-		$page.url.pathname.startsWith(`/collections/${collectionId}/materials`) ||
-		$page.url.pathname.startsWith(`/collections/${collectionId}/comparisons`) ||
-		$page.url.pathname.startsWith(`/collections/${collectionId}/evidence`) ||
-		$page.url.pathname.startsWith(`/collections/${collectionId}/results`);
 	$: downstreamUnlocked = readinessState === 'ready';
 	$: lockReason = buildLockReason(readinessState);
 	$: readinessKnown = Boolean(readinessState);
@@ -103,13 +107,24 @@
 		if (['idle', 'pending', 'uploaded', 'ready_to_process'].includes(normalized)) {
 			return 'ready_to_process';
 		}
-		if (['ready', 'complete', 'completed', 'document_profiled', 'graph_ready'].includes(normalized)) {
+		if (
+			['ready', 'complete', 'completed', 'document_profiled', 'graph_ready'].includes(normalized)
+		) {
 			return 'ready';
 		}
 		if (['failed', 'error', 'attention_required'].includes(normalized)) {
 			return 'failed';
 		}
 		return null;
+	}
+
+	function isLaterTimestamp(candidate?: string | null, current?: string | null) {
+		if (!candidate) return false;
+		if (!current) return false;
+		const candidateTime = Date.parse(candidate);
+		const currentTime = Date.parse(current);
+		if (Number.isNaN(candidateTime) || Number.isNaN(currentTime)) return candidate > current;
+		return candidateTime > currentTime;
 	}
 
 	function buildLockReason(state: typeof readinessState) {
@@ -162,13 +177,6 @@
 		<p class="collection-eyebrow">{$t('collection.eyebrow')}</p>
 		<div class="collection-title-row">
 			<h1>{collectionName || $t('collection.unknownName')}</h1>
-			<button
-				class="icon-button icon-button--subtle"
-				type="button"
-				aria-label={$t('collection.editName')}
-			>
-				<span class="edit-icon" aria-hidden="true"></span>
-			</button>
 		</div>
 		<p class="collection-subtitle">
 			{collection?.description || $t('collection.defaultSubtitle')}
@@ -189,13 +197,6 @@
 		>
 			{deleteLoading ? $t('collection.deleting') : $t('collection.delete')}
 		</button>
-		<button
-			class="icon-button icon-button--subtle"
-			type="button"
-			aria-label={$t('collection.moreActions')}
-		>
-			<span aria-hidden="true">...</span>
-		</button>
 	</div>
 </section>
 
@@ -211,12 +212,6 @@
 		{$t('collection.tabs.overview')}
 	</a>
 	<a
-		href={`/collections/${collectionId}/assistant`}
-		class={tabClass(`/collections/${collectionId}/assistant`)}
-	>
-		{$t('collection.tabs.assistant')}
-	</a>
-	<a
 		href={resolve('/collections/[id]/objectives', { id: collectionId })}
 		class={`${tabClass(`/collections/${collectionId}/objectives`)} ${downstreamUnlocked ? '' : 'locked'}`}
 		aria-disabled={downstreamUnlocked ? undefined : 'true'}
@@ -225,6 +220,26 @@
 		on:click={handleLockedTabClick}
 	>
 		{$t('collection.tabs.objectives')}
+	</a>
+	<a
+		href={`/collections/${collectionId}/comparisons`}
+		class={`${tabClass(`/collections/${collectionId}/comparisons`)} ${downstreamUnlocked ? '' : 'locked'}`}
+		aria-disabled={downstreamUnlocked ? undefined : 'true'}
+		tabindex={downstreamUnlocked ? undefined : -1}
+		title={downstreamUnlocked ? undefined : lockReason}
+		on:click={handleLockedTabClick}
+	>
+		{$t('collection.tabs.comparisons')}
+	</a>
+	<a
+		href={resolve('/collections/[id]/graph', { id: collectionId })}
+		class={`${tabClass(`/collections/${collectionId}/graph`)} ${downstreamUnlocked ? '' : 'locked'}`}
+		aria-disabled={downstreamUnlocked ? undefined : 'true'}
+		tabindex={downstreamUnlocked ? undefined : -1}
+		title={downstreamUnlocked ? undefined : lockReason}
+		on:click={handleLockedTabClick}
+	>
+		{$t('collection.tabs.graph')}
 	</a>
 	<a
 		href={`/collections/${collectionId}/documents`}
@@ -237,60 +252,11 @@
 		{$t('collection.tabs.papers')}
 	</a>
 	<a
-		href={`/collections/${collectionId}/graph`}
-		class={`${tabClass(`/collections/${collectionId}/graph`)} ${downstreamUnlocked ? '' : 'locked'}`}
-		aria-disabled={downstreamUnlocked ? undefined : 'true'}
-		tabindex={downstreamUnlocked ? undefined : -1}
-		title={downstreamUnlocked ? undefined : lockReason}
-		on:click={handleLockedTabClick}
+		href={`/collections/${collectionId}/assistant`}
+		class={tabClass(`/collections/${collectionId}/assistant`)}
 	>
-		{$t('collection.tabs.graph')}
+		{$t('collection.tabs.assistant')}
 	</a>
-	<details class="collection-tabs__more" class:active={moreActive}>
-		<summary>{$t('collection.moreLabel')}</summary>
-		<div class="collection-tabs__menu">
-			<a
-				href={`/collections/${collectionId}/materials`}
-				class={`${tabClass(`/collections/${collectionId}/materials`)} ${downstreamUnlocked ? '' : 'locked'}`}
-				aria-disabled={downstreamUnlocked ? undefined : 'true'}
-				tabindex={downstreamUnlocked ? undefined : -1}
-				title={downstreamUnlocked ? undefined : lockReason}
-				on:click={handleLockedTabClick}
-			>
-				{$t('collection.tabs.materials')}
-			</a>
-			<a
-				href={`/collections/${collectionId}/comparisons`}
-				class={`${tabClass(`/collections/${collectionId}/comparisons`)} ${downstreamUnlocked ? '' : 'locked'}`}
-				aria-disabled={downstreamUnlocked ? undefined : 'true'}
-				tabindex={downstreamUnlocked ? undefined : -1}
-				title={downstreamUnlocked ? undefined : lockReason}
-				on:click={handleLockedTabClick}
-			>
-				{$t('collection.tabs.allComparisons')}
-			</a>
-			<a
-				href={evidenceHref}
-				class={`${tabClass(`/collections/${collectionId}/evidence`)} ${downstreamUnlocked ? '' : 'locked'}`}
-				aria-disabled={downstreamUnlocked ? undefined : 'true'}
-				tabindex={downstreamUnlocked ? undefined : -1}
-				title={downstreamUnlocked ? undefined : lockReason}
-				on:click={handleLockedTabClick}
-			>
-				{$t('collection.tabs.evidence')}
-			</a>
-			<a
-				href={`/collections/${collectionId}/results`}
-				class={`${tabClass(`/collections/${collectionId}/results`)} ${downstreamUnlocked ? '' : 'locked'}`}
-				aria-disabled={downstreamUnlocked ? undefined : 'true'}
-				tabindex={downstreamUnlocked ? undefined : -1}
-				title={downstreamUnlocked ? undefined : lockReason}
-				on:click={handleLockedTabClick}
-			>
-				{$t('collection.tabs.extractedFacts')}
-			</a>
-		</div>
-	</details>
 </nav>
 
 <div class="collection-panel">

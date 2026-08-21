@@ -27,6 +27,99 @@ from tests.support.research_objective_service import (
 )
 
 
+def test_theme_objective_keeps_exact_interventions_in_separate_result_sets():
+    objective = _research_objective(
+        {
+            "objective_id": "obj-thermal-elongation",
+            "question": (
+                "How does thermal post-processing condition affect elongation?"
+            ),
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["thermal post-processing condition"],
+            "outcomes": ["elongation"],
+        }
+    )
+
+    def evidence(
+        *,
+        evidence_id: str,
+        document_id: str,
+        factor: str,
+        baseline: int,
+        target: int,
+    ) -> ObjectiveEvidence:
+        return ObjectiveEvidence.from_mapping(
+            {
+                "collection_id": objective.collection_id,
+                "objective_id": objective.objective_id,
+                "analysis_version": 1,
+                "evidence_id": evidence_id,
+                "document_id": document_id,
+                "source_kind": "table_row",
+                "source_ref": f"{document_id}-result-row",
+                "source_excerpt": (
+                    f"{factor} changed from {baseline} C to {target} C and "
+                    "elongation increased."
+                ),
+                "evidence_role": "direct_result",
+                "selection_status": "extracted",
+                "changed_variables": [
+                    {
+                        "name": factor,
+                        "baseline_value": baseline,
+                        "target_value": target,
+                        "unit": "C",
+                    }
+                ],
+                "comparison": {
+                    "baseline_label": f"{baseline} C",
+                    "target_label": f"{target} C",
+                    "axis_names": [factor],
+                    "comparable": True,
+                },
+                "reported_result": {
+                    "outcome": "elongation",
+                    "value": 12.0,
+                    "unit": "%",
+                    "direction": "increase",
+                    "result_text": "Elongation increased.",
+                },
+                "attribution_scope": "isolated_effect",
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    evidence_records = (
+        evidence(
+            evidence_id="evidence-annealing",
+            document_id="paper-annealing",
+            factor="annealing temperature",
+            baseline=700,
+            target=850,
+        ),
+        evidence(
+            evidence_id="evidence-hip",
+            document_id="paper-hip",
+            factor="HIP temperature",
+            baseline=850,
+            target=920,
+        ),
+    )
+    service = finding_synthesis.FindingSynthesisService()
+
+    assert all(
+        service.is_comparable_result_evidence(objective, item)
+        for item in evidence_records
+    )
+    result_sets = service._result_sets(objective, evidence_records)
+    assert len(result_sets) == 2
+    assert {tuple(item["factors"]) for item in result_sets} == {
+        ("annealing temperature",),
+        ("HIP temperature",),
+    }
+
+
 def test_objective_evidence_document_state_is_typed_and_document_scoped():
     class RecordingExtractor:
         def __init__(self) -> None:
@@ -2752,9 +2845,9 @@ def test_real_hip_result_uses_condition_registry_when_model_omits_comparison():
 
     bound = paper_experiment._bind_objective_result_process_context(
         (
-            condition("800 SC", "12", 3),
-            condition("800 FC", "100", 4),
-            condition("800 RQ", "2000", 5),
+            condition("800SC", "12", 3),
+            condition("800FC", "100", 4),
+            condition("800RQ", "2000", 5),
             result,
         )
     )[-1]
@@ -2770,8 +2863,8 @@ def test_real_hip_result_uses_condition_registry_when_model_omits_comparison():
     ]
     assert bound.comparison is not None
     assert bound.comparison.to_record() == {
-        "baseline_label": "800 SC",
-        "target_label": "800 RQ",
+        "baseline_label": "800SC",
+        "target_label": "800RQ",
         "axis_names": ["cooling rate"],
         "comparable": True,
         "incomparability_reasons": [],
@@ -2852,7 +2945,7 @@ def test_condition_registry_does_not_bind_a_conflicting_condition_label():
     bound = paper_experiment._bind_objective_result_process_context(
         (
             condition("800 SC", "12", "condition-source-a"),
-            condition("800 SC", "20", "condition-source-b"),
+            condition("800SC", "20", "condition-source-b"),
             condition("800 RQ", "2000", "condition-source-rq"),
             result,
         )
@@ -2928,3 +3021,195 @@ def test_condition_registry_does_not_bind_labels_from_a_remote_claim():
 
     assert bound.comparison is None
     assert bound.attribution_scope == "descriptive_only"
+
+
+def _reported_build_orientation_fact(
+    evidence_id: str,
+    source_ref: str,
+    scientific_context: dict[str, Any],
+    *,
+    result_value: Any = 1006.7,
+) -> ExtractedEvidenceDraft:
+    return ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": evidence_id,
+            "objective_id": "obj-build-orientation-uts",
+            "document_id": "paper-ti64",
+            "source_kind": "text_window",
+            "source_ref": source_ref,
+            "evidence_role": "direct_result",
+            "changed_variables": [
+                {
+                    "name": "build orientation",
+                    "baseline_value": "horizontal",
+                    "target_value": "vertical",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "horizontal",
+                "target_label": "vertical",
+                "axis_names": ["build orientation"],
+                "comparable": True,
+            },
+            "reported_result": {
+                "outcome": "ultimate tensile strength",
+                "value": result_value,
+                "unit": "MPa",
+                "direction": "increase",
+                "result_text": (
+                    "Ultimate tensile strength increased from 961.3 MPa "
+                    "for horizontal samples to 1006.7 MPa for vertical samples."
+                ),
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": scientific_context,
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": source_ref,
+                }
+            ],
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+
+def test_paper_reconstruction_merges_duplicate_reports_of_one_scientific_fact():
+    reconstructed = paper_experiment.reconstruct_paper_experiments(
+        collection_id="collection-ti64",
+        source_facts=(
+            _reported_build_orientation_fact("evidence-abstract", "abstract", {}),
+            _reported_build_orientation_fact(
+                "evidence-results",
+                "results",
+                {
+                    "material": [
+                        {"name": "material", "value": "Ti-6Al-4V"}
+                    ],
+                    "process": [
+                        {"name": "condition", "value": "as-fabricated"}
+                    ],
+                },
+            ),
+        ),
+        paper_skims=(),
+        objectives=(),
+    )
+
+    assert len(reconstructed) == 1
+    fact = reconstructed[0]
+    assert fact.evidence_id == "evidence-results"
+    assert fact.scientific_context.to_record() == {
+        "material": [
+            {"name": "material", "value": "Ti-6Al-4V", "unit": None}
+        ],
+        "sample": [],
+        "process": [
+            {"name": "condition", "value": "as-fabricated", "unit": None}
+        ],
+        "test": [],
+    }
+    assert {item["source_ref"] for item in fact.source_refs} == {
+        "abstract",
+        "results",
+    }
+
+
+def test_paper_reconstruction_does_not_bridge_conflicting_context_with_unknown():
+    ambiguous = paper_experiment.reconstruct_paper_experiments(
+        collection_id="collection-ti64",
+        source_facts=(
+            _reported_build_orientation_fact(
+                "evidence-as-fabricated",
+                "results-as-fabricated",
+                {
+                    "process": [
+                        {"name": "condition", "value": "as-fabricated"}
+                    ]
+                },
+            ),
+            _reported_build_orientation_fact(
+                "evidence-hip",
+                "results-hip",
+                {
+                    "process": [
+                        {"name": "condition", "value": "HIP-treated"}
+                    ]
+                },
+            ),
+            _reported_build_orientation_fact(
+                "evidence-unspecified",
+                "abstract",
+                {},
+            ),
+        ),
+        paper_skims=(),
+        objectives=(),
+    )
+
+    assert {item.evidence_id for item in ambiguous} == {
+        "evidence-as-fabricated",
+        "evidence-hip",
+        "evidence-unspecified",
+    }
+
+
+def test_paper_reconstruction_requires_one_context_to_enrich_the_other():
+    complementary = paper_experiment.reconstruct_paper_experiments(
+        collection_id="collection-ti64",
+        source_facts=(
+            _reported_build_orientation_fact(
+                "evidence-material-only",
+                "material-source",
+                {
+                    "material": [
+                        {"name": "material", "value": "Ti-6Al-4V"}
+                    ]
+                },
+            ),
+            _reported_build_orientation_fact(
+                "evidence-condition-only",
+                "condition-source",
+                {
+                    "process": [
+                        {"name": "condition", "value": "as-fabricated"}
+                    ]
+                },
+            ),
+        ),
+        paper_skims=(),
+        objectives=(),
+    )
+
+    assert {item.evidence_id for item in complementary} == {
+        "evidence-material-only",
+        "evidence-condition-only",
+    }
+
+
+def test_paper_reconstruction_preserves_distinct_reported_values():
+    distinct_values = paper_experiment.reconstruct_paper_experiments(
+        collection_id="collection-ti64",
+        source_facts=(
+            _reported_build_orientation_fact(
+                "evidence-value-1",
+                "value-source-1",
+                {},
+                result_value="1.0",
+            ),
+            _reported_build_orientation_fact(
+                "evidence-value-10",
+                "value-source-10",
+                {},
+                result_value="10",
+            ),
+        ),
+        paper_skims=(),
+        objectives=(),
+    )
+
+    assert {item.evidence_id for item in distinct_values} == {
+        "evidence-value-1",
+        "evidence-value-10",
+    }

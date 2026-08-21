@@ -17,56 +17,56 @@ const {
 	fetchCollectionMock,
 	fetchCollectionsMock,
 	fetchWorkspaceMock
-} =
-	vi.hoisted(() => {
-		const pageSubscribers = new Set<(value: CollectionLayoutPageState) => void>();
-		const collectionSubscribers = new Set<(value: unknown[]) => void>();
-		let currentPage: CollectionLayoutPageState = {
-			params: { id: 'col_123' },
-			url: new URL('http://localhost/collections/col_123')
-		};
-		const collectionItems = [
-			{
-				id: 'col_123',
-				name: 'Battery papers',
-				description: 'Objective-first collection',
-				status: 'ready',
-				paper_count: 2,
-				updated_at: '2026-01-02T00:00:00Z'
-			}
-		];
-		function emitCollections() {
-			for (const run of collectionSubscribers) run(collectionItems);
+} = vi.hoisted(() => {
+	const pageSubscribers = new Set<(value: CollectionLayoutPageState) => void>();
+	const collectionSubscribers = new Set<(value: unknown[]) => void>();
+	let currentPage: CollectionLayoutPageState = {
+		params: { id: 'col_123' },
+		url: new URL('http://localhost/collections/col_123')
+	};
+	const collectionItems = [
+		{
+			id: 'col_123',
+			name: 'Battery papers',
+			description: 'Objective-first collection',
+			status: 'ready',
+			paper_count: 2,
+			updated_at: '2026-01-02T00:00:00Z'
 		}
+	];
+	function emitCollections() {
+		for (const run of collectionSubscribers) run(collectionItems);
+	}
 
-		return {
-			pageStore: {
-				subscribe(run: (value: CollectionLayoutPageState) => void) {
-					run(currentPage);
-					pageSubscribers.add(run);
-					return () => pageSubscribers.delete(run);
-				}
-			},
-			setPage(next: CollectionLayoutPageState) {
-				currentPage = next;
-				for (const run of pageSubscribers) run(next);
-			},
-			collectionStore: {
-				subscribe(run: (value: unknown[]) => void) {
-					run(collectionItems);
-					collectionSubscribers.add(run);
-					return () => collectionSubscribers.delete(run);
-				}
-			},
-			setCollectionStatus(status: string) {
-				collectionItems[0].status = status;
-				emitCollections();
-			},
-			fetchCollectionMock: vi.fn(),
-			fetchCollectionsMock: vi.fn(),
-			fetchWorkspaceMock: vi.fn()
-		};
-	});
+	return {
+		pageStore: {
+			subscribe(run: (value: CollectionLayoutPageState) => void) {
+				run(currentPage);
+				pageSubscribers.add(run);
+				return () => pageSubscribers.delete(run);
+			}
+		},
+		setPage(next: CollectionLayoutPageState) {
+			currentPage = next;
+			for (const run of pageSubscribers) run(next);
+		},
+		collectionStore: {
+			subscribe(run: (value: unknown[]) => void) {
+				run(collectionItems);
+				collectionSubscribers.add(run);
+				return () => collectionSubscribers.delete(run);
+			}
+		},
+		setCollectionStatus(status: string, updatedAt = collectionItems[0].updated_at) {
+			collectionItems[0].status = status;
+			collectionItems[0].updated_at = updatedAt;
+			emitCollections();
+		},
+		fetchCollectionMock: vi.fn(),
+		fetchCollectionsMock: vi.fn(),
+		fetchWorkspaceMock: vi.fn()
+	};
+});
 
 vi.mock('$app/stores', () => ({
 	page: pageStore
@@ -100,7 +100,7 @@ describe('collections/[id]/+layout.svelte', () => {
 			params: { id: 'col_123' },
 			url: new URL('http://localhost/collections/col_123')
 		});
-		setCollectionStatus('ready');
+		setCollectionStatus('ready', '2026-01-02T00:00:00Z');
 		fetchCollectionMock.mockReset();
 		fetchCollectionsMock.mockReset();
 		fetchWorkspaceMock.mockReset();
@@ -109,24 +109,27 @@ describe('collections/[id]/+layout.svelte', () => {
 		fetchWorkspaceMock.mockRejectedValue(new Error('workspace unavailable'));
 	});
 
-	it('places the material dossier entry under the More menu', async () => {
+	it('shows only the maintained collection workflow in primary navigation', async () => {
 		render(Layout);
 
 		const nav = browserPage.getByRole('navigation', { name: 'Collection navigation' });
 
-		await expect.element(nav.getByRole('link', { name: 'Objectives' })).toBeVisible();
-
 		const primaryTabs = Array.from(document.querySelectorAll('.collection-tabs > a')).map((tab) =>
 			tab.textContent?.trim()
 		);
-		expect(primaryTabs).not.toContain('Materials');
-		expect(
-			document.querySelector('.collection-tabs__menu a[href="/collections/col_123/materials"]')
-		).not.toBeNull();
-
-		await nav.getByText('More').click();
-
-		await expect.element(nav.getByRole('link', { name: 'Materials' })).toBeVisible();
+		expect(primaryTabs).toEqual([
+			'Overview',
+			'Objectives',
+			'Comparisons',
+			'Evidence Map',
+			'Papers',
+			'AI Copilot'
+		]);
+		for (const retiredLabel of ['More', 'Materials', 'Evidence Cards', 'Extracted Facts']) {
+			expect(nav.element().textContent).not.toContain(retiredLabel);
+		}
+		expect(document.querySelector('button[aria-label="Edit collection name"]')).toBeNull();
+		expect(document.querySelector('button[aria-label="More actions"]')).toBeNull();
 	});
 
 	it('locks downstream navigation until the collection is processed', async () => {
@@ -136,23 +139,16 @@ describe('collections/[id]/+layout.svelte', () => {
 
 		const nav = browserPage.getByRole('navigation', { name: 'Collection navigation' });
 		const objectives = nav.getByRole('link', { name: 'Objectives' });
+		const comparisons = nav.getByRole('link', { name: 'Comparisons' });
 		const researchAgent = nav.getByRole('link', { name: 'AI Copilot' });
 
 		await expect.element(objectives).toHaveAttribute('aria-disabled', 'true');
+		await expect.element(comparisons).toHaveAttribute('aria-disabled', 'true');
 		await expect.element(researchAgent).not.toHaveAttribute('aria-disabled');
-		await expect.element(researchAgent).toHaveAttribute(
-			'href',
-			'/collections/col_123/assistant'
-		);
-		expect(document.querySelector('a[href="/collections/col_123/objectives"]')?.className).toContain(
-			'locked'
-		);
-
-		await nav.getByText('More').click();
-		await expect.element(nav.getByRole('link', { name: 'Materials' })).toHaveAttribute(
-			'aria-disabled',
-			'true'
-		);
+		await expect.element(researchAgent).toHaveAttribute('href', '/collections/col_123/assistant');
+		expect(
+			document.querySelector('a[href="/collections/col_123/objectives"]')?.className
+		).toContain('locked');
 	});
 
 	it('keeps the Research Agent route open before objective discovery is ready', async () => {
@@ -177,10 +173,9 @@ describe('collections/[id]/+layout.svelte', () => {
 		render(Layout);
 
 		await expect.element(browserPage.getByText('Processing required')).toBeVisible();
-		await expect.element(browserPage.getByRole('link', { name: 'Back to workspace' })).toHaveAttribute(
-			'href',
-			'/collections/col_123'
-		);
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Back to workspace' }))
+			.toHaveAttribute('href', '/collections/col_123');
 	});
 
 	it('keeps published objective routes open when a later build failed', async () => {
@@ -194,12 +189,9 @@ describe('collections/[id]/+layout.svelte', () => {
 			file_count: 2,
 			workflow: {
 				documents: 'ready',
-				results: 'not_started',
-				evidence: 'not_started',
-				comparisons: 'not_started',
-				graph: 'not_started'
+				objectives: 'ready'
 			},
-			artifacts: { documents_ready: true, document_profiles_ready: true },
+			artifacts: { document_profiles_ready: true, objective_candidates_ready: true },
 			document_summary: { total_documents: 2 },
 			warnings: [],
 			latest_task: { status: 'partial_success' },
@@ -223,10 +215,7 @@ describe('collections/[id]/+layout.svelte', () => {
 			file_count: 2,
 			workflow: {
 				documents: 'not_started',
-				results: 'not_started',
-				evidence: 'not_started',
-				comparisons: 'not_started',
-				graph: 'not_started'
+				objectives: 'not_started'
 			},
 			artifacts: {},
 			document_summary: { total_documents: 2 },
@@ -252,10 +241,7 @@ describe('collections/[id]/+layout.svelte', () => {
 			file_count: 2,
 			workflow: {
 				documents: 'not_started',
-				results: 'not_started',
-				evidence: 'not_started',
-				comparisons: 'not_started',
-				graph: 'not_started'
+				objectives: 'not_started'
 			},
 			artifacts: {},
 			document_summary: { total_documents: 2 },
@@ -267,24 +253,58 @@ describe('collections/[id]/+layout.svelte', () => {
 		render(Layout);
 
 		await vi.waitFor(() => {
-			expect(document.querySelector('.collection-meta-row')?.textContent).toContain('Ready to process');
+			expect(document.querySelector('.collection-meta-row')?.textContent).toContain(
+				'Ready to process'
+			);
 		});
 	});
 
-	it('marks More active on material routes', async () => {
-		setPage({
-			params: { id: 'col_123' },
-			url: new URL('http://localhost/collections/col_123/materials')
+	it('uses a newer workspace-derived collection snapshot after processing finishes', async () => {
+		setCollectionStatus('uploaded', '2026-01-02T00:00:00Z');
+		fetchWorkspaceMock.mockResolvedValue({
+			collection: {
+				collection_id: 'col_123',
+				name: 'Battery papers',
+				status: 'uploaded',
+				updated_at: '2026-01-02T00:00:00Z'
+			},
+			file_count: 2,
+			workflow: {
+				documents: { status: 'not_started', detail: 'Document profiling is pending.' },
+				objectives: { status: 'not_started', detail: 'Objective discovery is pending.' }
+			},
+			artifacts: { updated_at: '2026-01-02T00:00:00Z' },
+			document_summary: { total_documents: 2 },
+			warnings: [],
+			latest_task: null,
+			links: {}
 		});
 
 		render(Layout);
 
-		const activeMore = document.querySelector('.collection-tabs__more.active summary');
-		const activeMaterialsLink = document.querySelector(
-			'a[href="/collections/col_123/materials"].active'
-		);
+		await vi.waitFor(() => {
+			expect(document.querySelector('.collection-meta-row')?.textContent).toContain(
+				'Ready to process'
+			);
+		});
 
-		expect(activeMore?.textContent?.trim()).toBe('More');
-		expect(activeMaterialsLink).not.toBeNull();
+		setCollectionStatus('ready', '2026-01-02T00:00:03Z');
+
+		await vi.waitFor(() => {
+			expect(document.querySelector('.collection-meta-row')?.textContent).toContain('Complete');
+		});
+	});
+
+	it('marks Comparisons active on the published findings route', async () => {
+		setPage({
+			params: { id: 'col_123' },
+			url: new URL('http://localhost/collections/col_123/comparisons')
+		});
+
+		render(Layout);
+
+		expect(
+			document.querySelector('a[href="/collections/col_123/comparisons"].active')
+		).not.toBeNull();
 	});
 });

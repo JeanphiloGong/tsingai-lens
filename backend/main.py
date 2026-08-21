@@ -19,7 +19,6 @@ from application.chat.capabilities import (
     ProposeObjectiveDraftsCapability,
     QueryPublishedFindingsCapability,
 )
-from application.core.comparison_service import ComparisonService
 from application.core.document_profiles.service import (
     DocumentProfileService,
 )
@@ -33,10 +32,6 @@ from application.core.objectives.objective_candidate_service import (
 from application.core.objectives.paper_skim_service import PaperSkimService
 from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
-)
-from application.core.paper_facts.service import PaperFactsService
-from application.core.research_view_aggregation_service import (
-    ResearchViewAggregationService,
 )
 from application.core.workspace_overview_service import WorkspaceService
 from application.evaluation import (
@@ -54,23 +49,16 @@ from config import DATA_DIR
 from controllers import auth
 from controllers.chat import sessions as chat_sessions
 from controllers.core import (
-    comparable_results,
-    comparisons,
     documents,
-    evidence,
     finding_review,
     research_objectives,
-    research_view,
-    results,
     workspace,
 )
-from controllers.derived import graph
 from controllers.goal import experiment_plans
 from controllers.goal import intake as goals
 from controllers.source import collections, references, tasks
 from domain.ports import (
     ChatRepository,
-    ComparisonRepository,
     ExperimentPlanRepository,
     FindingReviewRepository,
     ObjectiveRepository,
@@ -89,9 +77,6 @@ from infra.persistence.postgres.build_repository import PostgresBuildRepository
 from infra.persistence.postgres.chat_repository import PostgresChatRepository
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
-)
-from infra.persistence.postgres.comparison_repository import (
-    PostgresComparisonRepository,
 )
 from infra.persistence.postgres.finding_review_repository import (
     PostgresFindingReviewRepository,
@@ -141,7 +126,6 @@ def create_app(
     source_artifact_repository: SourceArtifactRepository | None = None,
     paper_fact_repository: PaperFactRepository | None = None,
     objective_repository: ObjectiveRepository | None = None,
-    comparison_repository: ComparisonRepository | None = None,
     finding_review_repository: (
         FindingReviewRepository | None
     ) = None,
@@ -161,7 +145,6 @@ def create_app(
                 or source_artifact_repository is None
                 or paper_fact_repository is None
                 or objective_repository is None
-                or comparison_repository is None
                 or finding_review_repository is None
                 or experiment_plan_repository is None
                 or (chat_session_service is None and chat_repository is None)
@@ -192,9 +175,6 @@ def create_app(
             active_objective_repository = (
                 objective_repository or PostgresObjectiveRepository(session_factory)
             )
-            active_comparison_repository = (
-                comparison_repository or PostgresComparisonRepository(session_factory)
-            )
             active_review_repository = (
                 finding_review_repository
                 or PostgresFindingReviewRepository(session_factory)
@@ -214,25 +194,11 @@ def create_app(
             artifact_registry_service = ArtifactRegistryService(
                 active_task_service.repository,
                 active_source_artifact_repository,
-                active_paper_fact_repository,
-                active_comparison_repository,
             )
             document_profile_service = DocumentProfileService(
                 collection_service=active_collection_service,
                 source_artifact_repository=active_source_artifact_repository,
                 paper_fact_repository=active_paper_fact_repository,
-            )
-            paper_facts_service = PaperFactsService(
-                collection_service=active_collection_service,
-                source_artifact_repository=active_source_artifact_repository,
-                paper_fact_repository=active_paper_fact_repository,
-                document_profile_service=document_profile_service,
-            )
-            comparison_service = ComparisonService(
-                collection_service=active_collection_service,
-                paper_fact_repository=active_paper_fact_repository,
-                comparison_repository=active_comparison_repository,
-                document_profile_service=document_profile_service,
             )
             finding_synthesis_service = FindingSynthesisService()
             finding_feedback_service = (
@@ -255,20 +221,13 @@ def create_app(
                 collection_service=active_collection_service,
                 task_service=active_task_service,
                 source_artifact_repository=active_source_artifact_repository,
-                paper_fact_repository=active_paper_fact_repository,
-                comparison_repository=active_comparison_repository,
+                objective_repository=active_objective_repository,
                 document_profile_service=document_profile_service,
-            )
-            research_view_service = ResearchViewAggregationService(
-                collection_service=active_collection_service,
-                paper_fact_repository=active_paper_fact_repository,
-                comparison_service=comparison_service,
             )
             application.state.collection_service = active_collection_service
             application.state.task_service = active_task_service
             application.state.paper_fact_repository = active_paper_fact_repository
             application.state.objective_repository = active_objective_repository
-            application.state.comparison_repository = active_comparison_repository
             application.state.finding_review_repository = active_review_repository
             application.state.finding_feedback_service = (
                 finding_feedback_service
@@ -284,11 +243,8 @@ def create_app(
                     source_artifact_repository=active_source_artifact_repository,
                 )
             )
-            application.state.paper_facts_service = paper_facts_service
-            application.state.comparison_service = comparison_service
             application.state.research_objective_service = research_objective_service
             application.state.workspace_service = workspace_service
-            application.state.research_view_service = research_view_service
             application.state.build_pipeline_service = CollectionBuildPipelineService(
                 collection_service=active_collection_service,
                 task_service=active_task_service,
@@ -344,7 +300,7 @@ def create_app(
 
     app = FastAPI(
         title="TsingAI-Lens API",
-        version="0.11.20",
+        version="0.12.0",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",
@@ -453,19 +409,13 @@ def create_app(
     app.include_router(goals.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(experiment_plans.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(chat_sessions.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(graph.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(tasks.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(workspace.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(evidence.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(research_objectives.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(
         finding_review.router, prefix=PUBLIC_API_V1_PREFIX
     )
-    app.include_router(research_view.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(comparisons.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(results.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(comparable_results.router, prefix=PUBLIC_API_V1_PREFIX)
     return app
 
 

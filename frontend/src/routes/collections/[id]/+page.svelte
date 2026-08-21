@@ -10,15 +10,7 @@
 		type CollectionFile
 	} from '../../_shared/files';
 	import { t } from '../../_shared/i18n';
-	import {
-		fetchCollectionObjectives,
-		fetchCollectionResearchView,
-		getResearchViewStateTone,
-		type CollectionAggregation,
-		type ObjectiveList,
-		type ResearchViewState,
-		type ResearchViewWarning
-	} from '../../_shared/researchView';
+	import { fetchCollectionObjectives, type ObjectiveList } from '../../_shared/researchView';
 	import {
 		createBuildTask,
 		getTask,
@@ -45,16 +37,7 @@
 		count: number;
 	};
 
-	type WarningSummary = {
-		key: string;
-		message: string;
-		scope: string;
-		count: number;
-	};
-
 	let workspace: WorkspaceOverview | null = null;
-	let researchView: CollectionAggregation | null = null;
-	let researchViewError = '';
 	let objectiveList: ObjectiveList | null = null;
 	let objectivesLoaded = false;
 	let loading = false;
@@ -82,16 +65,14 @@
 	$: stateWorkspace = workspace ? { ...workspace, file_count: effectiveFileCount } : null;
 	$: readinessState = getOverviewReadinessState(stateWorkspace);
 	$: noObjectiveCandidates =
-		readinessState === 'ready' &&
-		objectivesLoaded &&
-		(objectiveList?.objectives.length ?? 0) === 0;
-	$: canViewEvidence = ['ready', 'limited'].includes(
-		getWorkspaceSurfaceState(stateWorkspace, 'evidence')
-	);
+		readinessState === 'ready' && objectivesLoaded && (objectiveList?.objectives.length ?? 0) === 0;
 	$: hasActiveTask = isTaskActive(stateWorkspace?.latest_task);
 	$: uploadControlsDisabled = uploadLoading || hasActiveTask;
 	$: pipelineSteps = buildOverviewPipelineSteps(stateWorkspace);
-	$: paperCount = Math.max(stateWorkspace?.document_summary.total_documents ?? 0, effectiveFileCount);
+	$: paperCount = Math.max(
+		stateWorkspace?.document_summary.total_documents ?? 0,
+		effectiveFileCount
+	);
 	$: statusChecklistItems = [
 		{
 			label: $t('overview.cards.currentStatus.uploaded', { count: paperCount }),
@@ -99,19 +80,11 @@
 		},
 		{
 			label: $t('overview.cards.currentStatus.parsed'),
-			done: stepStatus(pipelineSteps, 'parse') === 'completed'
+			done: stepStatus(pipelineSteps, 'documents') === 'completed'
 		},
 		{
-			label: $t('overview.cards.currentStatus.evidence'),
-			done: stepStatus(pipelineSteps, 'evidence') === 'completed'
-		},
-		{
-			label: $t('overview.cards.currentStatus.comparison'),
-			done: stepStatus(pipelineSteps, 'comparisons') === 'completed'
-		},
-		{
-			label: $t('overview.cards.currentStatus.graph'),
-			done: stepStatus(pipelineSteps, 'graph') === 'completed'
+			label: $t('overview.cards.currentStatus.objectives'),
+			done: stepStatus(pipelineSteps, 'objectives') === 'completed'
 		}
 	];
 	$: showUploadPanel =
@@ -127,7 +100,7 @@
 		clearPoll();
 		objectiveList = null;
 		objectivesLoaded = false;
-		void Promise.all([loadWorkspace(), loadFiles(), loadResearchView(), loadObjectives()]);
+		void Promise.all([loadWorkspace(), loadFiles(), loadObjectives()]);
 	}
 
 	onDestroy(() => {
@@ -169,12 +142,7 @@
 			schedulePoll(task.task_id);
 		} else {
 			clearPoll();
-			await Promise.all([
-				loadWorkspace(false),
-				loadFiles(false),
-				loadResearchView(),
-				loadObjectives()
-			]);
+			await Promise.all([loadWorkspace(false), loadFiles(false), loadObjectives()]);
 			uploadResult = null;
 			actionStatus =
 				task.status === 'failed' || task.status === 'partial_success'
@@ -189,8 +157,13 @@
 		try {
 			const nextWorkspace = await fetchWorkspaceOverview(collectionId);
 			workspace = nextWorkspace;
+			const workspaceReadiness = getOverviewReadinessState(nextWorkspace);
 			collections.update((items) => [
-				nextWorkspace.collection,
+				{
+					...nextWorkspace.collection,
+					status: workspaceReadiness,
+					updated_at: nextWorkspace.latest_task?.updated_at || nextWorkspace.collection.updated_at
+				},
 				...items.filter((item) => item.id !== nextWorkspace.collection.id)
 			]);
 			const latestTask = workspace.latest_task;
@@ -204,16 +177,6 @@
 			workspace = null;
 		} finally {
 			loading = false;
-		}
-	}
-
-	async function loadResearchView() {
-		researchViewError = '';
-		try {
-			researchView = await fetchCollectionResearchView(collectionId);
-		} catch (err) {
-			researchView = null;
-			researchViewError = errorMessage(err);
 		}
 	}
 
@@ -242,7 +205,7 @@
 	}
 
 	async function refreshAll() {
-		await Promise.all([loadWorkspace(), loadFiles(), loadResearchView(), loadObjectives()]);
+		await Promise.all([loadWorkspace(), loadFiles(), loadObjectives()]);
 	}
 
 	function browseFiles() {
@@ -323,12 +286,7 @@
 			uploadResult = await uploadCollectionFiles(collectionId, selectedFiles);
 			selectedFiles = [];
 			if (fileInput) fileInput.value = '';
-			await Promise.all([
-				loadFiles(false),
-				loadWorkspace(false),
-				loadResearchView(),
-				loadObjectives()
-			]);
+			await Promise.all([loadFiles(false), loadWorkspace(false), loadObjectives()]);
 			actionStatus = $t('documents.uploadDone');
 		} catch (err) {
 			uploadError = errorMessage(err);
@@ -411,72 +369,6 @@
 		return $t('overview.actions.enterObjectives');
 	}
 
-	function primaryResearchHref() {
-		return resolve('/collections/[id]/objectives', { id: collectionId });
-	}
-
-	function researchStateLabel(state: ResearchViewState) {
-		return $t(`research.state.${state}`);
-	}
-
-	function summarizeWarnings(warnings: ResearchViewWarning[]): WarningSummary[] {
-		const summaries = new Map<string, WarningSummary>();
-		for (const warning of warnings) {
-			const message = warning.message.trim();
-			if (!message) continue;
-			const key = `${warning.scope}:${message}`;
-			const existing = summaries.get(key);
-			if (existing) {
-				existing.count += 1;
-			} else {
-				summaries.set(key, {
-					key,
-					message,
-					scope: warning.scope,
-					count: 1
-				});
-			}
-		}
-		return [...summaries.values()];
-	}
-
-	function overviewWarnings() {
-		const collectionWarnings = researchView?.warnings ?? [];
-		const rowWarnings = (researchView?.paper_coverage ?? []).flatMap((row) => row.primary_warnings);
-		return summarizeWarnings(collectionWarnings.length ? collectionWarnings : rowWarnings).slice(0, 5);
-	}
-
-	function warningSummaryLabel(summary: WarningSummary) {
-		if (summary.count <= 1) return summary.message;
-		if (summary.scope === 'paper') {
-			return $t('research.warningPaperCount', {
-				message: summary.message,
-				count: summary.count
-			});
-		}
-		return $t('research.warningOccurrenceCount', {
-			message: summary.message,
-			count: summary.count
-		});
-	}
-
-	function coverageSummary() {
-		const rows = researchView?.paper_coverage ?? [];
-		return { total: rows.length };
-	}
-
-	function formatResearchViewState(state: ResearchViewState) {
-		return researchStateLabel(state);
-	}
-
-	function researchListLabel(items: string[]) {
-		return items.length ? items.slice(0, 6).join(', ') : $t('research.emptyValue');
-	}
-
-	function evidenceHref() {
-		return stateWorkspace?.links.evidence ?? stateWorkspace?.links.documents ?? '#';
-	}
-
 	function surfaceStatus(surface: WorkspaceSurfaceKey): WorkspaceSurfaceState {
 		return getWorkspaceSurfaceState(stateWorkspace, surface);
 	}
@@ -487,7 +379,7 @@
 
 	function surfaceTone(surface: WorkspaceSurfaceKey) {
 		const status = surfaceStatus(surface);
-		if (status === 'ready' || status === 'limited') return 'ready';
+		if (status === 'ready') return 'ready';
 		if (status === 'processing') return 'processing';
 		if (status === 'failed') return 'failed';
 		return 'pending';
@@ -610,9 +502,6 @@
 						{readyPrimaryLabel()}
 						<span aria-hidden="true">-&gt;</span>
 					</a>
-					{#if canViewEvidence}
-						<a class="btn btn--ghost" href={evidenceHref()}>{$t('overview.actions.viewEvidence')}</a>
-					{/if}
 					<button class="btn btn--ghost" type="button" on:click={refreshAll}>
 						{$t('overview.actions.refreshStatus')}
 					</button>
@@ -650,97 +539,6 @@
 		{#if actionStatus}
 			<div class={`status ${actionStatusTone(actionStatus)}`} role="status">{actionStatus}</div>
 		{/if}
-
-		{#if researchView}
-			<section
-				class="overview-card research-overview-card"
-				aria-labelledby="research-overview-title"
-			>
-				<div class="overview-card__header">
-					<div>
-						<h2 id="research-overview-title">{$t('research.overview.title')}</h2>
-						<p>{$t('research.overview.body')}</p>
-					</div>
-					<span
-						class={`status-badge status-badge--${getResearchViewStateTone(researchView.state)}`}
-					>
-						{formatResearchViewState(researchView.state)}
-					</span>
-				</div>
-
-				<div class="research-metric-grid">
-					<div>
-						<span>{$t('research.overview.documents')}</span>
-						<strong>{coverageSummary().total || researchView.overview.document_count}</strong>
-					</div>
-					<div>
-						<span>{$t('research.overview.samples')}</span>
-						<strong>{researchView.overview.sample_count}</strong>
-					</div>
-					<div>
-						<span>{$t('research.overview.measurements')}</span>
-						<strong>{researchView.overview.measurement_count}</strong>
-					</div>
-					<div>
-						<span>{$t('research.overview.evidence')}</span>
-						<strong>{researchView.overview.evidence_count}</strong>
-					</div>
-				</div>
-
-				<div class="research-overview-grid">
-					<div>
-						<span>{$t('research.overview.materials')}</span>
-						<strong>{researchListLabel(researchView.overview.material_systems)}</strong>
-					</div>
-					<div>
-						<span>{$t('research.overview.processes')}</span>
-						<strong>{researchListLabel(researchView.overview.process_families)}</strong>
-					</div>
-					<div>
-						<span>{$t('research.overview.variables')}</span>
-						<strong>{researchListLabel(researchView.overview.variable_axes)}</strong>
-					</div>
-					<div>
-						<span>{$t('research.overview.properties')}</span>
-						<strong>{researchListLabel(researchView.overview.measured_properties)}</strong>
-					</div>
-				</div>
-
-				{#if overviewWarnings().length}
-					<div class="research-warning-list">
-						<strong>{$t('research.warnings')}</strong>
-						<ul>
-							{#each overviewWarnings() as warning}
-								<li>{warningSummaryLabel(warning)}</li>
-							{/each}
-						</ul>
-					</div>
-				{/if}
-
-				<div class="split-actions">
-					<a class="btn btn--primary btn--small" href={primaryResearchHref()}>
-						{$t('overview.actions.enterObjectives')}
-					</a>
-					<a class="btn btn--ghost btn--small" href={`/collections/${collectionId}/documents`}>
-						{$t('overview.actions.viewDocumentList')}
-					</a>
-				</div>
-			</section>
-		{:else if researchViewError && readinessState === 'ready'}
-			<section class="overview-card research-overview-card research-overview-card--pending">
-				<div class="overview-card__header">
-					<div>
-						<h2>{$t('research.overview.pendingTitle')}</h2>
-						<p>{$t('research.overview.pendingBody')}</p>
-					</div>
-					<span class="status-badge status-badge--processing">
-						{$t('research.state.partial')}
-					</span>
-				</div>
-				<div class="status" role="status">{researchViewError}</div>
-			</section>
-		{/if}
-
 		{#if showUploadPanel}
 			<section id="upload" class="overview-card overview-upload-card">
 				<div>
@@ -893,23 +691,19 @@
 				<h3>{trustCardTitle}</h3>
 				<p>{trustCardBody}</p>
 				<div class="trust-chip-row">
-					<span class={`trust-chip trust-chip--${surfaceTone('comparisons')}`}>
-						{$t('overview.cards.trust.comparison')}: {surfaceLabel('comparisons')}
-					</span>
-					<span class={`trust-chip trust-chip--${surfaceTone('evidence')}`}>
-						{$t('overview.cards.trust.evidence')}: {surfaceLabel('evidence')}
-					</span>
 					<span class={`trust-chip trust-chip--${surfaceTone('documents')}`}>
 						{$t('overview.cards.trust.documents')}: {surfaceLabel('documents')}
+					</span>
+					<span
+						class={`trust-chip ${objectivesLoaded ? 'trust-chip--ready' : 'trust-chip--pending'}`}
+					>
+						{$t('collection.tabs.objectives')}: {objectivesLoaded
+							? $t('overview.surfaceStates.ready')
+							: $t('overview.surfaceStates.processing')}
 					</span>
 				</div>
 				<div class="split-actions">
 					{#if readinessState === 'ready'}
-						{#if canViewEvidence}
-							<a class="btn btn--ghost btn--small" href={evidenceHref()}>
-								{$t('overview.actions.viewEvidence')}
-							</a>
-						{/if}
 						<a class="btn btn--primary btn--small" href={readyPrimaryHref()}>
 							{$t('overview.actions.enterObjectives')}
 						</a>
@@ -982,91 +776,3 @@
 		<div class="overview-footer-note">{$t('overview.footerNote')}</div>
 	</section>
 {/if}
-
-<style>
-	.research-overview-card {
-		display: grid;
-		gap: 18px;
-	}
-
-	.research-metric-grid,
-	.research-overview-grid {
-		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-		gap: 12px;
-	}
-
-	.research-metric-grid > div,
-	.research-overview-grid > div {
-		display: grid;
-		gap: 6px;
-		min-width: 0;
-		padding: 14px;
-		border: 1px solid var(--border-default);
-		border-radius: var(--radius-md);
-		background: var(--bg-subtle);
-	}
-
-	.research-metric-grid span,
-	.research-overview-grid span {
-		color: var(--text-secondary);
-		font-size: 12px;
-		font-weight: 700;
-		line-height: 18px;
-	}
-
-	.research-metric-grid strong,
-	.research-overview-grid strong {
-		min-width: 0;
-		overflow-wrap: anywhere;
-		color: var(--text-primary);
-		font-size: 15px;
-		line-height: 22px;
-	}
-
-	.research-metric-grid strong {
-		font-size: 24px;
-		line-height: 30px;
-	}
-
-	.research-warning-list {
-		display: grid;
-		gap: 8px;
-		padding: 14px;
-		border: 1px solid var(--warning-border);
-		border-radius: var(--radius-md);
-		background: var(--warning-bg);
-		color: var(--text-primary);
-	}
-
-	.research-warning-list strong {
-		font-size: 13px;
-		line-height: 18px;
-	}
-
-	.research-warning-list ul {
-		margin: 0;
-		padding-left: 18px;
-		color: var(--text-secondary);
-		font-size: 13px;
-		line-height: 20px;
-	}
-
-	.research-overview-card--pending {
-		border-style: dashed;
-	}
-
-	@media (max-width: 900px) {
-		.research-metric-grid,
-		.research-overview-grid {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-	}
-
-	@media (max-width: 560px) {
-		.research-metric-grid,
-		.research-overview-grid {
-			grid-template-columns: 1fr;
-		}
-	}
-</style>

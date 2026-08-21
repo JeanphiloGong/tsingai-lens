@@ -12,41 +12,39 @@ Lens v1 supports traceable cross-paper research comparison:
 
 ```text
 collection workspace
-  -> comparisons and results
-  -> research Objectives and Findings
-  -> exact document Evidence
+  -> research Objectives
+  -> published analysis and Findings
+  -> comparison overview
+  -> exact ObjectiveEvidence and document Source
   -> reviewed downstream assistant or experiment plan
 ```
 
-Comparison remains the primary collection analysis surface. Objective Findings
-provide the expert synthesis/review surface. Documents provide source
-verification. Graph and protocol are secondary.
+Objective analysis owns scientific synthesis. Comparisons is the collection
+overview of published Findings, not a second conclusion system. Documents own
+Source verification.
 
 ## Collection Navigation
 
 - `/collections/[id]`
   Workspace, files, task progress, warnings, and next action.
 - `/collections/[id]/comparisons`
-  Primary cross-paper comparison table.
+  Published cross-paper Findings grouped by Objective.
 - `/collections/[id]/documents`
   Paper inventory and source reading entry.
 - `/collections/[id]/objectives`
   Candidate/confirmed research Objectives and analysis lifecycle.
 - `/collections/[id]/objectives/[objective_id]`
   Finding review workspace.
-- `/collections/[id]/results/*`
-  Comparable-result drilldown.
-- `/collections/[id]/materials/*`
-  Material/sample projections.
 - `/collections/[id]/assistant`
   Collection-bound assistant grounded on reviewed published Findings.
 - `/collections/[id]/protocol/*`
   Conditional downstream protocol views.
-- `/collections/[id]/graph`
-  Secondary graph exploration.
 
-No standalone report, Markdown answer, or alternate Goal-result page is part of
-the target interface.
+No standalone collection-wide graph, material matrix, comparison-row result,
+Evidence-card, report, Markdown answer, or alternate Goal-result page is part of
+the target interface. A secondary Objective Evidence Map may project one
+published analysis for lineage inspection; it does not restore a separate
+Graph domain, persistence, or analysis contract.
 
 ## Workspace
 
@@ -63,20 +61,21 @@ Primary action order:
 1. upload when no files exist;
 2. monitor when a build is queued/running;
 3. retry when the latest build failed;
-4. open comparisons when comparison output exists;
-5. open documents when Source exists but semantic output is incomplete.
+4. open Objectives when candidate discovery is complete;
+5. open comparisons when a published Finding exists;
+6. open documents to inspect Source content.
 
 The workspace does not expose retired internal pipeline stages as product
 concepts.
 
-## Comparisons And Results
+## Comparisons
 
-The comparisons page is optimized for scanning material, process, property,
-baseline, test conditions, comparability, and warnings. A row opens canonical
-result detail; Evidence and document source are secondary audit actions.
-
-The result page preserves normalized values, conditions, provenance, and
-source links. It never reconstructs Objective Findings from comparison rows.
+The comparisons page reads confirmed Objectives and their published analysis
+versions. It displays only persisted Findings, grouped under the Objective that
+owns them. A Finding link opens the Objective review workspace, where the
+researcher can inspect its exact ObjectiveEvidence and Source. If no published
+Finding exists, the page directs the researcher to Objectives instead of
+offering a synthetic comparison build.
 
 ## Research Objectives
 
@@ -154,13 +153,6 @@ Findings and return visible source links. Saved assistant-generated experiment
 plans retain analysis version, Finding fingerprint, Evidence fingerprint, and
 Evidence IDs. Plans remain editable drafts and display stale source status when
 any underlying snapshot changes.
-
-## Graph
-
-The graph supports Objective, document, Evidence, comparison, material,
-property, test-condition, and baseline nodes. Default layout is layered.
-Selecting a node shows its canonical object/source links. The graph does not
-own scientific conclusions or analysis lifecycle.
 
 ## Shared Data Rules
 

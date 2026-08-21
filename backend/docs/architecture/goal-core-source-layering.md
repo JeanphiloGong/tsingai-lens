@@ -201,8 +201,9 @@ Readiness semantics remain Core-owned:
 - `document_profiles` is already a real backend artifact
 - indexing already runs Core stages before secondary derived surfaces
 - `application/goals/` now exists as a thin Goal Brief / Intake surface
-- `domain/goal/` owns the minimal collection-bound conversation model:
-  goal sessions, messages, answer source modes, and user-navigable source links
+- `application/chat/` and `domain/chat/` own the collection-bound Research
+  Agent trajectory: sessions, messages, typed capability calls, structured
+  results, approval decisions, and user-navigable resource references
 
 ### Still Missing Or Blurred
 

@@ -257,7 +257,7 @@ def test_research_objective_rejects_cross_objective_publication() -> None:
 
 
 def test_objective_analysis_lifecycle_and_progress_are_immutable() -> None:
-    queued = _analysis()
+    queued = _analysis(total_document_count=6)
     started_at = datetime(2026, 7, 22, tzinfo=timezone.utc)
     running = queued.start(started_at=started_at)
     progressed = running.update_progress(
@@ -305,6 +305,13 @@ def test_objective_analysis_rejects_invalid_document_progress() -> None:
             phase="routing",
             processed_document_count=0,
             total_document_count=2,
+        )
+
+    with pytest.raises(ValueError, match="cannot change total document count"):
+        _analysis(total_document_count=6).start().update_progress(
+            phase="framing",
+            processed_document_count=1,
+            total_document_count=7,
         )
 
 

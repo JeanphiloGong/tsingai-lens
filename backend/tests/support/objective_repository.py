@@ -133,7 +133,10 @@ class MemoryObjectiveRepository:
             pipeline_version=pipeline_version,
             model_name=model_name,
             prompt_versions=dict(prompt_versions),
-            total_document_count=len(objective.seed_document_ids),
+            total_document_count=(
+                len(self.read(collection_id, build_id=self.active_build_id).paper_skims)
+                or len(objective.seed_document_ids)
+            ),
             progress_message="Objective analysis is queued.",
             created_at=datetime.now(timezone.utc),
         )

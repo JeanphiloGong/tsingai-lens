@@ -206,6 +206,10 @@ scientific recall, relevance certainty, or systematic-review completeness.
 current document, terminal error, timestamps, and provider-reported execution
 `stats`. Statistics include duration, request counts and provider-reported token
 usage grouped by response model, plus the prompt versions used by the analysis.
+`total_document_count` is fixed when the analysis is queued from all Source
+documents in its build; it does not reuse the Objective's seed-document count.
+Seed documents remain available through the Objective scope, while
+`processed_document_count` advances through the fixed candidate-paper scope.
 `unreported_request_count` identifies calls that failed without provider usage
 or omitted token fields. Token totals contain only reported usage and remain
 `null` when no call reported usage; the backend never estimates missing tokens

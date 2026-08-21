@@ -1055,6 +1055,8 @@ class ObjectiveAnalysis:
             raise ValueError(
                 f"cannot update analysis progress while status is {self.status}"
             )
+        if total_document_count != self.total_document_count:
+            raise ValueError("analysis progress cannot change total document count")
         return replace(
             self,
             phase=_required_text(phase, "analysis progress requires phase"),
@@ -1070,6 +1072,7 @@ class ObjectiveAnalysis:
             phase="completed",
             processed_document_count=self.total_document_count,
             current_document_id=None,
+            progress_message="Objective analysis completed.",
             error_code=None,
             error_message=None,
             completed_at=completed_at or self.completed_at,

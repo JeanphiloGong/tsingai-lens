@@ -451,6 +451,7 @@ def _queue_and_claim(repository: PostgresObjectiveRepository):
         "col_source", "objective-1", queued.analysis_version
     )
     assert claimed is not None
+    assert claimed.total_document_count == 4
     return objective, claimed
 
 
@@ -1249,7 +1250,7 @@ def test_analysis_version_claim_progress_and_retry_are_explicit(source_repositor
         1,
         phase="evidence",
         processed_document_count=1,
-        total_document_count=1,
+        total_document_count=4,
         current_document_id="srcdoc_runtime",
         progress_message="Extracting evidence.",
     )

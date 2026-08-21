@@ -727,7 +727,19 @@ class PostgresObjectiveRepository:
                 build_id=source_build_id,
                 authored=authored,
             )
-            total_documents = len(scope.get("seed", ()))
+            total_documents = int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(SourceDocument)
+                    .where(
+                        SourceDocument.collection_id == collection_id,
+                        SourceDocument.build_id == source_build_id,
+                    )
+                )
+                or 0
+            )
+            if total_documents == 0:
+                total_documents = len(scope.get("seed", ()))
             now = datetime.now(timezone.utc)
             analysis_row = ObjectiveAnalysisRecord(
                 collection_id=collection_id,

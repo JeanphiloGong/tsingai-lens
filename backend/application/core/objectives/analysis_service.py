@@ -410,7 +410,7 @@ class ObjectiveAnalysisService:
         total_document_count = analysis.total_document_count
 
         def update(progress: dict[str, Any]) -> None:
-            nonlocal processed_document_count, total_document_count
+            nonlocal processed_document_count
             active_document_id = (
                 str(progress.get("active_document_id"))
                 if progress.get("active_document_id")
@@ -420,8 +420,6 @@ class ObjectiveAnalysisService:
                 seen_document_ids.add(active_document_id)
             if progress.get("unit") in {"documents", "frames"}:
                 current = self._safe_int(progress.get("current"))
-                total = self._safe_int(progress.get("total"))
-                total_document_count = max(total_document_count, total or 0)
                 processed_document_count = max(
                     processed_document_count,
                     current or 0,

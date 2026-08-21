@@ -24,6 +24,9 @@ from application.core.objectives.analysis.evidence_routing import (
     EvidenceCandidate,
     order_routes_for_extraction,
 )
+from application.core.objectives.analysis.diagnostics import (
+    record_analysis_diagnostic,
+)
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from application.core.objectives.analysis.source_validation import (
     _objective_column_key,
@@ -1440,13 +1443,52 @@ def _repair_objective_table_source_if_needed(
         source=source,
     ):
         return source, None
-    if unavailable_error is not None:
-        return source, unavailable_error
     original_matrix = _normalized_objective_table_matrix(source.get("table_matrix"))
     canonical_matrix = _canonical_objective_table_matrix(
         source=source,
         matrix=original_matrix,
     )
+    model_request_count = 0
+    model_row_count: int | None = None
+    final_row_count: int | None = None
+    model_repair_count = 0
+    deterministic_rebind_count = 0
+    number_sequence_verified: bool | None = None
+    warnings: list[str] = []
+
+    def record_trace(status: str, failure_reason: str | None = None) -> None:
+        record_analysis_diagnostic(
+            {
+                "trace_type": "table_matrix_repair",
+                "collection_id": collection_id,
+                "objective_id": route.objective_id,
+                "document_id": route.document_id,
+                "table_id": route.source_ref,
+                "page": source.get("page"),
+                "status": status,
+                "original_row_count": len(canonical_matrix),
+                "model_row_count": model_row_count,
+                "final_row_count": final_row_count,
+                "model_request_count": model_request_count,
+                "model_repair_count": model_repair_count,
+                "fragment_row_reduction_count": (
+                    max(0, len(canonical_matrix) - final_row_count)
+                    if final_row_count is not None
+                    else 0
+                ),
+                "deterministic_rebind_count": deterministic_rebind_count,
+                "number_sequence_verified": number_sequence_verified,
+                "warnings": list(dict.fromkeys(warnings)),
+                "failure_reason": failure_reason,
+            }
+        )
+
+    if unavailable_error is not None:
+        record_trace(
+            "provider_failed",
+            f"{unavailable_error.__class__.__name__}: {unavailable_error}",
+        )
+        return source, unavailable_error
     try:
         if paper_facts_extractor is None:
             raise RuntimeError("table repair extractor is unavailable")
@@ -1455,13 +1497,16 @@ def _repair_objective_table_source_if_needed(
             source=source,
             paper_facts_extractor=paper_facts_extractor,
         )
-        parsed_repairs = tuple(
-            (
-                repair_payload,
-                paper_facts_extractor.repair_table_matrix(repair_payload),
+        parsed_repair_items = []
+        for repair_payload in repair_payloads:
+            model_request_count += 1
+            parsed_repair_items.append(
+                (
+                    repair_payload,
+                    paper_facts_extractor.repair_table_matrix(repair_payload),
+                )
             )
-            for repair_payload in repair_payloads
-        )
+        parsed_repairs = tuple(parsed_repair_items)
     except Exception as exc:
         logger.exception(
             "Research objective table matrix repair failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_ref=%s",
@@ -1471,45 +1516,10 @@ def _repair_objective_table_source_if_needed(
             route.document_id,
             route.source_ref,
         )
+        record_trace("provider_failed", f"{exc.__class__.__name__}: {exc}")
         return source, exc
-    repaired_matrix = _merge_objective_table_matrix_repairs(
-        source=source,
-        canonical_matrix=canonical_matrix,
-        parsed_repairs=parsed_repairs,
-    )
-    if not repaired_matrix:
-        return source, ValueError("table matrix repair returned no usable matrix")
-    repaired_matrix, residual_repairs = (
-        _cleanup_objective_repaired_table_matrix_residual_fragments(
-            original_matrix=canonical_matrix,
-            repaired_matrix=repaired_matrix,
-            column_headers=source.get("column_headers", ()),
-        )
-    )
-    if (
-        repaired_matrix == canonical_matrix
-        and _objective_table_matrix_has_structural_fragments(canonical_matrix)
-    ):
-        return source, ValueError(
-            "table matrix repair left the fragmented matrix unchanged"
-        )
-    if _objective_table_matrix_has_structural_fragments(repaired_matrix):
-        return source, ValueError(
-            "table matrix repair returned a structurally fragmented matrix"
-        )
-    if not _objective_table_repair_preserves_numeric_cells(
-        original_matrix=canonical_matrix,
-        repaired_matrix=repaired_matrix,
-    ):
-        return source, ValueError(
-            "table matrix repair changed an intact numeric source cell"
-        )
-    repaired_source = dict(source)
-    repaired_source["raw_table_matrix"] = source.get("table_matrix", [])
-    repaired_source["table_matrix"] = repaired_matrix
-    repaired_source["table_matrix_structural_repair_applied"] = True
+
     repair_records = []
-    warnings: list[str] = []
     for repair_payload, parsed in parsed_repairs:
         repairs = getattr(parsed, "repairs", None)
         if repairs:
@@ -1532,13 +1542,67 @@ def _repair_objective_table_source_if_needed(
             for warning in getattr(parsed, "warnings", None) or ()
             if str(warning).strip()
         )
+    model_repair_count = len(repair_records)
+    repaired_matrix = _merge_objective_table_matrix_repairs(
+        source=source,
+        canonical_matrix=canonical_matrix,
+        parsed_repairs=parsed_repairs,
+    )
+    model_row_count = len(repaired_matrix)
+    if not repaired_matrix:
+        reason = "table matrix repair returned no usable matrix"
+        record_trace("rejected", reason)
+        return source, ValueError(reason)
+    repaired_matrix, residual_repairs = (
+        _cleanup_objective_repaired_table_matrix_residual_fragments(
+            original_matrix=canonical_matrix,
+            repaired_matrix=repaired_matrix,
+            column_headers=source.get("column_headers", ()),
+        )
+    )
+    repaired_matrix, uncertainty_repairs = (
+        _rebind_objective_table_mean_uncertainty_columns(
+            original_matrix=canonical_matrix,
+            repaired_matrix=repaired_matrix,
+            column_headers=source.get("column_headers", ()),
+        )
+    )
+    deterministic_rebind_count = len(uncertainty_repairs)
+    final_row_count = len(repaired_matrix)
+    if (
+        repaired_matrix == canonical_matrix
+        and _objective_table_matrix_has_structural_fragments(canonical_matrix)
+    ):
+        reason = "table matrix repair left the fragmented matrix unchanged"
+        record_trace("rejected", reason)
+        return source, ValueError(reason)
+    if _objective_table_matrix_has_structural_fragments(repaired_matrix):
+        reason = "table matrix repair returned a structurally fragmented matrix"
+        record_trace("rejected", reason)
+        return source, ValueError(reason)
+    number_sequence_verified = (
+        _objective_table_repair_preserves_result_number_sequences(
+            original_matrix=canonical_matrix,
+            repaired_matrix=repaired_matrix,
+        )
+    )
+    if not number_sequence_verified:
+        reason = "table matrix repair changed or reordered source result numbers"
+        record_trace("rejected", reason)
+        return source, ValueError(reason)
+    repaired_source = dict(source)
+    repaired_source["raw_table_matrix"] = source.get("table_matrix", [])
+    repaired_source["table_matrix"] = repaired_matrix
+    repaired_source["table_matrix_structural_repair_applied"] = True
     repair_records.extend(residual_repairs)
+    repair_records.extend(uncertainty_repairs)
     if repair_records:
         repaired_source["table_matrix_repairs"] = repair_records
     if warnings:
         repaired_source["table_matrix_repair_warnings"] = list(
             dict.fromkeys(warnings)
         )
+    record_trace("verified")
     return repaired_source, None
 
 
@@ -1674,35 +1738,156 @@ def _merge_objective_table_matrix_repairs(
             tuple(repaired_slice[0]), tuple(headers)
         ) else repaired_slice
         merged.extend(slice_rows)
-    if len(merged) != len(canonical_matrix):
+    allowed_row_counts = {len(canonical_matrix)}
+    if _objective_table_has_mergeable_trailing_fragment_row(canonical_matrix):
+        allowed_row_counts.add(len(canonical_matrix) - 1)
+    if len(merged) not in allowed_row_counts:
         return []
     return merged
 
 
-def _objective_table_repair_preserves_numeric_cells(
+def _objective_table_repair_preserves_result_number_sequences(
     *,
     original_matrix: list[list[str]],
     repaired_matrix: list[list[str]],
 ) -> bool:
-    if len(original_matrix) != len(repaired_matrix):
+    if not original_matrix or not repaired_matrix:
         return False
-    for original_row, repaired_row in zip(
-        original_matrix,
-        repaired_matrix,
-        strict=True,
-    ):
-        if len(original_row) != len(repaired_row):
-            return False
-        for original_cell, repaired_cell in zip(
-            original_row,
-            repaired_row,
-            strict=True,
+    expected_width = len(original_matrix[0])
+    if expected_width != len(repaired_matrix[0]):
+        return False
+    if any(len(row) != expected_width for row in original_matrix):
+        return False
+    if any(len(row) != expected_width for row in repaired_matrix):
+        return False
+    return all(
+        _objective_column_numeric_tokens(original_matrix, column_index)
+        == _objective_column_numeric_tokens(repaired_matrix, column_index)
+        for column_index in range(1, expected_width)
+    )
+
+
+def _objective_column_numeric_tokens(
+    matrix: list[list[str]],
+    column_index: int,
+) -> tuple[str, ...]:
+    return tuple(
+        match.group(0)
+        for row in matrix[1:]
+        for match in _NUMBER_PATTERN.finditer(str(row[column_index] or ""))
+    )
+
+
+def _objective_table_has_mergeable_trailing_fragment_row(
+    matrix: list[list[str]],
+) -> bool:
+    if len(matrix) < 3 or len(matrix[-1]) < 2:
+        return False
+    row = [" ".join(str(cell or "").split()) for cell in matrix[-1]]
+    nonempty_result_cells = [cell for cell in row[1:] if cell]
+    if len(nonempty_result_cells) != 1:
+        return False
+    label = row[0]
+    return bool(
+        re.fullmatch(
+            r"\(?\s*[-+]?\d+(?:\.\d+)?\s*/\s*[-+]?\d+(?:\.\d+)?\s*\)?",
+            label,
+        )
+        and _objective_cell_is_uncertainty_fragment(nonempty_result_cells[0])
+    )
+
+
+def _objective_cell_is_uncertainty_fragment(value: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"\(?\s*(?:±|\+/-|\+-)\s*"
+            r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?\s*\)?",
+            " ".join(str(value or "").split()),
+        )
+    )
+
+
+def _objective_cell_is_mean_uncertainty_value(value: str) -> bool:
+    number = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+    return bool(
+        re.fullmatch(
+            rf"\s*{number}\s*\(?\s*(?:±|\+/-|\+-)\s*{number}\s*\)?\s*",
+            str(value or ""),
+        )
+    )
+
+
+def _rebind_objective_table_mean_uncertainty_columns(
+    *,
+    original_matrix: list[list[str]],
+    repaired_matrix: list[list[str]],
+    column_headers: Any,
+) -> tuple[list[list[str]], list[dict[str, Any]]]:
+    if len(repaired_matrix) < 2 or not original_matrix:
+        return repaired_matrix, []
+    width = len(repaired_matrix[0])
+    if width < 2 or any(len(row) != width for row in repaired_matrix):
+        return repaired_matrix, []
+    if any(len(row) != width for row in original_matrix):
+        return repaired_matrix, []
+
+    body_row_count = len(repaired_matrix) - 1
+    headers = [str(value).strip() for value in column_headers or ()]
+    rebound_matrix = [list(row) for row in repaired_matrix]
+    repairs: list[dict[str, Any]] = []
+    for column_index in range(1, width):
+        source_cells = [row[column_index] for row in original_matrix[1:]]
+        source_tokens = _objective_column_numeric_tokens(
+            original_matrix,
+            column_index,
+        )
+        if len(source_tokens) != body_row_count * 2:
+            continue
+        if not any(
+            len(tuple(_NUMBER_PATTERN.finditer(cell))) != 2
+            for cell in source_cells
         ):
-            if _objective_cell_text_looks_structurally_fragmented(original_cell):
+            continue
+        uncertainty_cell_count = sum(
+            1
+            for cell in source_cells
+            if re.search(r"(?:±|\+/-|\+-)", cell)
+        )
+        if uncertainty_cell_count < max(2, body_row_count // 2):
+            continue
+        repaired_cells = [row[column_index] for row in repaired_matrix[1:]]
+        if not all(
+            _objective_cell_is_mean_uncertainty_value(cell)
+            for cell in repaired_cells
+        ):
+            continue
+
+        for body_index, repaired_cell in enumerate(repaired_cells):
+            expected_tokens = source_tokens[body_index * 2 : body_index * 2 + 2]
+            actual_tokens = tuple(
+                match.group(0) for match in _NUMBER_PATTERN.finditer(repaired_cell)
+            )
+            if actual_tokens == expected_tokens:
                 continue
-            if _NUMBER_PATTERN.search(original_cell) and original_cell != repaired_cell:
-                return False
-    return True
+            rebound = f"{expected_tokens[0]} ( ± {expected_tokens[1]})"
+            rebound_matrix[body_index + 1][column_index] = rebound
+            repairs.append(
+                {
+                    "row_index": body_index + 1,
+                    "column": (
+                        headers[column_index]
+                        if column_index < len(headers)
+                        else str(column_index)
+                    ),
+                    "before": repaired_cell,
+                    "after": rebound,
+                    "reason": (
+                        "Rebound a parser-split uncertainty using the complete "
+                        "top-to-bottom numeric sequence of this result column."
+                    ),
+                }
+            )
+    return rebound_matrix, repairs
 
 
 def _validated_objective_repaired_table_matrix(

@@ -23,7 +23,7 @@ from tests.integration.persistence.database_cleanup import reset_postgres_schema
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
-HEAD_REVISION = "20260821_0034"
+HEAD_REVISION = "20260821_0035"
 EXPECTED_TABLES = {
     "alembic_version",
     "artifact_versions",
@@ -180,6 +180,7 @@ def test_empty_database_upgrades_and_rejects_irreversible_downgrade(
                 for column in inspect(connection).get_columns("objective_analyses")
             }
             assert "stats" in objective_analysis_columns
+            assert "diagnostics" in objective_analysis_columns
             study_columns = {
                 column["name"]
                 for column in inspect(connection).get_columns(

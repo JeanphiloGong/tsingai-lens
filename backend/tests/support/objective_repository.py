@@ -191,6 +191,7 @@ class MemoryObjectiveRepository:
         stats,
         model_name: str | None,
         prompt_versions: dict[str, str],
+        diagnostics: tuple[dict, ...],
     ) -> ObjectiveAnalysis:
         key = (collection_id, objective_id, analysis_version)
         analysis = replace(
@@ -198,6 +199,7 @@ class MemoryObjectiveRepository:
             stats=stats,
             model_name=model_name,
             prompt_versions=dict(prompt_versions),
+            diagnostics=diagnostics,
         )
         self._analyses[key] = analysis
         return analysis

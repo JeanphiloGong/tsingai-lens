@@ -17,8 +17,11 @@ Read the analysis responsibilities in real research order:
    payload construction, bounded continuous-row structural table repair,
    deterministic table parsing, model extraction, and route-scoped technical
    failures. Oversized repair inputs repeat the caption and flattened header on
-   every slice, then merge in Source row order; missing, reordered, or changed
-   numeric cells invalidate the repair.
+   every slice, then merge in Source row order. A final row containing only
+   carried label and uncertainty fragments may merge into the preceding logical
+   row. Mean-plus-uncertainty result columns are rebound from their complete
+   top-to-bottom Source number sequence; missing, duplicated, reordered, or
+   changed result numbers invalidate the repair.
 4. `source_validation.py` immediately checks each model-authored draft against
    the exact Source being inspected. Extraction and validation therefore
    alternate per Source; they are not two collection-wide passes. Unsupported
@@ -58,6 +61,13 @@ accepted state supplied to the next Source prompt. Provider or irrecoverable
 structured-output failures remain technical failed drafts. Shared provider
 invocation, JSON parsing, usage accounting, and trace capture stay outside this
 scientific responsibility.
+
+`diagnostics.py` captures private technical traces for one analysis execution.
+Each attempted structural table repair records the Source identity, row counts,
+model and deterministic repair counts, number-sequence verification, and a
+final `verified`, `rejected`, or `provider_failed` disposition. These traces are
+persisted with the internal analysis record for debugging but are deliberately
+absent from Objective API responses, Evidence, and user-visible warnings.
 
 `source_validation.py` owns deterministic source-local acceptance, demotion,
 or abstention. It checks the reported result, comparison labels, changed

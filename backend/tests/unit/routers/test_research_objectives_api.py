@@ -57,6 +57,13 @@ def _analysis(*, status: str = "succeeded") -> ObjectiveAnalysis:
             ),
             prompt_versions={"paper_framing": "paper_framing.v1"},
         ),
+        diagnostics=(
+            {
+                "trace_type": "table_matrix_repair",
+                "table_id": "table-3",
+                "status": "verified",
+            },
+        ),
         total_document_count=1,
     )
     if status == "queued":
@@ -872,6 +879,8 @@ def test_objective_api_exposes_definition_and_separate_analysis_state() -> None:
     assert payload["objective"]["confirmation_status"] == "confirmed"
     assert payload["active_analysis"]["status"] == "succeeded"
     assert payload["published_analysis"]["analysis_version"] == 1
+    assert "diagnostics" not in payload["active_analysis"]
+    assert "diagnostics" not in payload["published_analysis"]
     assert payload["paper_contributions"] == [
         {
             **_paper_contribution().to_record(),

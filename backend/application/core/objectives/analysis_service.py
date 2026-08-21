@@ -4,6 +4,9 @@ import logging
 from time import perf_counter
 from typing import Any, Callable
 
+from application.core.objectives.analysis.diagnostics import (
+    capture_analysis_diagnostics,
+)
 from application.core.objectives.evidence_map import build_objective_evidence_map
 from application.core.objectives.research_objective_service import (
     ObjectiveAnalysisArtifacts,
@@ -270,7 +273,10 @@ class ObjectiveAnalysisService:
             if claimed is None:
                 return self._result(collection_id, objective)
             usage_started_at = perf_counter()
-            with capture_llm_usage() as usage:
+            with (
+                capture_llm_usage() as usage,
+                capture_analysis_diagnostics() as diagnostics,
+            ):
                 try:
                     artifacts = (
                         self.research_objective_service.generate_objective_analysis_artifacts(
@@ -292,6 +298,7 @@ class ObjectiveAnalysisService:
                         ),
                         model_name=usage.model_name,
                         prompt_versions=usage.prompt_versions,
+                        diagnostics=diagnostics.records,
                     )
             objective, completed = self.objective_repository.publish_analysis(
                 collection_id,

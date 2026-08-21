@@ -231,6 +231,7 @@ def test_memory_objective_repository_records_analysis_execution_stats():
         stats=stats,
         model_name="test-model",
         prompt_versions={"source_extraction": "source_extraction.v1"},
+        diagnostics=(),
     )
 
     assert updated.stats == stats

@@ -6,6 +6,9 @@ from types import SimpleNamespace
 import pytest
 
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
+from application.core.objectives.analysis.diagnostics import (
+    record_analysis_diagnostic,
+)
 from application.core.objectives.research_objective_service import (
     ObjectiveAnalysisArtifacts,
 )
@@ -247,12 +250,14 @@ class FakeObjectiveRepository:
         stats,
         model_name,
         prompt_versions,
+        diagnostics,
     ):
         analysis = replace(
             self.analyses[analysis_version],
             stats=stats,
             model_name=model_name,
             prompt_versions=prompt_versions,
+            diagnostics=diagnostics,
         )
         self.analyses[analysis_version] = analysis
         return analysis
@@ -362,6 +367,24 @@ class UsageRecordingResearchObjectiveService(FakeResearchObjectiveService):
         )
 
 
+class DiagnosticsRecordingResearchObjectiveService(FakeResearchObjectiveService):
+    def generate_objective_analysis_artifacts(
+        self, collection_id, analysis, progress_callback=None
+    ):
+        record_analysis_diagnostic(
+            {
+                "trace_type": "table_matrix_repair",
+                "table_id": "table-1",
+                "status": "verified",
+            }
+        )
+        return super().generate_objective_analysis_artifacts(
+            collection_id,
+            analysis,
+            progress_callback=progress_callback,
+        )
+
+
 def _service(*, repository=None, analyzer=None):
     repository = repository or FakeObjectiveRepository()
     analyzer = analyzer or FakeResearchObjectiveService()
@@ -431,6 +454,50 @@ def test_objective_analysis_persists_real_model_prompt_and_token_usage() -> None
         "paper_framing": "paper_framing.v1"
     }
     assert analysis.stats.duration_ms is not None
+
+
+def test_objective_analysis_persists_internal_diagnostics_without_public_exposure(
+) -> None:
+    service, repository, _analyzer = _service(
+        analyzer=DiagnosticsRecordingResearchObjectiveService()
+    )
+    service.queue_analysis("collection-1", "objective-1")
+
+    result = service.execute_queued_analysis("collection-1", "objective-1", 1)
+
+    analysis = repository.read_analysis("collection-1", "objective-1", 1)
+    assert analysis is not None
+    assert analysis.diagnostics == (
+        {
+            "trace_type": "table_matrix_repair",
+            "table_id": "table-1",
+            "status": "verified",
+        },
+    )
+    assert "diagnostics" not in analysis.to_record()
+    assert "diagnostics" not in result["analysis"].to_record()
+
+
+def test_failed_objective_analysis_keeps_internal_diagnostics() -> None:
+    service, repository, _analyzer = _service(
+        analyzer=DiagnosticsRecordingResearchObjectiveService(
+            error=RuntimeError("analysis failed after table repair")
+        )
+    )
+    service.queue_analysis("collection-1", "objective-1")
+
+    result = service.execute_queued_analysis("collection-1", "objective-1", 1)
+
+    analysis = repository.read_analysis("collection-1", "objective-1", 1)
+    assert analysis is not None
+    assert result["analysis"].status == "failed"
+    assert analysis.diagnostics == (
+        {
+            "trace_type": "table_matrix_repair",
+            "table_id": "table-1",
+            "status": "verified",
+        },
+    )
 
 
 def test_route_progress_does_not_replace_candidate_paper_count() -> None:

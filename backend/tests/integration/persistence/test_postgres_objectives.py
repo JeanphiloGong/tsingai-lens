@@ -1304,11 +1304,25 @@ def test_analysis_execution_stats_round_trip_provider_usage(source_repositories)
         stats=stats,
         model_name="merged-qwen",
         prompt_versions={"paper_framing": "paper_framing.v1"},
+        diagnostics=(
+            {
+                "trace_type": "table_matrix_repair",
+                "table_id": "table-3",
+                "status": "verified",
+            },
+        ),
     )
 
     assert updated.stats == stats
     assert updated.model_name == "merged-qwen"
     assert updated.prompt_versions == {"paper_framing": "paper_framing.v1"}
+    assert updated.diagnostics == (
+        {
+            "trace_type": "table_matrix_repair",
+            "table_id": "table-3",
+            "status": "verified",
+        },
+    )
     persisted = repository.read_analysis(
         "col_source",
         "objective-1",
@@ -1318,6 +1332,7 @@ def test_analysis_execution_stats_round_trip_provider_usage(source_repositories)
     assert persisted.stats == stats
     assert persisted.model_name == "merged-qwen"
     assert persisted.prompt_versions == {"paper_framing": "paper_framing.v1"}
+    assert persisted.diagnostics == updated.diagnostics
 
 
 def test_publish_is_atomic_and_reads_findings_and_exact_evidence(source_repositories) -> None:

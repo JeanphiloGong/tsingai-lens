@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
@@ -1008,6 +1009,7 @@ class ObjectiveAnalysis:
     created_at: datetime | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    diagnostics: tuple[Mapping[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         if not _text(self.collection_id) or not _text(self.objective_id):
@@ -1028,6 +1030,11 @@ class ObjectiveAnalysis:
             raise ValueError("failed objective analysis requires error_message")
         if self.status == "succeeded" and self.error_message is not None:
             raise ValueError("succeeded objective analysis cannot have an error")
+        object.__setattr__(
+            self,
+            "diagnostics",
+            tuple(deepcopy(dict(item)) for item in self.diagnostics),
+        )
 
     @property
     def key(self) -> tuple[str, str, int]:

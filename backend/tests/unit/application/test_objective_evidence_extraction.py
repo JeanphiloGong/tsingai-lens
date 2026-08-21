@@ -17,6 +17,9 @@ from application.core.objectives.analysis import (
     source_screening,
     source_validation,
 )
+from application.core.objectives.analysis.diagnostics import (
+    capture_analysis_diagnostics,
+)
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
@@ -3164,18 +3167,203 @@ def test_research_objective_table_repair_rejects_changed_numeric_source_cell():
         ],
     }
 
-    repaired_source, repair_error = (
-        source_extraction._repair_objective_table_source_if_needed(
-            collection_id="col-test",
-            route=route,
-            source=source,
-            paper_facts_extractor=NumericChangingRepairExtractor(),
+    with capture_analysis_diagnostics() as diagnostics:
+        repaired_source, repair_error = (
+            source_extraction._repair_objective_table_source_if_needed(
+                collection_id="col-test",
+                route=route,
+                source=source,
+                paper_facts_extractor=NumericChangingRepairExtractor(),
+            )
         )
-    )
 
     assert repaired_source is source
     assert str(repair_error) == (
-        "table matrix repair changed an intact numeric source cell"
+        "table matrix repair changed or reordered source result numbers"
+    )
+    assert diagnostics.records == (
+        {
+            "trace_type": "table_matrix_repair",
+            "collection_id": "col-test",
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "table_id": "table-1",
+            "page": None,
+            "status": "rejected",
+            "original_row_count": 2,
+            "model_row_count": 2,
+            "final_row_count": 2,
+            "model_request_count": 1,
+            "model_repair_count": 0,
+            "fragment_row_reduction_count": 0,
+            "deterministic_rebind_count": 0,
+            "number_sequence_verified": False,
+            "warnings": [],
+            "failure_reason": (
+                "table matrix repair changed or reordered source result numbers"
+            ),
+        },
+    )
+
+
+def test_research_objective_table_repair_accepts_cross_row_uncertainty_rebinding():
+    original_matrix = [
+        ["Specimens", "Hardness (HV)"],
+        ["HIP-SLM (100/280)", "147.6"],
+        ["as-SLM (120/100)", "( +/- 9.2) 196.9 (+/- 4.5)"],
+    ]
+    repaired_matrix = [
+        ["Specimens", "Hardness (HV)"],
+        ["HIP-SLM (100/280)", "147.6 (+/- 9.2)"],
+        ["as-SLM (120/100)", "196.9 (+/- 4.5)"],
+    ]
+
+    assert (
+        source_extraction._objective_table_repair_preserves_result_number_sequences(
+            original_matrix=original_matrix,
+            repaired_matrix=repaired_matrix,
+        )
+    )
+
+
+def test_research_objective_table_repair_accepts_p004_trailing_fragment_row():
+    repaired_matrix = [
+        [
+            "Specimens",
+            "Hardness (HV)",
+            "Yield Strength (MPa)",
+            "Tensile Strength (MPa)",
+            "Elongation (%)",
+        ],
+        [
+            "as-SLM (140/280)",
+            "191.8 (+/- 7.2)",
+            "301.4 (+/- 22.0)",
+            "347.8 (+/- 31.8)",
+            "5.6 (+/- 1.2)",
+        ],
+        [
+            "HT-SLM (140/280)",
+            "160.1 (+/- 5.5)",
+            "217.0 (+/- 19.9)",
+            "323.2 (+/- 40.5)",
+            "9.1 (+/- 1.3)",
+        ],
+        [
+            "HIP-SLM (140/280)",
+            "162.4 ( ± 6.9)",
+            "221.3 (+/- 9.3)",
+            "332.6 (+/- 39.6)",
+            "9.6 (+/- 4.1)",
+        ],
+    ]
+
+    class RepairingPaperFactsExtractor:
+        def repair_table_matrix(self, _payload):
+            model_matrix = [list(row) for row in repaired_matrix]
+            model_matrix[-1][1] = "162.4 (+/- 5.5)"
+            return StructuredTableMatrixRepair(
+                repaired_table_matrix=model_matrix,
+                confidence=0.95,
+            )
+
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "obj-strength",
+            "document_id": "paper-p004",
+            "source_kind": "table",
+            "source_ref": "table-3",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+        }
+    )
+    source = {
+        "source_kind": "table",
+        "source_ref": "table-3",
+        "document_id": "paper-p004",
+        "column_headers": repaired_matrix[0],
+        "header_row_count": 1,
+        "table_matrix": [
+            repaired_matrix[0],
+            [
+                "as-SLM(140/",
+                "191.8 (+/- 7.2)",
+                "301.4 (+/- 22.0)",
+                "347.8 (+/- 31.8)",
+                "5.6 (+/- 1.2)",
+            ],
+            [
+                "280) HT-SLM",
+                "160.1 (+/- 5.5)",
+                "217.0 (+/- 19.9)",
+                "323.2 (+/- 40.5)",
+                "9.1 (+/- 1.3)",
+            ],
+            [
+                "(140/280) HIP-SLM",
+                "162.4",
+                "221.3 (+/- 9.3)",
+                "332.6 (+/- 39.6)",
+                "9.6 (+/- 4.1)",
+            ],
+            ["(140/280)", "(+/- 6.9)", "", "", ""],
+        ],
+    }
+
+    with capture_analysis_diagnostics() as diagnostics:
+        repaired_source, repair_error = (
+            source_extraction._repair_objective_table_source_if_needed(
+                collection_id="col-test",
+                route=route,
+                source=source,
+                paper_facts_extractor=RepairingPaperFactsExtractor(),
+            )
+        )
+
+    assert repair_error is None
+    assert repaired_source["table_matrix"] == repaired_matrix
+    assert repaired_source["table_matrix_structural_repair_applied"] is True
+    assert diagnostics.records == (
+        {
+            "trace_type": "table_matrix_repair",
+            "collection_id": "col-test",
+            "objective_id": "obj-strength",
+            "document_id": "paper-p004",
+            "table_id": "table-3",
+            "page": None,
+            "status": "verified",
+            "original_row_count": 5,
+            "model_row_count": 4,
+            "final_row_count": 4,
+            "model_request_count": 1,
+            "model_repair_count": 0,
+            "fragment_row_reduction_count": 1,
+            "deterministic_rebind_count": 1,
+            "number_sequence_verified": True,
+            "warnings": [],
+            "failure_reason": None,
+        },
+    )
+
+
+def test_research_objective_table_repair_rejects_lost_p004_uncertainty():
+    original_matrix = [
+        ["Specimens", "Hardness (HV)"],
+        ["HT-SLM (140/280)", "160.1 (+/- 5.5)"],
+        ["HIP-SLM (140/280)", "162.4"],
+        ["(140/280)", "(+/- 6.9)"],
+    ]
+    repaired_matrix = [
+        ["Specimens", "Hardness (HV)"],
+        ["HT-SLM (140/280)", "160.1 (+/- 5.5)"],
+        ["HIP-SLM (140/280)", "162.4 (+/- 5.5)"],
+    ]
+
+    assert not (
+        source_extraction._objective_table_repair_preserves_result_number_sequences(
+            original_matrix=original_matrix,
+            repaired_matrix=repaired_matrix,
+        )
     )
 
 
@@ -3442,17 +3630,18 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails():
         ),
     )
 
-    units = extract_and_validate_source_facts(
-        collection_id="col-test",
-        source_extractor=evidence_extractor,
-        paper_facts_extractor=repair_extractor,
-        objectives=(objective,),
-        objective_paper_frames=(),
-        objective_evidence_routes=(route,),
-        blocks_by_document_id={},
-        tables_by_document_id={"paper-1": [table]},
-        document_trees_by_document_id={},
-    )
+    with capture_analysis_diagnostics() as diagnostics:
+        units = extract_and_validate_source_facts(
+            collection_id="col-test",
+            source_extractor=evidence_extractor,
+            paper_facts_extractor=repair_extractor,
+            objectives=(objective,),
+            objective_paper_frames=(),
+            objective_evidence_routes=(route,),
+            blocks_by_document_id={},
+            tables_by_document_id={"paper-1": [table]},
+            document_trees_by_document_id={},
+        )
 
     assert repair_extractor.calls == 1
     assert evidence_extractor.calls == 0
@@ -3460,6 +3649,27 @@ def test_research_objective_records_failed_evidence_when_table_repair_fails():
     assert units[0].selection_status == "failed"
     assert units[0].source_ref == "table-1"
     assert units[0].failure_reason == "RuntimeError: table repair unavailable"
+    assert diagnostics.records == (
+        {
+            "trace_type": "table_matrix_repair",
+            "collection_id": "col-test",
+            "objective_id": "obj-density",
+            "document_id": "paper-1",
+            "table_id": "table-1",
+            "page": 4,
+            "status": "provider_failed",
+            "original_row_count": 2,
+            "model_row_count": None,
+            "final_row_count": None,
+            "model_request_count": 1,
+            "model_repair_count": 0,
+            "fragment_row_reduction_count": 0,
+            "deterministic_rebind_count": 0,
+            "number_sequence_verified": None,
+            "warnings": [],
+            "failure_reason": "RuntimeError: table repair unavailable",
+        },
+    )
 
     analysis = ObjectiveAnalysis(
         collection_id="col-test",

@@ -111,3 +111,9 @@ duplicate its destructive restore commands.
 - Collection build tasks run in a dedicated single-worker thread inside the
   backend process. The task creation request returns after queueing, and
   clients should poll `GET /api/v1/tasks/{task_id}` for progress.
+- Objective analysis starts as a process-local asyncio background task. An
+  application semaphore allows four analyses to execute concurrently per
+  backend process, and the existing synchronous analysis pipeline runs outside
+  the event-loop thread. There is no dedicated Objective executor queue or
+  external task broker; persisted Objective analysis rows remain the status
+  authority used by the polling API.

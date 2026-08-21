@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
+from threading import Barrier
 from types import SimpleNamespace
 
 import pytest
@@ -835,6 +837,35 @@ def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace()
     assert trace["task_type"] == "finding_synthesis"
     assert trace["prompt_version"] == "finding_synthesis.v13"
     assert trace["parsed_output"] == {"findings": []}
+
+
+def test_structured_response_traces_are_isolated_between_concurrent_calls():
+    client = _response_client(_FakeOpenAIClient('{"findings": []}'))
+    calls_completed = Barrier(2)
+
+    def complete_and_consume_trace(task_type: str):
+        client.complete(
+            system_prompt="Return structured findings.",
+            user_prompt=f"Analyze {task_type}.",
+            response_model=StructuredFindingSynthesis,
+            task_type=task_type,
+            prompt_version="test.v1",
+        )
+        calls_completed.wait(timeout=2)
+        return client.consume_last_trace()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        traces = tuple(
+            executor.map(
+                complete_and_consume_trace,
+                ("collection-one", "collection-two"),
+            )
+        )
+
+    assert {trace["task_type"] for trace in traces if trace is not None} == {
+        "collection-one",
+        "collection-two",
+    }
 
 
 def test_domain_model_extractors_bounds_json_text_finding_synthesis_output():

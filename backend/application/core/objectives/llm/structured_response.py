@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from collections.abc import Callable
+from contextvars import ContextVar
 from time import perf_counter
 from typing import Any
 
@@ -63,7 +64,10 @@ class StructuredResponseClient:
         self.reasoning_effort = (
             os.getenv("LLM_REASONING_EFFORT", "").strip() or None
         )
-        self.last_trace: dict[str, Any] | None = None
+        self._last_trace: ContextVar[dict[str, Any] | None] = ContextVar(
+            "structured_response_last_trace",
+            default=None,
+        )
         self.client = client or OpenAI(
             api_key=(api_key or os.getenv("LLM_API_KEY", "").strip() or "not-needed"),
             base_url=(base_url or os.getenv("LLM_BASE_URL", "").strip() or None),
@@ -120,7 +124,7 @@ class StructuredResponseClient:
             response_model=response_model,
             include_schema=self.extraction_mode != _EXTRACTION_MODE_PROVIDER_PARSE,
         )
-        self.last_trace = None
+        self._last_trace.set(None)
         started_at = perf_counter()
         trace_extraction_mode = self.extraction_mode
         try:
@@ -216,15 +220,17 @@ class StructuredResponseClient:
                 )
         except Exception:
             elapsed_s = perf_counter() - started_at
-            self.last_trace = self._build_trace(
-                task_type=task_type,
-                prompt_version=prompt_version,
-                response_model=response_model,
-                messages=messages,
-                extraction_mode=trace_extraction_mode,
-                trace_status="failed",
-                elapsed_s=elapsed_s,
-                error="structured extraction failed",
+            self._last_trace.set(
+                self._build_trace(
+                    task_type=task_type,
+                    prompt_version=prompt_version,
+                    response_model=response_model,
+                    messages=messages,
+                    extraction_mode=trace_extraction_mode,
+                    trace_status="failed",
+                    elapsed_s=elapsed_s,
+                    error="structured extraction failed",
+                )
             )
             logger.exception(
                 "Objective extraction failed mode=%s model=%s "
@@ -236,16 +242,18 @@ class StructuredResponseClient:
             )
             raise
         elapsed_s = perf_counter() - started_at
-        self.last_trace = self._build_trace(
-            task_type=task_type,
-            prompt_version=prompt_version,
-            response_model=response_model,
-            messages=messages,
-            extraction_mode=trace_extraction_mode,
-            trace_status="available",
-            elapsed_s=elapsed_s,
-            raw_content=raw_content,
-            parsed_output=parsed,
+        self._last_trace.set(
+            self._build_trace(
+                task_type=task_type,
+                prompt_version=prompt_version,
+                response_model=response_model,
+                messages=messages,
+                extraction_mode=trace_extraction_mode,
+                trace_status="available",
+                elapsed_s=elapsed_s,
+                raw_content=raw_content,
+                parsed_output=parsed,
+            )
         )
         logger.debug(
             "Objective extraction finished mode=%s model=%s "
@@ -470,8 +478,8 @@ class StructuredResponseClient:
         return options
 
     def consume_last_trace(self) -> dict[str, Any] | None:
-        trace = self.last_trace
-        self.last_trace = None
+        trace = self._last_trace.get()
+        self._last_trace.set(None)
         return dict(trace) if trace else None
 
     def _build_trace(

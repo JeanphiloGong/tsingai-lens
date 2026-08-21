@@ -18,7 +18,9 @@ inspect and cite:
 
 The domain layer owns semantics such as heading paths, caption proximity,
 complete table rendering, table row construction, unit hints, and stable Source
-table ids.
+table ids. Complete tables preserve the parser's header-row count and logical
+cell spans. Their Markdown projection uses flattened header paths once and
+keeps every data row in Source order.
 
 `SourceDocument` is the parsed-document aggregate. It owns its text units,
 blocks, tables, table rows, table cells, and figures. `text_unit_ids` is derived

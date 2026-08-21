@@ -10,6 +10,7 @@ from PIL import Image
 from domain.source import resolve_heading_path_for_page
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.mapping.block_artifacts import collect_pdf_text_items
+from infra.source.runtime.mapping.table_artifacts import build_pdf_table_cells
 from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
 from infra.source.runtime.source_evidence import (
     build_blocks,
@@ -110,6 +111,35 @@ def test_build_table_cells_extracts_pipe_delimited_rows():
     data_cells = table_cells[table_cells["row_index"] == 1]
     assert "Conductivity (mS/cm)" in set(data_cells["header_path"].dropna())
     assert "mS/cm" in set(table_cells["unit_hint"].dropna())
+
+
+def test_build_pdf_table_cells_preserves_docling_logical_topology():
+    cell = SimpleNamespace(
+        start_row_offset_idx=0,
+        end_row_offset_idx=2,
+        start_col_offset_idx=1,
+        end_col_offset_idx=4,
+        text="Mechanical properties",
+        column_header=True,
+        row_header=False,
+        row_section=True,
+    )
+    table = SimpleNamespace(
+        data=SimpleNamespace(table_cells=[cell]),
+        prov=[],
+    )
+
+    cells = build_pdf_table_cells(
+        document_id="doc-1",
+        document=SimpleNamespace(tables=[table]),
+    )
+
+    record = cells.iloc[0]
+    assert record["row_span"] == 2
+    assert record["col_span"] == 3
+    assert bool(record["column_header"]) is True
+    assert bool(record["row_header"]) is False
+    assert bool(record["row_section"]) is True
 
 
 def test_build_table_rows_extracts_row_level_evidence():

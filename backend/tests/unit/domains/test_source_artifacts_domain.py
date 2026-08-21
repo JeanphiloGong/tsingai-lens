@@ -72,6 +72,43 @@ def test_source_table_record_renders_complete_table_payload():
     assert "bbox" not in record
 
 
+def test_source_table_record_renders_flattened_headers_without_header_rows_as_data():
+    table = SourceTable(
+        table_id="tbl-doc-1-mechanical",
+        document_id="doc-1",
+        table_order=1,
+        caption_text="Table 3 Mechanical properties.",
+        caption_block_id=None,
+        page=4,
+        heading_path="Results",
+        column_headers=(
+            "Sample",
+            "Mechanical properties > Yield strength (MPa)",
+            "Mechanical properties > Elongation (%)",
+        ),
+        table_matrix=(
+            ("Sample", "Mechanical properties", "Mechanical properties"),
+            ("Sample", "Yield strength (MPa)", "Elongation (%)"),
+            ("as-SLM", "920", "8.4"),
+            ("HIP-SLM", "975", "12.4"),
+        ),
+        header_row_count=2,
+    )
+
+    record = table.to_record()
+
+    assert record["header_row_count"] == 2
+    assert (
+        "| Sample | Mechanical properties > Yield strength (MPa) | "
+        "Mechanical properties > Elongation (%) |"
+    ) in record["table_markdown"]
+    assert "| as-SLM | 920 | 8.4 |" in record["table_markdown"]
+    assert "| HIP-SLM | 975 | 12.4 |" in record["table_markdown"]
+    assert "| Sample | Yield strength (MPa) | Elongation (%) |" not in record[
+        "table_markdown"
+    ]
+
+
 def test_source_table_rows_bind_heading_by_page():
     heading = SourceBlock(
         block_id="blk-doc-1-heading",
@@ -181,6 +218,30 @@ def test_source_table_cell_record_keeps_document_id_alias():
 
     assert record["document_id"] == "doc-1"
     assert record["id"] == "doc-1"
+
+
+def test_source_table_cell_record_preserves_logical_topology():
+    cell = SourceTableCell(
+        cell_id="cell-header",
+        document_id="doc-1",
+        table_id="tbl-doc-1",
+        row_index=0,
+        col_index=1,
+        row_span=2,
+        col_span=3,
+        cell_text="Mechanical properties",
+        column_header=True,
+        row_header=False,
+        row_section=True,
+    )
+
+    restored = SourceTableCell.from_record(cell.to_record())
+
+    assert restored.row_span == 2
+    assert restored.col_span == 3
+    assert restored.column_header is True
+    assert restored.row_header is False
+    assert restored.row_section is True
 
 
 def test_source_document_tree_builds_section_parent_child_links():

@@ -217,6 +217,7 @@ class SourceTable:
     heading_path: str | None
     column_headers: tuple[str, ...]
     table_matrix: tuple[tuple[str, ...], ...]
+    header_row_count: int = 1
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @property
@@ -229,6 +230,7 @@ class SourceTable:
 
     @classmethod
     def from_record(cls, value: Mapping[str, Any]) -> "SourceTable":
+        header_row_count = safe_int(value.get("header_row_count"))
         return cls(
             table_id=str(value.get("table_id") or ""),
             document_id=str(value.get("document_id") or ""),
@@ -239,6 +241,10 @@ class SourceTable:
             heading_path=normalize_optional_text(value.get("heading_path")),
             column_headers=_string_tuple(value.get("column_headers")),
             table_matrix=_table_matrix_tuple(value.get("table_matrix")),
+            header_row_count=max(
+                0,
+                header_row_count if header_row_count is not None else 1,
+            ),
             metadata=_mapping(value.get("metadata")),
         )
 
@@ -255,9 +261,14 @@ class SourceTable:
             "heading_path": self.heading_path,
             "row_count": self.row_count,
             "col_count": self.col_count,
+            "header_row_count": self.header_row_count,
             "column_headers": headers,
             "table_matrix": matrix,
-            "table_markdown": render_markdown_table(matrix, headers),
+            "table_markdown": render_markdown_table(
+                matrix,
+                headers,
+                header_row_count=self.header_row_count,
+            ),
             "table_text": render_plain_table_text(matrix),
             "metadata": dict(self.metadata),
         }
@@ -271,12 +282,19 @@ class SourceTableCell:
     row_index: int
     col_index: int
     cell_text: str
+    row_span: int = 1
+    col_span: int = 1
+    column_header: bool = False
+    row_header: bool = False
+    row_section: bool = False
     header_path: str | None = None
     page: int | None = None
     unit_hint: str | None = None
 
     @classmethod
     def from_record(cls, value: Mapping[str, Any]) -> "SourceTableCell":
+        row_span = safe_int(value.get("row_span"))
+        col_span = safe_int(value.get("col_span"))
         return cls(
             cell_id=str(value.get("cell_id") or ""),
             document_id=str(value.get("document_id") or value.get("id") or ""),
@@ -284,6 +302,11 @@ class SourceTableCell:
             row_index=safe_int(value.get("row_index")) or 0,
             col_index=safe_int(value.get("col_index")) or 0,
             cell_text=str(value.get("cell_text") or ""),
+            row_span=max(1, row_span if row_span is not None else 1),
+            col_span=max(1, col_span if col_span is not None else 1),
+            column_header=bool(value.get("column_header")),
+            row_header=bool(value.get("row_header")),
+            row_section=bool(value.get("row_section")),
             header_path=normalize_optional_text(value.get("header_path")),
             page=safe_int(value.get("page")),
             unit_hint=normalize_optional_text(value.get("unit_hint")),
@@ -298,6 +321,11 @@ class SourceTableCell:
             "row_index": self.row_index,
             "col_index": self.col_index,
             "cell_text": self.cell_text,
+            "row_span": self.row_span,
+            "col_span": self.col_span,
+            "column_header": self.column_header,
+            "row_header": self.row_header,
+            "row_section": self.row_section,
             "header_path": self.header_path,
             "page": self.page,
             "unit_hint": self.unit_hint,
@@ -949,7 +977,10 @@ def build_source_document_tree(
 
 
 def render_markdown_table(
-    matrix: list[list[str]], column_headers: list[str]
+    matrix: list[list[str]],
+    column_headers: list[str],
+    *,
+    header_row_count: int = 1,
 ) -> str | None:
     if not matrix:
         return None
@@ -958,16 +989,15 @@ def render_markdown_table(
     if col_count <= 0:
         return None
     normalized_rows = [_normalize_table_row(row, col_count) for row in matrix]
-    header = _normalize_table_row(
-        normalized_rows[0] if normalized_rows else column_headers,
-        col_count,
-    )
-    if not any(header):
-        header = _normalize_table_row(column_headers, col_count)
+    normalized_header_row_count = max(0, min(header_row_count, len(normalized_rows)))
+    header = _normalize_table_row(column_headers, col_count)
+    if not any(header) and normalized_rows:
+        header = _normalize_table_row(normalized_rows[0], col_count)
+        normalized_header_row_count = max(1, normalized_header_row_count)
     if not any(header):
         header = [f"column_{index + 1}" for index in range(col_count)]
 
-    body_rows = normalized_rows[1:] if normalized_rows else []
+    body_rows = normalized_rows[normalized_header_row_count:]
     lines = [
         "| " + " | ".join(_escape_markdown_cell(value) for value in header) + " |",
         "| " + " | ".join("---" for _ in range(col_count)) + " |",

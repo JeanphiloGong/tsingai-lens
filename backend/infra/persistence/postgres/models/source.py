@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     JSON,
     CheckConstraint,
     Float,
@@ -205,6 +206,10 @@ class SourceTable(Base):
     __tablename__ = "source_tables"
     __table_args__ = (
         CheckConstraint("table_order >= 0", name="table_order_non_negative"),
+        CheckConstraint(
+            "header_row_count >= 0",
+            name="header_row_count_non_negative",
+        ),
         CheckConstraint("page IS NULL OR page >= 0", name="page_non_negative"),
         ForeignKeyConstraint(
             ["collection_id", "build_id", "source_document_id"],
@@ -234,6 +239,7 @@ class SourceTable(Base):
     caption_block_id: Mapped[str | None] = mapped_column(String(), nullable=True)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     heading_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    header_row_count: Mapped[int] = mapped_column(Integer, nullable=False)
     column_headers: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
     table_matrix: Mapped[list[list[str]]] = mapped_column(
         _JSON_DOCUMENT, nullable=False
@@ -280,6 +286,8 @@ class SourceTableCell(Base):
     __table_args__ = (
         CheckConstraint("row_index >= 0", name="row_index_non_negative"),
         CheckConstraint("col_index >= 0", name="col_index_non_negative"),
+        CheckConstraint("row_span >= 1", name="row_span_positive"),
+        CheckConstraint("col_span >= 1", name="col_span_positive"),
         CheckConstraint("page IS NULL OR page >= 0", name="page_non_negative"),
         ForeignKeyConstraint(
             ["collection_id", "build_id", "source_document_id", "table_id"],
@@ -308,6 +316,11 @@ class SourceTableCell(Base):
     row_index: Mapped[int] = mapped_column(Integer, nullable=False)
     col_index: Mapped[int] = mapped_column(Integer, nullable=False)
     cell_text: Mapped[str] = mapped_column(Text, nullable=False)
+    row_span: Mapped[int] = mapped_column(Integer, nullable=False)
+    col_span: Mapped[int] = mapped_column(Integer, nullable=False)
+    column_header: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    row_header: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    row_section: Mapped[bool] = mapped_column(Boolean, nullable=False)
     header_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     unit_hint: Mapped[str | None] = mapped_column(Text, nullable=True)

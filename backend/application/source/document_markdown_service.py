@@ -403,6 +403,7 @@ class DocumentMarkdownService:
         return render_markdown_table(
             [list(row) for row in table.table_matrix],
             list(table.column_headers),
+            header_row_count=table.header_row_count,
         )
 
     def _render_figure(

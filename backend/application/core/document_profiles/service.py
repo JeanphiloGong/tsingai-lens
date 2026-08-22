@@ -248,6 +248,7 @@ class DocumentProfileService:
             document_blocks = blocks_by_doc.get(document_id, [])
             profiled = self._profile_document_row(
                 collection_id=collection_id,
+                build_id=build_id,
                 row=row,
                 blocks=document_blocks,
                 file_lookup=file_lookup,
@@ -332,6 +333,7 @@ class DocumentProfileService:
     def _profile_document_row(
         self,
         collection_id: str,
+        build_id: str,
         row: Mapping[str, Any],
         blocks: list[dict[str, Any]],
         file_lookup: dict[str, Any] | None = None,
@@ -367,16 +369,36 @@ class DocumentProfileService:
                 }
             ).to_record()
 
+        extractor = self._get_document_profile_extractor()
         try:
-            extracted = self._get_document_profile_extractor().extract_document_profile(
-                profile_payload
-            )
+            extracted = extractor.extract_document_profile(profile_payload)
         except DocumentProfileExtractionError:
+            trace = extractor.consume_last_trace() or {}
+            diagnostic = {
+                key: trace[key]
+                for key in (
+                    "task_type",
+                    "prompt_version",
+                    "model",
+                    "extraction_mode",
+                    "trace_status",
+                    "elapsed_s",
+                    "error",
+                    "attempts",
+                )
+                if key in trace
+            }
             logger.warning(
                 "Document profile classification unavailable; preserving document "
-                "as uncertain collection_id=%s document_id=%s",
+                "as uncertain collection_id=%s build_id=%s document_id=%s trace=%s",
                 collection_id,
+                build_id,
                 document_id,
+                json.dumps(
+                    diagnostic,
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                ),
             )
             return DocumentProfile.from_mapping(
                 {

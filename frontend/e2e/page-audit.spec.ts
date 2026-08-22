@@ -299,6 +299,87 @@ test.describe('page interaction audit', () => {
 		expect(consoleErrors).toEqual([]);
 	});
 
+	test('research agent keeps the mobile composer visible across multiple turns', async ({
+		page
+	}) => {
+		const messageRequests: string[] = [];
+		let sequence = 0;
+		let trajectory: Array<Record<string, unknown>> = [];
+		await page.route(`**/api/v1/chat-sessions/${sessionId}/messages`, async (route) => {
+			const request = route.request();
+			if (request.method() === 'GET') {
+				return route.fulfill(json({ items: trajectory, pending_approval: null }));
+			}
+			const prompt = String(request.postDataJSON().message ?? '');
+			sequence += 1;
+			messageRequests.push(new URL(request.url()).pathname);
+			const turn = {
+				status: 'completed',
+				messages: [
+					agentMessage(`msg_mobile_user_${sequence}`, 'user', prompt),
+					agentMessage(`msg_mobile_assistant_${sequence}`, 'assistant', `Mobile reply ${sequence}`)
+				],
+				pending_approval: null,
+				error_code: null
+			};
+			trajectory = [...trajectory, ...turn.messages];
+			return route.fulfill(json(turn));
+		});
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto(`/collections/${collectionId}/assistant`);
+
+		const composer = page.locator('.composer');
+		const input = page.getByLabel('Message');
+		const sendButton = page.getByRole('button', { name: 'Send' });
+		await expect(composer).toBeVisible();
+		await expect(sendButton).toBeVisible();
+		const mobileLayout = await page.evaluate(() => {
+			const inputElement = document.querySelector<HTMLTextAreaElement>('.composer textarea');
+			const buttonElement = document.querySelector<HTMLButtonElement>('.composer button');
+			if (!inputElement || !buttonElement) return null;
+			const inputRect = inputElement.getBoundingClientRect();
+			const buttonRect = buttonElement.getBoundingClientRect();
+			const brandHex = getComputedStyle(document.documentElement)
+				.getPropertyValue('--brand-primary')
+				.trim();
+			const brandChannels = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(brandHex);
+			return {
+				buttonBottom: buttonRect.bottom,
+				buttonColor: getComputedStyle(buttonElement).backgroundColor,
+				brandColor: brandChannels
+					? `rgb(${Number.parseInt(brandChannels[1], 16)}, ${Number.parseInt(brandChannels[2], 16)}, ${Number.parseInt(brandChannels[3], 16)})`
+					: brandHex,
+				inputCenter: inputRect.top + inputRect.height / 2,
+				buttonCenter: buttonRect.top + buttonRect.height / 2,
+				viewportHeight: window.innerHeight
+			};
+		});
+		expect(mobileLayout).not.toBeNull();
+		expect(mobileLayout!.buttonBottom).toBeLessThanOrEqual(mobileLayout!.viewportHeight + 1);
+		expect(Math.abs(mobileLayout!.inputCenter - mobileLayout!.buttonCenter)).toBeLessThan(4);
+		expect(mobileLayout!.buttonColor).toBe(mobileLayout!.brandColor);
+
+		await input.fill('First question');
+		await sendButton.click();
+		await expect(page.getByText('Mobile reply 1')).toBeVisible();
+		await input.fill('Follow-up question');
+		await sendButton.click();
+		await expect(page.getByText('Mobile reply 2')).toBeVisible();
+		expect(messageRequests).toEqual([
+			`/api/v1/chat-sessions/${sessionId}/messages`,
+			`/api/v1/chat-sessions/${sessionId}/messages`
+		]);
+
+		await page.setViewportSize({ width: 390, height: 520 });
+		await input.focus();
+		await expect(sendButton).toBeInViewport();
+
+		await page.setViewportSize({ width: 320, height: 568 });
+		await expect(sendButton).toBeInViewport();
+		await expectNoHorizontalOverflow(page);
+	});
+
 	test('mobile app chrome keeps controls inside the viewport', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto('/');
@@ -376,7 +457,7 @@ async function checkViewport(
 	} else {
 		await expect(page.getByText(readyText).first()).toBeVisible();
 	}
-	await waitForVisualReady(page, path);
+	await waitForVisualReady(page);
 	await expectVisibleInteractionsHaveNames(page);
 	await expectNoHorizontalOverflow(page);
 	if (screenshotDir) {
@@ -387,7 +468,7 @@ async function checkViewport(
 	}
 }
 
-async function waitForVisualReady(page: Page, _path: string) {
+async function waitForVisualReady(page: Page) {
 	await page.waitForLoadState('networkidle');
 }
 

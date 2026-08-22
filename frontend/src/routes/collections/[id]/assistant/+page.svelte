@@ -734,7 +734,7 @@
 	:global(.app-shell:has(.research-agent)) {
 		padding: 0;
 		overflow: hidden;
-		background: #f4f6f8;
+		background: var(--bg-page);
 	}
 
 	:global(.app-shell:has(.research-agent) .site-header),
@@ -763,8 +763,9 @@
 		grid-template-columns: 280px minmax(0, 1fr);
 		width: 100vw;
 		height: 100vh;
-		background: #f4f6f8;
-		color: #18202a;
+		height: 100dvh;
+		background: var(--bg-page);
+		color: var(--text-primary);
 		letter-spacing: 0;
 		overflow: hidden;
 	}
@@ -774,8 +775,8 @@
 		min-height: 0;
 		flex-direction: column;
 		padding: 24px 20px;
-		border-right: 1px solid #dce1e7;
-		background: #eef1f4;
+		border-right: 1px solid var(--border-default);
+		background: var(--bg-subtle);
 	}
 
 	.brand {
@@ -788,9 +789,9 @@
 	.assistant-mark {
 		display: grid;
 		place-items: center;
-		background: #fff;
-		border: 1px solid #cbd3dc;
-		color: #215b43;
+		background: var(--surface-card);
+		border: 1px solid var(--brand-border);
+		color: var(--brand-primary);
 		font-weight: 800;
 	}
 
@@ -813,17 +814,18 @@
 		gap: 8px;
 		min-height: 42px;
 		margin-top: 24px;
-		border: 1px solid #174c38;
+		border: 1px solid var(--brand-primary);
 		border-radius: 6px;
-		background: #215b43;
+		background: var(--brand-primary);
 		color: #fff;
 		font-weight: 700;
 		cursor: pointer;
 	}
 
 	.new-session:hover:not(:disabled),
-	.approve:hover:not(:disabled) {
-		background: #174c38;
+	.approve:hover:not(:disabled),
+	.composer button:hover:not(:disabled) {
+		background: var(--brand-primary-hover);
 	}
 
 	button:disabled {
@@ -841,7 +843,7 @@
 
 	.history h2 {
 		margin: 0 0 10px;
-		color: #65717e;
+		color: var(--text-secondary);
 		font-size: 12px;
 		line-height: 18px;
 		text-transform: uppercase;
@@ -863,15 +865,15 @@
 		border: 1px solid transparent;
 		border-radius: 6px;
 		background: transparent;
-		color: #34404c;
+		color: var(--text-primary);
 		text-align: left;
 		cursor: pointer;
 	}
 
 	.history-item:hover,
 	.history-item.active {
-		border-color: #cbd3dc;
-		background: #fff;
+		border-color: var(--brand-border);
+		background: var(--surface-card);
 	}
 
 	.history-title {
@@ -883,7 +885,7 @@
 
 	.history-item time,
 	.empty-history {
-		color: #7a8693;
+		color: var(--text-tertiary);
 		font-size: 11px;
 	}
 
@@ -891,8 +893,8 @@
 		display: grid;
 		gap: 10px;
 		padding-top: 16px;
-		border-top: 1px solid #d3d9e0;
-		color: #215b43;
+		border-top: 1px solid var(--border-default);
+		color: var(--brand-primary);
 		font-size: 12px;
 		font-weight: 700;
 		text-decoration: none;
@@ -905,13 +907,13 @@
 	}
 
 	.collection-link small {
-		color: #65717e;
+		color: var(--text-secondary);
 		font-weight: 500;
 	}
 
 	.collection-link strong {
 		overflow: hidden;
-		color: #18202a;
+		color: var(--text-primary);
 		text-overflow: ellipsis;
 	}
 
@@ -920,7 +922,7 @@
 		flex-direction: column;
 		min-width: 0;
 		min-height: 0;
-		background: #fff;
+		background: var(--surface-card);
 	}
 
 	.conversation-header {
@@ -930,7 +932,7 @@
 		gap: 20px;
 		min-height: 76px;
 		padding: 16px 32px;
-		border-bottom: 1px solid #e1e5ea;
+		border-bottom: 1px solid var(--border-default);
 	}
 
 	.conversation-header h2 {
@@ -941,13 +943,13 @@
 
 	.conversation-header p {
 		margin: 3px 0 0;
-		color: #65717e;
+		color: var(--text-secondary);
 		font-size: 13px;
 	}
 
 	.objective-link,
 	.resource-links a {
-		color: #1f684d;
+		color: var(--brand-primary);
 		font-weight: 700;
 		text-decoration: none;
 	}
@@ -965,15 +967,15 @@
 	}
 
 	.status-error {
-		border: 1px solid #efb3b3;
-		background: #fff3f3;
-		color: #9f2828;
+		border: 1px solid var(--danger-border);
+		background: var(--danger-bg);
+		color: var(--danger-text);
 	}
 
 	.status-notice {
-		border: 1px solid #e4c77a;
-		background: #fff9e8;
-		color: #765619;
+		border: 1px solid var(--warning-border);
+		background: var(--warning-bg);
+		color: var(--warning-text);
 	}
 
 	.message-scroll {
@@ -1001,7 +1003,7 @@
 
 	.empty-state > p {
 		margin: 8px 0 0;
-		color: #65717e;
+		color: var(--text-secondary);
 		font-size: 14px;
 	}
 
@@ -1015,17 +1017,17 @@
 	.suggestions button {
 		min-height: 46px;
 		padding: 10px 12px;
-		border: 1px solid #cfd6de;
+		border: 1px solid var(--border-strong);
 		border-radius: 6px;
-		background: #fff;
-		color: #34404c;
+		background: var(--surface-card);
+		color: var(--text-primary);
 		text-align: left;
 		cursor: pointer;
 	}
 
 	.suggestions button:hover:not(:disabled) {
-		border-color: #4e806a;
-		background: #f3f8f5;
+		border-color: var(--brand-border);
+		background: var(--brand-soft);
 	}
 
 	.user-message {
@@ -1042,7 +1044,7 @@
 	.assistant-content > time {
 		display: block;
 		margin-bottom: 5px;
-		color: #87919b;
+		color: var(--text-tertiary);
 		font-size: 11px;
 	}
 
@@ -1054,7 +1056,7 @@
 		margin: 0;
 		padding: 12px 15px;
 		border-radius: 8px 8px 2px 8px;
-		background: #e8f0ec;
+		background: var(--brand-soft);
 		font-size: 14px;
 		line-height: 22px;
 		white-space: pre-wrap;
@@ -1082,9 +1084,9 @@
 
 	.assistant-copy {
 		padding: 14px 16px;
-		border: 1px solid #d8dee5;
+		border: 1px solid var(--border-default);
 		border-radius: 8px;
-		background: #fff;
+		background: var(--surface-card);
 		font-size: 14px;
 		line-height: 23px;
 		overflow-wrap: anywhere;
@@ -1102,16 +1104,16 @@
 
 	.capability-request {
 		margin: 7px 0 0;
-		color: #65717e;
+		color: var(--text-secondary);
 		font-size: 12px;
 	}
 
 	.capability-event {
 		margin: 0 0 22px 48px;
 		padding: 14px 16px;
-		border: 1px solid #ccd7d1;
+		border: 1px solid var(--border-default);
 		border-radius: 6px;
-		background: #f5f8f6;
+		background: var(--bg-subtle);
 	}
 
 	.capability-event > header {
@@ -1126,20 +1128,20 @@
 		width: 22px;
 		height: 22px;
 		border-radius: 50%;
-		background: #dcece4;
-		color: #215b43;
+		background: var(--success-bg);
+		color: var(--success-text);
 		font-size: 12px;
 		font-weight: 800;
 	}
 
 	.capability-event > header > span.failed {
-		background: #f8dddd;
-		color: #9f2828;
+		background: var(--danger-bg);
+		color: var(--danger-text);
 	}
 
 	.capability-event > header > span.queued {
-		background: #eee7c9;
-		color: #6f5a10;
+		background: var(--warning-bg);
+		color: var(--warning-text);
 	}
 
 	.capability-event header strong {
@@ -1148,7 +1150,7 @@
 
 	.capability-event header p {
 		margin: 2px 0 0;
-		color: #56636f;
+		color: var(--text-secondary);
 		font-size: 13px;
 	}
 
@@ -1163,7 +1165,7 @@
 
 	.draft-list li {
 		padding-top: 8px;
-		border-top: 1px solid #d6dfda;
+		border-top: 1px solid var(--border-default);
 		counter-increment: drafts;
 	}
 
@@ -1174,16 +1176,16 @@
 	.draft-list p,
 	.draft-list small {
 		margin: 4px 0 0;
-		color: #65717e;
+		color: var(--text-secondary);
 		font-size: 12px;
 	}
 
 	.warnings {
 		margin-top: 12px;
 		padding: 10px 12px;
-		border-left: 3px solid #c38b24;
-		background: #fff9e8;
-		color: #765619;
+		border-left: 3px solid var(--warning-border);
+		background: var(--warning-bg);
+		color: var(--warning-text);
 		font-size: 12px;
 	}
 
@@ -1203,9 +1205,9 @@
 	.approval {
 		margin: 8px 0 24px 48px;
 		padding: 18px;
-		border: 1px solid #d5b55f;
+		border: 1px solid var(--warning-border);
 		border-radius: 8px;
-		background: #fffaf0;
+		background: var(--warning-bg);
 	}
 
 	.approval > header {
@@ -1233,12 +1235,12 @@
 
 	.approval header p {
 		margin-top: 4px;
-		color: #6c6250;
+		color: var(--text-secondary);
 		font-size: 13px;
 	}
 
 	.approval > header > strong {
-		color: #765619;
+		color: var(--warning-text);
 		font-size: 12px;
 	}
 
@@ -1246,7 +1248,7 @@
 		display: grid;
 		gap: 0;
 		margin: 8px 0 0;
-		border-top: 1px solid #e6d7ad;
+		border-top: 1px solid var(--warning-border);
 	}
 
 	.approval dl div {
@@ -1254,11 +1256,11 @@
 		grid-template-columns: minmax(120px, 0.3fr) minmax(0, 1fr);
 		gap: 16px;
 		padding: 8px 0;
-		border-bottom: 1px solid #e6d7ad;
+		border-bottom: 1px solid var(--warning-border);
 	}
 
 	.approval dt {
-		color: #6c6250;
+		color: var(--text-secondary);
 		font-size: 12px;
 		font-weight: 700;
 		text-transform: capitalize;
@@ -1286,14 +1288,14 @@
 	}
 
 	.reject {
-		border: 1px solid #aeb7c1;
-		background: #fff;
-		color: #34404c;
+		border: 1px solid var(--border-strong);
+		background: var(--surface-card);
+		color: var(--text-primary);
 	}
 
 	.approve {
-		border: 1px solid #174c38;
-		background: #215b43;
+		border: 1px solid var(--brand-primary);
+		background: var(--brand-primary);
 		color: #fff;
 	}
 
@@ -1301,27 +1303,27 @@
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) auto;
 		gap: 10px;
-		padding: 16px 32px 20px;
-		border-top: 1px solid #e1e5ea;
-		background: #fff;
+		padding: 16px 32px max(20px, env(safe-area-inset-bottom));
+		border-top: 1px solid var(--border-default);
+		background: var(--surface-card);
 	}
 
 	.composer textarea {
 		min-height: 54px;
 		max-height: 150px;
 		padding: 12px 14px;
-		border: 1px solid #cbd3dc;
+		border: 1px solid var(--border-strong);
 		border-radius: 6px;
-		background: #fff;
-		color: #18202a;
+		background: var(--surface-card);
+		color: var(--text-primary);
 		font: inherit;
 		line-height: 22px;
 		resize: vertical;
 	}
 
 	.composer textarea:focus {
-		border-color: #2f7055;
-		outline: 2px solid #cfe3da;
+		border-color: var(--brand-primary);
+		outline: 2px solid var(--brand-border);
 		outline-offset: 1px;
 	}
 
@@ -1329,9 +1331,9 @@
 		align-self: end;
 		min-width: 92px;
 		min-height: 42px;
-		border: 1px solid #174c38;
+		border: 1px solid var(--brand-primary);
 		border-radius: 6px;
-		background: #215b43;
+		background: var(--brand-primary);
 		color: #fff;
 		font-weight: 700;
 		cursor: pointer;
@@ -1362,7 +1364,7 @@
 			gap: 12px;
 			padding: 12px 16px;
 			border-right: 0;
-			border-bottom: 1px solid #dce1e7;
+			border-bottom: 1px solid var(--border-default);
 		}
 
 		.new-session {
@@ -1410,11 +1412,20 @@
 		}
 
 		.composer {
-			grid-template-columns: 1fr;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 8px;
+			padding: 12px 12px max(12px, env(safe-area-inset-bottom));
 		}
 
 		.composer button {
-			width: 100%;
+			align-self: stretch;
+			min-width: 76px;
+			width: auto;
+		}
+
+		.composer textarea {
+			min-height: 48px;
+			resize: none;
 		}
 	}
 </style>

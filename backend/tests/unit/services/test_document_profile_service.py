@@ -202,10 +202,44 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
     assert item["parsing_warnings"] == ["insufficient_content"]
 
 
-def test_document_profile_service_continues_after_one_model_format_failure(tmp_path):
+def test_document_profile_service_continues_after_one_model_format_failure(
+    tmp_path,
+    caplog,
+):
     class OneFailedProfileExtractor:
+        def __init__(self) -> None:
+            self.last_trace = None
+
         def extract_document_profile(self, payload):  # noqa: ANN001
             if payload["title"] == "Unparseable model response":
+                self.last_trace = {
+                    "task_type": "document_profile",
+                    "prompt_version": "document_profile.v1",
+                    "model": "test-model",
+                    "extraction_mode": "json_text",
+                    "trace_status": "failed",
+                    "elapsed_s": 0.25,
+                    "messages": [{"role": "user", "content": "paper content"}],
+                    "raw_output": "classification: experimental",
+                    "parsed_output": None,
+                    "error": "structured extraction returned no JSON object",
+                    "attempts": [
+                        {
+                            "attempt": 1,
+                            "finish_reason": "stop",
+                            "response_chars": 28,
+                            "response_preview": "classification: experimental",
+                            "error": "structured extraction returned no JSON object",
+                        },
+                        {
+                            "attempt": 2,
+                            "finish_reason": "stop",
+                            "response_chars": 28,
+                            "response_preview": "classification: experimental",
+                            "error": "structured extraction returned no JSON object",
+                        },
+                    ],
+                }
                 raise DocumentProfileExtractionError(
                     "document profile model returned invalid structured output"
                 )
@@ -214,6 +248,11 @@ def test_document_profile_service_continues_after_one_model_format_failure(tmp_p
                 parsing_warnings=[],
                 confidence=0.9,
             )
+
+        def consume_last_trace(self):
+            trace = self.last_trace
+            self.last_trace = None
+            return trace
 
     collection_service = build_test_collection_service(tmp_path / "collections")
     profile_service = DocumentProfileService(
@@ -240,10 +279,11 @@ def test_document_profile_service_continues_after_one_model_format_failure(tmp_p
     )
     _write_source_artifacts(profile_service, collection_id, documents)
 
-    profiles = profile_service.build_document_profiles(
-        collection_id,
-        build_id="build_test",
-    )
+    with caplog.at_level("WARNING"):
+        profiles = profile_service.build_document_profiles(
+            collection_id,
+            build_id="build_test",
+        )
 
     records = {profile.document_id: profile.to_record() for profile in profiles}
     assert records["paper-failed"]["doc_type"] == "uncertain"
@@ -252,6 +292,19 @@ def test_document_profile_service_continues_after_one_model_format_failure(tmp_p
         "document_profile_extraction_failed"
     ]
     assert records["paper-success"]["doc_type"] == "experimental"
+    failure_log = next(
+        record.getMessage()
+        for record in caplog.records
+        if "Document profile classification unavailable" in record.getMessage()
+    )
+    assert f"collection_id={collection_id}" in failure_log
+    assert "build_id=build_test" in failure_log
+    assert "document_id=paper-failed" in failure_log
+    assert '"model":"test-model"' in failure_log
+    assert '"error":"structured extraction returned no JSON object"' in failure_log
+    assert '"attempt":1' in failure_log
+    assert '"attempt":2' in failure_log
+    assert "paper content" not in failure_log
 
 
 def test_document_profile_service_normalizes_numpy_array_columns(tmp_path):

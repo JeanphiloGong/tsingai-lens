@@ -335,6 +335,7 @@ class SqliteSourceArtifactRepository:
                     caption_block_id,
                     page,
                     heading_path,
+                    header_row_count,
                     column_headers_json,
                     table_matrix_json,
                     metadata_json
@@ -355,6 +356,7 @@ class SqliteSourceArtifactRepository:
                     "caption_block_id": row["caption_block_id"],
                     "page": row["page"],
                     "heading_path": row["heading_path"],
+                    "header_row_count": row["header_row_count"],
                     "column_headers": _load_json_list(row["column_headers_json"]),
                     "table_matrix": _load_json_list(row["table_matrix_json"]),
                     "metadata": _load_json_object(row["metadata_json"]),
@@ -419,6 +421,11 @@ class SqliteSourceArtifactRepository:
                     row_index,
                     col_index,
                     cell_text,
+                    row_span,
+                    col_span,
+                    column_header,
+                    row_header,
+                    row_section,
                     header_path,
                     page,
                     unit_hint
@@ -439,6 +446,11 @@ class SqliteSourceArtifactRepository:
                     "row_index": row["row_index"],
                     "col_index": row["col_index"],
                     "cell_text": row["cell_text"],
+                    "row_span": row["row_span"],
+                    "col_span": row["col_span"],
+                    "column_header": bool(row["column_header"]),
+                    "row_header": bool(row["row_header"]),
+                    "row_section": bool(row["row_section"]),
                     "header_path": row["header_path"],
                     "page": row["page"],
                     "unit_hint": row["unit_hint"],
@@ -591,6 +603,7 @@ class SqliteSourceArtifactRepository:
                     heading_path TEXT,
                     row_count INTEGER NOT NULL,
                     col_count INTEGER NOT NULL,
+                    header_row_count INTEGER NOT NULL DEFAULT 1,
                     column_headers_json TEXT NOT NULL,
                     table_matrix_json TEXT NOT NULL,
                     table_markdown TEXT,
@@ -625,6 +638,11 @@ class SqliteSourceArtifactRepository:
                     row_index INTEGER NOT NULL,
                     col_index INTEGER NOT NULL,
                     cell_text TEXT NOT NULL,
+                    row_span INTEGER NOT NULL DEFAULT 1,
+                    col_span INTEGER NOT NULL DEFAULT 1,
+                    column_header INTEGER NOT NULL DEFAULT 0,
+                    row_header INTEGER NOT NULL DEFAULT 0,
+                    row_section INTEGER NOT NULL DEFAULT 0,
                     header_path TEXT,
                     page INTEGER,
                     unit_hint TEXT,
@@ -654,6 +672,7 @@ class SqliteSourceArtifactRepository:
                 )
                 """
             )
+            self._ensure_table_topology_columns(connection)
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS source_artifact_builds (
@@ -793,6 +812,36 @@ class SqliteSourceArtifactRepository:
                     relevance_score DESC
                 )
                 """
+            )
+
+    @staticmethod
+    def _ensure_table_topology_columns(connection: sqlite3.Connection) -> None:
+        table_columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(source_tables)")
+        }
+        if "header_row_count" not in table_columns:
+            connection.execute(
+                "ALTER TABLE source_tables "
+                "ADD COLUMN header_row_count INTEGER NOT NULL DEFAULT 1"
+            )
+
+        cell_columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(source_table_cells)")
+        }
+        additions = {
+            "row_span": "INTEGER NOT NULL DEFAULT 1",
+            "col_span": "INTEGER NOT NULL DEFAULT 1",
+            "column_header": "INTEGER NOT NULL DEFAULT 0",
+            "row_header": "INTEGER NOT NULL DEFAULT 0",
+            "row_section": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for column_name, declaration in additions.items():
+            if column_name in cell_columns:
+                continue
+            connection.execute(
+                f"ALTER TABLE source_table_cells ADD COLUMN {column_name} {declaration}"
             )
 
     def _delete_collection_artifacts(
@@ -1000,12 +1049,13 @@ class SqliteSourceArtifactRepository:
                 heading_path,
                 row_count,
                 col_count,
+                header_row_count,
                 column_headers_json,
                 table_matrix_json,
                 table_markdown,
                 table_text,
                 metadata_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [self._table_values(collection_id, table) for table in tables],
         )
@@ -1060,10 +1110,15 @@ class SqliteSourceArtifactRepository:
                 row_index,
                 col_index,
                 cell_text,
+                row_span,
+                col_span,
+                column_header,
+                row_header,
+                row_section,
                 header_path,
                 page,
                 unit_hint
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -1074,6 +1129,11 @@ class SqliteSourceArtifactRepository:
                     cell.row_index,
                     cell.col_index,
                     cell.cell_text,
+                    cell.row_span,
+                    cell.col_span,
+                    int(cell.column_header),
+                    int(cell.row_header),
+                    int(cell.row_section),
                     cell.header_path,
                     cell.page,
                     cell.unit_hint,
@@ -1319,6 +1379,7 @@ class SqliteSourceArtifactRepository:
             table.heading_path,
             table.row_count,
             table.col_count,
+            table.header_row_count,
             _dump_json_list(record["column_headers"]),
             _dump_json_list(record["table_matrix"]),
             record["table_markdown"],

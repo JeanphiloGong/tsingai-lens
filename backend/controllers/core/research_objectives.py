@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from concurrent.futures import Future, ThreadPoolExecutor
+from asyncio import CancelledError, Semaphore, Task, create_task, to_thread
 import logging
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.concurrency import run_in_threadpool
@@ -19,10 +20,7 @@ from controllers.schemas.core.research_objectives import (
 
 router = APIRouter(prefix="/collections", tags=["research-objectives"])
 logger = logging.getLogger(__name__)
-_objective_analysis_executor = ThreadPoolExecutor(
-    max_workers=1,
-    thread_name_prefix="objective-analysis",
-)
+_OBJECTIVE_ANALYSIS_MAX_CONCURRENCY = 4
 
 
 @router.get(
@@ -198,28 +196,43 @@ async def confirm_collection_objective(
     summary="Start a research objective analysis",
     name="run_collection_objective_analysis",  # Preserve the OpenAPI operation ID.
 )
-def start_collection_objective_analysis(
+async def start_collection_objective_analysis(
     collection_id: str,
     objective_id: str,
     request: Request,
 ) -> ObjectiveAnalysisResponse:
     service = request.app.state.objective_analysis_service
     try:
-        payload = service.queue_analysis(collection_id, objective_id)
+        payload = await run_in_threadpool(
+            service.queue_analysis,
+            collection_id,
+            objective_id,
+        )
     except FileNotFoundError as exc:
         raise _objective_not_found(collection_id, objective_id, exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     analysis = payload.get("analysis")
     if analysis is not None and analysis.status == "queued":
+        semaphore = getattr(
+            request.app.state,
+            "objective_analysis_semaphore",
+            None,
+        )
+        if semaphore is None:
+            semaphore = Semaphore(_OBJECTIVE_ANALYSIS_MAX_CONCURRENCY)
+            request.app.state.objective_analysis_semaphore = semaphore
+        coroutine = _execute_queued_analysis(
+            semaphore,
+            service,
+            collection_id,
+            objective_id,
+            analysis.analysis_version,
+        )
         try:
-            future = _objective_analysis_executor.submit(
-                service.execute_queued_analysis,
-                collection_id,
-                objective_id,
-                analysis.analysis_version,
-            )
+            task = create_task(coroutine)
         except Exception as exc:  # noqa: BLE001
+            coroutine.close()
             logger.exception(
                 "Objective analysis dispatch failed collection_id=%s "
                 "objective_id=%s analysis_version=%s",
@@ -227,7 +240,8 @@ def start_collection_objective_analysis(
                 objective_id,
                 analysis.analysis_version,
             )
-            service.fail_analysis_dispatch(
+            await run_in_threadpool(
+                service.fail_analysis_dispatch,
                 collection_id,
                 objective_id,
                 analysis.analysis_version,
@@ -245,7 +259,14 @@ def start_collection_objective_analysis(
                     "analysis_version": analysis.analysis_version,
                 },
             ) from exc
-        future.add_done_callback(_log_unexpected_analysis_failure)
+        # Keep strong references until asyncio has delivered each task callback.
+        tasks = getattr(request.app.state, "objective_analysis_tasks", None)
+        if tasks is None:
+            tasks = set()
+            request.app.state.objective_analysis_tasks = tasks
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+        task.add_done_callback(_log_unexpected_analysis_failure)
     return _to_objective_analysis_response(payload)
 
 
@@ -423,8 +444,26 @@ def _objective_not_found(
     )
 
 
-def _log_unexpected_analysis_failure(future: Future) -> None:
+async def _execute_queued_analysis(
+    semaphore: Semaphore,
+    service: Any,
+    collection_id: str,
+    objective_id: str,
+    analysis_version: int,
+) -> dict[str, Any]:
+    async with semaphore:
+        return await to_thread(
+            service.execute_queued_analysis,
+            collection_id,
+            objective_id,
+            analysis_version,
+        )
+
+
+def _log_unexpected_analysis_failure(task: Task[dict[str, Any]]) -> None:
     try:
-        future.result()
+        task.result()
+    except CancelledError:
+        logger.info("Objective analysis task cancelled during backend shutdown")
     except Exception:  # noqa: BLE001
         logger.exception("Objective analysis crashed after route scheduling")

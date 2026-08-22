@@ -64,6 +64,7 @@ def test_sqlite_source_artifact_repository_round_trips_document_aggregates(tmp_p
                 heading_path="Methods",
                 column_headers=("Sample", "Strength (MPa)"),
                 table_matrix=(("Sample", "Strength (MPa)"), ("A", "123")),
+                header_row_count=1,
                 metadata={"caption_linkage_method": "test"},
             ),
         ),
@@ -86,6 +87,9 @@ def test_sqlite_source_artifact_repository_round_trips_document_aggregates(tmp_p
                 row_index=1,
                 col_index=1,
                 cell_text="123",
+                row_span=2,
+                col_span=1,
+                row_header=True,
                 header_path="Strength (MPa)",
                 page=1,
                 unit_hint="MPa",
@@ -125,6 +129,8 @@ def test_sqlite_source_artifact_repository_round_trips_document_aggregates(tmp_p
     )
     assert document.table_rows[0].row_text == "A | 123"
     assert document.table_cells[0].unit_hint == "MPa"
+    assert document.table_cells[0].row_span == 2
+    assert document.table_cells[0].row_header is True
     assert document.figures[0].image_path == "image_assets/fig-1.png"
 
     repository.replace_collection_documents(

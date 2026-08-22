@@ -776,6 +776,7 @@ def test_analysis_contributions_report_each_paper_evidence_disposition():
         collection_id="col-test",
         analysis=analysis,
         objective=objective,
+        paper_skims=(),
         frames=frames,
         routes=routes,
         evidence_records=evidence_records,

@@ -24,6 +24,9 @@ from application.core.objectives.analysis.evidence_routing import (
     EvidenceCandidate,
     order_routes_for_extraction,
 )
+from application.core.objectives.analysis.diagnostics import (
+    record_analysis_diagnostic,
+)
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from application.core.objectives.analysis.source_validation import (
     _objective_column_key,
@@ -48,7 +51,7 @@ from domain.core import (
     normalize_objective_confidence,
     normalize_objective_terms,
 )
-from domain.source import SourceDocumentTree
+from domain.source import SourceDocumentTree, render_markdown_table
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +63,7 @@ _OBJECTIVE_STATE_ITEM_LIMIT = 12
 _OBJECTIVE_STATE_TEXT_CHARS = 220
 _OBJECTIVE_EVIDENCE_TEXT_CHARS = 6000
 _OBJECTIVE_EVIDENCE_PROMPT_TEXT_CHARS = 1800
-_OBJECTIVE_EVIDENCE_PROMPT_TABLE_ROWS = 8
-_OBJECTIVE_EVIDENCE_PROMPT_TABLE_CELLS = 80
+_TABLE_MATRIX_REPAIR_PROMPT_TOKEN_LIMIT = 12_000
 _OBJECTIVE_NON_RESULT_VALUE_COLUMN_TERMS = (
     "standard deviation",
     "std",
@@ -524,7 +526,22 @@ def build_objective_evidence_prompt(
     source = (
         payload.get("source") if isinstance(payload.get("source"), dict) else {}
     )
-    source_text = str(source.get("text") or source.get("caption_text") or "").strip()
+    if str(source.get("source_kind") or route.get("source_kind") or "") == "table":
+        source_text = "\n\n".join(
+            part
+            for part in (
+                f"CAPTION: {str(source.get('caption_text') or '').strip()}"
+                if str(source.get("caption_text") or "").strip()
+                else "",
+                f"HEADING: {str(source.get('heading_path') or '').strip()}"
+                if str(source.get("heading_path") or "").strip()
+                else "",
+                str(source.get("table_markdown") or "").strip(),
+            )
+            if part
+        )
+    else:
+        source_text = str(source.get("text") or "").strip()
     if not source_text:
         source_text = json.dumps(
             {
@@ -534,8 +551,7 @@ def build_objective_evidence_prompt(
                     "page",
                     "heading_path",
                     "column_headers",
-                    "table_matrix",
-                    "table_cells",
+                    "table_markdown",
                 )
                 if source.get(key) not in (None, "", [], {})
             },
@@ -1427,16 +1443,70 @@ def _repair_objective_table_source_if_needed(
         source=source,
     ):
         return source, None
-    if unavailable_error is not None:
-        return source, unavailable_error
-    repair_payload = _build_objective_table_matrix_repair_payload(
-        route=route,
+    original_matrix = _normalized_objective_table_matrix(source.get("table_matrix"))
+    canonical_matrix = _canonical_objective_table_matrix(
         source=source,
+        matrix=original_matrix,
     )
+    model_request_count = 0
+    model_row_count: int | None = None
+    final_row_count: int | None = None
+    model_repair_count = 0
+    deterministic_rebind_count = 0
+    number_sequence_verified: bool | None = None
+    warnings: list[str] = []
+
+    def record_trace(status: str, failure_reason: str | None = None) -> None:
+        record_analysis_diagnostic(
+            {
+                "trace_type": "table_matrix_repair",
+                "collection_id": collection_id,
+                "objective_id": route.objective_id,
+                "document_id": route.document_id,
+                "table_id": route.source_ref,
+                "page": source.get("page"),
+                "status": status,
+                "original_row_count": len(canonical_matrix),
+                "model_row_count": model_row_count,
+                "final_row_count": final_row_count,
+                "model_request_count": model_request_count,
+                "model_repair_count": model_repair_count,
+                "fragment_row_reduction_count": (
+                    max(0, len(canonical_matrix) - final_row_count)
+                    if final_row_count is not None
+                    else 0
+                ),
+                "deterministic_rebind_count": deterministic_rebind_count,
+                "number_sequence_verified": number_sequence_verified,
+                "warnings": list(dict.fromkeys(warnings)),
+                "failure_reason": failure_reason,
+            }
+        )
+
+    if unavailable_error is not None:
+        record_trace(
+            "provider_failed",
+            f"{unavailable_error.__class__.__name__}: {unavailable_error}",
+        )
+        return source, unavailable_error
     try:
         if paper_facts_extractor is None:
             raise RuntimeError("table repair extractor is unavailable")
-        parsed = paper_facts_extractor.repair_table_matrix(repair_payload)
+        repair_payloads = _build_objective_table_matrix_repair_payloads(
+            route=route,
+            source=source,
+            paper_facts_extractor=paper_facts_extractor,
+        )
+        parsed_repair_items = []
+        for repair_payload in repair_payloads:
+            model_request_count += 1
+            parsed_repair_items.append(
+                (
+                    repair_payload,
+                    paper_facts_extractor.repair_table_matrix(repair_payload),
+                )
+            )
+        parsed_repairs = tuple(parsed_repair_items)
     except Exception as exc:
         logger.exception(
             "Research objective table matrix repair failed collection_id=%s source_ref=%s objective_id=%s document_id=%s source_ref=%s",
@@ -1446,61 +1516,155 @@ def _repair_objective_table_source_if_needed(
             route.document_id,
             route.source_ref,
         )
+        record_trace("provider_failed", f"{exc.__class__.__name__}: {exc}")
         return source, exc
-    repaired_matrix = _validated_objective_repaired_table_matrix(
+
+    repair_records = []
+    for repair_payload, parsed in parsed_repairs:
+        repairs = getattr(parsed, "repairs", None)
+        if repairs:
+            row_offset = int(
+                repair_payload["source"]["table_slice"]["first_source_row_index"]
+            )
+            for repair_item in repairs:
+                repair_record = (
+                    repair_item.model_dump()
+                    if hasattr(repair_item, "model_dump")
+                    else dict(repair_item)
+                )
+                if repair_record.get("row_index") is not None:
+                    repair_record["row_index"] = (
+                        int(repair_record["row_index"]) + row_offset - 1
+                    )
+                repair_records.append(repair_record)
+        warnings.extend(
+            str(warning)
+            for warning in getattr(parsed, "warnings", None) or ()
+            if str(warning).strip()
+        )
+    model_repair_count = len(repair_records)
+    repaired_matrix = _merge_objective_table_matrix_repairs(
         source=source,
-        repaired_table_matrix=getattr(parsed, "repaired_table_matrix", None),
+        canonical_matrix=canonical_matrix,
+        parsed_repairs=parsed_repairs,
     )
+    model_row_count = len(repaired_matrix)
     if not repaired_matrix:
-        return source, ValueError("table matrix repair returned no usable matrix")
-    original_matrix = _normalized_objective_table_matrix(source.get("table_matrix"))
+        reason = "table matrix repair returned no usable matrix"
+        record_trace("rejected", reason)
+        return source, ValueError(reason)
     repaired_matrix, residual_repairs = (
         _cleanup_objective_repaired_table_matrix_residual_fragments(
-            original_matrix=original_matrix,
+            original_matrix=canonical_matrix,
             repaired_matrix=repaired_matrix,
             column_headers=source.get("column_headers", ()),
         )
     )
+    repaired_matrix, uncertainty_repairs = (
+        _rebind_objective_table_mean_uncertainty_columns(
+            original_matrix=canonical_matrix,
+            repaired_matrix=repaired_matrix,
+            column_headers=source.get("column_headers", ()),
+        )
+    )
+    deterministic_rebind_count = len(uncertainty_repairs)
+    final_row_count = len(repaired_matrix)
     if (
-        repaired_matrix == original_matrix
-        and _objective_table_matrix_has_structural_fragments(original_matrix)
+        repaired_matrix == canonical_matrix
+        and _objective_table_matrix_has_structural_fragments(canonical_matrix)
     ):
-        return source, ValueError(
-            "table matrix repair left the fragmented matrix unchanged"
-        )
+        reason = "table matrix repair left the fragmented matrix unchanged"
+        record_trace("rejected", reason)
+        return source, ValueError(reason)
     if _objective_table_matrix_has_structural_fragments(repaired_matrix):
-        return source, ValueError(
-            "table matrix repair returned a structurally fragmented matrix"
+        reason = "table matrix repair returned a structurally fragmented matrix"
+        record_trace("rejected", reason)
+        return source, ValueError(reason)
+    number_sequence_verified = (
+        _objective_table_repair_preserves_result_number_sequences(
+            original_matrix=canonical_matrix,
+            repaired_matrix=repaired_matrix,
         )
+    )
+    if not number_sequence_verified:
+        reason = "table matrix repair changed or reordered source result numbers"
+        record_trace("rejected", reason)
+        return source, ValueError(reason)
     repaired_source = dict(source)
     repaired_source["raw_table_matrix"] = source.get("table_matrix", [])
     repaired_source["table_matrix"] = repaired_matrix
     repaired_source["table_matrix_structural_repair_applied"] = True
-    repairs = getattr(parsed, "repairs", None)
-    repair_records = []
-    if repairs:
-        repair_records.extend(
-            repair_item.model_dump()
-            if hasattr(repair_item, "model_dump")
-            else repair_item
-            for repair_item in repairs
-        )
     repair_records.extend(residual_repairs)
+    repair_records.extend(uncertainty_repairs)
     if repair_records:
         repaired_source["table_matrix_repairs"] = repair_records
-    warnings = getattr(parsed, "warnings", None)
     if warnings:
-        repaired_source["table_matrix_repair_warnings"] = [
-            str(warning) for warning in warnings if str(warning).strip()
-        ]
+        repaired_source["table_matrix_repair_warnings"] = list(
+            dict.fromkeys(warnings)
+        )
+    record_trace("verified")
     return repaired_source, None
+
+
+def _build_objective_table_matrix_repair_payloads(
+    *,
+    route: EvidenceCandidate,
+    source: dict[str, Any],
+    paper_facts_extractor: PaperFactsExtractor,
+) -> tuple[dict[str, Any], ...]:
+    matrix = _normalized_objective_table_matrix(source.get("table_matrix"))
+    canonical_matrix = _canonical_objective_table_matrix(source=source, matrix=matrix)
+    if not canonical_matrix:
+        return ()
+    headers = canonical_matrix[0]
+    body_rows = canonical_matrix[1:]
+
+    def payload(start: int, end: int) -> dict[str, Any]:
+        return _build_objective_table_matrix_repair_payload(
+            route=route,
+            source=source,
+            headers=headers,
+            body_rows=body_rows,
+            start=start,
+            end=end,
+        )
+
+    estimator = getattr(
+        paper_facts_extractor,
+        "estimate_table_matrix_repair_prompt_tokens",
+        None,
+    )
+    if not callable(estimator):
+        return (payload(0, len(body_rows)),)
+
+    bounded: list[dict[str, Any]] = []
+
+    def append_bounded(start: int, end: int) -> None:
+        candidate = payload(start, end)
+        if (
+            int(estimator(candidate)) <= _TABLE_MATRIX_REPAIR_PROMPT_TOKEN_LIMIT
+            or end - start <= 1
+        ):
+            bounded.append(candidate)
+            return
+        midpoint = start + max(1, (end - start) // 2)
+        append_bounded(start, midpoint)
+        append_bounded(midpoint, end)
+
+    append_bounded(0, len(body_rows))
+    return tuple(bounded)
 
 
 def _build_objective_table_matrix_repair_payload(
     *,
     route: EvidenceCandidate,
     source: dict[str, Any],
+    headers: list[str],
+    body_rows: list[list[str]],
+    start: int,
+    end: int,
 ) -> dict[str, Any]:
+    first_source_row_index = start + 1
     compact_source = {
         "source_kind": source.get("source_kind"),
         "source_ref": source.get("source_ref"),
@@ -1508,13 +1672,17 @@ def _build_objective_table_matrix_repair_payload(
         "page": source.get("page"),
         "caption_text": source.get("caption_text"),
         "heading_path": source.get("heading_path"),
-        "column_headers": [
-            str(value)
-            for value in source.get("column_headers", ())
-            if str(value).strip()
-        ],
-        "table_matrix": _normalized_objective_table_matrix(source.get("table_matrix")),
-        "table_cells": _compact_objective_table_cells_for_repair(source),
+        "column_headers": headers,
+        "table_markdown": render_markdown_table(
+            [headers, *body_rows[start:end]],
+            headers,
+            header_row_count=1,
+        ),
+        "table_slice": {
+            "first_source_row_index": first_source_row_index,
+            "end_source_row_index": end + 1,
+            "total_body_rows": len(body_rows),
+        },
     }
     return {
         "table_role": route.role,
@@ -1531,38 +1699,195 @@ def _build_objective_table_matrix_repair_payload(
     }
 
 
-def _compact_objective_table_cells_for_repair(
+def _canonical_objective_table_matrix(
+    *,
     source: dict[str, Any],
-) -> list[dict[str, Any]]:
-    cells = source.get("table_cells")
-    if not isinstance(cells, list):
+    matrix: list[list[str]],
+) -> list[list[str]]:
+    if not matrix:
         return []
-    fragmented_columns = {
-        cell.get("col_index")
-        for cell in cells
-        if isinstance(cell, dict)
-        and _objective_cell_text_looks_structurally_fragmented(
-            str(cell.get("cell_text") or "")
-        )
-    }
-    if not fragmented_columns:
+    headers = [str(value).strip() for value in source.get("column_headers", ())]
+    if not any(headers):
+        headers = list(matrix[0])
+    header_row_count = source.get("header_row_count", 1)
+    try:
+        body_start = max(0, min(int(header_row_count), len(matrix)))
+    except (TypeError, ValueError):
+        body_start = 1
+    return [headers, *matrix[body_start:]]
+
+
+def _merge_objective_table_matrix_repairs(
+    *,
+    source: dict[str, Any],
+    canonical_matrix: list[list[str]],
+    parsed_repairs: tuple[tuple[dict[str, Any], Any], ...],
+) -> list[list[str]]:
+    if not canonical_matrix or not parsed_repairs:
         return []
-    compact_cells: list[dict[str, Any]] = []
-    for cell in cells:
-        if not isinstance(cell, dict):
-            continue
-        col_index = cell.get("col_index")
-        if col_index not in fragmented_columns and col_index != 0:
-            continue
-        compact_cells.append(
-            {
-                "row_index": cell.get("row_index"),
-                "col_index": col_index,
-                "header_path": cell.get("header_path"),
-                "cell_text": str(cell.get("cell_text") or ""),
-            }
+    headers = canonical_matrix[0]
+    merged = [headers]
+    for _repair_payload, parsed in parsed_repairs:
+        repaired_slice = _validated_objective_repaired_table_matrix(
+            source={**source, "column_headers": headers},
+            repaired_table_matrix=getattr(parsed, "repaired_table_matrix", None),
         )
-    return compact_cells
+        if not repaired_slice:
+            return []
+        slice_rows = repaired_slice[1:] if _objective_row_matches_headers(
+            tuple(repaired_slice[0]), tuple(headers)
+        ) else repaired_slice
+        merged.extend(slice_rows)
+    allowed_row_counts = {len(canonical_matrix)}
+    if _objective_table_has_mergeable_trailing_fragment_row(canonical_matrix):
+        allowed_row_counts.add(len(canonical_matrix) - 1)
+    if len(merged) not in allowed_row_counts:
+        return []
+    return merged
+
+
+def _objective_table_repair_preserves_result_number_sequences(
+    *,
+    original_matrix: list[list[str]],
+    repaired_matrix: list[list[str]],
+) -> bool:
+    if not original_matrix or not repaired_matrix:
+        return False
+    expected_width = len(original_matrix[0])
+    if expected_width != len(repaired_matrix[0]):
+        return False
+    if any(len(row) != expected_width for row in original_matrix):
+        return False
+    if any(len(row) != expected_width for row in repaired_matrix):
+        return False
+    return all(
+        _objective_column_numeric_tokens(original_matrix, column_index)
+        == _objective_column_numeric_tokens(repaired_matrix, column_index)
+        for column_index in range(1, expected_width)
+    )
+
+
+def _objective_column_numeric_tokens(
+    matrix: list[list[str]],
+    column_index: int,
+) -> tuple[str, ...]:
+    return tuple(
+        match.group(0)
+        for row in matrix[1:]
+        for match in _NUMBER_PATTERN.finditer(str(row[column_index] or ""))
+    )
+
+
+def _objective_table_has_mergeable_trailing_fragment_row(
+    matrix: list[list[str]],
+) -> bool:
+    if len(matrix) < 3 or len(matrix[-1]) < 2:
+        return False
+    row = [" ".join(str(cell or "").split()) for cell in matrix[-1]]
+    nonempty_result_cells = [cell for cell in row[1:] if cell]
+    if len(nonempty_result_cells) != 1:
+        return False
+    label = row[0]
+    return bool(
+        re.fullmatch(
+            r"\(?\s*[-+]?\d+(?:\.\d+)?\s*/\s*[-+]?\d+(?:\.\d+)?\s*\)?",
+            label,
+        )
+        and _objective_cell_is_uncertainty_fragment(nonempty_result_cells[0])
+    )
+
+
+def _objective_cell_is_uncertainty_fragment(value: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"\(?\s*(?:±|\+/-|\+-)\s*"
+            r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?\s*\)?",
+            " ".join(str(value or "").split()),
+        )
+    )
+
+
+def _objective_cell_is_mean_uncertainty_value(value: str) -> bool:
+    number = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+    return bool(
+        re.fullmatch(
+            rf"\s*{number}\s*\(?\s*(?:±|\+/-|\+-)\s*{number}\s*\)?\s*",
+            str(value or ""),
+        )
+    )
+
+
+def _rebind_objective_table_mean_uncertainty_columns(
+    *,
+    original_matrix: list[list[str]],
+    repaired_matrix: list[list[str]],
+    column_headers: Any,
+) -> tuple[list[list[str]], list[dict[str, Any]]]:
+    if len(repaired_matrix) < 2 or not original_matrix:
+        return repaired_matrix, []
+    width = len(repaired_matrix[0])
+    if width < 2 or any(len(row) != width for row in repaired_matrix):
+        return repaired_matrix, []
+    if any(len(row) != width for row in original_matrix):
+        return repaired_matrix, []
+
+    body_row_count = len(repaired_matrix) - 1
+    headers = [str(value).strip() for value in column_headers or ()]
+    rebound_matrix = [list(row) for row in repaired_matrix]
+    repairs: list[dict[str, Any]] = []
+    for column_index in range(1, width):
+        source_cells = [row[column_index] for row in original_matrix[1:]]
+        source_tokens = _objective_column_numeric_tokens(
+            original_matrix,
+            column_index,
+        )
+        if len(source_tokens) != body_row_count * 2:
+            continue
+        if not any(
+            len(tuple(_NUMBER_PATTERN.finditer(cell))) != 2
+            for cell in source_cells
+        ):
+            continue
+        uncertainty_cell_count = sum(
+            1
+            for cell in source_cells
+            if re.search(r"(?:±|\+/-|\+-)", cell)
+        )
+        if uncertainty_cell_count < max(2, body_row_count // 2):
+            continue
+        repaired_cells = [row[column_index] for row in repaired_matrix[1:]]
+        if not all(
+            _objective_cell_is_mean_uncertainty_value(cell)
+            for cell in repaired_cells
+        ):
+            continue
+
+        for body_index, repaired_cell in enumerate(repaired_cells):
+            expected_tokens = source_tokens[body_index * 2 : body_index * 2 + 2]
+            actual_tokens = tuple(
+                match.group(0) for match in _NUMBER_PATTERN.finditer(repaired_cell)
+            )
+            if actual_tokens == expected_tokens:
+                continue
+            rebound = f"{expected_tokens[0]} ( ± {expected_tokens[1]})"
+            rebound_matrix[body_index + 1][column_index] = rebound
+            repairs.append(
+                {
+                    "row_index": body_index + 1,
+                    "column": (
+                        headers[column_index]
+                        if column_index < len(headers)
+                        else str(column_index)
+                    ),
+                    "before": repaired_cell,
+                    "after": rebound,
+                    "reason": (
+                        "Rebound a parser-split uncertainty using the complete "
+                        "top-to-bottom numeric sequence of this result column."
+                    ),
+                }
+            )
+    return rebound_matrix, repairs
 
 
 def _validated_objective_repaired_table_matrix(
@@ -2099,6 +2424,15 @@ def _build_objective_route_source_payload(
         )
         if table is None:
             return {}
+        header_row_count = int(getattr(table, "header_row_count", 1) or 0)
+        table_matrix = [
+            [str(cell) for cell in row]
+            for row in getattr(table, "table_matrix", ()) or ()
+            if isinstance(row, (list, tuple))
+        ]
+        column_headers = [
+            str(value) for value in getattr(table, "column_headers", ()) or ()
+        ]
         cells = tuple(
             cell
             for cell in table_cells or []
@@ -2114,14 +2448,14 @@ def _build_objective_route_source_payload(
                 blocks=blocks,
             ),
             "heading_path": getattr(table, "heading_path", None),
-            "column_headers": [
-                str(value) for value in getattr(table, "column_headers", ()) or ()
-            ],
-            "table_matrix": [
-                [str(cell) for cell in row]
-                for row in getattr(table, "table_matrix", ()) or ()
-                if isinstance(row, (list, tuple))
-            ],
+            "column_headers": column_headers,
+            "header_row_count": header_row_count,
+            "table_matrix": table_matrix,
+            "table_markdown": render_markdown_table(
+                table_matrix,
+                column_headers,
+                header_row_count=header_row_count,
+            ),
             "table_cells": [
                 {
                     "row_index": getattr(cell, "row_index", None),
@@ -3675,8 +4009,17 @@ def _objective_evidence_prompt_source(
 ) -> dict[str, Any]:
     source_kind = str(source.get("source_kind") or "")
     if source_kind == "table":
-        compact_cells = _objective_evidence_prompt_table_cells(source)
-        payload = {
+        table_markdown = str(source.get("table_markdown") or "")
+        if not table_markdown:
+            table_markdown = str(
+                render_markdown_table(
+                    _normalized_objective_table_matrix(source.get("table_matrix")),
+                    [str(value) for value in source.get("column_headers", ())],
+                    header_row_count=int(source.get("header_row_count", 1) or 0),
+                )
+                or ""
+            )
+        return {
             "source_kind": "table",
             "source_ref": str(source.get("source_ref") or ""),
             "document_id": source.get("document_id"),
@@ -3690,11 +4033,8 @@ def _objective_evidence_prompt_source(
                 for value in source.get("column_headers", []) or []
                 if str(value).strip()
             ],
-            "table_cells": compact_cells,
+            "table_markdown": table_markdown,
         }
-        if not compact_cells:
-            payload["table_matrix"] = _objective_evidence_prompt_table_matrix(source)
-        return payload
     if source_kind == "text_window":
         return {
             "source_kind": "text_window",
@@ -3708,48 +4048,6 @@ def _objective_evidence_prompt_source(
             ],
         }
     return dict(source)
-
-
-def _objective_evidence_prompt_table_matrix(
-    source: dict[str, Any],
-) -> list[list[str]]:
-    matrix = source.get("table_matrix")
-    if not isinstance(matrix, list):
-        return []
-    rows: list[list[str]] = []
-    for row in matrix[:_OBJECTIVE_EVIDENCE_PROMPT_TABLE_ROWS]:
-        if not isinstance(row, (list, tuple)):
-            continue
-        rows.append(
-            [
-                str(cell)[:_OBJECTIVE_STATE_TEXT_CHARS]
-                for cell in row[:_ROUTE_PROMPT_HEADER_LIMIT]
-            ]
-        )
-    return rows
-
-
-def _objective_evidence_prompt_table_cells(
-    source: dict[str, Any],
-) -> list[dict[str, Any]]:
-    cells = source.get("table_cells")
-    if not isinstance(cells, list):
-        return []
-    compact_cells: list[dict[str, Any]] = []
-    for cell in cells[:_OBJECTIVE_EVIDENCE_PROMPT_TABLE_CELLS]:
-        if not isinstance(cell, dict):
-            continue
-        compact_cells.append(
-            {
-                "row_index": cell.get("row_index"),
-                "col_index": cell.get("col_index"),
-                "header_path": cell.get("header_path"),
-                "cell_text": str(cell.get("cell_text") or "")[
-                    :_OBJECTIVE_STATE_TEXT_CHARS
-                ],
-            }
-        )
-    return compact_cells
 
 
 def _empty_objective_document_state() -> dict[str, Any]:

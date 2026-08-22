@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from application.core.document_profiles.extraction import (
+    DocumentProfileExtractionError,
     DocumentProfileExtractor,
     build_default_document_profile_extractor,
 )
@@ -366,9 +367,28 @@ class DocumentProfileService:
                 }
             ).to_record()
 
-        extracted = self._get_document_profile_extractor().extract_document_profile(
-            profile_payload
-        )
+        try:
+            extracted = self._get_document_profile_extractor().extract_document_profile(
+                profile_payload
+            )
+        except DocumentProfileExtractionError:
+            logger.warning(
+                "Document profile classification unavailable; preserving document "
+                "as uncertain collection_id=%s document_id=%s",
+                collection_id,
+                document_id,
+            )
+            return DocumentProfile.from_mapping(
+                {
+                    "document_id": document_id,
+                    "collection_id": collection_id,
+                    "title": title,
+                    "source_filename": source_filename,
+                    "doc_type": DOC_TYPE_UNCERTAIN,
+                    "parsing_warnings": ["document_profile_extraction_failed"],
+                    "confidence": 0.0,
+                }
+            ).to_record()
         parsing_warnings = list(extracted.parsing_warnings)
         if extracted.doc_type == DOC_TYPE_UNCERTAIN and "classification_uncertain" not in parsing_warnings:
             parsing_warnings.append("classification_uncertain")

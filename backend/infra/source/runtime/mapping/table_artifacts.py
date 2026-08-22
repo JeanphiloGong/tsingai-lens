@@ -78,6 +78,7 @@ def build_pdf_tables(
         matrix = build_docling_table_matrix(table)
         col_count = max((len(row) for row in matrix), default=0)
         header_paths = build_docling_header_paths(table)
+        header_row_count = build_docling_header_row_count(table)
         column_headers = [
             header_paths.get(col_index) or f"column_{col_index + 1}"
             for col_index in range(col_count)
@@ -94,6 +95,7 @@ def build_pdf_tables(
                 heading_path=resolve_heading_path_for_page(page, heading_blocks),
                 column_headers=tuple(column_headers),
                 table_matrix=tuple(tuple(cell for cell in row) for row in matrix),
+                header_row_count=header_row_count,
                 metadata={
                     "docling_ref": f"#/tables/{table_order - 1}",
                     "table_label": normalize_label(getattr(table, "label", None)),
@@ -118,6 +120,12 @@ def build_pdf_table_cells(*, document_id: str, document: Any) -> pd.DataFrame:
         ):
             row_index = int(getattr(cell, "start_row_offset_idx", 0))
             col_index = int(getattr(cell, "start_col_offset_idx", 0))
+            end_row_index = int(
+                getattr(cell, "end_row_offset_idx", row_index + 1)
+            )
+            end_col_index = int(
+                getattr(cell, "end_col_offset_idx", col_index + 1)
+            )
             cell_text = str(getattr(cell, "text", "") or "").strip()
             header_path = None
             if not bool(getattr(cell, "column_header", False)):
@@ -147,6 +155,11 @@ def build_pdf_table_cells(*, document_id: str, document: Any) -> pd.DataFrame:
                     row_index=row_index,
                     col_index=col_index,
                     cell_text=cell_text,
+                    row_span=max(1, end_row_index - row_index),
+                    col_span=max(1, end_col_index - col_index),
+                    column_header=bool(getattr(cell, "column_header", False)),
+                    row_header=bool(getattr(cell, "row_header", False)),
+                    row_section=bool(getattr(cell, "row_section", False)),
                     header_path=header_path,
                     page=table_page,
                     unit_hint=extract_unit_hint(header_path, cell_text),
@@ -203,6 +216,21 @@ def build_docling_header_paths(table: Any) -> dict[int, str]:
         for col_index, values in header_by_col.items()
         if values
     }
+
+
+def build_docling_header_row_count(table: Any) -> int:
+    header_ends = [
+        int(
+            getattr(
+                cell,
+                "end_row_offset_idx",
+                int(getattr(cell, "start_row_offset_idx", 0)) + 1,
+            )
+        )
+        for cell in getattr(getattr(table, "data", None), "table_cells", []) or []
+        if bool(getattr(cell, "column_header", False))
+    ]
+    return max(header_ends, default=0)
 
 
 def build_docling_table_matrix(table: Any) -> list[list[str]]:

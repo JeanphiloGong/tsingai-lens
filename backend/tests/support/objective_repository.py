@@ -133,7 +133,10 @@ class MemoryObjectiveRepository:
             pipeline_version=pipeline_version,
             model_name=model_name,
             prompt_versions=dict(prompt_versions),
-            total_document_count=len(objective.seed_document_ids),
+            total_document_count=(
+                len(self.read(collection_id, build_id=self.active_build_id).paper_skims)
+                or len(objective.seed_document_ids)
+            ),
             progress_message="Objective analysis is queued.",
             created_at=datetime.now(timezone.utc),
         )
@@ -188,6 +191,7 @@ class MemoryObjectiveRepository:
         stats,
         model_name: str | None,
         prompt_versions: dict[str, str],
+        diagnostics: tuple[dict, ...],
     ) -> ObjectiveAnalysis:
         key = (collection_id, objective_id, analysis_version)
         analysis = replace(
@@ -195,6 +199,7 @@ class MemoryObjectiveRepository:
             stats=stats,
             model_name=model_name,
             prompt_versions=dict(prompt_versions),
+            diagnostics=diagnostics,
         )
         self._analyses[key] = analysis
         return analysis

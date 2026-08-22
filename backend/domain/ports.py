@@ -412,6 +412,7 @@ class ObjectiveRepository(Protocol):
         stats: ExecutionStats,
         model_name: str | None,
         prompt_versions: dict[str, str],
+        diagnostics: tuple[dict[str, Any], ...],
     ) -> ObjectiveAnalysis: ...
 
     def fail_analysis(

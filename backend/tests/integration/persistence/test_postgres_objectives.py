@@ -451,6 +451,7 @@ def _queue_and_claim(repository: PostgresObjectiveRepository):
         "col_source", "objective-1", queued.analysis_version
     )
     assert claimed is not None
+    assert claimed.total_document_count == 4
     return objective, claimed
 
 
@@ -1249,7 +1250,7 @@ def test_analysis_version_claim_progress_and_retry_are_explicit(source_repositor
         1,
         phase="evidence",
         processed_document_count=1,
-        total_document_count=1,
+        total_document_count=4,
         current_document_id="srcdoc_runtime",
         progress_message="Extracting evidence.",
     )
@@ -1303,11 +1304,25 @@ def test_analysis_execution_stats_round_trip_provider_usage(source_repositories)
         stats=stats,
         model_name="merged-qwen",
         prompt_versions={"paper_framing": "paper_framing.v1"},
+        diagnostics=(
+            {
+                "trace_type": "table_matrix_repair",
+                "table_id": "table-3",
+                "status": "verified",
+            },
+        ),
     )
 
     assert updated.stats == stats
     assert updated.model_name == "merged-qwen"
     assert updated.prompt_versions == {"paper_framing": "paper_framing.v1"}
+    assert updated.diagnostics == (
+        {
+            "trace_type": "table_matrix_repair",
+            "table_id": "table-3",
+            "status": "verified",
+        },
+    )
     persisted = repository.read_analysis(
         "col_source",
         "objective-1",
@@ -1317,6 +1332,7 @@ def test_analysis_execution_stats_round_trip_provider_usage(source_repositories)
     assert persisted.stats == stats
     assert persisted.model_name == "merged-qwen"
     assert persisted.prompt_versions == {"paper_framing": "paper_framing.v1"}
+    assert persisted.diagnostics == updated.diagnostics
 
 
 def test_publish_is_atomic_and_reads_findings_and_exact_evidence(source_repositories) -> None:

@@ -90,7 +90,7 @@ def test_document_markdown_service_projects_source_blocks_and_tables(tmp_path):
                     "block_type": "table_caption",
                     "block_order": 6,
                     "heading_path": "Results",
-                    "text": "Table 1. Conductivity summary.",
+                    "text": "Table 1. Mechanical properties.",
                     "page": 3,
                 },
                 {
@@ -137,15 +137,22 @@ def test_document_markdown_service_projects_source_blocks_and_tables(tmp_path):
                     "document_id": "paper-1",
                     "table_id": "tbl-1",
                     "table_order": 1,
-                    "caption_text": "Table 1. Conductivity summary.",
+                    "caption_text": "Table 1. Mechanical properties.",
                     "caption_block_id": "blk-table-caption",
                     "page": 3,
                     "heading_path": "Results",
-                    "column_headers": ["Sample", "Conductivity"],
-                    "table_matrix": [
-                        ["Sample", "Conductivity"],
-                        ["A", "12 mS/cm"],
+                    "column_headers": [
+                        "Sample",
+                        "Mechanical properties > Yield strength (MPa)",
+                        "Mechanical properties > Elongation (%)",
                     ],
+                    "table_matrix": [
+                        ["Sample", "Mechanical properties", "Mechanical properties"],
+                        ["Sample", "Yield strength (MPa)", "Elongation (%)"],
+                        ["as-SLM", "920", "8.4"],
+                        ["HIP-SLM", "975", "12.4"],
+                    ],
+                    "header_row_count": 2,
                 }
             ],
         ),
@@ -162,9 +169,16 @@ def test_document_markdown_service_projects_source_blocks_and_tables(tmp_path):
     assert "- Annealed at 700 C." in payload["markdown"]
     assert "## Results" in payload["markdown"]
     assert "Results section text appears before the table." in payload["markdown"]
-    assert "**Table.** Table 1. Conductivity summary." in payload["markdown"]
-    assert "| Sample | Conductivity |" in payload["markdown"]
-    assert "| A | 12 mS/cm |" in payload["markdown"]
+    assert "**Table.** Table 1. Mechanical properties." in payload["markdown"]
+    assert (
+        "| Sample | Mechanical properties > Yield strength (MPa) | "
+        "Mechanical properties > Elongation (%) |"
+    ) in payload["markdown"]
+    assert "| as-SLM | 920 | 8.4 |" in payload["markdown"]
+    assert "| HIP-SLM | 975 | 12.4 |" in payload["markdown"]
+    assert "| Sample | Yield strength (MPa) | Elongation (%) |" not in payload[
+        "markdown"
+    ]
     assert "## References" in payload["markdown"]
     assert "Reference text should appear in the paper reader." in payload["markdown"]
     assert payload["warnings"] == []
@@ -173,8 +187,8 @@ def test_document_markdown_service_projects_source_blocks_and_tables(tmp_path):
     )
     assert payload["markdown"].index(
         "Results section text appears before the table."
-    ) < (payload["markdown"].index("**Table.** Table 1. Conductivity summary."))
-    assert payload["markdown"].index("**Table.** Table 1. Conductivity summary.") < (
+    ) < (payload["markdown"].index("**Table.** Table 1. Mechanical properties."))
+    assert payload["markdown"].index("**Table.** Table 1. Mechanical properties.") < (
         payload["markdown"].index("## References")
     )
 

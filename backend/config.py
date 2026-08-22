@@ -19,8 +19,6 @@ IMAGES_DIR = DATA_DIR / "images"
 INDEX_FILE = DOCUMENTS_DIR / "index.json"
 GRAPH_STORE_FILE = DATA_DIR / "graph_store.json"
 
-STATIC_IMAGE_URL = "/statc/images"
-
 # LLM 配置（可根据需要手工修改）
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:11434/v1")
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")

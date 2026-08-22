@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+from threading import Event
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -53,6 +56,13 @@ def _analysis(*, status: str = "succeeded") -> ObjectiveAnalysis:
                 ModelUsage("model-1", 2, TokenUsage(300, 50, 350)),
             ),
             prompt_versions={"paper_framing": "paper_framing.v1"},
+        ),
+        diagnostics=(
+            {
+                "trace_type": "table_matrix_repair",
+                "table_id": "table-3",
+                "status": "verified",
+            },
         ),
         total_document_count=1,
     )
@@ -343,10 +353,15 @@ def _client(
     *,
     repository: _Repository | None = None,
     raise_server_exceptions: bool = True,
+    analysis_max_concurrency: int | None = None,
 ) -> TestClient:
     app = FastAPI()
     app.state.objective_repository = repository or _Repository()
     app.state.objective_analysis_service = service or _Service()
+    if analysis_max_concurrency is not None:
+        app.state.objective_analysis_semaphore = asyncio.Semaphore(
+            analysis_max_concurrency
+        )
     app.include_router(router)
     return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
@@ -711,23 +726,29 @@ def test_paper_study_inventory_preserves_relationships_dispositions_and_signals(
     assert second_page_payload["items"][0]["signal_id"] == "signal-1"
 
 
-def test_start_analysis_dispatches_the_queued_worker(monkeypatch) -> None:
+def test_start_analysis_dispatches_an_asyncio_background_task(monkeypatch) -> None:
     service = _Service(queued=True)
     submitted: dict[str, object] = {}
 
-    class _SubmittedFuture:
-        def add_done_callback(self, callback) -> None:
-            submitted["callback"] = callback
+    class _SubmittedTask:
+        def __init__(self) -> None:
+            self.callbacks = []
 
-    def submit(function, *args):
-        submitted["function"] = function
-        submitted["args"] = args
-        return _SubmittedFuture()
+        def add_done_callback(self, callback) -> None:
+            self.callbacks.append(callback)
+
+    submitted_task = _SubmittedTask()
+
+    def create_task(coroutine):
+        submitted["coroutine"] = coroutine
+        coroutine.close()
+        return submitted_task
 
     monkeypatch.setattr(
-        research_objectives._objective_analysis_executor,
-        "submit",
-        submit,
+        research_objectives,
+        "create_task",
+        create_task,
+        raising=False,
     )
 
     response = _client(service).post(
@@ -736,26 +757,108 @@ def test_start_analysis_dispatches_the_queued_worker(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["active_analysis"]["status"] == "queued"
-    assert submitted["function"] == service.execute_queued_analysis
-    assert submitted["args"] == ("col-1", "obj-1", 1)
-    assert (
-        submitted["callback"]
-        == research_objectives._log_unexpected_analysis_failure
+    assert submitted["coroutine"] is not None
+    assert research_objectives._log_unexpected_analysis_failure in (
+        submitted_task.callbacks
     )
 
 
-def test_start_analysis_fails_queued_version_when_worker_submission_fails(
+def test_start_analysis_runs_different_collections_concurrently() -> None:
+    release_workers = Event()
+    collection_started = {
+        "col-1": Event(),
+        "col-2": Event(),
+    }
+    collection_completed = {
+        "col-1": Event(),
+        "col-2": Event(),
+    }
+
+    class ConcurrentService(_Service):
+        def execute_queued_analysis(
+            self,
+            collection_id,
+            objective_id,
+            analysis_version,
+        ):
+            collection_started[collection_id].set()
+            release_workers.wait(timeout=5)
+            collection_completed[collection_id].set()
+            return self.get_analysis_state(collection_id, objective_id)
+
+    with _client(ConcurrentService(queued=True)) as client:
+        try:
+            first_response = client.post(
+                "/collections/col-1/objectives/obj-1/analysis"
+            )
+            assert first_response.status_code == 200
+            assert collection_started["col-1"].wait(timeout=1)
+
+            second_response = client.post(
+                "/collections/col-2/objectives/obj-1/analysis"
+            )
+            assert second_response.status_code == 200
+            assert collection_started["col-2"].wait(timeout=1)
+        finally:
+            release_workers.set()
+
+    assert collection_completed["col-1"].wait(timeout=1)
+    assert collection_completed["col-2"].wait(timeout=1)
+
+
+def test_start_analysis_limits_asyncio_background_concurrency() -> None:
+    release_first = Event()
+    first_started = Event()
+    second_started = Event()
+
+    class LimitedService(_Service):
+        def execute_queued_analysis(
+            self,
+            collection_id,
+            objective_id,
+            analysis_version,
+        ):
+            if collection_id == "col-1":
+                first_started.set()
+                release_first.wait(timeout=5)
+            else:
+                second_started.set()
+            return self.get_analysis_state(collection_id, objective_id)
+
+    with _client(
+        LimitedService(queued=True),
+        analysis_max_concurrency=1,
+    ) as client:
+        try:
+            assert client.post(
+                "/collections/col-1/objectives/obj-1/analysis"
+            ).status_code == 200
+            assert first_started.wait(timeout=1)
+
+            assert client.post(
+                "/collections/col-2/objectives/obj-1/analysis"
+            ).status_code == 200
+            assert not second_started.wait(timeout=0.1)
+        finally:
+            release_first.set()
+
+        assert second_started.wait(timeout=1)
+
+
+def test_start_analysis_fails_queued_version_when_async_task_creation_fails(
     monkeypatch,
 ) -> None:
     service = _Service(queued=True)
 
-    def submit(*_args):
-        raise RuntimeError("executor unavailable")
+    def create_task(coroutine):
+        coroutine.close()
+        raise RuntimeError("event loop unavailable")
 
     monkeypatch.setattr(
-        research_objectives._objective_analysis_executor,
-        "submit",
-        submit,
+        research_objectives,
+        "create_task",
+        create_task,
+        raising=False,
     )
 
     response = _client(service, raise_server_exceptions=False).post(
@@ -776,6 +879,8 @@ def test_objective_api_exposes_definition_and_separate_analysis_state() -> None:
     assert payload["objective"]["confirmation_status"] == "confirmed"
     assert payload["active_analysis"]["status"] == "succeeded"
     assert payload["published_analysis"]["analysis_version"] == 1
+    assert "diagnostics" not in payload["active_analysis"]
+    assert "diagnostics" not in payload["published_analysis"]
     assert payload["paper_contributions"] == [
         {
             **_paper_contribution().to_record(),

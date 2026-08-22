@@ -206,16 +206,26 @@ scientific recall, relevance certainty, or systematic-review completeness.
 current document, terminal error, timestamps, and provider-reported execution
 `stats`. Statistics include duration, request counts and provider-reported token
 usage grouped by response model, plus the prompt versions used by the analysis.
+`total_document_count` is fixed when the analysis is queued from all Source
+documents in its build; it does not reuse the Objective's seed-document count.
+Seed documents remain available through the Objective scope, while
+`processed_document_count` advances through the fixed candidate-paper scope.
 `unreported_request_count` identifies calls that failed without provider usage
 or omitted token fields. Token totals contain only reported usage and remain
 `null` when no call reported usage; the backend never estimates missing tokens
 from prompt or response text.
 
-Confirmation does not start analysis. `POST .../analysis` queues the next
-version and returns immediately. The frontend polls `GET .../analysis`. Retry
-allocates a new version. A failed active version leaves the prior published
-version readable. If the backend cannot dispatch a queued version to its local
-analysis worker, it records that version as failed and returns `503`, allowing
+Confirmation does not start analysis. `POST .../analysis` creates the next
+analysis version with `queued` status and returns immediately. The frontend
+polls `GET .../analysis`. Retry allocates a new version. A failed active version
+leaves the prior published version readable. Independent Objective analyses,
+including analyses from different collections, execute as process-local asyncio
+background tasks. An application semaphore bounds simultaneous analysis
+execution while the synchronous analysis pipeline runs outside the event-loop
+thread. The repository claim transition still allows only one task to execute a
+specific Objective analysis version, and persisted analysis state remains the
+status authority queried by the client. If the backend cannot create the
+background task, it records that version as failed and returns `503`, allowing
 the client to retry without leaving a permanently queued version. Only a
 complete succeeded version can become published. A succeeded version may have
 zero Findings when paper contributions and source-backed Evidence were
@@ -246,6 +256,16 @@ together or all `null`. Historical analyses created before this accounting was
 persisted retain `null`, meaning unknown; clients must not interpret those
 values as zero. A successful `comparable_evidence` contribution with no partial
 failure may have no reason.
+
+Each published contribution's `warnings` reports only final degraded coverage:
+conservative paper-framing fallback, PaperSkim Source units whose extraction
+ultimately failed, and selected Objective Evidence Sources whose extraction
+ultimately failed. A successful bounded retry or framing repair is not a
+warning. Warning text contains bounded counts rather than provider errors or
+raw exceptions. `ObjectiveAnalysisResponse.warnings` aggregates those persisted
+contribution warnings in paper order, prefixes each entry with `document_id`,
+and removes duplicates within the same paper. A clean published analysis
+returns an empty list.
 
 ### Published Findings And Evidence
 

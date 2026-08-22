@@ -73,12 +73,14 @@ The final Source artifact family is:
   SHA-256, MIME type, dimensions, byte size, and parser metadata.
 - `tables`
   The primary complete-table structure with stable table IDs, caption, heading, page,
-  headers, `table_matrix`, Markdown, and plain text.
+  flattened header paths, header-row count, `table_matrix`, Markdown, and plain
+  text.
 - `table_rows`
   Row-level evidence anchors for table-grounded extraction and traceback.
 - `table_cells`
   Cell-level evidence anchors with header paths, unit hints, row and column
-  indexes, page, and stable cell IDs.
+  indexes, logical row and column spans, header roles, page, and stable cell
+  IDs.
 - `image_assets/`
   Parser scratch crops handed to the application pipeline. Product reads use
   the registered object key and never depend on this directory.
@@ -86,6 +88,12 @@ The final Source artifact family is:
 `tables` is the primary table context. `table_rows` and `table_cells` support
 anchoring, UI drilldown, and debugging; they are not replacements for the
 complete table artifact.
+
+Core and the parsed-paper reader receive the complete normalized Markdown table
+when it fits the relevant prompt or display surface. Model-facing structural
+repair may divide an oversized table only into continuous row slices, with the
+caption and complete flattened header repeated on every slice. That repair is
+analysis-local and does not overwrite the persisted Source table.
 
 Parser adapters may inspect PDF geometry privately to exclude text embedded in
 figures or crop figure images. Geometry is not a Source domain field, persisted

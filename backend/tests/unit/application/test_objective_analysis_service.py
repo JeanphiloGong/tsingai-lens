@@ -6,6 +6,9 @@ from types import SimpleNamespace
 import pytest
 
 from application.core.objectives.analysis_service import ObjectiveAnalysisService
+from application.core.objectives.analysis.diagnostics import (
+    record_analysis_diagnostic,
+)
 from application.core.objectives.research_objective_service import (
     ObjectiveAnalysisArtifacts,
 )
@@ -42,7 +45,12 @@ def _objective(*, published: int | None = None) -> ResearchObjective:
     )
 
 
-def _analysis(version: int, status: str = "queued") -> ObjectiveAnalysis:
+def _analysis(
+    version: int,
+    status: str = "queued",
+    *,
+    total_document_count: int = 1,
+) -> ObjectiveAnalysis:
     analysis = ObjectiveAnalysis(
         collection_id="collection-1",
         objective_id="objective-1",
@@ -51,7 +59,7 @@ def _analysis(version: int, status: str = "queued") -> ObjectiveAnalysis:
         pipeline_version="test.v1",
         model_name="test-model",
         prompt_versions={},
-        total_document_count=1,
+        total_document_count=total_document_count,
     )
     if status == "running":
         return analysis.start()
@@ -177,6 +185,7 @@ class FakeObjectiveRepository:
         claimable: bool = True,
         claim_error: Exception | None = None,
         claim_before_fail: bool = False,
+        candidate_document_count: int = 1,
     ) -> None:
         self.objective = _objective(published=1 if published else None)
         self.analyses: dict[int, ObjectiveAnalysis] = (
@@ -190,6 +199,7 @@ class FakeObjectiveRepository:
         self.claimable = claimable
         self.claim_error = claim_error
         self.claim_before_fail = claim_before_fail
+        self.candidate_document_count = candidate_document_count
         self.published_calls = 0
 
     def read_objective(self, collection_id, objective_id):
@@ -209,7 +219,10 @@ class FakeObjectiveRepository:
             )
             return self.objective, analysis
         version = max(self.analyses, default=0) + 1
-        analysis = _analysis(version)
+        analysis = _analysis(
+            version,
+            total_document_count=self.candidate_document_count,
+        )
         self.analyses[version] = analysis
         self.objective = self.objective.queue_analysis(version)
         return self.objective, analysis
@@ -237,12 +250,14 @@ class FakeObjectiveRepository:
         stats,
         model_name,
         prompt_versions,
+        diagnostics,
     ):
         analysis = replace(
             self.analyses[analysis_version],
             stats=stats,
             model_name=model_name,
             prompt_versions=prompt_versions,
+            diagnostics=diagnostics,
         )
         self.analyses[analysis_version] = analysis
         return analysis
@@ -352,6 +367,24 @@ class UsageRecordingResearchObjectiveService(FakeResearchObjectiveService):
         )
 
 
+class DiagnosticsRecordingResearchObjectiveService(FakeResearchObjectiveService):
+    def generate_objective_analysis_artifacts(
+        self, collection_id, analysis, progress_callback=None
+    ):
+        record_analysis_diagnostic(
+            {
+                "trace_type": "table_matrix_repair",
+                "table_id": "table-1",
+                "status": "verified",
+            }
+        )
+        return super().generate_objective_analysis_artifacts(
+            collection_id,
+            analysis,
+            progress_callback=progress_callback,
+        )
+
+
 def _service(*, repository=None, analyzer=None):
     repository = repository or FakeObjectiveRepository()
     analyzer = analyzer or FakeResearchObjectiveService()
@@ -369,10 +402,38 @@ def test_objective_analysis_publishes_one_complete_version() -> None:
 
     assert queued["analysis"].status == "queued"
     assert result["analysis"].status == "succeeded"
+    assert result["analysis"].progress_message == "Objective analysis completed."
     assert result["objective"].published_analysis_version == 1
     assert result["findings"] == (_finding(1),)
     assert result["paper_contributions"] == _artifacts(1).contributions
+    assert result["warnings"] == []
     assert repository.published_calls == 1
+
+
+def test_objective_analysis_aggregates_persisted_contribution_warnings() -> None:
+    repository = FakeObjectiveRepository(published=True)
+    contribution = _artifacts(1).contributions[0]
+    warning = "1 selected source(s) failed extraction."
+    repository.contributions[1] = (
+        replace(contribution, warnings=(warning, warning)),
+        replace(
+            contribution,
+            document_id="paper-2",
+            warnings=(
+                warning,
+                "1 Source unit(s) used conservative paper framing fallback.",
+            ),
+        ),
+    )
+    service, _repository, _analyzer = _service(repository=repository)
+
+    result = service.get_analysis_state("collection-1", "objective-1")
+
+    assert result["warnings"] == [
+        f"paper-1: {warning}",
+        f"paper-2: {warning}",
+        "paper-2: 1 Source unit(s) used conservative paper framing fallback.",
+    ]
 
 
 def test_objective_analysis_persists_real_model_prompt_and_token_usage() -> None:
@@ -395,8 +456,54 @@ def test_objective_analysis_persists_real_model_prompt_and_token_usage() -> None
     assert analysis.stats.duration_ms is not None
 
 
-def test_route_progress_does_not_replace_paper_counts() -> None:
-    service, repository, _analyzer = _service()
+def test_objective_analysis_persists_internal_diagnostics_without_public_exposure(
+) -> None:
+    service, repository, _analyzer = _service(
+        analyzer=DiagnosticsRecordingResearchObjectiveService()
+    )
+    service.queue_analysis("collection-1", "objective-1")
+
+    result = service.execute_queued_analysis("collection-1", "objective-1", 1)
+
+    analysis = repository.read_analysis("collection-1", "objective-1", 1)
+    assert analysis is not None
+    assert analysis.diagnostics == (
+        {
+            "trace_type": "table_matrix_repair",
+            "table_id": "table-1",
+            "status": "verified",
+        },
+    )
+    assert "diagnostics" not in analysis.to_record()
+    assert "diagnostics" not in result["analysis"].to_record()
+
+
+def test_failed_objective_analysis_keeps_internal_diagnostics() -> None:
+    service, repository, _analyzer = _service(
+        analyzer=DiagnosticsRecordingResearchObjectiveService(
+            error=RuntimeError("analysis failed after table repair")
+        )
+    )
+    service.queue_analysis("collection-1", "objective-1")
+
+    result = service.execute_queued_analysis("collection-1", "objective-1", 1)
+
+    analysis = repository.read_analysis("collection-1", "objective-1", 1)
+    assert analysis is not None
+    assert result["analysis"].status == "failed"
+    assert analysis.diagnostics == (
+        {
+            "trace_type": "table_matrix_repair",
+            "table_id": "table-1",
+            "status": "verified",
+        },
+    )
+
+
+def test_route_progress_does_not_replace_candidate_paper_count() -> None:
+    service, repository, _analyzer = _service(
+        repository=FakeObjectiveRepository(candidate_document_count=6)
+    )
     service.queue_analysis("collection-1", "objective-1")
     running = repository.claim_analysis("collection-1", "objective-1", 1)
     assert running is not None
@@ -405,11 +512,11 @@ def test_route_progress_does_not_replace_paper_counts() -> None:
     progress(
         {
             "phase": "objective_evidence_routing_started",
-            "current": 6,
-            "total": 6,
+            "current": 1,
+            "total": 7,
             "unit": "frames",
-            "active_document_id": "paper-6",
-            "message": "Routing the sixth paper.",
+            "active_document_id": "paper-1",
+            "message": "Routing the first paper.",
         }
     )
     progress(
@@ -424,7 +531,7 @@ def test_route_progress_does_not_replace_paper_counts() -> None:
     )
 
     progressed = repository.read_analysis("collection-1", "objective-1", 1)
-    assert progressed.processed_document_count == 6
+    assert progressed.processed_document_count == 2
     assert progressed.total_document_count == 6
 
 

@@ -13,9 +13,15 @@ Read the analysis responsibilities in real research order:
    instruction to inspect a Source, not a scientific finding.
 3. `source_extraction.py` exposes `extract_and_validate_source_facts`, which
    inspects routed Sources one at a time and produces transient, source-local
-   `ExtractedEvidenceDraft` records. It owns text and table payload construction,
-   structural table repair, deterministic table parsing, model extraction, and
-   route-scoped technical failures.
+   `ExtractedEvidenceDraft` records. It owns text and complete Markdown table
+   payload construction, bounded continuous-row structural table repair,
+   deterministic table parsing, model extraction, and route-scoped technical
+   failures. Oversized repair inputs repeat the caption and flattened header on
+   every slice, then merge in Source row order. A final row containing only
+   carried label and uncertainty fragments may merge into the preceding logical
+   row. Mean-plus-uncertainty result columns are rebound from their complete
+   top-to-bottom Source number sequence; missing, duplicated, reordered, or
+   changed result numbers invalidate the repair.
 4. `source_validation.py` immediately checks each model-authored draft against
    the exact Source being inspected. Extraction and validation therefore
    alternate per Source; they are not two collection-wide passes. Unsupported
@@ -56,6 +62,13 @@ structured-output failures remain technical failed drafts. Shared provider
 invocation, JSON parsing, usage accounting, and trace capture stay outside this
 scientific responsibility.
 
+`diagnostics.py` captures private technical traces for one analysis execution.
+Each attempted structural table repair records the Source identity, row counts,
+model and deterministic repair counts, number-sequence verification, and a
+final `verified`, `rejected`, or `provider_failed` disposition. These traces are
+persisted with the internal analysis record for debugging but are deliberately
+absent from Objective API responses, Evidence, and user-visible warnings.
+
 `source_validation.py` owns deterministic source-local acceptance, demotion,
 or abstention. It checks the reported result, comparison labels, changed
 variables, and scientific context independently and records which field
@@ -88,7 +101,9 @@ related locators, and deduplicates only replayed drafts with the same stable
 `evidence_id`. Distinct claims from one Source remain separate because a table,
 figure, or paragraph can support several measurements or comparisons.
 `PaperContribution` route, extracted, failed, and comparable counts are computed
-from that complete claim set. It does not persist artifacts or synthesize a
+from that complete claim set. Contribution warnings count only final framing
+fallback, PaperSkim coverage gaps, and failed Evidence Sources; successful
+repair is not a warning. It does not persist artifacts or synthesize a
 cross-paper claim.
 
 `finding_synthesis.py` owns cross-paper comparison after durable Evidence and

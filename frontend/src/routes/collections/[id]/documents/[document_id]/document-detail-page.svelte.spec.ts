@@ -236,7 +236,7 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 					source_filename: 'paper-a.pdf',
 					parser: 'docling',
 					markdown:
-						'# Paper A\n\n## Abstract\n\nConductivity improved to 12 mS/cm.\n\n## Methodology\n\nThe sample was annealed at 700 C.\n\n## Results\n\nConductivity improved to 12 mS/cm under EIS.\n\n- First listed observation.\n- Second listed observation.\n- The SLM samples processed at higher scanning speed exhibited better densification.\n\n## 4. Conclusion\n\nThe effect of SLM processing parameters has been investigated.\n\n- The highest densification was observed for alternate hatches.\n- The SLM samples processed at higher scanning speed exhibited better densification, refined microstructure, and excellent mechanical properties as compared to samples processed with lower scanning speed.\n\n![Fig. 1](/api/v1/collections/col_123/documents/doc_1/figures/fig_1/image)\n\n**Figure.** Fig. 1. Microstructure after annealing.\n\n| Sample | Conductivity |\n| --- | --- |\n| A | 12 mS/cm |',
+						'# Paper A\n\n## Abstract\n\nConductivity improved to 12 mS/cm.\n\n## Methodology\n\nThe sample was annealed at 700 C.\n\n## Results\n\nConductivity improved to 12 mS/cm under EIS.\n\n- First listed observation.\n- Second listed observation.\n- The SLM samples processed at higher scanning speed exhibited better densification.\n\n## 4. Conclusion\n\nThe effect of SLM processing parameters has been investigated.\n\n- The highest densification was observed for alternate hatches.\n- The SLM samples processed at higher scanning speed exhibited better densification, refined microstructure, and excellent mechanical properties as compared to samples processed with lower scanning speed.\n\n![Fig. 1](/api/v1/collections/col_123/documents/doc_1/figures/fig_1/image)\n\n**Figure.** Fig. 1. Microstructure after annealing.\n\n| Sample | Mechanical properties > Yield strength (MPa) | Mechanical properties > Elongation (%) |\n| --- | --- | --- |\n| as-SLM | 920 | 8.4 |\n| HIP-SLM | 975 | 12.4 |',
 					source_map: [
 						{
 							markdown_anchor: 'block-abstract',
@@ -367,6 +367,22 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByText('Figure. Fig. 1. Microstructure after annealing.'))
 			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText('Mechanical properties > Yield strength (MPa)', { exact: true })
+			)
+			.toBeInTheDocument();
+		expect(
+			Array.from(document.querySelectorAll('.markdown-table-wrapper th')).map(
+				(header) => header.textContent
+			)
+		).toEqual([
+			'Sample',
+			'Mechanical properties > Yield strength (MPa)',
+			'Mechanical properties > Elongation (%)'
+		]);
+		await expect.element(browserPage.getByText('975', { exact: true })).toBeInTheDocument();
+		await expect.element(browserPage.getByText('12.4', { exact: true })).toBeInTheDocument();
 		await expect.element(browserPage.getByTestId('pdf-page-shell').first()).not.toBeInTheDocument();
 		expect(callPaths()).toContain('/api/v1/collections/col_123/documents/doc_1/content');
 		expect(callPaths()).toContain('/api/v1/collections/col_123/documents/doc_1/markdown');
@@ -460,8 +476,8 @@ describe('collections/[id]/documents/[document_id]/+page.svelte', () => {
 		await expect.element(browserPage.getByText('Paper A').first()).toBeInTheDocument();
 		const activeSource = browserPage.getByTestId('markdown-active-source');
 		await expect.element(activeSource).toHaveTextContent('Sample');
-		await expect.element(activeSource).toHaveTextContent('Conductivity');
-		await expect.element(activeSource).toHaveTextContent('12 mS/cm');
+		await expect.element(activeSource).toHaveTextContent('Yield strength (MPa)');
+		await expect.element(activeSource).toHaveTextContent('975');
 		await expect
 			.element(activeSource)
 			.not.toHaveTextContent('Conductivity improved to 12 mS/cm under EIS.');

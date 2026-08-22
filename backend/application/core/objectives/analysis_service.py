@@ -4,6 +4,9 @@ import logging
 from time import perf_counter
 from typing import Any, Callable
 
+from application.core.objectives.analysis.diagnostics import (
+    capture_analysis_diagnostics,
+)
 from application.core.objectives.evidence_map import build_objective_evidence_map
 from application.core.objectives.research_objective_service import (
     ObjectiveAnalysisArtifacts,
@@ -270,7 +273,10 @@ class ObjectiveAnalysisService:
             if claimed is None:
                 return self._result(collection_id, objective)
             usage_started_at = perf_counter()
-            with capture_llm_usage() as usage:
+            with (
+                capture_llm_usage() as usage,
+                capture_analysis_diagnostics() as diagnostics,
+            ):
                 try:
                     artifacts = (
                         self.research_objective_service.generate_objective_analysis_artifacts(
@@ -292,6 +298,7 @@ class ObjectiveAnalysisService:
                         ),
                         model_name=usage.model_name,
                         prompt_versions=usage.prompt_versions,
+                        diagnostics=diagnostics.records,
                     )
             objective, completed = self.objective_repository.publish_analysis(
                 collection_id,
@@ -350,6 +357,7 @@ class ObjectiveAnalysisService:
         )
         findings = ()
         paper_contributions = ()
+        warnings: list[str] = []
         if published is not None:
             paper_contributions = self.objective_repository.list_contributions(
                 collection_id,
@@ -363,6 +371,14 @@ class ObjectiveAnalysisService:
                 offset=0,
                 limit=50,
             )
+            seen_warnings: set[str] = set()
+            for contribution in paper_contributions:
+                for warning in contribution.warnings:
+                    scoped_warning = f"{contribution.document_id}: {warning}"
+                    if scoped_warning in seen_warnings:
+                        continue
+                    seen_warnings.add(scoped_warning)
+                    warnings.append(scoped_warning)
         return {
             "collection_id": collection_id,
             "objective": objective,
@@ -370,7 +386,7 @@ class ObjectiveAnalysisService:
             "published_analysis": published,
             "findings": findings,
             "paper_contributions": paper_contributions,
-            "warnings": [],
+            "warnings": warnings,
         }
 
     def _require_objective(
@@ -410,7 +426,7 @@ class ObjectiveAnalysisService:
         total_document_count = analysis.total_document_count
 
         def update(progress: dict[str, Any]) -> None:
-            nonlocal processed_document_count, total_document_count
+            nonlocal processed_document_count
             active_document_id = (
                 str(progress.get("active_document_id"))
                 if progress.get("active_document_id")
@@ -420,8 +436,6 @@ class ObjectiveAnalysisService:
                 seen_document_ids.add(active_document_id)
             if progress.get("unit") in {"documents", "frames"}:
                 current = self._safe_int(progress.get("current"))
-                total = self._safe_int(progress.get("total"))
-                total_document_count = max(total_document_count, total or 0)
                 processed_document_count = max(
                     processed_document_count,
                     current or 0,

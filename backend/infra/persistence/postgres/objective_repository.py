@@ -727,7 +727,19 @@ class PostgresObjectiveRepository:
                 build_id=source_build_id,
                 authored=authored,
             )
-            total_documents = len(scope.get("seed", ()))
+            total_documents = int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(SourceDocument)
+                    .where(
+                        SourceDocument.collection_id == collection_id,
+                        SourceDocument.build_id == source_build_id,
+                    )
+                )
+                or 0
+            )
+            if total_documents == 0:
+                total_documents = len(scope.get("seed", ()))
             now = datetime.now(timezone.utc)
             analysis_row = ObjectiveAnalysisRecord(
                 collection_id=collection_id,
@@ -738,6 +750,7 @@ class PostgresObjectiveRepository:
                 model_name=model_name,
                 prompt_versions=dict(prompt_versions),
                 stats=ExecutionStats().to_record(),
+                diagnostics=[],
                 status="queued",
                 phase="queued",
                 processed_document_count=0,
@@ -825,6 +838,7 @@ class PostgresObjectiveRepository:
         stats: ExecutionStats,
         model_name: str | None,
         prompt_versions: dict[str, str],
+        diagnostics: tuple[dict[str, Any], ...],
     ) -> ObjectiveAnalysis:
         with self.session_factory.begin() as session:
             row = self._locked_analysis(
@@ -835,6 +849,7 @@ class PostgresObjectiveRepository:
                 stats=stats,
                 model_name=model_name,
                 prompt_versions=dict(prompt_versions),
+                diagnostics=diagnostics,
             )
             self._apply_analysis(row, updated)
             return updated
@@ -1169,6 +1184,7 @@ class PostgresObjectiveRepository:
         row.model_name = analysis.model_name
         row.prompt_versions = dict(analysis.prompt_versions)
         row.stats = analysis.stats.to_record()
+        row.diagnostics = [dict(item) for item in analysis.diagnostics]
         row.status = analysis.status
         row.phase = analysis.phase
         row.processed_document_count = analysis.processed_document_count
@@ -1612,6 +1628,7 @@ class PostgresObjectiveRepository:
             model_name=row.model_name,
             prompt_versions=dict(row.prompt_versions),
             stats=ExecutionStats.from_mapping(row.stats),
+            diagnostics=tuple(dict(item) for item in row.diagnostics),
             status=row.status,
             phase=row.phase,
             processed_document_count=row.processed_document_count,

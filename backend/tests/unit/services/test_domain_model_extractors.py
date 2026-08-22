@@ -10,7 +10,10 @@ import tiktoken
 from openai import LengthFinishReasonError
 from pydantic import ValidationError
 
-from application.core.document_profiles.extraction import DocumentProfileExtractor
+from application.core.document_profiles.extraction import (
+    DocumentProfileExtractionError,
+    DocumentProfileExtractor,
+)
 from application.core.document_profiles.schemas import StructuredDocumentProfile
 from application.core.objectives.analysis.evidence_routing import (
     ObjectiveEvidenceRouter,
@@ -424,6 +427,7 @@ class _FakeCompletions:
             ),
             choices=[
                 SimpleNamespace(
+                    finish_reason="stop",
                     message=SimpleNamespace(content=content),
                 )
             ]
@@ -609,6 +613,84 @@ def test_domain_model_extractors_uses_last_complete_json_after_model_reasoning()
 
     assert result.doc_type == "experimental"
     assert result.confidence == 0.9
+
+
+def test_document_profile_retry_includes_the_invalid_output_it_must_correct():
+    client = _FakeOpenAIClient(
+        [
+            "The document appears to be an experimental paper.",
+            '{"doc_type":"experimental","confidence":0.9,"parsing_warnings":[]}',
+        ]
+    )
+    extractor = _document_profile_extractor(client)
+
+    result = extractor.extract_document_profile(
+        {
+            "title": "LPBF paper",
+            "abstract_or_lead_text": "This study varies laser power.",
+        }
+    )
+
+    assert result.doc_type == "experimental"
+    retry_messages = client.chat.completions.calls[1]["messages"]
+    assert retry_messages[-2] == {
+        "role": "assistant",
+        "content": "The document appears to be an experimental paper.",
+    }
+    assert "Previous output was invalid" in retry_messages[-1]["content"]
+
+
+def test_document_profile_failure_trace_preserves_bounded_attempt_diagnostics():
+    invalid_output = "classification: experimental"
+    client = _FakeOpenAIClient(invalid_output)
+    extractor = _document_profile_extractor(client)
+
+    with pytest.raises(DocumentProfileExtractionError):
+        extractor.extract_document_profile(
+            {
+                "title": "LPBF paper",
+                "abstract_or_lead_text": "This study varies laser power.",
+            }
+        )
+
+    trace = extractor.consume_last_trace()
+    assert trace is not None
+    assert trace["trace_status"] == "failed"
+    assert trace["error"] == "structured extraction returned no JSON object"
+    assert trace["attempts"] == [
+        {
+            "attempt": 1,
+            "finish_reason": "stop",
+            "response_chars": len(invalid_output),
+            "response_preview": invalid_output,
+            "error": "structured extraction returned no JSON object",
+        },
+        {
+            "attempt": 2,
+            "finish_reason": "stop",
+            "response_chars": len(invalid_output),
+            "response_preview": invalid_output,
+            "error": "structured extraction returned no JSON object",
+        },
+    ]
+
+
+def test_document_profile_extractor_does_not_hide_programming_errors():
+    client = _FakeOpenAIClient("unused")
+
+    def raise_programming_error(**kwargs):  # noqa: ANN003, ARG001
+        raise AssertionError("unexpected extractor bug")
+
+    client.chat.completions.create = raise_programming_error
+    extractor = _document_profile_extractor(client)
+
+    with pytest.raises(AssertionError, match="unexpected extractor bug"):
+        extractor.extract_document_profile(
+            {
+                "title": "LPBF paper",
+                "abstract_or_lead_text": "This study varies laser power.",
+            }
+        )
 
 
 def test_domain_model_extractors_ignores_top_level_extra_json_text_fields():

@@ -5,6 +5,10 @@ import pandas as pd
 
 import pytest
 
+from application.core.document_profiles.extraction import (
+    DocumentProfileExtractionError,
+)
+from application.core.document_profiles.schemas import StructuredDocumentProfile
 from application.core.document_profiles.service import (
     DocumentProfileService,
     DocumentProfilesNotReadyError,
@@ -196,6 +200,58 @@ def test_document_profile_service_short_circuits_insufficient_content(tmp_path):
     item = payload["items"][0]
     assert item["doc_type"] == "uncertain"
     assert item["parsing_warnings"] == ["insufficient_content"]
+
+
+def test_document_profile_service_continues_after_one_model_format_failure(tmp_path):
+    class OneFailedProfileExtractor:
+        def extract_document_profile(self, payload):  # noqa: ANN001
+            if payload["title"] == "Unparseable model response":
+                raise DocumentProfileExtractionError(
+                    "document profile model returned invalid structured output"
+                )
+            return StructuredDocumentProfile(
+                doc_type="experimental",
+                parsing_warnings=[],
+                confidence=0.9,
+            )
+
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    profile_service = DocumentProfileService(
+        collection_service,
+        source_artifact_repository=MemorySourceArtifactRepository(),
+        paper_fact_repository=MemoryPaperFactRepository(),
+        document_profile_extractor=OneFailedProfileExtractor(),
+    )
+    collection = collection_service.create_collection("Partial Profiles")
+    collection_id = collection["collection_id"]
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "paper-failed",
+                "title": "Unparseable model response",
+                "text": "This paper reports a materials experiment.",
+            },
+            {
+                "id": "paper-success",
+                "title": "Valid experimental paper",
+                "text": "This study varies laser power and measures density.",
+            },
+        ]
+    )
+    _write_source_artifacts(profile_service, collection_id, documents)
+
+    profiles = profile_service.build_document_profiles(
+        collection_id,
+        build_id="build_test",
+    )
+
+    records = {profile.document_id: profile.to_record() for profile in profiles}
+    assert records["paper-failed"]["doc_type"] == "uncertain"
+    assert records["paper-failed"]["confidence"] == 0.0
+    assert records["paper-failed"]["parsing_warnings"] == [
+        "document_profile_extraction_failed"
+    ]
+    assert records["paper-success"]["doc_type"] == "experimental"
 
 
 def test_document_profile_service_normalizes_numpy_array_columns(tmp_path):

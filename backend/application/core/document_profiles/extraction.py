@@ -6,7 +6,7 @@ import os
 from time import perf_counter
 from typing import Any
 
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 from pydantic import ValidationError
 
 from application.core.document_profiles.prompts import (
@@ -28,6 +28,12 @@ logger = logging.getLogger(__name__)
 _DEFAULT_EXTRACTION_MODE = "provider_parse"
 _SUPPORTED_EXTRACTION_MODES = {"json_text", "provider_parse"}
 _MAX_COMPLETION_TOKENS = 1024
+_REPAIR_OUTPUT_CHARS = 4000
+_TRACE_OUTPUT_PREVIEW_CHARS = 1000
+
+
+class DocumentProfileExtractionError(RuntimeError):
+    """The model did not produce a usable document classification."""
 
 
 class DocumentProfileExtractor:
@@ -72,24 +78,46 @@ class DocumentProfileExtractor:
         system_prompt, user_prompt = build_document_profile_prompt(payload)
         messages = self._build_messages(system_prompt, user_prompt)
         self.last_trace = None
+        attempts: list[dict[str, Any]] = []
         started_at = perf_counter()
         try:
-            parsed, raw_content = self._request_document_profile(messages)
-        except Exception:
+            parsed, raw_content = self._request_document_profile(
+                messages,
+                attempts=attempts,
+            )
+        except (
+            DocumentProfileExtractionError,
+            OpenAIError,
+            RuntimeError,
+            ValueError,
+            ValidationError,
+            json.JSONDecodeError,
+        ) as exc:
             elapsed_s = perf_counter() - started_at
             self.last_trace = self._build_trace(
                 messages=messages,
                 trace_status="failed",
                 elapsed_s=elapsed_s,
-                error="structured extraction failed",
+                raw_content=(
+                    str(attempts[-1].get("response_preview") or "")
+                    if attempts
+                    else None
+                ),
+                error=str(exc),
+                attempts=attempts,
             )
             logger.exception(
                 "Document profile extraction failed mode=json_text model=%s "
-                "elapsed_s=%.3f validated=false",
+                "elapsed_s=%.3f validated=false attempts=%s",
                 self.model,
                 elapsed_s,
+                json.dumps(attempts, ensure_ascii=True, separators=(",", ":")),
             )
-            raise
+            if isinstance(exc, DocumentProfileExtractionError):
+                raise
+            raise DocumentProfileExtractionError(
+                "document profile model returned invalid structured output"
+            ) from exc
         elapsed_s = perf_counter() - started_at
         self.last_trace = self._build_trace(
             messages=messages,
@@ -97,12 +125,15 @@ class DocumentProfileExtractor:
             elapsed_s=elapsed_s,
             raw_content=raw_content,
             parsed_output=parsed,
+            attempts=attempts,
         )
         return parsed
 
     def _request_document_profile(
         self,
         messages: list[dict[str, str]],
+        *,
+        attempts: list[dict[str, Any]],
     ) -> tuple[StructuredDocumentProfile, str]:
         request_kwargs = {
             "model": self.model,
@@ -113,9 +144,17 @@ class DocumentProfileExtractor:
             **self._provider_request_options(),
         }
         last_error: Exception | None = None
+        last_raw_content = ""
         for attempt in range(2):
             attempt_messages = [*messages]
             if attempt:
+                if last_raw_content:
+                    attempt_messages.append(
+                        {
+                            "role": "assistant",
+                            "content": last_raw_content[:_REPAIR_OUTPUT_CHARS],
+                        }
+                    )
                 attempt_messages.append(
                     {
                         "role": "user",
@@ -133,6 +172,8 @@ class DocumentProfileExtractor:
                 )
             attempt_kwargs = dict(request_kwargs)
             attempt_kwargs["messages"] = attempt_messages
+            raw_content = ""
+            finish_reason: str | None = None
             try:
                 try:
                     completion = self.client.chat.completions.create(**attempt_kwargs)
@@ -143,17 +184,29 @@ class DocumentProfileExtractor:
                     )
                     raise
                 record_llm_completion(completion, requested_model=self.model)
+                choice = completion.choices[0] if completion.choices else None
+                finish_reason = (
+                    str(getattr(choice, "finish_reason", "") or "").strip() or None
+                )
                 raw_content = coerce_message_content(
-                    completion.choices[0].message.content
-                    if completion.choices
+                    choice.message.content
+                    if choice is not None
                     else None
                 )
+                last_raw_content = raw_content
                 if not raw_content:
                     raise RuntimeError(
                         "structured extraction returned empty response content"
                     )
                 parsed = StructuredDocumentProfile.model_validate(
                     load_json_payload(extract_json_object(raw_content))
+                )
+                attempts.append(
+                    self._build_attempt_trace(
+                        attempt=attempt + 1,
+                        finish_reason=finish_reason,
+                        raw_content=raw_content,
+                    )
                 )
                 return parsed, raw_content
             except (
@@ -162,11 +215,40 @@ class DocumentProfileExtractor:
                 ValidationError,
                 json.JSONDecodeError,
             ) as error:
+                attempts.append(
+                    self._build_attempt_trace(
+                        attempt=attempt + 1,
+                        finish_reason=finish_reason,
+                        raw_content=raw_content,
+                        error=error,
+                    )
+                )
                 last_error = error
                 if attempt == 0:
                     continue
                 raise
         raise RuntimeError("structured extraction failed after retry") from last_error
+
+    @staticmethod
+    def _build_attempt_trace(
+        *,
+        attempt: int,
+        finish_reason: str | None,
+        raw_content: str,
+        error: Exception | None = None,
+    ) -> dict[str, Any]:
+        trace = {
+            "attempt": attempt,
+            "finish_reason": finish_reason,
+            "response_chars": len(raw_content),
+            "response_preview": trace_text(
+                raw_content,
+                _TRACE_OUTPUT_PREVIEW_CHARS,
+            ),
+        }
+        if error is not None:
+            trace["error"] = trace_text(str(error), 1000)
+        return trace
 
     @staticmethod
     def _build_messages(
@@ -217,6 +299,7 @@ class DocumentProfileExtractor:
         raw_content: str | None = None,
         parsed_output: StructuredDocumentProfile | None = None,
         error: str | None = None,
+        attempts: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return {
             "task_type": "document_profile",
@@ -235,6 +318,7 @@ class DocumentProfileExtractor:
             "raw_output": trace_text(raw_content),
             "parsed_output": trace_json(parsed_output),
             "error": trace_text(error, 1000),
+            "attempts": [dict(attempt) for attempt in attempts or ()],
         }
 
     @staticmethod

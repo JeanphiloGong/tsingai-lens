@@ -398,9 +398,11 @@ Git and the linked persistence issues.
 
 Keep the runtime composition direct:
 
-- one synchronous SQLAlchemy engine and session factory at application startup
-- one short session and transaction per repository operation
-- no live session shared across background threads
+- one SQLAlchemy `AsyncEngine` and `async_sessionmaker` at application startup
+- one short `AsyncSession` and transaction per repository operation
+- no live session shared across concurrent asyncio tasks
+- PostgreSQL I/O is awaited directly; only synchronous model or scientific
+  computation is moved to a worker thread
 - repositories grouped by real business aggregate and direct caller need
 - no generic CRUD repository, service locator, DI framework, or compatibility
   facade

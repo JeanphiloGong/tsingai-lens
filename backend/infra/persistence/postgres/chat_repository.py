@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.chat import (
     ChatMessage,
@@ -23,11 +23,13 @@ from infra.persistence.postgres.models.chat import (
 
 
 class PostgresChatRepository:
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         self.session_factory = session_factory
 
-    def add_session(self, record: ChatSession) -> None:
-        with self.session_factory.begin() as session:
+    async def add_session(self, record: ChatSession) -> None:
+        async with self.session_factory.begin() as session:
             session.add(
                 ChatSessionRow(
                     session_id=record.session_id,
@@ -38,15 +40,15 @@ class PostgresChatRepository:
                 )
             )
 
-    def read_session(self, session_id: str) -> ChatSession | None:
-        with self.session_factory() as session:
-            row = session.get(ChatSessionRow, session_id)
+    async def read_session(self, session_id: str) -> ChatSession | None:
+        async with self.session_factory() as session:
+            row = await session.get(ChatSessionRow, session_id)
             return _session_record(row) if row is not None else None
 
-    def read_messages(self, session_id: str) -> tuple[ChatMessage, ...]:
-        with self.session_factory() as session:
+    async def read_messages(self, session_id: str) -> tuple[ChatMessage, ...]:
+        async with self.session_factory() as session:
             rows = tuple(
-                session.scalars(
+                await session.scalars(
                     select(ChatMessageRow)
                     .where(ChatMessageRow.session_id == session_id)
                     .order_by(ChatMessageRow.position)
@@ -59,7 +61,7 @@ class PostgresChatRepository:
             }
             results = {
                 row.tool_call_id: row
-                for row in session.scalars(
+                for row in await session.scalars(
                     select(ChatToolResultRow).where(
                         ChatToolResultRow.tool_call_id.in_(result_ids)
                     )
@@ -73,12 +75,12 @@ class PostgresChatRepository:
                 for row in rows
             )
 
-    def read_tool_call(self, tool_call_id: str) -> ChatToolCall | None:
-        with self.session_factory() as session:
-            row = session.get(ChatToolCallRow, tool_call_id)
+    async def read_tool_call(self, tool_call_id: str) -> ChatToolCall | None:
+        async with self.session_factory() as session:
+            row = await session.get(ChatToolCallRow, tool_call_id)
             return _call_record(row) if row is not None else None
 
-    def save_trajectory(
+    async def save_trajectory(
         self,
         *,
         session: ChatSession,
@@ -90,8 +92,10 @@ class PostgresChatRepository:
             raise ValueError("chat message belongs to another session")
         if any(call.session_id != session.session_id for call in tool_calls):
             raise ValueError("chat tool call belongs to another session")
-        with self.session_factory.begin() as database:
-            session_row = database.get(ChatSessionRow, session.session_id)
+        async with self.session_factory.begin() as database:
+            session_row = await database.get(
+                ChatSessionRow, session.session_id
+            )
             if session_row is None:
                 raise ValueError(f"chat session not found: {session.session_id}")
             if (
@@ -101,7 +105,7 @@ class PostgresChatRepository:
                 raise ValueError("session identity cannot be reassigned")
 
             existing_messages = tuple(
-                database.scalars(
+                await database.scalars(
                     select(ChatMessageRow)
                     .where(ChatMessageRow.session_id == session.session_id)
                     .order_by(ChatMessageRow.position)
@@ -114,7 +118,10 @@ class PostgresChatRepository:
             session_row.updated_at = _datetime(session.updated_at)
 
             for position, message in enumerate(messages[len(existing_ids) :], len(existing_ids)):
-                if database.get(ChatMessageRow, message.message_id) is not None:
+                if (
+                    await database.get(ChatMessageRow, message.message_id)
+                    is not None
+                ):
                     raise ValueError("message identity cannot be reassigned")
                 database.add(
                     ChatMessageRow(
@@ -133,10 +140,10 @@ class PostgresChatRepository:
                         created_at=_datetime(message.created_at),
                     )
                 )
-            database.flush()
+            await database.flush()
 
             for call in tool_calls:
-                row = database.get(ChatToolCallRow, call.tool_call_id)
+                row = await database.get(ChatToolCallRow, call.tool_call_id)
                 if row is None:
                     row = ChatToolCallRow(
                         tool_call_id=call.tool_call_id,
@@ -157,13 +164,17 @@ class PostgresChatRepository:
                 ):
                     raise ValueError("tool call identity cannot be reassigned")
                 _update_call_row(row, call)
-            database.flush()
+            await database.flush()
 
             for result in tool_results:
-                call_row = database.get(ChatToolCallRow, result.tool_call_id)
+                call_row = await database.get(
+                    ChatToolCallRow, result.tool_call_id
+                )
                 if call_row is None or call_row.session_id != session.session_id:
                     raise ValueError("tool result belongs to an unknown call")
-                row = database.get(ChatToolResultRow, result.tool_call_id)
+                row = await database.get(
+                    ChatToolResultRow, result.tool_call_id
+                )
                 if row is None:
                     row = ChatToolResultRow(
                         tool_call_id=result.tool_call_id,
@@ -180,7 +191,7 @@ class PostgresChatRepository:
                 row.error_code = result.error_code
                 row.error_message = result.error_message
 
-    def decide_tool_call(
+    async def decide_tool_call(
         self,
         *,
         session_id: str,
@@ -192,11 +203,13 @@ class PostgresChatRepository:
     ) -> ChatToolCall:
         if decision not in {"approved", "rejected"}:
             raise ValueError("decision must be approved or rejected")
-        with self.session_factory.begin() as database:
-            session_row = database.get(ChatSessionRow, session_id)
+        async with self.session_factory.begin() as database:
+            session_row = await database.get(ChatSessionRow, session_id)
             if session_row is None or session_row.user_id != user_id:
                 raise FileNotFoundError(f"chat session not found: {session_id}")
-            row = database.get(ChatToolCallRow, tool_call_id, with_for_update=True)
+            row = await database.get(
+                ChatToolCallRow, tool_call_id, with_for_update=True
+            )
             if row is None or row.session_id != session_id:
                 raise FileNotFoundError(f"chat tool call not found: {tool_call_id}")
             call = _call_record(row)

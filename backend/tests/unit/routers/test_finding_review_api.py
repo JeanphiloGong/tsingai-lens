@@ -9,7 +9,7 @@ from domain.evaluation import FindingCuration, FindingFeedback
 
 
 class _Service:
-    def record_feedback(self, **kwargs):
+    async def record_feedback(self, **kwargs):
         return FindingFeedback.from_mapping(
             {
                 "feedback_id": "feedback-1",
@@ -18,18 +18,18 @@ class _Service:
             }
         )
 
-    def list_feedback(self, **kwargs):
+    async def list_feedback(self, **kwargs):
         if kwargs["analysis_version"] != 1:
             raise ValueError("review must reference the published analysis version")
         return (
-            self.record_feedback(
+            await self.record_feedback(
                 **kwargs,
                 review_status="correct",
                 issue_type="none",
             ),
         )
 
-    def record_curation(self, **kwargs):
+    async def record_curation(self, **kwargs):
         return FindingCuration.from_mapping(
             {
                 "curation_id": "curation-1",
@@ -38,24 +38,24 @@ class _Service:
             }
         )
 
-    def list_curations(self, **kwargs):
+    async def list_curations(self, **kwargs):
         if kwargs["analysis_version"] != 1:
             raise ValueError("review must reference the published analysis version")
         return (
-            self.record_curation(
+            await self.record_curation(
                 **kwargs,
                 curated_status="limited",
                 curated_finding=_finding_record("Narrower expert statement."),
             ),
         )
 
-    def export_dataset(self, **kwargs):
+    async def export_dataset(self, **kwargs):
         return _dataset(kwargs["collection_id"], kwargs["objective_id"])
 
-    def export_collection_dataset(self, **kwargs):
+    async def export_collection_dataset(self, **kwargs):
         return _dataset(kwargs["collection_id"], None)
 
-    def export_gold_draft(self, **kwargs):
+    async def export_gold_draft(self, **kwargs):
         return {
             "gold_id": "gold-1",
             "collection_id": kwargs["collection_id"],
@@ -304,8 +304,8 @@ def test_training_jsonl_contains_messages_and_versioned_metadata() -> None:
 
 def test_training_jsonl_excludes_non_training_ready_samples() -> None:
     class _RejectedDatasetService(_Service):
-        def export_dataset(self, **kwargs):
-            payload = super().export_dataset(**kwargs)
+        async def export_dataset(self, **kwargs):
+            payload = await super().export_dataset(**kwargs)
             payload["items"][0]["label_status"] = "rejected"
             payload["items"][0]["dataset_use_status"] = "rejected"
             return payload

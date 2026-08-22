@@ -5,12 +5,19 @@ import pytest
 from tests.support.collection_service import build_test_collection_service
 from application.goal.brief_service import GoalService
 
+pytestmark = pytest.mark.anyio
 
-def test_goal_service_creates_seed_collection_and_contract(tmp_path):
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+async def test_goal_service_creates_seed_collection_and_contract(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     service = GoalService(collection_service)
 
-    payload = service.intake_goal(
+    payload = await service.intake_goal(
         material_system="LiFePO4",
         target_property="rate capability",
         intent="compare",
@@ -20,7 +27,7 @@ def test_goal_service_creates_seed_collection_and_contract(tmp_path):
     )
 
     collection_id = payload["seed_collection"]["collection_id"]
-    collection = collection_service.get_collection(collection_id)
+    collection = await collection_service.get_collection(collection_id)
 
     assert payload["research_brief"]["objective"] == "Assess rate capability for LiFePO4."
     assert payload["coverage_assessment"]["level"] == "direct"
@@ -32,7 +39,7 @@ def test_goal_service_creates_seed_collection_and_contract(tmp_path):
     assert payload["seed_collection"]["handoff_status"] == "awaiting_source_material"
     assert collection["collection_id"] == collection_id
     assert collection["description"] == "Assess rate capability for LiFePO4."
-    manifest = collection_service.get_import_manifest(collection_id)
+    manifest = await collection_service.get_import_manifest(collection_id)
     assert manifest["handoffs"][0]["handoff_id"] == payload["seed_collection"]["handoff_id"]
     assert manifest["handoffs"][0]["kind"] == "goal_brief"
     assert manifest["handoffs"][0]["status"] == "awaiting_source_material"
@@ -41,12 +48,12 @@ def test_goal_service_creates_seed_collection_and_contract(tmp_path):
     assert manifest["handoffs"][0]["goal_context"]["coverage_assessment"]["level"] == "direct"
 
 
-def test_goal_service_rejects_empty_goal_signal(tmp_path):
+async def test_goal_service_rejects_empty_goal_signal(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
     service = GoalService(collection_service)
 
     with pytest.raises(ValueError) as exc_info:
-        service.intake_goal(
+        await service.intake_goal(
             material_system=None,
             target_property=None,
             intent="explore",

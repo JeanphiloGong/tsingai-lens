@@ -156,7 +156,11 @@ def create_app(
                     PostgresAuthRepository(session_factory)
                 )
                 application.state.auth_session_service = active_auth_session_service
-                active_auth_session_service.ensure_bootstrap_user()
+                await active_auth_session_service.ensure_bootstrap_user()
+            else:
+                active_auth_session_service = auth_session_service
+                application.state.auth_session_service = active_auth_session_service
+                await active_auth_session_service.ensure_bootstrap_user()
 
             active_collection_service = collection_service or CollectionService(
                 repository=PostgresCollectionRepository(session_factory),
@@ -296,7 +300,7 @@ def create_app(
             yield
         finally:
             if engine is not None:
-                engine.dispose()
+                await engine.dispose()
 
     app = FastAPI(
         title="TsingAI-Lens API",
@@ -308,7 +312,6 @@ def create_app(
     )
     if auth_session_service is not None:
         app.state.auth_session_service = auth_session_service
-        auth_session_service.ensure_bootstrap_user()
     cors_allowed_origins = _parse_cors_allowed_origins()
     app.add_middleware(
         CORSMiddleware,
@@ -369,7 +372,7 @@ def create_app(
             return await call_next(request)
 
         try:
-            user = request.app.state.auth_session_service.resolve_session(
+            user = await request.app.state.auth_session_service.resolve_session(
                 request.cookies.get("lens_session")
             )
         except SessionNotFoundError:
@@ -385,7 +388,7 @@ def create_app(
 
         request.state.current_user = user
         collection_id = _extract_collection_id(request.url.path)
-        if collection_id and not _user_owns_collection(
+        if collection_id and not await _user_owns_collection(
             request.app.state.collection_service,
             collection_id,
             user["user_id"],
@@ -435,13 +438,13 @@ def _extract_collection_id(path: str) -> str | None:
     return collection_id or None
 
 
-def _user_owns_collection(
+async def _user_owns_collection(
     collection_service: CollectionService,
     collection_id: str,
     user_id: str,
 ) -> bool:
     try:
-        collection_service.get_collection_for_user(collection_id, user_id)
+        await collection_service.get_collection_for_user(collection_id, user_id)
     except FileNotFoundError:
         return False
     return True

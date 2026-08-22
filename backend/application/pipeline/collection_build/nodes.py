@@ -16,7 +16,7 @@ async def build_source_artifacts(
     context: CollectionBuildContext,
     config: CollectionBuildPipelineConfig,
 ) -> dict[str, Any]:
-    files = context.collection_service.list_files(context.collection_id)
+    files = await context.collection_service.list_files(context.collection_id)
     if not files:
         raise RuntimeError("集合内没有可构建文件")
     context.state["file_count"] = len(files)
@@ -80,13 +80,13 @@ async def build_source_artifacts(
             + ", ".join(sorted(unreferenced_assets))
         )
     documents = tuple(persisted_documents)
-    context.source_artifact_repository.replace_collection_documents(
+    await context.source_artifact_repository.replace_collection_documents(
         context.collection_id,
         context.build_id,
         documents,
     )
     references = SourceReferenceExtractionService().extract(documents)
-    context.source_artifact_repository.replace_collection_references(
+    await context.source_artifact_repository.replace_collection_references(
         context.collection_id,
         context.build_id,
         references,
@@ -98,11 +98,11 @@ async def build_source_artifacts(
     }
 
 
-def register_artifacts(
+async def register_artifacts(
     context: CollectionBuildContext,
     config: CollectionBuildPipelineConfig,
 ) -> dict:
-    artifacts = context.artifact_registry_service.register(
+    artifacts = await context.artifact_registry_service.register(
         context.task_id,
         context.collection_id,
         config.source.output.base_dir,
@@ -112,22 +112,22 @@ def register_artifacts(
     return {"output_path": artifacts["output_path"]}
 
 
-def build_document_profiles(
+async def build_document_profiles(
     context: CollectionBuildContext,
     _config: CollectionBuildPipelineConfig,
 ) -> dict:
-    profiles = context.document_profile_service.build_document_profiles(
+    profiles = await context.document_profile_service.build_document_profiles(
         context.collection_id,
         build_id=context.build_id,
     )
     return {"profile_count": len(profiles)}
 
 
-def discover_and_replace_objective_candidates(
+async def discover_and_replace_objective_candidates(
     context: CollectionBuildContext,
     _config: CollectionBuildPipelineConfig,
 ) -> dict[str, Any]:
-    facts = context.research_objective_service.discover_and_replace_objective_candidates(
+    facts = await context.research_objective_service.discover_and_replace_objective_candidates(
         context.collection_id,
         progress_callback=context.objective_progress_callback,
         build_id=context.build_id,

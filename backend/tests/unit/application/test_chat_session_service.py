@@ -28,6 +28,13 @@ from domain.chat import (
     ToolRisk,
 )
 
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
 
 class _Question(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -54,7 +61,7 @@ class _WriteCapability:
     def __init__(self) -> None:
         self.executed: list[dict[str, Any]] = []
 
-    def execute(
+    async def execute(
         self,
         context: AgentContext,
         arguments: BaseModel,
@@ -68,7 +75,11 @@ class _WriteCapability:
 
 
 class _CollectionService:
-    def get_collection_for_user(self, collection_id: str, user_id: str) -> dict:
+    async def get_collection_for_user(
+        self,
+        collection_id: str,
+        user_id: str,
+    ) -> dict:
         if collection_id != "col-1" or user_id != "user-1":
             raise FileNotFoundError("collection not found")
         return {"collection_id": collection_id, "owner_user_id": user_id}
@@ -84,20 +95,20 @@ class _Repository:
             tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]
         ] = []
 
-    def add_session(self, record: ChatSession) -> None:
+    async def add_session(self, record: ChatSession) -> None:
         self.sessions[record.session_id] = record
         self.messages[record.session_id] = ()
 
-    def read_session(self, session_id: str) -> ChatSession | None:
+    async def read_session(self, session_id: str) -> ChatSession | None:
         return self.sessions.get(session_id)
 
-    def read_messages(self, session_id: str) -> tuple[ChatMessage, ...]:
+    async def read_messages(self, session_id: str) -> tuple[ChatMessage, ...]:
         return self.messages.get(session_id, ())
 
-    def read_tool_call(self, tool_call_id: str) -> ChatToolCall | None:
+    async def read_tool_call(self, tool_call_id: str) -> ChatToolCall | None:
         return self.calls.get(tool_call_id)
 
-    def save_trajectory(
+    async def save_trajectory(
         self,
         *,
         session: ChatSession,
@@ -117,7 +128,7 @@ class _Repository:
             )
         )
 
-    def decide_tool_call(
+    async def decide_tool_call(
         self,
         *,
         session_id: str,
@@ -163,12 +174,12 @@ def _service(
     )
 
 
-def test_chat_session_service_persists_ordinary_conversation() -> None:
+async def test_chat_session_service_persists_ordinary_conversation() -> None:
     repository = _Repository()
     service = _service(_Model(ModelTurn(content="你好，我可以帮助你。")), repository)
-    session = service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
 
-    result = service.post_message_for_user(
+    result = await service.post_message_for_user(
         session.session_id,
         "user-1",
         message="你好",
@@ -176,12 +187,12 @@ def test_chat_session_service_persists_ordinary_conversation() -> None:
 
     assert result["status"] == "completed"
     assert [item.role.value for item in result["messages"]] == ["user", "assistant"]
-    assert len(service.list_messages_for_user(session.session_id, "user-1")) == 2
+    assert len(await service.list_messages_for_user(session.session_id, "user-1")) == 2
     with pytest.raises(ChatSessionNotFoundError):
-        service.get_session_for_user(session.session_id, "user-2")
+        await service.get_session_for_user(session.session_id, "user-2")
 
 
-def test_chat_session_service_checkpoints_every_agent_step() -> None:
+async def test_chat_session_service_checkpoints_every_agent_step() -> None:
     repository = _Repository()
     capability = _WriteCapability()
     capability.spec = ToolSpec(
@@ -204,9 +215,9 @@ def test_chat_session_service_checkpoints_every_agent_step() -> None:
         repository,
         capability,
     )
-    session = service.create_session(collection_id="col-1", user_id="user-1")
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
 
-    result = service.post_message_for_user(
+    result = await service.post_message_for_user(
         session.session_id,
         "user-1",
         message="What is in this collection?",
@@ -222,7 +233,7 @@ def test_chat_session_service_checkpoints_every_agent_step() -> None:
     ]
 
 
-def test_chat_session_service_approves_exact_write_and_resumes() -> None:
+async def test_chat_session_service_approves_exact_write_and_resumes() -> None:
     repository = _Repository()
     capability = _WriteCapability()
     service = _service(
@@ -240,8 +251,8 @@ def test_chat_session_service_approves_exact_write_and_resumes() -> None:
         repository,
         capability,
     )
-    session = service.create_session(collection_id="col-1", user_id="user-1")
-    pending_turn = service.post_message_for_user(
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    pending_turn = await service.post_message_for_user(
         session.session_id,
         "user-1",
         message="保存这个目标",
@@ -250,19 +261,19 @@ def test_chat_session_service_approves_exact_write_and_resumes() -> None:
 
     assert pending.status is ToolCallStatus.APPROVAL_REQUIRED
     assert (
-        service.get_pending_approval_for_user(session.session_id, "user-1")
+        await service.get_pending_approval_for_user(session.session_id, "user-1")
         == pending
     )
     assert capability.executed == []
     with pytest.raises(ChatApprovalPendingError) as blocked:
-        service.post_message_for_user(
+        await service.post_message_for_user(
             session.session_id,
             "user-1",
             message="start another branch",
         )
     assert blocked.value.tool_call_id == pending.tool_call_id
     with pytest.raises(ValueError, match="arguments digest"):
-        service.decide_tool_call_for_user(
+        await service.decide_tool_call_for_user(
             session.session_id,
             pending.tool_call_id,
             "user-1",
@@ -270,7 +281,7 @@ def test_chat_session_service_approves_exact_write_and_resumes() -> None:
             decision="approved",
         )
 
-    approved_turn = service.decide_tool_call_for_user(
+    approved_turn = await service.decide_tool_call_for_user(
         session.session_id,
         pending.tool_call_id,
         "user-1",
@@ -283,10 +294,13 @@ def test_chat_session_service_approves_exact_write_and_resumes() -> None:
         {"question": "How does energy input affect ductility?"}
     ]
     assert repository.calls[pending.tool_call_id].status is ToolCallStatus.SUCCEEDED
-    assert service.get_pending_approval_for_user(session.session_id, "user-1") is None
+    assert (
+        await service.get_pending_approval_for_user(session.session_id, "user-1")
+        is None
+    )
 
 
-def test_chat_session_service_rejection_never_executes_write() -> None:
+async def test_chat_session_service_rejection_never_executes_write() -> None:
     repository = _Repository()
     capability = _WriteCapability()
     service = _service(
@@ -302,14 +316,14 @@ def test_chat_session_service_rejection_never_executes_write() -> None:
         repository,
         capability,
     )
-    session = service.create_session(collection_id="col-1", user_id="user-1")
-    pending = service.post_message_for_user(
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+    pending = (await service.post_message_for_user(
         session.session_id,
         "user-1",
         message="保存这个目标",
-    )["pending_approval"]
+    ))["pending_approval"]
 
-    result = service.decide_tool_call_for_user(
+    result = await service.decide_tool_call_for_user(
         session.session_id,
         pending.tool_call_id,
         "user-1",
@@ -320,4 +334,6 @@ def test_chat_session_service_rejection_never_executes_write() -> None:
     assert result["status"] == "rejected"
     assert capability.executed == []
     assert repository.results[pending.tool_call_id].error_code == "user_rejected"
-    assert service.list_messages_for_user(session.session_id, "user-1")[-1].role == "tool"
+    assert (
+        await service.list_messages_for_user(session.session_id, "user-1")
+    )[-1].role == "tool"

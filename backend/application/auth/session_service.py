@@ -38,21 +38,21 @@ class AuthSessionService:
         self.repository = repository
         self.session_ttl = timedelta(hours=session_ttl_hours)
 
-    def ensure_bootstrap_user(self) -> dict[str, Any] | None:
+    async def ensure_bootstrap_user(self) -> dict[str, Any] | None:
         email = _clean_text(os.getenv("BOOTSTRAP_ADMIN_EMAIL"))
         password = os.getenv("BOOTSTRAP_ADMIN_PASSWORD")
         if not email or not password:
             return None
-        user = self.repository.read_user_by_email(email)
+        user = await self.repository.read_user_by_email(email)
         if user:
             return _public_user(user)
-        return self.create_user(
+        return await self.create_user(
             email=email,
             password=password,
             display_name=os.getenv("BOOTSTRAP_ADMIN_NAME") or "Admin",
         )
 
-    def create_user(
+    async def create_user(
         self,
         *,
         email: str,
@@ -70,11 +70,13 @@ class AuthSessionService:
             "password_hash": hash_password(password),
             "created_at": now,
         }
-        self.repository.add_user(user)
+        await self.repository.add_user(user)
         return _public_user(user)
 
-    def login(self, *, email: str, password: str) -> dict[str, Any]:
-        user = self.repository.read_user_by_email(_required_text(email, "email"))
+    async def login(self, *, email: str, password: str) -> dict[str, Any]:
+        user = await self.repository.read_user_by_email(
+            _required_text(email, "email")
+        )
         if not user or not verify_password(password, str(user["password_hash"])):
             raise InvalidCredentialsError("invalid email or password")
         now = datetime.now(timezone.utc)
@@ -87,32 +89,34 @@ class AuthSessionService:
             "expires_at": (now + self.session_ttl).isoformat(),
             "revoked_at": None,
         }
-        self.repository.add_session(session)
+        await self.repository.add_session(session)
         return {
             "session_id": bearer_token,
             "expires_at": session["expires_at"],
             "user": _public_user(user),
         }
 
-    def logout(self, session_id: str | None) -> None:
+    async def logout(self, session_id: str | None) -> None:
         if not session_id:
             return
-        self.repository.revoke_session_by_token_hash(
+        await self.repository.revoke_session_by_token_hash(
             _session_token_hash(session_id),
             _now_iso(),
         )
 
-    def resolve_session(self, session_id: str | None) -> dict[str, Any]:
+    async def resolve_session(
+        self, session_id: str | None
+    ) -> dict[str, Any]:
         if not session_id:
             raise SessionNotFoundError("authentication required")
-        session = self.repository.read_session_by_token_hash(
+        session = await self.repository.read_session_by_token_hash(
             _session_token_hash(session_id)
         )
         if not session or session.get("revoked_at"):
             raise SessionNotFoundError("authentication required")
         if _parse_iso(str(session["expires_at"])) <= datetime.now(timezone.utc):
             raise SessionNotFoundError("authentication required")
-        user = self.repository.read_user(str(session["user_id"]))
+        user = await self.repository.read_user(str(session["user_id"]))
         if not user:
             raise SessionNotFoundError("authentication required")
         return _public_user(user)

@@ -458,13 +458,13 @@ class PaperFactsService:
             return _DEFAULT_MAX_EXTRACTION_CONCURRENCY
         return parsed
 
-    def list_evidence_cards(
+    async def list_evidence_cards(
         self,
         collection_id: str,
         offset: int = 0,
         limit: int = 50,
     ) -> dict[str, Any]:
-        cards = self.read_evidence_cards(collection_id)
+        cards = await self.read_evidence_cards(collection_id)
         items = [
             self._serialize_card_row(row)
             for row in cards[offset : offset + limit]
@@ -476,12 +476,12 @@ class PaperFactsService:
             "items": items,
         }
 
-    def get_evidence_card(
+    async def get_evidence_card(
         self,
         collection_id: str,
         evidence_id: str,
     ) -> dict[str, Any]:
-        cards = self.read_evidence_cards(collection_id)
+        cards = await self.read_evidence_cards(collection_id)
         matched = next(
             (
                 row
@@ -494,12 +494,12 @@ class PaperFactsService:
             raise EvidenceCardNotFoundError(collection_id, evidence_id)
         return self._serialize_card_row(matched)
 
-    def get_evidence_traceback(
+    async def get_evidence_traceback(
         self,
         collection_id: str,
         evidence_id: str,
     ) -> dict[str, Any]:
-        cards = self.read_evidence_cards(collection_id)
+        cards = await self.read_evidence_cards(collection_id)
         row = next(
             (
                 card
@@ -520,7 +520,7 @@ class PaperFactsService:
                 "anchors": [],
             }
 
-        content = self.document_profile_service.get_document_content(
+        content = await self.document_profile_service.get_document_content(
             collection_id,
             document_id,
         )
@@ -547,28 +547,30 @@ class PaperFactsService:
             "anchors": resolved_anchors,
         }
 
-    def read_evidence_cards(self, collection_id: str) -> tuple[dict[str, Any], ...]:
-        records = self.read_paper_fact_records(collection_id)
+    async def read_evidence_cards(
+        self, collection_id: str
+    ) -> tuple[dict[str, Any], ...]:
+        records = await self.read_paper_fact_records(collection_id)
         return self._normalize_card_records(
             self._legacy_evidence_cards_from_records(collection_id, records),
             collection_id,
         )
 
-    def read_paper_fact_records(
+    async def read_paper_fact_records(
         self,
         collection_id: str,
     ) -> dict[str, tuple[dict[str, Any], ...]]:
-        return self._load_paper_fact_records(collection_id)
+        return await self._load_paper_fact_records(collection_id)
 
-    def build_paper_facts(
+    async def build_paper_facts(
         self,
         collection_id: str,
         *,
         build_id: str,
     ) -> dict[str, tuple[dict[str, Any], ...]]:
-        self.collection_service.get_collection(collection_id)
+        await self.collection_service.get_collection(collection_id)
         try:
-            profiles = self.document_profile_service.read_document_profiles(
+            profiles = await self.document_profile_service.read_document_profiles(
                 collection_id,
                 build_id=build_id,
             )
@@ -576,27 +578,27 @@ class PaperFactsService:
             raise PaperFactsNotReadyError(collection_id) from exc
 
         try:
-            documents, text_units = load_collection_inputs(
+            documents, text_units = await load_collection_inputs(
                 collection_id,
                 self.source_artifact_repository,
                 build_id=build_id,
             )
-            blocks = load_blocks_artifact(
+            blocks = await load_blocks_artifact(
                 collection_id,
                 self.source_artifact_repository,
                 build_id=build_id,
             )
-            tables = load_tables_artifact(
+            tables = await load_tables_artifact(
                 collection_id,
                 self.source_artifact_repository,
                 build_id=build_id,
             )
-            table_rows = load_table_rows_artifact(
+            table_rows = await load_table_rows_artifact(
                 collection_id,
                 self.source_artifact_repository,
                 build_id=build_id,
             )
-            table_cells = load_table_cells_artifact(
+            table_cells = await load_table_cells_artifact(
                 collection_id,
                 self.source_artifact_repository,
                 build_id=build_id,
@@ -1109,7 +1111,7 @@ class PaperFactsService:
         measurement_results = self._deduplicate_measurement_result_records(
             measurement_results
         )
-        self.paper_fact_repository.replace_paper_facts(
+        await self.paper_fact_repository.replace_paper_facts(
             collection_id,
             build_id,
             self._build_paper_fact_set(
@@ -1147,15 +1149,15 @@ class PaperFactsService:
             "structure_features": structure_features,
         }
 
-    def build_evidence_cards(
+    async def build_evidence_cards(
         self,
         collection_id: str,
     ) -> tuple[dict[str, Any], ...]:
-        self.collection_service.get_collection(collection_id)
-        paper_facts = self.paper_fact_repository.read(collection_id)
+        await self.collection_service.get_collection(collection_id)
+        paper_facts = await self.paper_fact_repository.read(collection_id)
         if not self._paper_fact_records_available(paper_facts):
             raise PaperFactsNotReadyError(collection_id)
-        records = self._load_paper_fact_records(collection_id)
+        records = await self._load_paper_fact_records(collection_id)
         cards_table = self._legacy_evidence_cards_from_records(collection_id, records)
         logger.info(
             "Evidence view derivation finished collection_id=%s evidence_cards=%s",
@@ -1179,12 +1181,12 @@ class PaperFactsService:
             measurement_results=records["measurement_results"],
         )
 
-    def _load_paper_fact_records(
+    async def _load_paper_fact_records(
         self,
         collection_id: str,
     ) -> dict[str, tuple[dict[str, Any], ...]]:
-        self.collection_service.get_collection(collection_id)
-        facts = self.paper_fact_repository.read(collection_id)
+        await self.collection_service.get_collection(collection_id)
+        facts = await self.paper_fact_repository.read(collection_id)
         if not self._paper_fact_records_available(facts):
             raise PaperFactsNotReadyError(collection_id)
 

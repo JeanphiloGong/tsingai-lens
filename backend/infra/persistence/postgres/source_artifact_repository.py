@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.source import (
     SourceBlock,
@@ -52,10 +52,10 @@ class PostgresSourceArtifactRepository:
 
     backend_name = "postgres"
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self.session_factory = session_factory
 
-    def replace_collection_documents(
+    async def replace_collection_documents(
         self,
         collection_id: str,
         build_id: str,
@@ -77,16 +77,18 @@ class PostgresSourceArtifactRepository:
             item for document in documents for item in document.table_cells
         )
         figures = tuple(item for document in documents for item in document.figures)
-        with self.session_factory.begin() as session:
-            build = self._require_build(session, collection_id, build_id)
+        async with self.session_factory.begin() as session:
+            build = await self._require_build(
+                session, collection_id, build_id
+            )
             if build.status not in {"queued", "building"}:
                 raise ValueError(f"collection build is not writable: {build_id}")
-            lineage = self._resolve_document_lineage(
+            lineage = await self._resolve_document_lineage(
                 session,
                 collection_id,
                 documents,
             )
-            session.execute(
+            await session.execute(
                 delete(SourceDocumentRow).where(SourceDocumentRow.build_id == build_id)
             )
             session.add_all(
@@ -104,7 +106,7 @@ class PostgresSourceArtifactRepository:
                 )
                 for document in documents
             )
-            session.flush()
+            await session.flush()
             session.add_all(
                 SourceTextUnitRow(
                     build_id=build_id,
@@ -116,7 +118,7 @@ class PostgresSourceArtifactRepository:
                 )
                 for text_unit in text_units
             )
-            session.flush()
+            await session.flush()
             session.add_all(
                 SourceTextUnitDocument(
                     build_id=build_id,
@@ -142,7 +144,7 @@ class PostgresSourceArtifactRepository:
                 )
                 for block in blocks
             )
-            session.flush()
+            await session.flush()
             session.add_all(
                 SourceBlockTextUnit(
                     build_id=build_id,
@@ -171,7 +173,7 @@ class PostgresSourceArtifactRepository:
                 )
                 for table in tables
             )
-            session.flush()
+            await session.flush()
             session.add_all(
                 SourceTableRowModel(
                     build_id=build_id,
@@ -230,35 +232,53 @@ class PostgresSourceArtifactRepository:
                 for figure in figures
             )
 
-    def read_collection_documents(
+    async def read_collection_documents(
         self,
         collection_id: str,
         build_id: str | None = None,
     ) -> tuple[SourceDocument, ...]:
         if build_id is None:
-            with self.session_factory() as session:
-                build_id = self._resolve_read_build(session, collection_id, None)
+            async with self.session_factory() as session:
+                build_id = await self._resolve_read_build(
+                    session, collection_id, None
+                )
             if build_id is None:
                 return ()
         return assemble_source_documents(
-            documents=tuple(self.list_documents(collection_id, build_id=build_id)),
-            text_units=tuple(self.list_text_units(collection_id, build_id=build_id)),
-            blocks=tuple(self.list_blocks(collection_id, build_id=build_id)),
-            tables=tuple(self.list_tables(collection_id, build_id=build_id)),
-            table_rows=tuple(self.list_table_rows(collection_id, build_id=build_id)),
-            table_cells=tuple(self.list_table_cells(collection_id, build_id=build_id)),
-            figures=tuple(self.list_figures(collection_id, build_id=build_id)),
+            documents=tuple(
+                await self.list_documents(collection_id, build_id=build_id)
+            ),
+            text_units=tuple(
+                await self.list_text_units(collection_id, build_id=build_id)
+            ),
+            blocks=tuple(
+                await self.list_blocks(collection_id, build_id=build_id)
+            ),
+            tables=tuple(
+                await self.list_tables(collection_id, build_id=build_id)
+            ),
+            table_rows=tuple(
+                await self.list_table_rows(collection_id, build_id=build_id)
+            ),
+            table_cells=tuple(
+                await self.list_table_cells(collection_id, build_id=build_id)
+            ),
+            figures=tuple(
+                await self.list_figures(collection_id, build_id=build_id)
+            ),
         )
 
-    def read_document_tree(
+    async def read_document_tree(
         self,
         collection_id: str,
         document_id: str,
         build_id: str | None = None,
     ) -> SourceDocumentTree:
         if build_id is None:
-            with self.session_factory() as session:
-                build_id = self._resolve_read_build(session, collection_id, None)
+            async with self.session_factory() as session:
+                build_id = await self._resolve_read_build(
+                    session, collection_id, None
+                )
             if build_id is None:
                 raise FileNotFoundError(
                     f"source document not found: {collection_id}/{document_id}"
@@ -266,7 +286,7 @@ class PostgresSourceArtifactRepository:
         document = next(
             (
                 item
-                for item in self.read_collection_documents(
+                for item in await self.read_collection_documents(
                     collection_id, build_id=build_id
                 )
                 if item.document_id == document_id
@@ -283,27 +303,27 @@ class PostgresSourceArtifactRepository:
             blocks=document.blocks,
             tables=document.tables,
             figures=document.figures,
-            references=self.read_collection_references(
+            references=await self.read_collection_references(
                 collection_id, build_id=build_id
             ),
         )
 
-    def list_documents(
+    async def list_documents(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
     ) -> list[SourceDocument]:
-        with self.session_factory() as session:
-            resolved_build_id = self._resolve_read_build(
+        async with self.session_factory() as session:
+            resolved_build_id = await self._resolve_read_build(
                 session, collection_id, build_id
             )
             if resolved_build_id is None:
                 return []
-            text_units_by_document = self._text_units_by_document(
+            text_units_by_document = await self._text_units_by_document(
                 session, collection_id, resolved_build_id
             )
-            rows = session.scalars(
+            rows = await session.scalars(
                 select(SourceDocumentRow)
                 .where(
                     SourceDocumentRow.collection_id == collection_id,
@@ -331,20 +351,20 @@ class PostgresSourceArtifactRepository:
                 for row in rows
             ]
 
-    def list_text_units(
+    async def list_text_units(
         self,
         collection_id: str,
         document_id: str | None = None,
         *,
         build_id: str | None = None,
     ) -> list[SourceTextUnit]:
-        with self.session_factory() as session:
-            resolved_build_id = self._resolve_read_build(
+        async with self.session_factory() as session:
+            resolved_build_id = await self._resolve_read_build(
                 session, collection_id, build_id
             )
             if resolved_build_id is None:
                 return []
-            documents_by_text_unit = self._documents_by_text_unit(
+            documents_by_text_unit = await self._documents_by_text_unit(
                 session, collection_id, resolved_build_id
             )
             statement = select(SourceTextUnitRow).where(
@@ -362,7 +382,7 @@ class PostgresSourceArtifactRepository:
                         )
                     ),
                 ).where(SourceTextUnitDocument.source_document_id == document_id)
-            rows = session.scalars(
+            rows = await session.scalars(
                 statement.order_by(
                     SourceTextUnitRow.text_unit_order,
                     SourceTextUnitRow.text_unit_id,
@@ -383,20 +403,20 @@ class PostgresSourceArtifactRepository:
                 for row in rows
             ]
 
-    def list_blocks(
+    async def list_blocks(
         self,
         collection_id: str,
         document_id: str | None = None,
         *,
         build_id: str | None = None,
     ) -> list[SourceBlock]:
-        with self.session_factory() as session:
-            resolved_build_id = self._resolve_read_build(
+        async with self.session_factory() as session:
+            resolved_build_id = await self._resolve_read_build(
                 session, collection_id, build_id
             )
             if resolved_build_id is None:
                 return []
-            text_units_by_block = self._text_units_by_block(
+            text_units_by_block = await self._text_units_by_block(
                 session, collection_id, resolved_build_id
             )
             statement = select(SourceBlockRow).where(
@@ -407,7 +427,7 @@ class PostgresSourceArtifactRepository:
                 statement = statement.where(
                     SourceBlockRow.source_document_id == document_id
                 )
-            rows = session.scalars(
+            rows = await session.scalars(
                 statement.order_by(
                     SourceBlockRow.source_document_id,
                     SourceBlockRow.block_order,
@@ -431,15 +451,15 @@ class PostgresSourceArtifactRepository:
                 for row in rows
             ]
 
-    def list_tables(
+    async def list_tables(
         self,
         collection_id: str,
         document_id: str | None = None,
         *,
         build_id: str | None = None,
     ) -> list[SourceTable]:
-        with self.session_factory() as session:
-            resolved_build_id = self._resolve_read_build(
+        async with self.session_factory() as session:
+            resolved_build_id = await self._resolve_read_build(
                 session, collection_id, build_id
             )
             if resolved_build_id is None:
@@ -452,7 +472,7 @@ class PostgresSourceArtifactRepository:
                 statement = statement.where(
                     SourceTableModel.source_document_id == document_id
                 )
-            rows = session.scalars(
+            rows = await session.scalars(
                 statement.order_by(
                     SourceTableModel.source_document_id,
                     SourceTableModel.table_order,
@@ -478,15 +498,15 @@ class PostgresSourceArtifactRepository:
                 for row in rows
             ]
 
-    def list_table_rows(
+    async def list_table_rows(
         self,
         collection_id: str,
         table_id: str | None = None,
         *,
         build_id: str | None = None,
     ) -> list[SourceTableRow]:
-        with self.session_factory() as session:
-            resolved_build_id = self._resolve_read_build(
+        async with self.session_factory() as session:
+            resolved_build_id = await self._resolve_read_build(
                 session, collection_id, build_id
             )
             if resolved_build_id is None:
@@ -497,7 +517,7 @@ class PostgresSourceArtifactRepository:
             )
             if table_id is not None:
                 statement = statement.where(SourceTableRowModel.table_id == table_id)
-            rows = session.scalars(
+            rows = await session.scalars(
                 statement.order_by(
                     SourceTableRowModel.source_document_id,
                     SourceTableRowModel.table_id,
@@ -520,7 +540,7 @@ class PostgresSourceArtifactRepository:
                 for row in rows
             ]
 
-    def list_table_cells(
+    async def list_table_cells(
         self,
         collection_id: str,
         table_id: str | None = None,
@@ -528,8 +548,8 @@ class PostgresSourceArtifactRepository:
         *,
         build_id: str | None = None,
     ) -> list[SourceTableCell]:
-        with self.session_factory() as session:
-            resolved_build_id = self._resolve_read_build(
+        async with self.session_factory() as session:
+            resolved_build_id = await self._resolve_read_build(
                 session, collection_id, build_id
             )
             if resolved_build_id is None:
@@ -542,7 +562,7 @@ class PostgresSourceArtifactRepository:
                 statement = statement.where(SourceTableCellRow.table_id == table_id)
             if row_index is not None:
                 statement = statement.where(SourceTableCellRow.row_index == row_index)
-            rows = session.scalars(
+            rows = await session.scalars(
                 statement.order_by(
                     SourceTableCellRow.source_document_id,
                     SourceTableCellRow.table_id,
@@ -573,15 +593,15 @@ class PostgresSourceArtifactRepository:
                 for row in rows
             ]
 
-    def list_figures(
+    async def list_figures(
         self,
         collection_id: str,
         document_id: str | None = None,
         *,
         build_id: str | None = None,
     ) -> list[SourceFigure]:
-        with self.session_factory() as session:
-            resolved_build_id = self._resolve_read_build(
+        async with self.session_factory() as session:
+            resolved_build_id = await self._resolve_read_build(
                 session, collection_id, build_id
             )
             if resolved_build_id is None:
@@ -594,7 +614,7 @@ class PostgresSourceArtifactRepository:
                 statement = statement.where(
                     SourceFigureRow.source_document_id == document_id
                 )
-            rows = session.scalars(
+            rows = await session.scalars(
                 statement.order_by(
                     SourceFigureRow.source_document_id,
                     SourceFigureRow.figure_order,
@@ -624,14 +644,16 @@ class PostgresSourceArtifactRepository:
                 for row in rows
             ]
 
-    def replace_collection_references(
+    async def replace_collection_references(
         self,
         collection_id: str,
         build_id: str,
         references: SourceReferenceSet,
     ) -> None:
-        with self.session_factory.begin() as session:
-            build = self._require_build(session, collection_id, build_id)
+        async with self.session_factory.begin() as session:
+            build = await self._require_build(
+                session, collection_id, build_id
+            )
             if build.status not in {"queued", "building"}:
                 raise ValueError(f"collection build is not writable: {build_id}")
             for model in (
@@ -640,7 +662,7 @@ class PostgresSourceArtifactRepository:
                 SourceReferenceMentionRow,
                 SourceReferenceEntryRow,
             ):
-                session.execute(delete(model).where(model.build_id == build_id))
+                await session.execute(delete(model).where(model.build_id == build_id))
             session.add_all(
                 SourceReferenceEntryRow(
                     build_id=build_id,
@@ -660,7 +682,7 @@ class PostgresSourceArtifactRepository:
                 )
                 for entry in references.entries
             )
-            session.flush()
+            await session.flush()
             session.add_all(
                 SourceReferenceMentionRow(
                     build_id=build_id,
@@ -717,18 +739,18 @@ class PostgresSourceArtifactRepository:
                 for candidate in references.candidates
             )
 
-    def read_collection_references(
+    async def read_collection_references(
         self,
         collection_id: str,
         build_id: str | None = None,
     ) -> SourceReferenceSet:
-        with self.session_factory() as session:
-            resolved_build_id = self._resolve_read_build(
+        async with self.session_factory() as session:
+            resolved_build_id = await self._resolve_read_build(
                 session, collection_id, build_id
             )
             if resolved_build_id is None:
                 return SourceReferenceSet()
-            entries = session.scalars(
+            entries = await session.scalars(
                 select(SourceReferenceEntryRow)
                 .where(
                     SourceReferenceEntryRow.collection_id == collection_id,
@@ -740,7 +762,7 @@ class PostgresSourceArtifactRepository:
                     SourceReferenceEntryRow.reference_id,
                 )
             )
-            mentions = session.scalars(
+            mentions = await session.scalars(
                 select(SourceReferenceMentionRow)
                 .where(
                     SourceReferenceMentionRow.collection_id == collection_id,
@@ -752,7 +774,7 @@ class PostgresSourceArtifactRepository:
                     SourceReferenceMentionRow.mention_id,
                 )
             )
-            resolutions = session.scalars(
+            resolutions = await session.scalars(
                 select(SourceReferenceResolutionRow)
                 .where(
                     SourceReferenceResolutionRow.collection_id == collection_id,
@@ -764,7 +786,7 @@ class PostgresSourceArtifactRepository:
                     SourceReferenceResolutionRow.resolution_id,
                 )
             )
-            candidates = session.scalars(
+            candidates = await session.scalars(
                 select(SourceReferenceCandidateRow)
                 .where(
                     SourceReferenceCandidateRow.collection_id == collection_id,
@@ -853,12 +875,12 @@ class PostgresSourceArtifactRepository:
             )
 
     @staticmethod
-    def _require_build(
-        session: Session,
+    async def _require_build(
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
     ) -> CollectionBuild:
-        build = session.get(CollectionBuild, build_id)
+        build = await session.get(CollectionBuild, build_id)
         if build is None or build.collection_id != collection_id:
             raise FileNotFoundError(
                 f"collection build not found: {collection_id}/{build_id}"
@@ -866,29 +888,30 @@ class PostgresSourceArtifactRepository:
         return build
 
     @staticmethod
-    def _resolve_read_build(
-        session: Session,
+    async def _resolve_read_build(
+        session: AsyncSession,
         collection_id: str,
         build_id: str | None,
     ) -> str | None:
         if build_id is not None:
-            PostgresSourceArtifactRepository._require_build(
+            await PostgresSourceArtifactRepository._require_build(
                 session, collection_id, build_id
             )
             return build_id
-        return session.scalar(
+        return await session.scalar(
             select(CollectionActiveBuild.build_id).where(
                 CollectionActiveBuild.collection_id == collection_id
             )
         )
 
     @staticmethod
-    def _resolve_document_lineage(
-        session: Session,
+    async def _resolve_document_lineage(
+        session: AsyncSession,
         collection_id: str,
         documents: tuple[SourceDocument, ...],
     ) -> dict[str, tuple[str, str]]:
-        file_rows = session.execute(
+        file_rows = (
+            await session.execute(
             select(
                 CollectionFile.stored_filename,
                 CollectionDocument.collection_document_id,
@@ -900,6 +923,7 @@ class PostgresSourceArtifactRepository:
                 == CollectionFile.collection_document_id,
             )
             .where(CollectionFile.collection_id == collection_id)
+            )
         ).all()
         lineage_by_filename: dict[str, list[tuple[str, str]]] = {}
         for stored_filename, collection_document_id, document_version_id in file_rows:
@@ -921,10 +945,10 @@ class PostgresSourceArtifactRepository:
         return result
 
     @staticmethod
-    def _documents_by_text_unit(
-        session: Session, collection_id: str, build_id: str
+    async def _documents_by_text_unit(
+        session: AsyncSession, collection_id: str, build_id: str
     ) -> dict[str, tuple[str, ...]]:
-        rows = session.execute(
+        rows = await session.execute(
             select(
                 SourceTextUnitDocument.text_unit_id,
                 SourceTextUnitDocument.source_document_id,
@@ -941,10 +965,10 @@ class PostgresSourceArtifactRepository:
         return _group_pairs(rows)
 
     @staticmethod
-    def _text_units_by_document(
-        session: Session, collection_id: str, build_id: str
+    async def _text_units_by_document(
+        session: AsyncSession, collection_id: str, build_id: str
     ) -> dict[str, tuple[str, ...]]:
-        rows = session.execute(
+        rows = await session.execute(
             select(
                 SourceTextUnitDocument.source_document_id,
                 SourceTextUnitDocument.text_unit_id,
@@ -970,10 +994,10 @@ class PostgresSourceArtifactRepository:
         return _group_pairs(rows)
 
     @staticmethod
-    def _text_units_by_block(
-        session: Session, collection_id: str, build_id: str
+    async def _text_units_by_block(
+        session: AsyncSession, collection_id: str, build_id: str
     ) -> dict[str, tuple[str, ...]]:
-        rows = session.execute(
+        rows = await session.execute(
             select(SourceBlockTextUnit.block_id, SourceBlockTextUnit.text_unit_id)
             .join(
                 SourceTextUnitRow,

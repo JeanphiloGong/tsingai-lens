@@ -2,10 +2,19 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from application.evaluation.finding_review_import_service import (
     FindingReviewImportService,
 )
 from domain.core import Finding
+
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 class _FeedbackService:
@@ -15,7 +24,7 @@ class _FeedbackService:
         self.export_calls: list[dict[str, str]] = []
         self.validation_calls: list[dict[str, Any]] = []
 
-    def export_dataset(self, *, collection_id: str, objective_id: str) -> dict:
+    async def export_dataset(self, *, collection_id: str, objective_id: str) -> dict:
         self.export_calls.append(
             {"collection_id": collection_id, "objective_id": objective_id}
         )
@@ -33,13 +42,13 @@ class _FeedbackService:
             ]
         }
 
-    def record_feedback(self, **payload: Any) -> None:
+    async def record_feedback(self, **payload: Any) -> None:
         self.feedback_calls.append(payload)
 
-    def record_curation(self, **payload: Any) -> None:
+    async def record_curation(self, **payload: Any) -> None:
         self.curation_calls.append(payload)
 
-    def validate_curation(self, **payload: Any) -> Finding:
+    async def validate_curation(self, **payload: Any) -> Finding:
         self.validation_calls.append(payload)
         candidate = Finding.from_mapping(payload["curated_finding"])
         if candidate.to_record() != payload["curated_finding"]:
@@ -101,9 +110,9 @@ def _finding() -> dict[str, Any]:
     }
 
 
-def test_import_accepts_canonical_finding_identity() -> None:
+async def test_import_accepts_canonical_finding_identity() -> None:
     feedback = _FeedbackService()
-    result = FindingReviewImportService(feedback).import_rows(
+    result = await FindingReviewImportService(feedback).import_rows(
         rows=[_identity(action="accept", note="Evidence and statement agree.")],
         reviewer="expert-1",
     )
@@ -127,9 +136,9 @@ def test_import_accepts_canonical_finding_identity() -> None:
     ]
 
 
-def test_import_rejects_stale_analysis_version() -> None:
+async def test_import_rejects_stale_analysis_version() -> None:
     feedback = _FeedbackService()
-    result = FindingReviewImportService(feedback).import_rows(
+    result = await FindingReviewImportService(feedback).import_rows(
         rows=[_identity(action="accept", analysis_version=2)],
         reviewer="expert-1",
     )
@@ -145,9 +154,9 @@ def test_import_rejects_stale_analysis_version() -> None:
     assert feedback.feedback_calls == []
 
 
-def test_import_rejects_unknown_finding() -> None:
+async def test_import_rejects_unknown_finding() -> None:
     feedback = _FeedbackService()
-    result = FindingReviewImportService(feedback).import_rows(
+    result = await FindingReviewImportService(feedback).import_rows(
         rows=[_identity(action="reject", finding_id="missing", issue_type="overclaim")],
         reviewer="expert-1",
     )
@@ -156,9 +165,9 @@ def test_import_rejects_unknown_finding() -> None:
     assert feedback.feedback_calls == []
 
 
-def test_import_applies_curation_with_version_local_evidence() -> None:
+async def test_import_applies_curation_with_version_local_evidence() -> None:
     feedback = _FeedbackService()
-    result = FindingReviewImportService(feedback).import_rows(
+    result = await FindingReviewImportService(feedback).import_rows(
         rows=[
             _identity(
                 action="correct",
@@ -193,12 +202,12 @@ def test_import_applies_curation_with_version_local_evidence() -> None:
     ]
 
 
-def test_import_dry_run_rejects_noncanonical_curated_finding() -> None:
+async def test_import_dry_run_rejects_noncanonical_curated_finding() -> None:
     feedback = _FeedbackService()
     malformed = _finding()
     malformed.pop("scientific_context")
 
-    result = FindingReviewImportService(feedback).import_rows(
+    result = await FindingReviewImportService(feedback).import_rows(
         rows=[_identity(action="correct", curated_finding=malformed)],
         reviewer="expert-1",
         dry_run=True,
@@ -209,12 +218,12 @@ def test_import_dry_run_rejects_noncanonical_curated_finding() -> None:
     assert feedback.curation_calls == []
 
 
-def test_import_dry_run_rejects_cross_identity_curated_finding() -> None:
+async def test_import_dry_run_rejects_cross_identity_curated_finding() -> None:
     feedback = _FeedbackService()
     cross_identity = _finding()
     cross_identity["objective_id"] = "objective-other"
 
-    result = FindingReviewImportService(feedback).import_rows(
+    result = await FindingReviewImportService(feedback).import_rows(
         rows=[_identity(action="correct", curated_finding=cross_identity)],
         reviewer="expert-1",
         dry_run=True,
@@ -225,10 +234,10 @@ def test_import_dry_run_rejects_cross_identity_curated_finding() -> None:
     assert feedback.curation_calls == []
 
 
-def test_import_dry_run_rejects_invalid_curated_status() -> None:
+async def test_import_dry_run_rejects_invalid_curated_status() -> None:
     feedback = _FeedbackService()
 
-    result = FindingReviewImportService(feedback).import_rows(
+    result = await FindingReviewImportService(feedback).import_rows(
         rows=[
             _identity(
                 action="correct",
@@ -247,10 +256,10 @@ def test_import_dry_run_rejects_invalid_curated_status() -> None:
     assert feedback.curation_calls == []
 
 
-def test_import_rejects_retired_review_jsonl_aliases() -> None:
+async def test_import_rejects_retired_review_jsonl_aliases() -> None:
     feedback = _FeedbackService()
 
-    result = FindingReviewImportService(feedback).import_rows(
+    result = await FindingReviewImportService(feedback).import_rows(
         rows=[_identity(expert_action="accept", expert_note="legacy")],
         reviewer="expert-1",
         dry_run=True,
@@ -266,9 +275,9 @@ def test_import_rejects_retired_review_jsonl_aliases() -> None:
     assert feedback.export_calls == []
 
 
-def test_import_rejects_claim_identity_instead_of_ignoring_it() -> None:
+async def test_import_rejects_claim_identity_instead_of_ignoring_it() -> None:
     feedback = _FeedbackService()
-    result = FindingReviewImportService(feedback).import_rows(
+    result = await FindingReviewImportService(feedback).import_rows(
         rows=[_identity(action="accept", claim_id="legacy-claim")],
         reviewer="expert-1",
     )

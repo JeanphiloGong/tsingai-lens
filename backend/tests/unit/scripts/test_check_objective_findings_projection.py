@@ -4,8 +4,14 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 DIRECT_SOURCE_TEXT = (
@@ -1115,7 +1121,8 @@ def test_real_acceptance_manifest_covers_six_papers_and_multiple_objectives() ->
     }
 
 
-def test_acceptance_checker_adds_backend_root_before_manifest_resolution(
+@pytest.mark.anyio
+async def test_acceptance_checker_adds_backend_root_before_manifest_resolution(
     monkeypatch,
 ) -> None:
     checker = _load_module()
@@ -1126,7 +1133,7 @@ def test_acceptance_checker_adds_backend_root_before_manifest_resolution(
         [entry for entry in checker.sys.path if entry != backend_root],
     )
 
-    def assert_backend_import_path(_collection_id, _documents):
+    async def assert_backend_import_path(_collection_id, _documents):
         assert backend_root in checker.sys.path
         raise RuntimeError("manifest resolution reached")
 
@@ -1142,7 +1149,7 @@ def test_acceptance_checker_adds_backend_root_before_manifest_resolution(
     manifest = checker.load_acceptance_manifest(manifest_path)
 
     try:
-        checker.check_objective_findings_projection(
+        await checker.check_objective_findings_projection(
             collection_id="col-1",
             objective_ids=("objective-1", "objective-2", "objective-3"),
             acceptance_manifest=manifest,
@@ -1207,11 +1214,12 @@ def test_required_review_statuses_are_checked_across_objectives() -> None:
     assert "incorrect" in check["detail"]
 
 
-def test_real_acceptance_requires_manifest_and_three_objectives() -> None:
+@pytest.mark.anyio
+async def test_real_acceptance_requires_manifest_and_three_objectives() -> None:
     checker = _load_module()
 
     with pytest.raises(ValueError, match="acceptance_manifest is required"):
-        checker.check_objective_findings_projection(
+        await checker.check_objective_findings_projection(
             collection_id="col-1",
             objective_ids=("objective-1", "objective-2", "objective-3"),
         )
@@ -1222,14 +1230,15 @@ def test_real_acceptance_requires_manifest_and_three_objectives() -> None:
     )
     manifest = checker.load_acceptance_manifest(manifest_path)
     with pytest.raises(ValueError, match="at least three objective_ids"):
-        checker.check_objective_findings_projection(
+        await checker.check_objective_findings_projection(
             collection_id="col-1",
             objective_ids=("objective-1",),
             acceptance_manifest=manifest,
         )
 
 
-def test_real_acceptance_requires_three_distinct_manifest_objectives(
+@pytest.mark.anyio
+async def test_real_acceptance_requires_three_distinct_manifest_objectives(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     checker = _load_module()
@@ -1242,15 +1251,15 @@ def test_real_acceptance_requires_three_distinct_manifest_objectives(
     monkeypatch.setattr(
         checker,
         "_resolve_manifest_document_ids",
-        lambda *_args, **_kwargs: {"paper-1"},
+        AsyncMock(return_value={"paper-1"}),
     )
-    monkeypatch.setattr(checker, "_load_source_index", lambda *_args: {})
+    monkeypatch.setattr(checker, "_load_source_index", AsyncMock(return_value={}))
     monkeypatch.setattr(
         checker,
         "_local_objective_bundle",
-        lambda _collection_id, objective_id: {
+        AsyncMock(side_effect=lambda _collection_id, objective_id: {
             "objective": {"objective_id": objective_id, "question": same_question}
-        },
+        }),
     )
     monkeypatch.setattr(
         checker,
@@ -1264,7 +1273,7 @@ def test_real_acceptance_requires_three_distinct_manifest_objectives(
     )
 
     with pytest.raises(ValueError, match="distinct acceptance objectives"):
-        checker.check_objective_findings_projection(
+        await checker.check_objective_findings_projection(
             collection_id="col-1",
             objective_ids=("objective-1", "objective-2", "objective-3"),
             acceptance_manifest=manifest,

@@ -5,13 +5,21 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from domain.core import EvidenceAnchor, MeasurementResult, SampleVariant
 from domain.core.paper_fact import PaperFactSet
 from domain.source import source_documents_from_records
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
+from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 def _load_trace_module():
@@ -29,13 +37,15 @@ def _load_trace_module():
     return module
 
 
-def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
+@pytest.mark.anyio
+async def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
     trace = _load_trace_module()
     backend_root = tmp_path / "backend"
     collection_id = "col-test"
-    db_path = backend_root / "data" / "lens.sqlite"
-    SqliteSourceArtifactRepository(db_path).replace_collection_documents(
+    source_repository = MemorySourceArtifactRepository()
+    await source_repository.replace_collection_documents(
         collection_id,
+        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -72,7 +82,7 @@ def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
         ),
     )
     paper_fact_repository = MemoryPaperFactRepository()
-    paper_fact_repository.replace_paper_facts(
+    await paper_fact_repository.replace_paper_facts(
         collection_id,
         "build_test",
         PaperFactSet(
@@ -127,13 +137,13 @@ def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
     monkeypatch.setattr(
         trace,
         "build_database_engine",
-        lambda _settings: SimpleNamespace(dispose=lambda: None),
+        lambda _settings: SimpleNamespace(dispose=AsyncMock()),
     )
     monkeypatch.setattr(trace, "build_session_factory", lambda _engine: None)
     monkeypatch.setattr(
         trace,
         "PostgresSourceArtifactRepository",
-        lambda _session_factory: SqliteSourceArtifactRepository(db_path),
+        lambda _session_factory: source_repository,
     )
     monkeypatch.setattr(
         trace,
@@ -146,7 +156,7 @@ def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
         lambda _session_factory: MemoryComparisonRepository(),
     )
 
-    trace_dir = trace.export_trace(
+    trace_dir = await trace.export_trace(
         backend_root=backend_root,
         collection_id=collection_id,
         trace_name="trace-test",

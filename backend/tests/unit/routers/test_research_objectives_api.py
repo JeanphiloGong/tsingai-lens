@@ -185,10 +185,10 @@ class _Repository:
     def __init__(self, facts: ObjectiveFactSet | None = None) -> None:
         self.facts = facts or _default_objective_facts()
 
-    def read(self, collection_id):
+    async def read(self, collection_id):
         return self.facts
 
-    def list_objectives(self, collection_id):
+    async def list_objectives(self, collection_id):
         return self.facts.research_objectives
 
 
@@ -197,21 +197,25 @@ class _Service:
         self.analysis_status = "queued" if queued else "succeeded"
         self.dispatch_failure_version: int | None = None
 
-    def confirm_objective(self, collection_id, objective_id):
-        return self.get_analysis_state(collection_id, objective_id)
+    async def confirm_objective(self, collection_id, objective_id):
+        return await self.get_analysis_state(collection_id, objective_id)
 
-    def queue_analysis(self, collection_id, objective_id):
-        return self.get_analysis_state(collection_id, objective_id)
+    async def queue_analysis(self, collection_id, objective_id):
+        return await self.get_analysis_state(collection_id, objective_id)
 
-    def execute_queued_analysis(self, collection_id, objective_id, analysis_version):
-        return self.get_analysis_state(collection_id, objective_id)
+    async def execute_queued_analysis(
+        self, collection_id, objective_id, analysis_version
+    ):
+        return await self.get_analysis_state(collection_id, objective_id)
 
-    def fail_analysis_dispatch(self, collection_id, objective_id, analysis_version):
+    async def fail_analysis_dispatch(
+        self, collection_id, objective_id, analysis_version
+    ):
         self.analysis_status = "failed"
         self.dispatch_failure_version = analysis_version
-        return self.get_analysis_state(collection_id, objective_id)
+        return await self.get_analysis_state(collection_id, objective_id)
 
-    def get_analysis_state(self, collection_id, objective_id):
+    async def get_analysis_state(self, collection_id, objective_id):
         return {
             "collection_id": collection_id,
             "objective": _objective(),
@@ -221,7 +225,7 @@ class _Service:
             "warnings": [],
         }
 
-    def list_findings(self, collection_id, objective_id, **kwargs):
+    async def list_findings(self, collection_id, objective_id, **kwargs):
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
@@ -232,7 +236,9 @@ class _Service:
             "total": 1,
         }
 
-    def get_finding(self, collection_id, objective_id, finding_id, **kwargs):
+    async def get_finding(
+        self, collection_id, objective_id, finding_id, **kwargs
+    ):
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
@@ -240,7 +246,7 @@ class _Service:
             "finding": _finding().to_record(),
         }
 
-    def list_evidence(self, collection_id, objective_id, **kwargs):
+    async def list_evidence(self, collection_id, objective_id, **kwargs):
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
@@ -252,7 +258,7 @@ class _Service:
             "total": 1,
         }
 
-    def get_evidence_map(self, collection_id, objective_id):
+    async def get_evidence_map(self, collection_id, objective_id):
         return {
             "collection_id": collection_id,
             "objective_id": objective_id,
@@ -512,13 +518,13 @@ def test_objective_list_exposes_candidates_after_rank_six() -> None:
 
 def test_objective_list_hides_stale_objectives_from_an_unready_build() -> None:
     class UnreadyRepository(_Repository):
-        def read(self, collection_id):
+        async def read(self, collection_id):
             return ObjectiveFactSet(
                 research_objectives_ready=False,
                 research_objectives=(_objective(),),
             )
 
-        def list_objectives(self, collection_id):
+        async def list_objectives(self, collection_id):
             return ()
 
     response = _client(repository=UnreadyRepository()).get(
@@ -775,16 +781,16 @@ def test_start_analysis_runs_different_collections_concurrently() -> None:
     }
 
     class ConcurrentService(_Service):
-        def execute_queued_analysis(
+        async def execute_queued_analysis(
             self,
             collection_id,
             objective_id,
             analysis_version,
         ):
             collection_started[collection_id].set()
-            release_workers.wait(timeout=5)
+            await asyncio.to_thread(release_workers.wait, 5)
             collection_completed[collection_id].set()
-            return self.get_analysis_state(collection_id, objective_id)
+            return await self.get_analysis_state(collection_id, objective_id)
 
     with _client(ConcurrentService(queued=True)) as client:
         try:
@@ -812,7 +818,7 @@ def test_start_analysis_limits_asyncio_background_concurrency() -> None:
     second_started = Event()
 
     class LimitedService(_Service):
-        def execute_queued_analysis(
+        async def execute_queued_analysis(
             self,
             collection_id,
             objective_id,
@@ -820,10 +826,10 @@ def test_start_analysis_limits_asyncio_background_concurrency() -> None:
         ):
             if collection_id == "col-1":
                 first_started.set()
-                release_first.wait(timeout=5)
+                await asyncio.to_thread(release_first.wait, 5)
             else:
                 second_started.set()
-            return self.get_analysis_state(collection_id, objective_id)
+            return await self.get_analysis_state(collection_id, objective_id)
 
     with _client(
         LimitedService(queued=True),

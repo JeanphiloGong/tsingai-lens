@@ -32,6 +32,13 @@ from domain.core import (
     ResearchObjective,
 )
 
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
 
 def _objective(
     objective_id: str,
@@ -90,7 +97,11 @@ def _skim() -> PaperSkim:
 
 
 class _CollectionService:
-    def get_collection_for_user(self, collection_id: str, user_id: str) -> dict:
+    async def get_collection_for_user(
+        self,
+        collection_id: str,
+        user_id: str,
+    ) -> dict:
         if collection_id != "col-1" or user_id != "user-1":
             raise FileNotFoundError("collection not found")
         return {
@@ -108,11 +119,14 @@ class _ObjectiveRepository:
         self.objectives = objectives
         self.facts = ObjectiveFactSet(paper_skims=(_skim(),))
 
-    def list_objectives(self, collection_id: str) -> tuple[ResearchObjective, ...]:
+    async def list_objectives(
+        self,
+        collection_id: str,
+    ) -> tuple[ResearchObjective, ...]:
         assert collection_id == "col-1"
         return self.objectives
 
-    def read(self, collection_id: str) -> ObjectiveFactSet:
+    async def read(self, collection_id: str) -> ObjectiveFactSet:
         assert collection_id == "col-1"
         return self.facts
 
@@ -152,7 +166,7 @@ class _ObjectiveAuthoringRepository(_ObjectiveRepository):
         )
         self.created: list[dict] = []
 
-    def create_authored_candidate(
+    async def create_authored_candidate(
         self,
         objective: ResearchObjective,
         *,
@@ -183,7 +197,7 @@ class _ObjectiveAuthoringService:
         self.objective = objective
         self.calls: list[dict] = []
 
-    def create_chat_assisted_candidate(self, **kwargs) -> ResearchObjective:
+    async def create_chat_assisted_candidate(self, **kwargs) -> ResearchObjective:
         self.calls.append(kwargs)
         return self.objective
 
@@ -193,7 +207,12 @@ class _AnalysisService:
         self.finding_calls: list[str] = []
         self.evidence_calls: list[str] = []
 
-    def list_findings(self, collection_id: str, objective_id: str, **_kwargs) -> dict:
+    async def list_findings(
+        self,
+        collection_id: str,
+        objective_id: str,
+        **_kwargs,
+    ) -> dict:
         self.finding_calls.append(objective_id)
         return {
             "analysis_version": 2,
@@ -218,7 +237,12 @@ class _AnalysisService:
             ],
         }
 
-    def list_evidence(self, collection_id: str, objective_id: str, **_kwargs) -> dict:
+    async def list_evidence(
+        self,
+        collection_id: str,
+        objective_id: str,
+        **_kwargs,
+    ) -> dict:
         self.evidence_calls.append(objective_id)
         return {
             "analysis_version": 2,
@@ -268,14 +292,14 @@ def _context(tool_call_id: str = "call-1") -> CapabilityExecutionContext:
     )
 
 
-def test_collection_context_is_bounded_and_uses_canonical_resource_refs() -> None:
+async def test_collection_context_is_bounded_and_uses_canonical_resource_refs() -> None:
     objectives = tuple(_objective(f"objective-{index}") for index in range(15))
     capability = GetCollectionContextCapability(
         collection_service=_CollectionService(),
         objective_repository=_ObjectiveRepository(objectives),
     )
 
-    result = capability.execute(_context(), capability.spec.input_model())
+    result = await capability.execute(_context(), capability.spec.input_model())
 
     assert result.status.value == "succeeded"
     assert result.data["objective_count"] == 15
@@ -285,7 +309,7 @@ def test_collection_context_is_bounded_and_uses_canonical_resource_refs() -> Non
     assert result.warnings == ("3 additional Objectives were omitted from this bounded result.",)
 
 
-def test_published_findings_reads_only_published_objective_versions() -> None:
+async def test_published_findings_reads_only_published_objective_versions() -> None:
     published = _objective("objective-published", published_version=2)
     candidate = _objective("objective-candidate")
     repository = _ObjectiveRepository((published, candidate))
@@ -297,7 +321,7 @@ def test_published_findings_reads_only_published_objective_versions() -> None:
     )
 
     arguments = capability.spec.input_model(objective_ids=[])
-    result = capability.execute(_context(), arguments)
+    result = await capability.execute(_context(), arguments)
 
     assert result.status.value == "succeeded"
     assert result.data["finding_count"] == 1
@@ -319,7 +343,7 @@ def test_published_findings_reads_only_published_objective_versions() -> None:
     )
 
 
-def test_missing_published_results_is_a_successful_scientific_absence() -> None:
+async def test_missing_published_results_is_a_successful_scientific_absence() -> None:
     candidate = _objective("objective-candidate")
     analysis_service = _AnalysisService()
     capability = QueryPublishedFindingsCapability(
@@ -328,7 +352,7 @@ def test_missing_published_results_is_a_successful_scientific_absence() -> None:
         objective_analysis_service=analysis_service,
     )
 
-    result = capability.execute(
+    result = await capability.execute(
         _context(),
         capability.spec.input_model(objective_ids=["objective-candidate"]),
     )
@@ -340,7 +364,7 @@ def test_missing_published_results_is_a_successful_scientific_absence() -> None:
     assert "No selected Objective has a published analysis." in result.warnings
 
 
-def test_objective_drafts_are_transient_and_paper_skim_is_not_evidence() -> None:
+async def test_objective_drafts_are_transient_and_paper_skim_is_not_evidence() -> None:
     capability = ProposeObjectiveDraftsCapability(
         collection_service=_CollectionService(),
         objective_repository=_ObjectiveRepository((_objective("objective-existing"),)),
@@ -365,7 +389,7 @@ def test_objective_drafts_are_transient_and_paper_skim_is_not_evidence() -> None
         }
     )
 
-    result = capability.execute(_context("call-drafts"), arguments)
+    result = await capability.execute(_context("call-drafts"), arguments)
 
     assert result.status.value == "succeeded"
     assert result.data["draft_count"] == 2
@@ -376,7 +400,7 @@ def test_objective_drafts_are_transient_and_paper_skim_is_not_evidence() -> None
     assert all("evidence" not in ref.resource_type for ref in result.resource_refs)
 
 
-def test_objective_draft_contract_rejects_compound_outcomes() -> None:
+async def test_objective_draft_contract_rejects_compound_outcomes() -> None:
     with pytest.raises(ValidationError):
         ProposeObjectiveDraftsArguments.model_validate(
             {
@@ -391,7 +415,7 @@ def test_objective_draft_contract_rejects_compound_outcomes() -> None:
         )
 
 
-def test_create_objective_candidate_returns_only_an_unconfirmed_core_candidate() -> None:
+async def test_create_objective_candidate_returns_only_an_unconfirmed_core_candidate() -> None:
     objective = ResearchObjective.from_mapping(
         {
             "collection_id": "col-1",
@@ -422,7 +446,7 @@ def test_create_objective_candidate_returns_only_an_unconfirmed_core_candidate()
         }
     )
 
-    result = capability.execute(_context("call-create"), arguments)
+    result = await capability.execute(_context("call-create"), arguments)
 
     assert result.status.value == "succeeded"
     assert result.data == {
@@ -444,7 +468,7 @@ def test_create_objective_candidate_returns_only_an_unconfirmed_core_candidate()
     ]
 
 
-def test_core_authoring_requires_seed_relationship_support_and_derives_confidence() -> None:
+async def test_core_authoring_requires_seed_relationship_support_and_derives_confidence() -> None:
     repository = _ObjectiveAuthoringRepository()
     service = ResearchObjectiveService(
         collection_service=_CollectionService(),
@@ -457,7 +481,7 @@ def test_core_authoring_requires_seed_relationship_support_and_derives_confidenc
         objective_candidate_service=SimpleNamespace(),
     )
 
-    created = service.create_chat_assisted_candidate(
+    created = await service.create_chat_assisted_candidate(
         collection_id="col-1",
         user_id="user-1",
         tool_call_id="call-create",
@@ -478,7 +502,7 @@ def test_core_authoring_requires_seed_relationship_support_and_derives_confidenc
     assert repository.created[0]["objective"].source_relationship_ids == ()
 
     with pytest.raises(ValueError, match="seed PaperSkim context"):
-        service.create_chat_assisted_candidate(
+        await service.create_chat_assisted_candidate(
             collection_id="col-1",
             user_id="user-1",
             tool_call_id="call-unsupported",
@@ -494,7 +518,7 @@ def test_core_authoring_requires_seed_relationship_support_and_derives_confidenc
         )
 
 
-def test_agent_uses_collection_context_then_records_drafts_before_final_answer() -> None:
+async def test_agent_uses_collection_context_then_records_drafts_before_final_answer() -> None:
     repository = _ObjectiveRepository((_objective("objective-existing"),))
     collection_service = _CollectionService()
     model = _Model(
@@ -544,7 +568,7 @@ def test_agent_uses_collection_context_then_records_drafts_before_final_answer()
         ),
     )
 
-    result = runner.run_turn(
+    result = await runner.run_turn(
         context=AgentContext(
             session_id="chat-1",
             user_id="user-1",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import ast
 from datetime import datetime
 import json
@@ -94,9 +95,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+async def main_async() -> None:
     args = parse_args()
-    output_dir = export_trace(
+    output_dir = await export_trace(
         backend_root=args.backend_root,
         collection_id=args.collection_id,
         source_output_dir=args.output_dir,
@@ -107,7 +108,7 @@ def main() -> None:
     print(output_dir)
 
 
-def export_trace(
+async def export_trace(
     *,
     backend_root: str | Path = DEFAULT_BACKEND_ROOT,
     collection_id: str | None = None,
@@ -134,7 +135,7 @@ def export_trace(
     destination.mkdir(parents=True, exist_ok=True)
     (destination / "artifacts").mkdir(parents=True, exist_ok=True)
 
-    frames = _load_artifacts(
+    frames = await _load_artifacts(
         backend_root=backend_root,
         collection_id=resolved_collection_id,
     )
@@ -180,7 +181,7 @@ def _default_trace_name(collection_id: str | None, output_dir: Path) -> str:
     return f"{_safe_name(prefix)}-{timestamp}"
 
 
-def _load_artifacts(
+async def _load_artifacts(
     *,
     backend_root: Path,
     collection_id: str,
@@ -188,15 +189,17 @@ def _load_artifacts(
     engine = build_database_engine(DatabaseSettings())
     try:
         session_factory = build_session_factory(engine)
-        source_documents = PostgresSourceArtifactRepository(
+        source_documents = await PostgresSourceArtifactRepository(
             session_factory
         ).read_collection_documents(collection_id)
-        paper_facts = PostgresPaperFactRepository(session_factory).read(collection_id)
-        comparison_facts = PostgresComparisonRepository(session_factory).read(
+        paper_facts = await PostgresPaperFactRepository(session_factory).read(
+            collection_id
+        )
+        comparison_facts = await PostgresComparisonRepository(session_factory).read(
             collection_id
         )
     finally:
-        engine.dispose()
+        await engine.dispose()
     comparison_rows = ComparisonRowProjector().project_rows_from_semantic_artifacts(
         collection_id=collection_id,
         comparable_results=comparison_facts.comparable_results,
@@ -659,4 +662,4 @@ def _md_cell(value: Any) -> str:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main_async())

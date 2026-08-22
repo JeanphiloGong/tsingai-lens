@@ -24,7 +24,7 @@ class MemoryBuildRepository:
         self._artifacts: dict[str, ArtifactVersionRecord] = {}
         self._active_build_ids: dict[str, str] = {}
 
-    def add_task(
+    async def add_task(
         self,
         record: TaskRecord,
         *,
@@ -58,12 +58,12 @@ class MemoryBuildRepository:
             self._task_build_ids[record.task_id] = build_id
             return deepcopy(build)
 
-    def read_task(self, task_id: str) -> TaskRecord | None:
+    async def read_task(self, task_id: str) -> TaskRecord | None:
         with self._lock:
             record = self._tasks.get(task_id)
             return deepcopy(record) if record is not None else None
 
-    def list_tasks(
+    async def list_tasks(
         self,
         *,
         collection_id: str | None = None,
@@ -88,7 +88,7 @@ class MemoryBuildRepository:
                 records = records[:limit]
             return tuple(deepcopy(records))
 
-    def update_task(
+    async def update_task(
         self,
         record: TaskRecord,
         *,
@@ -113,12 +113,12 @@ class MemoryBuildRepository:
                     self._stages[stage.stage_id] = deepcopy(stage)
             return True
 
-    def read_build(self, task_id: str) -> CollectionBuildRecord | None:
+    async def read_build(self, task_id: str) -> CollectionBuildRecord | None:
         with self._lock:
             build_id = self._task_build_ids.get(task_id)
             return deepcopy(self._builds[build_id]) if build_id is not None else None
 
-    def list_stages(self, task_id: str) -> tuple[BuildStageRecord, ...]:
+    async def list_stages(self, task_id: str) -> tuple[BuildStageRecord, ...]:
         with self._lock:
             build_id = self._task_build_ids.get(task_id)
             if build_id is None:
@@ -129,7 +129,7 @@ class MemoryBuildRepository:
             records.sort(key=lambda stage: (stage.stage_order, stage.stage_id))
             return tuple(deepcopy(records))
 
-    def add_artifact_versions(
+    async def add_artifact_versions(
         self,
         task_id: str,
         records: tuple[ArtifactVersionRecord, ...],
@@ -154,12 +154,19 @@ class MemoryBuildRepository:
                     )
                 self._artifacts[record.artifact_version_id] = deepcopy(record)
 
-    def list_artifact_versions(
+    async def list_artifact_versions(
         self,
         task_id: str,
     ) -> tuple[ArtifactVersionRecord, ...]:
         with self._lock:
-            stage_ids = {stage.stage_id for stage in self.list_stages(task_id)}
+            build_id = self._task_build_ids.get(task_id)
+            if build_id is None:
+                return ()
+            stage_ids = {
+                stage.stage_id
+                for stage in self._stages.values()
+                if stage.build_id == build_id
+            }
             records = [
                 artifact
                 for artifact in self._artifacts.values()
@@ -173,7 +180,7 @@ class MemoryBuildRepository:
             )
             return tuple(deepcopy(records))
 
-    def finish_build(
+    async def finish_build(
         self,
         record: TaskRecord,
         *,
@@ -201,7 +208,7 @@ class MemoryBuildRepository:
                     self._active_build_ids[build.collection_id] = build.build_id
             return deepcopy(build)
 
-    def read_active_build(
+    async def read_active_build(
         self,
         collection_id: str,
     ) -> CollectionBuildRecord | None:

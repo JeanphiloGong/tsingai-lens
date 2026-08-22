@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from typing import Any
 
+import pytest
 from pydantic import BaseModel, ConfigDict
 
 from application.chat import (
@@ -25,6 +26,13 @@ from domain.chat import (
     ToolResultStatus,
     ToolRisk,
 )
+
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 class _NoArguments(BaseModel):
@@ -73,7 +81,7 @@ class _Capability:
         self.executed_arguments: list[dict[str, Any]] = []
         self.executed_call_ids: list[str] = []
 
-    def execute(
+    async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: BaseModel,
@@ -107,14 +115,14 @@ def _context() -> AgentContext:
     )
 
 
-def test_greeting_completes_without_calling_a_tool() -> None:
+async def test_greeting_completes_without_calling_a_tool() -> None:
     capability = _Capability("get_collection_context", ToolRisk.READ)
     runner = ResearchAgentRunner(
         model=_Model(ModelTurn(content="你好，我可以帮助你分析当前文献集合。")),
         capabilities=CapabilityRegistry((capability,)),
     )
 
-    result = runner.run_turn(
+    result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
         user_message="你好",
@@ -127,7 +135,7 @@ def test_greeting_completes_without_calling_a_tool() -> None:
     assert capability.executed_arguments == []
 
 
-def test_read_capability_result_returns_to_the_model_before_final_answer() -> None:
+async def test_read_capability_result_returns_to_the_model_before_final_answer() -> None:
     capability = _Capability("get_collection_context", ToolRisk.READ)
     runner = ResearchAgentRunner(
         model=_Model(
@@ -143,7 +151,7 @@ def test_read_capability_result_returns_to_the_model_before_final_answer() -> No
         capabilities=CapabilityRegistry((capability,)),
     )
 
-    result = runner.run_turn(
+    result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
         user_message="这些论文主要研究什么？",
@@ -162,14 +170,14 @@ def test_read_capability_result_returns_to_the_model_before_final_answer() -> No
     assert capability.executed_call_ids == ["call-1"]
 
 
-def test_authorization_is_deterministic_and_not_granted_by_prompt_text() -> None:
+async def test_authorization_is_deterministic_and_not_granted_by_prompt_text() -> None:
     assert not evaluate_authorization(ToolRisk.READ).requires_approval
     assert not evaluate_authorization(ToolRisk.DRAFT).requires_approval
     assert evaluate_authorization(ToolRisk.WRITE).requires_approval
     assert not evaluate_authorization(ToolRisk.WRITE).may_execute
 
 
-def test_draft_capability_executes_without_write_approval() -> None:
+async def test_draft_capability_executes_without_write_approval() -> None:
     capability = _Capability(
         "propose_objective_drafts",
         ToolRisk.DRAFT,
@@ -189,7 +197,7 @@ def test_draft_capability_executes_without_write_approval() -> None:
         capabilities=CapabilityRegistry((capability,)),
     )
 
-    result = runner.run_turn(
+    result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
         user_message="帮我整理成研究目标",
@@ -202,7 +210,7 @@ def test_draft_capability_executes_without_write_approval() -> None:
     ]
 
 
-def test_write_capability_stops_for_approval_without_execution() -> None:
+async def test_write_capability_stops_for_approval_without_execution() -> None:
     capability = _Capability(
         "create_objective_candidate",
         ToolRisk.WRITE,
@@ -222,7 +230,7 @@ def test_write_capability_stops_for_approval_without_execution() -> None:
         capabilities=CapabilityRegistry((capability,)),
     )
 
-    result = runner.run_turn(
+    result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
         user_message="保存这个目标",
@@ -235,7 +243,7 @@ def test_write_capability_stops_for_approval_without_execution() -> None:
     assert capability.executed_arguments == []
 
 
-def test_approved_write_resumes_exact_call_before_returning_to_model() -> None:
+async def test_approved_write_resumes_exact_call_before_returning_to_model() -> None:
     capability = _Capability(
         "create_objective_candidate",
         ToolRisk.WRITE,
@@ -276,7 +284,7 @@ def test_approved_write_resumes_exact_call_before_returning_to_model() -> None:
         ),
     )
 
-    result = runner.resume_approved_call(
+    result = await runner.resume_approved_call(
         context=_context(),
         previous_messages=prior_messages,
         approved_call=approved,
@@ -290,7 +298,7 @@ def test_approved_write_resumes_exact_call_before_returning_to_model() -> None:
     ]
 
 
-def test_unknown_tool_is_returned_to_the_model_as_a_failed_result() -> None:
+async def test_unknown_tool_is_returned_to_the_model_as_a_failed_result() -> None:
     runner = ResearchAgentRunner(
         model=_Model(
             ModelTurn(
@@ -307,7 +315,7 @@ def test_unknown_tool_is_returned_to_the_model_as_a_failed_result() -> None:
         ),
     )
 
-    result = runner.run_turn(
+    result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
         user_message="读取服务器文件",
@@ -319,7 +327,7 @@ def test_unknown_tool_is_returned_to_the_model_as_a_failed_result() -> None:
     assert "/etc/passwd" not in result.tool_results[0].error_message
 
 
-def test_invalid_arguments_do_not_execute_capability() -> None:
+async def test_invalid_arguments_do_not_execute_capability() -> None:
     capability = _Capability(
         "propose_objective_drafts",
         ToolRisk.DRAFT,
@@ -339,7 +347,7 @@ def test_invalid_arguments_do_not_execute_capability() -> None:
         capabilities=CapabilityRegistry((capability,)),
     )
 
-    result = runner.run_turn(
+    result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
         user_message="帮我整理一下",
@@ -349,7 +357,7 @@ def test_invalid_arguments_do_not_execute_capability() -> None:
     assert capability.executed_arguments == []
 
 
-def test_capability_exception_is_sanitized_before_returning_to_model() -> None:
+async def test_capability_exception_is_sanitized_before_returning_to_model() -> None:
     capability = _Capability(
         "get_collection_context",
         ToolRisk.READ,
@@ -369,7 +377,7 @@ def test_capability_exception_is_sanitized_before_returning_to_model() -> None:
         capabilities=CapabilityRegistry((capability,)),
     )
 
-    result = runner.run_turn(
+    result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
         user_message="读取 collection",
@@ -380,7 +388,7 @@ def test_capability_exception_is_sanitized_before_returning_to_model() -> None:
     assert "do-not-expose" not in result.tool_results[0].error_message
 
 
-def test_queued_capability_result_returns_to_model_as_a_successful_observation() -> None:
+async def test_queued_capability_result_returns_to_model_as_a_successful_observation() -> None:
     capability = _Capability(
         "start_objective_analysis",
         ToolRisk.READ,
@@ -400,7 +408,7 @@ def test_queued_capability_result_returns_to_model_as_a_successful_observation()
         capabilities=CapabilityRegistry((capability,)),
     )
 
-    result = runner.run_turn(
+    result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
         user_message="开始分析",
@@ -413,7 +421,7 @@ def test_queued_capability_result_returns_to_model_as_a_successful_observation()
     assert result.messages[-1].content.startswith("分析任务已启动")
 
 
-def test_step_limit_stops_repeated_tool_calls() -> None:
+async def test_step_limit_stops_repeated_tool_calls() -> None:
     capability = _Capability("get_collection_context", ToolRisk.READ)
     runner = ResearchAgentRunner(
         model=_Model(
@@ -436,7 +444,7 @@ def test_step_limit_stops_repeated_tool_calls() -> None:
         max_model_steps=2,
     )
 
-    result = runner.run_turn(
+    result = await runner.run_turn(
         context=_context(),
         previous_messages=(),
         user_message="不断读取",

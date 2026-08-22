@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import Future, ThreadPoolExecutor
+from asyncio import CancelledError, Task, create_task
 import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -14,12 +14,14 @@ from controllers.schemas.source.task import (
 
 router = APIRouter(tags=["tasks"])
 logger = logging.getLogger(__name__)
-_build_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="source-build")
+_active_build_tasks: set[Task[dict]] = set()
 
 
-def _log_unexpected_build_failure(future: Future) -> None:
+def _log_unexpected_build_failure(task: Task[dict]) -> None:
     try:
-        future.result()
+        task.result()
+    except CancelledError:
+        logger.info("Build task cancelled during backend shutdown")
     except Exception:  # noqa: BLE001
         logger.exception("Build task crashed after route scheduling")
 
@@ -36,15 +38,15 @@ async def create_build_task(
 ) -> TaskResponse:
     collection_service = request.app.state.collection_service
     try:
-        collection_service.get_collection(collection_id)
-        files = collection_service.list_files(collection_id)
+        await collection_service.get_collection(collection_id)
+        files = await collection_service.list_files(collection_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     if not files:
         raise HTTPException(status_code=400, detail="集合内没有可构建文件")
 
-    task = request.app.state.task_service.create_task(
+    task = await request.app.state.task_service.create_task(
         collection_id=collection_id,
         task_type="build",
         mode=payload.mode,
@@ -57,15 +59,18 @@ async def create_build_task(
         payload.mode,
         payload.verbose,
     )
-    future = _build_executor.submit(
-        request.app.state.build_pipeline_service.run_task_blocking,
-        task["task_id"],
-        collection_id,
-        verbose=payload.verbose,
-        additional_context=payload.additional_context,
-        request_id=request_id,
+    build_task = create_task(
+        request.app.state.build_pipeline_service.run_task(
+            task["task_id"],
+            collection_id,
+            verbose=payload.verbose,
+            additional_context=payload.additional_context,
+            request_id=request_id,
+        )
     )
-    future.add_done_callback(_log_unexpected_build_failure)
+    _active_build_tasks.add(build_task)
+    build_task.add_done_callback(_active_build_tasks.discard)
+    build_task.add_done_callback(_log_unexpected_build_failure)
     return TaskResponse(**task)
 
 
@@ -82,13 +87,13 @@ async def list_collection_tasks(
     offset: int = Query(default=0, ge=0, description="偏移量"),
 ) -> TaskListResponse:
     try:
-        request.app.state.collection_service.get_collection(collection_id)
+        await request.app.state.collection_service.get_collection(collection_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     items = [
         TaskResponse(**record)
-        for record in request.app.state.task_service.list_tasks(
+        for record in await request.app.state.task_service.list_tasks(
             collection_id=collection_id,
             status=status,
             limit=limit,
@@ -101,7 +106,7 @@ async def list_collection_tasks(
 @router.get("/tasks/{task_id}", response_model=TaskResponse, summary="查询任务状态")
 async def get_task(task_id: str, request: Request) -> TaskResponse:
     try:
-        record = request.app.state.task_service.get_task(task_id)
+        record = await request.app.state.task_service.get_task(task_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return TaskResponse(**record)
@@ -114,8 +119,10 @@ async def get_task(task_id: str, request: Request) -> TaskResponse:
 )
 async def get_task_artifacts(task_id: str, request: Request) -> ArtifactStatusResponse:
     try:
-        request.app.state.task_service.get_task(task_id)
-        artifacts = request.app.state.artifact_registry_service.get_for_task(task_id)
+        await request.app.state.task_service.get_task(task_id)
+        artifacts = await request.app.state.artifact_registry_service.get_for_task(
+            task_id
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

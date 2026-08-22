@@ -11,13 +11,13 @@ from domain.source import SourceDocument, SourceDocumentTree
 SourceRecord = dict[str, Any]
 
 
-def load_collection_inputs(
+async def load_collection_inputs(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
     *,
     build_id: str | None = None,
 ) -> tuple[tuple[SourceRecord, ...], tuple[SourceRecord, ...] | None]:
-    source_documents = _load_source_documents(
+    source_documents = await _load_source_documents(
         collection_id, source_artifact_repository, build_id=build_id
     )
     documents = _records(document.to_record() for document in source_documents)
@@ -29,13 +29,13 @@ def load_collection_inputs(
     return documents, text_units or None
 
 
-def load_blocks_artifact(
+async def load_blocks_artifact(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
     *,
     build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
-    source_documents = _load_source_documents(
+    source_documents = await _load_source_documents(
         collection_id, source_artifact_repository, build_id=build_id
     )
     return _records(
@@ -45,13 +45,13 @@ def load_blocks_artifact(
     )
 
 
-def load_table_rows_artifact(
+async def load_table_rows_artifact(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
     *,
     build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
-    source_documents = _load_source_documents(
+    source_documents = await _load_source_documents(
         collection_id, source_artifact_repository, build_id=build_id
     )
     return _records(
@@ -61,13 +61,13 @@ def load_table_rows_artifact(
     )
 
 
-def load_table_cells_artifact(
+async def load_table_cells_artifact(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
     *,
     build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
-    source_documents = _load_source_documents(
+    source_documents = await _load_source_documents(
         collection_id, source_artifact_repository, build_id=build_id
     )
     return _records(
@@ -77,23 +77,23 @@ def load_table_cells_artifact(
     )
 
 
-def load_figures_artifact(
+async def load_figures_artifact(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
 ) -> tuple[SourceRecord, ...]:
     return _records(
         figure.to_record()
-        for figure in source_artifact_repository.list_figures(collection_id)
+        for figure in await source_artifact_repository.list_figures(collection_id)
     )
 
 
-def load_tables_artifact(
+async def load_tables_artifact(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
     *,
     build_id: str | None = None,
 ) -> tuple[SourceRecord, ...]:
-    source_documents = _load_source_documents(
+    source_documents = await _load_source_documents(
         collection_id, source_artifact_repository, build_id=build_id
     )
     return _records(
@@ -103,7 +103,7 @@ def load_tables_artifact(
     )
 
 
-def load_document_tree(
+async def load_document_tree(
     collection_id: str,
     document_id: str,
     source_artifact_repository: SourceArtifactRepository,
@@ -111,30 +111,32 @@ def load_document_tree(
     build_id: str | None = None,
 ) -> SourceDocumentTree:
     if build_id is None:
-        return source_artifact_repository.read_document_tree(
+        return await source_artifact_repository.read_document_tree(
             collection_id,
             document_id,
         )
-    return source_artifact_repository.read_document_tree(
+    return await source_artifact_repository.read_document_tree(
         collection_id,
         document_id,
         build_id=build_id,
     )
 
 
-def _load_source_documents(
+async def _load_source_documents(
     collection_id: str,
     source_artifact_repository: SourceArtifactRepository,
     *,
     build_id: str | None = None,
 ) -> tuple[SourceDocument, ...]:
     documents = (
-        source_artifact_repository.read_collection_documents(
+        await source_artifact_repository.read_collection_documents(
             collection_id,
             build_id=build_id,
         )
         if build_id is not None
-        else source_artifact_repository.read_collection_documents(collection_id)
+        else await source_artifact_repository.read_collection_documents(
+            collection_id
+        )
     )
     if not documents:
         raise FileNotFoundError(f"source artifacts not ready: {collection_id}")

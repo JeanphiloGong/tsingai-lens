@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from collections import defaultdict
 import json
 import logging
@@ -219,7 +220,7 @@ def build_services(
     )
 
 
-def load_collection_inputs_for_benchmark(
+async def load_collection_inputs_for_benchmark(
     collection_id: str,
     *,
     build_id: str,
@@ -235,7 +236,7 @@ def load_collection_inputs_for_benchmark(
     )
     from application.core.document_profiles.service import DocumentProfilesNotReadyError
     output_dir = collection_service.get_paths(collection_id).output_dir
-    document_records, text_unit_records = load_collection_inputs(
+    document_records, text_unit_records = await load_collection_inputs(
         collection_id,
         source_artifact_repository,
         build_id=build_id,
@@ -245,21 +246,21 @@ def load_collection_inputs_for_benchmark(
         pd.DataFrame(text_unit_records) if text_unit_records is not None else None
     )
     blocks = pd.DataFrame(
-        load_blocks_artifact(
+        await load_blocks_artifact(
             collection_id,
             source_artifact_repository,
             build_id=build_id,
         )
     )
     table_rows = pd.DataFrame(
-        load_table_rows_artifact(
+        await load_table_rows_artifact(
             collection_id,
             source_artifact_repository,
             build_id=build_id,
         )
     )
     table_cells = pd.DataFrame(
-        load_table_cells_artifact(
+        await load_table_cells_artifact(
             collection_id,
             source_artifact_repository,
             build_id=build_id,
@@ -268,7 +269,7 @@ def load_collection_inputs_for_benchmark(
     try:
         profiles = pd.DataFrame(
             profile.to_record()
-            for profile in document_profile_service.read_document_profiles(
+            for profile in await document_profile_service.read_document_profiles(
                 collection_id,
                 build_id=build_id,
             )
@@ -474,7 +475,7 @@ def _extract_log_value(message: str, key: str) -> str | None:
     return value or None
 
 
-def main() -> int:
+async def main_async() -> int:
     args = parse_args()
     runtime = resolve_runtime(args)
     ensure_backend_root_on_path(runtime.backend_root)
@@ -507,7 +508,7 @@ def main() -> int:
         table_rows,
         table_cells,
         profiles,
-    ) = load_collection_inputs_for_benchmark(
+    ) = await load_collection_inputs_for_benchmark(
         args.collection_id,
         build_id=args.build_id,
         collection_service=collection_service,
@@ -558,7 +559,7 @@ def main() -> int:
 
     try:
         collection_started_at = perf_counter()
-        frames = benchmark_service.build_paper_facts(
+        frames = await benchmark_service.build_paper_facts(
             args.collection_id,
             build_id=args.build_id,
         )
@@ -627,9 +628,9 @@ def main() -> int:
 
     write_json_output(args.summary_output, summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
-    engine.dispose()
+    await engine.dispose()
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(asyncio.run(main_async()))

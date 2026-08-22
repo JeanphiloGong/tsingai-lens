@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
-from starlette.concurrency import run_in_threadpool
 
 from application.goal.experiment_plan_service import (
     ExperimentPlanNotFoundError,
@@ -30,13 +29,12 @@ async def create_experiment_plan(
     request: Request,
 ) -> ExperimentPlanResponse:
     try:
-        plan = await run_in_threadpool(
-            request.app.state.experiment_plan_service.create_plan,
+        plan = await request.app.state.experiment_plan_service.create_plan(
             collection_id=collection_id,
             objective_id=objective_id,
             title=payload.title,
             content=payload.content,
-            created_by=current_user_id(request),
+            created_by=await current_user_id(request),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -53,8 +51,7 @@ async def list_experiment_plans(
     objective_id: str,
     request: Request,
 ) -> ExperimentPlanListResponse:
-    plans = await run_in_threadpool(
-        request.app.state.experiment_plan_service.list_plans,
+    plans = await request.app.state.experiment_plan_service.list_plans(
         collection_id,
         objective_id,
     )
@@ -78,8 +75,7 @@ async def update_experiment_plan(
     request: Request,
 ) -> ExperimentPlanResponse:
     try:
-        plan = await run_in_threadpool(
-            request.app.state.experiment_plan_service.update_plan,
+        plan = await request.app.state.experiment_plan_service.update_plan(
             collection_id=collection_id,
             objective_id=objective_id,
             plan_id=plan_id,

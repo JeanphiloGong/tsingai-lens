@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.evaluation import (
     EvaluationFailure,
@@ -31,18 +31,18 @@ from infra.persistence.postgres.models.evaluation import (
 class PostgresEvaluationRepository:
     backend_name = "postgresql"
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self.session_factory = session_factory
 
-    def upsert_gold_set(
+    async def upsert_gold_set(
         self,
         gold_set: EvaluationGoldSet,
         gold_items: tuple[EvaluationGoldItem, ...],
     ) -> None:
         if any(item.gold_id != gold_set.gold_id for item in gold_items):
             raise ValueError("gold item does not belong to gold set")
-        with self.session_factory.begin() as session:
-            row = session.get(EvaluationGoldSetRecord, gold_set.gold_id)
+        async with self.session_factory.begin() as session:
+            row = await session.get(EvaluationGoldSetRecord, gold_set.gold_id)
             if row is not None and row.collection_id != gold_set.collection_id:
                 raise ValueError("gold set identity cannot be reassigned")
             if row is None:
@@ -64,8 +64,8 @@ class PostgresEvaluationRepository:
                 row.description = gold_set.description
                 row.metadata_json = _json_value(gold_set.metadata or {})
                 row.updated_at = _now()
-            session.flush()
-            session.execute(
+            await session.flush()
+            await session.execute(
                 delete(EvaluationGoldItemRecord).where(
                     EvaluationGoldItemRecord.gold_id == gold_set.gold_id
                 )
@@ -84,14 +84,14 @@ class PostgresEvaluationRepository:
                 for item in gold_items
             )
 
-    def read_gold_set(self, gold_id: str) -> EvaluationGoldSet | None:
-        with self.session_factory() as session:
-            row = session.get(EvaluationGoldSetRecord, gold_id)
+    async def read_gold_set(self, gold_id: str) -> EvaluationGoldSet | None:
+        async with self.session_factory() as session:
+            row = await session.get(EvaluationGoldSetRecord, gold_id)
             return _gold_set(row) if row is not None else None
 
-    def list_gold_items(self, gold_id: str) -> tuple[EvaluationGoldItem, ...]:
-        with self.session_factory() as session:
-            rows = session.scalars(
+    async def list_gold_items(self, gold_id: str) -> tuple[EvaluationGoldItem, ...]:
+        async with self.session_factory() as session:
+            rows = await session.scalars(
                 select(EvaluationGoldItemRecord)
                 .where(EvaluationGoldItemRecord.gold_id == gold_id)
                 .order_by(
@@ -103,12 +103,12 @@ class PostgresEvaluationRepository:
             )
             return tuple(_gold_item(row) for row in rows)
 
-    def upsert_prediction_snapshot(
+    async def upsert_prediction_snapshot(
         self,
         snapshot: EvaluationPredictionSnapshot,
     ) -> None:
-        with self.session_factory.begin() as session:
-            row = session.get(EvaluationPredictionSnapshotRecord, snapshot.snapshot_id)
+        async with self.session_factory.begin() as session:
+            row = await session.get(EvaluationPredictionSnapshotRecord, snapshot.snapshot_id)
             if row is not None and row.collection_id != snapshot.collection_id:
                 raise ValueError("prediction snapshot identity cannot be reassigned")
             if row is None:
@@ -127,8 +127,8 @@ class PostgresEvaluationRepository:
                 row.fact_source = snapshot.fact_source
                 row.system_context = _json_value(snapshot.system_context)
                 row.artifact_counts = _json_value(snapshot.artifact_counts)
-            session.flush()
-            session.execute(
+            await session.flush()
+            await session.execute(
                 delete(EvaluationPredictionItemRecord).where(
                     EvaluationPredictionItemRecord.snapshot_id == snapshot.snapshot_id
                 )
@@ -147,15 +147,15 @@ class PostgresEvaluationRepository:
                 for item in snapshot.items
             )
 
-    def read_prediction_snapshot(
+    async def read_prediction_snapshot(
         self,
         snapshot_id: str,
     ) -> EvaluationPredictionSnapshot | None:
-        with self.session_factory() as session:
-            row = session.get(EvaluationPredictionSnapshotRecord, snapshot_id)
+        async with self.session_factory() as session:
+            row = await session.get(EvaluationPredictionSnapshotRecord, snapshot_id)
             if row is None:
                 return None
-            items = session.scalars(
+            items = await session.scalars(
                 select(EvaluationPredictionItemRecord)
                 .where(EvaluationPredictionItemRecord.snapshot_id == snapshot_id)
                 .order_by(
@@ -177,7 +177,7 @@ class PostgresEvaluationRepository:
                 }
             )
 
-    def upsert_evaluation_run(self, run: EvaluationRun) -> None:
+    async def upsert_evaluation_run(self, run: EvaluationRun) -> None:
         if any(
             score.evaluation_run_id != run.evaluation_run_id for score in run.scores
         ):
@@ -187,9 +187,9 @@ class PostgresEvaluationRepository:
             for failure in run.failures
         ):
             raise ValueError("evaluation failure does not belong to run")
-        with self.session_factory.begin() as session:
-            gold = session.get(EvaluationGoldSetRecord, run.gold_id)
-            snapshot = session.get(
+        async with self.session_factory.begin() as session:
+            gold = await session.get(EvaluationGoldSetRecord, run.gold_id)
+            snapshot = await session.get(
                 EvaluationPredictionSnapshotRecord, run.prediction_snapshot_id
             )
             if gold is None or snapshot is None:
@@ -199,7 +199,7 @@ class PostgresEvaluationRepository:
                 or snapshot.collection_id != run.collection_id
             ):
                 raise ValueError("evaluation parents must share collection")
-            row = session.get(EvaluationRunRecord, run.evaluation_run_id)
+            row = await session.get(EvaluationRunRecord, run.evaluation_run_id)
             if row is not None and row.collection_id != run.collection_id:
                 raise ValueError("evaluation run identity cannot be reassigned")
             if row is None:
@@ -224,13 +224,13 @@ class PostgresEvaluationRepository:
                 row.metric_profile = run.metric_profile
                 row.status = run.status
                 row.summary = _json_value(run.summary)
-            session.flush()
-            session.execute(
+            await session.flush()
+            await session.execute(
                 delete(EvaluationScoreRecord).where(
                     EvaluationScoreRecord.evaluation_run_id == run.evaluation_run_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(EvaluationFailureRecord).where(
                     EvaluationFailureRecord.evaluation_run_id == run.evaluation_run_id
                 )
@@ -238,14 +238,14 @@ class PostgresEvaluationRepository:
             session.add_all(_score_record(score) for score in run.scores)
             session.add_all(_failure_record(failure) for failure in run.failures)
 
-    def read_evaluation_run(self, evaluation_run_id: str) -> EvaluationRun | None:
-        with self.session_factory() as session:
-            row = session.get(EvaluationRunRecord, evaluation_run_id)
-            return _evaluation_run(session, row) if row is not None else None
+    async def read_evaluation_run(self, evaluation_run_id: str) -> EvaluationRun | None:
+        async with self.session_factory() as session:
+            row = await session.get(EvaluationRunRecord, evaluation_run_id)
+            return await _evaluation_run(session, row) if row is not None else None
 
-    def list_evaluation_runs(self, collection_id: str) -> tuple[EvaluationRun, ...]:
-        with self.session_factory() as session:
-            rows = session.scalars(
+    async def list_evaluation_runs(self, collection_id: str) -> tuple[EvaluationRun, ...]:
+        async with self.session_factory() as session:
+            rows = await session.scalars(
                 select(EvaluationRunRecord)
                 .where(EvaluationRunRecord.collection_id == collection_id)
                 .order_by(
@@ -253,7 +253,9 @@ class PostgresEvaluationRepository:
                     EvaluationRunRecord.evaluation_run_id.desc(),
                 )
             )
-            return tuple(_evaluation_run(session, row) for row in rows)
+            return tuple(
+                [await _evaluation_run(session, row) for row in rows]
+            )
 
 
 def _gold_set(row: EvaluationGoldSetRecord) -> EvaluationGoldSet:
@@ -301,8 +303,8 @@ def _prediction_item(
     )
 
 
-def _evaluation_run(session: Session, row: EvaluationRunRecord) -> EvaluationRun:
-    scores = session.scalars(
+async def _evaluation_run(session: AsyncSession, row: EvaluationRunRecord) -> EvaluationRun:
+    scores = await session.scalars(
         select(EvaluationScoreRecord)
         .where(EvaluationScoreRecord.evaluation_run_id == row.evaluation_run_id)
         .order_by(
@@ -311,7 +313,7 @@ def _evaluation_run(session: Session, row: EvaluationRunRecord) -> EvaluationRun
             EvaluationScoreRecord.score_id,
         )
     )
-    failures = session.scalars(
+    failures = await session.scalars(
         select(EvaluationFailureRecord)
         .where(EvaluationFailureRecord.evaluation_run_id == row.evaluation_run_id)
         .order_by(

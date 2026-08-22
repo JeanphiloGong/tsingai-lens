@@ -1,14 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
-import os
 
-from alembic import command
-from alembic.config import Config
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.engine import make_url
 
 from domain.core import (
     Finding,
@@ -21,31 +15,18 @@ from domain.core import (
     ResearchObjective,
 )
 from domain.pipeline import ExecutionStats, ModelUsage, TokenUsage
-from domain.source import CollectionRecord
-from infra.persistence.database import build_session_factory
-from infra.persistence.postgres.auth_repository import PostgresAuthRepository
-from infra.persistence.postgres.build_repository import PostgresBuildRepository
-from infra.persistence.postgres.collection_repository import (
-    PostgresCollectionRepository,
-)
 from infra.persistence.postgres.objective_repository import PostgresObjectiveRepository
-from infra.persistence.postgres.source_artifact_repository import (
-    PostgresSourceArtifactRepository,
-)
-from tests.integration.persistence.database_cleanup import reset_postgres_schema
 from tests.integration.persistence.test_postgres_source_artifacts import (
-    BACKEND_ROOT,
-    NOW,
     REAL_SOURCE_DOCUMENT_ID,
     REAL_SOURCE_ROW_ID,
     _artifacts,
-    _collection_import,
     _finish,
     _real_shape_artifacts,
     _task,
 )
 
 pytest_plugins = ("tests.integration.persistence.test_postgres_source_artifacts",)
+pytestmark = pytest.mark.anyio
 
 
 def _objective(
@@ -215,15 +196,19 @@ def _analysis_artifacts():
     )
 
 
-def _prepare_studies(source_repository, builds, build_id: str = "build_objectives"):
+async def _prepare_studies(
+    source_repository,
+    builds,
+    build_id: str = "build_objectives",
+):
     task = _task(f"task_{build_id}")
-    builds.add_task(task, build_id=build_id)
-    source_repository.replace_collection_documents(
+    await builds.add_task(task, build_id=build_id)
+    await source_repository.replace_collection_documents(
         "col_source", build_id, _analysis_artifacts()
     )
     repository = PostgresObjectiveRepository(source_repository.session_factory)
-    repository.replace("col_source", build_id, _study_facts())
-    _finish(builds, task, success=True)
+    await repository.replace("col_source", build_id, _study_facts())
+    await _finish(builds, task, success=True)
     return repository
 
 
@@ -438,16 +423,16 @@ def _analysis_evidence(version: int) -> tuple[ObjectiveEvidence, ...]:
     )
 
 
-def _queue_and_claim(repository: PostgresObjectiveRepository):
-    repository.confirm_objective("col_source", "objective-1")
-    objective, queued = repository.queue_analysis(
+async def _queue_and_claim(repository: PostgresObjectiveRepository):
+    await repository.confirm_objective("col_source", "objective-1")
+    objective, queued = await repository.queue_analysis(
         "col_source",
         "objective-1",
         pipeline_version="test.v1",
         model_name="test-model",
         prompt_versions={"finding": "v1"},
     )
-    claimed = repository.claim_analysis(
+    claimed = await repository.claim_analysis(
         "col_source", "objective-1", queued.analysis_version
     )
     assert claimed is not None
@@ -455,11 +440,13 @@ def _queue_and_claim(repository: PostgresObjectiveRepository):
     return objective, claimed
 
 
-def test_study_build_round_trips_without_analysis_artifacts(source_repositories) -> None:
+async def test_study_build_round_trips_without_analysis_artifacts(
+    source_repositories,
+) -> None:
     source_repository, builds = source_repositories
-    repository = _prepare_studies(source_repository, builds)
+    repository = await _prepare_studies(source_repository, builds)
 
-    facts = repository.read("col_source")
+    facts = await repository.read("col_source")
     assert facts.research_objectives_ready is True
     assert facts.paper_skims == _study_facts().paper_skims
     assert facts.study_dispositions == _study_facts().study_dispositions
@@ -478,25 +465,29 @@ def test_study_build_round_trips_without_analysis_artifacts(source_repositories)
         }
         for item in _study_facts().research_objectives
     )
-    assert repository.list_objectives("col_source")[0].objective_id == "objective-1"
-    objective = repository.read_objective("col_source", "objective-1")
+    assert (await repository.list_objectives("col_source"))[0].objective_id == (
+        "objective-1"
+    )
+    objective = await repository.read_objective("col_source", "objective-1")
     assert objective is not None
     assert objective.source_relationship_ids == ("relationship-1",)
     assert objective.rank == 1
-    assert repository.read_published_analysis("col_source", "objective-1") is None
+    assert await repository.read_published_analysis(
+        "col_source", "objective-1"
+    ) is None
 
 
-def test_study_build_round_trips_table_row_source_locator(
+async def test_study_build_round_trips_table_row_source_locator(
     source_repositories,
 ) -> None:
     source_repository, builds = source_repositories
     task = _task("task_table_row_objective_source")
     build_id = "build_table_row_objective_source"
-    builds.add_task(task, build_id=build_id)
+    await builds.add_task(task, build_id=build_id)
     source_artifacts = _artifacts()
     source_document = source_artifacts[0]
     long_row_id = f"row-{'x' * 300}"
-    source_repository.replace_collection_documents(
+    await source_repository.replace_collection_documents(
         "col_source",
         build_id,
         tuple(
@@ -536,11 +527,11 @@ def test_study_build_round_trips_table_row_source_locator(
         ),
     )
 
-    repository.replace("col_source", build_id, row_facts)
+    await repository.replace("col_source", build_id, row_facts)
 
-    persisted_skim = repository.read(
+    persisted_skim = (await repository.read(
         "col_source", build_id=build_id
-    ).paper_skims[0]
+    )).paper_skims[0]
     persisted_relationship = persisted_skim.studies[0].relationships[0]
     assert [
         source_ref.to_record()
@@ -549,154 +540,113 @@ def test_study_build_round_trips_table_row_source_locator(
     assert persisted_skim.source_unit_coverage[0].source_ref == long_row_id
 
 
-def test_postgresql_round_trips_long_source_unit_coverage_locator() -> None:
-    database_url = os.getenv("LENS_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("LENS_TEST_DATABASE_URL is not configured")
-    url = make_url(database_url)
-    if url.drivername != "postgresql+psycopg" or not str(url.database).endswith(
-        "_test"
-    ):
-        pytest.fail(
-            "LENS_TEST_DATABASE_URL must use postgresql+psycopg and a *_test database"
-        )
-
-    assert len(REAL_SOURCE_ROW_ID) > 160
-    engine = create_engine(url)
-    config = Config(str(BACKEND_ROOT / "alembic.ini"))
-    try:
-        reset_postgres_schema(engine)
-        with engine.begin() as connection:
-            config.attributes["connection"] = connection
-            command.upgrade(config, "head")
-        sessions = build_session_factory(engine)
-        PostgresAuthRepository(sessions).add_user(
-            {
-                "user_id": "user_source",
-                "email": "source@example.com",
-                "display_name": None,
-                "password_hash": "synthetic-password-hash",
-                "created_at": datetime(2026, 7, 19, tzinfo=timezone.utc).isoformat(),
-            }
-        )
-        collections = PostgresCollectionRepository(sessions)
-        collections.add_collection(
-            CollectionRecord(
-                collection_id="col_source",
-                owner_user_id="user_source",
-                name="Source collection",
-                description=None,
-                status="idle",
-                paper_count=0,
-                created_at=NOW,
-                updated_at=NOW,
-            )
-        )
-        collections.add_collection_import(
-            _collection_import("stored-paper.pdf"), updated_at=NOW
-        )
-        source_repository = PostgresSourceArtifactRepository(sessions)
-        builds = PostgresBuildRepository(sessions)
-        build_id = "build_objectives_postgresql"
-        builds.add_task(_task("task_objectives_postgresql"), build_id=build_id)
-        source_repository.replace_collection_documents(
-            "col_source",
-            build_id,
-            _real_shape_artifacts(),
-        )
-        relationship_id = "relationship-long-row"
-        skim = PaperSkim.from_mapping(
-            {
-                "document_id": REAL_SOURCE_DOCUMENT_ID,
-                "doc_role": "primary_experiment",
-                "studies": [
-                    {
-                        "study_id": "study-long-row",
-                        "design_type": "experimental",
-                        "claim_scope": "current_work",
-                        "relationships": [
-                            {
-                                "relationship_id": relationship_id,
-                                "varied_factors": ["temperature"],
-                                "outcome": "strength",
-                                "source_refs": [
-                                    {
-                                        "source_kind": "table_row",
-                                        "source_ref": REAL_SOURCE_ROW_ID,
-                                    }
-                                ],
-                                "confidence": 0.9,
-                            }
-                        ],
-                        "confidence": 0.9,
-                    }
-                ],
-                "source_unit_coverage": [
-                    {
-                        "source_unit_id": "results-1-source-1",
-                        "window_id": "results-1",
-                        "source_kind": "table_row",
-                        "source_ref": REAL_SOURCE_ROW_ID,
-                        "status": "relationship_emitted",
-                    }
-                ],
-                "evidence_density": "high",
-                "confidence": 0.9,
-            }
-        )
-        objective = ResearchObjective.from_mapping(
-            {
-                "collection_id": "col_source",
-                "objective_id": "objective-long-row",
-                "question": "How does temperature affect strength?",
-                "variables": ["temperature"],
-                "outcomes": ["strength"],
-                "seed_document_ids": [REAL_SOURCE_DOCUMENT_ID],
-                "source_relationship_ids": [relationship_id],
-                "rank": 1,
-                "confidence": 0.9,
-            }
-        )
-        facts = ObjectiveFactSet(
-            research_objectives_ready=True,
-            paper_skims=(skim,),
-            research_objectives=(objective,),
-            study_dispositions=(
-                PaperStudyDisposition.from_mapping(
-                    {
-                        "document_id": REAL_SOURCE_DOCUMENT_ID,
-                        "study_id": "study-long-row",
-                        "relationship_id": relationship_id,
-                        "status": "promoted",
-                        "objective_id": objective.objective_id,
-                    }
-                ),
-            ),
-        )
-        repository = PostgresObjectiveRepository(sessions)
-
-        repository.replace("col_source", build_id, facts)
-
-        persisted = repository.read("col_source", build_id=build_id)
-        assert persisted.paper_skims[0].source_unit_coverage[0].source_ref == (
-            REAL_SOURCE_ROW_ID
-        )
-        assert (
-            persisted.paper_skims[0].studies[0].relationships[0].source_refs[0].source_ref
-            == REAL_SOURCE_ROW_ID
-        )
-    finally:
-        reset_postgres_schema(engine)
-        engine.dispose()
-
-
-def test_confirmed_objective_rebuild_scopes_lineage_and_analysis_to_each_build(
+async def test_postgresql_round_trips_long_source_unit_coverage_locator(
     source_repositories,
 ) -> None:
     source_repository, builds = source_repositories
-    repository = _prepare_studies(source_repository, builds, "build_initial_scope")
-    _objective_row, analysis = _queue_and_claim(repository)
-    repository.publish_analysis(
+    sessions = source_repository.session_factory
+    assert len(REAL_SOURCE_ROW_ID) > 160
+    build_id = "build_objectives_postgresql"
+    await builds.add_task(
+        _task("task_objectives_postgresql"), build_id=build_id
+    )
+    await source_repository.replace_collection_documents(
+        "col_source",
+        build_id,
+        _real_shape_artifacts(),
+    )
+    relationship_id = "relationship-long-row"
+    skim = PaperSkim.from_mapping(
+        {
+            "document_id": REAL_SOURCE_DOCUMENT_ID,
+            "doc_role": "primary_experiment",
+            "studies": [
+                {
+                    "study_id": "study-long-row",
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "relationships": [
+                        {
+                            "relationship_id": relationship_id,
+                            "varied_factors": ["temperature"],
+                            "outcome": "strength",
+                            "source_refs": [
+                                {
+                                    "source_kind": "table_row",
+                                    "source_ref": REAL_SOURCE_ROW_ID,
+                                }
+                            ],
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "confidence": 0.9,
+                }
+            ],
+            "source_unit_coverage": [
+                {
+                    "source_unit_id": "results-1-source-1",
+                    "window_id": "results-1",
+                    "source_kind": "table_row",
+                    "source_ref": REAL_SOURCE_ROW_ID,
+                    "status": "relationship_emitted",
+                }
+            ],
+            "evidence_density": "high",
+            "confidence": 0.9,
+        }
+    )
+    objective = ResearchObjective.from_mapping(
+        {
+            "collection_id": "col_source",
+            "objective_id": "objective-long-row",
+            "question": "How does temperature affect strength?",
+            "variables": ["temperature"],
+            "outcomes": ["strength"],
+            "seed_document_ids": [REAL_SOURCE_DOCUMENT_ID],
+            "source_relationship_ids": [relationship_id],
+            "rank": 1,
+            "confidence": 0.9,
+        }
+    )
+    facts = ObjectiveFactSet(
+        research_objectives_ready=True,
+        paper_skims=(skim,),
+        research_objectives=(objective,),
+        study_dispositions=(
+            PaperStudyDisposition.from_mapping(
+                {
+                    "document_id": REAL_SOURCE_DOCUMENT_ID,
+                    "study_id": "study-long-row",
+                    "relationship_id": relationship_id,
+                    "status": "promoted",
+                    "objective_id": objective.objective_id,
+                }
+            ),
+        ),
+    )
+    repository = PostgresObjectiveRepository(sessions)
+
+    await repository.replace("col_source", build_id, facts)
+
+    persisted = await repository.read("col_source", build_id=build_id)
+    assert persisted.paper_skims[0].source_unit_coverage[0].source_ref == (
+        REAL_SOURCE_ROW_ID
+    )
+    assert (
+        persisted.paper_skims[0].studies[0].relationships[0].source_refs[0].source_ref
+        == REAL_SOURCE_ROW_ID
+    )
+
+
+async def test_confirmed_objective_rebuild_scopes_lineage_and_analysis_to_each_build(
+    source_repositories,
+) -> None:
+    source_repository, builds = source_repositories
+    repository = await _prepare_studies(
+        source_repository, builds, "build_initial_scope"
+    )
+    _objective_row, analysis = await _queue_and_claim(repository)
+    await repository.publish_analysis(
         "col_source",
         "objective-1",
         analysis.analysis_version,
@@ -764,15 +714,15 @@ def test_confirmed_objective_rebuild_scopes_lineage_and_analysis_to_each_build(
     )
     expanded_task = _task("task_expanded_objective_scope")
     expanded_build_id = "build_expanded_objective_scope"
-    builds.add_task(expanded_task, build_id=expanded_build_id)
-    source_repository.replace_collection_documents(
+    await builds.add_task(expanded_task, build_id=expanded_build_id)
+    await source_repository.replace_collection_documents(
         "col_source", expanded_build_id, _analysis_artifacts()
     )
 
-    repository.replace("col_source", expanded_build_id, expanded_facts)
-    _finish(builds, expanded_task, success=True)
+    await repository.replace("col_source", expanded_build_id, expanded_facts)
+    await _finish(builds, expanded_task, success=True)
 
-    expanded = repository.read("col_source").research_objectives[0]
+    expanded = (await repository.read("col_source")).research_objectives[0]
     assert expanded.seed_document_ids == (
         "srcdoc_runtime",
         "srcdoc_supporting",
@@ -785,7 +735,9 @@ def test_confirmed_objective_rebuild_scopes_lineage_and_analysis_to_each_build(
     assert expanded.confirmation_status == "confirmed"
     assert expanded.active_analysis_version is None
     assert expanded.published_analysis_version is None
-    assert repository.read_published_analysis("col_source", "objective-1") is None
+    assert await repository.read_published_analysis(
+        "col_source", "objective-1"
+    ) is None
 
     contracted_objective = replace(
         initial_facts.research_objectives[0],
@@ -801,15 +753,15 @@ def test_confirmed_objective_rebuild_scopes_lineage_and_analysis_to_each_build(
     )
     contracted_task = _task("task_contracted_objective_scope")
     contracted_build_id = "build_contracted_objective_scope"
-    builds.add_task(contracted_task, build_id=contracted_build_id)
-    source_repository.replace_collection_documents(
+    await builds.add_task(contracted_task, build_id=contracted_build_id)
+    await source_repository.replace_collection_documents(
         "col_source", contracted_build_id, _analysis_artifacts()
     )
 
-    repository.replace("col_source", contracted_build_id, contracted_facts)
-    _finish(builds, contracted_task, success=True)
+    await repository.replace("col_source", contracted_build_id, contracted_facts)
+    await _finish(builds, contracted_task, success=True)
 
-    active_facts = repository.read("col_source")
+    active_facts = await repository.read("col_source")
     contracted = active_facts.research_objectives[0]
     assert contracted.seed_document_ids == ("srcdoc_supporting",)
     assert contracted.excluded_document_ids == ("srcdoc_contradicting",)
@@ -818,33 +770,35 @@ def test_confirmed_objective_rebuild_scopes_lineage_and_analysis_to_each_build(
     assert contracted.active_analysis_version is None
     assert contracted.published_analysis_version is None
     assert active_facts.study_dispositions == (supporting_disposition,)
-    initial = repository.read(
+    initial = (await repository.read(
         "col_source", build_id="build_initial_scope"
-    ).research_objectives[0]
+    )).research_objectives[0]
     assert initial.seed_document_ids == ("srcdoc_runtime",)
     assert initial.excluded_document_ids == ()
     assert initial.source_relationship_ids == ("relationship-1",)
     assert initial.active_analysis_version == analysis.analysis_version
     assert initial.published_analysis_version == analysis.analysis_version
-    expanded_history = repository.read(
+    expanded_history = (await repository.read(
         "col_source", build_id="build_expanded_objective_scope"
-    ).research_objectives[0]
+    )).research_objectives[0]
     assert expanded_history.excluded_document_ids == ("srcdoc_excluded",)
     assert expanded_history.active_analysis_version is None
     assert expanded_history.published_analysis_version is None
-    persisted_analysis = repository.read_analysis(
+    persisted_analysis = await repository.read_analysis(
         "col_source", "objective-1", analysis.analysis_version
     )
     assert persisted_analysis.source_build_id == "build_initial_scope"
     assert persisted_analysis.status == "succeeded"
 
 
-def test_rebuild_rejects_reused_objective_id_for_another_scientific_definition(
+async def test_rebuild_rejects_reused_objective_id_for_another_scientific_definition(
     source_repositories,
 ) -> None:
     source_repository, builds = source_repositories
-    repository = _prepare_studies(source_repository, builds, "build_confirmed_identity")
-    repository.confirm_objective("col_source", "objective-1")
+    repository = await _prepare_studies(
+        source_repository, builds, "build_confirmed_identity"
+    )
+    await repository.confirm_objective("col_source", "objective-1")
 
     initial_facts = _study_facts()
     skim = initial_facts.paper_skims[0]
@@ -874,33 +828,35 @@ def test_rebuild_rejects_reused_objective_id_for_another_scientific_definition(
     )
     task = _task("task_conflicting_objective_identity")
     build_id = "build_conflicting_objective_identity"
-    builds.add_task(task, build_id=build_id)
-    source_repository.replace_collection_documents(
+    await builds.add_task(task, build_id=build_id)
+    await source_repository.replace_collection_documents(
         "col_source", build_id, _analysis_artifacts()
     )
 
     with pytest.raises(ValueError, match="research objective identity collision"):
-        repository.replace("col_source", build_id, changed_facts)
+        await repository.replace("col_source", build_id, changed_facts)
 
-    confirmed = repository.read_objective("col_source", "objective-1")
+    confirmed = await repository.read_objective("col_source", "objective-1")
     assert confirmed is not None
     assert confirmed.question == "How does temperature affect strength?"
     assert confirmed.variables == ("temperature",)
     assert confirmed.outcomes == ("strength",)
     assert confirmed.confirmation_status == "confirmed"
-    assert repository.read("col_source", build_id=build_id) == ObjectiveFactSet()
+    assert await repository.read(
+        "col_source", build_id=build_id
+    ) == ObjectiveFactSet()
 
 
 @pytest.mark.parametrize("source_ref", ("missing-block", "block-support-2"))
-def test_study_build_rejects_missing_or_cross_document_source_refs(
+async def test_study_build_rejects_missing_or_cross_document_source_refs(
     source_repositories,
     source_ref: str,
 ) -> None:
     source_repository, builds = source_repositories
     task = _task("task_invalid_objective_source")
     build_id = "build_invalid_objective_source"
-    builds.add_task(task, build_id=build_id)
-    source_repository.replace_collection_documents(
+    await builds.add_task(task, build_id=build_id)
+    await source_repository.replace_collection_documents(
         "col_source", build_id, _analysis_artifacts()
     )
     repository = PostgresObjectiveRepository(source_repository.session_factory)
@@ -919,19 +875,21 @@ def test_study_build_rejects_missing_or_cross_document_source_refs(
     )
 
     with pytest.raises(FileNotFoundError, match="paper study source not found"):
-        repository.replace("col_source", build_id, invalid_facts)
+        await repository.replace("col_source", build_id, invalid_facts)
 
-    assert repository.read("col_source", build_id=build_id) == ObjectiveFactSet()
+    assert await repository.read(
+        "col_source", build_id=build_id
+    ) == ObjectiveFactSet()
 
 
-def test_study_build_rejects_invalid_source_unit_coverage_ref(
+async def test_study_build_rejects_invalid_source_unit_coverage_ref(
     source_repositories,
 ) -> None:
     source_repository, builds = source_repositories
     task = _task("task_invalid_objective_coverage_source")
     build_id = "build_invalid_objective_coverage_source"
-    builds.add_task(task, build_id=build_id)
-    source_repository.replace_collection_documents(
+    await builds.add_task(task, build_id=build_id)
+    await source_repository.replace_collection_documents(
         "col_source", build_id, _analysis_artifacts()
     )
     repository = PostgresObjectiveRepository(source_repository.session_factory)
@@ -943,7 +901,7 @@ def test_study_build_rejects_invalid_source_unit_coverage_ref(
     )
 
     with pytest.raises(FileNotFoundError, match="paper study source not found"):
-        repository.replace(
+        await repository.replace(
             "col_source",
             build_id,
             replace(
@@ -960,19 +918,23 @@ def test_study_build_rejects_invalid_source_unit_coverage_ref(
             ),
         )
 
-    assert repository.read("col_source", build_id=build_id) == ObjectiveFactSet()
+    assert await repository.read(
+        "col_source", build_id=build_id
+    ) == ObjectiveFactSet()
 
 
-def test_list_objectives_uses_only_the_active_ready_build_and_persisted_rank(
+async def test_list_objectives_uses_only_the_active_ready_build_and_persisted_rank(
     source_repositories,
 ) -> None:
     source_repository, builds = source_repositories
-    repository = _prepare_studies(source_repository, builds, "build_stale_objectives")
+    repository = await _prepare_studies(
+        source_repository, builds, "build_stale_objectives"
+    )
 
     task = _task("task_ranked_objectives")
     build_id = "build_ranked_objectives"
-    builds.add_task(task, build_id=build_id)
-    source_repository.replace_collection_documents(
+    await builds.add_task(task, build_id=build_id)
+    await source_repository.replace_collection_documents(
         "col_source", build_id, _analysis_artifacts()
     )
     skim = PaperSkim.from_mapping(
@@ -1060,7 +1022,7 @@ def test_list_objectives_uses_only_the_active_ready_build_and_persisted_rank(
             ("study-a", "relationship-a", "objective-a"),
         )
     )
-    repository.replace(
+    await repository.replace(
         "col_source",
         build_id,
         ObjectiveFactSet(
@@ -1070,28 +1032,28 @@ def test_list_objectives_uses_only_the_active_ready_build_and_persisted_rank(
             study_dispositions=dispositions,
         ),
     )
-    _finish(builds, task, success=True)
+    await _finish(builds, task, success=True)
 
-    listed = repository.list_objectives("col_source")
+    listed = await repository.list_objectives("col_source")
     assert [item.objective_id for item in listed] == ["objective-z", "objective-a"]
     assert [item.rank for item in listed] == [1, 2]
     assert [item.source_relationship_ids for item in listed] == [
         ("relationship-z",),
         ("relationship-a",),
     ]
-    active = repository.read_objective("col_source", "objective-z")
+    active = await repository.read_objective("col_source", "objective-z")
     assert active is not None
     assert active.source_relationship_ids == ("relationship-z",)
     assert active.rank == 1
-    assert repository.read_objective("col_source", "objective-1") is None
+    assert await repository.read_objective("col_source", "objective-1") is None
 
     pending_task = _task("task_pending_objectives")
     pending_build_id = "build_pending_objectives"
-    builds.add_task(pending_task, build_id=pending_build_id)
-    source_repository.replace_collection_documents(
+    await builds.add_task(pending_task, build_id=pending_build_id)
+    await source_repository.replace_collection_documents(
         "col_source", pending_build_id, _analysis_artifacts()
     )
-    repository.replace(
+    await repository.replace(
         "col_source",
         pending_build_id,
         ObjectiveFactSet(
@@ -1110,17 +1072,17 @@ def test_list_objectives_uses_only_the_active_ready_build_and_persisted_rank(
             ),
         ),
     )
-    _finish(builds, pending_task, success=True)
+    await _finish(builds, pending_task, success=True)
 
-    assert repository.list_objectives("col_source") == ()
-    assert repository.read_objective("col_source", "objective-z") is None
+    assert await repository.list_objectives("col_source") == ()
+    assert await repository.read_objective("col_source", "objective-z") is None
 
 
-def test_authored_candidate_is_idempotent_and_survives_collection_rebuild(
+async def test_authored_candidate_is_idempotent_and_survives_collection_rebuild(
     source_repositories,
 ) -> None:
     source_repository, builds = source_repositories
-    repository = _prepare_studies(
+    repository = await _prepare_studies(
         source_repository,
         builds,
         "build_authored_source",
@@ -1144,12 +1106,12 @@ def test_authored_candidate_is_idempotent_and_survives_collection_rebuild(
         }
     )
 
-    created = repository.create_authored_candidate(
+    created = await repository.create_authored_candidate(
         candidate,
         created_by_user_id="user_source",
         created_by_tool_call_id="call-authored-1",
     )
-    retried = repository.create_authored_candidate(
+    retried = await repository.create_authored_candidate(
         candidate,
         created_by_user_id="user_source",
         created_by_tool_call_id="call-authored-1",
@@ -1164,10 +1126,12 @@ def test_authored_candidate_is_idempotent_and_survives_collection_rebuild(
     assert created.source_relationship_ids == ()
     assert created.rank == 2
 
-    _prepare_studies(source_repository, builds, "build_after_authored")
+    await _prepare_studies(source_repository, builds, "build_after_authored")
 
-    listed = repository.list_objectives("col_source")
-    restored = repository.read_objective("col_source", created.objective_id)
+    listed = await repository.list_objectives("col_source")
+    restored = await repository.read_objective(
+        "col_source", created.objective_id
+    )
     assert [item.objective_id for item in listed] == [
         "objective-1",
         created.objective_id,
@@ -1176,8 +1140,10 @@ def test_authored_candidate_is_idempotent_and_survives_collection_rebuild(
     assert restored.source_build_id == "build_authored_source"
     assert restored.rank == 2
 
-    confirmed = repository.confirm_objective("col_source", created.objective_id)
-    queued_objective, analysis = repository.queue_analysis(
+    confirmed = await repository.confirm_objective(
+        "col_source", created.objective_id
+    )
+    queued_objective, analysis = await repository.queue_analysis(
         "col_source",
         created.objective_id,
         pipeline_version="test.v1",
@@ -1189,11 +1155,13 @@ def test_authored_candidate_is_idempotent_and_survives_collection_rebuild(
     assert analysis.source_build_id == "build_authored_source"
 
 
-def test_authored_candidate_rejects_reusing_tool_call_for_other_arguments(
+async def test_authored_candidate_rejects_reusing_tool_call_for_other_arguments(
     source_repositories,
 ) -> None:
     source_repository, builds = source_repositories
-    repository = _prepare_studies(source_repository, builds, "build_authored_collision")
+    repository = await _prepare_studies(
+        source_repository, builds, "build_authored_collision"
+    )
     first = ResearchObjective.from_mapping(
         {
             "collection_id": "col_source",
@@ -1220,31 +1188,35 @@ def test_authored_candidate_rejects_reusing_tool_call_for_other_arguments(
             "created_by_tool_call_id": "call-authored-collision",
         }
     )
-    repository.create_authored_candidate(
+    await repository.create_authored_candidate(
         first,
         created_by_user_id="user_source",
         created_by_tool_call_id="call-authored-collision",
     )
 
     with pytest.raises(ValueError, match="different objective"):
-        repository.create_authored_candidate(
+        await repository.create_authored_candidate(
             second,
             created_by_user_id="user_source",
             created_by_tool_call_id="call-authored-collision",
         )
 
 
-def test_analysis_version_claim_progress_and_retry_are_explicit(source_repositories) -> None:
+async def test_analysis_version_claim_progress_and_retry_are_explicit(
+    source_repositories,
+) -> None:
     source_repository, builds = source_repositories
-    repository = _prepare_studies(source_repository, builds)
-    objective, claimed = _queue_and_claim(repository)
+    repository = await _prepare_studies(source_repository, builds)
+    objective, claimed = await _queue_and_claim(repository)
 
     assert objective.active_analysis_version == 1
     assert objective.source_relationship_ids == ("relationship-1",)
     assert objective.rank == 1
     assert claimed.status == "running"
-    assert repository.claim_analysis("col_source", "objective-1", 1) is None
-    progressed = repository.update_analysis_progress(
+    assert await repository.claim_analysis(
+        "col_source", "objective-1", 1
+    ) is None
+    progressed = await repository.update_analysis_progress(
         "col_source",
         "objective-1",
         1,
@@ -1256,7 +1228,7 @@ def test_analysis_version_claim_progress_and_retry_are_explicit(source_repositor
     )
     assert progressed.phase == "evidence"
 
-    still_running = repository.fail_analysis(
+    still_running = await repository.fail_analysis(
         "col_source",
         "objective-1",
         1,
@@ -1266,7 +1238,7 @@ def test_analysis_version_claim_progress_and_retry_are_explicit(source_repositor
     )
     assert still_running.status == "running"
 
-    failed = repository.fail_analysis(
+    failed = await repository.fail_analysis(
         "col_source",
         "objective-1",
         1,
@@ -1274,7 +1246,7 @@ def test_analysis_version_claim_progress_and_retry_are_explicit(source_repositor
         error_message="model unavailable",
     )
     assert failed.status == "failed"
-    objective, retry = repository.queue_analysis(
+    objective, retry = await repository.queue_analysis(
         "col_source",
         "objective-1",
         pipeline_version="test.v1",
@@ -1285,10 +1257,12 @@ def test_analysis_version_claim_progress_and_retry_are_explicit(source_repositor
     assert objective.active_analysis_version == 2
 
 
-def test_analysis_execution_stats_round_trip_provider_usage(source_repositories) -> None:
+async def test_analysis_execution_stats_round_trip_provider_usage(
+    source_repositories,
+) -> None:
     source_repository, builds = source_repositories
-    repository = _prepare_studies(source_repository, builds)
-    _objective_row, claimed = _queue_and_claim(repository)
+    repository = await _prepare_studies(source_repository, builds)
+    _objective_row, claimed = await _queue_and_claim(repository)
     stats = ExecutionStats(
         duration_ms=1400,
         model_usage=(
@@ -1297,7 +1271,7 @@ def test_analysis_execution_stats_round_trip_provider_usage(source_repositories)
         prompt_versions={"paper_framing": "paper_framing.v1"},
     )
 
-    updated = repository.update_analysis_execution_stats(
+    updated = await repository.update_analysis_execution_stats(
         "col_source",
         "objective-1",
         claimed.analysis_version,
@@ -1323,7 +1297,7 @@ def test_analysis_execution_stats_round_trip_provider_usage(source_repositories)
             "status": "verified",
         },
     )
-    persisted = repository.read_analysis(
+    persisted = await repository.read_analysis(
         "col_source",
         "objective-1",
         claimed.analysis_version,
@@ -1335,13 +1309,15 @@ def test_analysis_execution_stats_round_trip_provider_usage(source_repositories)
     assert persisted.diagnostics == updated.diagnostics
 
 
-def test_publish_is_atomic_and_reads_findings_and_exact_evidence(source_repositories) -> None:
+async def test_publish_is_atomic_and_reads_findings_and_exact_evidence(
+    source_repositories,
+) -> None:
     source_repository, builds = source_repositories
-    repository = _prepare_studies(source_repository, builds)
-    _objective_row, claimed = _queue_and_claim(repository)
+    repository = await _prepare_studies(source_repository, builds)
+    _objective_row, claimed = await _queue_and_claim(repository)
     version = claimed.analysis_version
 
-    objective, succeeded = repository.publish_analysis(
+    objective, succeeded = await repository.publish_analysis(
         "col_source",
         "objective-1",
         version,
@@ -1352,14 +1328,16 @@ def test_publish_is_atomic_and_reads_findings_and_exact_evidence(source_reposito
 
     assert succeeded.status == "succeeded"
     assert objective.published_analysis_version == version
-    published = repository.read_published_analysis("col_source", "objective-1")
+    published = await repository.read_published_analysis(
+        "col_source", "objective-1"
+    )
     assert published is not None
     assert published.key == succeeded.key
     assert published.status == "succeeded"
-    findings, finding_total = repository.list_findings(
+    findings, finding_total = await repository.list_findings(
         "col_source", "objective-1", version
     )
-    evidence, evidence_total = repository.list_evidence(
+    evidence, evidence_total = await repository.list_evidence(
         "col_source", "objective-1", version, finding_id="finding-1"
     )
     assert finding_total == 1
@@ -1368,7 +1346,7 @@ def test_publish_is_atomic_and_reads_findings_and_exact_evidence(source_reposito
     assert evidence == _analysis_evidence(version)
     persisted_contributions = {
         item.document_id: item
-        for item in repository.list_contributions(
+        for item in await repository.list_contributions(
             "col_source", "objective-1", version
         )
     }
@@ -1377,11 +1355,13 @@ def test_publish_is_atomic_and_reads_findings_and_exact_evidence(source_reposito
     }
 
 
-def test_failed_retry_preserves_previous_published_version(source_repositories) -> None:
+async def test_failed_retry_preserves_previous_published_version(
+    source_repositories,
+) -> None:
     source_repository, builds = source_repositories
-    repository = _prepare_studies(source_repository, builds)
-    _objective_row, claimed = _queue_and_claim(repository)
-    repository.publish_analysis(
+    repository = await _prepare_studies(source_repository, builds)
+    _objective_row, claimed = await _queue_and_claim(repository)
+    await repository.publish_analysis(
         "col_source",
         "objective-1",
         1,
@@ -1389,15 +1369,17 @@ def test_failed_retry_preserves_previous_published_version(source_repositories) 
         evidence_records=_analysis_evidence(1),
         findings=(_finding(1),),
     )
-    objective, retry = repository.queue_analysis(
+    objective, retry = await repository.queue_analysis(
         "col_source",
         "objective-1",
         pipeline_version="test.v2",
         model_name=None,
         prompt_versions={},
     )
-    repository.claim_analysis("col_source", "objective-1", retry.analysis_version)
-    repository.fail_analysis(
+    await repository.claim_analysis(
+        "col_source", "objective-1", retry.analysis_version
+    )
+    await repository.fail_analysis(
         "col_source",
         "objective-1",
         retry.analysis_version,
@@ -1405,22 +1387,24 @@ def test_failed_retry_preserves_previous_published_version(source_repositories) 
         error_message="timeout",
     )
 
-    current = repository.read_objective("col_source", "objective-1")
+    current = await repository.read_objective("col_source", "objective-1")
     assert current is not None
     assert current.active_analysis_version == 2
     assert current.published_analysis_version == 1
-    assert repository.read_published_analysis("col_source", "objective-1").analysis_version == 1
+    assert (
+        await repository.read_published_analysis("col_source", "objective-1")
+    ).analysis_version == 1
 
 
-def test_publish_rejects_cross_version_artifacts_without_partial_writes(
+async def test_publish_rejects_cross_version_artifacts_without_partial_writes(
     source_repositories,
 ) -> None:
     source_repository, builds = source_repositories
-    repository = _prepare_studies(source_repository, builds)
-    _objective_row, claimed = _queue_and_claim(repository)
+    repository = await _prepare_studies(source_repository, builds)
+    _objective_row, claimed = await _queue_and_claim(repository)
 
     with pytest.raises(ValueError, match="cross-version"):
-        repository.publish_analysis(
+        await repository.publish_analysis(
             "col_source",
             "objective-1",
             claimed.analysis_version,
@@ -1429,5 +1413,9 @@ def test_publish_rejects_cross_version_artifacts_without_partial_writes(
             findings=(_finding(1),),
         )
 
-    assert repository.read_analysis("col_source", "objective-1", 1).status == "running"
-    assert repository.read_published_analysis("col_source", "objective-1") is None
+    assert (
+        await repository.read_analysis("col_source", "objective-1", 1)
+    ).status == "running"
+    assert await repository.read_published_analysis(
+        "col_source", "objective-1"
+    ) is None

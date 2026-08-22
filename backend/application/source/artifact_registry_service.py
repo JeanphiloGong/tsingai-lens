@@ -35,7 +35,7 @@ class ArtifactRegistryService:
         self.repository = repository
         self.source_artifact_repository = source_artifact_repository
 
-    def build_registry(
+    async def build_registry(
         self,
         collection_id: str,
         output_dir: str | Path,
@@ -44,12 +44,12 @@ class ArtifactRegistryService:
     ) -> dict:
         base_dir = Path(output_dir).expanduser().resolve()
         source_documents = (
-            self.source_artifact_repository.read_collection_documents(
+            await self.source_artifact_repository.read_collection_documents(
                 collection_id,
                 build_id=build_id,
             )
             if build_id is not None
-            else self.source_artifact_repository.read_collection_documents(
+            else await self.source_artifact_repository.read_collection_documents(
                 collection_id
             )
         )
@@ -75,7 +75,7 @@ class ArtifactRegistryService:
         ).to_record()
         return payload
 
-    def register(
+    async def register(
         self,
         task_id: str,
         collection_id: str,
@@ -86,14 +86,16 @@ class ArtifactRegistryService:
         stage = next(
             (
                 item
-                for item in self.repository.list_stages(task_id)
+                for item in await self.repository.list_stages(task_id)
                 if item.node.name == "artifact_registry"
             ),
             None,
         )
         if stage is None:
             raise RuntimeError(f"artifact_registry stage not found for task: {task_id}")
-        payload = self.build_registry(collection_id, output_dir, build_id=build_id)
+        payload = await self.build_registry(
+            collection_id, output_dir, build_id=build_id
+        )
         records = tuple(
             ArtifactVersionRecord(
                 artifact_version_id=f"artifact_{uuid4().hex[:20]}",
@@ -115,14 +117,14 @@ class ArtifactRegistryService:
             for artifact_kind, generated_field, ready_field, stale_field in _ARTIFACT_FIELDS
             if payload[generated_field]
         )
-        self.repository.add_artifact_versions(task_id, records)
+        await self.repository.add_artifact_versions(task_id, records)
         return payload
 
-    def get_for_task(self, task_id: str) -> dict:
-        task = self.repository.read_task(task_id)
+    async def get_for_task(self, task_id: str) -> dict:
+        task = await self.repository.read_task(task_id)
         if task is None:
             raise FileNotFoundError(f"task not found: {task_id}")
-        versions = self.repository.list_artifact_versions(task_id)
+        versions = await self.repository.list_artifact_versions(task_id)
         if not versions:
             raise FileNotFoundError(f"artifact registry not found for task: {task_id}")
         payload: dict = {

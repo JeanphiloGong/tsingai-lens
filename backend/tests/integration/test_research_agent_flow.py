@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict
+import pytest
 
 from application.chat import (
     CapabilityExecutionContext,
@@ -17,8 +18,11 @@ from application.chat import (
 from application.chat.capabilities import GetCollectionContextCapability
 from application.chat.session_service import ChatSessionService
 from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
-from infra.persistence.postgres.chat_repository import PostgresChatRepository
 from main import create_app
+from tests.support.chat_repository import MemoryChatRepository
+
+
+pytestmark = pytest.mark.anyio
 
 
 class _Model:
@@ -35,7 +39,7 @@ class _Model:
 
 
 class _ObjectiveRepository:
-    def list_objectives(self, collection_id: str) -> tuple:
+    async def list_objectives(self, collection_id: str) -> tuple:
         assert collection_id
         return ()
 
@@ -57,7 +61,7 @@ class _CandidateCapability:
     def __init__(self) -> None:
         self.executed: list[dict] = []
 
-    def execute(
+    async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: _CandidateArguments,
@@ -83,28 +87,26 @@ class _CandidateCapability:
         )
 
 
-def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
+async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
     auth_session_service,
     collection_service,
 ) -> None:
-    user = auth_session_service.create_user(
+    user = await auth_session_service.create_user(
         email="agent-flow@example.com",
         password="test-password",
     )
-    login = auth_session_service.login(
+    login = await auth_session_service.login(
         email=user["email"],
         password="test-password",
     )
-    collection = collection_service.create_collection(
+    collection = await collection_service.create_collection(
         "Ti-6Al-4V energy input",
         "Literature for a traceable energy-input comparison.",
         owner_user_id=user["user_id"],
     )
     objective_repository = _ObjectiveRepository()
     candidate_capability = _CandidateCapability()
-    chat_repository = PostgresChatRepository(
-        auth_session_service.repository.session_factory
-    )
+    chat_repository = MemoryChatRepository()
     model = _Model(
         ModelTurn(content="Hello. I can help inspect this literature collection."),
         ModelTurn(

@@ -27,12 +27,12 @@ class MemoryCollectionRepository:
         self._document_versions: dict[str, DocumentVersionRecord] = {}
         self._collection_documents: dict[str, list[CollectionDocumentRecord]] = {}
 
-    def add_collection(self, record: CollectionRecord) -> None:
+    async def add_collection(self, record: CollectionRecord) -> None:
         if record.collection_id in self._collections:
             raise ValueError(f"collection already exists: {record.collection_id}")
         self._collections[record.collection_id] = record
 
-    def list_collections(
+    async def list_collections(
         self,
         owner_user_id: str | None = None,
     ) -> tuple[CollectionRecord, ...]:
@@ -42,16 +42,16 @@ class MemoryCollectionRepository:
             if owner_user_id is None or record.owner_user_id == owner_user_id
         )
 
-    def read_collection(self, collection_id: str) -> CollectionRecord | None:
+    async def read_collection(self, collection_id: str) -> CollectionRecord | None:
         return self._collections.get(collection_id)
 
-    def update_collection(self, record: CollectionRecord) -> bool:
+    async def update_collection(self, record: CollectionRecord) -> bool:
         if record.collection_id not in self._collections:
             return False
         self._collections[record.collection_id] = record
         return True
 
-    def add_collection_import(
+    async def add_collection_import(
         self,
         record: CollectionImportRecord,
         *,
@@ -131,34 +131,34 @@ class MemoryCollectionRepository:
             updated_at=updated_at,
         )
 
-    def list_collection_files(
+    async def list_collection_files(
         self,
         collection_id: str,
     ) -> tuple[CollectionFileRecord, ...]:
         return tuple(self._files.get(collection_id, ()))
 
-    def list_collection_imports(
+    async def list_collection_imports(
         self,
         collection_id: str,
     ) -> tuple[CollectionImportRecord, ...]:
         return tuple(self._imports.get(collection_id, ()))
 
-    def read_document(self, document_id: str) -> DocumentRecord | None:
+    async def read_document(self, document_id: str) -> DocumentRecord | None:
         return self._documents.get(document_id)
 
-    def read_document_version(
+    async def read_document_version(
         self,
         document_version_id: str,
     ) -> DocumentVersionRecord | None:
         return self._document_versions.get(document_version_id)
 
-    def list_collection_documents(
+    async def list_collection_documents(
         self,
         collection_id: str,
     ) -> tuple[CollectionDocumentRecord, ...]:
         return tuple(self._collection_documents.get(collection_id, ()))
 
-    def add_collection_handoff(self, record: CollectionHandoffRecord) -> None:
+    async def add_collection_handoff(self, record: CollectionHandoffRecord) -> None:
         if record.collection_id not in self._collections:
             raise FileNotFoundError(f"collection not found: {record.collection_id}")
         handoffs = self._handoffs.setdefault(record.collection_id, [])
@@ -166,13 +166,13 @@ class MemoryCollectionRepository:
             raise ValueError("collection handoff already exists")
         handoffs.append(record)
 
-    def list_collection_handoffs(
+    async def list_collection_handoffs(
         self,
         collection_id: str,
     ) -> tuple[CollectionHandoffRecord, ...]:
         return tuple(self._handoffs.get(collection_id, ()))
 
-    def delete_collection(self, collection_id: str) -> bool:
+    async def delete_collection(self, collection_id: str) -> bool:
         if self._collections.pop(collection_id, None) is None:
             return False
         self._files.pop(collection_id, None)

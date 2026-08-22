@@ -4,7 +4,6 @@ import json
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
-from starlette.concurrency import run_in_threadpool
 
 from controllers.schemas.core.finding_review import (
     FindingCurationCreateRequest,
@@ -34,8 +33,7 @@ async def record_finding_feedback(
     request: Request,
 ) -> FindingFeedbackResponse:
     try:
-        feedback = await run_in_threadpool(
-            request.app.state.finding_feedback_service.record_feedback,
+        feedback = await request.app.state.finding_feedback_service.record_feedback(
             collection_id=collection_id,
             objective_id=objective_id,
             analysis_version=payload.analysis_version,
@@ -65,8 +63,7 @@ async def list_finding_feedback(
     analysis_version: int = Query(..., ge=1),
 ) -> FindingFeedbackListResponse:
     try:
-        records = await run_in_threadpool(
-            request.app.state.finding_feedback_service.list_feedback,
+        records = await request.app.state.finding_feedback_service.list_feedback(
             collection_id=collection_id,
             objective_id=objective_id,
             analysis_version=analysis_version,
@@ -98,8 +95,7 @@ async def record_finding_curation(
     request: Request,
 ) -> FindingCurationResponse:
     try:
-        curation = await run_in_threadpool(
-            request.app.state.finding_feedback_service.record_curation,
+        curation = await request.app.state.finding_feedback_service.record_curation(
             collection_id=collection_id,
             objective_id=objective_id,
             analysis_version=payload.analysis_version,
@@ -129,8 +125,7 @@ async def list_finding_curations(
     analysis_version: int = Query(..., ge=1),
 ) -> FindingCurationListResponse:
     try:
-        records = await run_in_threadpool(
-            request.app.state.finding_feedback_service.list_curations,
+        records = await request.app.state.finding_feedback_service.list_curations(
             collection_id=collection_id,
             objective_id=objective_id,
             analysis_version=analysis_version,
@@ -162,8 +157,7 @@ async def export_objective_finding_dataset(
     dataset_use_status: str | None = Query(default=None),
 ):
     try:
-        payload = await run_in_threadpool(
-            request.app.state.finding_feedback_service.export_dataset,
+        payload = await request.app.state.finding_feedback_service.export_dataset(
             collection_id=collection_id,
             objective_id=objective_id,
             label_status=label_status,
@@ -187,8 +181,7 @@ async def export_collection_finding_dataset(
     label_status: str | None = Query(default=None),
     dataset_use_status: str | None = Query(default=None),
 ):
-    payload = await run_in_threadpool(
-        request.app.state.finding_feedback_service.export_collection_dataset,
+    payload = await request.app.state.finding_feedback_service.export_collection_dataset(
         collection_id=collection_id,
         label_status=label_status,
         dataset_use_status=dataset_use_status,
@@ -205,8 +198,7 @@ async def export_finding_gold_draft(
     collection_id: str,
     request: Request,
 ) -> FindingGoldDraftResponse:
-    payload = await run_in_threadpool(
-        request.app.state.finding_feedback_service.export_gold_draft,
+    payload = await request.app.state.finding_feedback_service.export_gold_draft(
         collection_id=collection_id,
     )
     return FindingGoldDraftResponse(**payload)

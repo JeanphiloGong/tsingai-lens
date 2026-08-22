@@ -25,7 +25,7 @@ async def login(
     response: Response,
 ) -> AuthSessionResponse:
     try:
-        session = request.app.state.auth_session_service.login(
+        session = await request.app.state.auth_session_service.login(
             email=payload.email,
             password=payload.password,
         )
@@ -53,7 +53,7 @@ async def login(
 
 @router.post("/logout", response_model=AuthLogoutResponse, summary="Log out")
 async def logout(request: Request, response: Response) -> AuthLogoutResponse:
-    request.app.state.auth_session_service.logout(
+    await request.app.state.auth_session_service.logout(
         request.cookies.get(SESSION_COOKIE_NAME)
     )
     response.delete_cookie(SESSION_COOKIE_NAME, path="/", samesite="lax")
@@ -62,7 +62,7 @@ async def logout(request: Request, response: Response) -> AuthLogoutResponse:
 
 @router.get("/me", response_model=AuthSessionResponse, summary="Read current user")
 async def me(request: Request) -> AuthSessionResponse:
-    return AuthSessionResponse(user=require_current_user(request))
+    return AuthSessionResponse(user=await require_current_user(request))
 
 
 def _cookie_secure() -> bool:

@@ -45,9 +45,9 @@ async def create_chat_session(
     request: Request,
 ) -> ChatSessionResponse:
     try:
-        session = request.app.state.chat_session_service.create_session(
+        session = await request.app.state.chat_session_service.create_session(
             collection_id=payload.collection_id,
-            user_id=current_user_id(request),
+            user_id=await current_user_id(request),
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -64,9 +64,9 @@ async def get_chat_session(
     request: Request,
 ) -> ChatSessionResponse:
     try:
-        session = request.app.state.chat_session_service.get_session_for_user(
+        session = await request.app.state.chat_session_service.get_session_for_user(
             session_id,
-            current_user_id(request),
+            await current_user_id(request),
         )
     except ChatSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
@@ -83,13 +83,13 @@ async def list_chat_messages(
     request: Request,
 ) -> ChatMessageListResponse:
     try:
-        messages = request.app.state.chat_session_service.list_messages_for_user(
+        messages = await request.app.state.chat_session_service.list_messages_for_user(
             session_id,
-            current_user_id(request),
+            await current_user_id(request),
         )
-        pending = request.app.state.chat_session_service.get_pending_approval_for_user(
+        pending = await request.app.state.chat_session_service.get_pending_approval_for_user(
             session_id,
-            current_user_id(request),
+            await current_user_id(request),
         )
     except ChatSessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=_session_not_found(exc)) from exc
@@ -114,9 +114,9 @@ async def post_chat_message(
     request: Request,
 ) -> ChatTurnResponse:
     try:
-        turn = request.app.state.chat_session_service.post_message_for_user(
+        turn = await request.app.state.chat_session_service.post_message_for_user(
             session_id,
-            current_user_id(request),
+            await current_user_id(request),
             message=payload.message,
         )
     except ChatSessionNotFoundError as exc:
@@ -145,10 +145,10 @@ async def decide_chat_tool_call(
     request: Request,
 ) -> ChatTurnResponse:
     try:
-        turn = request.app.state.chat_session_service.decide_tool_call_for_user(
+        turn = await request.app.state.chat_session_service.decide_tool_call_for_user(
             session_id,
             tool_call_id,
-            current_user_id(request),
+            await current_user_id(request),
             arguments_digest=payload.arguments_digest,
             decision=payload.decision,
         )

@@ -6,7 +6,7 @@ from collections import defaultdict
 from typing import Any
 
 from sqlalchemy import Table, delete, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.core.comparison import (
     CollectionComparableResult,
@@ -53,24 +53,24 @@ class PostgresComparisonRepository:
 
     backend_name = "postgres"
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self.session_factory = session_factory
 
-    def replace(
+    async def replace(
         self,
         collection_id: str,
         build_id: str,
         facts: ComparisonFactSet,
     ) -> None:
-        with self.session_factory.begin() as session:
-            self._require_writable_build(session, collection_id, build_id)
-            source_kinds = self._validate_facts(
+        async with self.session_factory.begin() as session:
+            await self._require_writable_build(session, collection_id, build_id)
+            source_kinds = await self._validate_facts(
                 session,
                 collection_id,
                 build_id,
                 facts,
             )
-            self._delete_build_records(session, build_id)
+            await self._delete_build_records(session, build_id)
             session.add(
                 ComparisonBuild(
                     build_id=build_id,
@@ -78,7 +78,7 @@ class PostgresComparisonRepository:
                     comparison_artifacts_ready=facts.comparison_artifacts_ready,
                 )
             )
-            session.flush()
+            await session.flush()
             session.add_all(
                 self._comparable_row(
                     collection_id,
@@ -89,7 +89,7 @@ class PostgresComparisonRepository:
                 )
                 for position, item in enumerate(facts.comparable_results)
             )
-            session.flush()
+            await session.flush()
             session.add_all(
                 self._scoped_row(collection_id, build_id, item)
                 for item in facts.collection_comparable_results
@@ -98,42 +98,42 @@ class PostgresComparisonRepository:
                 self._pairwise_row(collection_id, build_id, position, item)
                 for position, item in enumerate(facts.pairwise_comparison_relations)
             )
-            session.flush()
-            self._write_links(session, build_id, facts)
+            await session.flush()
+            await self._write_links(session, build_id, facts)
 
-    def read(
+    async def read(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
     ) -> ComparisonFactSet:
-        with self.session_factory() as session:
-            resolved_build_id = self._resolve_read_build(
+        async with self.session_factory() as session:
+            resolved_build_id = await self._resolve_read_build(
                 session,
                 collection_id,
                 build_id,
             )
             if resolved_build_id is None:
                 return ComparisonFactSet()
-            marker = session.get(ComparisonBuild, resolved_build_id)
+            marker = await session.get(ComparisonBuild, resolved_build_id)
             if marker is None or marker.collection_id != collection_id:
                 return ComparisonFactSet()
 
-            evidence_links = self._read_links(
+            evidence_links = await self._read_links(
                 session,
                 comparable_result_evidence_links,
                 resolved_build_id,
                 "comparable_result_id",
                 "evidence_id",
             )
-            feature_links = self._read_links(
+            feature_links = await self._read_links(
                 session,
                 comparable_result_feature_links,
                 resolved_build_id,
                 "comparable_result_id",
                 "feature_id",
             )
-            observation_links = self._read_links(
+            observation_links = await self._read_links(
                 session,
                 comparable_result_observation_links,
                 resolved_build_id,
@@ -142,13 +142,18 @@ class PostgresComparisonRepository:
             )
             direct_anchors: dict[str, list[str]] = defaultdict(list)
             contextual_anchors: dict[str, list[str]] = defaultdict(list)
-            for row in session.execute(
-                select(comparable_result_anchor_links)
-                .where(comparable_result_anchor_links.c.build_id == resolved_build_id)
-                .order_by(
-                    comparable_result_anchor_links.c.comparable_result_id,
-                    comparable_result_anchor_links.c.link_kind,
-                    comparable_result_anchor_links.c.position,
+            for row in (
+                await session.execute(
+                    select(comparable_result_anchor_links)
+                    .where(
+                        comparable_result_anchor_links.c.build_id
+                        == resolved_build_id
+                    )
+                    .order_by(
+                        comparable_result_anchor_links.c.comparable_result_id,
+                        comparable_result_anchor_links.c.link_kind,
+                        comparable_result_anchor_links.c.position,
+                    )
                 )
             ).mappings():
                 target = (
@@ -167,7 +172,7 @@ class PostgresComparisonRepository:
                     feature_links,
                     observation_links,
                 )
-                for row in session.scalars(
+                for row in await session.scalars(
                     select(ComparableResultRecord)
                     .where(ComparableResultRecord.build_id == resolved_build_id)
                     .order_by(ComparableResultRecord.result_order)
@@ -175,7 +180,7 @@ class PostgresComparisonRepository:
             )
             scoped_results = tuple(
                 self._scoped_record(row)
-                for row in session.scalars(
+                for row in await session.scalars(
                     select(CollectionComparableResultRecord)
                     .where(
                         CollectionComparableResultRecord.build_id == resolved_build_id
@@ -186,7 +191,7 @@ class PostgresComparisonRepository:
                     )
                 )
             )
-            pairwise_anchors = self._read_links(
+            pairwise_anchors = await self._read_links(
                 session,
                 pairwise_comparison_anchor_links,
                 resolved_build_id,
@@ -195,7 +200,7 @@ class PostgresComparisonRepository:
             )
             pairwise_relations = tuple(
                 self._pairwise_record(row, pairwise_anchors)
-                for row in session.scalars(
+                for row in await session.scalars(
                     select(PairwiseComparisonRelationRecord)
                     .where(
                         PairwiseComparisonRelationRecord.build_id == resolved_build_id
@@ -210,9 +215,9 @@ class PostgresComparisonRepository:
                 pairwise_comparison_relations=pairwise_relations,
             )
 
-    def _validate_facts(
+    async def _validate_facts(
         self,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
         facts: ComparisonFactSet,
@@ -227,14 +232,14 @@ class PostgresComparisonRepository:
         )
         source_kinds: dict[str, str] = {}
         for item in facts.comparable_results:
-            source_kind = self._validate_comparable_source(
+            source_kind = await self._validate_comparable_source(
                 session,
                 collection_id,
                 build_id,
                 item,
             )
             source_kinds[item.comparable_result_id] = source_kind
-            self._validate_comparable_links(
+            await self._validate_comparable_links(
                 session,
                 collection_id,
                 build_id,
@@ -255,7 +260,7 @@ class PostgresComparisonRepository:
                 "collection comparable result belongs to another collection"
             )
         for relation in facts.pairwise_comparison_relations:
-            self._validate_pairwise_relation(
+            await self._validate_pairwise_relation(
                 session,
                 collection_id,
                 build_id,
@@ -263,14 +268,14 @@ class PostgresComparisonRepository:
             )
         return source_kinds
 
-    def _validate_comparable_source(
+    async def _validate_comparable_source(
         self,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
         item: ComparableResult,
     ) -> str:
-        paper_source = session.get(
+        paper_source = await session.get(
             PaperFactMeasurementResult,
             (build_id, item.source_result_id),
         )
@@ -286,15 +291,15 @@ class PostgresComparisonRepository:
             )
         return "paper_measurement"
 
-    def _validate_comparable_links(
+    async def _validate_comparable_links(
         self,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
         item: ComparableResult,
         source_kind: str,
     ) -> None:
-        self._require_document_records(
+        await self._require_document_records(
             session,
             PaperFactEvidenceAnchor,
             build_id,
@@ -302,7 +307,7 @@ class PostgresComparisonRepository:
             item.source_document_id,
             "evidence anchor",
         )
-        self._require_document_records(
+        await self._require_document_records(
             session,
             PaperFactStructureFeature,
             build_id,
@@ -310,7 +315,7 @@ class PostgresComparisonRepository:
             item.source_document_id,
             "structure feature",
         )
-        self._require_document_records(
+        await self._require_document_records(
             session,
             PaperFactCharacterizationObservation,
             build_id,
@@ -334,7 +339,7 @@ class PostgresComparisonRepository:
         ):
             if value is None:
                 continue
-            self._require_document_records(
+            await self._require_document_records(
                 session,
                 model,
                 build_id,
@@ -343,9 +348,9 @@ class PostgresComparisonRepository:
                 label,
             )
 
-    def _validate_pairwise_relation(
+    async def _validate_pairwise_relation(
         self,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
         item: PairwiseComparisonRelation,
@@ -353,7 +358,7 @@ class PostgresComparisonRepository:
         if item.collection_id != collection_id:
             raise ValueError("pairwise relation belongs to another collection")
         for result_id in (item.current_result_id, item.reference_result_id):
-            self._require_document_records(
+            await self._require_document_records(
                 session,
                 PaperFactMeasurementResult,
                 build_id,
@@ -362,7 +367,7 @@ class PostgresComparisonRepository:
                 "pairwise result",
             )
         for variant_id in (item.current_variant_id, item.reference_variant_id):
-            self._require_document_records(
+            await self._require_document_records(
                 session,
                 PaperFactSampleVariant,
                 build_id,
@@ -370,7 +375,7 @@ class PostgresComparisonRepository:
                 item.document_id,
                 "pairwise variant",
             )
-        self._require_document_records(
+        await self._require_document_records(
             session,
             PaperFactEvidenceAnchor,
             build_id,
@@ -379,9 +384,9 @@ class PostgresComparisonRepository:
             "pairwise evidence anchor",
         )
 
-    def _require_document_records(
+    async def _require_document_records(
         self,
-        session: Session,
+        session: AsyncSession,
         model: type,
         build_id: str,
         record_ids: tuple[str, ...],
@@ -398,7 +403,7 @@ class PostgresComparisonRepository:
             PaperFactMeasurementResult: PaperFactMeasurementResult.result_id,
         }[model]
         for record_id in record_ids:
-            row = session.scalar(
+            row = await session.scalar(
                 select(model).where(
                     model.build_id == build_id,
                     id_column == record_id,
@@ -407,25 +412,25 @@ class PostgresComparisonRepository:
             if row is None or row.source_document_id != source_document_id:
                 raise ValueError(f"{label} has missing or cross-build lineage")
 
-    def _delete_build_records(self, session: Session, build_id: str) -> None:
-        session.execute(
+    async def _delete_build_records(self, session: AsyncSession, build_id: str) -> None:
+        await session.execute(
             delete(pairwise_comparison_anchor_links).where(
                 pairwise_comparison_anchor_links.c.build_id == build_id
             )
         )
         for table in _RESULT_LINK_TABLES:
-            session.execute(delete(table).where(table.c.build_id == build_id))
+            await session.execute(delete(table).where(table.c.build_id == build_id))
         for model in (
             CollectionComparableResultRecord,
             PairwiseComparisonRelationRecord,
             ComparableResultRecord,
             ComparisonBuild,
         ):
-            session.execute(delete(model).where(model.build_id == build_id))
+            await session.execute(delete(model).where(model.build_id == build_id))
 
-    def _write_links(
+    async def _write_links(
         self,
-        session: Session,
+        session: AsyncSession,
         build_id: str,
         facts: ComparisonFactSet,
     ) -> None:
@@ -435,7 +440,7 @@ class PostgresComparisonRepository:
                 ("contextual", item.evidence.contextual_anchor_ids),
             ):
                 if values:
-                    session.execute(
+                    await session.execute(
                         comparable_result_anchor_links.insert(),
                         [
                             {
@@ -466,7 +471,7 @@ class PostgresComparisonRepository:
                 ),
             ):
                 if values:
-                    session.execute(
+                    await session.execute(
                         table.insert(),
                         [
                             {
@@ -480,7 +485,7 @@ class PostgresComparisonRepository:
                     )
         for item in facts.pairwise_comparison_relations:
             if item.evidence_anchor_ids:
-                session.execute(
+                await session.execute(
                     pairwise_comparison_anchor_links.insert(),
                     [
                         {
@@ -703,46 +708,48 @@ class PostgresComparisonRepository:
             }
         )
 
-    def _read_links(
+    async def _read_links(
         self,
-        session: Session,
+        session: AsyncSession,
         table: Table,
         build_id: str,
         owner_column: str,
         value_column: str,
     ) -> dict[str, list[str]]:
         grouped: dict[str, list[str]] = defaultdict(list)
-        for row in session.execute(
-            select(table)
-            .where(table.c.build_id == build_id)
-            .order_by(table.c[owner_column], table.c.position)
+        for row in (
+            await session.execute(
+                select(table)
+                .where(table.c.build_id == build_id)
+                .order_by(table.c[owner_column], table.c.position)
+            )
         ).mappings():
             grouped[str(row[owner_column])].append(str(row[value_column]))
         return grouped
 
-    def _resolve_read_build(
+    async def _resolve_read_build(
         self,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         build_id: str | None,
     ) -> str | None:
         if build_id is not None:
-            build = session.get(CollectionBuild, build_id)
+            build = await session.get(CollectionBuild, build_id)
             return (
                 build_id
                 if build is not None and build.collection_id == collection_id
                 else None
             )
-        active = session.get(CollectionActiveBuild, collection_id)
+        active = await session.get(CollectionActiveBuild, collection_id)
         return active.build_id if active is not None else None
 
-    def _require_writable_build(
+    async def _require_writable_build(
         self,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
     ) -> None:
-        build = session.get(CollectionBuild, build_id)
+        build = await session.get(CollectionBuild, build_id)
         if (
             build is None
             or build.collection_id != collection_id

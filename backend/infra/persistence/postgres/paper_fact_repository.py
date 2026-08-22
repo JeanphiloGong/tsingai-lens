@@ -6,7 +6,7 @@ from collections import defaultdict
 from typing import Any
 
 from sqlalchemy import Table, delete, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.core.document_profile import DocumentProfile
 from domain.core.evidence_backbone import (
@@ -68,19 +68,19 @@ class PostgresPaperFactRepository:
 
     backend_name = "postgres"
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self.session_factory = session_factory
 
-    def replace_document_profiles(
+    async def replace_document_profiles(
         self,
         collection_id: str,
         build_id: str,
         document_profiles: tuple[DocumentProfile, ...],
     ) -> None:
-        with self.session_factory.begin() as session:
-            self._require_writable_build(session, collection_id, build_id)
-            lineage = self._source_document_lineage(session, collection_id, build_id)
-            marker = session.get(PaperFactBuild, build_id)
+        async with self.session_factory.begin() as session:
+            await self._require_writable_build(session, collection_id, build_id)
+            lineage = await self._source_document_lineage(session, collection_id, build_id)
+            marker = await session.get(PaperFactBuild, build_id)
             if marker is None:
                 session.add(
                     PaperFactBuild(
@@ -89,7 +89,7 @@ class PostgresPaperFactRepository:
                         paper_facts_ready=False,
                     )
                 )
-            session.execute(
+            await session.execute(
                 delete(PaperFactDocumentProfile).where(
                     PaperFactDocumentProfile.build_id == build_id
                 )
@@ -115,16 +115,16 @@ class PostgresPaperFactRepository:
                 for position, profile in enumerate(document_profiles)
             )
 
-    def replace_paper_facts(
+    async def replace_paper_facts(
         self,
         collection_id: str,
         build_id: str,
         facts: PaperFactSet,
     ) -> None:
-        with self.session_factory.begin() as session:
-            self._require_writable_build(session, collection_id, build_id)
-            lineage = self._source_document_lineage(session, collection_id, build_id)
-            marker = session.get(PaperFactBuild, build_id)
+        async with self.session_factory.begin() as session:
+            await self._require_writable_build(session, collection_id, build_id)
+            lineage = await self._source_document_lineage(session, collection_id, build_id)
+            marker = await session.get(PaperFactBuild, build_id)
             if marker is None:
                 marker = PaperFactBuild(
                     build_id=build_id,
@@ -136,7 +136,7 @@ class PostgresPaperFactRepository:
                 marker.paper_facts_ready = facts.paper_facts_ready
 
             for table in _LINK_TABLES:
-                session.execute(delete(table).where(table.c.build_id == build_id))
+                await session.execute(delete(table).where(table.c.build_id == build_id))
             for model in (
                 PaperFactMeasurementResult,
                 PaperFactBaselineReference,
@@ -147,7 +147,7 @@ class PostgresPaperFactRepository:
                 PaperFactMethod,
                 PaperFactEvidenceAnchor,
             ):
-                session.execute(delete(model).where(model.build_id == build_id))
+                await session.execute(delete(model).where(model.build_id == build_id))
 
             session.add_all(
                 self._anchor_row(collection_id, build_id, lineage, position, item)
@@ -165,7 +165,7 @@ class PostgresPaperFactRepository:
                 self._condition_row(collection_id, build_id, lineage, position, item)
                 for position, item in enumerate(facts.test_conditions)
             )
-            session.flush()
+            await session.flush()
             session.add_all(
                 self._baseline_row(collection_id, build_id, lineage, position, item)
                 for position, item in enumerate(facts.baseline_references)
@@ -178,97 +178,97 @@ class PostgresPaperFactRepository:
                 self._feature_row(collection_id, build_id, lineage, position, item)
                 for position, item in enumerate(facts.structure_features)
             )
-            session.flush()
+            await session.flush()
             session.add_all(
                 self._result_row(collection_id, build_id, lineage, position, item)
                 for position, item in enumerate(facts.measurement_results)
             )
-            session.flush()
+            await session.flush()
 
-            self._write_links(session, build_id, facts)
+            await self._write_links(session, build_id, facts)
 
-    def read(
+    async def read(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
     ) -> PaperFactSet:
-        with self.session_factory() as session:
-            resolved_build_id = self._resolve_read_build(
+        async with self.session_factory() as session:
+            resolved_build_id = await self._resolve_read_build(
                 session,
                 collection_id,
                 build_id,
             )
             if resolved_build_id is None:
                 return PaperFactSet()
-            marker = session.get(PaperFactBuild, resolved_build_id)
+            marker = await session.get(PaperFactBuild, resolved_build_id)
             if marker is None or marker.collection_id != collection_id:
                 return PaperFactSet()
 
-            method_anchors = self._read_links(
+            method_anchors = await self._read_links(
                 session,
                 paper_fact_method_evidence_anchors,
                 resolved_build_id,
                 "method_id",
                 "anchor_id",
             )
-            variant_features = self._read_links(
+            variant_features = await self._read_links(
                 session,
                 paper_fact_variant_structure_features,
                 resolved_build_id,
                 "variant_id",
                 "feature_id",
             )
-            variant_anchors = self._read_links(
+            variant_anchors = await self._read_links(
                 session,
                 paper_fact_variant_evidence_anchors,
                 resolved_build_id,
                 "variant_id",
                 "anchor_id",
             )
-            condition_anchors = self._read_links(
+            condition_anchors = await self._read_links(
                 session,
                 paper_fact_condition_evidence_anchors,
                 resolved_build_id,
                 "test_condition_id",
                 "anchor_id",
             )
-            baseline_anchors = self._read_links(
+            baseline_anchors = await self._read_links(
                 session,
                 paper_fact_baseline_evidence_anchors,
                 resolved_build_id,
                 "baseline_id",
                 "anchor_id",
             )
-            observation_anchors = self._read_links(
+            observation_anchors = await self._read_links(
                 session,
                 paper_fact_observation_evidence_anchors,
                 resolved_build_id,
                 "observation_id",
                 "anchor_id",
             )
-            feature_observations = self._read_links(
+            feature_observations = await self._read_links(
                 session,
                 paper_fact_feature_observations,
                 resolved_build_id,
                 "feature_id",
                 "observation_id",
             )
-            result_features = self._read_links(
+            result_features = await self._read_links(
                 session,
                 paper_fact_result_structure_features,
                 resolved_build_id,
                 "result_id",
                 "feature_id",
             )
-            result_observations = self._read_links(
+            result_observations = await self._read_links(
                 session,
                 paper_fact_result_observations,
                 resolved_build_id,
                 "result_id",
                 "observation_id",
             )
-            result_anchors = self._read_links(
+            result_anchors = await self._read_links(
                 session,
                 paper_fact_result_evidence_anchors,
                 resolved_build_id,
@@ -290,7 +290,7 @@ class PostgresPaperFactRepository:
                             "confidence": row.confidence,
                         }
                     )
-                    for row in self._ordered_rows(
+                    for row in await self._ordered_rows(
                         session,
                         PaperFactDocumentProfile,
                         collection_id,
@@ -312,7 +312,7 @@ class PostgresPaperFactRepository:
                             "deep_link": row.deep_link,
                         }
                     )
-                    for row in self._ordered_rows(
+                    for row in await self._ordered_rows(
                         session,
                         PaperFactEvidenceAnchor,
                         collection_id,
@@ -336,7 +336,7 @@ class PostgresPaperFactRepository:
                             "epistemic_status": row.epistemic_status,
                         }
                     )
-                    for row in self._ordered_rows(
+                    for row in await self._ordered_rows(
                         session,
                         PaperFactMethod,
                         collection_id,
@@ -365,7 +365,7 @@ class PostgresPaperFactRepository:
                             "epistemic_status": row.epistemic_status,
                         }
                     )
-                    for row in self._ordered_rows(
+                    for row in await self._ordered_rows(
                         session,
                         PaperFactSampleVariant,
                         collection_id,
@@ -394,7 +394,7 @@ class PostgresPaperFactRepository:
                             "epistemic_status": row.epistemic_status,
                         }
                     )
-                    for row in self._ordered_rows(
+                    for row in await self._ordered_rows(
                         session,
                         PaperFactTestCondition,
                         collection_id,
@@ -419,7 +419,7 @@ class PostgresPaperFactRepository:
                             "epistemic_status": row.epistemic_status,
                         }
                     )
-                    for row in self._ordered_rows(
+                    for row in await self._ordered_rows(
                         session,
                         PaperFactBaselineReference,
                         collection_id,
@@ -453,7 +453,7 @@ class PostgresPaperFactRepository:
                             "epistemic_status": row.epistemic_status,
                         }
                     )
-                    for row in self._ordered_rows(
+                    for row in await self._ordered_rows(
                         session,
                         PaperFactMeasurementResult,
                         collection_id,
@@ -481,7 +481,7 @@ class PostgresPaperFactRepository:
                             "epistemic_status": row.epistemic_status,
                         }
                     )
-                    for row in self._ordered_rows(
+                    for row in await self._ordered_rows(
                         session,
                         PaperFactCharacterizationObservation,
                         collection_id,
@@ -508,7 +508,7 @@ class PostgresPaperFactRepository:
                             "epistemic_status": row.epistemic_status,
                         }
                     )
-                    for row in self._ordered_rows(
+                    for row in await self._ordered_rows(
                         session,
                         PaperFactStructureFeature,
                         collection_id,
@@ -737,8 +737,8 @@ class PostgresPaperFactRepository:
         )
 
     @staticmethod
-    def _write_links(
-        session: Session,
+    async def _write_links(
+        session: AsyncSession,
         build_id: str,
         facts: PaperFactSet,
     ) -> None:
@@ -878,11 +878,11 @@ class PostgresPaperFactRepository:
         )
         for table, rows in links:
             if rows:
-                session.execute(table.insert(), rows)
+                await session.execute(table.insert(), rows)
 
     @staticmethod
-    def _ordered_rows(
-        session: Session,
+    async def _ordered_rows(
+        session: AsyncSession,
         model: Any,
         collection_id: str,
         build_id: str,
@@ -890,7 +890,7 @@ class PostgresPaperFactRepository:
         id_column: Any,
     ) -> list[Any]:
         return list(
-            session.scalars(
+            await session.scalars(
                 select(model)
                 .where(
                     model.collection_id == collection_id,
@@ -901,8 +901,8 @@ class PostgresPaperFactRepository:
         )
 
     @staticmethod
-    def _read_links(
-        session: Session,
+    async def _read_links(
+        session: AsyncSession,
         table: Table,
         build_id: str,
         owner_column: str,
@@ -911,7 +911,7 @@ class PostgresPaperFactRepository:
         grouped: dict[str, list[str]] = defaultdict(list)
         owner = table.c[owner_column]
         target = table.c[target_column]
-        for owner_id, target_id in session.execute(
+        for owner_id, target_id in await session.execute(
             select(owner, target)
             .where(table.c.build_id == build_id)
             .order_by(owner, table.c.position, target)
@@ -920,14 +920,14 @@ class PostgresPaperFactRepository:
         return defaultdict(tuple, {key: tuple(value) for key, value in grouped.items()})
 
     @staticmethod
-    def _source_document_lineage(
-        session: Session,
+    async def _source_document_lineage(
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
     ) -> dict[str, str]:
         return {
             str(source_document_id): str(document_version_id)
-            for source_document_id, document_version_id in session.execute(
+            for source_document_id, document_version_id in await session.execute(
                 select(
                     SourceDocument.source_document_id,
                     SourceDocument.document_version_id,
@@ -955,12 +955,12 @@ class PostgresPaperFactRepository:
             ) from exc
 
     @staticmethod
-    def _require_build(
-        session: Session,
+    async def _require_build(
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
     ) -> CollectionBuild:
-        build = session.get(CollectionBuild, build_id)
+        build = await session.get(CollectionBuild, build_id)
         if build is None or build.collection_id != collection_id:
             raise FileNotFoundError(
                 f"collection build not found: {collection_id}/{build_id}"
@@ -968,28 +968,28 @@ class PostgresPaperFactRepository:
         return build
 
     @classmethod
-    def _require_writable_build(
+    async def _require_writable_build(
         cls,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
     ) -> CollectionBuild:
-        build = cls._require_build(session, collection_id, build_id)
+        build = await cls._require_build(session, collection_id, build_id)
         if build.status not in {"queued", "building"}:
             raise ValueError(f"collection build is not writable: {build_id}")
         return build
 
     @classmethod
-    def _resolve_read_build(
+    async def _resolve_read_build(
         cls,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         build_id: str | None,
     ) -> str | None:
         if build_id is not None:
-            cls._require_build(session, collection_id, build_id)
+            await cls._require_build(session, collection_id, build_id)
             return build_id
-        return session.scalar(
+        return await session.scalar(
             select(CollectionActiveBuild.build_id).where(
                 CollectionActiveBuild.collection_id == collection_id
             )

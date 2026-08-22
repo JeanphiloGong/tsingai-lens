@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from pathlib import Path
 import sys
@@ -21,7 +22,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def import_review_decisions(
+async def import_review_decisions(
     *,
     input_path: Path,
     reviewer: str,
@@ -57,14 +58,14 @@ def import_review_decisions(
             objective_repository=PostgresObjectiveRepository(session_factory),
         )
     try:
-        return FindingReviewImportService(feedback_service).import_jsonl_file(
+        return await FindingReviewImportService(feedback_service).import_jsonl_file(
             input_path=input_path,
             reviewer=reviewer,
             dry_run=dry_run,
         )
     finally:
         if engine is not None:
-            engine.dispose()
+            await engine.dispose()
 
 
 def render_text_summary(summary: dict) -> str:
@@ -88,9 +89,9 @@ def render_text_summary(summary: dict) -> str:
     return "\n".join(lines)
 
 
-def main() -> None:
+async def main_async() -> None:
     args = parse_args()
-    summary = import_review_decisions(
+    summary = await import_review_decisions(
         input_path=args.input_path,
         reviewer=args.reviewer,
         dry_run=args.dry_run,
@@ -105,4 +106,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main_async())

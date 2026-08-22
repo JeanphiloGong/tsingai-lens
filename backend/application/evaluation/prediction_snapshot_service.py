@@ -46,7 +46,7 @@ class EvaluationPredictionSnapshotService:
         self.comparison_repository = comparison_repository
         self.evaluation_repository = evaluation_repository
 
-    def create_core_snapshot(
+    async def create_core_snapshot(
         self,
         *,
         collection_id: str,
@@ -54,16 +54,18 @@ class EvaluationPredictionSnapshotService:
         snapshot_id: str | None = None,
         system_context: dict[str, Any] | None = None,
     ) -> EvaluationPredictionSnapshot:
-        self.collection_service.get_collection(collection_id)
-        paper_facts = self.paper_fact_repository.read(collection_id)
-        comparison_facts = self.comparison_repository.read(collection_id)
+        await self.collection_service.get_collection(collection_id)
+        paper_facts = await self.paper_fact_repository.read(collection_id)
+        comparison_facts = await self.comparison_repository.read(collection_id)
         objective_counts = {
             "published_objective_analyses": 0,
             "objective_findings": 0,
             "objective_evidence": 0,
         }
         if fact_source == "objective_first":
-            items, objective_counts = self._objective_first_items(collection_id)
+            items, objective_counts = await self._objective_first_items(
+                collection_id
+            )
         elif fact_source == "paper_facts":
             items = self._paper_fact_items(paper_facts, comparison_facts)
         else:
@@ -89,24 +91,26 @@ class EvaluationPredictionSnapshotService:
             ),
             items=tuple(items),
         )
-        self.evaluation_repository.upsert_prediction_snapshot(snapshot)
+        await self.evaluation_repository.upsert_prediction_snapshot(snapshot)
         return snapshot
 
-    def _objective_first_items(
+    async def _objective_first_items(
         self,
         collection_id: str,
     ) -> tuple[list[EvaluationPredictionItem], dict[str, int]]:
         items: list[EvaluationPredictionItem] = []
         published_analysis_count = 0
         exported_evidence_keys: set[tuple[str, int, str]] = set()
-        for objective in self.objective_repository.list_objectives(collection_id):
+        for objective in await self.objective_repository.list_objectives(
+            collection_id
+        ):
             analysis_version = objective.published_analysis_version
             if analysis_version is None:
                 continue
             published_analysis_count += 1
             finding_offset = 0
             while True:
-                findings, finding_total = self.objective_repository.list_findings(
+                findings, finding_total = await self.objective_repository.list_findings(
                     collection_id,
                     objective.objective_id,
                     analysis_version,
@@ -120,7 +124,7 @@ class EvaluationPredictionSnapshotService:
                     evidence_offset = 0
                     while True:
                         evidence_page, evidence_total = (
-                            self.objective_repository.list_evidence(
+                            await self.objective_repository.list_evidence(
                                 collection_id,
                                 objective.objective_id,
                                 analysis_version,

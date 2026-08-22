@@ -13,7 +13,9 @@ async def get_collection_workspace(
     request: Request,
 ) -> WorkspaceOverviewResponse:
     try:
-        payload = request.app.state.workspace_service.get_workspace_overview(collection_id)
+        payload = await request.app.state.workspace_service.get_workspace_overview(
+            collection_id
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return WorkspaceOverviewResponse(**payload)

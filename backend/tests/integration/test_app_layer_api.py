@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 import threading
 import time
@@ -12,12 +13,6 @@ if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
 
 import pytest
-from domain.source import (
-    SourceDocument,
-    SourceReferenceSet,
-    assemble_source_documents,
-    build_source_document_tree,
-)
 from infra.persistence.memory import MemoryBuildRepository
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 from infra.source.runtime.source_evidence import (
@@ -31,6 +26,8 @@ from tests.support.objective_review_repository import InMemoryObjectiveReviewRep
 from tests.support.experiment_plan_repository import (
     InMemoryExperimentPlanRepository,
 )
+from tests.support.chat_repository import MemoryChatRepository
+from tests.support.source_artifact_repository import MemorySourceArtifactRepository
 
 try:
     from fastapi.testclient import TestClient
@@ -57,73 +54,6 @@ class DummyWorkflowOutput:
         self.result = result
 
 
-class MemorySourceArtifactRepository:
-    def __init__(self) -> None:
-        self._documents: dict[tuple[str, str], tuple[SourceDocument, ...]] = {}
-        self._references: dict[tuple[str, str], SourceReferenceSet] = {}
-
-    def replace_collection_documents(
-        self,
-        collection_id: str,
-        build_id: str,
-        documents: tuple[SourceDocument, ...],
-    ) -> None:
-        self._documents[(collection_id, build_id)] = documents
-
-    def read_collection_documents(
-        self,
-        collection_id: str,
-        *,
-        build_id: str | None = None,
-    ) -> tuple[SourceDocument, ...]:
-        if build_id is None:
-            return ()
-        return self._documents.get((collection_id, build_id), ())
-
-    def replace_collection_references(
-        self,
-        collection_id: str,
-        build_id: str,
-        references: SourceReferenceSet,
-    ) -> None:
-        self._references[(collection_id, build_id)] = references
-
-    def read_collection_references(
-        self,
-        collection_id: str,
-        *,
-        build_id: str | None = None,
-    ) -> SourceReferenceSet:
-        if build_id is None:
-            return SourceReferenceSet()
-        return self._references.get((collection_id, build_id), SourceReferenceSet())
-
-    def read_document_tree(
-        self,
-        collection_id: str,
-        document_id: str,
-        build_id: str | None = None,
-    ):
-        documents = self.read_collection_documents(
-            collection_id,
-            build_id=build_id,
-        )
-        document = next(
-            item for item in documents if item.document_id == document_id
-        )
-        return build_source_document_tree(
-            collection_id=collection_id,
-            document=document,
-            blocks=document.blocks,
-            tables=document.tables,
-            figures=document.figures,
-            references=self.read_collection_references(
-                collection_id,
-                build_id=build_id,
-            ),
-        )
-
-
 def _wait_for_task_terminal(app_client, task_id: str, timeout_s: float = 5.0) -> dict:  # noqa: ANN001
     deadline = time.monotonic() + timeout_s
     last_body: dict | None = None
@@ -143,10 +73,6 @@ def _build_config(output_dir: Path, input_dir: Path) -> SimpleNamespace:
         input=SimpleNamespace(storage=SimpleNamespace(base_dir=str(input_dir))),
         root_dir=str(output_dir.parent),
     )
-
-
-def _collection_output_dir(app_client, collection_id: str) -> Path:  # noqa: ANN001
-    return app_client.app.state.collection_service.get_paths(collection_id).output_dir
 
 
 def _write_source_artifact_outputs(
@@ -252,8 +178,9 @@ def _create_built_collection(
     task_id = task_resp.json()["task_id"]
     final_task = _wait_for_task_terminal(app_client, task_id)
     assert final_task["status"] == "completed"
-    active_build = app_client.app.state.task_service.repository.read_active_build(
-        collection_id
+    active_build = app_client.portal.call(
+        app_client.app.state.task_service.repository.read_active_build,
+        collection_id,
     )
     assert active_build is not None
     app_client.app.state.paper_fact_repository.activate(active_build.build_id)
@@ -316,34 +243,25 @@ def test_request_id_is_echoed_and_propagated_to_background_build(
     assert captured["bound_request_id"] == request_id
 
 
-def test_build_task_route_schedules_blocking_entry_without_waiting(
+def test_build_task_route_schedules_async_entry_without_waiting(
     app_client, monkeypatch
 ):
     captured: dict[str, object] = {}
     started = threading.Event()
-    release = threading.Event()
     finished = threading.Event()
 
-    def fake_run_task_blocking(*args, **kwargs):  # noqa: ANN002, ANN003
+    async def fake_run_task(*args, **kwargs):  # noqa: ANN002, ANN003
         captured["args"] = args
         captured["kwargs"] = kwargs
         started.set()
-        release.wait(timeout=5)
+        await asyncio.sleep(0.2)
         finished.set()
         return {"task_id": args[0], "collection_id": args[1], "status": "queued"}
 
-    def fail_run_task(*args, **kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("async build entry should not be scheduled directly")
-
-    monkeypatch.setattr(
-        app_client.app.state.build_pipeline_service,
-        "run_task_blocking",
-        fake_run_task_blocking,
-    )
     monkeypatch.setattr(
         app_client.app.state.build_pipeline_service,
         "run_task",
-        fail_run_task,
+        fake_run_task,
     )
 
     create_resp = app_client.post(
@@ -364,18 +282,15 @@ def test_build_task_route_schedules_blocking_entry_without_waiting(
     )
     assert upload_resp.status_code == 200
 
-    try:
-        task_resp = app_client.post(
-            f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={}
-        )
+    task_resp = app_client.post(
+        f"{API_V1_PREFIX}/collections/{collection_id}/tasks/build", json={}
+    )
 
-        assert task_resp.status_code == 200
-        assert started.wait(timeout=2)
-        assert captured["args"][1] == collection_id
-        assert not finished.is_set()
-    finally:
-        release.set()
-        finished.wait(timeout=2)
+    assert task_resp.status_code == 200
+    assert started.wait(timeout=2)
+    assert captured["args"][1] == collection_id
+    assert not finished.is_set()
+    assert finished.wait(timeout=2)
 
 
 def test_legacy_index_task_route_is_not_registered(app_client):
@@ -439,7 +354,6 @@ def test_retired_collection_projection_routes_are_not_registered(
 def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
     import application.pipeline.collection_build.service as task_runner_module
     from application.source.task_service import TaskService
-    from infra.persistence.postgres.chat_repository import PostgresChatRepository
 
     monkeypatch.setenv("BOOTSTRAP_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "admin-password")
@@ -472,9 +386,7 @@ def app_client(monkeypatch, tmp_path, auth_session_service, collection_service):
             objective_repository=objective_repository,
             finding_review_repository=finding_review_repository,
             experiment_plan_repository=experiment_plan_repository,
-            chat_repository=PostgresChatRepository(
-                auth_session_service.repository.session_factory
-            ),
+            chat_repository=MemoryChatRepository(),
         )
     ) as client:
         login_response = client.post(
@@ -695,7 +607,10 @@ def test_build_task_contract_ignores_legacy_engine_fields(app_client, monkeypatc
     assert task_status["status"] == "completed"
 
     assert captured["method"] == task_runner_module.IndexingMethod.Fast
-    build = app_client.app.state.task_service.repository.read_build(task_id)
+    build = app_client.portal.call(
+        app_client.app.state.task_service.repository.read_build,
+        task_id,
+    )
     assert build is not None
     assert build.mode == "fast"
     assert "is_update_run" not in captured

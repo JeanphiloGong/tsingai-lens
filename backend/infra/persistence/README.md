@@ -12,8 +12,11 @@ identity and ownership model is documented in
 - Alembic is the only runtime schema-change path.
 
 SQLite and memory repositories exist only for isolated tests. Maintained
-runtime composition uses one SQLAlchemy engine and explicit PostgreSQL
-repositories from `main.py`; there is no repository factory, runtime storage
+runtime composition uses one SQLAlchemy `AsyncEngine`, one
+`async_sessionmaker`, and explicit PostgreSQL repositories from `main.py`.
+Each repository operation creates its own short `AsyncSession`; concurrent
+tasks never share a session. Database I/O is awaited directly instead of being
+offloaded to a worker thread. There is no repository factory, runtime storage
 selector, or fallback read.
 
 ## Objective Aggregate
@@ -93,7 +96,9 @@ plans do not derive authority from general Chat text.
 
 SQLAlchemy models own storage shape, domain records own scientific meaning and
 invariants, and Pydantic models own HTTP payloads. Repositories map between
-those layers explicitly and use short transactions.
+those layers explicitly and use short async transactions. Synchronous model or
+scientific computation may run outside the event-loop thread, but it must not
+carry an `AsyncSession` or perform repository I/O there.
 
 Do not add a generic repository, persistence facade, compatibility wrapper,
 dual write, runtime schema detection, or JSON fallback store. Change the owning

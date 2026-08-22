@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from asyncio import get_running_loop, run_coroutine_threadsafe
 import logging
 from time import perf_counter
 from typing import Any, Callable
@@ -34,30 +35,30 @@ class ObjectiveAnalysisService:
         self.objective_repository = objective_repository
         self.research_objective_service = research_objective_service
 
-    def confirm_objective(self, collection_id: str, objective_id: str) -> dict[str, Any]:
-        objective = self.objective_repository.confirm_objective(
+    async def confirm_objective(self, collection_id: str, objective_id: str) -> dict[str, Any]:
+        objective = await self.objective_repository.confirm_objective(
             collection_id, objective_id
         )
-        return self._result(collection_id, objective)
+        return await self._result(collection_id, objective)
 
-    def queue_analysis(self, collection_id: str, objective_id: str) -> dict[str, Any]:
-        objective, analysis = self.objective_repository.queue_analysis(
+    async def queue_analysis(self, collection_id: str, objective_id: str) -> dict[str, Any]:
+        objective, analysis = await self.objective_repository.queue_analysis(
             collection_id,
             objective_id,
             pipeline_version=_PIPELINE_VERSION,
             model_name=None,
             prompt_versions={},
         )
-        return self._result(collection_id, objective, analysis=analysis)
+        return await self._result(collection_id, objective, analysis=analysis)
 
-    def fail_analysis_dispatch(
+    async def fail_analysis_dispatch(
         self,
         collection_id: str,
         objective_id: str,
         analysis_version: int,
     ) -> dict[str, Any]:
-        objective = self._require_objective(collection_id, objective_id)
-        analysis = self.objective_repository.fail_analysis(
+        objective = await self._require_objective(collection_id, objective_id)
+        analysis = await self.objective_repository.fail_analysis(
             collection_id,
             objective_id,
             analysis_version,
@@ -67,17 +68,17 @@ class ObjectiveAnalysisService:
             ),
             expected_status="queued",
         )
-        return self._result(collection_id, objective, analysis=analysis)
+        return await self._result(collection_id, objective, analysis=analysis)
 
-    def get_analysis_state(
+    async def get_analysis_state(
         self,
         collection_id: str,
         objective_id: str,
     ) -> dict[str, Any]:
-        objective = self._require_objective(collection_id, objective_id)
-        return self._result(collection_id, objective)
+        objective = await self._require_objective(collection_id, objective_id)
+        return await self._result(collection_id, objective)
 
-    def list_findings(
+    async def list_findings(
         self,
         collection_id: str,
         objective_id: str,
@@ -86,12 +87,12 @@ class ObjectiveAnalysisService:
         offset: int = 0,
         limit: int = 50,
     ) -> dict[str, Any]:
-        version = self._published_version(
+        version = await self._published_version(
             collection_id,
             objective_id,
             analysis_version,
         )
-        findings, total = self.objective_repository.list_findings(
+        findings, total = await self.objective_repository.list_findings(
             collection_id,
             objective_id,
             version,
@@ -108,7 +109,7 @@ class ObjectiveAnalysisService:
             "total": total,
         }
 
-    def get_finding(
+    async def get_finding(
         self,
         collection_id: str,
         objective_id: str,
@@ -116,12 +117,12 @@ class ObjectiveAnalysisService:
         *,
         analysis_version: int | None = None,
     ) -> dict[str, Any]:
-        version = self._published_version(
+        version = await self._published_version(
             collection_id,
             objective_id,
             analysis_version,
         )
-        finding = self.objective_repository.read_finding(
+        finding = await self.objective_repository.read_finding(
             collection_id,
             objective_id,
             version,
@@ -138,7 +139,7 @@ class ObjectiveAnalysisService:
             "finding": finding.to_record(),
         }
 
-    def list_evidence(
+    async def list_evidence(
         self,
         collection_id: str,
         objective_id: str,
@@ -148,12 +149,12 @@ class ObjectiveAnalysisService:
         offset: int = 0,
         limit: int = 100,
     ) -> dict[str, Any]:
-        version = self._published_version(
+        version = await self._published_version(
             collection_id,
             objective_id,
             analysis_version,
         )
-        evidence, total = self.objective_repository.list_evidence(
+        evidence, total = await self.objective_repository.list_evidence(
             collection_id,
             objective_id,
             version,
@@ -172,40 +173,39 @@ class ObjectiveAnalysisService:
             "total": total,
         }
 
-    def get_evidence_map(
+    async def get_evidence_map(
         self,
         collection_id: str,
         objective_id: str,
     ) -> dict[str, Any]:
-        objective = self._require_objective(collection_id, objective_id)
-        version = self._published_version(collection_id, objective_id, None)
-        analysis = self.objective_repository.read_published_analysis(
+        objective = await self._require_objective(collection_id, objective_id)
+        version = await self._published_version(collection_id, objective_id, None)
+        analysis = await self.objective_repository.read_published_analysis(
             collection_id,
             objective_id,
         )
         if analysis is None:
             raise ValueError("objective has no published analysis")
 
-        findings = self._all_published_findings(
+        findings = await self._all_published_findings(
             collection_id,
             objective_id,
             version,
         )
-        evidence_records = self._all_published_evidence(
+        evidence_records = await self._all_published_evidence(
             collection_id,
             objective_id,
             version,
         )
-        profiles = (
+        profiles = await (
             self.research_objective_service.document_profile_service.read_document_profiles(
-                collection_id,
-                build_id=analysis.source_build_id,
+                collection_id, build_id=analysis.source_build_id
             )
         )
         return build_objective_evidence_map(
             objective=objective,
             analysis=analysis,
-            contributions=self.objective_repository.list_contributions(
+            contributions=await self.objective_repository.list_contributions(
                 collection_id,
                 objective_id,
                 version,
@@ -215,7 +215,7 @@ class ObjectiveAnalysisService:
             profiles=profiles,
         )
 
-    def _all_published_findings(
+    async def _all_published_findings(
         self,
         collection_id: str,
         objective_id: str,
@@ -224,7 +224,7 @@ class ObjectiveAnalysisService:
         records: list[Any] = []
         offset = 0
         while True:
-            page, total = self.objective_repository.list_findings(
+            page, total = await self.objective_repository.list_findings(
                 collection_id,
                 objective_id,
                 analysis_version,
@@ -236,7 +236,7 @@ class ObjectiveAnalysisService:
             if offset >= total or not page:
                 return tuple(records)
 
-    def _all_published_evidence(
+    async def _all_published_evidence(
         self,
         collection_id: str,
         objective_id: str,
@@ -245,7 +245,7 @@ class ObjectiveAnalysisService:
         records: list[Any] = []
         offset = 0
         while True:
-            page, total = self.objective_repository.list_evidence(
+            page, total = await self.objective_repository.list_evidence(
                 collection_id,
                 objective_id,
                 analysis_version,
@@ -257,37 +257,38 @@ class ObjectiveAnalysisService:
             if offset >= total or not page:
                 return tuple(records)
 
-    def execute_queued_analysis(
+    async def execute_queued_analysis(
         self,
         collection_id: str,
         objective_id: str,
         analysis_version: int,
     ) -> dict[str, Any]:
         try:
-            objective = self._require_objective(collection_id, objective_id)
-            claimed = self.objective_repository.claim_analysis(
+            objective = await self._require_objective(collection_id, objective_id)
+            claimed = await self.objective_repository.claim_analysis(
                 collection_id,
                 objective_id,
                 analysis_version,
             )
             if claimed is None:
-                return self._result(collection_id, objective)
+                return await self._result(collection_id, objective)
             usage_started_at = perf_counter()
+            progress_callback = self._build_progress_callback(claimed)
             with (
                 capture_llm_usage() as usage,
                 capture_analysis_diagnostics() as diagnostics,
             ):
                 try:
                     artifacts = (
-                        self.research_objective_service.generate_objective_analysis_artifacts(
+                        await self.research_objective_service.generate_objective_analysis_artifacts(
                             collection_id,
                             claimed,
-                            progress_callback=self._build_progress_callback(claimed),
+                            progress_callback=progress_callback,
                         )
                     )
                     self._validate_artifacts(artifacts)
                 finally:
-                    claimed = self.objective_repository.update_analysis_execution_stats(
+                    claimed = await self.objective_repository.update_analysis_execution_stats(
                         collection_id,
                         objective_id,
                         analysis_version,
@@ -300,7 +301,7 @@ class ObjectiveAnalysisService:
                         prompt_versions=usage.prompt_versions,
                         diagnostics=diagnostics.records,
                     )
-            objective, completed = self.objective_repository.publish_analysis(
+            objective, completed = await self.objective_repository.publish_analysis(
                 collection_id,
                 objective_id,
                 analysis_version,
@@ -308,7 +309,7 @@ class ObjectiveAnalysisService:
                 evidence_records=artifacts.evidence_records,
                 findings=artifacts.findings,
             )
-            return self._result(collection_id, objective, analysis=completed)
+            return await self._result(collection_id, objective, analysis=completed)
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "Objective analysis failed collection_id=%s objective_id=%s analysis_version=%s",
@@ -316,21 +317,21 @@ class ObjectiveAnalysisService:
                 objective_id,
                 analysis_version,
             )
-            current = self.objective_repository.read_analysis(
+            current = await self.objective_repository.read_analysis(
                 collection_id,
                 objective_id,
                 analysis_version,
             )
             if current is not None and current.status in {"queued", "running"}:
-                current = self.objective_repository.fail_analysis(
+                current = await self.objective_repository.fail_analysis(
                     collection_id,
                     objective_id,
                     analysis_version,
                     error_code=self._error_code(exc),
                     error_message=str(exc) or exc.__class__.__name__,
                 )
-            objective = self._require_objective(collection_id, objective_id)
-            return self._result(collection_id, objective, analysis=current)
+            objective = await self._require_objective(collection_id, objective_id)
+            return await self._result(collection_id, objective, analysis=current)
 
     @staticmethod
     def _validate_artifacts(artifacts: ObjectiveAnalysisArtifacts) -> None:
@@ -339,19 +340,19 @@ class ObjectiveAnalysisService:
         if not artifacts.evidence_records:
             raise RuntimeError("objective analysis produced no source-backed evidence")
 
-    def _result(
+    async def _result(
         self,
         collection_id: str,
         objective: ResearchObjective,
         *,
         analysis: ObjectiveAnalysis | None = None,
     ) -> dict[str, Any]:
-        active = analysis or self.objective_repository.read_analysis(
+        active = analysis or await self.objective_repository.read_analysis(
             collection_id,
             objective.objective_id,
             objective.active_analysis_version,
         )
-        published = self.objective_repository.read_published_analysis(
+        published = await self.objective_repository.read_published_analysis(
             collection_id,
             objective.objective_id,
         )
@@ -359,12 +360,12 @@ class ObjectiveAnalysisService:
         paper_contributions = ()
         warnings: list[str] = []
         if published is not None:
-            paper_contributions = self.objective_repository.list_contributions(
+            paper_contributions = await self.objective_repository.list_contributions(
                 collection_id,
                 objective.objective_id,
                 published.analysis_version,
             )
-            findings, _total = self.objective_repository.list_findings(
+            findings, _total = await self.objective_repository.list_findings(
                 collection_id,
                 objective.objective_id,
                 published.analysis_version,
@@ -389,12 +390,12 @@ class ObjectiveAnalysisService:
             "warnings": warnings,
         }
 
-    def _require_objective(
+    async def _require_objective(
         self,
         collection_id: str,
         objective_id: str,
     ) -> ResearchObjective:
-        objective = self.objective_repository.read_objective(
+        objective = await self.objective_repository.read_objective(
             collection_id, objective_id
         )
         if objective is None:
@@ -403,13 +404,13 @@ class ObjectiveAnalysisService:
             )
         return objective
 
-    def _published_version(
+    async def _published_version(
         self,
         collection_id: str,
         objective_id: str,
         requested_version: int | None,
     ) -> int:
-        objective = self._require_objective(collection_id, objective_id)
+        objective = await self._require_objective(collection_id, objective_id)
         published_version = objective.published_analysis_version
         if published_version is None:
             raise ValueError("objective has no published analysis")
@@ -421,6 +422,7 @@ class ObjectiveAnalysisService:
         self,
         analysis: ObjectiveAnalysis,
     ) -> Callable[[dict[str, Any]], None]:
+        loop = get_running_loop()
         seen_document_ids: set[str] = set()
         processed_document_count = analysis.processed_document_count
         total_document_count = analysis.total_document_count
@@ -449,18 +451,24 @@ class ObjectiveAnalysisService:
                 processed_document_count,
                 total_document_count,
             )
-            self.objective_repository.update_analysis_progress(
-                analysis.collection_id,
-                analysis.objective_id,
-                analysis.analysis_version,
-                phase=str(progress.get("phase") or "running"),
-                processed_document_count=processed_document_count,
-                total_document_count=total_document_count,
-                current_document_id=active_document_id,
-                progress_message=(
-                    str(progress.get("message")) if progress.get("message") else None
+            update_future = run_coroutine_threadsafe(
+                self.objective_repository.update_analysis_progress(
+                    analysis.collection_id,
+                    analysis.objective_id,
+                    analysis.analysis_version,
+                    phase=str(progress.get("phase") or "running"),
+                    processed_document_count=processed_document_count,
+                    total_document_count=total_document_count,
+                    current_document_id=active_document_id,
+                    progress_message=(
+                        str(progress.get("message"))
+                        if progress.get("message")
+                        else None
+                    ),
                 ),
+                loop,
             )
+            update_future.result()
 
         return update
 

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from sqlalchemy import select, update
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from infra.persistence.postgres.models.auth import AuthSession, AuthUser
 
@@ -14,12 +14,14 @@ from infra.persistence.postgres.models.auth import AuthSession, AuthUser
 class PostgresAuthRepository:
     backend_name = "postgres"
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         self.session_factory = session_factory
 
-    def read_user_by_email(self, email: str) -> dict[str, Any] | None:
-        with self.session_factory() as session:
-            user = session.scalar(
+    async def read_user_by_email(self, email: str) -> dict[str, Any] | None:
+        async with self.session_factory() as session:
+            user = await session.scalar(
                 select(AuthUser).where(AuthUser.email == email.strip().lower())
             )
             if user is None:
@@ -32,9 +34,9 @@ class PostgresAuthRepository:
                 "created_at": _iso(user.created_at),
             }
 
-    def read_user(self, user_id: str) -> dict[str, Any] | None:
-        with self.session_factory() as session:
-            user = session.get(AuthUser, user_id)
+    async def read_user(self, user_id: str) -> dict[str, Any] | None:
+        async with self.session_factory() as session:
+            user = await session.get(AuthUser, user_id)
             if user is None:
                 return None
             return {
@@ -45,8 +47,8 @@ class PostgresAuthRepository:
                 "created_at": _iso(user.created_at),
             }
 
-    def add_user(self, payload: Mapping[str, Any]) -> None:
-        with self.session_factory.begin() as session:
+    async def add_user(self, payload: Mapping[str, Any]) -> None:
+        async with self.session_factory.begin() as session:
             session.add(
                 AuthUser(
                     user_id=str(payload["user_id"]),
@@ -61,12 +63,12 @@ class PostgresAuthRepository:
                 )
             )
 
-    def read_session_by_token_hash(
+    async def read_session_by_token_hash(
         self,
         token_hash: str,
     ) -> dict[str, Any] | None:
-        with self.session_factory() as session:
-            auth_session = session.scalar(
+        async with self.session_factory() as session:
+            auth_session = await session.scalar(
                 select(AuthSession).where(AuthSession.token_hash == token_hash)
             )
             if auth_session is None:
@@ -79,8 +81,8 @@ class PostgresAuthRepository:
                 "revoked_at": _optional_iso(auth_session.revoked_at),
             }
 
-    def add_session(self, payload: Mapping[str, Any]) -> None:
-        with self.session_factory.begin() as session:
+    async def add_session(self, payload: Mapping[str, Any]) -> None:
+        async with self.session_factory.begin() as session:
             session.add(
                 AuthSession(
                     session_id=str(payload["session_id"]),
@@ -92,9 +94,11 @@ class PostgresAuthRepository:
                 )
             )
 
-    def revoke_session_by_token_hash(self, token_hash: str, revoked_at: str) -> None:
-        with self.session_factory.begin() as session:
-            session.execute(
+    async def revoke_session_by_token_hash(
+        self, token_hash: str, revoked_at: str
+    ) -> None:
+        async with self.session_factory.begin() as session:
+            await session.execute(
                 update(AuthSession)
                 .where(AuthSession.token_hash == token_hash)
                 .values(revoked_at=_datetime(revoked_at))

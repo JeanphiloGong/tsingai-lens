@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
-from starlette.concurrency import run_in_threadpool
 
 from application.source.reference_workflow_service import (
     SourceReferenceWorkflowResult,
@@ -28,10 +27,9 @@ async def build_collection_references(
     request: Request,
 ) -> SourceReferenceSummaryResponse:
     try:
-        request.app.state.collection_service.get_collection(collection_id)
-        result = await run_in_threadpool(
-            request.app.state.reference_workflow_service.build_collection_references,
-            collection_id,
+        await request.app.state.collection_service.get_collection(collection_id)
+        result = await request.app.state.reference_workflow_service.build_collection_references(
+            collection_id
         )
     except FileNotFoundError as exc:
         raise _not_ready_or_missing(collection_id, exc) from exc
@@ -48,10 +46,9 @@ async def get_collection_references(
     request: Request,
 ) -> SourceReferenceSetResponse:
     try:
-        request.app.state.collection_service.get_collection(collection_id)
-        result = await run_in_threadpool(
-            request.app.state.reference_workflow_service.read_collection_references,
-            collection_id,
+        await request.app.state.collection_service.get_collection(collection_id)
+        result = await request.app.state.reference_workflow_service.read_collection_references(
+            collection_id
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

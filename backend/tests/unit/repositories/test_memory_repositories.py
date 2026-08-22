@@ -13,8 +13,15 @@ from domain.source import (
     CollectionRecord,
 )
 
+pytestmark = pytest.mark.anyio
 
-def test_memory_collection_repository_round_trips_records_by_owner():
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+async def test_memory_collection_repository_round_trips_records_by_owner():
     repository = MemoryCollectionRepository()
     record = CollectionRecord(
         collection_id="col_demo",
@@ -27,14 +34,14 @@ def test_memory_collection_repository_round_trips_records_by_owner():
         updated_at="2026-07-19T00:00:00+00:00",
     )
 
-    repository.add_collection(record)
+    await repository.add_collection(record)
 
-    assert repository.read_collection(record.collection_id) == record
-    assert repository.list_collections("user_demo") == (record,)
-    assert repository.list_collections("user_other") == ()
+    assert await repository.read_collection(record.collection_id) == record
+    assert await repository.list_collections("user_demo") == (record,)
+    assert await repository.list_collections("user_other") == ()
 
 
-def test_memory_collection_repository_keeps_file_provenance_in_one_aggregate():
+async def test_memory_collection_repository_keeps_file_provenance_in_one_aggregate():
     repository = MemoryCollectionRepository()
     collection = CollectionRecord(
         collection_id="col_demo",
@@ -91,42 +98,42 @@ def test_memory_collection_repository_keeps_file_provenance_in_one_aggregate():
         goal_context={"research_brief": {"intent": "compare"}},
     )
 
-    repository.add_collection(collection)
-    repository.add_collection_import(
+    await repository.add_collection(collection)
+    await repository.add_collection_import(
         import_record,
         updated_at="2026-07-19T00:01:00+00:00",
     )
-    repository.add_collection_handoff(handoff)
+    await repository.add_collection_handoff(handoff)
 
-    assert repository.list_collection_files("col_demo") == (file_record,)
-    assert repository.list_collection_imports("col_demo") == (import_record,)
-    assert repository.list_collection_handoffs("col_demo") == (handoff,)
-    membership = repository.list_collection_documents("col_demo")[0]
-    assert repository.read_document(membership.document_id) is not None
+    assert await repository.list_collection_files("col_demo") == (file_record,)
+    assert await repository.list_collection_imports("col_demo") == (import_record,)
+    assert await repository.list_collection_handoffs("col_demo") == (handoff,)
+    membership = (await repository.list_collection_documents("col_demo"))[0]
+    assert await repository.read_document(membership.document_id) is not None
     assert (
-        repository.read_document_version(membership.document_version_id).sha256
+        (await repository.read_document_version(membership.document_version_id)).sha256
         == file_record.sha256
     )
-    assert repository.read_collection("col_demo").paper_count == 1
-    assert repository.read_collection("col_demo").status == "ready"
+    assert (await repository.read_collection("col_demo")).paper_count == 1
+    assert (await repository.read_collection("col_demo")).status == "ready"
 
-    assert repository.delete_collection("col_demo") is True
-    assert repository.list_collection_files("col_demo") == ()
-    assert repository.list_collection_imports("col_demo") == ()
-    assert repository.list_collection_handoffs("col_demo") == ()
-    assert repository.list_collection_documents("col_demo") == ()
-    assert repository.read_document(membership.document_id) is None
-    assert repository.read_document_version(membership.document_version_id) is None
+    assert await repository.delete_collection("col_demo") is True
+    assert await repository.list_collection_files("col_demo") == ()
+    assert await repository.list_collection_imports("col_demo") == ()
+    assert await repository.list_collection_handoffs("col_demo") == ()
+    assert await repository.list_collection_documents("col_demo") == ()
+    assert await repository.read_document(membership.document_id) is None
+    assert await repository.read_document_version(membership.document_version_id) is None
 
 
-def test_memory_build_repository_is_directly_injected_for_isolated_tests() -> None:
+async def test_memory_build_repository_is_directly_injected_for_isolated_tests() -> None:
     repository = MemoryBuildRepository()
 
-    assert repository.list_tasks() == ()
-    assert repository.read_active_build("col_demo") is None
+    assert await repository.list_tasks() == ()
+    assert await repository.read_active_build("col_demo") is None
 
 
-def test_memory_collection_import_rejects_invalid_hash_without_partial_state() -> None:
+async def test_memory_collection_import_rejects_invalid_hash_without_partial_state() -> None:
     repository = MemoryCollectionRepository()
     collection = CollectionRecord(
         collection_id="col_invalid_hash",
@@ -173,15 +180,15 @@ def test_memory_collection_import_rejects_invalid_hash_without_partial_state() -
             ),
         ),
     )
-    repository.add_collection(collection)
+    await repository.add_collection(collection)
 
     with pytest.raises(ValueError, match="lowercase SHA-256"):
-        repository.add_collection_import(
+        await repository.add_collection_import(
             import_record,
             updated_at="2026-07-19T00:02:00+00:00",
         )
 
-    assert repository.list_collection_files(collection.collection_id) == ()
-    assert repository.list_collection_imports(collection.collection_id) == ()
-    assert repository.list_collection_documents(collection.collection_id) == ()
-    assert repository.read_collection(collection.collection_id) == collection
+    assert await repository.list_collection_files(collection.collection_id) == ()
+    assert await repository.list_collection_imports(collection.collection_id) == ()
+    assert await repository.list_collection_documents(collection.collection_id) == ()
+    assert await repository.read_collection(collection.collection_id) == collection

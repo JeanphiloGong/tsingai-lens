@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -14,8 +15,15 @@ from infra.persistence.file.object_store import FileObjectStore
 from infra.persistence.memory import MemoryCollectionRepository
 from scripts import export_source_tables as export_script
 
+pytestmark = pytest.mark.anyio
 
-def test_collection_input_rows_use_registered_storage_key(tmp_path):
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+async def test_collection_input_rows_use_registered_storage_key(tmp_path):
     collections_root = tmp_path / "collections"
     collection_dir = collections_root / "col_demo"
     collection_dir.mkdir(parents=True)
@@ -24,7 +32,7 @@ def test_collection_input_rows_use_registered_storage_key(tmp_path):
     digest = sha256(payload).hexdigest()
     FileObjectStore(collections_root).write(storage_key, payload, digest)
     repository = MemoryCollectionRepository()
-    repository.add_collection(
+    await repository.add_collection(
         CollectionRecord.create(
             collection_id="col_demo",
             name="Demo",
@@ -46,7 +54,7 @@ def test_collection_input_rows_use_registered_storage_key(tmp_path):
         size_bytes=len(payload),
         created_at="2026-07-19T00:00:00+00:00",
     )
-    repository.add_collection_import(
+    await repository.add_collection_import(
         CollectionImportRecord(
             import_id="imp_1",
             collection_id="col_demo",
@@ -71,7 +79,7 @@ def test_collection_input_rows_use_registered_storage_key(tmp_path):
         updated_at=file_record.created_at,
     )
 
-    rows = export_script._collection_input_rows(repository, "col_demo")
+    rows = await export_script._collection_input_rows(repository, "col_demo")
 
     assert rows == [
         {
@@ -85,9 +93,9 @@ def test_collection_input_rows_use_registered_storage_key(tmp_path):
         }
     ]
 
-    repository.list_collection_imports = lambda _collection_id: ()
+    repository.list_collection_imports = AsyncMock(return_value=())
 
-    assert export_script._collection_input_rows(repository, "col_demo") == [
+    assert await export_script._collection_input_rows(repository, "col_demo") == [
         {
             "id": "file_1",
             "title": "paper.pdf",
@@ -100,16 +108,16 @@ def test_collection_input_rows_use_registered_storage_key(tmp_path):
     ]
 
 
-def test_collection_input_rows_do_not_scan_input_directory(tmp_path):
+async def test_collection_input_rows_do_not_scan_input_directory(tmp_path):
     collection_dir = tmp_path / "collections" / "col_demo" / "input"
     collection_dir.mkdir(parents=True)
     (collection_dir / "unregistered.pdf").write_bytes(b"%PDF-1.4")
     repository = MemoryCollectionRepository()
 
-    assert export_script._collection_input_rows(repository, "col_demo") == []
+    assert await export_script._collection_input_rows(repository, "col_demo") == []
 
 
-def test_reparse_registered_input_verifies_object_hash(monkeypatch, tmp_path):
+async def test_reparse_registered_input_verifies_object_hash(monkeypatch, tmp_path):
     collections_root = tmp_path / "collections"
     collection_dir = collections_root / "col_demo"
     collection_dir.mkdir(parents=True)
@@ -118,7 +126,7 @@ def test_reparse_registered_input_verifies_object_hash(monkeypatch, tmp_path):
     digest = sha256(payload).hexdigest()
     FileObjectStore(collections_root).write(storage_key, payload, digest)
     repository = MemoryCollectionRepository()
-    repository.add_collection(
+    await repository.add_collection(
         CollectionRecord.create(
             collection_id="col_demo",
             name="Demo",
@@ -140,7 +148,7 @@ def test_reparse_registered_input_verifies_object_hash(monkeypatch, tmp_path):
         size_bytes=len(payload),
         created_at="2026-07-19T00:00:00+00:00",
     )
-    repository.add_collection_import(
+    await repository.add_collection_import(
         CollectionImportRecord(
             import_id="imp_1",
             collection_id="col_demo",
@@ -168,7 +176,7 @@ def test_reparse_registered_input_verifies_object_hash(monkeypatch, tmp_path):
     monkeypatch.setattr(export_script, "build_pdf_converter", lambda: object())
 
     with pytest.raises(ValueError, match="SHA-256 mismatch"):
-        export_script._reparse_collection_inputs(
+        await export_script._reparse_collection_inputs(
             backend_root=tmp_path,
             collection_dir=collection_dir,
             collection_repository=repository,

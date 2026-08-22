@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from asyncio import to_thread
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -37,7 +39,7 @@ _TrajectoryCheckpoint = Callable[
         tuple[ChatToolCall, ...],
         tuple[ChatToolResult, ...],
     ],
-    None,
+    Awaitable[None],
 ]
 
 _STEP_LIMIT_MESSAGE = (
@@ -83,7 +85,7 @@ class ResearchAgentRunner:
         self.context_builder = context_builder or ChatContextBuilder()
         self.max_model_steps = max_model_steps
 
-    def run_turn(
+    async def run_turn(
         self,
         *,
         context: AgentContext,
@@ -102,8 +104,8 @@ class ResearchAgentRunner:
         ]
         calls: list[ChatToolCall] = []
         results: list[ChatToolResult] = []
-        self._checkpoint(checkpoint, messages, calls, results)
-        return self._continue(
+        await self._checkpoint(checkpoint, messages, calls, results)
+        return await self._continue(
             context,
             messages,
             calls,
@@ -111,7 +113,7 @@ class ResearchAgentRunner:
             checkpoint=checkpoint,
         )
 
-    def resume_approved_call(
+    async def resume_approved_call(
         self,
         *,
         context: AgentContext,
@@ -131,7 +133,7 @@ class ResearchAgentRunner:
                 "The approved research capability is not available.",
             )
         else:
-            call, result = self._validate_and_execute(
+            call, result = await self._validate_and_execute(
                 context,
                 approved_call,
                 handler,
@@ -143,8 +145,8 @@ class ResearchAgentRunner:
         calls[-1] = call
         results.append(result)
         messages.append(self._result_message(context, result))
-        self._checkpoint(checkpoint, messages, calls, results)
-        return self._continue(
+        await self._checkpoint(checkpoint, messages, calls, results)
+        return await self._continue(
             context,
             messages,
             calls,
@@ -152,7 +154,7 @@ class ResearchAgentRunner:
             checkpoint=checkpoint,
         )
 
-    def _continue(
+    async def _continue(
         self,
         context: AgentContext,
         messages: list[ChatMessage],
@@ -163,7 +165,8 @@ class ResearchAgentRunner:
     ) -> AgentRunResult:
         for _ in range(self.max_model_steps):
             try:
-                turn = self.model.respond(
+                turn = await to_thread(
+                    self.model.respond,
                     messages=self.context_builder.for_model(tuple(messages)),
                     tool_specs=self.capabilities.specs,
                 )
@@ -178,7 +181,7 @@ class ResearchAgentRunner:
                         "The research model is unavailable for this turn.",
                     )
                 )
-                self._checkpoint(checkpoint, messages, calls, results)
+                await self._checkpoint(checkpoint, messages, calls, results)
                 return self._result(
                     AgentRunStatus.FAILED,
                     messages,
@@ -189,12 +192,12 @@ class ResearchAgentRunner:
 
             if turn.tool_call is None:
                 messages.append(self._assistant(context, turn.content))
-                self._checkpoint(checkpoint, messages, calls, results)
+                await self._checkpoint(checkpoint, messages, calls, results)
                 return self._result(AgentRunStatus.COMPLETED, messages, calls, results)
 
             call, handler = self._requested_call(context, messages, turn)
             calls.append(call)
-            self._checkpoint(checkpoint, messages, calls, results)
+            await self._checkpoint(checkpoint, messages, calls, results)
             if handler is None:
                 call, capability_result = self._failure(
                     call,
@@ -206,7 +209,7 @@ class ResearchAgentRunner:
                 if decision.requires_approval:
                     pending = call.require_approval()
                     calls[-1] = pending
-                    self._checkpoint(checkpoint, messages, calls, results)
+                    await self._checkpoint(checkpoint, messages, calls, results)
                     return AgentRunResult(
                         status=AgentRunStatus.APPROVAL_REQUIRED,
                         messages=tuple(messages),
@@ -221,7 +224,7 @@ class ResearchAgentRunner:
                         "The research capability is not authorized.",
                     )
                 else:
-                    call, capability_result = self._validate_and_execute(
+                    call, capability_result = await self._validate_and_execute(
                         context,
                         call,
                         handler,
@@ -233,10 +236,10 @@ class ResearchAgentRunner:
             calls[-1] = call
             results.append(capability_result)
             messages.append(self._result_message(context, capability_result))
-            self._checkpoint(checkpoint, messages, calls, results)
+            await self._checkpoint(checkpoint, messages, calls, results)
 
         messages.append(self._assistant(context, _STEP_LIMIT_MESSAGE))
-        self._checkpoint(checkpoint, messages, calls, results)
+        await self._checkpoint(checkpoint, messages, calls, results)
         return self._result(
             AgentRunStatus.STEP_LIMIT_REACHED,
             messages,
@@ -274,7 +277,7 @@ class ResearchAgentRunner:
             risk=handler.spec.risk if handler is not None else ToolRisk.UNKNOWN,
         ), handler
 
-    def _validate_and_execute(
+    async def _validate_and_execute(
         self,
         context: AgentContext,
         call: ChatToolCall,
@@ -295,13 +298,13 @@ class ResearchAgentRunner:
             )
         call = call.start(_now_iso())
         calls[-1] = call
-        self._checkpoint(checkpoint, messages, calls, results)
+        await self._checkpoint(checkpoint, messages, calls, results)
         try:
             execution_context = CapabilityExecutionContext.for_call(
                 context,
                 call.tool_call_id,
             )
-            result = handler.execute(execution_context, arguments).for_call(
+            result = (await handler.execute(execution_context, arguments)).for_call(
                 call.tool_call_id
             )
             call = (
@@ -382,14 +385,14 @@ class ResearchAgentRunner:
         )
 
     @staticmethod
-    def _checkpoint(
+    async def _checkpoint(
         checkpoint: _TrajectoryCheckpoint | None,
         messages: list[ChatMessage],
         calls: list[ChatToolCall],
         results: list[ChatToolResult],
     ) -> None:
         if checkpoint is not None:
-            checkpoint(tuple(messages), tuple(calls), tuple(results))
+            await checkpoint(tuple(messages), tuple(calls), tuple(results))
 
     @staticmethod
     def _message_id() -> str:

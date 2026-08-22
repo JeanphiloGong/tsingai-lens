@@ -1,4 +1,6 @@
-"""Alembic environment for synchronous PostgreSQL migrations."""
+"""Alembic environment for asynchronous PostgreSQL migrations."""
+
+import asyncio
 
 from alembic import context
 from sqlalchemy.engine import Connection
@@ -27,12 +29,17 @@ def run_migrations_online() -> None:
         run_migrations(supplied_connection)
         return
 
+    asyncio.run(run_async_migrations())
+
+
+async def run_async_migrations() -> None:
     engine = build_database_engine(DatabaseSettings())
+
     try:
-        with engine.connect() as connection:
-            run_migrations(connection)
+        async with engine.connect() as connection:
+            await connection.run_sync(run_migrations)
     finally:
-        engine.dispose()
+        await engine.dispose()
 
 
 if context.is_offline_mode():

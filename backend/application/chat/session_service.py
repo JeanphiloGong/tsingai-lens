@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -50,8 +50,10 @@ class ChatSessionService:
         self.repository = repository
         self.runner = runner
 
-    def create_session(self, *, collection_id: str, user_id: str) -> ChatSession:
-        collection = self.collection_service.get_collection_for_user(
+    async def create_session(
+        self, *, collection_id: str, user_id: str
+    ) -> ChatSession:
+        collection = await self.collection_service.get_collection_for_user(
             collection_id,
             user_id,
         )
@@ -62,51 +64,55 @@ class ChatSessionService:
             collection_id=str(collection["collection_id"]),
             created_at=now,
         )
-        self.repository.add_session(session)
+        await self.repository.add_session(session)
         return session
 
-    def get_session_for_user(self, session_id: str, user_id: str) -> ChatSession:
-        session = self.repository.read_session(session_id)
+    async def get_session_for_user(
+        self, session_id: str, user_id: str
+    ) -> ChatSession:
+        session = await self.repository.read_session(session_id)
         if session is None or session.user_id != user_id:
             raise ChatSessionNotFoundError(session_id)
-        self.collection_service.get_collection_for_user(session.collection_id, user_id)
+        await self.collection_service.get_collection_for_user(
+            session.collection_id, user_id
+        )
         return session
 
-    def list_messages_for_user(
+    async def list_messages_for_user(
         self,
         session_id: str,
         user_id: str,
     ) -> tuple[ChatMessage, ...]:
-        self.get_session_for_user(session_id, user_id)
-        return self.repository.read_messages(session_id)
+        await self.get_session_for_user(session_id, user_id)
+        return await self.repository.read_messages(session_id)
 
-    def get_pending_approval_for_user(
+    async def get_pending_approval_for_user(
         self,
         session_id: str,
         user_id: str,
     ) -> ChatToolCall | None:
-        messages = self.list_messages_for_user(session_id, user_id)
+        messages = await self.list_messages_for_user(session_id, user_id)
         for message in reversed(messages):
             if message.tool_call_id is None:
                 continue
-            call = self.repository.read_tool_call(message.tool_call_id)
+            call = await self.repository.read_tool_call(message.tool_call_id)
             if call is not None and call.status is ToolCallStatus.APPROVAL_REQUIRED:
                 return call
         return None
 
-    def post_message_for_user(
+    async def post_message_for_user(
         self,
         session_id: str,
         user_id: str,
         *,
         message: str,
     ) -> dict[str, Any]:
-        session = self.get_session_for_user(session_id, user_id)
-        previous_messages = self.repository.read_messages(session_id)
-        pending = self.get_pending_approval_for_user(session_id, user_id)
+        session = await self.get_session_for_user(session_id, user_id)
+        previous_messages = await self.repository.read_messages(session_id)
+        pending = await self.get_pending_approval_for_user(session_id, user_id)
         if pending is not None:
             raise ChatApprovalPendingError(pending.tool_call_id)
-        result = self.runner.run_turn(
+        result = await self.runner.run_turn(
             context=self._context(session),
             previous_messages=previous_messages,
             user_message=message,
@@ -114,7 +120,7 @@ class ChatSessionService:
         )
         return self._turn_record(result, previous_count=len(previous_messages))
 
-    def decide_tool_call_for_user(
+    async def decide_tool_call_for_user(
         self,
         session_id: str,
         tool_call_id: str,
@@ -123,8 +129,8 @@ class ChatSessionService:
         arguments_digest: str,
         decision: str,
     ) -> dict[str, Any]:
-        session = self.get_session_for_user(session_id, user_id)
-        existing = self.repository.read_tool_call(tool_call_id)
+        session = await self.get_session_for_user(session_id, user_id)
+        existing = await self.repository.read_tool_call(tool_call_id)
         if existing is None or existing.session_id != session_id:
             raise FileNotFoundError(f"chat tool call not found: {tool_call_id}")
         if existing.status is ToolCallStatus.SUCCEEDED:
@@ -132,7 +138,7 @@ class ChatSessionService:
         if existing.status is ToolCallStatus.REJECTED:
             return {"status": "rejected", "messages": (), "pending_approval": None}
 
-        decided = self.repository.decide_tool_call(
+        decided = await self.repository.decide_tool_call(
             session_id=session_id,
             tool_call_id=tool_call_id,
             user_id=user_id,
@@ -140,7 +146,7 @@ class ChatSessionService:
             decision=decision,
             decided_at=_now_iso(),
         )
-        previous_messages = self.repository.read_messages(session_id)
+        previous_messages = await self.repository.read_messages(session_id)
         if decided.status is ToolCallStatus.REJECTED:
             result = ChatToolResult(
                 tool_call_id=decided.tool_call_id,
@@ -159,7 +165,7 @@ class ChatSessionService:
                 collection_id=session.collection_id,
                 updated_at=result_message.created_at,
             )
-            self.repository.save_trajectory(
+            await self.repository.save_trajectory(
                 session=updated_session,
                 messages=(*previous_messages, result_message),
                 tool_calls=(decided,),
@@ -171,7 +177,7 @@ class ChatSessionService:
                 "pending_approval": None,
             }
 
-        run_result = self.runner.resume_approved_call(
+        run_result = await self.runner.resume_approved_call(
             context=self._context(session),
             previous_messages=previous_messages,
             approved_call=decided,
@@ -191,15 +197,15 @@ class ChatSessionService:
             tuple[ChatToolCall, ...],
             tuple[ChatToolResult, ...],
         ],
-        None,
+        Awaitable[None],
     ]:
-        def save(
+        async def save(
             messages: tuple[ChatMessage, ...],
             tool_calls: tuple[ChatToolCall, ...],
             tool_results: tuple[ChatToolResult, ...],
         ) -> None:
             updated_at = messages[-1].created_at if messages else _now_iso()
-            self.repository.save_trajectory(
+            await self.repository.save_trajectory(
                 session=session.update(
                     user_id=session.user_id,
                     collection_id=session.collection_id,

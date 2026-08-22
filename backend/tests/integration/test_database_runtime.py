@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+import asyncio
 from pathlib import Path
 import subprocess
 import sys
-from threading import Barrier
 
 from pydantic import ValidationError
 import pytest
-from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, func
-from sqlalchemy import insert, select
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from infra.persistence.database import (
     DatabaseSettings,
@@ -59,7 +57,8 @@ def test_database_engine_rejects_invalid_configuration(
         build_database_engine(settings)
 
 
-def test_database_engine_uses_sync_psycopg_and_masks_credentials() -> None:
+@pytest.mark.anyio
+async def test_database_engine_uses_async_psycopg_and_masks_credentials() -> None:
     sensitive_value = "synthetic-sensitive-value"
     settings = DatabaseSettings(
         database_url=(
@@ -70,72 +69,37 @@ def test_database_engine_uses_sync_psycopg_and_masks_credentials() -> None:
 
     engine = build_database_engine(settings)
     try:
+        assert isinstance(engine, AsyncEngine)
         assert engine.dialect.name == "postgresql"
         assert engine.dialect.driver == "psycopg"
+        assert engine.dialect.is_async is True
         assert sensitive_value not in repr(settings)
         assert sensitive_value not in str(engine.url)
     finally:
-        engine.dispose()
+        await engine.dispose()
 
 
-def test_session_factory_commits_successful_transaction(tmp_path) -> None:
-    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'commit.sqlite'}")
-    metadata = MetaData()
-    records = Table(
-        "records",
-        metadata,
-        Column("id", Integer, primary_key=True),
-        Column("value", String, nullable=False),
+@pytest.mark.anyio
+async def test_session_factory_creates_one_async_session_per_task() -> None:
+    settings = DatabaseSettings(
+        database_url="postgresql+psycopg://lens:secret@localhost/lens_test",
+        _env_file=None,
     )
-    metadata.create_all(engine)
+    engine = build_database_engine(settings)
     sessions = build_session_factory(engine)
 
-    with sessions.begin() as session:
-        session.execute(insert(records).values(id=1, value="committed"))
+    async def open_session() -> AsyncSession:
+        session = sessions()
+        await asyncio.sleep(0)
+        return session
 
-    with sessions() as session:
-        assert session.scalar(select(func.count()).select_from(records)) == 1
-    engine.dispose()
-
-
-def test_session_factory_rolls_back_failed_transaction(tmp_path) -> None:
-    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'rollback.sqlite'}")
-    metadata = MetaData()
-    records = Table(
-        "records",
-        metadata,
-        Column("id", Integer, primary_key=True),
-        Column("value", String, nullable=False),
-    )
-    metadata.create_all(engine)
-    sessions = build_session_factory(engine)
-
-    with pytest.raises(RuntimeError, match="rollback"):
-        with sessions.begin() as session:
-            session.execute(insert(records).values(id=1, value="discarded"))
-            raise RuntimeError("force rollback")
-
-    with sessions() as session:
-        assert session.scalar(select(func.count()).select_from(records)) == 0
-    engine.dispose()
-
-
-def test_session_factory_creates_one_session_per_thread() -> None:
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    sessions = build_session_factory(engine)
-    barrier = Barrier(2)
-
-    def open_session() -> int:
-        with sessions() as session:
-            barrier.wait(timeout=5)
-            return id(session)
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = (
-            executor.submit(open_session),
-            executor.submit(open_session),
-        )
-        session_ids = [future.result() for future in futures]
-
-    assert len(set(session_ids)) == 2
-    engine.dispose()
+    first, second = await asyncio.gather(open_session(), open_session())
+    try:
+        assert isinstance(sessions, async_sessionmaker)
+        assert isinstance(first, AsyncSession)
+        assert isinstance(second, AsyncSession)
+        assert first is not second
+    finally:
+        for session in (first, second):
+            await session.close()
+        await engine.dispose()

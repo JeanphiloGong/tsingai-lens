@@ -27,16 +27,16 @@ class WorkspaceService:
         self.objective_repository = objective_repository
         self.document_profile_service = document_profile_service
 
-    def _build_artifacts(
+    async def _build_artifacts(
         self,
         collection_id: str,
         collection: dict,
         document_summary: dict,
     ) -> dict:
-        source_documents = self.source_artifact_repository.read_collection_documents(
+        source_documents = await self.source_artifact_repository.read_collection_documents(
             collection_id
         )
-        objective_facts = self.objective_repository.read(collection_id)
+        objective_facts = await self.objective_repository.read(collection_id)
         return {
             "source_documents_ready": bool(source_documents),
             "document_profiles_ready": bool(
@@ -143,9 +143,11 @@ class WorkspaceService:
 
         return {"documents": documents, "objectives": objectives}
 
-    def _build_document_summary(self, collection_id: str) -> dict:
+    async def _build_document_summary(self, collection_id: str) -> dict:
         try:
-            return self.document_profile_service.get_document_summary(collection_id)
+            return await self.document_profile_service.get_document_summary(
+                collection_id
+            )
         except DocumentProfilesNotReadyError:
             return {"total_documents": 0, "by_doc_type": {}, "warnings": []}
 
@@ -185,20 +187,20 @@ class WorkspaceService:
             "comparisons": f"{base}/comparisons",
         }
 
-    def get_workspace_overview(
+    async def get_workspace_overview(
         self,
         collection_id: str,
         recent_task_limit: int = 5,
     ) -> dict:
-        collection = self.collection_service.get_collection(collection_id)
-        files = self.collection_service.list_files(collection_id)
-        recent_tasks = self.task_service.list_tasks(
+        collection = await self.collection_service.get_collection(collection_id)
+        files = await self.collection_service.list_files(collection_id)
+        recent_tasks = await self.task_service.list_tasks(
             collection_id=collection_id,
             limit=recent_task_limit,
         )
         latest_task = recent_tasks[0] if recent_tasks else None
-        document_summary = self._build_document_summary(collection_id)
-        artifacts = self._build_artifacts(
+        document_summary = await self._build_document_summary(collection_id)
+        artifacts = await self._build_artifacts(
             collection_id,
             collection,
             document_summary,

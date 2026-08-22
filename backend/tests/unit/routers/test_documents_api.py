@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 from hashlib import sha256
 from types import SimpleNamespace
@@ -17,9 +16,6 @@ from application.core.document_profiles.service import (
     DocumentProfileService,
 )
 from application.source.document_markdown_service import DocumentMarkdownService
-from infra.persistence.sqlite import (
-    SqliteSourceArtifactRepository,
-)
 from controllers.core import documents as documents_controller
 from domain.core import DocumentProfile
 from domain.source import (
@@ -35,14 +31,22 @@ from infra.source.ingestion.normalized_import import (
 )
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+
+pytestmark = pytest.mark.anyio
 
 
-def _store_document_profiles(
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+async def _store_document_profiles(
     document_profile_service: DocumentProfileService,
     collection_id: str,
     profiles: list[dict],
 ) -> None:
-    document_profile_service.paper_fact_repository.replace_document_profiles(
+    await document_profile_service.paper_fact_repository.replace_document_profiles(
         collection_id,
         "build_test",
         tuple(DocumentProfile.from_mapping(row) for row in profiles),
@@ -52,7 +56,7 @@ def _store_document_profiles(
 @pytest.fixture()
 def document_services(tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    source_repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    source_repository = MemorySourceArtifactRepository()
     paper_fact_repository = MemoryPaperFactRepository()
     document_profile_service = DocumentProfileService(
         collection_service,
@@ -88,21 +92,21 @@ def _document_request(document_services):
     )
 
 
-def test_documents_route_returns_409_when_profiles_are_not_ready(document_services):
+async def test_documents_route_returns_409_when_profiles_are_not_ready(
+    document_services,
+):
     (
         collection_service,
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    record = collection_service.create_collection(name="Pending Collection")
+    record = await collection_service.create_collection(name="Pending Collection")
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            documents_controller.list_collection_document_profiles(
+        await documents_controller.list_collection_document_profiles(
                 record["collection_id"],
                 _document_request(document_services),
             )
-        )
 
     exc = exc_info.value
     assert exc.status_code == 409
@@ -110,7 +114,7 @@ def test_documents_route_returns_409_when_profiles_are_not_ready(document_servic
     assert exc.detail["collection_id"] == record["collection_id"]
 
 
-def test_documents_route_returns_404_for_missing_collection(document_services):
+async def test_documents_route_returns_404_for_missing_collection(document_services):
     (
         _collection_service,
         _document_profile_service,
@@ -118,27 +122,27 @@ def test_documents_route_returns_404_for_missing_collection(document_services):
     ) = document_services
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            documents_controller.list_collection_document_profiles(
+        await documents_controller.list_collection_document_profiles(
                 "col_missing",
                 _document_request(document_services),
             )
-        )
 
     exc = exc_info.value
     assert exc.status_code == 404
     assert "collection not found" in str(exc.detail)
 
 
-def test_document_profile_route_returns_single_profile(document_services):
+async def test_document_profile_route_returns_single_profile(document_services):
     (
         collection_service,
         document_profile_service,
         _markdown_service,
     ) = document_services
-    record = collection_service.create_collection(name="Single Profile Collection")
+    record = await collection_service.create_collection(
+        name="Single Profile Collection"
+    )
     collection_id = record["collection_id"]
-    _store_document_profiles(
+    await _store_document_profiles(
         document_profile_service,
         collection_id,
         [
@@ -153,20 +157,18 @@ def test_document_profile_route_returns_single_profile(document_services):
             }
         ],
     )
-    payload = asyncio.run(
-        documents_controller.get_collection_document_profile(
+    payload = await documents_controller.get_collection_document_profile(
             collection_id,
             "paper-1",
             _document_request(document_services),
         )
-    )
 
     assert payload.document_id == "paper-1"
     assert payload.collection_id == collection_id
     assert payload.title == "Single Paper"
 
 
-def test_document_profile_route_normalizes_invalid_profile_status_values(
+async def test_document_profile_route_normalizes_invalid_profile_status_values(
     document_services,
 ):
     (
@@ -174,9 +176,11 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
         document_profile_service,
         _markdown_service,
     ) = document_services
-    record = collection_service.create_collection(name="Invalid Profile Collection")
+    record = await collection_service.create_collection(
+        name="Invalid Profile Collection"
+    )
     collection_id = record["collection_id"]
-    _store_document_profiles(
+    await _store_document_profiles(
         document_profile_service,
         collection_id,
         [
@@ -191,18 +195,16 @@ def test_document_profile_route_normalizes_invalid_profile_status_values(
             }
         ],
     )
-    payload = asyncio.run(
-        documents_controller.get_collection_document_profile(
+    payload = await documents_controller.get_collection_document_profile(
             collection_id,
             "paper-1",
             _document_request(document_services),
         )
-    )
 
     assert payload.doc_type == "experimental"
 
 
-def test_document_content_route_uses_stable_block_locator(
+async def test_document_content_route_uses_stable_block_locator(
     document_services,
 ):
     (
@@ -210,10 +212,13 @@ def test_document_content_route_uses_stable_block_locator(
         document_profile_service,
         _markdown_service,
     ) = document_services
-    record = collection_service.create_collection(name="Document Locator Collection")
+    record = await collection_service.create_collection(
+        name="Document Locator Collection"
+    )
     collection_id = record["collection_id"]
-    document_profile_service.source_artifact_repository.replace_collection_documents(
+    await document_profile_service.source_artifact_repository.replace_collection_documents(
         collection_id,
+        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -238,7 +243,7 @@ def test_document_content_route_uses_stable_block_locator(
             ],
         ),
     )
-    _store_document_profiles(
+    await _store_document_profiles(
         document_profile_service,
         collection_id,
         [
@@ -253,13 +258,11 @@ def test_document_content_route_uses_stable_block_locator(
             }
         ],
     )
-    payload = asyncio.run(
-        documents_controller.get_collection_document_content(
+    payload = await documents_controller.get_collection_document_content(
             collection_id,
             "paper-1",
             _document_request(document_services),
         )
-    )
 
     first = payload.blocks[0]
     assert first.block_id == "blk-result"
@@ -276,16 +279,19 @@ def test_document_content_route_uses_stable_block_locator(
     }
 
 
-def test_document_markdown_route_returns_markdown_projection(document_services):
+async def test_document_markdown_route_returns_markdown_projection(document_services):
     (
         collection_service,
         _document_profile_service,
         markdown_service,
     ) = document_services
-    record = collection_service.create_collection(name="Markdown Route Collection")
+    record = await collection_service.create_collection(
+        name="Markdown Route Collection"
+    )
     collection_id = record["collection_id"]
-    markdown_service.source_artifact_repository.replace_collection_documents(
+    await markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
+        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -322,13 +328,11 @@ def test_document_markdown_route_returns_markdown_projection(document_services):
         ),
     )
 
-    payload = asyncio.run(
-        documents_controller.get_collection_document_markdown(
+    payload = await documents_controller.get_collection_document_markdown(
             collection_id,
             "paper-1",
             _document_request(document_services),
         )
-    )
 
     assert payload.collection_id == collection_id
     assert payload.document_id == "paper-1"
@@ -342,7 +346,7 @@ def test_document_markdown_route_returns_markdown_projection(document_services):
     assert source_map["blk-result"].text_unit_ids == ["tu-result"]
 
 
-def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
+async def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
     document_services,
 ):
     (
@@ -350,16 +354,16 @@ def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    record = collection_service.create_collection(name="Markdown Pending Collection")
+    record = await collection_service.create_collection(
+        name="Markdown Pending Collection"
+    )
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            documents_controller.get_collection_document_markdown(
+        await documents_controller.get_collection_document_markdown(
                 record["collection_id"],
                 "paper-1",
                 _document_request(document_services),
             )
-        )
 
     exc = exc_info.value
     assert exc.status_code == 409
@@ -367,16 +371,16 @@ def test_document_markdown_route_returns_409_when_markdown_is_not_ready(
     assert exc.detail["collection_id"] == record["collection_id"]
 
 
-def test_document_source_route_streams_manifest_source_file(document_services):
+async def test_document_source_route_streams_manifest_source_file(document_services):
     (
         collection_service,
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    record = collection_service.create_collection(name="Source File Collection")
+    record = await collection_service.create_collection(name="Source File Collection")
     collection_id = record["collection_id"]
     payload = b"%PDF-1.4\nfixture\n"
-    collection_service.import_normalized_batch(
+    await collection_service.import_normalized_batch(
         collection_id,
         NormalizedImportBatch(
             documents=(
@@ -398,20 +402,18 @@ def test_document_source_route_streams_manifest_source_file(document_services):
         ),
     )
 
-    response = asyncio.run(
-        documents_controller.get_collection_document_source(
+    response = await documents_controller.get_collection_document_source(
             collection_id,
             "paper-1",
             _document_request(document_services),
         )
-    )
 
     assert response.body == payload
     assert response.media_type == "application/pdf"
     assert response.headers["content-disposition"].startswith("inline;")
 
 
-def test_document_source_route_resolves_profile_document_id_by_source_filename(
+async def test_document_source_route_resolves_profile_document_id_by_source_filename(
     document_services,
 ):
     (
@@ -419,10 +421,12 @@ def test_document_source_route_resolves_profile_document_id_by_source_filename(
         document_profile_service,
         _markdown_service,
     ) = document_services
-    record = collection_service.create_collection(name="Profile Source File Collection")
+    record = await collection_service.create_collection(
+        name="Profile Source File Collection"
+    )
     collection_id = record["collection_id"]
     payload = b"%PDF-1.4\nprofile fixture\n"
-    _store_document_profiles(
+    await _store_document_profiles(
         document_profile_service,
         collection_id,
         [
@@ -437,7 +441,7 @@ def test_document_source_route_resolves_profile_document_id_by_source_filename(
             }
         ],
     )
-    collection_service.import_normalized_batch(
+    await collection_service.import_normalized_batch(
         collection_id,
         NormalizedImportBatch(
             documents=(
@@ -459,19 +463,17 @@ def test_document_source_route_resolves_profile_document_id_by_source_filename(
         ),
     )
 
-    response = asyncio.run(
-        documents_controller.get_collection_document_source(
+    response = await documents_controller.get_collection_document_source(
             collection_id,
             "profile-hash-doc",
             _document_request(document_services),
         )
-    )
 
     assert response.body == payload
     assert response.media_type == "application/pdf"
 
 
-def test_document_source_route_returns_409_when_source_is_unavailable(
+async def test_document_source_route_returns_409_when_source_is_unavailable(
     document_services,
 ):
     (
@@ -479,16 +481,14 @@ def test_document_source_route_returns_409_when_source_is_unavailable(
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    record = collection_service.create_collection(name="Missing Source Collection")
+    record = await collection_service.create_collection(name="Missing Source Collection")
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            documents_controller.get_collection_document_source(
+        await documents_controller.get_collection_document_source(
                 record["collection_id"],
                 "paper-1",
                 _document_request(document_services),
             )
-        )
 
     exc = exc_info.value
     assert exc.status_code == 409
@@ -496,7 +496,7 @@ def test_document_source_route_returns_409_when_source_is_unavailable(
     assert exc.detail["document_id"] == "paper-1"
 
 
-def test_document_source_route_rejects_manifest_path_outside_collection(
+async def test_document_source_route_rejects_manifest_path_outside_collection(
     document_services,
 ):
     (
@@ -504,7 +504,7 @@ def test_document_source_route_rejects_manifest_path_outside_collection(
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    record = collection_service.create_collection(name="Unsafe Source Collection")
+    record = await collection_service.create_collection(name="Unsafe Source Collection")
     collection_id = record["collection_id"]
     unsafe_file = CollectionFileRecord(
         file_id="file_unsafe",
@@ -520,7 +520,7 @@ def test_document_source_route_rejects_manifest_path_outside_collection(
         size_bytes=len(b"outside"),
         created_at="2026-07-19T00:00:00+00:00",
     )
-    collection_service.repository.add_collection_import(
+    await collection_service.repository.add_collection_import(
         CollectionImportRecord(
             import_id="imp_unsafe",
             collection_id=collection_id,
@@ -546,13 +546,11 @@ def test_document_source_route_rejects_manifest_path_outside_collection(
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            documents_controller.get_collection_document_source(
+        await documents_controller.get_collection_document_source(
                 collection_id,
                 "paper-1",
                 _document_request(document_services),
             )
-        )
 
     exc = exc_info.value
     assert exc.status_code == 409
@@ -560,7 +558,7 @@ def test_document_source_route_rejects_manifest_path_outside_collection(
     assert "outside.pdf" not in str(exc.detail)
 
 
-def test_document_source_route_rejects_another_collections_storage_key(
+async def test_document_source_route_rejects_another_collections_storage_key(
     document_services,
 ):
     (
@@ -568,8 +566,8 @@ def test_document_source_route_rejects_another_collections_storage_key(
         _document_profile_service,
         _markdown_service,
     ) = document_services
-    first = collection_service.create_collection(name="First source collection")
-    second = collection_service.create_collection(name="Second source collection")
+    first = await collection_service.create_collection(name="First source collection")
+    second = await collection_service.create_collection(name="Second source collection")
     payload = b"%PDF-1.4\nsecond collection\n"
     storage_key = f"{second['collection_id']}/input/paper-2.pdf"
     digest = sha256(payload).hexdigest()
@@ -588,7 +586,7 @@ def test_document_source_route_rejects_another_collections_storage_key(
         size_bytes=len(payload),
         created_at="2026-07-19T00:00:00+00:00",
     )
-    collection_service.repository.add_collection_import(
+    await collection_service.repository.add_collection_import(
         CollectionImportRecord(
             import_id="imp_foreign_key",
             collection_id=first["collection_id"],
@@ -614,25 +612,23 @@ def test_document_source_route_rejects_another_collections_storage_key(
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            documents_controller.get_collection_document_source(
+        await documents_controller.get_collection_document_source(
                 first["collection_id"],
                 "paper-1",
                 _document_request(document_services),
             )
-        )
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "document_source_path_invalid"
 
 
-def test_document_figure_image_route_streams_extracted_asset(document_services):
+async def test_document_figure_image_route_streams_extracted_asset(document_services):
     (
         collection_service,
         _document_profile_service,
         markdown_service,
     ) = document_services
-    record = collection_service.create_collection(name="Figure Image Collection")
+    record = await collection_service.create_collection(name="Figure Image Collection")
     collection_id = record["collection_id"]
     content = b"\x89PNG\r\n\x1a\nfixture\n"
     asset_sha256 = sha256(content).hexdigest()
@@ -643,8 +639,9 @@ def test_document_figure_image_route_streams_extracted_asset(document_services):
         content,
         asset_sha256,
     )
-    markdown_service.source_artifact_repository.replace_collection_documents(
+    await markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
+        "build_test",
         source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
@@ -663,21 +660,19 @@ def test_document_figure_image_route_streams_extracted_asset(document_services):
         ),
     )
 
-    response = asyncio.run(
-        documents_controller.get_collection_document_figure_image(
+    response = await documents_controller.get_collection_document_figure_image(
             collection_id,
             "paper-1",
             "fig-1",
             _document_request(document_services),
         )
-    )
 
     assert response.body == content
     assert response.media_type == "image/png"
     assert response.headers["content-disposition"] == 'inline; filename="fig-1.png"'
 
 
-def test_document_figure_image_route_rejects_figure_from_other_document(
+async def test_document_figure_image_route_rejects_figure_from_other_document(
     document_services,
 ):
     (
@@ -685,12 +680,13 @@ def test_document_figure_image_route_rejects_figure_from_other_document(
         _document_profile_service,
         markdown_service,
     ) = document_services
-    record = collection_service.create_collection(
+    record = await collection_service.create_collection(
         name="Cross Document Figure Collection"
     )
     collection_id = record["collection_id"]
-    markdown_service.source_artifact_repository.replace_collection_documents(
+    await markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
+        "build_test",
         source_documents_from_records(
             documents=[
                 {"id": "paper-1", "title": "Paper 1", "text": ""},
@@ -709,14 +705,12 @@ def test_document_figure_image_route_rejects_figure_from_other_document(
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            documents_controller.get_collection_document_figure_image(
+        await documents_controller.get_collection_document_figure_image(
                 collection_id,
                 "paper-1",
                 "fig-2",
                 _document_request(document_services),
             )
-        )
 
     exc = exc_info.value
     assert exc.status_code == 404
@@ -725,7 +719,7 @@ def test_document_figure_image_route_rejects_figure_from_other_document(
     assert exc.detail["figure_id"] == "fig-2"
 
 
-def test_document_figure_image_route_rejects_path_outside_collection(
+async def test_document_figure_image_route_rejects_path_outside_collection(
     document_services,
     tmp_path,
 ):
@@ -734,12 +728,15 @@ def test_document_figure_image_route_rejects_path_outside_collection(
         _document_profile_service,
         markdown_service,
     ) = document_services
-    record = collection_service.create_collection(name="Unsafe Figure Image Collection")
+    record = await collection_service.create_collection(
+        name="Unsafe Figure Image Collection"
+    )
     collection_id = record["collection_id"]
     outside_path = tmp_path / "outside.png"
     outside_path.write_bytes(b"outside")
-    markdown_service.source_artifact_repository.replace_collection_documents(
+    await markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
+        "build_test",
         source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
@@ -755,14 +752,12 @@ def test_document_figure_image_route_rejects_path_outside_collection(
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            documents_controller.get_collection_document_figure_image(
+        await documents_controller.get_collection_document_figure_image(
                 collection_id,
                 "paper-1",
                 "fig-1",
                 _document_request(document_services),
             )
-        )
 
     exc = exc_info.value
     assert exc.status_code == 409
@@ -770,7 +765,7 @@ def test_document_figure_image_route_rejects_path_outside_collection(
     assert "outside.png" not in str(exc.detail)
 
 
-def test_document_figure_image_route_rejects_another_collections_object_key(
+async def test_document_figure_image_route_rejects_another_collections_object_key(
     document_services,
 ):
     (
@@ -778,8 +773,8 @@ def test_document_figure_image_route_rejects_another_collections_object_key(
         _document_profile_service,
         markdown_service,
     ) = document_services
-    first = collection_service.create_collection(name="First Figure Collection")
-    second = collection_service.create_collection(name="Second Figure Collection")
+    first = await collection_service.create_collection(name="First Figure Collection")
+    second = await collection_service.create_collection(name="Second Figure Collection")
     content = b"figure"
     digest = sha256(content).hexdigest()
     foreign_key = collection_service.write_figure_asset(
@@ -789,8 +784,9 @@ def test_document_figure_image_route_rejects_another_collections_object_key(
         content,
         digest,
     )
-    markdown_service.source_artifact_repository.replace_collection_documents(
+    await markdown_service.source_artifact_repository.replace_collection_documents(
         first["collection_id"],
+        "build_test",
         source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
@@ -808,21 +804,19 @@ def test_document_figure_image_route_rejects_another_collections_object_key(
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            documents_controller.get_collection_document_figure_image(
+        await documents_controller.get_collection_document_figure_image(
                 first["collection_id"],
                 "paper-1",
                 "fig-1",
                 _document_request(document_services),
             )
-        )
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "figure_image_path_invalid"
 
 
 @pytest.mark.parametrize("failure", ["missing", "hash_mismatch"])
-def test_document_figure_image_route_reports_unavailable_object_bytes(
+async def test_document_figure_image_route_reports_unavailable_object_bytes(
     document_services,
     failure,
 ):
@@ -831,7 +825,9 @@ def test_document_figure_image_route_reports_unavailable_object_bytes(
         _document_profile_service,
         markdown_service,
     ) = document_services
-    record = collection_service.create_collection(name="Unavailable Figure Collection")
+    record = await collection_service.create_collection(
+        name="Unavailable Figure Collection"
+    )
     collection_id = record["collection_id"]
     content = b"figure"
     digest = sha256(content).hexdigest()
@@ -846,8 +842,9 @@ def test_document_figure_image_route_reports_unavailable_object_bytes(
         collection_service.object_store.delete(storage_key)
     else:
         (collection_service.root_dir / storage_key).write_bytes(b"corrupt")
-    markdown_service.source_artifact_repository.replace_collection_documents(
+    await markdown_service.source_artifact_repository.replace_collection_documents(
         collection_id,
+        "build_test",
         source_documents_from_records(
             documents=[{"id": "paper-1", "title": "Figure Paper", "text": ""}],
             figures=[
@@ -865,14 +862,12 @@ def test_document_figure_image_route_reports_unavailable_object_bytes(
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            documents_controller.get_collection_document_figure_image(
+        await documents_controller.get_collection_document_figure_image(
                 collection_id,
                 "paper-1",
                 "fig-1",
                 _document_request(document_services),
             )
-        )
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "figure_image_unavailable"

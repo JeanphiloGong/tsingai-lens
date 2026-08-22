@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.goal import ExperimentPlanRecord
 from infra.persistence.postgres.models.chat import ChatMessageRow, ChatSessionRow
@@ -17,15 +17,21 @@ from infra.persistence.postgres.models.objective_workspace import (
 class PostgresExperimentPlanRepository:
     backend_name = "postgresql"
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         self.session_factory = session_factory
 
-    def upsert_plan(self, plan: ExperimentPlanRecord) -> ExperimentPlanRecord:
-        with self.session_factory.begin() as session:
+    async def upsert_plan(
+        self, plan: ExperimentPlanRecord
+    ) -> ExperimentPlanRecord:
+        async with self.session_factory.begin() as session:
             if plan.source_message_id is not None:
-                message = session.get(ChatMessageRow, plan.source_message_id)
+                message = await session.get(
+                    ChatMessageRow, plan.source_message_id
+                )
                 chat = (
-                    session.get(ChatSessionRow, message.session_id)
+                    await session.get(ChatSessionRow, message.session_id)
                     if message is not None
                     else None
                 )
@@ -37,7 +43,7 @@ class PostgresExperimentPlanRepository:
                     raise ValueError(
                         "historical source message must belong to the plan collection"
                     )
-            row = session.get(ObjectiveExperimentPlan, plan.plan_id)
+            row = await session.get(ObjectiveExperimentPlan, plan.plan_id)
             if row is not None and (
                 row.collection_id != plan.collection_id
                 or row.objective_id != plan.objective_id
@@ -67,17 +73,17 @@ class PostgresExperimentPlanRepository:
             row.metadata_json = dict(plan.metadata)
             row.created_by = plan.created_by
             row.updated_at = _datetime(plan.updated_at)
-            session.flush()
+            await session.flush()
             return _plan_record(row)
 
-    def read_plan(
+    async def read_plan(
         self,
         collection_id: str,
         objective_id: str,
         plan_id: str,
     ) -> ExperimentPlanRecord | None:
-        with self.session_factory() as session:
-            row = session.scalar(
+        async with self.session_factory() as session:
+            row = await session.scalar(
                 select(ObjectiveExperimentPlan).where(
                     ObjectiveExperimentPlan.plan_id == plan_id,
                     ObjectiveExperimentPlan.collection_id == collection_id,
@@ -86,13 +92,13 @@ class PostgresExperimentPlanRepository:
             )
             return _plan_record(row) if row is not None else None
 
-    def list_plans(
+    async def list_plans(
         self,
         collection_id: str,
         objective_id: str,
     ) -> tuple[ExperimentPlanRecord, ...]:
-        with self.session_factory() as session:
-            rows = session.scalars(
+        async with self.session_factory() as session:
+            rows = await session.scalars(
                 select(ObjectiveExperimentPlan)
                 .where(
                     ObjectiveExperimentPlan.collection_id == collection_id,

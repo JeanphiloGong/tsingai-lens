@@ -53,7 +53,9 @@ Objective readiness is derived from their owning repositories rather than
 duplicated into the task artifact registry.
 The build request accepts `mode: standard | fast` and defaults to `standard`.
 The selected mode is persisted before dispatch and determines the runtime
-dependency graph for that task.
+dependency graph for that task. The request starts a process-local asyncio task
+and returns immediately; clients read persisted task state through the task
+status endpoint. This handoff is not an external or durable queue.
 
 ### Goal Intake
 
@@ -221,17 +223,19 @@ polls `GET .../analysis`. Retry allocates a new version. A failed active version
 leaves the prior published version readable. Independent Objective analyses,
 including analyses from different collections, execute as process-local asyncio
 background tasks. An application semaphore bounds simultaneous analysis
-execution while the synchronous analysis pipeline runs outside the event-loop
-thread. The repository claim transition still allows only one task to execute a
-specific Objective analysis version, and persisted analysis state remains the
-status authority queried by the client. If the backend cannot create the
-background task, it records that version as failed and returns `503`, allowing
-the client to retry without leaving a permanently queued version. Only a
-complete succeeded version can become published. A succeeded version may have
-zero Findings when paper contributions and source-backed Evidence were
-published but no defensible comparison survived; this is a scientific
-abstention, not a technical failure. The Finding list then returns `total=0`
-without a placeholder Finding.
+execution. Tasks above that limit wait on the in-process semaphore; this is not
+a durable application queue. Synchronous model and scientific computations run
+outside the event-loop thread, while PostgreSQL reads and writes use awaited,
+task-local `AsyncSession` transactions. The repository claim transition still
+allows only one task to execute a specific Objective analysis version, and
+persisted analysis state remains the status authority queried by the client. If
+the backend cannot create the background task, it records that version as
+failed and returns `503`, allowing the client to retry without leaving a
+permanently queued version. Only a complete succeeded version can become
+published. A succeeded version may have zero Findings when paper contributions
+and source-backed Evidence were published but no defensible comparison
+survived; this is a scientific abstention, not a technical failure. The Finding
+list then returns `total=0` without a placeholder Finding.
 
 Objective document scope and current-analysis projection are build-scoped. A
 rebuild may preserve a confirmed Objective identity and all historical analysis

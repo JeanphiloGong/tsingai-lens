@@ -13,7 +13,7 @@ class MemoryPaperFactRepository:
         self.active_build_id = active_build_id
         self._facts: dict[tuple[str, str], PaperFactSet] = {}
 
-    def replace_document_profiles(
+    async def replace_document_profiles(
         self,
         collection_id: str,
         build_id: str,
@@ -25,7 +25,7 @@ class MemoryPaperFactRepository:
             document_profiles=profiles,
         )
 
-    def replace_paper_facts(
+    async def replace_paper_facts(
         self,
         collection_id: str,
         build_id: str,
@@ -37,7 +37,7 @@ class MemoryPaperFactRepository:
             document_profiles=self._facts.get(key, PaperFactSet()).document_profiles,
         )
 
-    def read(
+    async def read(
         self,
         collection_id: str,
         *,

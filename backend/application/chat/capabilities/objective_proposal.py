@@ -83,17 +83,19 @@ class ProposeObjectiveDraftsCapability:
         self.collection_service = collection_service
         self.objective_repository = objective_repository
 
-    def execute(
+    async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: ProposeObjectiveDraftsArguments,
     ) -> ChatToolResult:
-        self.collection_service.get_collection_for_user(
+        await self.collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        facts = self.objective_repository.read(context.collection_id)
-        existing = self.objective_repository.list_objectives(context.collection_id)
+        facts = await self.objective_repository.read(context.collection_id)
+        existing = await self.objective_repository.list_objectives(
+            context.collection_id
+        )
         records: list[dict[str, Any]] = []
         refs: list[ChatResourceRef] = []
         unsupported_count = 0

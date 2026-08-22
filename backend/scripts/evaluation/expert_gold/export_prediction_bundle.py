@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import ast
 from datetime import datetime, timezone
 import json
@@ -123,9 +124,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+async def main_async() -> None:
     args = parse_args()
-    output_path = export_prediction_bundle(
+    output_path = await export_prediction_bundle(
         backend_root=args.backend_root,
         collection_id=args.collection_id,
         source_output_dir=args.output_dir,
@@ -135,7 +136,7 @@ def main() -> None:
     print(output_path)
 
 
-def export_prediction_bundle(
+async def export_prediction_bundle(
     *,
     backend_root: str | Path = DEFAULT_BACKEND_ROOT,
     collection_id: str | None = None,
@@ -151,7 +152,7 @@ def export_prediction_bundle(
     )
     resolved_collection_id = collection_id or output_dir.parent.name
 
-    records_by_artifact, missing_artifacts = _load_artifacts(
+    records_by_artifact, missing_artifacts = await _load_artifacts(
         backend_root=root,
         collection_id=resolved_collection_id,
     )
@@ -306,7 +307,7 @@ def _resolve_source_output_dir(
     return backend_root / "data" / "collections" / collection_id / "output"
 
 
-def _load_artifacts(
+async def _load_artifacts(
     *,
     backend_root: Path,
     collection_id: str,
@@ -314,25 +315,27 @@ def _load_artifacts(
     engine = build_database_engine(DatabaseSettings())
     try:
         session_factory = build_session_factory(engine)
-        source_documents = PostgresSourceArtifactRepository(
+        source_documents = await PostgresSourceArtifactRepository(
             session_factory
         ).read_collection_documents(collection_id)
-        paper_facts = PostgresPaperFactRepository(session_factory).read(collection_id)
+        paper_facts = await PostgresPaperFactRepository(session_factory).read(
+            collection_id
+        )
         objective_repository = PostgresObjectiveRepository(session_factory)
         objective_evidence = []
         objective_findings = []
-        for objective in objective_repository.list_objectives(collection_id):
+        for objective in await objective_repository.list_objectives(collection_id):
             version = objective.published_analysis_version
             if version is None:
                 continue
-            evidence, _ = objective_repository.list_evidence(
+            evidence, _ = await objective_repository.list_evidence(
                 collection_id,
                 objective.objective_id,
                 version,
                 offset=0,
                 limit=10_000,
             )
-            findings, _ = objective_repository.list_findings(
+            findings, _ = await objective_repository.list_findings(
                 collection_id,
                 objective.objective_id,
                 version,
@@ -341,11 +344,11 @@ def _load_artifacts(
             )
             objective_evidence.extend(item.to_record() for item in evidence)
             objective_findings.extend(item.to_record() for item in findings)
-        comparison_facts = PostgresComparisonRepository(session_factory).read(
+        comparison_facts = await PostgresComparisonRepository(session_factory).read(
             collection_id
         )
     finally:
-        engine.dispose()
+        await engine.dispose()
     comparison_rows = ComparisonRowProjector().project_rows_from_semantic_artifacts(
         collection_id=collection_id,
         comparable_results=comparison_facts.comparable_results,
@@ -999,4 +1002,4 @@ def _infer_process_unit(name: str) -> str:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main_async())

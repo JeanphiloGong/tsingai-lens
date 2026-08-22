@@ -60,7 +60,7 @@ class CollectionBuildPipelineRunner:
         if missing_definitions or missing_functions:
             missing = sorted(missing_definitions | missing_functions)
             raise ValueError("pipeline nodes are not executable: " + ", ".join(missing))
-        self._persist_run(context, pipeline_run)
+        await self._persist_run(context, pipeline_run)
 
         while any(node.status is PipelineNodeStatus.QUEUED for node in pipeline_run.nodes):
             progressed = False
@@ -75,7 +75,9 @@ class CollectionBuildPipelineRunner:
                     in {PipelineNodeStatus.FAILED, PipelineNodeStatus.SKIPPED}
                     for dependency in dependencies
                 ):
-                    pipeline_run = self._mark_skipped(context, node.name, pipeline_run)
+                    pipeline_run = await self._mark_skipped(
+                        context, node.name, pipeline_run
+                    )
                     progressed = True
                     continue
                 if not all(
@@ -85,14 +87,16 @@ class CollectionBuildPipelineRunner:
                     continue
 
                 definition = definitions_by_name[node.name]
-                pipeline_run = self._mark_running(context, definition, pipeline_run)
+                pipeline_run = await self._mark_running(
+                    context, definition, pipeline_run
+                )
                 with capture_llm_usage() as usage:
                     try:
                         result = self.node_functions[node.name](context, config)
                         if inspect.isawaitable(result):
                             result = await result
                     except Exception as exc:  # noqa: BLE001
-                        pipeline_run = self._mark_failed(
+                        pipeline_run = await self._mark_failed(
                             context,
                             definition,
                             pipeline_run,
@@ -106,7 +110,7 @@ class CollectionBuildPipelineRunner:
                             node.name,
                         )
                     else:
-                        pipeline_run = self._mark_succeeded(
+                        pipeline_run = await self._mark_succeeded(
                             context,
                             definition,
                             pipeline_run,
@@ -127,24 +131,24 @@ class CollectionBuildPipelineRunner:
 
         return pipeline_run
 
-    def _persist_run(
+    async def _persist_run(
         self,
         context: CollectionBuildContext,
         pipeline_run: PipelineRun,
     ) -> None:
-        context.task_service.update_task(
+        await context.task_service.update_task(
             context.task_id,
             pipeline_run=pipeline_run,
         )
 
-    def _update_task_for_node(
+    async def _update_task_for_node(
         self,
         context: CollectionBuildContext,
         definition: CollectionBuildNodeDefinition,
         pipeline_run: PipelineRun,
         **fields: Any,
     ) -> None:
-        record = context.task_service.update_task(
+        record = await context.task_service.update_task(
             context.task_id,
             current_stage=fields.pop("current_stage", definition.node_id),
             progress_percent=fields.pop("progress_percent", definition.progress_percent),
@@ -161,7 +165,7 @@ class CollectionBuildPipelineRunner:
             record.get("status"),
         )
 
-    def _mark_running(
+    async def _mark_running(
         self,
         context: CollectionBuildContext,
         definition: CollectionBuildNodeDefinition,
@@ -173,7 +177,7 @@ class CollectionBuildPipelineRunner:
         pipeline_run = pipeline_run.with_node(
             pipeline_run.node(definition.node_id).start(started_at)
         )
-        self._update_task_for_node(
+        await self._update_task_for_node(
             context,
             definition,
             pipeline_run,
@@ -191,7 +195,7 @@ class CollectionBuildPipelineRunner:
         )
         return pipeline_run
 
-    def _mark_succeeded(
+    async def _mark_succeeded(
         self,
         context: CollectionBuildContext,
         definition: CollectionBuildNodeDefinition,
@@ -217,7 +221,7 @@ class CollectionBuildPipelineRunner:
                 stats=stats,
             )
         )
-        self._update_task_for_node(
+        await self._update_task_for_node(
             context,
             definition,
             pipeline_run,
@@ -228,7 +232,7 @@ class CollectionBuildPipelineRunner:
         )
         return pipeline_run
 
-    def _mark_failed(
+    async def _mark_failed(
         self,
         context: CollectionBuildContext,
         definition: CollectionBuildNodeDefinition,
@@ -244,7 +248,7 @@ class CollectionBuildPipelineRunner:
                 stats=stats,
             )
         )
-        self._update_task_for_node(
+        await self._update_task_for_node(
             context,
             definition,
             pipeline_run,
@@ -259,7 +263,7 @@ class CollectionBuildPipelineRunner:
         )
         return pipeline_run
 
-    def _mark_skipped(
+    async def _mark_skipped(
         self,
         context: CollectionBuildContext,
         node_name: str,
@@ -268,5 +272,5 @@ class CollectionBuildPipelineRunner:
         pipeline_run = pipeline_run.with_node(
             pipeline_run.node(node_name).skip(finished_at=_now_iso())
         )
-        self._persist_run(context, pipeline_run)
+        await self._persist_run(context, pipeline_run)
         return pipeline_run

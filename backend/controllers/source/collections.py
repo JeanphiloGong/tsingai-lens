@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from typing import BinaryIO
+from urllib.parse import quote
+
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
+
+from application.source.collection_service import CollectionSourceArchiveError
 
 from controllers.dependencies.auth import current_user_id
 from controllers.schemas.source.collection import (
@@ -10,9 +18,28 @@ from controllers.schemas.source.collection import (
     CollectionFileResponse,
     CollectionListResponse,
     CollectionResponse,
+    CollectionSourceArchiveRequest,
 )
 
 router = APIRouter(prefix="/collections", tags=["collections"])
+
+
+def _stream_file(file: BinaryIO) -> Iterator[bytes]:
+    while chunk := file.read(64 * 1024):
+        yield chunk
+
+
+def _source_archive_error_detail(
+    exc: CollectionSourceArchiveError,
+) -> dict[str, str]:
+    detail = {
+        "code": exc.code,
+        "message": exc.message,
+        "collection_id": exc.collection_id,
+    }
+    if exc.file_id is not None:
+        detail["file_id"] = exc.file_id
+    return detail
 
 
 @router.post("", response_model=CollectionResponse, summary="create the paper collection")
@@ -126,3 +153,49 @@ async def list_collection_files(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return CollectionFileListResponse(items=items)
+
+
+@router.post(
+    "/{collection_id}/source-archives",
+    summary="Download selected original collection files for reproduction",
+)
+async def create_collection_source_archive(
+    collection_id: str,
+    payload: CollectionSourceArchiveRequest,
+    request: Request,
+) -> StreamingResponse:
+    collection_service = request.app.state.collection_service
+    try:
+        await collection_service.get_collection_for_user(
+            collection_id,
+            await current_user_id(request),
+        )
+        result = await collection_service.build_source_archive(
+            collection_id,
+            payload.file_ids,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CollectionSourceArchiveError as exc:
+        status_code = {
+            "collection_source_file_not_found": 404,
+            "collection_source_archive_too_large": 413,
+        }.get(exc.code, 409)
+        raise HTTPException(
+            status_code=status_code,
+            detail=_source_archive_error_detail(exc),
+        ) from exc
+
+    archive_file = result["file"]
+    filename = str(result["filename"])
+    return StreamingResponse(
+        _stream_file(archive_file),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{filename}"; '
+                f"filename*=UTF-8''{quote(filename, safe='')}"
+            )
+        },
+        background=BackgroundTask(archive_file.close),
+    )

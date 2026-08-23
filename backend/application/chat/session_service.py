@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timezone
+import logging
 from typing import Any
 from uuid import uuid4
 
@@ -18,6 +20,9 @@ from domain.chat import (
     ToolResultStatus,
 )
 from domain.ports import ChatRepository
+
+
+logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
@@ -49,6 +54,7 @@ class ChatSessionService:
         self.collection_service = collection_service
         self.repository = repository
         self.runner = runner
+        self._active_stream_tasks: set[asyncio.Task[None]] = set()
 
     async def create_session(
         self, *, collection_id: str, user_id: str
@@ -119,6 +125,72 @@ class ChatSessionService:
             checkpoint=self._trajectory_checkpoint(session),
         )
         return self._turn_record(result, previous_count=len(previous_messages))
+
+    async def stream_message_for_user(
+        self,
+        session_id: str,
+        user_id: str,
+        *,
+        message: str,
+    ) -> AsyncIterator[dict[str, Any]]:
+        session = await self.get_session_for_user(session_id, user_id)
+        previous_messages = await self.repository.read_messages(session_id)
+        pending = await self.get_pending_approval_for_user(session_id, user_id)
+        if pending is not None:
+            raise ChatApprovalPendingError(pending.tool_call_id)
+
+        async def events() -> AsyncIterator[dict[str, Any]]:
+            queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+            loop = asyncio.get_running_loop()
+
+            def emit_text_delta(content: str) -> None:
+                loop.call_soon_threadsafe(
+                    queue.put_nowait,
+                    {"type": "text_delta", "content": content},
+                )
+
+            async def run_turn() -> None:
+                try:
+                    result = await self.runner.run_turn(
+                        context=self._context(session),
+                        previous_messages=previous_messages,
+                        user_message=message,
+                        checkpoint=self._trajectory_checkpoint(session),
+                        text_delta_callback=emit_text_delta,
+                    )
+                    await queue.put(
+                        {
+                            "type": "turn",
+                            "turn": self._turn_record(
+                                result,
+                                previous_count=len(previous_messages),
+                            ),
+                        }
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "Research Agent streaming turn failed session_id=%s",
+                        session_id,
+                    )
+                    await queue.put(
+                        {
+                            "type": "error",
+                            "error": {
+                                "code": "chat_stream_failed",
+                                "message": "The research response could not be completed.",
+                            },
+                        }
+                    )
+                finally:
+                    await queue.put(None)
+
+            task = asyncio.create_task(run_turn())
+            self._active_stream_tasks.add(task)
+            task.add_done_callback(self._active_stream_tasks.discard)
+            while (event := await queue.get()) is not None:
+                yield event
+
+        return events()
 
     async def decide_tool_call_for_user(
         self,

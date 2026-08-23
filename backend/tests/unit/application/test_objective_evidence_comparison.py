@@ -678,7 +678,7 @@ def test_analysis_contributions_report_each_paper_evidence_disposition():
                     if document_id == "paper-excluded"
                     else "primary_experiment"
                 ),
-                "background": (
+                "screening_note": (
                     "Outside the Objective scope."
                     if document_id == "paper-excluded"
                     else "Relevant experiment."

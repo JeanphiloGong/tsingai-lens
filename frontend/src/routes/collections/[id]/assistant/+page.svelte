@@ -8,7 +8,7 @@
 		decideChatToolCall,
 		fetchChatSession,
 		fetchChatTrajectory,
-		postChatMessage,
+		streamChatMessage,
 		type ChatMessage,
 		type ChatResourceRef,
 		type ChatSession,
@@ -207,38 +207,68 @@
 		const text = nextText.trim();
 		if (!session || !text || sending || deciding || pendingApproval) return;
 		const activeSession = session;
+		const previousMessageCount = messages.length;
 		const optimisticId = `local-${Date.now()}`;
+		const streamingId = `local-stream-${Date.now()}`;
+		const createdAt = new Date().toISOString();
 		const optimisticMessage: ChatMessage = {
 			message_id: optimisticId,
 			session_id: activeSession.session_id,
 			role: 'user',
 			content: text,
-			created_at: new Date().toISOString(),
+			created_at: createdAt,
 			tool_call_id: null,
 			tool_name: null,
 			tool_arguments: null,
 			tool_result: null
 		};
-		messages = [...messages, optimisticMessage];
+		const streamingMessage: ChatMessage = {
+			...optimisticMessage,
+			message_id: streamingId,
+			role: 'assistant',
+			content: ''
+		};
+		messages = [...messages, optimisticMessage, streamingMessage];
 		input = '';
 		sending = true;
 		error = '';
 		notice = '';
 		try {
-			const turn = await postChatMessage(activeSession.session_id, text);
-			applyTurn(turn, optimisticId);
+			const turn = await streamChatMessage(activeSession.session_id, text, (content) => {
+				messages = messages.map((message) =>
+					message.message_id === streamingId
+						? { ...message, content: `${message.content}${content}` }
+						: message
+				);
+			});
+			applyTurn(turn, [optimisticId, streamingId]);
 		} catch (err) {
-			messages = messages.filter((message) => message.message_id !== optimisticId);
-			input = text;
+			try {
+				const trajectory = await fetchChatTrajectory(activeSession.session_id);
+				messages = trajectory.items;
+				pendingApproval = trajectory.pending_approval;
+				if (
+					!messages
+						.slice(previousMessageCount)
+						.some((message) => message.role === 'user' && message.content === text)
+				) {
+					input = text;
+				}
+			} catch {
+				messages = messages.filter(
+					(message) => ![optimisticId, streamingId].includes(message.message_id)
+				);
+				input = text;
+			}
 			error = errorMessage(err);
 		} finally {
 			sending = false;
 		}
 	}
 
-	function applyTurn(turn: ChatTurn, optimisticId = '') {
-		const prior = optimisticId
-			? messages.filter((message) => message.message_id !== optimisticId)
+	function applyTurn(turn: ChatTurn, localMessageIds: string[] = []) {
+		const prior = localMessageIds.length
+			? messages.filter((message) => !localMessageIds.includes(message.message_id))
 			: messages;
 		const knownIds = new Set(prior.map((message) => message.message_id));
 		messages = [...prior, ...turn.messages.filter((message) => !knownIds.has(message.message_id))];
@@ -595,6 +625,17 @@
 													</p>
 												{/if}
 											{/each}
+											{#if message.message_id.startsWith('local-stream-')}
+												<span class="stream-cursor" aria-hidden="true"></span>
+											{/if}
+										</div>
+									{:else if message.message_id.startsWith('local-stream-')}
+										<div
+											class="assistant-copy streaming-copy"
+											role="status"
+											aria-label={$t('researchAgent.sending')}
+										>
+											<span class="stream-cursor" aria-hidden="true"></span>
 										</div>
 									{/if}
 									{#if message.tool_call_id}
@@ -1100,6 +1141,33 @@
 	.assistant-copy p:last-child,
 	.assistant-copy ul:last-child {
 		margin-bottom: 0;
+	}
+
+	.streaming-copy {
+		min-width: 48px;
+		min-height: 51px;
+	}
+
+	.stream-cursor {
+		display: inline-block;
+		width: 2px;
+		height: 1em;
+		margin-left: 2px;
+		background: currentColor;
+		vertical-align: text-bottom;
+		animation: stream-cursor 0.9s steps(1) infinite;
+	}
+
+	@keyframes stream-cursor {
+		50% {
+			opacity: 0;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.stream-cursor {
+			animation: none;
+		}
 	}
 
 	.capability-request {

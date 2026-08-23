@@ -46,8 +46,19 @@ class _Model:
     def __init__(self, *turns: ModelTurn) -> None:
         self.turns = deque(turns)
 
-    def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
-        return self.turns.popleft()
+    def respond(
+        self,
+        *,
+        messages: tuple,
+        tool_specs: tuple,
+        text_delta_callback=None,  # noqa: ANN001
+    ) -> ModelTurn:
+        turn = self.turns.popleft()
+        if text_delta_callback is not None and turn.content:
+            for chunk in (turn.content[:2], turn.content[2:]):
+                if chunk:
+                    text_delta_callback(chunk)
+        return turn
 
 
 class _WriteCapability:
@@ -192,6 +203,27 @@ async def test_chat_session_service_persists_ordinary_conversation() -> None:
         await service.get_session_for_user(session.session_id, "user-2")
 
 
+async def test_chat_session_service_streams_text_before_the_persisted_turn() -> None:
+    repository = _Repository()
+    service = _service(_Model(ModelTurn(content="逐段回复")), repository)
+    session = await service.create_session(collection_id="col-1", user_id="user-1")
+
+    stream = await service.stream_message_for_user(
+        session.session_id,
+        "user-1",
+        message="你好",
+    )
+    events = [event async for event in stream]
+
+    assert events[0:2] == [
+        {"type": "text_delta", "content": "逐段"},
+        {"type": "text_delta", "content": "回复"},
+    ]
+    assert events[-1]["type"] == "turn"
+    assert events[-1]["turn"]["messages"][-1].content == "逐段回复"
+    assert (await repository.read_messages(session.session_id))[-1].content == "逐段回复"
+
+
 async def test_chat_session_service_checkpoints_every_agent_step() -> None:
     repository = _Repository()
     capability = _WriteCapability()
@@ -205,7 +237,6 @@ async def test_chat_session_service_checkpoints_every_agent_step() -> None:
         _Model(
             ModelTurn(
                 tool_call=ModelToolCall(
-                    tool_call_id="call-1",
                     name="get_collection_context",
                     arguments={"question": "What is in this collection?"},
                 )
@@ -241,7 +272,6 @@ async def test_chat_session_service_approves_exact_write_and_resumes() -> None:
             ModelTurn(
                 content="我准备保存候选目标。",
                 tool_call=ModelToolCall(
-                    tool_call_id="call-1",
                     name="create_objective_candidate",
                     arguments={"question": "How does energy input affect ductility?"},
                 ),
@@ -307,7 +337,6 @@ async def test_chat_session_service_rejection_never_executes_write() -> None:
         _Model(
             ModelTurn(
                 tool_call=ModelToolCall(
-                    tool_call_id="call-1",
                     name="create_objective_candidate",
                     arguments={"question": "How does energy input affect ductility?"},
                 )

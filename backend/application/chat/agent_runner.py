@@ -92,6 +92,7 @@ class ResearchAgentRunner:
         previous_messages: tuple[ChatMessage, ...],
         user_message: str,
         checkpoint: _TrajectoryCheckpoint | None = None,
+        text_delta_callback: Callable[[str], None] | None = None,
     ) -> AgentRunResult:
         messages = [
             *previous_messages,
@@ -111,6 +112,7 @@ class ResearchAgentRunner:
             calls,
             results,
             checkpoint=checkpoint,
+            text_delta_callback=text_delta_callback,
         )
 
     async def resume_approved_call(
@@ -120,6 +122,7 @@ class ResearchAgentRunner:
         previous_messages: tuple[ChatMessage, ...],
         approved_call: ChatToolCall,
         checkpoint: _TrajectoryCheckpoint | None = None,
+        text_delta_callback: Callable[[str], None] | None = None,
     ) -> AgentRunResult:
         self._validate_approved_call(context, approved_call)
         messages = list(previous_messages)
@@ -152,6 +155,7 @@ class ResearchAgentRunner:
             calls,
             results,
             checkpoint=checkpoint,
+            text_delta_callback=text_delta_callback,
         )
 
     async def _continue(
@@ -162,13 +166,19 @@ class ResearchAgentRunner:
         results: list[ChatToolResult],
         *,
         checkpoint: _TrajectoryCheckpoint | None,
+        text_delta_callback: Callable[[str], None] | None,
     ) -> AgentRunResult:
         for _ in range(self.max_model_steps):
             try:
+                model_arguments: dict[str, Any] = {
+                    "messages": self.context_builder.for_model(tuple(messages)),
+                    "tool_specs": self.capabilities.specs,
+                }
+                if text_delta_callback is not None:
+                    model_arguments["text_delta_callback"] = text_delta_callback
                 turn = await to_thread(
                     self.model.respond,
-                    messages=self.context_builder.for_model(tuple(messages)),
-                    tool_specs=self.capabilities.specs,
+                    **model_arguments,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -256,12 +266,13 @@ class ResearchAgentRunner:
     ) -> tuple[ChatToolCall, Any]:
         model_call = turn.tool_call
         assistant_message_id = self._message_id()
+        tool_call_id = self._tool_call_id()
         messages.append(
             ChatMessage.assistant_tool_call(
                 message_id=assistant_message_id,
                 session_id=context.session_id,
                 content=turn.content,
-                tool_call_id=model_call.tool_call_id,
+                tool_call_id=tool_call_id,
                 tool_name=model_call.name,
                 tool_arguments=model_call.arguments,
                 created_at=_now_iso(),
@@ -269,7 +280,7 @@ class ResearchAgentRunner:
         )
         handler = self.capabilities.get(model_call.name)
         return ChatToolCall.requested(
-            tool_call_id=model_call.tool_call_id,
+            tool_call_id=tool_call_id,
             session_id=context.session_id,
             assistant_message_id=assistant_message_id,
             name=model_call.name,
@@ -397,6 +408,10 @@ class ResearchAgentRunner:
     @staticmethod
     def _message_id() -> str:
         return f"msg_{uuid4().hex[:16]}"
+
+    @staticmethod
+    def _tool_call_id() -> str:
+        return f"call_{uuid4().hex[:16]}"
 
 
 __all__ = [

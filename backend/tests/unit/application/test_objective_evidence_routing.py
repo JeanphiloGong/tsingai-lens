@@ -886,7 +886,7 @@ def test_research_objective_routing_uses_compact_prompt_payload():
             "document_id": "paper-1",
             "relevance": "high",
             "paper_role": "primary_experiment",
-            "background": "x" * 1000,
+            "screening_note": "x" * 1000,
             "material_match": ["316L stainless steel"],
             "changed_variables": ["heat treatment"],
             "measured_property_scope": ["yield strength"],
@@ -921,7 +921,7 @@ def test_research_objective_routing_uses_compact_prompt_payload():
     assert "routing_hints" not in route_payload["objective"]
     assert "extraction_guidance" not in route_payload["objective"]
     assert "objective_context" not in route_payload
-    assert "background" not in route_payload["paper_frame"]
+    assert "screening_note" not in route_payload["paper_frame"]
     assert "relevant_tables" not in route_payload["paper_frame"]
     assert "excluded_tables" not in route_payload["paper_frame"]
     assert "table_schema" not in route_payload["current_source"]

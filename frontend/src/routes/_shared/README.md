@@ -25,8 +25,8 @@ This node owns browser-side helpers shared across frontend routes.
   research identity. Feedback, curation, and dataset export use only
   `(collection_id, objective_id, analysis_version, finding_id)`.
 - `chatSessions.ts`
-  Collection-bound Research Agent sessions, typed trajectories, capability
-  results, and exact write decisions.
+  Collection-bound Research Agent sessions, typed trajectories, streamed text
+  deltas, capability results, and exact write decisions.
 - `experimentPlans.ts`
   Objective-scoped, human-authored experiment-plan drafts. Historical plans
   may retain source provenance returned by the API.

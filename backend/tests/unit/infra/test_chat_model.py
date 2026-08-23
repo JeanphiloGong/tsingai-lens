@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 
 from application.chat import ToolSpec
 from application.chat.model import (
+    ModelTurn,
     RESEARCH_AGENT_PROMPT_VERSION,
     RESEARCH_AGENT_SYSTEM_PROMPT,
 )
@@ -42,6 +43,20 @@ def _completion(*, content: str | None = None, tool_calls: list | None = None):
     )
 
 
+def _stream_chunk(
+    *,
+    content: str | None = None,
+    tool_calls: list | None = None,
+    usage=None,  # noqa: ANN001
+):
+    delta = SimpleNamespace(content=content, tool_calls=tool_calls or [])
+    return SimpleNamespace(
+        choices=[SimpleNamespace(delta=delta)] if content is not None or tool_calls else [],
+        model="test-model",
+        usage=usage,
+    )
+
+
 def _message() -> ChatMessage:
     return ChatMessage.user(
         message_id="msg-1",
@@ -52,7 +67,7 @@ def _message() -> ChatMessage:
 
 
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v4"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v5"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
@@ -64,6 +79,12 @@ def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None
     assert "设计研究方案" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "验证研究判断" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "研究方案生成和验证闭环仍在开发中" in RESEARCH_AGENT_SYSTEM_PROMPT
+
+
+def test_prompt_separates_product_questions_from_collection_reads() -> None:
+    assert "application's purpose" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "without calling a tool" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "current collection's contents" in RESEARCH_AGENT_SYSTEM_PROMPT
 
 
 def test_openai_chat_model_uses_the_global_model_setting(monkeypatch) -> None:
@@ -116,6 +137,70 @@ def test_openai_chat_model_parses_one_typed_tool_call() -> None:
     request = completions.calls[0]
     assert request["parallel_tool_calls"] is False
     assert request["tools"][0]["function"]["name"] == "get_collection_context"
+
+
+def test_openai_chat_model_streams_text_and_returns_the_complete_turn() -> None:
+    client, completions = _client(
+        iter(
+            (
+                _stream_chunk(content="这批"),
+                _stream_chunk(content="论文"),
+                _stream_chunk(usage=SimpleNamespace(
+                    prompt_tokens=10,
+                    completion_tokens=2,
+                    total_tokens=12,
+                )),
+            )
+        )
+    )
+    model = OpenAIChatModel(client=client, model="test-model")
+    deltas: list[str] = []
+
+    turn = model.respond(
+        messages=(_message(),),
+        tool_specs=(),
+        text_delta_callback=deltas.append,
+    )
+
+    assert deltas == ["这批", "论文"]
+    assert turn == ModelTurn(content="这批论文")
+    request = completions.calls[0]
+    assert request["stream"] is True
+    assert request["stream_options"] == {"include_usage": True}
+
+
+def test_openai_chat_model_reassembles_one_streamed_tool_call() -> None:
+    first = SimpleNamespace(
+        index=0,
+        id="provider-call-0",
+        type="function",
+        function=SimpleNamespace(name="get_collection_context", arguments=""),
+    )
+    second = SimpleNamespace(
+        index=0,
+        id=None,
+        type=None,
+        function=SimpleNamespace(name=None, arguments="{}"),
+    )
+    client, _completions = _client(
+        iter(
+            (
+                _stream_chunk(tool_calls=[first]),
+                _stream_chunk(tool_calls=[second]),
+            )
+        )
+    )
+    model = OpenAIChatModel(client=client, model="test-model")
+
+    turn = model.respond(
+        messages=(_message(),),
+        tool_specs=(),
+        text_delta_callback=lambda _content: None,
+    )
+
+    assert turn.tool_call is not None
+    assert turn.tool_call.name == "get_collection_context"
+    assert turn.tool_call.arguments == {}
 
 
 def test_openai_chat_model_rejects_multiple_or_non_object_tool_arguments() -> None:

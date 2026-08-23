@@ -111,7 +111,6 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         ModelTurn(content="Hello. I can help inspect this literature collection."),
         ModelTurn(
             tool_call=ModelToolCall(
-                tool_call_id="call-context",
                 name="get_collection_context",
                 arguments={},
             )
@@ -120,7 +119,6 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
         ModelTurn(
             content="I prepared the exact candidate for your approval.",
             tool_call=ModelToolCall(
-                tool_call_id="call-write",
                 name="create_objective_candidate",
                 arguments={
                     "question": "How does energy input affect grain morphology?"
@@ -185,11 +183,13 @@ async def test_research_agent_http_flow_persists_tools_and_exact_write_approval(
             json={"message": "Continue without deciding"},
         )
         wrong_digest = client.post(
-            f"/api/v1/chat-sessions/{session_id}/tool-calls/call-write/decision",
+            f"/api/v1/chat-sessions/{session_id}/tool-calls/"
+            f"{pending['tool_call_id']}/decision",
             json={"decision": "approved", "arguments_digest": "0" * 64},
         )
         approved = client.post(
-            f"/api/v1/chat-sessions/{session_id}/tool-calls/call-write/decision",
+            f"/api/v1/chat-sessions/{session_id}/tool-calls/"
+            f"{pending['tool_call_id']}/decision",
             json={
                 "decision": "approved",
                 "arguments_digest": pending["arguments_digest"],

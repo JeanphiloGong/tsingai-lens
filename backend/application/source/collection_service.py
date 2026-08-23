@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from datetime import datetime, timezone
 from hashlib import sha256
+import json
 from pathlib import Path, PurePosixPath
+from tempfile import SpooledTemporaryFile
 from typing import Any
 from uuid import uuid4
+from zipfile import ZIP_STORED, ZipFile
 
 from domain.ports import CollectionPaths, CollectionRepository
 from domain.source import (
@@ -28,6 +32,10 @@ from infra.source.ingestion import (
 )
 
 
+_SOURCE_ARCHIVE_MAX_MIB = 256
+_SOURCE_ARCHIVE_MAX_BYTES = _SOURCE_ARCHIVE_MAX_MIB * 1024 * 1024
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -45,6 +53,24 @@ class DocumentSourceUnavailableError(RuntimeError):
     ) -> None:
         self.collection_id = collection_id
         self.document_id = document_id
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+class CollectionSourceArchiveError(RuntimeError):
+    """Raised when selected original files cannot form a safe source archive."""
+
+    def __init__(
+        self,
+        collection_id: str,
+        *,
+        code: str,
+        message: str,
+        file_id: str | None = None,
+    ) -> None:
+        self.collection_id = collection_id
+        self.file_id = file_id
         self.code = code
         self.message = message
         super().__init__(message)
@@ -222,6 +248,139 @@ class CollectionService:
                 collection_id
             )
         ]
+
+    async def build_source_archive(
+        self,
+        collection_id: str,
+        file_ids: list[str],
+    ) -> dict[str, Any]:
+        """Build a bounded ZIP of original uploads for failure reproduction."""
+
+        normalized_file_ids = [str(file_id).strip() for file_id in file_ids]
+        if not normalized_file_ids or any(
+            not file_id for file_id in normalized_file_ids
+        ):
+            raise ValueError("source archive requires at least one file_id")
+        if len(normalized_file_ids) > 100:
+            raise ValueError("source archive supports at most 100 file_ids")
+        if len(set(normalized_file_ids)) != len(normalized_file_ids):
+            raise ValueError("source archive file_ids must be unique")
+
+        records = await self.list_files(collection_id)
+        records_by_file_id = {
+            str(record.get("file_id") or "").strip(): record for record in records
+        }
+        selected_records: list[tuple[str, dict[str, Any]]] = []
+        for file_id in normalized_file_ids:
+            record = records_by_file_id.get(file_id)
+            if record is None:
+                raise CollectionSourceArchiveError(
+                    collection_id,
+                    code="collection_source_file_not_found",
+                    message=(
+                        "A requested source file does not exist in this collection."
+                    ),
+                    file_id=file_id,
+                )
+            selected_records.append((file_id, record))
+
+        selected_size_bytes = sum(
+            max(int(record.get("size_bytes") or 0), 0)
+            for _file_id, record in selected_records
+        )
+        if selected_size_bytes > _SOURCE_ARCHIVE_MAX_BYTES:
+            raise CollectionSourceArchiveError(
+                collection_id,
+                code="collection_source_archive_too_large",
+                message=(
+                    "Selected source files exceed the "
+                    f"{_SOURCE_ARCHIVE_MAX_MIB} MiB archive limit."
+                ),
+            )
+
+        return await asyncio.to_thread(
+            self._write_source_archive,
+            collection_id,
+            selected_records,
+        )
+
+    def _write_source_archive(
+        self,
+        collection_id: str,
+        selected_records: list[tuple[str, dict[str, Any]]],
+    ) -> dict[str, Any]:
+        """Verify source bytes and write the archive outside the event loop."""
+
+        archive_file = SpooledTemporaryFile(max_size=16 * 1024 * 1024, mode="w+b")
+        try:
+            manifest_files: list[dict[str, Any]] = []
+            with ZipFile(
+                archive_file,
+                mode="w",
+                compression=ZIP_STORED,
+                allowZip64=True,
+            ) as archive:
+                for position, (file_id, record) in enumerate(
+                    selected_records,
+                    start=1,
+                ):
+                    try:
+                        source = self._build_source_file_payload(
+                            collection_id=collection_id,
+                            document_id=file_id,
+                            record=record,
+                        )
+                    except DocumentSourceUnavailableError as exc:
+                        raise CollectionSourceArchiveError(
+                            collection_id,
+                            code=self._source_archive_error_code(exc.code),
+                            message=exc.message,
+                            file_id=file_id,
+                        ) from exc
+
+                    archive_path = (
+                        f"sources/{position:03d}-"
+                        f"{self._safe_archive_filename(source['filename'])}"
+                    )
+                    content = source["content"]
+                    archive.writestr(archive_path, content)
+                    manifest_record: dict[str, Any] = {
+                        "file_id": file_id,
+                        "archive_path": archive_path,
+                        "original_filename": source["filename"],
+                        "media_type": source.get("media_type"),
+                        "size_bytes": len(content),
+                        "sha256": record.get("sha256"),
+                        "status": record.get("status"),
+                        "created_at": record.get("created_at"),
+                    }
+                    if record.get("document_id"):
+                        manifest_record["document_id"] = record["document_id"]
+                    manifest_files.append(manifest_record)
+
+                archive.writestr(
+                    "manifest.json",
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "collection_id": collection_id,
+                            "files": manifest_files,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ).encode("utf-8"),
+                )
+            archive_file.seek(0)
+        except Exception:
+            archive_file.close()
+            raise
+
+        return {
+            "file": archive_file,
+            "filename": self._safe_archive_filename(
+                f"collection-{collection_id}-sources.zip"
+            ),
+        }
 
     async def get_import_manifest(self, collection_id: str) -> dict[str, Any]:
         await self.get_collection(collection_id)
@@ -694,6 +853,22 @@ class CollectionService:
             "source_document_id": self._optional_text(record.get("source_document_id"))
             or document_id,
         }
+
+    @staticmethod
+    def _safe_archive_filename(value: Any) -> str:
+        filename = PurePosixPath(str(value or "").replace("\\", "/")).name
+        filename = "".join(
+            "_" if ord(character) < 32 or character in '<>:"|?*' else character
+            for character in filename
+        ).strip(" .")
+        return filename or "source.bin"
+
+    @staticmethod
+    def _source_archive_error_code(document_source_code: str) -> str:
+        return {
+            "document_source_path_invalid": "collection_source_path_invalid",
+            "document_source_integrity_failed": "collection_source_integrity_failed",
+        }.get(document_source_code, "collection_source_file_unavailable")
 
     def _optional_text(self, value: Any) -> str | None:
         if value is None:

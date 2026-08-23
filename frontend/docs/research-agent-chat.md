@@ -50,6 +50,15 @@ POST /api/v1/chat-sessions/{session_id}/messages
 POST /api/v1/chat-sessions/{session_id}/tool-calls/{tool_call_id}/decision
 ```
 
+Message submission uses `Accept: text/event-stream` on the existing `POST
+/messages` endpoint. The browser appends `text_delta` events to one temporary
+assistant message, then replaces the temporary user/assistant pair with the
+complete `turn` event returned after server persistence. Tool requests,
+results, warnings, resource links, and approval state therefore continue to
+come from the authoritative final turn rather than from partial model text. If
+the stream is interrupted, the browser reloads the durable trajectory before
+offering a retry.
+
 The selected session ID and a small presentation-only history are stored under:
 
 ```text
@@ -66,7 +75,9 @@ session to load and how to label it in the local history list.
 
 The page offers realistic prompts for collection overview, published Findings,
 and focused Objective proposals. A greeting or general conversational response
-is rendered as a normal assistant message with no fake capability activity.
+is rendered incrementally as a normal assistant message with no fake capability
+activity. A stable response cursor occupies the assistant row before the first
+text delta; it does not create a stored partial message.
 
 ### Capability activity
 
@@ -138,7 +149,8 @@ The focused browser suite covers:
 8. removal of stale legacy browser session keys without calling a retired API;
 9. queued capability presentation with a canonical resource link;
 10. a visible mobile composer across consecutive turns and reduced viewport
-    height.
+    height;
+11. text visible before the final persisted turn arrives.
 
 The page audit additionally verifies desktop and mobile framing, accessible
 interaction names, horizontal overflow, and browser console errors.

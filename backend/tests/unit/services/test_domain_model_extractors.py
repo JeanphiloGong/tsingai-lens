@@ -2225,7 +2225,7 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
         {
           "relevance": "high",
           "paper_role": "primary_experiment",
-          "background": "Direct current-work evidence for the objective.",
+          "screening_note": "Direct current-work evidence for the objective.",
           "material_match": ["316L stainless steel"],
           "changed_variables": ["heat treatment"],
           "measured_property_scope": ["corrosion"],
@@ -2270,6 +2270,44 @@ def test_domain_model_extractors_validates_objective_paper_frame_response():
     assert "source_accounting_origin" not in frame_schema["properties"]
     assert "source_accounting_errors" not in frame_schema["properties"]
     assert client.chat.completions.calls[0]["max_completion_tokens"] == 1024
+
+
+def test_objective_paper_frame_bounds_screening_note_without_rejecting_source_ids():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "relevance": "high",
+                "paper_role": "primary_experiment",
+                "screening_note": "x" * 400,
+                "relevant_source_unit_ids": ["frame-section-results"],
+                "excluded_source_unit_ids": [],
+            }
+        )
+    )
+    extractor = _response_client(client)
+
+    frame = ObjectiveSourceScreener(extractor).screen_batch(
+        {
+            "collection_id": "col-1",
+            "objective": {"question": "How does heat treatment affect corrosion?"},
+            "source_units": [
+                {
+                    "source_unit_id": "frame-section-results",
+                    "source_kind": "section",
+                    "source_ref": "results",
+                    "section_label": "Results",
+                    "text": "Heat treatment changed corrosion resistance.",
+                }
+            ],
+        }
+    )
+
+    assert frame.screening_note == "x" * 320
+    assert frame.relevant_source_unit_ids == ["frame-section-results"]
+    assert len(client.chat.completions.calls) == 1
+    assert "background" not in StructuredPaperFrameBatch.model_json_schema()[
+        "properties"
+    ]
 
 
 def test_objective_paper_frame_json_repair_rejects_unknown_source_id():
@@ -2605,6 +2643,9 @@ def test_objective_paper_frame_prompt_defines_bounded_source_accounting():
     assert "Do not infer whole-paper irrelevance" in user_prompt
     assert '"relevant_source_unit_ids":["unit-methods"]' in user_prompt
     assert '"excluded_source_unit_ids":["unit-composition"]' in user_prompt
+    assert '"paper_role":"uncertain"' in user_prompt
+    assert '"relevant_source_unit_ids":[]' in user_prompt
+    assert "This batch contains nominal composition only." in user_prompt
 
 
 def test_objective_paper_frame_prompt_token_estimate_counts_complete_schema():
@@ -3214,7 +3255,7 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
         {
             "collection_id": "col-1",
             "objective": {"question": "How does preheating affect 316L?"},
-            "paper_frame": {"background": "must not become evidence"},
+            "paper_frame": {"screening_note": "must not become evidence"},
             "evidence_route": {
                 "source_kind": "text_window",
                 "source_ref": "block-1",

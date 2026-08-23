@@ -54,10 +54,16 @@ class _Model:
         *,
         messages: tuple,
         tool_specs: tuple[ToolSpec, ...],
+        text_delta_callback=None,  # noqa: ANN001
     ) -> ModelTurn:
         assert messages
         assert tool_specs
-        return self.turns.popleft()
+        turn = self.turns.popleft()
+        if text_delta_callback is not None and turn.content:
+            for chunk in (turn.content[:2], turn.content[2:]):
+                if chunk:
+                    text_delta_callback(chunk)
+        return turn
 
 
 class _Capability:
@@ -135,13 +141,31 @@ async def test_greeting_completes_without_calling_a_tool() -> None:
     assert capability.executed_arguments == []
 
 
+async def test_runner_forwards_model_text_deltas_before_returning_the_turn() -> None:
+    capability = _Capability("get_collection_context", ToolRisk.READ)
+    runner = ResearchAgentRunner(
+        model=_Model(ModelTurn(content="逐段回复")),
+        capabilities=CapabilityRegistry((capability,)),
+    )
+    deltas: list[str] = []
+
+    result = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="你好",
+        text_delta_callback=deltas.append,
+    )
+
+    assert deltas == ["逐段", "回复"]
+    assert result.messages[-1].content == "逐段回复"
+
+
 async def test_read_capability_result_returns_to_the_model_before_final_answer() -> None:
     capability = _Capability("get_collection_context", ToolRisk.READ)
     runner = ResearchAgentRunner(
         model=_Model(
             ModelTurn(
                 tool_call=ModelToolCall(
-                    tool_call_id="call-1",
                     name="get_collection_context",
                     arguments={},
                 )
@@ -167,7 +191,47 @@ async def test_read_capability_result_returns_to_the_model_before_final_answer()
     assert result.tool_calls[0].status is ToolCallStatus.SUCCEEDED
     assert result.tool_results[0].data["collection_id"] == "col-1"
     assert capability.executed_arguments == [{}]
-    assert capability.executed_call_ids == ["call-1"]
+    assert capability.executed_call_ids == [result.tool_calls[0].tool_call_id]
+    assert result.tool_results[0].tool_call_id == result.tool_calls[0].tool_call_id
+
+
+async def test_each_model_tool_decision_gets_a_unique_lens_call_identity() -> None:
+    capability = _Capability("get_collection_context", ToolRisk.READ)
+    runner = ResearchAgentRunner(
+        model=_Model(
+            ModelTurn(
+                tool_call=ModelToolCall(
+                    name="get_collection_context",
+                    arguments={},
+                )
+            ),
+            ModelTurn(content="第一轮读取完成。"),
+            ModelTurn(
+                tool_call=ModelToolCall(
+                    name="get_collection_context",
+                    arguments={},
+                )
+            ),
+            ModelTurn(content="第二轮读取完成。"),
+        ),
+        capabilities=CapabilityRegistry((capability,)),
+    )
+
+    first = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="读取当前 collection",
+    )
+    second = await runner.run_turn(
+        context=_context(),
+        previous_messages=first.messages,
+        user_message="再读取一次",
+    )
+
+    call_ids = [first.tool_calls[0].tool_call_id, second.tool_calls[0].tool_call_id]
+    assert call_ids[0] != call_ids[1]
+    assert all(call_id.startswith("call_") for call_id in call_ids)
+    assert capability.executed_call_ids == call_ids
 
 
 async def test_authorization_is_deterministic_and_not_granted_by_prompt_text() -> None:
@@ -187,7 +251,6 @@ async def test_draft_capability_executes_without_write_approval() -> None:
         model=_Model(
             ModelTurn(
                 tool_call=ModelToolCall(
-                    tool_call_id="call-1",
                     name="propose_objective_drafts",
                     arguments={"question": "energy input and ductility"},
                 )
@@ -221,7 +284,6 @@ async def test_write_capability_stops_for_approval_without_execution() -> None:
             ModelTurn(
                 content="我准备保存这个候选目标。",
                 tool_call=ModelToolCall(
-                    tool_call_id="call-1",
                     name="create_objective_candidate",
                     arguments={"question": "How does energy input affect ductility?"},
                 ),
@@ -303,7 +365,6 @@ async def test_unknown_tool_is_returned_to_the_model_as_a_failed_result() -> Non
         model=_Model(
             ModelTurn(
                 tool_call=ModelToolCall(
-                    tool_call_id="call-unknown",
                     name="read_file",
                     arguments={"path": "/etc/passwd"},
                 )
@@ -337,7 +398,6 @@ async def test_invalid_arguments_do_not_execute_capability() -> None:
         model=_Model(
             ModelTurn(
                 tool_call=ModelToolCall(
-                    tool_call_id="call-invalid",
                     name="propose_objective_drafts",
                     arguments={"unexpected": "value"},
                 )
@@ -367,7 +427,6 @@ async def test_capability_exception_is_sanitized_before_returning_to_model() -> 
         model=_Model(
             ModelTurn(
                 tool_call=ModelToolCall(
-                    tool_call_id="call-1",
                     name="get_collection_context",
                     arguments={},
                 )
@@ -398,7 +457,6 @@ async def test_queued_capability_result_returns_to_model_as_a_successful_observa
         model=_Model(
             ModelTurn(
                 tool_call=ModelToolCall(
-                    tool_call_id="call-queued",
                     name="start_objective_analysis",
                     arguments={},
                 )
@@ -427,14 +485,12 @@ async def test_step_limit_stops_repeated_tool_calls() -> None:
         model=_Model(
             ModelTurn(
                 tool_call=ModelToolCall(
-                    tool_call_id="call-1",
                     name="get_collection_context",
                     arguments={},
                 )
             ),
             ModelTurn(
                 tool_call=ModelToolCall(
-                    tool_call_id="call-2",
                     name="get_collection_context",
                     arguments={},
                 )

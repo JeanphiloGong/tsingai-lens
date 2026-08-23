@@ -524,14 +524,12 @@ async def test_agent_uses_collection_context_then_records_drafts_before_final_an
     model = _Model(
         ModelTurn(
             tool_call=ModelToolCall(
-                tool_call_id="call-context",
                 name="get_collection_context",
                 arguments={},
             )
         ),
         ModelTurn(
             tool_call=ModelToolCall(
-                tool_call_id="call-drafts",
                 name="propose_objective_drafts",
                 arguments={
                     "drafts": [

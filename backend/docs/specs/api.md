@@ -41,6 +41,7 @@ login.
 - `DELETE /api/v1/collections/{collection_id}`
 - `GET /api/v1/collections/{collection_id}/files`
 - `POST /api/v1/collections/{collection_id}/files`
+- `POST /api/v1/collections/{collection_id}/source-archives`
 - `GET /api/v1/collections/{collection_id}/tasks`
 - `POST /api/v1/collections/{collection_id}/tasks/build`
 - `GET /api/v1/tasks/{task_id}`
@@ -55,6 +56,27 @@ The task artifact registry reports only persisted Source artifacts (documents,
 blocks, figures, table rows, and table cells). Workspace document-profile and
 Objective readiness is derived from their owning repositories rather than
 duplicated into the task artifact registry.
+
+The source archive request accepts between one and 100 unique collection
+`file_id` values with at most 256 MiB of persisted source bytes and returns an
+`application/zip` attachment. The archive contains the selected original
+uploads under `sources/` plus `manifest.json` with their stable file IDs,
+archive paths, media types, sizes, and SHA-256 digests. Selection is atomic: a
+missing, oversized, unsafe, unavailable, or integrity-failing source prevents
+the complete archive from being returned.
+An unknown selected ID returns `404 collection_source_file_not_found`.
+An oversized selection returns `413 collection_source_archive_too_large`
+before any selected Source bytes are read.
+Persisted metadata whose bytes are unavailable, unsafe, or fail integrity
+verification returns `409` with the corresponding bounded
+`collection_source_*` code; storage paths are never returned.
+The endpoint does not infer which papers failed. Parsing, PaperSkim, and
+Objective analysis retain ownership of their failure states. Clients select
+IDs from the collection file list or from failure lineage when that stage
+provides it; some early parsing failures do not yet expose per-file failure
+lineage. The export contract itself remains usable before a Core `document_id`
+exists.
+
 The build request accepts `mode: standard | fast` and defaults to `standard`.
 The selected mode is persisted before dispatch and determines the runtime
 dependency graph for that task. The request starts a process-local asyncio task
@@ -81,6 +103,16 @@ record ordinary user and assistant conversation, model tool intent, and bounded
 structured tool results. Chat references Core resources through stable resource
 references; it does not own or duplicate Objective, Evidence, Finding, or
 Analysis records.
+
+`POST /api/v1/chat-sessions/{session_id}/messages` returns the existing JSON
+`ChatTurnResponse` by default. A caller may send `Accept: text/event-stream` on
+the same endpoint to receive UTF-8 server-sent events. `text_delta` events have
+`{"content": string}` data and are transient presentation updates. The stream
+ends with one `turn` event whose data is the complete `ChatTurnResponse` after
+the durable trajectory checkpoints have succeeded. A terminal `error` event
+contains only a stable code and sanitized message. Partial text is never a
+stored Chat message or a scientific result; clients reload the server
+trajectory after an interrupted stream.
 
 An ordinary message may return a final answer without calling a tool. Registered
 `read` and `draft` calls may execute automatically. A `write` call stops at
@@ -117,7 +149,9 @@ The server checkpoints the user message before the first model request, then
 checkpoints model tool intent, running call state, structured tool results, and
 the final assistant answer as separate append-only transitions. A process
 interruption therefore cannot erase an already requested action or make an
-approved write appear never to have started.
+approved write appear never to have started. Lens allocates every durable tool
+call ID; any request-local identifier returned by a model provider is not a
+Chat identity and is not persisted.
 
 Turn status is one of `completed`, `approval_required`,
 `step_limit_reached`, `failed`, or `rejected`. Tool call and result failures are

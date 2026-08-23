@@ -43,8 +43,10 @@ Read the analysis responsibilities in real research order:
 batches, the screening prompt and response schema, prompt preflight, bounded
 repair, model/repaired/fallback dispositions, and frame aggregation. Its
 `ObjectiveSourceScreener` performs only the current bounded relevance judgment.
-Later stages may consume a frame, but they may not reinterpret a screening
-decision as scientific Evidence.
+Its optional `screening_note` explains only the current selection decision and
+is normalized after parsing so an overlong note cannot discard valid Source
+accounting. Later stages may consume a frame, but they may not reinterpret a
+screening decision or note as scientific Evidence or a paper-level conclusion.
 
 `evidence_routing.py` owns transient route records, Source-tree candidate
 ordering, selection hints, the bounded routing prompt and response schema, the
@@ -101,13 +103,14 @@ related locators, and deduplicates only replayed drafts with the same stable
 `evidence_id`. Distinct claims from one Source remain separate because a table,
 figure, or paragraph can support several measurements or comparisons.
 `PaperContribution` route, extracted, failed, and comparable counts are computed
-from that complete claim set. Contribution warnings count only final framing
-fallback, deterministic evidence-routing fallback, PaperSkim coverage gaps, and
-failed Evidence Sources; successful repair is not a warning. It does not persist
-artifacts or synthesize a cross-paper claim. Its private materialization trace
-records only bounded counts and paper dispositions, so an empty result can be
-distinguished from filtering and technical extraction failure without storing
-Source content in diagnostics.
+from that complete claim set, and its contribution summary is assembled only
+from grounded result text in the final Evidence records. Contribution warnings
+count only final framing fallback, deterministic evidence-routing fallback,
+PaperSkim coverage gaps, and failed Evidence Sources; successful repair is not
+a warning. It does not persist artifacts or synthesize a cross-paper claim. Its
+private materialization trace records only bounded counts and paper
+dispositions, so an empty result can be distinguished from filtering and
+technical extraction failure without storing Source content in diagnostics.
 
 An analysis that inspects its paper scope but finds no grounded Objective
 Evidence publishes an empty Finding set as a scientific abstention. This is not

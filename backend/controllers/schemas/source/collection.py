@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CollectionCreateRequest(BaseModel):
@@ -55,3 +55,23 @@ class CollectionFileListResponse(BaseModel):
     """Collection file listing payload."""
 
     items: list[CollectionFileResponse] = Field(default_factory=list, description="文件列表")
+
+
+class CollectionSourceArchiveRequest(BaseModel):
+    """Selection of original collection files to export for reproduction."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    file_ids: list[str] = Field(min_length=1, max_length=100)
+
+    @field_validator("file_ids")
+    @classmethod
+    def validate_file_ids(cls, values: list[str]) -> list[str]:
+        normalized = [str(value).strip() for value in values]
+        if any(not value or len(value) > 128 for value in normalized):
+            raise ValueError(
+                "file_ids must contain non-empty values up to 128 characters"
+            )
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("file_ids must be unique")
+        return normalized

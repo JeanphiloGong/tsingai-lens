@@ -403,7 +403,7 @@ class FakeDomainModelExtractor:
             return StructuredPaperFrameBatch(
                 relevance="irrelevant",
                 paper_role="review",
-                background="Paper does not directly support the objective.",
+                screening_note="Paper does not directly support the objective.",
                 excluded_source_unit_ids=source_unit_ids,
             )
 
@@ -441,7 +441,7 @@ class FakeDomainModelExtractor:
         return StructuredPaperFrameBatch(
             relevance="high" if paper_prior else "uncertain",
             paper_role="primary_experiment",
-            background="Paper directly supports the objective.",
+            screening_note="Paper directly supports the objective.",
             material_match=list(objective.get("material_scope") or []),
             changed_variables=list(objective.get("variables") or []),
             measured_property_scope=[

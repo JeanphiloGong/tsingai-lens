@@ -104,7 +104,16 @@ figure, or paragraph can support several measurements or comparisons.
 from that complete claim set. Contribution warnings count only final framing
 fallback, PaperSkim coverage gaps, and failed Evidence Sources; successful
 repair is not a warning. It does not persist artifacts or synthesize a
-cross-paper claim.
+cross-paper claim. Its private materialization trace records only bounded counts
+and paper dispositions, so an empty result can be distinguished from filtering
+and technical extraction failure without storing Source content in diagnostics.
+
+An analysis that inspects its paper scope but finds no grounded Objective
+Evidence publishes an empty Finding set as a scientific abstention. This is not
+a provider failure. If every relevant paper instead ends in technical extraction
+failure, the analysis run fails and remains retryable. A partial technical
+failure may still publish surviving paper outcomes with explicit contribution
+warnings.
 
 `finding_synthesis.py` owns cross-paper comparison after durable Evidence and
 paper outcomes exist. `FindingSynthesisService` deterministically selects

@@ -337,8 +337,18 @@ class ObjectiveAnalysisService:
     def _validate_artifacts(artifacts: ObjectiveAnalysisArtifacts) -> None:
         if not artifacts.contributions:
             raise RuntimeError("objective analysis produced no paper contributions")
-        if not artifacts.evidence_records:
-            raise RuntimeError("objective analysis produced no source-backed evidence")
+        relevant_contributions = tuple(
+            contribution
+            for contribution in artifacts.contributions
+            if contribution.analysis_status != "excluded"
+        )
+        if relevant_contributions and all(
+            contribution.analysis_status == "failed"
+            for contribution in relevant_contributions
+        ):
+            raise RuntimeError(
+                "objective analysis failed to extract every relevant paper"
+            )
 
     async def _result(
         self,

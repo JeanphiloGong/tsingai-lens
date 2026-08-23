@@ -1,8 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections import Counter
+from collections.abc import Mapping
+from typing import Any
 
 from application.core.objectives import property_matching
+from application.core.objectives.analysis.diagnostics import (
+    record_analysis_diagnostic,
+)
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
 from application.core.objectives.analysis.finding_synthesis import (
     FindingSynthesisService,
@@ -19,6 +24,7 @@ from domain.core import (
     PaperSourceUnitCoverageStatus,
     ResearchObjective,
 )
+
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
@@ -58,6 +64,38 @@ def materialize_evidence(
         frames=frames,
         routes=routes,
         evidence_records=evidence_records,
+    )
+    target_axes = property_matching.objective_outcomes(objective)
+    record_analysis_diagnostic(
+        {
+            "trace_type": "objective_evidence_materialization",
+            "collection_id": collection_id,
+            "objective_id": objective.objective_id,
+            "analysis_version": analysis.analysis_version,
+            "draft_count": len(drafts),
+            "failed_draft_count": sum(
+                draft.selection_status == "failed" for draft in drafts
+            ),
+            "target_outcome_match_count": sum(
+                draft.selection_status != "failed"
+                and bool(target_axes)
+                and _objective_evidence_matches_target_property(
+                    draft,
+                    target_axes=target_axes,
+                )
+                for draft in drafts
+            ),
+            "selected_draft_count": len(selected_drafts),
+            "evidence_record_count": len(evidence_records),
+            "paper_disposition_counts": dict(
+                sorted(
+                    Counter(
+                        contribution.evidence_disposition or "unclassified"
+                        for contribution in contributions
+                    ).items()
+                )
+            ),
+        }
     )
     return evidence_records, contributions
 

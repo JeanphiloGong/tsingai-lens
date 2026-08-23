@@ -588,18 +588,51 @@ async def test_empty_finding_output_publishes_scientific_abstention() -> None:
     assert repository.published_calls == 1
 
 
-@pytest.mark.parametrize(
-    ("missing_field", "expected_error"),
-    (
-        ("contributions", "objective analysis produced no paper contributions"),
-        ("evidence_records", "objective analysis produced no source-backed evidence"),
-    ),
-)
-async def test_missing_required_analysis_artifacts_still_fail_without_publication(
-    missing_field: str,
-    expected_error: str,
-) -> None:
-    artifacts = replace(_artifacts(1), **{missing_field: ()})
+async def test_no_grounded_evidence_publishes_scientific_abstention() -> None:
+    contribution = PaperContribution.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 1,
+            "document_id": "paper-1",
+            "analysis_status": "analyzed",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "confidence": 0.9,
+            "evidence_disposition": "no_routable_evidence",
+            "routed_source_count": 0,
+            "extracted_source_count": 0,
+            "comparable_evidence_count": 0,
+            "failed_source_count": 0,
+            "evidence_disposition_reason": (
+                "No source in this paper was selected for Objective extraction."
+            ),
+        }
+    )
+    artifacts = ObjectiveAnalysisArtifacts(
+        contributions=(contribution,),
+        evidence_records=(),
+        findings=(),
+    )
+    service, repository, _analyzer = _service(
+        analyzer=FakeResearchObjectiveService(artifacts=artifacts)
+    )
+    await service.queue_analysis("collection-1", "objective-1")
+
+    result = await service.execute_queued_analysis(
+        "collection-1", "objective-1", 1
+    )
+
+    assert result["analysis"].status == "succeeded"
+    assert result["objective"].published_analysis_version == 1
+    assert result["findings"] == ()
+    assert result["paper_contributions"] == (contribution,)
+    assert repository.evidence[1] == ()
+    assert repository.published_calls == 1
+
+
+async def test_missing_paper_contributions_still_fails_without_publication() -> None:
+    artifacts = replace(_artifacts(1), contributions=())
     service, repository, _analyzer = _service(
         analyzer=FakeResearchObjectiveService(artifacts=artifacts)
     )
@@ -610,7 +643,73 @@ async def test_missing_required_analysis_artifacts_still_fail_without_publicatio
     )
 
     assert result["analysis"].status == "failed"
-    assert result["analysis"].error_message == expected_error
+    assert (
+        result["analysis"].error_message
+        == "objective analysis produced no paper contributions"
+    )
+    assert result["objective"].published_analysis_version is None
+    assert repository.published_calls == 0
+
+
+async def test_all_relevant_paper_extractions_failed_without_publication() -> None:
+    failed_evidence = ObjectiveEvidence.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 1,
+            "evidence_id": "failed-evidence-1",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "block-1",
+            "source_excerpt": "Source selected for inspection.",
+            "evidence_role": "irrelevant",
+            "selection_status": "failed",
+            "attribution_scope": "not_attributable",
+            "resolution_status": "unknown",
+            "failure_reason": "RuntimeError: model unavailable",
+            "confidence": 0.0,
+        }
+    )
+    failed_contribution = PaperContribution.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 1,
+            "document_id": "paper-1",
+            "analysis_status": "failed",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "warnings": ["1 selected source(s) failed extraction."],
+            "confidence": 0.9,
+            "evidence_disposition": "extraction_failed",
+            "routed_source_count": 1,
+            "extracted_source_count": 0,
+            "comparable_evidence_count": 0,
+            "failed_source_count": 1,
+            "evidence_disposition_reason": (
+                "1 selected source(s) failed extraction."
+            ),
+        }
+    )
+    artifacts = ObjectiveAnalysisArtifacts(
+        contributions=(failed_contribution,),
+        evidence_records=(failed_evidence,),
+        findings=(),
+    )
+    service, repository, _analyzer = _service(
+        analyzer=FakeResearchObjectiveService(artifacts=artifacts)
+    )
+    await service.queue_analysis("collection-1", "objective-1")
+
+    result = await service.execute_queued_analysis(
+        "collection-1", "objective-1", 1
+    )
+
+    assert result["analysis"].status == "failed"
+    assert (
+        result["analysis"].error_message
+        == "objective analysis failed to extract every relevant paper"
+    )
     assert result["objective"].published_analysis_version is None
     assert repository.published_calls == 0
 

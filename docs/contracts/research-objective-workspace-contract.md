@@ -245,7 +245,9 @@ document with Evidence identity, `source_ref`, exact quote, and page context.
 - Published Finding graphs are immutable.
 - Internal IDs are retained for requests and audit but are not used as visible
   scientific labels.
-- Empty, failed, stale, or scientifically unsupported output is not reported as
-  successful expert analysis.
+- A completed inspection with no grounded Evidence publishes an empty Finding
+  set as a scientific abstention, not as an expert conclusion. A run whose
+  relevant papers all fail technical extraction remains failed and retryable;
+  stale or technically failed output is never reported as successful analysis.
 - The frontend and downstream assistant consume published Findings directly;
   they do not rebuild another conclusion graph.

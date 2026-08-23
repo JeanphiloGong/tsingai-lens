@@ -618,10 +618,12 @@ class PostgresObjectiveRepository:
                 scope,
                 source_relationship_ids=source_relationship_ids,
                 rank=rank,
-                analysis_versions=await self._analysis_versions_by_objective(
-                    session,
-                    collection_id,
-                    build_id,
+                analysis_versions=(
+                    await self._analysis_versions_by_objective(
+                        session,
+                        collection_id,
+                        build_id,
+                    )
                 ).get(objective_id, (None, None)),
                 authored=authored,
             )
@@ -659,10 +661,12 @@ class PostgresObjectiveRepository:
                 scope,
                 source_relationship_ids=source_relationship_ids,
                 rank=rank,
-                analysis_versions=await self._analysis_versions_by_objective(
-                    session,
-                    collection_id,
-                    build_id,
+                analysis_versions=(
+                    await self._analysis_versions_by_objective(
+                        session,
+                        collection_id,
+                        build_id,
+                    )
                 ).get(objective_id, (None, None)),
                 authored=authored,
             )
@@ -712,10 +716,12 @@ class PostgresObjectiveRepository:
                     scope,
                     source_relationship_ids=source_relationship_ids,
                     rank=rank,
-                    analysis_versions=await self._analysis_versions_by_objective(
-                        session,
-                        collection_id,
-                        source_build_id,
+                    analysis_versions=(
+                        await self._analysis_versions_by_objective(
+                            session,
+                            collection_id,
+                            source_build_id,
+                        )
                     ).get(objective_id, (None, None)),
                     authored=authored,
                 ), self._analysis_record(existing)
@@ -781,10 +787,12 @@ class PostgresObjectiveRepository:
                 rank=rank,
                 analysis_versions=(
                     next_version,
-                    await self._analysis_versions_by_objective(
-                        session,
-                        collection_id,
-                        source_build_id,
+                    (
+                        await self._analysis_versions_by_objective(
+                            session,
+                            collection_id,
+                            source_build_id,
+                        )
                     ).get(objective_id, (None, None))[1],
                 ),
                 authored=authored,
@@ -988,10 +996,12 @@ class PostgresObjectiveRepository:
                 if link is None:
                     return None
                 _relationship_ids, _rank, build_id = link
-                analysis_version = await self._analysis_versions_by_objective(
-                    session,
-                    collection_id,
-                    build_id,
+                analysis_version = (
+                    await self._analysis_versions_by_objective(
+                        session,
+                        collection_id,
+                        build_id,
+                    )
                 ).get(objective_id, (None, None))[0]
                 if analysis_version is None:
                     return None
@@ -1015,10 +1025,12 @@ class PostgresObjectiveRepository:
             if link is None:
                 return None
             _relationship_ids, _rank, build_id = link
-            published_analysis_version = await self._analysis_versions_by_objective(
-                session,
-                collection_id,
-                build_id,
+            published_analysis_version = (
+                await self._analysis_versions_by_objective(
+                    session,
+                    collection_id,
+                    build_id,
+                )
             ).get(objective_id, (None, None))[1]
             if published_analysis_version is None:
                 return None
@@ -1089,7 +1101,9 @@ class PostgresObjectiveRepository:
                     .limit(max(1, min(limit, 200)))
                 )
             )
-            return tuple(await self._finding_record(session, row) for row in rows), total
+            return tuple(
+                [await self._finding_record(session, row) for row in rows]
+            ), total
 
     async def read_finding(
         self,
@@ -1551,27 +1565,29 @@ class PostgresObjectiveRepository:
             ),
             limitations=tuple(context_row.limitations),
             paper_contributions=tuple(
-                FindingPaperContribution(
-                    document_id=paper_row.source_document_id,
-                    analysis_status=await self._paper_contribution_status(
-                        session,
-                        key_filters[:3],
-                        paper_row.source_document_id,
-                    ),
-                    supporting_evidence_ids=evidence_for_document(
-                        "supporting", paper_row.source_document_id
-                    ),
-                    contradicting_evidence_ids=evidence_for_document(
-                        "contradicting", paper_row.source_document_id
-                    ),
-                    context_evidence_ids=evidence_for_document(
-                        "context", paper_row.source_document_id
-                    ),
-                    condition_boundary_evidence_ids=evidence_for_document(
-                        "boundary", paper_row.source_document_id
-                    ),
-                )
-                for paper_row in paper_rows
+                [
+                    FindingPaperContribution(
+                        document_id=paper_row.source_document_id,
+                        analysis_status=await self._paper_contribution_status(
+                            session,
+                            key_filters[:3],
+                            paper_row.source_document_id,
+                        ),
+                        supporting_evidence_ids=evidence_for_document(
+                            "supporting", paper_row.source_document_id
+                        ),
+                        contradicting_evidence_ids=evidence_for_document(
+                            "contradicting", paper_row.source_document_id
+                        ),
+                        context_evidence_ids=evidence_for_document(
+                            "context", paper_row.source_document_id
+                        ),
+                        condition_boundary_evidence_ids=evidence_for_document(
+                            "boundary", paper_row.source_document_id
+                        ),
+                    )
+                    for paper_row in paper_rows
+                ]
             ),
         )
 
@@ -1739,10 +1755,12 @@ class PostgresObjectiveRepository:
                 authored.collection_id,
                 authored.objective_id,
             ),
-            analysis_versions=await cls._analysis_versions_by_objective(
-                session,
-                authored.collection_id,
-                authored.source_build_id,
+            analysis_versions=(
+                await cls._analysis_versions_by_objective(
+                    session,
+                    authored.collection_id,
+                    authored.source_build_id,
+                )
             ).get(authored.objective_id, (None, None)),
             authored=authored,
         )
@@ -1781,7 +1799,7 @@ class PostgresObjectiveRepository:
         cls._require_source_document(
             source_document_ids, collection_id, skim.document_id
         )
-        cls._require_paper_skim_source_refs(
+        await cls._require_paper_skim_source_refs(
             session,
             collection_id,
             build_id,
@@ -2190,10 +2208,12 @@ class PostgresObjectiveRepository:
                 "seed": tuple(authored.seed_document_ids),
                 "excluded": tuple(authored.excluded_document_ids),
             }
-        return await cls._scope_by_objective(
-            session,
-            collection_id,
-            build_id=build_id,
+        return (
+            await cls._scope_by_objective(
+                session,
+                collection_id,
+                build_id=build_id,
+            )
         ).get(objective_id, {})
 
     @classmethod

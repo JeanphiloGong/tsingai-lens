@@ -1355,6 +1355,59 @@ async def test_publish_is_atomic_and_reads_findings_and_exact_evidence(
     }
 
 
+async def test_publish_preserves_scientific_abstention_without_evidence(
+    source_repositories,
+) -> None:
+    source_repository, builds = source_repositories
+    repository = await _prepare_studies(source_repository, builds)
+    _objective_row, claimed = await _queue_and_claim(repository)
+    version = claimed.analysis_version
+    contributions = tuple(
+        PaperContribution.from_mapping(
+            {
+                **_contribution(version, document_id).to_record(),
+                "evidence_disposition": "no_routable_evidence",
+                "routed_source_count": 0,
+                "extracted_source_count": 0,
+                "comparable_evidence_count": 0,
+                "failed_source_count": 0,
+                "evidence_disposition_reason": (
+                    "No source in this paper was selected for Objective extraction."
+                ),
+            }
+        )
+        for document_id in (
+            "srcdoc_runtime",
+            "srcdoc_supporting",
+            "srcdoc_contradicting",
+        )
+    ) + (_contribution(version, "srcdoc_excluded", analysis_status="excluded"),)
+
+    objective, succeeded = await repository.publish_analysis(
+        "col_source",
+        "objective-1",
+        version,
+        contributions=contributions,
+        evidence_records=(),
+        findings=(),
+    )
+
+    assert succeeded.status == "succeeded"
+    assert objective.published_analysis_version == version
+    persisted_contributions = await repository.list_contributions(
+        "col_source", "objective-1", version
+    )
+    assert {
+        item.document_id: item for item in persisted_contributions
+    } == {item.document_id: item for item in contributions}
+    assert await repository.list_evidence(
+        "col_source", "objective-1", version
+    ) == ((), 0)
+    assert await repository.list_findings(
+        "col_source", "objective-1", version
+    ) == ((), 0)
+
+
 async def test_failed_retry_preserves_previous_published_version(
     source_repositories,
 ) -> None:

@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
+from io import BytesIO
+import json
 import os
 from pathlib import Path
 import subprocess
 import sys
 from unittest.mock import AsyncMock, Mock
+from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
 import pytest
@@ -271,3 +274,154 @@ def test_public_static_data_mount_is_removed(
         response = client.get("/api/static/leak.txt")
 
         assert response.status_code == 404
+
+
+def test_collection_source_archive_downloads_selected_original_files(
+    monkeypatch,
+    tmp_path,
+    auth_session_service,
+    collection_service,
+):
+    with _build_client(
+        monkeypatch,
+        tmp_path,
+        auth_session_service,
+        collection_service,
+    ) as client:
+        assert _login(client).status_code == 200
+        created = client.post(
+            "/api/v1/collections",
+            json={"name": "Failed paper reproduction"},
+        )
+        collection_id = created.json()["collection_id"]
+        upload = client.post(
+            f"/api/v1/collections/{collection_id}/files",
+            files={
+                "file": (
+                    "failed.pdf",
+                    b"%PDF-1.4\nfailed source\n",
+                    "application/pdf",
+                )
+            },
+        )
+        file_id = upload.json()["file_id"]
+
+        response = client.post(
+            f"/api/v1/collections/{collection_id}/source-archives",
+            json={"file_ids": [file_id]},
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/zip"
+        assert response.headers["content-disposition"].startswith("attachment;")
+        with ZipFile(BytesIO(response.content)) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            assert manifest["files"][0]["file_id"] == file_id
+            assert archive.read(manifest["files"][0]["archive_path"]) == (
+                b"%PDF-1.4\nfailed source\n"
+            )
+
+
+def test_collection_source_archive_is_scoped_to_authenticated_owner(
+    monkeypatch,
+    tmp_path,
+    auth_session_service,
+    collection_service,
+):
+    with _build_client(
+        monkeypatch,
+        tmp_path,
+        auth_session_service,
+        collection_service,
+    ) as client:
+        assert _login(client).status_code == 200
+        created = client.post(
+            "/api/v1/collections",
+            json={"name": "Private failures"},
+        )
+        collection_id = created.json()["collection_id"]
+        auth_service = client.app.state.auth_session_service
+        asyncio.run(
+            auth_service.create_user(
+                email="other@example.com",
+                password="other-password",
+            )
+        )
+        client.cookies.clear()
+        assert _login(client, "other@example.com", "other-password").status_code == 200
+
+        response = client.post(
+            f"/api/v1/collections/{collection_id}/source-archives",
+            json={"file_ids": ["file_private"]},
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"]["code"] == "collection_not_found"
+
+
+@pytest.mark.parametrize(
+    "file_ids",
+    [
+        [],
+        ["file_same", "file_same"],
+        [f"file_{index}" for index in range(101)],
+    ],
+)
+def test_collection_source_archive_rejects_invalid_file_selection(
+    monkeypatch,
+    tmp_path,
+    auth_session_service,
+    collection_service,
+    file_ids,
+):
+    with _build_client(
+        monkeypatch,
+        tmp_path,
+        auth_session_service,
+        collection_service,
+    ) as client:
+        assert _login(client).status_code == 200
+        created = client.post(
+            "/api/v1/collections",
+            json={"name": "Invalid selection"},
+        )
+
+        response = client.post(
+            f"/api/v1/collections/{created.json()['collection_id']}/source-archives",
+            json={"file_ids": file_ids},
+        )
+
+        assert response.status_code == 422
+
+
+def test_collection_source_archive_returns_bounded_missing_file_error(
+    monkeypatch,
+    tmp_path,
+    auth_session_service,
+    collection_service,
+):
+    with _build_client(
+        monkeypatch,
+        tmp_path,
+        auth_session_service,
+        collection_service,
+    ) as client:
+        assert _login(client).status_code == 200
+        created = client.post(
+            "/api/v1/collections",
+            json={"name": "Missing file"},
+        )
+        collection_id = created.json()["collection_id"]
+
+        response = client.post(
+            f"/api/v1/collections/{collection_id}/source-archives",
+            json={"file_ids": ["file_missing"]},
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == {
+            "code": "collection_source_file_not_found",
+            "message": "A requested source file does not exist in this collection.",
+            "collection_id": collection_id,
+            "file_id": "file_missing",
+        }

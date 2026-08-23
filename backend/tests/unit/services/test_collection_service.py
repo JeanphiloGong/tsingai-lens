@@ -3,9 +3,14 @@ from __future__ import annotations
 import base64
 from dataclasses import replace
 from hashlib import sha256
+import json
+from zipfile import ZipFile
 import pytest
 
-from application.source.collection_service import CollectionService
+from application.source.collection_service import (
+    CollectionService,
+    CollectionSourceArchiveError,
+)
 from domain.source import (
     CollectionImportDocumentRecord,
     CollectionImportRecord,
@@ -55,6 +60,131 @@ async def test_list_files_requires_collection_metadata(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="collection not found"):
         await service.list_files("col_orphaned_workspace")
+
+
+async def test_build_source_archive_preserves_requested_files_and_manifest(tmp_path):
+    service = build_test_collection_service(tmp_path / "collections")
+    collection = await service.create_collection("Reproduction sources")
+    collection_id = collection["collection_id"]
+    first = await service.add_file(
+        collection_id,
+        "paper.pdf",
+        b"%PDF-1.4\nfirst paper\n",
+        "application/pdf",
+    )
+    second = await service.add_file(
+        collection_id,
+        "paper.pdf",
+        b"%PDF-1.4\nsecond paper\n",
+        "application/pdf",
+    )
+
+    result = await service.build_source_archive(
+        collection_id,
+        [second["file_id"], first["file_id"]],
+    )
+    try:
+        with ZipFile(result["file"]) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            archive_paths = [item["archive_path"] for item in manifest["files"]]
+
+            assert archive_paths == [
+                "sources/001-paper.pdf",
+                "sources/002-paper.pdf",
+            ]
+            assert [item["file_id"] for item in manifest["files"]] == [
+                second["file_id"],
+                first["file_id"],
+            ]
+            assert archive.read(archive_paths[0]) == b"%PDF-1.4\nsecond paper\n"
+            assert archive.read(archive_paths[1]) == b"%PDF-1.4\nfirst paper\n"
+            assert manifest["collection_id"] == collection_id
+            assert manifest["schema_version"] == 1
+            assert manifest["files"][0]["sha256"] == second["sha256"]
+            assert manifest["files"][0]["media_type"] == "application/pdf"
+    finally:
+        result["file"].close()
+
+
+async def test_build_source_archive_rejects_missing_file_before_reading(
+    monkeypatch,
+    tmp_path,
+):
+    service = build_test_collection_service(tmp_path / "collections")
+    collection = await service.create_collection("Missing source")
+    uploaded = await service.add_file(
+        collection["collection_id"],
+        "paper.pdf",
+        b"%PDF-1.4\nsource\n",
+    )
+
+    def fail_if_read(*_args, **_kwargs):
+        raise AssertionError("source bytes must not be read before selection resolves")
+
+    monkeypatch.setattr(service.object_store, "read", fail_if_read)
+
+    with pytest.raises(CollectionSourceArchiveError) as exc_info:
+        await service.build_source_archive(
+            collection["collection_id"],
+            [uploaded["file_id"], "file_missing"],
+        )
+
+    assert exc_info.value.code == "collection_source_file_not_found"
+    assert exc_info.value.file_id == "file_missing"
+
+
+async def test_build_source_archive_rejects_unsafe_collection_storage_key(tmp_path):
+    service = build_test_collection_service(tmp_path / "collections")
+    first = await service.create_collection("Requested collection")
+    second = await service.create_collection("Foreign collection")
+    foreign_file = await service.add_file(
+        second["collection_id"],
+        "foreign.pdf",
+        b"%PDF-1.4\nforeign source\n",
+    )
+    foreign_record = (
+        await service.repository.list_collection_files(second["collection_id"])
+    )[0]
+    unsafe_file = replace(
+        foreign_record,
+        file_id="file_unsafe",
+        object_id="obj_unsafe",
+        collection_id=first["collection_id"],
+    )
+    await service.repository.add_collection_import(
+        CollectionImportRecord(
+            import_id="imp_unsafe",
+            collection_id=first["collection_id"],
+            channel="upload",
+            adapter_name="upload",
+            adapter_version=None,
+            raw_locator="foreign.pdf",
+            goal_context=None,
+            warnings=(),
+            ingested_at=unsafe_file.created_at,
+            documents=(
+                CollectionImportDocumentRecord(
+                    source_document_id="srcdoc_unsafe",
+                    origin_channel="upload",
+                    file=unsafe_file,
+                    language=None,
+                    ingest_status="normalized",
+                    text_units=(),
+                ),
+            ),
+        ),
+        updated_at=unsafe_file.created_at,
+    )
+
+    with pytest.raises(CollectionSourceArchiveError) as exc_info:
+        await service.build_source_archive(
+            first["collection_id"],
+            ["file_unsafe"],
+        )
+
+    assert exc_info.value.code == "collection_source_path_invalid"
+    assert exc_info.value.file_id == "file_unsafe"
+    assert foreign_file["storage_key"] not in str(exc_info.value)
 
 
 async def test_delete_collection_removes_collection_directory(tmp_path):

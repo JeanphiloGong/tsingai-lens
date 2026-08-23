@@ -13,6 +13,12 @@ const config = {
 	preprocess: vitePreprocess(),
 	kit: {
 		adapter: adapter({ fallback: 'index.html' }),
+		csp: {
+			mode: 'hash',
+			directives: {
+				'script-src': ['self']
+			}
+		},
 		version: {
 			name: packageMetadata.version
 		}

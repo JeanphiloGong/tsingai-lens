@@ -256,12 +256,13 @@ class ResearchAgentRunner:
     ) -> tuple[ChatToolCall, Any]:
         model_call = turn.tool_call
         assistant_message_id = self._message_id()
+        tool_call_id = self._tool_call_id()
         messages.append(
             ChatMessage.assistant_tool_call(
                 message_id=assistant_message_id,
                 session_id=context.session_id,
                 content=turn.content,
-                tool_call_id=model_call.tool_call_id,
+                tool_call_id=tool_call_id,
                 tool_name=model_call.name,
                 tool_arguments=model_call.arguments,
                 created_at=_now_iso(),
@@ -269,7 +270,7 @@ class ResearchAgentRunner:
         )
         handler = self.capabilities.get(model_call.name)
         return ChatToolCall.requested(
-            tool_call_id=model_call.tool_call_id,
+            tool_call_id=tool_call_id,
             session_id=context.session_id,
             assistant_message_id=assistant_message_id,
             name=model_call.name,
@@ -397,6 +398,10 @@ class ResearchAgentRunner:
     @staticmethod
     def _message_id() -> str:
         return f"msg_{uuid4().hex[:16]}"
+
+    @staticmethod
+    def _tool_call_id() -> str:
+        return f"call_{uuid4().hex[:16]}"
 
 
 __all__ = [

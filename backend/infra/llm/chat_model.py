@@ -79,7 +79,6 @@ class OpenAIChatModel:
         return ModelTurn(
             content=content,
             tool_call=ModelToolCall(
-                tool_call_id=str(raw_call.id),
                 name=str(function.name),
                 arguments=dict(arguments),
             ),

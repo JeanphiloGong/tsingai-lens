@@ -205,7 +205,6 @@ async def test_chat_session_service_checkpoints_every_agent_step() -> None:
         _Model(
             ModelTurn(
                 tool_call=ModelToolCall(
-                    tool_call_id="call-1",
                     name="get_collection_context",
                     arguments={"question": "What is in this collection?"},
                 )
@@ -241,7 +240,6 @@ async def test_chat_session_service_approves_exact_write_and_resumes() -> None:
             ModelTurn(
                 content="我准备保存候选目标。",
                 tool_call=ModelToolCall(
-                    tool_call_id="call-1",
                     name="create_objective_candidate",
                     arguments={"question": "How does energy input affect ductility?"},
                 ),
@@ -307,7 +305,6 @@ async def test_chat_session_service_rejection_never_executes_write() -> None:
         _Model(
             ModelTurn(
                 tool_call=ModelToolCall(
-                    tool_call_id="call-1",
                     name="create_objective_candidate",
                     arguments={"question": "How does energy input affect ductility?"},
                 )

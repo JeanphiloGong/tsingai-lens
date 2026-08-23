@@ -52,7 +52,7 @@ def _message() -> ChatMessage:
 
 
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v4"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v5"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
@@ -64,6 +64,12 @@ def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None
     assert "设计研究方案" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "验证研究判断" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "研究方案生成和验证闭环仍在开发中" in RESEARCH_AGENT_SYSTEM_PROMPT
+
+
+def test_prompt_separates_product_questions_from_collection_reads() -> None:
+    assert "application's purpose" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "without calling a tool" in RESEARCH_AGENT_SYSTEM_PROMPT
+    assert "current collection's contents" in RESEARCH_AGENT_SYSTEM_PROMPT
 
 
 def test_openai_chat_model_uses_the_global_model_setting(monkeypatch) -> None:

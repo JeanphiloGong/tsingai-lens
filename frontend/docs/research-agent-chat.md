@@ -112,6 +112,11 @@ is not rendered as a technical error.
 - The mobile layout removes the secondary history rail but retains collection
   navigation, active conversation, structured results, approval controls, and
   the composer.
+- The mobile composer keeps its input and send action on one row, follows the
+  dynamic viewport as browser chrome changes, and preserves the device bottom
+  safe area.
+- Assistant colors and status treatments use the shared Lens design tokens in
+  both light and dark themes.
 - Every interactive control has an accessible name and native keyboard
   behavior.
 - Status, warning, and approval states use text as well as color.
@@ -131,7 +136,9 @@ The focused browser suite covers:
 6. approval with a canonical Objective link;
 7. refresh recovery of persisted approval;
 8. removal of stale legacy browser session keys without calling a retired API;
-9. queued capability presentation with a canonical resource link.
+9. queued capability presentation with a canonical resource link;
+10. a visible mobile composer across consecutive turns and reduced viewport
+    height.
 
 The page audit additionally verifies desktop and mobile framing, accessible
 interaction names, horizontal overflow, and browser console errors.

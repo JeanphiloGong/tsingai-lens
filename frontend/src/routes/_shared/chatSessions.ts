@@ -1,4 +1,4 @@
-import { requestJson } from './api';
+import { buildApiUrl, requestJson, throwApiError } from './api';
 
 export type ChatResourceRef = {
 	resource_type: string;
@@ -95,11 +95,72 @@ export async function fetchChatTrajectory(sessionId: string) {
 	})) as ChatTrajectory;
 }
 
-export async function postChatMessage(sessionId: string, message: string) {
-	return (await requestJson(`${chatSessionPath(sessionId)}/messages`, {
+export async function streamChatMessage(
+	sessionId: string,
+	message: string,
+	onTextDelta: (content: string) => void
+) {
+	const response = await fetch(buildApiUrl(`${chatSessionPath(sessionId)}/messages`), {
 		method: 'POST',
+		credentials: 'same-origin',
+		headers: {
+			Accept: 'text/event-stream',
+			'Content-Type': 'application/json'
+		},
 		body: JSON.stringify({ message })
-	})) as ChatTurn;
+	});
+	if (!response.ok) await throwApiError(response);
+	if (!response.body) throw new Error('The research response stream is unavailable.');
+
+	const reader = response.body.getReader();
+	const decoder = new TextDecoder();
+	let buffer = '';
+	let turn: ChatTurn | null = null;
+	const consume = (block: string) => {
+		const lines = block.replace(/\r\n?/g, '\n').split('\n');
+		const event = lines
+			.find((line) => line.startsWith('event:'))
+			?.slice(6)
+			.trim();
+		const data = lines
+			.filter((line) => line.startsWith('data:'))
+			.map((line) => line.slice(5).trimStart())
+			.join('\n');
+		if (!event || !data) return;
+		const payload = JSON.parse(data) as unknown;
+		if (event === 'text_delta') {
+			if (payload && typeof payload === 'object' && 'content' in payload) {
+				onTextDelta(String(payload.content ?? ''));
+			}
+			return;
+		}
+		if (event === 'turn') {
+			turn = payload as ChatTurn;
+			return;
+		}
+		if (event === 'error') {
+			const message =
+				payload && typeof payload === 'object' && 'message' in payload
+					? String(payload.message)
+					: 'The research response could not be completed.';
+			throw new Error(message);
+		}
+	};
+
+	while (true) {
+		const { done, value } = await reader.read();
+		buffer += decoder.decode(value, { stream: !done });
+		let boundary = /\r?\n\r?\n|\r\r/.exec(buffer);
+		while (boundary?.index !== undefined) {
+			consume(buffer.slice(0, boundary.index));
+			buffer = buffer.slice(boundary.index + boundary[0].length);
+			boundary = /\r?\n\r?\n|\r\r/.exec(buffer);
+		}
+		if (done) break;
+	}
+	if (buffer.trim()) consume(buffer);
+	if (turn === null) throw new Error('The research response ended before completion.');
+	return turn;
 }
 
 export async function decideChatToolCall(

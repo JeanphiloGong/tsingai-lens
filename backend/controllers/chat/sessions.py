@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+import json
 from typing import Any, Mapping
 
 from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 
 from application.chat.session_service import (
     ChatApprovalPendingError,
@@ -112,11 +115,26 @@ async def post_chat_message(
     session_id: str,
     payload: ChatTurnRequest,
     request: Request,
-) -> ChatTurnResponse:
+) -> ChatTurnResponse | StreamingResponse:
     try:
+        user_id = await current_user_id(request)
+        if "text/event-stream" in request.headers.get("accept", ""):
+            events = await request.app.state.chat_session_service.stream_message_for_user(
+                session_id,
+                user_id,
+                message=payload.message,
+            )
+            return StreamingResponse(
+                _chat_event_stream(events),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                },
+            )
         turn = await request.app.state.chat_session_service.post_message_for_user(
             session_id,
-            await current_user_id(request),
+            user_id,
             message=payload.message,
         )
     except ChatSessionNotFoundError as exc:
@@ -131,6 +149,25 @@ async def post_chat_message(
             },
         ) from exc
     return _turn_response(turn)
+
+
+async def _chat_event_stream(
+    events: AsyncIterator[Mapping[str, Any]],
+) -> AsyncIterator[str]:
+    async for item in events:
+        event_type = str(item.get("type") or "error")
+        if event_type == "turn":
+            data: Any = _turn_response(item.get("turn") or {}).model_dump(mode="json")
+        elif event_type == "text_delta":
+            data = {"content": str(item.get("content") or "")}
+        else:
+            event_type = "error"
+            data = item.get("error") or {
+                "code": "chat_stream_failed",
+                "message": "The research response could not be completed.",
+            }
+        payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        yield f"event: {event_type}\ndata: {payload}\n\n"
 
 
 @router.post(

@@ -92,6 +92,7 @@ class ResearchAgentRunner:
         previous_messages: tuple[ChatMessage, ...],
         user_message: str,
         checkpoint: _TrajectoryCheckpoint | None = None,
+        text_delta_callback: Callable[[str], None] | None = None,
     ) -> AgentRunResult:
         messages = [
             *previous_messages,
@@ -111,6 +112,7 @@ class ResearchAgentRunner:
             calls,
             results,
             checkpoint=checkpoint,
+            text_delta_callback=text_delta_callback,
         )
 
     async def resume_approved_call(
@@ -120,6 +122,7 @@ class ResearchAgentRunner:
         previous_messages: tuple[ChatMessage, ...],
         approved_call: ChatToolCall,
         checkpoint: _TrajectoryCheckpoint | None = None,
+        text_delta_callback: Callable[[str], None] | None = None,
     ) -> AgentRunResult:
         self._validate_approved_call(context, approved_call)
         messages = list(previous_messages)
@@ -152,6 +155,7 @@ class ResearchAgentRunner:
             calls,
             results,
             checkpoint=checkpoint,
+            text_delta_callback=text_delta_callback,
         )
 
     async def _continue(
@@ -162,13 +166,19 @@ class ResearchAgentRunner:
         results: list[ChatToolResult],
         *,
         checkpoint: _TrajectoryCheckpoint | None,
+        text_delta_callback: Callable[[str], None] | None,
     ) -> AgentRunResult:
         for _ in range(self.max_model_steps):
             try:
+                model_arguments: dict[str, Any] = {
+                    "messages": self.context_builder.for_model(tuple(messages)),
+                    "tool_specs": self.capabilities.specs,
+                }
+                if text_delta_callback is not None:
+                    model_arguments["text_delta_callback"] = text_delta_callback
                 turn = await to_thread(
                     self.model.respond,
-                    messages=self.context_builder.for_model(tuple(messages)),
-                    tool_specs=self.capabilities.specs,
+                    **model_arguments,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(

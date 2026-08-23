@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from openai import OpenAI
 
@@ -41,6 +41,7 @@ class OpenAIChatModel:
         *,
         messages: tuple[ChatMessage, ...],
         tool_specs: tuple[ToolSpec, ...],
+        text_delta_callback: Callable[[str], None] | None = None,
     ) -> ModelTurn:
         request: dict[str, Any] = {
             "model": self.model,
@@ -56,6 +57,14 @@ class OpenAIChatModel:
                 tool_choice="auto",
                 parallel_tool_calls=False,
             )
+        if text_delta_callback is not None:
+            chunks = self.client.chat.completions.create(
+                **request,
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+            return self._stream_turn(chunks, text_delta_callback)
+
         completion = self.client.chat.completions.create(**request)
         record_llm_prompt_version("research_agent", RESEARCH_AGENT_PROMPT_VERSION)
         record_llm_completion(completion, requested_model=self.model)
@@ -80,6 +89,58 @@ class OpenAIChatModel:
             content=content,
             tool_call=ModelToolCall(
                 name=str(function.name),
+                arguments=dict(arguments),
+            ),
+        )
+
+    def _stream_turn(
+        self,
+        chunks: Any,
+        text_delta_callback: Callable[[str], None],
+    ) -> ModelTurn:
+        content_parts: list[str] = []
+        tool_name_parts: list[str] = []
+        tool_argument_parts: list[str] = []
+        tool_call_index: int | None = None
+        last_chunk = None
+        for chunk in chunks:
+            last_chunk = chunk
+            choices = tuple(getattr(chunk, "choices", None) or ())
+            if not choices:
+                continue
+            delta = choices[0].delta
+            content = str(getattr(delta, "content", None) or "")
+            if content:
+                content_parts.append(content)
+                text_delta_callback(content)
+            for raw_call in tuple(getattr(delta, "tool_calls", None) or ()):
+                index = int(getattr(raw_call, "index", 0) or 0)
+                if tool_call_index is not None and index != tool_call_index:
+                    raise ValueError("research model must return exactly one tool call")
+                tool_call_index = index
+                if (getattr(raw_call, "type", None) or "function") != "function":
+                    raise ValueError(
+                        "research model returned an unsupported tool call type"
+                    )
+                function = getattr(raw_call, "function", None)
+                tool_name_parts.append(str(getattr(function, "name", None) or ""))
+                tool_argument_parts.append(
+                    str(getattr(function, "arguments", None) or "")
+                )
+
+        record_llm_prompt_version("research_agent", RESEARCH_AGENT_PROMPT_VERSION)
+        record_llm_completion(last_chunk, requested_model=self.model)
+        content = "".join(content_parts).strip()
+        if tool_call_index is None:
+            return ModelTurn(content=content)
+
+        arguments = json.loads("".join(tool_argument_parts) or "{}")
+        if not isinstance(arguments, Mapping):
+            raise ValueError("research tool arguments must be a JSON object")
+        return ModelTurn(
+            content=content,
+            tool_call=ModelToolCall(
+                name="".join(tool_name_parts),
                 arguments=dict(arguments),
             ),
         )

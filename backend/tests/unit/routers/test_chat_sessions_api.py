@@ -101,6 +101,25 @@ class _Service:
             "error_code": None,
         }
 
+    async def stream_message_for_user(
+        self,
+        session_id: str,
+        user_id: str,
+        *,
+        message: str,
+    ):
+        turn = await self.post_message_for_user(
+            session_id,
+            user_id,
+            message=message,
+        )
+
+        async def events():
+            yield {"type": "text_delta", "content": "你好"}
+            yield {"type": "turn", "turn": turn}
+
+        return events()
+
     async def decide_tool_call_for_user(
         self,
         session_id: str,
@@ -127,6 +146,7 @@ def _request(service: _Service, user_id: str = "user-1") -> SimpleNamespace:
     return SimpleNamespace(
         app=SimpleNamespace(state=SimpleNamespace(chat_session_service=service)),
         state=SimpleNamespace(current_user={"user_id": user_id}),
+        headers={},
     )
 
 
@@ -255,3 +275,32 @@ def test_chat_http_routes_require_authentication_and_run_an_ordinary_turn() -> N
     assert created.json()["session_id"] == "chat-1"
     assert turn.status_code == 200
     assert turn.json()["status"] == "completed"
+
+
+def test_chat_message_route_streams_text_then_the_persisted_turn() -> None:
+    service = _Service()
+    app = create_app(
+        auth_session_service=_AuthService(),
+        collection_service=SimpleNamespace(),
+        task_service=SimpleNamespace(repository=object()),
+        source_artifact_repository=object(),
+        paper_fact_repository=object(),
+        objective_repository=object(),
+        finding_review_repository=object(),
+        experiment_plan_repository=object(),
+        chat_session_service=service,
+    )
+
+    with TestClient(app) as client:
+        client.cookies.set("lens_session", "browser-session")
+        response = client.post(
+            "/api/v1/chat-sessions/chat-1/messages",
+            headers={"Accept": "text/event-stream"},
+            json={"message": "你好"},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: text_delta\ndata: {\"content\":\"你好\"}" in response.text
+    assert "event: turn\n" in response.text
+    assert '"status":"completed"' in response.text

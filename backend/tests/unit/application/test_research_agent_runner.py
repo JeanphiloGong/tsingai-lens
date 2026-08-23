@@ -54,10 +54,16 @@ class _Model:
         *,
         messages: tuple,
         tool_specs: tuple[ToolSpec, ...],
+        text_delta_callback=None,  # noqa: ANN001
     ) -> ModelTurn:
         assert messages
         assert tool_specs
-        return self.turns.popleft()
+        turn = self.turns.popleft()
+        if text_delta_callback is not None and turn.content:
+            for chunk in (turn.content[:2], turn.content[2:]):
+                if chunk:
+                    text_delta_callback(chunk)
+        return turn
 
 
 class _Capability:
@@ -133,6 +139,25 @@ async def test_greeting_completes_without_calling_a_tool() -> None:
     assert result.messages[-1].content.startswith("你好")
     assert result.tool_calls == ()
     assert capability.executed_arguments == []
+
+
+async def test_runner_forwards_model_text_deltas_before_returning_the_turn() -> None:
+    capability = _Capability("get_collection_context", ToolRisk.READ)
+    runner = ResearchAgentRunner(
+        model=_Model(ModelTurn(content="逐段回复")),
+        capabilities=CapabilityRegistry((capability,)),
+    )
+    deltas: list[str] = []
+
+    result = await runner.run_turn(
+        context=_context(),
+        previous_messages=(),
+        user_message="你好",
+        text_delta_callback=deltas.append,
+    )
+
+    assert deltas == ["逐段", "回复"]
+    assert result.messages[-1].content == "逐段回复"
 
 
 async def test_read_capability_result_returns_to_the_model_before_final_answer() -> None:

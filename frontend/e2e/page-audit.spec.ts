@@ -172,12 +172,13 @@ test.describe('page interaction audit', () => {
 				return route.fulfill(json({ items: trajectory, pending_approval: pendingApproval }));
 			}
 			if (path === `/api/v1/chat-sessions/${sessionId}/messages` && request.method() === 'POST') {
+				expect(request.headers().accept).toContain('text/event-stream');
 				const prompt = String(request.postDataJSON().message ?? '');
 				messageSequence += 1;
 				const turn = agentTurn(prompt, messageSequence);
 				trajectory = [...trajectory, ...turn.messages];
 				pendingApproval = turn.pending_approval;
-				return route.fulfill(json(turn));
+				return route.fulfill(sseTurn(turn));
 			}
 			if (/\/tool-calls\/call_write_[12]\/decision$/.test(path) && request.method() === 'POST') {
 				const decision = request.postDataJSON() as Record<string, unknown>;
@@ -311,6 +312,7 @@ test.describe('page interaction audit', () => {
 				return route.fulfill(json({ items: trajectory, pending_approval: null }));
 			}
 			const prompt = String(request.postDataJSON().message ?? '');
+			expect(request.headers().accept).toContain('text/event-stream');
 			sequence += 1;
 			messageRequests.push(new URL(request.url()).pathname);
 			const turn = {
@@ -323,7 +325,7 @@ test.describe('page interaction audit', () => {
 				error_code: null
 			};
 			trajectory = [...trajectory, ...turn.messages];
-			return route.fulfill(json(turn));
+			return route.fulfill(sseTurn(turn));
 		});
 
 		await page.setViewportSize({ width: 390, height: 844 });
@@ -632,6 +634,23 @@ async function mockApis(page: Page) {
 
 function json(body: unknown, status = 200) {
 	return { status, contentType: 'application/json', body: JSON.stringify(body) };
+}
+
+function sseTurn(turn: { messages?: Array<Record<string, unknown>> }) {
+	const finalText = [...(turn.messages ?? [])]
+		.reverse()
+		.find((message) => message.role === 'assistant' && !message.tool_call_id)?.content;
+	const events = [];
+	if (typeof finalText === 'string' && finalText) {
+		events.push(`event: text_delta\ndata: ${JSON.stringify({ content: finalText })}`);
+	}
+	events.push(`event: turn\ndata: ${JSON.stringify(turn)}`);
+	return {
+		status: 200,
+		contentType: 'text/event-stream',
+		headers: { 'Cache-Control': 'no-cache' },
+		body: `${events.join('\n\n')}\n\n`
+	};
 }
 
 async function sendAgentMessage(page: Page, text: string) {

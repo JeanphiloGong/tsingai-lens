@@ -58,6 +58,34 @@ function jsonResponse(body: unknown, status = 200) {
 	});
 }
 
+function streamResponse(turn: ChatTurn, deltas: string[] = [], delayMs = 0) {
+	const encoder = new TextEncoder();
+	const event = (name: string, data: unknown) =>
+		encoder.encode(`event: ${name}\r\ndata: ${JSON.stringify(data)}\r\n\r\n`);
+	if (!delayMs) {
+		return new Response(
+			new Blob([...deltas.map((content) => event('text_delta', { content })), event('turn', turn)]),
+			{ headers: { 'Content-Type': 'text/event-stream' } }
+		);
+	}
+	return new Response(
+		new ReadableStream({
+			start(controller) {
+				const [first = '', ...remaining] = deltas;
+				if (first) controller.enqueue(event('text_delta', { content: first }));
+				setTimeout(() => {
+					for (const content of remaining) {
+						controller.enqueue(event('text_delta', { content }));
+					}
+					controller.enqueue(event('turn', turn));
+					controller.close();
+				}, delayMs);
+			}
+		}),
+		{ headers: { 'Content-Type': 'text/event-stream' } }
+	);
+}
+
 function requestPath(input: string | URL | Request) {
 	const raw =
 		typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
@@ -120,10 +148,14 @@ function pendingCall(overrides: Partial<ChatToolCall> = {}): ChatToolCall {
 function installApi({
 	trajectory = { items: [], pending_approval: null },
 	messageTurn,
+	messageDeltas = [],
+	messageDelayMs = 0,
 	decisionTurn
 }: {
 	trajectory?: ChatTrajectory;
 	messageTurn?: ChatTurn;
+	messageDeltas?: string[];
+	messageDelayMs?: number;
 	decisionTurn?: ChatTurn;
 } = {}) {
 	fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
@@ -139,7 +171,7 @@ function installApi({
 			return Promise.resolve(jsonResponse(trajectory));
 		}
 		if (path === `/api/v1/chat-sessions/${session.session_id}/messages` && method === 'POST') {
-			return Promise.resolve(jsonResponse(messageTurn));
+			return Promise.resolve(streamResponse(messageTurn!, messageDeltas, messageDelayMs));
 		}
 		if (
 			path === `/api/v1/chat-sessions/${session.session_id}/tool-calls/call_write_1/decision` &&
@@ -193,6 +225,37 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.element(browserPage.getByText('Hello. I can help inspect this collection.'))
 			.toBeInTheDocument();
 		await expect.element(browserPage.getByLabelText('Research activity')).not.toBeInTheDocument();
+	});
+
+	it('shows assistant text before the persisted turn finishes streaming', async () => {
+		installApi({
+			messageDeltas: ['Partial answer', ' complete.'],
+			messageDelayMs: 100,
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_stream', 'user', 'Begin'),
+					message('msg_assistant_stream', 'assistant', 'Partial answer complete.')
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		const composer = await renderReady();
+		await composer.fill('Begin');
+		await browserPage.getByRole('button', { name: 'Send' }).click();
+
+		await expect
+			.element(browserPage.getByText('Partial answer', { exact: true }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Partial answer complete.')).toBeInTheDocument();
+		const post = fetchMock.mock.calls.find(
+			([input, init]) =>
+				requestPath(input as string | URL | Request).endsWith('/messages') &&
+				requestMethod(input as string | URL | Request, init as RequestInit) === 'POST'
+		);
+		expect(new Headers(post?.[1]?.headers).get('Accept')).toBe('text/event-stream');
 	});
 
 	it('renders a read capability result separately from the final answer', async () => {

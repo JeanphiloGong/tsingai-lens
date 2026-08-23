@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 from application.chat.capabilities.contracts import ToolSpec
 from domain.chat import ChatMessage
@@ -131,6 +131,7 @@ class ChatModel(Protocol):
         *,
         messages: tuple[ChatMessage, ...],
         tool_specs: tuple[ToolSpec, ...],
+        text_delta_callback: Callable[[str], None] | None = None,
     ) -> ModelTurn: ...
 
 

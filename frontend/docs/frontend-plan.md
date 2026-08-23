@@ -56,7 +56,9 @@
   `objective_id`，不维护第二套持久化目标身份
 - `/collections/{collection_id}/assistant` 使用同源 `chat-sessions` API，是绑定当前
   collection 的 Research Agent 入口。普通对话不要求 capability；读取和草拟 capability
-  自动执行并将结构化结果与最终回答分开显示；Core 写入停在持久化的精确参数审批点。
+  自动执行并将结构化结果与最终回答分开显示；消息 POST 通过同一 URL 的
+  `Accept: text/event-stream` 内容协商增量显示模型文本，并以服务端持久化后的完整 turn
+  收尾；Core 写入停在持久化的精确参数审批点。
   Chat 是会话、消息、capability 轨迹和审批的唯一运行时权威，但不拥有 Objective、
   Evidence、Finding 或 Analysis 真值。Objective 链接仅指向 Core 的规范记录。
 - `/collections/{collection_id}/comparisons` 只读取已发布 Objective analysis

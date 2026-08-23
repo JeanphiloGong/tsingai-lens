@@ -4,6 +4,7 @@ from application.core.objectives.analysis.diagnostics import (
     capture_analysis_diagnostics,
 )
 from application.core.objectives.analysis.evidence_materialization import (
+    _analysis_contributions,
     materialize_evidence,
 )
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
@@ -11,7 +12,7 @@ from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
-from domain.core import ObjectiveAnalysis
+from domain.core import ObjectiveAnalysis, ObjectiveEvidence
 from tests.support.research_objective_service import research_objective
 
 
@@ -178,3 +179,98 @@ def test_out_of_scope_result_records_bounded_no_comparable_evidence_trace() -> N
         "evidence_record_count": 0,
         "paper_disposition_counts": {"no_comparable_evidence": 1},
     }
+
+
+def test_paper_contribution_summary_comes_from_grounded_evidence() -> None:
+    objective = research_objective(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "variables": ["temperature"],
+            "outcomes": ["strength"],
+        }
+    )
+    analysis = ObjectiveAnalysis(
+        collection_id="collection-1",
+        objective_id="objective-1",
+        analysis_version=1,
+        source_build_id="build-1",
+        pipeline_version="test.v1",
+        model_name="test-model",
+        prompt_versions={},
+    )
+    frame = PaperAnalysisFrame.from_mapping(
+        {
+            "objective_id": "objective-1",
+            "document_id": "paper-1",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "screening_note": "This local batch may discuss strength.",
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": "objective-1",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "results-1",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+        }
+    )
+    evidence = ObjectiveEvidence.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 1,
+            "evidence_id": "evidence-1",
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "results-1",
+            "source_excerpt": "Strength increased from 800 MPa to 900 MPa.",
+            "evidence_role": "direct_result",
+            "selection_status": "extracted",
+            "changed_variables": [
+                {
+                    "name": "temperature",
+                    "baseline_value": 500,
+                    "target_value": 600,
+                    "unit": "C",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "500 C",
+                "target_label": "600 C",
+                "axis_names": ["temperature"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "strength",
+                "baseline_value": 800,
+                "target_value": 900,
+                "unit": "MPa",
+                "direction": "increase",
+                "result_text": "Strength increased from 800 MPa to 900 MPa.",
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {},
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+    contributions = _analysis_contributions(
+        collection_id="collection-1",
+        analysis=analysis,
+        objective=objective,
+        paper_skims=(),
+        frames=(frame,),
+        routes=(route,),
+        evidence_records=(evidence,),
+    )
+
+    assert contributions[0].contribution_summary == (
+        "Strength increased from 800 MPa to 900 MPa."
+    )
+    assert contributions[0].contribution_summary != frame.screening_note

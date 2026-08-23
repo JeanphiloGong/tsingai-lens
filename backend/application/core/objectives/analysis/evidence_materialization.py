@@ -26,8 +26,27 @@ from domain.core import (
 )
 
 
+_CONTRIBUTION_SUMMARY_CHARS = 320
+
+
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _source_backed_contribution_summary(
+    evidence_records: tuple[ObjectiveEvidence, ...],
+) -> str | None:
+    result_texts = tuple(
+        dict.fromkeys(
+            result_text
+            for evidence in evidence_records
+            if evidence.selection_status == "extracted"
+            if evidence.reported_result is not None
+            if (result_text := _text(evidence.reported_result.result_text))
+        )
+    )
+    summary = " ".join(result_texts)
+    return summary[:_CONTRIBUTION_SUMMARY_CHARS].rstrip() or None
 
 
 def materialize_evidence(
@@ -211,7 +230,7 @@ def _analysis_contributions(
             extracted_source_count = 0
             comparable_evidence_count = 0
             failed_source_count = 0
-            evidence_reason = frame.background or (
+            evidence_reason = frame.screening_note or (
                 "Paper is not relevant to this objective."
             )
         else:
@@ -293,7 +312,11 @@ def _analysis_contributions(
                 analysis_status=analysis_status,
                 relevance=frame.relevance,
                 paper_role=frame.paper_role,
-                contribution_summary=frame.background,
+                contribution_summary=(
+                    None
+                    if excluded
+                    else _source_backed_contribution_summary(document_evidence)
+                ),
                 material_match=frame.material_match,
                 changed_variables=frame.changed_variables,
                 measured_property_scope=frame.measured_property_scope,

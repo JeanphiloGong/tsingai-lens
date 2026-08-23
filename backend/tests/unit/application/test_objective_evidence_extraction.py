@@ -123,11 +123,11 @@ class _BoundedFrameExtractor:
                 ),
                 "primary_experiment",
             ),
-            background=next(
+            screening_note=next(
                 (
-                    str(record["background"])
+                    str(record["screening_note"])
                     for record in records
-                    if record.get("background")
+                    if record.get("screening_note")
                 ),
                 "Bounded model frame.",
             ),
@@ -1141,12 +1141,12 @@ def test_objective_paper_framing_preserves_siblings_when_one_batch_fails():
         records_by_source_ref={
             "methods": {
                 "relevance": "medium",
-                "background": "Variable definition.",
+                "screening_note": "Variable definition.",
                 "changed_variables": ["laser power"],
             },
             "results": {
                 "relevance": "high",
-                "background": "Direct density result.",
+                "screening_note": "Direct density result.",
                 "measured_property_scope": ["relative density"],
             },
         },
@@ -1172,8 +1172,10 @@ def test_objective_paper_framing_preserves_siblings_when_one_batch_fails():
     assert frame.changed_variables == ("laser power",)
     assert frame.measured_property_scope == ("relative density",)
     assert frame.relevant_sections == ("Methods", "Experimental setup", "Results")
-    assert frame.background == "Direct density result."
-    assert frame.background != "Deterministic frame built after model framing failed."
+    assert frame.screening_note == "Direct density result."
+    assert frame.screening_note != (
+        "Deterministic frame built after model framing failed."
+    )
 
 
 def test_objective_paper_framing_keeps_failed_batch_routable_when_sibling_is_irrelevant():
@@ -1192,7 +1194,7 @@ def test_objective_paper_framing_keeps_failed_batch_routable_when_sibling_is_irr
                 "excluded": True,
                 "relevance": "irrelevant",
                 "paper_role": "irrelevant",
-                "background": "This source is unrelated.",
+                "screening_note": "This source is unrelated.",
             },
         },
         failing_source_refs={"results"},
@@ -1218,7 +1220,7 @@ def test_objective_paper_framing_keeps_failed_batch_routable_when_sibling_is_irr
     assert len(frames) == 1
     assert frames[0].relevance == "uncertain"
     assert frames[0].paper_role == "uncertain"
-    assert frames[0].background is None
+    assert frames[0].screening_note is None
     assert frames[0].relevant_sections == ("Results",)
     assert [
         (item.source_ref, item.disposition)
@@ -2892,7 +2894,7 @@ def test_research_objective_evidence_prompt_compacts_long_text_source(
             "document_id": "paper-1",
             "relevance": "high",
             "paper_role": "primary_experiment",
-            "background": "x" * 1000,
+            "screening_note": "x" * 1000,
             "relevant_tables": ["table-1"],
             "excluded_tables": ["table-2"],
         }
@@ -2943,7 +2945,7 @@ def test_research_objective_evidence_prompt_compacts_long_text_source(
 
     payload = extractor.unit_payloads[0]
     assert len(payload["source"]["text"]) <= 1800
-    assert "background" not in payload["paper_frame"]
+    assert "screening_note" not in payload["paper_frame"]
     assert "relevant_tables" not in payload["paper_frame"]
     assert "excluded_tables" not in payload["paper_frame"]
 

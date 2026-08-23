@@ -31,8 +31,9 @@ _FRAME_PRIOR_STUDY_LIMIT = 8
 _FRAME_PRIOR_RELATIONSHIP_LIMIT = 12
 _FRAME_TABLE_TEXT_CHARS = 800
 _FRAME_TABLE_VALUE_CHARS = 240
+_FRAME_SCREENING_NOTE_CHARS = 320
 OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT = 12_288
-OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v2"
+OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v3"
 
 _FRAME_MAX_COMPLETION_TOKENS = 1024
 _FRAME_RELEVANCE = {"high", "medium", "low", "irrelevant", "uncertain"}
@@ -80,7 +81,7 @@ class StructuredPaperFrameBatch(_SourceScreeningResponse):
         "mixed",
         "uncertain",
     ] = "uncertain"
-    background: str | None = Field(default=None, max_length=320)
+    screening_note: str | None = None
     material_match: list[Annotated[str, Field(max_length=120)]] = Field(
         default_factory=list,
         max_length=8,
@@ -180,21 +181,25 @@ def build_objective_paper_frame_prompt(
         "1. Read the objective variables, outcomes, material scope, constraints, and comparator.\n"
         "2. For each source unit independently, decide whether it may contain direct results, changed-variable context, material/sample/test context, mechanism context, or a useful table for that objective.\n"
         "3. Put useful or uncertain candidates in `relevant_source_unit_ids`; put only clearly unrelated, review-only, composition-only, or generic background candidates in `excluded_source_unit_ids`.\n"
-        "4. Summarize only scientific scope supported by the current relevant candidates.\n"
+        "4. Optionally write one short `screening_note` explaining why the current candidates should or should not be inspected. This is a local selection note, not a paper summary or scientific Evidence.\n"
         "5. Set batch `relevance` and `paper_role` from current evidence and `paper_prior`. Do not infer whole-paper irrelevance from facts absent in this partial neighborhood.\n\n"
         "BOUNDARY EXAMPLES\n"
         "- A Methods section defining the objective variable but not reporting the outcome is relevant.\n"
         "- A Results table using a symbol or abbreviation for an objective axis is relevant when headers, caption, or cells establish that meaning.\n"
         "- A literature-comparison table without current-work results is excluded unless the objective explicitly asks for literature comparison.\n"
         "- Shared material alone does not make generic composition or background text relevant.\n\n"
-        "SAME-SCHEMA EXAMPLE\n"
-        "Example input: "
+        "SAME-SCHEMA EXAMPLES\n"
+        "Relevant input: "
         '{"collection_id":"col-example","objective":{"variables":["laser power"],"outcomes":["relative density"]},"document":{"document_id":"paper-example"},"document_profile":{"doc_type":"experimental"},"paper_prior":{"doc_role":"experimental"},"source_units":[{"source_unit_id":"unit-methods","source_kind":"section","text":"Laser power was varied."},{"source_unit_id":"unit-composition","source_kind":"table","caption_text":"Nominal composition."}]}\n'
-        "Example output: "
-        '{"relevance":"medium","paper_role":"primary_experiment","background":"The current batch defines the changed process variable.","material_match":[],"changed_variables":["laser power"],"measured_property_scope":[],"test_environment_scope":[],"relevant_source_unit_ids":["unit-methods"],"excluded_source_unit_ids":["unit-composition"]}\n\n'
+        "Relevant output: "
+        '{"relevance":"medium","paper_role":"primary_experiment","screening_note":"The current batch defines the changed process variable.","material_match":[],"changed_variables":["laser power"],"measured_property_scope":[],"test_environment_scope":[],"relevant_source_unit_ids":["unit-methods"],"excluded_source_unit_ids":["unit-composition"]}\n\n'
+        "Local exclusion input: "
+        '{"collection_id":"col-example","objective":{"variables":["laser power"],"outcomes":["relative density"]},"document":{"document_id":"paper-example"},"source_units":[{"source_unit_id":"unit-composition","source_kind":"table","caption_text":"Nominal composition."}]}\n'
+        "Local exclusion output: "
+        '{"relevance":"low","paper_role":"uncertain","screening_note":"This batch contains nominal composition only.","material_match":[],"changed_variables":[],"measured_property_scope":[],"test_environment_scope":[],"relevant_source_unit_ids":[],"excluded_source_unit_ids":["unit-composition"]}\n\n'
         "OUTPUT CONTRACT\n"
         "Return only schema-valid structured data. Every input `source_unit_id` must appear exactly once across `relevant_source_unit_ids` and `excluded_source_unit_ids`. "
-        "Keep `background` concise and return no source text or reasoning transcript."
+        "Keep `screening_note` to one concise sentence and return no source text, paper-level conclusion, or reasoning transcript."
     )
     return _FRAME_SYSTEM_PROMPT, user_prompt
 
@@ -297,6 +302,17 @@ class ObjectiveSourceScreener:
             ) from exc
         if not isinstance(response, StructuredPaperFrameBatch):
             raise TypeError("unexpected objective paper frame response type")
+        screening_note = _optional_text(response.screening_note)
+        if screening_note and len(screening_note) > _FRAME_SCREENING_NOTE_CHARS:
+            logger.warning(
+                "Objective paper framing screening note truncated model=%s "
+                "original_chars=%s retained_chars=%s",
+                self.response_client.model,
+                len(screening_note),
+                _FRAME_SCREENING_NOTE_CHARS,
+            )
+            screening_note = screening_note[:_FRAME_SCREENING_NOTE_CHARS].rstrip()
+        response.screening_note = screening_note
         if source_accounting_errors:
             response.record_source_accounting_repair(source_accounting_errors)
         return response
@@ -377,7 +393,7 @@ class PaperAnalysisFrame:
     document_id: str
     relevance: str
     paper_role: str
-    background: str | None
+    screening_note: str | None
     material_match: tuple[str, ...]
     changed_variables: tuple[str, ...]
     measured_property_scope: tuple[str, ...]
@@ -395,7 +411,7 @@ class PaperAnalysisFrame:
             document_id=_text(payload.get("document_id")),
             relevance=_text(payload.get("relevance")) or "uncertain",
             paper_role=_text(payload.get("paper_role")) or "uncertain",
-            background=_optional_text(payload.get("background")),
+            screening_note=_optional_text(payload.get("screening_note")),
             material_match=normalize_objective_terms(payload.get("material_match")),
             changed_variables=normalize_objective_terms(
                 payload.get("changed_variables")
@@ -427,7 +443,7 @@ class PaperAnalysisFrame:
             "document_id": self.document_id,
             "relevance": self.relevance,
             "paper_role": self.paper_role,
-            "background": self.background,
+            "screening_note": self.screening_note,
             "material_match": list(self.material_match),
             "changed_variables": list(self.changed_variables),
             "measured_property_scope": list(self.measured_property_scope),
@@ -533,7 +549,7 @@ def screen_sources(
                             "document_id": document_id,
                             "relevance": "irrelevant",
                             "paper_role": "irrelevant",
-                            "background": (
+                            "screening_note": (
                                 "Paper was explicitly excluded from this research "
                                 "objective."
                             ),
@@ -799,7 +815,7 @@ def _build_conservative_objective_paper_frame_batch(
     return {
         "relevance": "uncertain",
         "paper_role": _deterministic_frame_paper_role(paper_skim),
-        "background": None,
+        "screening_note": None,
         "material_match": [],
         "changed_variables": [],
         "measured_property_scope": [],
@@ -943,13 +959,13 @@ def _aggregate_objective_paper_frame_batches(
 
     representative_results = ranked_results
     representative = representative_results[0][1][0] if representative_results else {}
-    background_record = next(
+    screening_note_record = next(
         (
             record
             for _position, (record, decision_origin, _errors) in representative_results
             if decision_origin != "fallback"
             and record_relevance(record) != "irrelevant"
-            and str(record.get("background") or "").strip()
+            and str(record.get("screening_note") or "").strip()
         ),
         {},
     )
@@ -1003,7 +1019,7 @@ def _aggregate_objective_paper_frame_batches(
             "document_id": document_id,
             "relevance": relevance,
             "paper_role": paper_role,
-            "background": background_record.get("background"),
+            "screening_note": screening_note_record.get("screening_note"),
             "material_match": values("material_match"),
             "changed_variables": values("changed_variables"),
             "measured_property_scope": values("measured_property_scope"),

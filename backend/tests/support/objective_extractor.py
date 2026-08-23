@@ -168,7 +168,7 @@ class FakeObjectiveExtractor:
             return StructuredPaperFrameBatch(
                 relevance="irrelevant",
                 paper_role="review",
-                background="Excluded by objective discovery.",
+                screening_note="Excluded by objective discovery.",
                 material_match=[],
                 changed_variables=[],
                 measured_property_scope=[],
@@ -192,7 +192,7 @@ class FakeObjectiveExtractor:
         return StructuredPaperFrameBatch(
             relevance="high",
             paper_role="primary_experiment",
-            background="Paper directly supports the active research objective.",
+            screening_note="Paper directly supports the active research objective.",
             material_match=list(objective.get("material_scope") or []),
             changed_variables=list(objective.get("variables") or []),
             measured_property_scope=list(objective.get("outcomes") or []),

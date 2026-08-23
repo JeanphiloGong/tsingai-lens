@@ -85,8 +85,10 @@ Finding by `(collection_id, objective_id, analysis_version, finding_id)`.
   Loads one immutable Source build and coordinates the discovery and analysis
   owners in their required order.
 - `objectives/analysis_service.py`
-  Manages analysis runtime state and publishes a complete version only after
-  contributions, Evidence, and Findings are all valid.
+  Manages analysis runtime state and publishes a complete version after paper
+  contributions and any Evidence or Findings are valid. A completed inspection
+  with no grounded Evidence is a published scientific abstention; a run where
+  every relevant paper fails technical extraction is a runtime failure.
 - `structured_extraction/`
   Provides domain-neutral message-content and JSON normalization used outside
   the Objective-specific structured response boundary.

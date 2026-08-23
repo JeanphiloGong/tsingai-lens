@@ -85,11 +85,13 @@ def build_research_objective_service(
     )
 
 
-def seed_document_profiles(
+async def seed_document_profiles(
     service: ResearchObjectiveService,
     collection_id: str,
 ) -> None:
-    documents = service.source_artifact_repository.read_collection_documents(collection_id)
+    documents = await service.source_artifact_repository.read_collection_documents(
+        collection_id
+    )
     profiles: list[DocumentProfile] = []
     for document in documents:
         metadata = dict(document.metadata)
@@ -107,27 +109,27 @@ def seed_document_profiles(
                 }
             )
         )
-    service.paper_fact_repository.replace_document_profiles(
+    await service.paper_fact_repository.replace_document_profiles(
         collection_id,
         "build_test",
         tuple(profiles),
     )
 
 
-def queue_running_analysis(
+async def queue_running_analysis(
     service: ResearchObjectiveService,
     collection_id: str,
     objective_id: str,
 ) -> ObjectiveAnalysis:
-    service.objective_repository.confirm_objective(collection_id, objective_id)
-    _, queued = service.objective_repository.queue_analysis(
+    await service.objective_repository.confirm_objective(collection_id, objective_id)
+    _, queued = await service.objective_repository.queue_analysis(
         collection_id,
         objective_id,
         pipeline_version="test.v1",
         model_name="test-model",
         prompt_versions={},
     )
-    claimed = service.objective_repository.claim_analysis(
+    claimed = await service.objective_repository.claim_analysis(
         collection_id,
         objective_id,
         queued.analysis_version,

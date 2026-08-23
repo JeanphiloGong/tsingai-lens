@@ -5,6 +5,9 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from domain.core import (
     BaselineReference,
@@ -23,10 +26,15 @@ from domain.core import (
 )
 from domain.core.paper_fact import PaperFactSet
 from domain.source import source_documents_from_records
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
 from tests.support.objective_repository import MemoryObjectiveRepository
+from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 def _load_exporter_module():
@@ -50,27 +58,32 @@ def _load_exporter_module():
     return module
 
 
-def test_export_prediction_bundle_writes_gold_aligned_system_output(
+@pytest.mark.anyio
+async def test_export_prediction_bundle_writes_gold_aligned_system_output(
     tmp_path,
     monkeypatch,
 ):
     exporter = _load_exporter_module()
+    monkeypatch.setenv(
+        "LENS_DATABASE_URL",
+        "postgresql+psycopg://test:test@localhost/test",
+    )
     backend_root = tmp_path / "backend"
     collection_id = "col-test"
-    paper_fact_repository, comparison_repository = _write_system_artifacts(
-        backend_root, collection_id
+    source_repository, paper_fact_repository, comparison_repository = (
+        await _write_system_artifacts(backend_root, collection_id)
     )
-    source_db_path = [backend_root / "data" / "lens.sqlite"]
+    source_repositories = [source_repository]
     monkeypatch.setattr(
         exporter,
         "build_database_engine",
-        lambda _settings: SimpleNamespace(dispose=lambda: None),
+        lambda _settings: SimpleNamespace(dispose=AsyncMock()),
     )
     monkeypatch.setattr(exporter, "build_session_factory", lambda _engine: None)
     monkeypatch.setattr(
         exporter,
         "PostgresSourceArtifactRepository",
-        lambda _session_factory: SqliteSourceArtifactRepository(source_db_path[0]),
+        lambda _session_factory: source_repositories[0],
     )
     paper_fact_repositories = [paper_fact_repository]
     monkeypatch.setattr(
@@ -91,7 +104,7 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(
     )
     prediction_path = tmp_path / "generated" / "prediction_bundle.json"
 
-    result_path = exporter.export_prediction_bundle(
+    result_path = await exporter.export_prediction_bundle(
         backend_root=backend_root,
         collection_id=collection_id,
         output_path=prediction_path,
@@ -133,7 +146,7 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(
         backend_root / "data" / "collections" / collection_id / "output"
     )
     collection_output_dir.mkdir(parents=True)
-    exporter.export_prediction_bundle(
+    await exporter.export_prediction_bundle(
         backend_root=backend_root,
         source_output_dir=collection_output_dir,
         output_path=output_dir_prediction_path,
@@ -148,15 +161,21 @@ def test_export_prediction_bundle_writes_gold_aligned_system_output(
     run_collection_id = "col-run"
     run_output_dir = run_root / "collections" / run_collection_id / "output"
     run_output_dir.mkdir(parents=True)
-    run_paper_fact_repository, run_comparison_repository = (
-        _write_system_artifacts_to_db(run_root / "lens.sqlite", run_collection_id)
+    (
+        run_source_repository,
+        run_paper_fact_repository,
+        run_comparison_repository,
+    ) = (
+        await _write_system_artifacts_to_db(
+            run_root / "lens.sqlite", run_collection_id
+        )
     )
-    source_db_path[0] = run_root / "lens.sqlite"
+    source_repositories[0] = run_source_repository
     paper_fact_repositories[0] = run_paper_fact_repository
     comparison_repositories[0] = run_comparison_repository
     run_output_prediction_path = tmp_path / "generated" / "prediction_from_run.json"
 
-    exporter.export_prediction_bundle(
+    await exporter.export_prediction_bundle(
         backend_root=backend_root,
         source_output_dir=run_output_dir,
         output_path=run_output_prediction_path,
@@ -233,22 +252,26 @@ def test_prediction_bundle_exports_published_findings_and_exact_evidence(tmp_pat
     )
 
 
-def test_export_prediction_bundle_allows_missing_artifacts(tmp_path, monkeypatch):
+@pytest.mark.anyio
+async def test_export_prediction_bundle_allows_missing_artifacts(tmp_path, monkeypatch):
     exporter = _load_exporter_module()
+    monkeypatch.setenv(
+        "LENS_DATABASE_URL",
+        "postgresql+psycopg://test:test@localhost/test",
+    )
     backend_root = tmp_path / "backend"
     collection_id = "col-empty"
     prediction_path = tmp_path / "generated" / "prediction_bundle.json"
-    db_path = backend_root / "data" / "lens.sqlite"
     monkeypatch.setattr(
         exporter,
         "build_database_engine",
-        lambda _settings: SimpleNamespace(dispose=lambda: None),
+        lambda _settings: SimpleNamespace(dispose=AsyncMock()),
     )
     monkeypatch.setattr(exporter, "build_session_factory", lambda _engine: None)
     monkeypatch.setattr(
         exporter,
         "PostgresSourceArtifactRepository",
-        lambda _session_factory: SqliteSourceArtifactRepository(db_path),
+        lambda _session_factory: MemorySourceArtifactRepository(),
     )
     monkeypatch.setattr(
         exporter,
@@ -266,7 +289,7 @@ def test_export_prediction_bundle_allows_missing_artifacts(tmp_path, monkeypatch
         lambda _session_factory: MemoryComparisonRepository(),
     )
 
-    exporter.export_prediction_bundle(
+    await exporter.export_prediction_bundle(
         backend_root=backend_root,
         collection_id=collection_id,
         output_path=prediction_path,
@@ -279,18 +302,29 @@ def test_export_prediction_bundle_allows_missing_artifacts(tmp_path, monkeypatch
     assert "documents" in bundle["metadata"]["missing_artifacts"]
 
 
-def _write_system_artifacts(
+async def _write_system_artifacts(
     backend_root: Path, collection_id: str
-) -> tuple[MemoryPaperFactRepository, MemoryComparisonRepository]:
+) -> tuple[
+    MemorySourceArtifactRepository,
+    MemoryPaperFactRepository,
+    MemoryComparisonRepository,
+]:
     db_path = backend_root / "data" / "lens.sqlite"
-    return _write_system_artifacts_to_db(db_path, collection_id)
+    return await _write_system_artifacts_to_db(db_path, collection_id)
 
 
-def _write_system_artifacts_to_db(
+async def _write_system_artifacts_to_db(
     db_path: Path, collection_id: str
-) -> tuple[MemoryPaperFactRepository, MemoryComparisonRepository]:
-    SqliteSourceArtifactRepository(db_path).replace_collection_documents(
+) -> tuple[
+    MemorySourceArtifactRepository,
+    MemoryPaperFactRepository,
+    MemoryComparisonRepository,
+]:
+    del db_path
+    source_repository = MemorySourceArtifactRepository()
+    await source_repository.replace_collection_documents(
         collection_id,
+        "build_test",
         source_documents_from_records(
             documents=[
                 {
@@ -303,7 +337,7 @@ def _write_system_artifacts_to_db(
         ),
     )
     paper_fact_repository = MemoryPaperFactRepository()
-    paper_fact_repository.replace_document_profiles(
+    await paper_fact_repository.replace_document_profiles(
         collection_id,
         "build_test",
         (
@@ -320,7 +354,7 @@ def _write_system_artifacts_to_db(
             ),
         ),
     )
-    paper_fact_repository.replace_paper_facts(
+    await paper_fact_repository.replace_paper_facts(
         collection_id,
         "build_test",
         PaperFactSet(
@@ -570,7 +604,7 @@ def _write_system_artifacts_to_db(
         ),
     )
     comparison_repository = MemoryComparisonRepository()
-    comparison_repository.replace(
+    await comparison_repository.replace(
         collection_id,
         "build_test",
         ComparisonFactSet(
@@ -580,4 +614,4 @@ def _write_system_artifacts_to_db(
             pairwise_comparison_relations=pairwise_comparison_relations,
         ),
     )
-    return paper_fact_repository, comparison_repository
+    return source_repository, paper_fact_repository, comparison_repository

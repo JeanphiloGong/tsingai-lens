@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from sqlalchemy import delete, func, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.core import (
     Finding,
@@ -71,25 +71,28 @@ from infra.persistence.postgres.models.source import (
 class PostgresObjectiveRepository:
     backend_name = "postgresql"
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+    ) -> None:
         self.session_factory = session_factory
 
-    def replace(
+    async def replace(
         self,
         collection_id: str,
         build_id: str,
         facts: ObjectiveFactSet,
     ) -> None:
         """Replace generated paper studies and Objectives for one pending build."""
-        with self.session_factory.begin() as session:
-            self._require_writable_build(session, collection_id, build_id)
-            source_document_ids = self._source_document_ids(
+        async with self.session_factory.begin() as session:
+            await self._require_writable_build(session, collection_id, build_id)
+            source_document_ids = await self._source_document_ids(
                 session, collection_id, build_id
             )
-            session.execute(
+            await session.execute(
                 delete(ObjectiveBuild).where(ObjectiveBuild.build_id == build_id)
             )
-            session.flush()
+            await session.flush()
             session.add(
                 ObjectiveBuild(
                     build_id=build_id,
@@ -99,7 +102,7 @@ class PostgresObjectiveRepository:
             )
             for position, skim in enumerate(facts.paper_skims):
                 session.add(
-                    self._skim_row(
+                    await self._skim_row(
                         session,
                         collection_id,
                         build_id,
@@ -108,21 +111,21 @@ class PostgresObjectiveRepository:
                         skim,
                     )
                 )
-                session.flush()
-                self._write_paper_study_rows(
+                await session.flush()
+                await self._write_paper_study_rows(
                     session,
                     collection_id=collection_id,
                     build_id=build_id,
                     skim=skim,
                 )
-            session.flush()
+            await session.flush()
 
             now = datetime.now(timezone.utc)
             relationship_index = self._relationship_index(facts.paper_skims)
             for position, objective in enumerate(facts.research_objectives):
                 if objective.collection_id != collection_id:
                     raise ValueError("objective belongs to another collection")
-                row = session.get(
+                row = await session.get(
                     ObjectiveResearchRecord,
                     (collection_id, objective.objective_id),
                 )
@@ -146,7 +149,7 @@ class PostgresObjectiveRepository:
                         updated_at=objective.updated_at or now,
                     )
                     session.add(row)
-                    session.flush()
+                    await session.flush()
                 else:
                     if self._objective_definition_id(
                         row
@@ -155,7 +158,7 @@ class PostgresObjectiveRepository:
                             "research objective identity collision: "
                             f"{collection_id}/{objective.objective_id}"
                         )
-                    authored = session.get(
+                    authored = await session.get(
                         ObjectiveAuthoredCandidateRecord,
                         (collection_id, objective.objective_id),
                     )
@@ -170,7 +173,7 @@ class PostgresObjectiveRepository:
                         row.confidence = objective.confidence
                         row.reason = objective.reason
                         row.updated_at = now
-                session.execute(
+                await session.execute(
                     objective_build_candidates.insert().values(
                         build_id=build_id,
                         collection_id=collection_id,
@@ -178,7 +181,7 @@ class PostgresObjectiveRepository:
                         objective_order=position,
                     )
                 )
-                self._replace_document_scope(session, build_id, objective)
+                await self._replace_document_scope(session, build_id, objective)
                 for link_order, relationship_id in enumerate(
                     objective.source_relationship_ids
                 ):
@@ -190,7 +193,7 @@ class PostgresObjectiveRepository:
                         raise ValueError(
                             "objective references an unknown paper study relationship"
                         ) from exc
-                    session.execute(
+                    await session.execute(
                         objective_build_relationship_links.insert().values(
                             build_id=build_id,
                             collection_id=collection_id,
@@ -215,71 +218,73 @@ class PostgresObjectiveRepository:
                 for item in facts.study_dispositions
             )
 
-    def read(
+    async def read(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
     ) -> ObjectiveFactSet:
-        with self.session_factory() as session:
-            resolved_build_id = self._resolve_read_build(
+        async with self.session_factory() as session:
+            resolved_build_id = await self._resolve_read_build(
                 session, collection_id, build_id
             )
             if resolved_build_id is None:
                 return ObjectiveFactSet()
-            marker = session.get(ObjectiveBuild, resolved_build_id)
+            marker = await session.get(ObjectiveBuild, resolved_build_id)
             if marker is None or marker.collection_id != collection_id:
                 return ObjectiveFactSet()
-            scope = self._scope_by_objective(
+            scope = await self._scope_by_objective(
                 session,
                 collection_id,
                 build_id=resolved_build_id,
             )
-            objective_rows = session.execute(
-                select(
-                    ObjectiveResearchRecord,
-                    objective_build_candidates.c.objective_order,
-                )
-                .join(
-                    objective_build_candidates,
-                    (
-                        objective_build_candidates.c.collection_id
-                        == ObjectiveResearchRecord.collection_id
+            objective_rows = (
+                await session.execute(
+                    select(
+                        ObjectiveResearchRecord,
+                        objective_build_candidates.c.objective_order,
                     )
-                    & (
-                        objective_build_candidates.c.objective_id
-                        == ObjectiveResearchRecord.objective_id
-                    ),
+                    .join(
+                        objective_build_candidates,
+                        (
+                            objective_build_candidates.c.collection_id
+                            == ObjectiveResearchRecord.collection_id
+                        )
+                        & (
+                            objective_build_candidates.c.objective_id
+                            == ObjectiveResearchRecord.objective_id
+                        ),
+                    )
+                    .where(
+                        objective_build_candidates.c.collection_id == collection_id,
+                        objective_build_candidates.c.build_id == resolved_build_id,
+                    )
+                    .order_by(objective_build_candidates.c.objective_order)
                 )
-                .where(
-                    objective_build_candidates.c.collection_id == collection_id,
-                    objective_build_candidates.c.build_id == resolved_build_id,
-                )
-                .order_by(objective_build_candidates.c.objective_order)
             ).all()
             skim_rows = tuple(
-                session.scalars(
+                await session.scalars(
                     select(ObjectivePaperSkim)
                     .where(ObjectivePaperSkim.build_id == resolved_build_id)
                     .order_by(ObjectivePaperSkim.skim_order)
                 )
             )
-            relationships_by_study = self._relationship_rows_by_study(
+            relationships_by_study = await self._relationship_rows_by_study(
                 session, resolved_build_id
             )
-            studies_by_document = self._study_rows_by_document(
+            studies_by_document = await self._study_rows_by_document(
                 session, resolved_build_id, relationships_by_study
             )
-            signals_by_document = self._signal_rows_by_document(
+            signals_by_document = await self._signal_rows_by_document(
                 session, resolved_build_id
             )
-            coverage_by_document = self._coverage_rows_by_document(
+            coverage_by_document = await self._coverage_rows_by_document(
                 session, resolved_build_id
             )
-            relationship_ids_by_objective = self._relationship_ids_by_objective(
+            relationship_ids_by_objective = await self._relationship_ids_by_objective(
                 session, resolved_build_id
             )
-            analysis_versions_by_objective = self._analysis_versions_by_objective(
+            analysis_versions_by_objective = await self._analysis_versions_by_objective(
                 session,
                 collection_id,
                 resolved_build_id,
@@ -320,7 +325,7 @@ class PostgresObjectiveRepository:
                             "reason": row.reason,
                         }
                     )
-                    for row in session.scalars(
+                    for row in await session.scalars(
                         select(ObjectivePaperStudyDisposition)
                         .where(ObjectivePaperStudyDisposition.build_id == resolved_build_id)
                         .order_by(
@@ -332,11 +337,11 @@ class PostgresObjectiveRepository:
                 ),
             )
 
-    def list_objectives(self, collection_id: str) -> tuple[ResearchObjective, ...]:
-        with self.session_factory() as session:
-            build_id = self._resolve_read_build(session, collection_id, None)
+    async def list_objectives(self, collection_id: str) -> tuple[ResearchObjective, ...]:
+        async with self.session_factory() as session:
+            build_id = await self._resolve_read_build(session, collection_id, None)
             generated_rows: list[tuple[ObjectiveResearchRecord, int]] = []
-            marker = session.get(ObjectiveBuild, build_id) if build_id else None
+            marker = await session.get(ObjectiveBuild, build_id) if build_id else None
             if (
                 build_id is not None
                 and marker is not None
@@ -344,31 +349,34 @@ class PostgresObjectiveRepository:
                 and marker.research_objectives_ready
             ):
                 generated_rows = list(
-                    session.execute(
-                        select(
-                            ObjectiveResearchRecord,
-                            objective_build_candidates.c.objective_order,
-                        )
-                        .join(
-                            objective_build_candidates,
-                            (
-                                objective_build_candidates.c.collection_id
-                                == ObjectiveResearchRecord.collection_id
+                    (
+                        await session.execute(
+                            select(
+                                ObjectiveResearchRecord,
+                                objective_build_candidates.c.objective_order,
                             )
-                            & (
-                                objective_build_candidates.c.objective_id
-                                == ObjectiveResearchRecord.objective_id
-                            ),
+                            .join(
+                                objective_build_candidates,
+                                (
+                                    objective_build_candidates.c.collection_id
+                                    == ObjectiveResearchRecord.collection_id
+                                )
+                                & (
+                                    objective_build_candidates.c.objective_id
+                                    == ObjectiveResearchRecord.objective_id
+                                ),
+                            )
+                            .where(
+                                objective_build_candidates.c.collection_id
+                                == collection_id,
+                                objective_build_candidates.c.build_id == build_id,
+                            )
+                            .order_by(objective_build_candidates.c.objective_order)
                         )
-                        .where(
-                            objective_build_candidates.c.collection_id == collection_id,
-                            objective_build_candidates.c.build_id == build_id,
-                        )
-                        .order_by(objective_build_candidates.c.objective_order)
                     ).all()
                 )
             authored_rows = list(
-                session.scalars(
+                await session.scalars(
                     select(ObjectiveAuthoredCandidateRecord)
                     .where(
                         ObjectiveAuthoredCandidateRecord.collection_id == collection_id
@@ -390,7 +398,7 @@ class PostgresObjectiveRepository:
             for authored in authored_rows:
                 if authored.objective_id in seen:
                     continue
-                row = session.get(
+                row = await session.get(
                     ObjectiveResearchRecord,
                     (collection_id, authored.objective_id),
                 )
@@ -407,7 +415,7 @@ class PostgresObjectiveRepository:
                     continue
                 scopes.setdefault(
                     source_build_id,
-                    self._scope_by_objective(
+                    await self._scope_by_objective(
                         session,
                         collection_id,
                         build_id=source_build_id,
@@ -415,11 +423,11 @@ class PostgresObjectiveRepository:
                 )
                 relationships.setdefault(
                     source_build_id,
-                    self._relationship_ids_by_objective(session, source_build_id),
+                    await self._relationship_ids_by_objective(session, source_build_id),
                 )
                 versions.setdefault(
                     source_build_id,
-                    self._analysis_versions_by_objective(
+                    await self._analysis_versions_by_objective(
                         session,
                         collection_id,
                         source_build_id,
@@ -443,7 +451,7 @@ class PostgresObjectiveRepository:
                 )
             return tuple(records)
 
-    def create_authored_candidate(
+    async def create_authored_candidate(
         self,
         objective: ResearchObjective,
         *,
@@ -456,8 +464,8 @@ class PostgresObjectiveRepository:
             objective.created_by_tool_call_id != created_by_tool_call_id
         ):
             raise ValueError("authored candidate provenance does not match the request")
-        with self.session_factory.begin() as session:
-            existing_call = session.scalar(
+        async with self.session_factory.begin() as session:
+            existing_call = await session.scalar(
                 select(ObjectiveAuthoredCandidateRecord).where(
                     ObjectiveAuthoredCandidateRecord.created_by_tool_call_id
                     == created_by_tool_call_id
@@ -472,23 +480,23 @@ class PostgresObjectiveRepository:
                     raise ValueError(
                         "authored candidate tool call already created a different objective"
                     )
-                row = self._locked_objective(
+                row = await self._locked_objective(
                     session,
                     objective.collection_id,
                     objective.objective_id,
                 )
-                return self._authored_objective_record(
+                return await self._authored_objective_record(
                     session,
                     row,
                     existing_call,
                 )
 
-            build_id = self._resolve_read_build(
+            build_id = await self._resolve_read_build(
                 session,
                 objective.collection_id,
                 None,
             )
-            marker = session.get(ObjectiveBuild, build_id) if build_id else None
+            marker = await session.get(ObjectiveBuild, build_id) if build_id else None
             if (
                 build_id is None
                 or marker is None
@@ -502,7 +510,7 @@ class PostgresObjectiveRepository:
                 objective.excluded_document_ids
             )
             available_document_ids = set(
-                session.scalars(
+                await session.scalars(
                     select(
                         SourceDocument.source_document_id,
                     )
@@ -520,7 +528,7 @@ class PostgresObjectiveRepository:
                     + ", ".join(sorted(missing))
                 )
 
-            row = session.get(
+            row = await session.get(
                 ObjectiveResearchRecord,
                 (objective.collection_id, objective.objective_id),
             )
@@ -545,7 +553,7 @@ class PostgresObjectiveRepository:
                     updated_at=objective.updated_at or now,
                 )
                 session.add(row)
-                session.flush()
+                await session.flush()
             elif self._objective_definition_id(row) != self._objective_definition_id(
                 objective
             ):
@@ -554,7 +562,7 @@ class PostgresObjectiveRepository:
                     f"{objective.collection_id}/{objective.objective_id}"
                 )
 
-            existing_authored = session.get(
+            existing_authored = await session.get(
                 ObjectiveAuthoredCandidateRecord,
                 (objective.collection_id, objective.objective_id),
             )
@@ -571,34 +579,34 @@ class PostgresObjectiveRepository:
                     created_at=now,
                 )
                 session.add(existing_authored)
-                session.flush()
-            session.refresh(row)
-            session.refresh(existing_authored)
-            return self._authored_objective_record(session, row, existing_authored)
+                await session.flush()
+            await session.refresh(row)
+            await session.refresh(existing_authored)
+            return await self._authored_objective_record(session, row, existing_authored)
 
-    def read_objective(
+    async def read_objective(
         self,
         collection_id: str,
         objective_id: str,
     ) -> ResearchObjective | None:
-        with self.session_factory() as session:
-            link = self._objective_build_link(
+        async with self.session_factory() as session:
+            link = await self._objective_build_link(
                 session,
                 collection_id,
                 objective_id,
             )
             if link is None:
                 return None
-            row = session.get(ObjectiveResearchRecord, (collection_id, objective_id))
+            row = await session.get(ObjectiveResearchRecord, (collection_id, objective_id))
             if row is None:
                 return None
             source_relationship_ids, rank, build_id = link
-            authored = self._authored_candidate(
+            authored = await self._authored_candidate(
                 session,
                 collection_id,
                 objective_id,
             )
-            scope = self._objective_scope(
+            scope = await self._objective_scope(
                 session,
                 collection_id,
                 objective_id,
@@ -610,36 +618,38 @@ class PostgresObjectiveRepository:
                 scope,
                 source_relationship_ids=source_relationship_ids,
                 rank=rank,
-                analysis_versions=self._analysis_versions_by_objective(
-                    session,
-                    collection_id,
-                    build_id,
+                analysis_versions=(
+                    await self._analysis_versions_by_objective(
+                        session,
+                        collection_id,
+                        build_id,
+                    )
                 ).get(objective_id, (None, None)),
                 authored=authored,
             )
 
-    def confirm_objective(
+    async def confirm_objective(
         self,
         collection_id: str,
         objective_id: str,
     ) -> ResearchObjective:
-        with self.session_factory.begin() as session:
-            link = self._require_objective_build_link(
+        async with self.session_factory.begin() as session:
+            link = await self._require_objective_build_link(
                 session,
                 collection_id,
                 objective_id,
             )
-            row = self._locked_objective(session, collection_id, objective_id)
+            row = await self._locked_objective(session, collection_id, objective_id)
             if row.confirmation_status == "candidate":
                 row.confirmation_status = "confirmed"
                 row.updated_at = datetime.now(timezone.utc)
             source_relationship_ids, rank, build_id = link
-            authored = self._authored_candidate(
+            authored = await self._authored_candidate(
                 session,
                 collection_id,
                 objective_id,
             )
-            scope = self._objective_scope(
+            scope = await self._objective_scope(
                 session,
                 collection_id,
                 objective_id,
@@ -651,15 +661,17 @@ class PostgresObjectiveRepository:
                 scope,
                 source_relationship_ids=source_relationship_ids,
                 rank=rank,
-                analysis_versions=self._analysis_versions_by_objective(
-                    session,
-                    collection_id,
-                    build_id,
+                analysis_versions=(
+                    await self._analysis_versions_by_objective(
+                        session,
+                        collection_id,
+                        build_id,
+                    )
                 ).get(objective_id, (None, None)),
                 authored=authored,
             )
 
-    def queue_analysis(
+    async def queue_analysis(
         self,
         collection_id: str,
         objective_id: str,
@@ -668,22 +680,22 @@ class PostgresObjectiveRepository:
         model_name: str | None,
         prompt_versions: dict[str, str],
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
-        with self.session_factory.begin() as session:
-            link = self._require_objective_build_link(
+        async with self.session_factory.begin() as session:
+            link = await self._require_objective_build_link(
                 session,
                 collection_id,
                 objective_id,
             )
             source_relationship_ids, rank, source_build_id = link
-            row = self._locked_objective(session, collection_id, objective_id)
-            authored = self._authored_candidate(
+            row = await self._locked_objective(session, collection_id, objective_id)
+            authored = await self._authored_candidate(
                 session,
                 collection_id,
                 objective_id,
             )
             if row.confirmation_status != "confirmed":
                 raise ValueError("objective must be confirmed before analysis")
-            existing = session.scalar(
+            existing = await session.scalar(
                 select(ObjectiveAnalysisRecord).where(
                     ObjectiveAnalysisRecord.collection_id == collection_id,
                     ObjectiveAnalysisRecord.objective_id == objective_id,
@@ -692,7 +704,7 @@ class PostgresObjectiveRepository:
                 )
             )
             if existing is not None:
-                scope = self._objective_scope(
+                scope = await self._objective_scope(
                     session,
                     collection_id,
                     objective_id,
@@ -704,15 +716,17 @@ class PostgresObjectiveRepository:
                     scope,
                     source_relationship_ids=source_relationship_ids,
                     rank=rank,
-                    analysis_versions=self._analysis_versions_by_objective(
-                        session,
-                        collection_id,
-                        source_build_id,
+                    analysis_versions=(
+                        await self._analysis_versions_by_objective(
+                            session,
+                            collection_id,
+                            source_build_id,
+                        )
                     ).get(objective_id, (None, None)),
                     authored=authored,
                 ), self._analysis_record(existing)
             next_version = (
-                session.scalar(
+                await session.scalar(
                     select(func.max(ObjectiveAnalysisRecord.analysis_version)).where(
                         ObjectiveAnalysisRecord.collection_id == collection_id,
                         ObjectiveAnalysisRecord.objective_id == objective_id,
@@ -720,7 +734,7 @@ class PostgresObjectiveRepository:
                 )
                 or 0
             ) + 1
-            scope = self._objective_scope(
+            scope = await self._objective_scope(
                 session,
                 collection_id,
                 objective_id,
@@ -728,7 +742,7 @@ class PostgresObjectiveRepository:
                 authored=authored,
             )
             total_documents = int(
-                session.scalar(
+                await session.scalar(
                     select(func.count())
                     .select_from(SourceDocument)
                     .where(
@@ -773,23 +787,25 @@ class PostgresObjectiveRepository:
                 rank=rank,
                 analysis_versions=(
                     next_version,
-                    self._analysis_versions_by_objective(
-                        session,
-                        collection_id,
-                        source_build_id,
+                    (
+                        await self._analysis_versions_by_objective(
+                            session,
+                            collection_id,
+                            source_build_id,
+                        )
                     ).get(objective_id, (None, None))[1],
                 ),
                 authored=authored,
             ), self._analysis_record(analysis_row)
 
-    def claim_analysis(
+    async def claim_analysis(
         self,
         collection_id: str,
         objective_id: str,
         analysis_version: int,
     ) -> ObjectiveAnalysis | None:
-        with self.session_factory.begin() as session:
-            row = self._locked_analysis(
+        async with self.session_factory.begin() as session:
+            row = await self._locked_analysis(
                 session, collection_id, objective_id, analysis_version
             )
             if row.status != "queued":
@@ -803,7 +819,7 @@ class PostgresObjectiveRepository:
             row.progress_message = "Objective analysis has started."
             return self._analysis_record(row)
 
-    def update_analysis_progress(
+    async def update_analysis_progress(
         self,
         collection_id: str,
         objective_id: str,
@@ -815,8 +831,8 @@ class PostgresObjectiveRepository:
         current_document_id: str | None,
         progress_message: str | None,
     ) -> ObjectiveAnalysis:
-        with self.session_factory.begin() as session:
-            row = self._locked_analysis(
+        async with self.session_factory.begin() as session:
+            row = await self._locked_analysis(
                 session, collection_id, objective_id, analysis_version
             )
             updated = self._analysis_record(row).update_progress(
@@ -829,7 +845,7 @@ class PostgresObjectiveRepository:
             self._apply_analysis(row, updated)
             return updated
 
-    def update_analysis_execution_stats(
+    async def update_analysis_execution_stats(
         self,
         collection_id: str,
         objective_id: str,
@@ -840,8 +856,8 @@ class PostgresObjectiveRepository:
         prompt_versions: dict[str, str],
         diagnostics: tuple[dict[str, Any], ...],
     ) -> ObjectiveAnalysis:
-        with self.session_factory.begin() as session:
-            row = self._locked_analysis(
+        async with self.session_factory.begin() as session:
+            row = await self._locked_analysis(
                 session, collection_id, objective_id, analysis_version
             )
             updated = replace(
@@ -854,7 +870,7 @@ class PostgresObjectiveRepository:
             self._apply_analysis(row, updated)
             return updated
 
-    def fail_analysis(
+    async def fail_analysis(
         self,
         collection_id: str,
         objective_id: str,
@@ -864,8 +880,8 @@ class PostgresObjectiveRepository:
         error_message: str,
         expected_status: str | None = None,
     ) -> ObjectiveAnalysis:
-        with self.session_factory.begin() as session:
-            row = self._locked_analysis(
+        async with self.session_factory.begin() as session:
+            row = await self._locked_analysis(
                 session, collection_id, objective_id, analysis_version
             )
             analysis = self._analysis_record(row)
@@ -879,7 +895,7 @@ class PostgresObjectiveRepository:
             self._apply_analysis(row, failed)
             return failed
 
-    def publish_analysis(
+    async def publish_analysis(
         self,
         collection_id: str,
         objective_id: str,
@@ -889,9 +905,9 @@ class PostgresObjectiveRepository:
         evidence_records: tuple[ObjectiveEvidence, ...],
         findings: tuple[Finding, ...],
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
-        with self.session_factory.begin() as session:
-            objective_row = self._locked_objective(session, collection_id, objective_id)
-            analysis_row = self._locked_analysis(
+        async with self.session_factory.begin() as session:
+            objective_row = await self._locked_objective(session, collection_id, objective_id)
+            analysis_row = await self._locked_analysis(
                 session, collection_id, objective_id, analysis_version
             )
             if analysis_row.status != "running":
@@ -907,7 +923,7 @@ class PostgresObjectiveRepository:
             if {item.document_id for item in evidence_records} - contribution_documents:
                 raise ValueError("objective evidence lacks owning paper contribution")
             for evidence in evidence_records:
-                self._require_source_locator(
+                await self._require_source_locator(
                     session,
                     collection_id,
                     analysis_row.source_build_id,
@@ -916,39 +932,39 @@ class PostgresObjectiveRepository:
             for finding in findings:
                 finding.validate_sources(evidence_records, contributions)
 
-            self._delete_analysis_artifacts(
+            await self._delete_analysis_artifacts(
                 session, collection_id, objective_id, analysis_version
             )
             session.add_all(
                 self._contribution_row(analysis_row.source_build_id, item)
                 for item in contributions
             )
-            session.flush()
+            await session.flush()
             session.add_all(
                 self._evidence_row(position, item)
                 for position, item in enumerate(evidence_records)
             )
-            session.flush()
+            await session.flush()
             for finding in findings:
-                self._write_finding(session, finding)
+                await self._write_finding(session, finding)
             succeeded = self._analysis_record(analysis_row).succeed(
                 completed_at=datetime.now(timezone.utc)
             )
             self._apply_analysis(analysis_row, succeeded)
-            source_relationship_ids, rank, _build_id = self._require_objective_build_link(
+            source_relationship_ids, rank, _build_id = await self._require_objective_build_link(
                 session,
                 collection_id,
                 objective_id,
                 build_id=analysis_row.source_build_id,
             )
-            authored = self._authored_candidate(
+            authored = await self._authored_candidate(
                 session,
                 collection_id,
                 objective_id,
             )
             objective = self._objective_record(
                 objective_row,
-                self._objective_scope(
+                await self._objective_scope(
                     session,
                     collection_id,
                     objective_id,
@@ -964,15 +980,15 @@ class PostgresObjectiveRepository:
             objective_row.updated_at = datetime.now(timezone.utc)
             return objective, succeeded
 
-    def read_analysis(
+    async def read_analysis(
         self,
         collection_id: str,
         objective_id: str,
         analysis_version: int | None = None,
     ) -> ObjectiveAnalysis | None:
-        with self.session_factory() as session:
+        async with self.session_factory() as session:
             if analysis_version is None:
-                link = self._objective_build_link(
+                link = await self._objective_build_link(
                     session,
                     collection_id,
                     objective_id,
@@ -980,26 +996,28 @@ class PostgresObjectiveRepository:
                 if link is None:
                     return None
                 _relationship_ids, _rank, build_id = link
-                analysis_version = self._analysis_versions_by_objective(
-                    session,
-                    collection_id,
-                    build_id,
+                analysis_version = (
+                    await self._analysis_versions_by_objective(
+                        session,
+                        collection_id,
+                        build_id,
+                    )
                 ).get(objective_id, (None, None))[0]
                 if analysis_version is None:
                     return None
-            row = session.get(
+            row = await session.get(
                 ObjectiveAnalysisRecord,
                 (collection_id, objective_id, analysis_version),
             )
             return self._analysis_record(row) if row is not None else None
 
-    def read_published_analysis(
+    async def read_published_analysis(
         self,
         collection_id: str,
         objective_id: str,
     ) -> ObjectiveAnalysis | None:
-        with self.session_factory() as session:
-            link = self._objective_build_link(
+        async with self.session_factory() as session:
+            link = await self._objective_build_link(
                 session,
                 collection_id,
                 objective_id,
@@ -1007,14 +1025,16 @@ class PostgresObjectiveRepository:
             if link is None:
                 return None
             _relationship_ids, _rank, build_id = link
-            published_analysis_version = self._analysis_versions_by_objective(
-                session,
-                collection_id,
-                build_id,
+            published_analysis_version = (
+                await self._analysis_versions_by_objective(
+                    session,
+                    collection_id,
+                    build_id,
+                )
             ).get(objective_id, (None, None))[1]
             if published_analysis_version is None:
                 return None
-            row = session.get(
+            row = await session.get(
                 ObjectiveAnalysisRecord,
                 (
                     collection_id,
@@ -1024,14 +1044,14 @@ class PostgresObjectiveRepository:
             )
             return self._analysis_record(row) if row is not None else None
 
-    def list_contributions(
+    async def list_contributions(
         self,
         collection_id: str,
         objective_id: str,
         analysis_version: int,
     ) -> tuple[PaperContribution, ...]:
-        with self.session_factory() as session:
-            rows = session.scalars(
+        async with self.session_factory() as session:
+            rows = await session.scalars(
                 select(ObjectivePaperContributionRecord)
                 .where(
                     ObjectivePaperContributionRecord.collection_id == collection_id,
@@ -1043,7 +1063,7 @@ class PostgresObjectiveRepository:
             )
             return tuple(self._contribution_record(row) for row in rows)
 
-    def list_findings(
+    async def list_findings(
         self,
         collection_id: str,
         objective_id: str,
@@ -1052,9 +1072,9 @@ class PostgresObjectiveRepository:
         offset: int = 0,
         limit: int = 50,
     ) -> tuple[tuple[Finding, ...], int]:
-        with self.session_factory() as session:
+        async with self.session_factory() as session:
             total = (
-                session.scalar(
+                await session.scalar(
                     select(func.count())
                     .select_from(ObjectiveFindingRecord)
                     .where(
@@ -1066,7 +1086,7 @@ class PostgresObjectiveRepository:
                 or 0
             )
             rows = tuple(
-                session.scalars(
+                await session.scalars(
                     select(ObjectiveFindingRecord)
                     .where(
                         ObjectiveFindingRecord.collection_id == collection_id,
@@ -1081,23 +1101,25 @@ class PostgresObjectiveRepository:
                     .limit(max(1, min(limit, 200)))
                 )
             )
-            return tuple(self._finding_record(session, row) for row in rows), total
+            return tuple(
+                [await self._finding_record(session, row) for row in rows]
+            ), total
 
-    def read_finding(
+    async def read_finding(
         self,
         collection_id: str,
         objective_id: str,
         analysis_version: int,
         finding_id: str,
     ) -> Finding | None:
-        with self.session_factory() as session:
-            row = session.get(
+        async with self.session_factory() as session:
+            row = await session.get(
                 ObjectiveFindingRecord,
                 (collection_id, objective_id, analysis_version, finding_id),
             )
-            return self._finding_record(session, row) if row is not None else None
+            return await self._finding_record(session, row) if row is not None else None
 
-    def list_evidence(
+    async def list_evidence(
         self,
         collection_id: str,
         objective_id: str,
@@ -1107,11 +1129,11 @@ class PostgresObjectiveRepository:
         offset: int = 0,
         limit: int = 100,
     ) -> tuple[tuple[ObjectiveEvidence, ...], int]:
-        with self.session_factory() as session:
+        async with self.session_factory() as session:
             evidence_ids: tuple[str, ...] | None = None
             if finding_id is not None:
                 evidence_ids = tuple(
-                    session.scalars(
+                    await session.scalars(
                         select(objective_finding_evidence_links.c.evidence_id)
                         .where(
                             objective_finding_evidence_links.c.collection_id
@@ -1141,14 +1163,14 @@ class PostgresObjectiveRepository:
                     ObjectiveEvidenceRecord.evidence_id.in_(evidence_ids),
                 )
             total = (
-                session.scalar(
+                await session.scalar(
                     select(func.count())
                     .select_from(ObjectiveEvidenceRecord)
                     .where(*filters)
                 )
                 or 0
             )
-            rows = session.scalars(
+            rows = await session.scalars(
                 select(ObjectiveEvidenceRecord)
                 .where(*filters)
                 .order_by(
@@ -1197,8 +1219,8 @@ class PostgresObjectiveRepository:
         row.completed_at = analysis.completed_at
 
     @staticmethod
-    def _delete_analysis_artifacts(
-        session: Session,
+    async def _delete_analysis_artifacts(
+        session: AsyncSession,
         collection_id: str,
         objective_id: str,
         analysis_version: int,
@@ -1208,7 +1230,7 @@ class PostgresObjectiveRepository:
             ObjectiveEvidenceRecord,
             ObjectivePaperContributionRecord,
         ):
-            session.execute(
+            await session.execute(
                 delete(model).where(
                     model.collection_id == collection_id,
                     model.objective_id == objective_id,
@@ -1311,7 +1333,7 @@ class PostgresObjectiveRepository:
             }
         )
 
-    def _write_finding(self, session: Session, finding: Finding) -> None:
+    async def _write_finding(self, session: AsyncSession, finding: Finding) -> None:
         session.add(
             ObjectiveFindingRecord(
                 collection_id=finding.collection_id,
@@ -1329,7 +1351,7 @@ class PostgresObjectiveRepository:
                 display_rank=finding.display_rank,
             )
         )
-        session.flush()
+        await session.flush()
         session.add_all(
             ObjectiveFindingRelationRecord(
                 collection_id=finding.collection_id,
@@ -1366,7 +1388,7 @@ class PostgresObjectiveRepository:
             )
             for position, contribution in enumerate(finding.paper_contributions)
         )
-        session.flush()
+        await session.flush()
         for link_role, evidence_ids in (
             ("supporting", finding.supporting_evidence_ids),
             ("contradicting", finding.contradicting_evidence_ids),
@@ -1386,7 +1408,7 @@ class PostgresObjectiveRepository:
                 for position, evidence_id in enumerate(evidence_ids)
             ]
             if rows:
-                session.execute(objective_finding_evidence_links.insert(), rows)
+                await session.execute(objective_finding_evidence_links.insert(), rows)
         for relation_order, relation in enumerate(finding.mechanisms):
             rows = [
                 {
@@ -1401,13 +1423,13 @@ class PostgresObjectiveRepository:
                 for position, evidence_id in enumerate(relation.supporting_evidence_ids)
             ]
             if rows:
-                session.execute(
+                await session.execute(
                     objective_finding_relation_evidence_links.insert(), rows
                 )
 
-    def _finding_record(
+    async def _finding_record(
         self,
-        session: Session,
+        session: AsyncSession,
         row: ObjectiveFindingRecord,
     ) -> Finding:
         key_filters = (
@@ -1417,7 +1439,7 @@ class PostgresObjectiveRepository:
             row.finding_id,
         )
         relation_rows = tuple(
-            session.scalars(
+            await session.scalars(
                 select(ObjectiveFindingRelationRecord)
                 .where(
                     ObjectiveFindingRelationRecord.collection_id == key_filters[0],
@@ -1429,42 +1451,48 @@ class PostgresObjectiveRepository:
             )
         )
         relation_links: dict[int, list[str]] = defaultdict(list)
-        for link in session.execute(
-            select(objective_finding_relation_evidence_links)
-            .where(
-                objective_finding_relation_evidence_links.c.collection_id
-                == key_filters[0],
-                objective_finding_relation_evidence_links.c.objective_id
-                == key_filters[1],
-                objective_finding_relation_evidence_links.c.analysis_version
-                == key_filters[2],
-                objective_finding_relation_evidence_links.c.finding_id
-                == key_filters[3],
-            )
-            .order_by(
-                objective_finding_relation_evidence_links.c.relation_order,
-                objective_finding_relation_evidence_links.c.position,
+        for link in (
+            await session.execute(
+                select(objective_finding_relation_evidence_links)
+                .where(
+                    objective_finding_relation_evidence_links.c.collection_id
+                    == key_filters[0],
+                    objective_finding_relation_evidence_links.c.objective_id
+                    == key_filters[1],
+                    objective_finding_relation_evidence_links.c.analysis_version
+                    == key_filters[2],
+                    objective_finding_relation_evidence_links.c.finding_id
+                    == key_filters[3],
+                )
+                .order_by(
+                    objective_finding_relation_evidence_links.c.relation_order,
+                    objective_finding_relation_evidence_links.c.position,
+                )
             )
         ).mappings():
             relation_links[int(link["relation_order"])].append(str(link["evidence_id"]))
         evidence_links: dict[str, list[str]] = defaultdict(list)
-        for link in session.execute(
-            select(objective_finding_evidence_links)
-            .where(
-                objective_finding_evidence_links.c.collection_id == key_filters[0],
-                objective_finding_evidence_links.c.objective_id == key_filters[1],
-                objective_finding_evidence_links.c.analysis_version == key_filters[2],
-                objective_finding_evidence_links.c.finding_id == key_filters[3],
-            )
-            .order_by(
-                objective_finding_evidence_links.c.link_role,
-                objective_finding_evidence_links.c.position,
+        for link in (
+            await session.execute(
+                select(objective_finding_evidence_links)
+                .where(
+                    objective_finding_evidence_links.c.collection_id
+                    == key_filters[0],
+                    objective_finding_evidence_links.c.objective_id == key_filters[1],
+                    objective_finding_evidence_links.c.analysis_version
+                    == key_filters[2],
+                    objective_finding_evidence_links.c.finding_id == key_filters[3],
+                )
+                .order_by(
+                    objective_finding_evidence_links.c.link_role,
+                    objective_finding_evidence_links.c.position,
+                )
             )
         ).mappings():
             evidence_links[str(link["link_role"])].append(str(link["evidence_id"]))
-        context_row = session.get(ObjectiveFindingContextRecord, key_filters)
+        context_row = await session.get(ObjectiveFindingContextRecord, key_filters)
         paper_rows = tuple(
-            session.scalars(
+            await session.scalars(
                 select(ObjectiveFindingPaperContributionRecord)
                 .where(
                     ObjectiveFindingPaperContributionRecord.collection_id
@@ -1488,7 +1516,7 @@ class PostgresObjectiveRepository:
         }
         evidence_documents: dict[str, str] = {}
         for evidence_id in linked_evidence_ids:
-            evidence_row = session.get(
+            evidence_row = await session.get(
                 ObjectiveEvidenceRecord,
                 (*key_filters[:3], evidence_id),
             )
@@ -1537,37 +1565,39 @@ class PostgresObjectiveRepository:
             ),
             limitations=tuple(context_row.limitations),
             paper_contributions=tuple(
-                FindingPaperContribution(
-                    document_id=paper_row.source_document_id,
-                    analysis_status=self._paper_contribution_status(
-                        session,
-                        key_filters[:3],
-                        paper_row.source_document_id,
-                    ),
-                    supporting_evidence_ids=evidence_for_document(
-                        "supporting", paper_row.source_document_id
-                    ),
-                    contradicting_evidence_ids=evidence_for_document(
-                        "contradicting", paper_row.source_document_id
-                    ),
-                    context_evidence_ids=evidence_for_document(
-                        "context", paper_row.source_document_id
-                    ),
-                    condition_boundary_evidence_ids=evidence_for_document(
-                        "boundary", paper_row.source_document_id
-                    ),
-                )
-                for paper_row in paper_rows
+                [
+                    FindingPaperContribution(
+                        document_id=paper_row.source_document_id,
+                        analysis_status=await self._paper_contribution_status(
+                            session,
+                            key_filters[:3],
+                            paper_row.source_document_id,
+                        ),
+                        supporting_evidence_ids=evidence_for_document(
+                            "supporting", paper_row.source_document_id
+                        ),
+                        contradicting_evidence_ids=evidence_for_document(
+                            "contradicting", paper_row.source_document_id
+                        ),
+                        context_evidence_ids=evidence_for_document(
+                            "context", paper_row.source_document_id
+                        ),
+                        condition_boundary_evidence_ids=evidence_for_document(
+                            "boundary", paper_row.source_document_id
+                        ),
+                    )
+                    for paper_row in paper_rows
+                ]
             ),
         )
 
     @staticmethod
-    def _paper_contribution_status(
-        session: Session,
+    async def _paper_contribution_status(
+        session: AsyncSession,
         analysis_key: tuple[str, str, int],
         document_id: str,
     ) -> str:
-        row = session.get(
+        row = await session.get(
             ObjectivePaperContributionRecord,
             (*analysis_key, document_id),
         )
@@ -1711,24 +1741,26 @@ class PostgresObjectiveRepository:
         )
 
     @classmethod
-    def _authored_objective_record(
+    async def _authored_objective_record(
         cls,
-        session: Session,
+        session: AsyncSession,
         row: ObjectiveResearchRecord,
         authored: ObjectiveAuthoredCandidateRecord,
     ) -> ResearchObjective:
         return cls._objective_record(
             row,
             {},
-            rank=cls._objective_rank(
+            rank=await cls._objective_rank(
                 session,
                 authored.collection_id,
                 authored.objective_id,
             ),
-            analysis_versions=cls._analysis_versions_by_objective(
-                session,
-                authored.collection_id,
-                authored.source_build_id,
+            analysis_versions=(
+                await cls._analysis_versions_by_objective(
+                    session,
+                    authored.collection_id,
+                    authored.source_build_id,
+                )
             ).get(authored.objective_id, (None, None)),
             authored=authored,
         )
@@ -1755,9 +1787,9 @@ class PostgresObjectiveRepository:
         )
 
     @classmethod
-    def _skim_row(
+    async def _skim_row(
         cls,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
         source_document_ids: set[str],
@@ -1767,7 +1799,7 @@ class PostgresObjectiveRepository:
         cls._require_source_document(
             source_document_ids, collection_id, skim.document_id
         )
-        cls._require_paper_skim_source_refs(
+        await cls._require_paper_skim_source_refs(
             session,
             collection_id,
             build_id,
@@ -1785,8 +1817,8 @@ class PostgresObjectiveRepository:
         )
 
     @staticmethod
-    def _require_paper_skim_source_refs(
-        session: Session,
+    async def _require_paper_skim_source_refs(
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
         skim: PaperSkim,
@@ -1829,7 +1861,7 @@ class PostgresObjectiveRepository:
                     "paper study Source document belongs to another skim: "
                     f"{source_ref.source_ref}/{skim.document_id}"
                 )
-            exists = session.scalar(
+            exists = await session.scalar(
                 select(func.count()).select_from(model).where(*filters)
             )
             if not exists:
@@ -1855,8 +1887,8 @@ class PostgresObjectiveRepository:
         }
 
     @staticmethod
-    def _write_paper_study_rows(
-        session: Session,
+    async def _write_paper_study_rows(
+        session: AsyncSession,
         *,
         collection_id: str,
         build_id: str,
@@ -1925,12 +1957,12 @@ class PostgresObjectiveRepository:
         )
 
     @staticmethod
-    def _coverage_rows_by_document(
-        session: Session,
+    async def _coverage_rows_by_document(
+        session: AsyncSession,
         build_id: str,
     ) -> dict[str, tuple[PaperSourceUnitCoverage, ...]]:
         grouped: dict[str, list[PaperSourceUnitCoverage]] = defaultdict(list)
-        for row in session.scalars(
+        for row in await session.scalars(
             select(ObjectivePaperSourceUnitCoverage)
             .where(ObjectivePaperSourceUnitCoverage.build_id == build_id)
             .order_by(
@@ -1953,12 +1985,12 @@ class PostgresObjectiveRepository:
         return {key: tuple(values) for key, values in grouped.items()}
 
     @staticmethod
-    def _relationship_rows_by_study(
-        session: Session,
+    async def _relationship_rows_by_study(
+        session: AsyncSession,
         build_id: str,
     ) -> dict[tuple[str, str], tuple[PaperStudyRelationship, ...]]:
         grouped: dict[tuple[str, str], list[PaperStudyRelationship]] = defaultdict(list)
-        for row in session.scalars(
+        for row in await session.scalars(
             select(ObjectivePaperStudyRelationship)
             .where(ObjectivePaperStudyRelationship.build_id == build_id)
             .order_by(
@@ -1981,15 +2013,15 @@ class PostgresObjectiveRepository:
         return {key: tuple(values) for key, values in grouped.items()}
 
     @staticmethod
-    def _study_rows_by_document(
-        session: Session,
+    async def _study_rows_by_document(
+        session: AsyncSession,
         build_id: str,
         relationships_by_study: dict[
             tuple[str, str], tuple[PaperStudyRelationship, ...]
         ],
     ) -> dict[str, tuple[PaperStudy, ...]]:
         grouped: dict[str, list[PaperStudy]] = defaultdict(list)
-        for row in session.scalars(
+        for row in await session.scalars(
             select(ObjectivePaperStudy)
             .where(ObjectivePaperStudy.build_id == build_id)
             .order_by(
@@ -2024,12 +2056,12 @@ class PostgresObjectiveRepository:
         return {key: tuple(values) for key, values in grouped.items()}
 
     @staticmethod
-    def _signal_rows_by_document(
-        session: Session,
+    async def _signal_rows_by_document(
+        session: AsyncSession,
         build_id: str,
     ) -> dict[str, tuple[PaperStudySignal, ...]]:
         grouped: dict[str, list[PaperStudySignal]] = defaultdict(list)
-        for row in session.scalars(
+        for row in await session.scalars(
             select(ObjectivePaperStudySignal)
             .where(ObjectivePaperStudySignal.build_id == build_id)
             .order_by(
@@ -2043,29 +2075,31 @@ class PostgresObjectiveRepository:
         return {key: tuple(values) for key, values in grouped.items()}
 
     @staticmethod
-    def _relationship_ids_by_objective(
-        session: Session,
+    async def _relationship_ids_by_objective(
+        session: AsyncSession,
         build_id: str,
     ) -> dict[str, tuple[str, ...]]:
         grouped: dict[str, list[str]] = defaultdict(list)
-        for row in session.execute(
-            select(objective_build_relationship_links)
-            .where(objective_build_relationship_links.c.build_id == build_id)
-            .order_by(
-                objective_build_relationship_links.c.objective_id,
-                objective_build_relationship_links.c.link_order,
+        for row in (
+            await session.execute(
+                select(objective_build_relationship_links)
+                .where(objective_build_relationship_links.c.build_id == build_id)
+                .order_by(
+                    objective_build_relationship_links.c.objective_id,
+                    objective_build_relationship_links.c.link_order,
+                )
             )
         ).mappings():
             grouped[str(row["objective_id"])].append(str(row["relationship_id"]))
         return {key: tuple(values) for key, values in grouped.items()}
 
     @staticmethod
-    def _replace_document_scope(
-        session: Session,
+    async def _replace_document_scope(
+        session: AsyncSession,
         build_id: str,
         objective: ResearchObjective,
     ) -> None:
-        session.execute(
+        await session.execute(
             delete(objective_document_scope).where(
                 objective_document_scope.c.collection_id == objective.collection_id,
                 objective_document_scope.c.objective_id == objective.objective_id,
@@ -2088,11 +2122,11 @@ class PostgresObjectiveRepository:
                 for position, document_id in enumerate(document_ids)
             ]
             if rows:
-                session.execute(objective_document_scope.insert(), rows)
+                await session.execute(objective_document_scope.insert(), rows)
 
     @staticmethod
-    def _scope_by_objective(
-        session: Session,
+    async def _scope_by_objective(
+        session: AsyncSession,
         collection_id: str,
         *,
         build_id: str,
@@ -2100,31 +2134,36 @@ class PostgresObjectiveRepository:
         grouped: dict[str, dict[str, list[str]]] = defaultdict(
             lambda: defaultdict(list)
         )
-        for row in session.execute(
-            select(objective_document_scope)
-            .where(
-                objective_document_scope.c.collection_id == collection_id,
-                objective_document_scope.c.build_id == build_id,
-            )
-            .order_by(
-                objective_document_scope.c.objective_id,
-                objective_document_scope.c.scope_kind,
-                objective_document_scope.c.position,
+        for row in (
+            await session.execute(
+                select(objective_document_scope)
+                .where(
+                    objective_document_scope.c.collection_id == collection_id,
+                    objective_document_scope.c.build_id == build_id,
+                )
+                .order_by(
+                    objective_document_scope.c.objective_id,
+                    objective_document_scope.c.scope_kind,
+                    objective_document_scope.c.position,
+                )
             )
         ).mappings():
             grouped[str(row["objective_id"])][str(row["scope_kind"])].append(
                 str(row["source_document_id"])
             )
         build_seed_scope: dict[str, list[str]] = defaultdict(list)
-        for row in session.execute(
-            select(objective_build_relationship_links)
-            .where(
-                objective_build_relationship_links.c.collection_id == collection_id,
-                objective_build_relationship_links.c.build_id == build_id,
-            )
-            .order_by(
-                objective_build_relationship_links.c.objective_id,
-                objective_build_relationship_links.c.link_order,
+        for row in (
+            await session.execute(
+                select(objective_build_relationship_links)
+                .where(
+                    objective_build_relationship_links.c.collection_id
+                    == collection_id,
+                    objective_build_relationship_links.c.build_id == build_id,
+                )
+                .order_by(
+                    objective_build_relationship_links.c.objective_id,
+                    objective_build_relationship_links.c.link_order,
+                )
             )
         ).mappings():
             objective_id = str(row["objective_id"])
@@ -2142,20 +2181,20 @@ class PostgresObjectiveRepository:
         }
 
     @staticmethod
-    def _authored_candidate(
-        session: Session,
+    async def _authored_candidate(
+        session: AsyncSession,
         collection_id: str,
         objective_id: str,
     ) -> ObjectiveAuthoredCandidateRecord | None:
-        return session.get(
+        return await session.get(
             ObjectiveAuthoredCandidateRecord,
             (collection_id, objective_id),
         )
 
     @classmethod
-    def _objective_scope(
+    async def _objective_scope(
         cls,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         objective_id: str,
         *,
@@ -2169,23 +2208,25 @@ class PostgresObjectiveRepository:
                 "seed": tuple(authored.seed_document_ids),
                 "excluded": tuple(authored.excluded_document_ids),
             }
-        return cls._scope_by_objective(
-            session,
-            collection_id,
-            build_id=build_id,
+        return (
+            await cls._scope_by_objective(
+                session,
+                collection_id,
+                build_id=build_id,
+            )
         ).get(objective_id, {})
 
     @classmethod
-    def _objective_rank(
+    async def _objective_rank(
         cls,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         objective_id: str,
     ) -> int:
-        active_build_id = cls._resolve_read_build(session, collection_id, None)
+        active_build_id = await cls._resolve_read_build(session, collection_id, None)
         generated_ids: list[str] = []
         if active_build_id is not None:
-            marker = session.get(ObjectiveBuild, active_build_id)
+            marker = await session.get(ObjectiveBuild, active_build_id)
             if (
                 marker is not None
                 and marker.collection_id == collection_id
@@ -2193,7 +2234,7 @@ class PostgresObjectiveRepository:
             ):
                 generated_ids = [
                     str(row.objective_id)
-                    for row in session.execute(
+                    for row in await session.execute(
                         select(objective_build_candidates.c.objective_id)
                         .where(
                             objective_build_candidates.c.collection_id
@@ -2208,7 +2249,7 @@ class PostgresObjectiveRepository:
 
         authored_ids = [
             row.objective_id
-            for row in session.scalars(
+            for row in await session.scalars(
                 select(ObjectiveAuthoredCandidateRecord)
                 .where(
                     ObjectiveAuthoredCandidateRecord.collection_id == collection_id
@@ -2228,13 +2269,13 @@ class PostgresObjectiveRepository:
             ) from exc
 
     @staticmethod
-    def _analysis_versions_by_objective(
-        session: Session,
+    async def _analysis_versions_by_objective(
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
     ) -> dict[str, tuple[int | None, int | None]]:
         versions: dict[str, tuple[int | None, int | None]] = {}
-        for row in session.scalars(
+        for row in await session.scalars(
             select(ObjectiveAnalysisRecord)
             .where(
                 ObjectiveAnalysisRecord.collection_id == collection_id,
@@ -2253,8 +2294,8 @@ class PostgresObjectiveRepository:
         return versions
 
     @staticmethod
-    def _require_source_locator(
-        session: Session,
+    async def _require_source_locator(
+        session: AsyncSession,
         collection_id: str,
         source_build_id: str,
         evidence: ObjectiveEvidence,
@@ -2265,7 +2306,7 @@ class PostgresObjectiveRepository:
             "figure": (SourceFigure, SourceFigure.figure_id),
         }[evidence.source_kind]
         model, id_column = model_and_id
-        exists = session.scalar(
+        exists = await session.scalar(
             select(func.count())
             .select_from(model)
             .where(
@@ -2283,12 +2324,12 @@ class PostgresObjectiveRepository:
             )
 
     @staticmethod
-    def _locked_objective(
-        session: Session,
+    async def _locked_objective(
+        session: AsyncSession,
         collection_id: str,
         objective_id: str,
     ) -> ObjectiveResearchRecord:
-        row = session.scalar(
+        row = await session.scalar(
             select(ObjectiveResearchRecord)
             .where(
                 ObjectiveResearchRecord.collection_id == collection_id,
@@ -2303,13 +2344,13 @@ class PostgresObjectiveRepository:
         return row
 
     @staticmethod
-    def _locked_analysis(
-        session: Session,
+    async def _locked_analysis(
+        session: AsyncSession,
         collection_id: str,
         objective_id: str,
         analysis_version: int,
     ) -> ObjectiveAnalysisRecord:
-        row = session.scalar(
+        row = await session.scalar(
             select(ObjectiveAnalysisRecord)
             .where(
                 ObjectiveAnalysisRecord.collection_id == collection_id,
@@ -2326,13 +2367,13 @@ class PostgresObjectiveRepository:
         return row
 
     @staticmethod
-    def _source_document_ids(
-        session: Session,
+    async def _source_document_ids(
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
     ) -> set[str]:
         return set(
-            session.scalars(
+            await session.scalars(
                 select(SourceDocument.source_document_id).where(
                     SourceDocument.collection_id == collection_id,
                     SourceDocument.build_id == build_id,
@@ -2352,12 +2393,12 @@ class PostgresObjectiveRepository:
             )
 
     @staticmethod
-    def _require_build(
-        session: Session,
+    async def _require_build(
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
     ) -> CollectionBuild:
-        build = session.get(CollectionBuild, build_id)
+        build = await session.get(CollectionBuild, build_id)
         if build is None or build.collection_id != collection_id:
             raise FileNotFoundError(
                 f"collection build not found: {collection_id}/{build_id}"
@@ -2365,47 +2406,47 @@ class PostgresObjectiveRepository:
         return build
 
     @classmethod
-    def _require_writable_build(
+    async def _require_writable_build(
         cls,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         build_id: str,
     ) -> CollectionBuild:
-        build = cls._require_build(session, collection_id, build_id)
+        build = await cls._require_build(session, collection_id, build_id)
         if build.status not in {"queued", "building"}:
             raise ValueError(f"collection build is not writable: {build_id}")
         return build
 
     @classmethod
-    def _resolve_read_build(
+    async def _resolve_read_build(
         cls,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         build_id: str | None,
     ) -> str | None:
         if build_id is not None:
-            cls._require_build(session, collection_id, build_id)
+            await cls._require_build(session, collection_id, build_id)
             return build_id
-        return session.scalar(
+        return await session.scalar(
             select(CollectionActiveBuild.build_id).where(
                 CollectionActiveBuild.collection_id == collection_id
             )
         )
 
     @classmethod
-    def _objective_build_link(
+    async def _objective_build_link(
         cls,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         objective_id: str,
         *,
         build_id: str | None = None,
     ) -> tuple[tuple[str, ...], int, str] | None:
-        authored = cls._authored_candidate(session, collection_id, objective_id)
+        authored = await cls._authored_candidate(session, collection_id, objective_id)
         if authored is not None and (
             build_id is None or build_id == authored.source_build_id
         ):
-            marker = session.get(ObjectiveBuild, authored.source_build_id)
+            marker = await session.get(ObjectiveBuild, authored.source_build_id)
             if (
                 marker is not None
                 and marker.collection_id == collection_id
@@ -2413,43 +2454,45 @@ class PostgresObjectiveRepository:
             ):
                 return (
                     (),
-                    cls._objective_rank(session, collection_id, objective_id),
+                    await cls._objective_rank(session, collection_id, objective_id),
                     authored.source_build_id,
                 )
-        resolved_build_id = cls._resolve_read_build(session, collection_id, build_id)
+        resolved_build_id = await cls._resolve_read_build(session, collection_id, build_id)
         if resolved_build_id is None:
             return None
-        marker = session.get(ObjectiveBuild, resolved_build_id)
+        marker = await session.get(ObjectiveBuild, resolved_build_id)
         if (
             marker is None
             or marker.collection_id != collection_id
             or not marker.research_objectives_ready
         ):
             return None
-        link = session.execute(
-            select(objective_build_candidates.c.objective_order).where(
-                objective_build_candidates.c.collection_id == collection_id,
-                objective_build_candidates.c.build_id == resolved_build_id,
-                objective_build_candidates.c.objective_id == objective_id,
+        link = (
+            await session.execute(
+                select(objective_build_candidates.c.objective_order).where(
+                    objective_build_candidates.c.collection_id == collection_id,
+                    objective_build_candidates.c.build_id == resolved_build_id,
+                    objective_build_candidates.c.objective_id == objective_id,
+                )
             )
         ).one_or_none()
         if link is None:
             return None
-        source_relationship_ids = cls._relationship_ids_by_objective(
-            session, resolved_build_id
+        source_relationship_ids = (
+            await cls._relationship_ids_by_objective(session, resolved_build_id)
         ).get(objective_id, ())
         return source_relationship_ids, int(link.objective_order) + 1, resolved_build_id
 
     @classmethod
-    def _require_objective_build_link(
+    async def _require_objective_build_link(
         cls,
-        session: Session,
+        session: AsyncSession,
         collection_id: str,
         objective_id: str,
         *,
         build_id: str | None = None,
     ) -> tuple[tuple[str, ...], int, str]:
-        link = cls._objective_build_link(
+        link = await cls._objective_build_link(
             session,
             collection_id,
             objective_id,

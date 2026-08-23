@@ -21,10 +21,10 @@ async def create_collection(
     request: Request,
 ) -> CollectionResponse:
     # create collection of paper
-    record = request.app.state.collection_service.create_collection(
+    record = await request.app.state.collection_service.create_collection(
         name=payload.name,
         description=payload.description,
-        owner_user_id=current_user_id(request),
+        owner_user_id=await current_user_id(request),
     )
     return CollectionResponse(**record)
 
@@ -33,8 +33,8 @@ async def create_collection(
 async def list_collections(request: Request) -> CollectionListResponse:
     items = [
         CollectionResponse(**record)
-        for record in request.app.state.collection_service.list_collections(
-            current_user_id(request)
+        for record in await request.app.state.collection_service.list_collections(
+            await current_user_id(request)
         )
     ]
     return CollectionListResponse(items=items)
@@ -43,9 +43,9 @@ async def list_collections(request: Request) -> CollectionListResponse:
 @router.get("/{collection_id}", response_model=CollectionResponse, summary="获取集合详情")
 async def get_collection(collection_id: str, request: Request) -> CollectionResponse:
     try:
-        record = request.app.state.collection_service.get_collection_for_user(
+        record = await request.app.state.collection_service.get_collection_for_user(
             collection_id,
-            current_user_id(request),
+            await current_user_id(request),
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -59,9 +59,9 @@ async def get_collection(collection_id: str, request: Request) -> CollectionResp
 )
 async def delete_collection(collection_id: str, request: Request) -> CollectionDeleteResponse:
     try:
-        result = request.app.state.collection_service.delete_collection_for_user(
+        result = await request.app.state.collection_service.delete_collection_for_user(
             collection_id,
-            current_user_id(request),
+            await current_user_id(request),
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -82,9 +82,11 @@ async def upload_collection_file(
 ) -> CollectionFileResponse:
     collection_service = request.app.state.collection_service
     try:
-        collection_service.get_collection_for_user(collection_id, current_user_id(request))
+        await collection_service.get_collection_for_user(
+            collection_id, await current_user_id(request)
+        )
         content = await file.read()
-        record = collection_service.add_file(
+        record = await collection_service.add_file(
             collection_id=collection_id,
             filename=file.filename or "upload.bin",
             content=content,
@@ -111,13 +113,15 @@ async def list_collection_files(
 ) -> CollectionFileListResponse:
     collection_service = request.app.state.collection_service
     try:
-        collection_service.get_collection_for_user(collection_id, current_user_id(request))
+        await collection_service.get_collection_for_user(
+            collection_id, await current_user_id(request)
+        )
         items = [
             CollectionFileResponse(
                 **record,
                 stored_path=str(record["storage_key"]),
             )
-            for record in collection_service.list_files(collection_id)
+            for record in await collection_service.list_files(collection_id)
         ]
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

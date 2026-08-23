@@ -10,7 +10,7 @@ class MemoryComparisonRepository:
         self.facts_by_build: dict[tuple[str, str], ComparisonFactSet] = {}
         self.active_builds: dict[str, str] = {}
 
-    def replace(
+    async def replace(
         self,
         collection_id: str,
         build_id: str,
@@ -19,7 +19,7 @@ class MemoryComparisonRepository:
         self.facts_by_build[(collection_id, build_id)] = facts
         self.active_builds[collection_id] = build_id
 
-    def read(
+    async def read(
         self,
         collection_id: str,
         *,

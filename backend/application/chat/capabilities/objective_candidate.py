@@ -47,12 +47,12 @@ class CreateObjectiveCandidateCapability:
     def __init__(self, *, research_objective_service: Any) -> None:
         self.research_objective_service = research_objective_service
 
-    def execute(
+    async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: CreateObjectiveCandidateArguments,
     ) -> ChatToolResult:
-        objective = self.research_objective_service.create_chat_assisted_candidate(
+        objective = await self.research_objective_service.create_chat_assisted_candidate(
             collection_id=context.collection_id,
             user_id=context.user_id,
             tool_call_id=context.tool_call_id,

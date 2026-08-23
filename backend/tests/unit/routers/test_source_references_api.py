@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -19,13 +18,20 @@ from application.source.reference_extraction_service import (
 )
 from controllers.source import references as references_controller
 from domain.source import SourceBlock, SourceDocument, assemble_source_documents
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 @pytest.fixture()
 def source_reference_services(monkeypatch, tmp_path):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+    repository = MemorySourceArtifactRepository()
     workflow_service = SourceReferenceWorkflowService(
         source_artifact_repository=repository,
     )
@@ -40,9 +46,9 @@ def source_reference_services(monkeypatch, tmp_path):
     return collection_service, repository, request
 
 
-def test_source_reference_routes_build_and_read_refs(source_reference_services):
+async def test_source_reference_routes_build_and_read_refs(source_reference_services):
     collection_service, repository, request = source_reference_services
-    collection = collection_service.create_collection("Refs Collection")
+    collection = await collection_service.create_collection("Refs Collection")
     collection_id = collection["collection_id"]
     artifacts = assemble_source_documents(
         documents=(
@@ -77,17 +83,24 @@ def test_source_reference_routes_build_and_read_refs(source_reference_services):
             ),
         ),
     )
-    repository.replace_collection_documents(collection_id, artifacts)
-    repository.replace_collection_references(
+    await repository.replace_collection_documents(
         collection_id,
+        "build_test",
+        artifacts,
+    )
+    await repository.replace_collection_references(
+        collection_id,
+        "build_test",
         SourceReferenceExtractionService().extract(artifacts),
     )
 
-    summary = asyncio.run(
-        references_controller.build_collection_references(collection_id, request)
+    summary = await references_controller.build_collection_references(
+        collection_id,
+        request,
     )
-    payload = asyncio.run(
-        references_controller.get_collection_references(collection_id, request)
+    payload = await references_controller.get_collection_references(
+        collection_id,
+        request,
     )
 
     assert summary.collection_id == collection_id
@@ -99,19 +112,17 @@ def test_source_reference_routes_build_and_read_refs(source_reference_services):
     assert payload.candidates[0].status == "metadata_only"
 
 
-def test_source_reference_build_route_returns_409_when_source_is_not_ready(
+async def test_source_reference_build_route_returns_409_when_source_is_not_ready(
     source_reference_services,
 ):
     collection_service, _repository, request = source_reference_services
-    collection = collection_service.create_collection("Pending Refs Collection")
+    collection = await collection_service.create_collection("Pending Refs Collection")
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            references_controller.build_collection_references(
+        await references_controller.build_collection_references(
                 collection["collection_id"],
                 request,
             )
-        )
 
     exc = exc_info.value
     assert exc.status_code == 409
@@ -119,13 +130,14 @@ def test_source_reference_build_route_returns_409_when_source_is_not_ready(
     assert exc.detail["collection_id"] == collection["collection_id"]
 
 
-def test_source_reference_route_returns_404_for_missing_collection(
+async def test_source_reference_route_returns_404_for_missing_collection(
     source_reference_services,
 ):
     _collection_service, _repository, request = source_reference_services
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            references_controller.get_collection_references("col_missing", request)
+        await references_controller.get_collection_references(
+            "col_missing",
+            request,
         )
 
     assert exc_info.value.status_code == 404

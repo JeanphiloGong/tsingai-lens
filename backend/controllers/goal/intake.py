@@ -18,14 +18,14 @@ async def intake_goal(
     request: Request,
 ) -> GoalIntakeResponse:
     try:
-        response = request.app.state.goal_service.intake_goal(
+        response = await request.app.state.goal_service.intake_goal(
             material_system=payload.material_system,
             target_property=payload.target_property,
             intent=payload.intent,
             constraints=payload.constraints,
             context=payload.context,
             max_seed_documents=payload.max_seed_documents,
-            owner_user_id=current_user_id(request),
+            owner_user_id=await current_user_id(request),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

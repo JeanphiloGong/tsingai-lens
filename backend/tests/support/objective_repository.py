@@ -36,10 +36,14 @@ class MemoryObjectiveRepository:
         build_id: str = "build_test",
     ) -> "MemoryObjectiveRepository":
         repository = cls(active_build_id=build_id)
-        repository.replace(collection_id, build_id, facts)
+        for objective in facts.research_objectives:
+            if objective.collection_id != collection_id:
+                raise ValueError("objective belongs to another collection")
+            repository._objectives[(collection_id, objective.objective_id)] = objective
+        repository._facts[(collection_id, build_id)] = facts
         return repository
 
-    def replace(
+    async def replace(
         self,
         collection_id: str,
         build_id: str,
@@ -53,7 +57,7 @@ class MemoryObjectiveRepository:
             self._objectives[key] = objective if existing is None else existing
         self._facts[(collection_id, build_id)] = facts
 
-    def read(
+    async def read(
         self,
         collection_id: str,
         *,
@@ -65,21 +69,24 @@ class MemoryObjectiveRepository:
     def activate(self, build_id: str) -> None:
         self.active_build_id = build_id
 
-    def list_objectives(self, collection_id: str) -> tuple[ResearchObjective, ...]:
+    async def list_objectives(
+        self,
+        collection_id: str,
+    ) -> tuple[ResearchObjective, ...]:
         return tuple(
             objective
             for (owned_collection_id, _), objective in self._objectives.items()
             if owned_collection_id == collection_id
         )
 
-    def read_objective(
+    async def read_objective(
         self,
         collection_id: str,
         objective_id: str,
     ) -> ResearchObjective | None:
         return self._objectives.get((collection_id, objective_id))
 
-    def confirm_objective(
+    async def confirm_objective(
         self,
         collection_id: str,
         objective_id: str,
@@ -91,7 +98,7 @@ class MemoryObjectiveRepository:
             self._objectives[key] = objective
         return objective
 
-    def queue_analysis(
+    async def queue_analysis(
         self,
         collection_id: str,
         objective_id: str,
@@ -134,7 +141,12 @@ class MemoryObjectiveRepository:
             model_name=model_name,
             prompt_versions=dict(prompt_versions),
             total_document_count=(
-                len(self.read(collection_id, build_id=self.active_build_id).paper_skims)
+                len(
+                    self._facts.get(
+                        (collection_id, self.active_build_id),
+                        ObjectiveFactSet(),
+                    ).paper_skims
+                )
                 or len(objective.seed_document_ids)
             ),
             progress_message="Objective analysis is queued.",
@@ -145,7 +157,7 @@ class MemoryObjectiveRepository:
         self._analyses[analysis.key] = analysis
         return objective, analysis
 
-    def claim_analysis(
+    async def claim_analysis(
         self,
         collection_id: str,
         objective_id: str,
@@ -159,7 +171,7 @@ class MemoryObjectiveRepository:
         self._analyses[key] = analysis
         return analysis
 
-    def update_analysis_progress(
+    async def update_analysis_progress(
         self,
         collection_id: str,
         objective_id: str,
@@ -182,7 +194,7 @@ class MemoryObjectiveRepository:
         self._analyses[key] = analysis
         return analysis
 
-    def update_analysis_execution_stats(
+    async def update_analysis_execution_stats(
         self,
         collection_id: str,
         objective_id: str,
@@ -204,7 +216,7 @@ class MemoryObjectiveRepository:
         self._analyses[key] = analysis
         return analysis
 
-    def fail_analysis(
+    async def fail_analysis(
         self,
         collection_id: str,
         objective_id: str,
@@ -226,7 +238,7 @@ class MemoryObjectiveRepository:
         self._analyses[key] = analysis
         return analysis
 
-    def publish_analysis(
+    async def publish_analysis(
         self,
         collection_id: str,
         objective_id: str,
@@ -258,14 +270,14 @@ class MemoryObjectiveRepository:
         self._findings[key] = findings
         return objective, analysis
 
-    def read_analysis(
+    async def read_analysis(
         self,
         collection_id: str,
         objective_id: str,
         analysis_version: int | None = None,
     ) -> ObjectiveAnalysis | None:
         if analysis_version is None:
-            objective = self.read_objective(collection_id, objective_id)
+            objective = self._objectives.get((collection_id, objective_id))
             analysis_version = (
                 objective.active_analysis_version if objective is not None else None
             )
@@ -273,19 +285,19 @@ class MemoryObjectiveRepository:
             return None
         return self._analyses.get((collection_id, objective_id, analysis_version))
 
-    def read_published_analysis(
+    async def read_published_analysis(
         self,
         collection_id: str,
         objective_id: str,
     ) -> ObjectiveAnalysis | None:
-        objective = self.read_objective(collection_id, objective_id)
+        objective = self._objectives.get((collection_id, objective_id))
         if objective is None or objective.published_analysis_version is None:
             return None
         return self._analyses.get(
             (collection_id, objective_id, objective.published_analysis_version)
         )
 
-    def list_findings(
+    async def list_findings(
         self,
         collection_id: str,
         objective_id: str,
@@ -304,7 +316,7 @@ class MemoryObjectiveRepository:
             ordered
         )
 
-    def read_finding(
+    async def read_finding(
         self,
         collection_id: str,
         objective_id: str,
@@ -322,7 +334,7 @@ class MemoryObjectiveRepository:
             None,
         )
 
-    def list_contributions(
+    async def list_contributions(
         self,
         collection_id: str,
         objective_id: str,
@@ -332,7 +344,7 @@ class MemoryObjectiveRepository:
             (collection_id, objective_id, analysis_version), ()
         )
 
-    def list_evidence(
+    async def list_evidence(
         self,
         collection_id: str,
         objective_id: str,
@@ -346,8 +358,15 @@ class MemoryObjectiveRepository:
             (collection_id, objective_id, analysis_version), ()
         )
         if finding_id is not None:
-            finding = self.read_finding(
-                collection_id, objective_id, analysis_version, finding_id
+            finding = next(
+                (
+                    item
+                    for item in self._findings.get(
+                        (collection_id, objective_id, analysis_version), ()
+                    )
+                    if item.finding_id == finding_id
+                ),
+                None,
             )
             if finding is None:
                 return (), 0
@@ -367,7 +386,7 @@ class MemoryObjectiveRepository:
         collection_id: str,
         objective_id: str,
     ) -> ResearchObjective:
-        objective = self.read_objective(collection_id, objective_id)
+        objective = self._objectives.get((collection_id, objective_id))
         if objective is None:
             raise FileNotFoundError(objective_id)
         return objective

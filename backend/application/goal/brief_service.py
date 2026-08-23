@@ -106,7 +106,7 @@ class GoalService:
         # builder channels; it does not import papers itself.
         return ["upload"]
 
-    def intake_goal(
+    async def intake_goal(
         self,
         material_system: str | None,
         target_property: str | None,
@@ -150,7 +150,7 @@ class GoalService:
             max_seed_documents,
         )
 
-        collection = self.collection_service.create_collection(
+        collection = await self.collection_service.create_collection(
             name=self._build_collection_name(
                 normalized_material_system,
                 normalized_target_property,
@@ -160,7 +160,7 @@ class GoalService:
             owner_user_id=owner_user_id,
         )
         collection_id = collection["collection_id"]
-        handoff = self.collection_service.register_goal_brief_handoff(
+        handoff = await self.collection_service.register_goal_brief_handoff(
             collection_id,
             research_brief,
             coverage_assessment,

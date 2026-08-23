@@ -82,22 +82,24 @@ class DocumentMarkdownService:
         self.collection_service = collection_service
         self.source_artifact_repository = source_artifact_repository
 
-    def get_document_markdown(
+    async def get_document_markdown(
         self,
         collection_id: str,
         document_id: str,
     ) -> dict[str, Any]:
-        self.collection_service.get_collection(collection_id)
-        documents = self._load_source_documents(collection_id)
+        await self.collection_service.get_collection(collection_id)
+        documents = await self._load_source_documents(collection_id)
         document = self._find_document(documents, collection_id, document_id)
-        document_tree = load_document_tree(
+        document_tree = await load_document_tree(
             collection_id,
             document_id,
             self.source_artifact_repository,
         )
-        display_names = self._document_display_names(collection_id, document)
+        display_names = await self._document_display_names(
+            collection_id, document
+        )
 
-        markdown, source_map, warnings = self._project_markdown_from_tree(
+        markdown, source_map, warnings = await self._project_markdown_from_tree(
             collection_id=collection_id,
             document=document,
             document_tree=document_tree,
@@ -120,13 +122,13 @@ class DocumentMarkdownService:
             "warnings": warnings,
         }
 
-    def resolve_figure_image_file(
+    async def resolve_figure_image_file(
         self,
         collection_id: str,
         document_id: str,
         figure_id: str,
     ) -> dict[str, Any]:
-        self.collection_service.get_collection(collection_id)
+        await self.collection_service.get_collection(collection_id)
         document_key = str(document_id or "").strip()
         figure_key = str(figure_id or "").strip()
         if not document_key or not figure_key:
@@ -139,7 +141,7 @@ class DocumentMarkdownService:
         figure = next(
             (
                 item
-                for item in self.source_artifact_repository.list_figures(
+                for item in await self.source_artifact_repository.list_figures(
                     collection_id,
                     document_key,
                 )
@@ -194,10 +196,10 @@ class DocumentMarkdownService:
             "media_type": media_type,
         }
 
-    def _load_source_documents(
+    async def _load_source_documents(
         self, collection_id: str
     ) -> tuple[SourceDocument, ...]:
-        documents = self.source_artifact_repository.read_collection_documents(
+        documents = await self.source_artifact_repository.read_collection_documents(
             collection_id
         )
         if not documents:
@@ -215,7 +217,7 @@ class DocumentMarkdownService:
                 return document
         raise SourceDocumentNotFoundError(collection_id, document_id)
 
-    def _project_markdown_from_tree(
+    async def _project_markdown_from_tree(
         self,
         *,
         collection_id: str,
@@ -245,7 +247,7 @@ class DocumentMarkdownService:
         content_rendered = False
         for child_id in document_tree.root.child_ids:
             content_rendered = (
-                self._append_tree_node_markdown(
+                await self._append_tree_node_markdown(
                     node=document_tree.nodes[child_id],
                     document_tree=document_tree,
                     parts=parts,
@@ -266,7 +268,7 @@ class DocumentMarkdownService:
 
         return "\n\n".join(parts).strip(), source_map, warnings
 
-    def _append_tree_node_markdown(
+    async def _append_tree_node_markdown(
         self,
         *,
         node: SourceDocumentNode,
@@ -289,7 +291,7 @@ class DocumentMarkdownService:
             rendered_child = False
             for child_id in node.child_ids:
                 rendered_child = (
-                    self._append_tree_node_markdown(
+                    await self._append_tree_node_markdown(
                         node=document_tree.nodes[child_id],
                         document_tree=document_tree,
                         parts=parts,
@@ -335,7 +337,7 @@ class DocumentMarkdownService:
             figure = figures_by_id.get(str(node.source_ref_id or ""))
             if figure is None:
                 return False
-            figure_markdown = self._render_figure(
+            figure_markdown = await self._render_figure(
                 figure,
                 collection_id=collection_id,
                 document_id=document_id,
@@ -406,7 +408,7 @@ class DocumentMarkdownService:
             header_row_count=table.header_row_count,
         )
 
-    def _render_figure(
+    async def _render_figure(
         self,
         figure: SourceFigure,
         *,
@@ -416,7 +418,7 @@ class DocumentMarkdownService:
         caption = self._normalize_text(figure.caption_text)
         label = self._normalize_text(figure.figure_label)
         image_markdown = None
-        if self._figure_image_available(
+        if await self._figure_image_available(
             collection_id=collection_id,
             document_id=document_id,
             figure_id=figure.figure_id,
@@ -438,7 +440,7 @@ class DocumentMarkdownService:
             or None
         )
 
-    def _figure_image_available(
+    async def _figure_image_available(
         self,
         *,
         collection_id: str,
@@ -446,7 +448,11 @@ class DocumentMarkdownService:
         figure_id: str,
     ) -> bool:
         try:
-            self.resolve_figure_image_file(collection_id, document_id, figure_id)
+            await self.resolve_figure_image_file(
+                collection_id,
+                document_id,
+                figure_id,
+            )
         except (SourceFigureImageNotFoundError, SourceFigureImageUnavailableError):
             return False
         return True
@@ -545,12 +551,14 @@ class DocumentMarkdownService:
                 return Path(value).name
         return None
 
-    def _document_display_names(
+    async def _document_display_names(
         self,
         collection_id: str,
         document: SourceDocument,
     ) -> dict[str, str | None]:
-        stored_to_original = self._stored_to_original_filenames(collection_id)
+        stored_to_original = await self._stored_to_original_filenames(
+            collection_id
+        )
         source_filename = self._source_filename(document)
         display_source_filename = (
             stored_to_original.get(source_filename, source_filename)
@@ -568,9 +576,11 @@ class DocumentMarkdownService:
             "source_filename": display_source_filename,
         }
 
-    def _stored_to_original_filenames(self, collection_id: str) -> dict[str, str]:
+    async def _stored_to_original_filenames(
+        self, collection_id: str
+    ) -> dict[str, str]:
         try:
-            file_records = self.collection_service.list_files(collection_id)
+            file_records = await self.collection_service.list_files(collection_id)
         except FileNotFoundError:
             return {}
         filenames: dict[str, str] = {}

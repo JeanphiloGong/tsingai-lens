@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -45,6 +46,7 @@ from domain.source import (
 from application.source.artifact_registry_service import ArtifactRegistryService
 from infra.persistence.file import FileCollectionWorkspace
 from infra.persistence.file.object_store import FileObjectStore
+from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.collection_repository import (
     PostgresCollectionRepository,
 )
@@ -56,6 +58,7 @@ from infra.persistence.postgres.chat_repository import PostgresChatRepository
 from infra.persistence.postgres.experiment_plan_repository import (
     PostgresExperimentPlanRepository,
 )
+from infra.persistence.postgres.models.objective import ObjectiveResearchRecord
 from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from scripts.persistence.capture_baseline import capture_baseline
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
@@ -85,9 +88,10 @@ def test_baseline_rejects_mismatched_curated_finding_identity() -> None:
         capture_baseline(scenario)
 
 
-def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
+@pytest.mark.anyio
+async def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
     tmp_path,
-    auth_session_service,
+    postgres_session_factory,
 ) -> None:
     scenario = json.loads((FIXTURE_DIR / "scenario.json").read_text(encoding="utf-8"))
     expected = json.loads(
@@ -99,11 +103,9 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
 
     collection_workspace = FileCollectionWorkspace(tmp_path / "collections")
     object_store = FileObjectStore(collection_workspace.root_dir)
-    auth_repository = auth_session_service.repository
-    collection_repository = PostgresCollectionRepository(
-        auth_repository.session_factory
-    )
-    build_repository = PostgresBuildRepository(auth_repository.session_factory)
+    auth_repository = PostgresAuthRepository(postgres_session_factory)
+    collection_repository = PostgresCollectionRepository(postgres_session_factory)
+    build_repository = PostgresBuildRepository(postgres_session_factory)
     source_repository = SqliteSourceArtifactRepository(db_path)
     paper_fact_repository = MemoryPaperFactRepository()
     objective_repository = MemoryObjectiveRepository()
@@ -111,17 +113,17 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         build_repository,
         source_artifact_repository=source_repository,
     )
-    chat_repository = PostgresChatRepository(auth_repository.session_factory)
+    chat_repository = PostgresChatRepository(postgres_session_factory)
     experiment_plan_repository = PostgresExperimentPlanRepository(
-        auth_repository.session_factory
+        postgres_session_factory
     )
     evaluation_repository = PostgresEvaluationRepository(
-        auth_repository.session_factory
+        postgres_session_factory
     )
     review_repository = InMemoryObjectiveReviewRepository()
 
-    auth_repository.add_user(records["auth_users"][0])
-    collection_repository.add_collection(
+    await auth_repository.add_user(records["auth_users"][0])
+    await collection_repository.add_collection(
         CollectionRecord.from_mapping(
             records["collections"][0],
             collection_id,
@@ -155,7 +157,7 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         document_id=fixture_file["document_id"],
     )
     fixture_import = records["import_manifests"][0]["imports"][0]
-    collection_repository.add_collection_import(
+    await collection_repository.add_collection_import(
         CollectionImportRecord(
             import_id=fixture_import["import_id"],
             collection_id=collection_id,
@@ -180,7 +182,7 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         updated_at=records["collections"][0]["updated_at"],
     )
     task_record = TaskRecord.from_mapping(records["tasks"][0])
-    build_repository.add_task(task_record, build_id="build_baseline")
+    await build_repository.add_task(task_record, build_id="build_baseline")
     artifact_stage = BuildStageRecord(
         stage_id="stage_artifact_registry_baseline",
         build_id="build_baseline",
@@ -195,8 +197,8 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
             ),
         ),
     )
-    build_repository.update_task(task_record, stages=(artifact_stage,))
-    build_repository.add_artifact_versions(
+    await build_repository.update_task(task_record, stages=(artifact_stage,))
+    await build_repository.add_artifact_versions(
         task_record.task_id,
         tuple(
             ArtifactVersionRecord(
@@ -215,14 +217,14 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
             )
         ),
     )
-    build_repository.finish_build(
+    await build_repository.finish_build(
         task_record,
         build_status="succeeded",
         activate=True,
     )
 
     session_token_hash = sha256(b"synthetic-baseline-session-token").hexdigest()
-    auth_repository.add_session(
+    await auth_repository.add_session(
         {
             **records["auth_sessions"][0],
             "token_hash": session_token_hash,
@@ -251,19 +253,45 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         ),
     )
 
-    objective_repository.replace(
+    research_objectives = tuple(
+        ResearchObjective.from_mapping(
+            {"collection_id": collection_id, **item}
+        )
+        for item in records["research_objectives"]
+    )
+    await objective_repository.replace(
         collection_id,
         "build_baseline",
         ObjectiveFactSet(
-                research_objectives=tuple(
-                    ResearchObjective.from_mapping(
-                        {"collection_id": collection_id, **item}
-                    )
-                    for item in records["research_objectives"]
-                ),
+            research_objectives=research_objectives,
         ),
     )
-    paper_fact_repository.replace_document_profiles(
+    objective = research_objectives[0]
+    objective_timestamp = datetime.fromisoformat(
+        records["collections"][0]["created_at"]
+    )
+    async with postgres_session_factory.begin() as session:
+        session.add(
+            ObjectiveResearchRecord(
+                collection_id=objective.collection_id,
+                objective_id=objective.objective_id,
+                question=objective.question,
+                material_scope=list(objective.material_scope),
+                variables=list(objective.variables),
+                outcomes=list(objective.outcomes),
+                mechanisms=list(objective.mechanisms),
+                constraints=list(objective.constraints),
+                requested_comparator=objective.requested_comparator,
+                confidence=objective.confidence,
+                reason=objective.reason,
+                confirmation_status=objective.confirmation_status,
+                active_analysis_version=None,
+                published_analysis_version=None,
+                created_at=objective_timestamp,
+                updated_at=objective_timestamp,
+            )
+        )
+    await paper_fact_repository.replace_document_profiles(
         collection_id,
         "build_test",
         tuple(
@@ -271,7 +299,7 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
             for item in records["core_document_profiles"]
         ),
     )
-    paper_fact_repository.replace_paper_facts(
+    await paper_fact_repository.replace_paper_facts(
         collection_id,
         "build_test",
         PaperFactSet(
@@ -302,8 +330,8 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         ),
     )
     chat_session = ChatSession.from_mapping(records["chat_sessions"][0])
-    chat_repository.add_session(chat_session)
-    chat_repository.save_trajectory(
+    await chat_repository.add_session(chat_session)
+    await chat_repository.save_trajectory(
         session=chat_session,
         messages=tuple(
             ChatMessage.from_mapping(item) for item in records["chat_messages"]
@@ -311,40 +339,42 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
         tool_calls=(),
         tool_results=(),
     )
-    experiment_plan_repository.upsert_plan(
+    await experiment_plan_repository.upsert_plan(
         ExperimentPlanRecord.from_mapping(records["experiment_plans"][0])
     )
 
     gold_set = EvaluationGoldSet.from_mapping(records["evaluation_gold_sets"][0])
-    evaluation_repository.upsert_gold_set(
+    await evaluation_repository.upsert_gold_set(
         gold_set,
         tuple(
             EvaluationGoldItem.from_mapping(item)
             for item in records["evaluation_gold_items"]
         ),
     )
-    evaluation_repository.upsert_prediction_snapshot(
+    await evaluation_repository.upsert_prediction_snapshot(
         EvaluationPredictionSnapshot.from_mapping(records["prediction_snapshots"][0])
     )
-    evaluation_repository.upsert_evaluation_run(
+    await evaluation_repository.upsert_evaluation_run(
         EvaluationRun.from_mapping(records["evaluation_runs"][0])
     )
     for item in records["feedback"]:
-        review_repository.upsert_feedback(
+        await review_repository.upsert_feedback(
             FindingFeedback.from_mapping(item)
         )
     for item in records["curations"]:
-        review_repository.upsert_curation(
+        await review_repository.upsert_curation(
             FindingCuration.from_mapping(item)
         )
 
     observed = deepcopy(scenario)
     observed_records = observed["records"]
-    stored_collection = collection_repository.read_collection(collection_id).to_record()
+    stored_collection_record = await collection_repository.read_collection(collection_id)
+    assert stored_collection_record is not None
+    stored_collection = stored_collection_record.to_record()
     observed_records["collections"] = [
         {key: stored_collection.get(key) for key in records["collections"][0]}
     ]
-    stored_files = collection_repository.list_collection_files(collection_id)
+    stored_files = await collection_repository.list_collection_files(collection_id)
     observed_records["collection_files"] = [
         {
             key: (
@@ -362,25 +392,27 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
             "collection_id": collection_id,
             "imports": [
                 item.to_record()
-                for item in collection_repository.list_collection_imports(collection_id)
+                for item in await collection_repository.list_collection_imports(collection_id)
             ],
         }
     ]
     observed_records["tasks"] = [
         {
-            key: build_repository.read_task(task_record.task_id).to_record().get(key)
+            key: (await build_repository.read_task(task_record.task_id)).to_record().get(key)
             for key in records["tasks"][0]
         }
     ]
-    projected_artifacts = artifact_registry_service.get_for_task(task_record.task_id)
+    projected_artifacts = await artifact_registry_service.get_for_task(
+        task_record.task_id
+    )
     observed_records["artifacts"] = [
         {key: projected_artifacts.get(key) for key in records["artifacts"][0]}
     ]
     observed_records["auth_users"] = [
-        auth_repository.read_user(records["auth_users"][0]["user_id"])
+        await auth_repository.read_user(records["auth_users"][0]["user_id"])
     ]
     observed_records["auth_sessions"] = [
-        auth_repository.read_session_by_token_hash(session_token_hash)
+        await auth_repository.read_session_by_token_hash(session_token_hash)
     ]
 
     source = source_repository.read_collection_documents(collection_id)
@@ -414,8 +446,8 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
             for index, actual in enumerate(actual_items)
         ]
 
-    paper_facts = paper_fact_repository.read(collection_id)
-    objective_facts = objective_repository.read(
+    paper_facts = await paper_fact_repository.read(collection_id)
+    objective_facts = await objective_repository.read(
         collection_id,
         build_id="build_baseline",
     )
@@ -452,35 +484,39 @@ def test_current_repositories_round_trip_the_reviewed_persistence_baseline(
 
     session_id = records["chat_sessions"][0]["session_id"]
     observed_records["chat_sessions"] = [
-        chat_repository.read_session(session_id).to_record()
+        (await chat_repository.read_session(session_id)).to_record()
     ]
     observed_records["chat_messages"] = [
-        item.to_record() for item in chat_repository.read_messages(session_id)
+        item.to_record() for item in await chat_repository.read_messages(session_id)
     ]
     observed_records["experiment_plans"] = [
         item.to_record()
-        for item in experiment_plan_repository.list_plans(
+        for item in await experiment_plan_repository.list_plans(
             collection_id, "objective_strength"
         )
     ]
     observed_records["feedback"] = [
-        item.to_record() for item in review_repository.list_feedback(collection_id)
+        item.to_record() for item in await review_repository.list_feedback(collection_id)
     ]
     observed_records["curations"] = [
-        item.to_record() for item in review_repository.list_curations(collection_id)
+        item.to_record() for item in await review_repository.list_curations(collection_id)
     ]
     observed_records["evaluation_gold_sets"] = [
-        evaluation_repository.read_gold_set("gold_strength").to_record()
+        (await evaluation_repository.read_gold_set("gold_strength")).to_record()
     ]
     observed_records["evaluation_gold_items"] = [
         item.to_record()
-        for item in evaluation_repository.list_gold_items("gold_strength")
+        for item in await evaluation_repository.list_gold_items("gold_strength")
     ]
     observed_records["prediction_snapshots"] = [
-        evaluation_repository.read_prediction_snapshot("snapshot_strength").to_record()
+        (
+            await evaluation_repository.read_prediction_snapshot("snapshot_strength")
+        ).to_record()
     ]
     observed_records["evaluation_runs"] = [
-        evaluation_repository.read_evaluation_run("evaluation_strength").to_record()
+        (
+            await evaluation_repository.read_evaluation_run("evaluation_strength")
+        ).to_record()
     ]
 
     assert capture_baseline(observed) == expected

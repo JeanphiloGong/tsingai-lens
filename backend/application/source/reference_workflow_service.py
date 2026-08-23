@@ -30,16 +30,16 @@ class SourceReferenceWorkflowService:
     ) -> None:
         self.source_artifact_repository = source_artifact_repository
 
-    def build_collection_references(
+    async def build_collection_references(
         self,
         collection_id: str,
     ) -> SourceReferenceWorkflowResult:
-        documents = self.source_artifact_repository.read_collection_documents(
+        documents = await self.source_artifact_repository.read_collection_documents(
             collection_id
         )
         if not documents:
             raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
-        references = self.source_artifact_repository.read_collection_references(
+        references = await self.source_artifact_repository.read_collection_references(
             collection_id
         )
         return SourceReferenceWorkflowResult(
@@ -47,11 +47,11 @@ class SourceReferenceWorkflowService:
             references=references,
         )
 
-    def read_collection_references(
+    async def read_collection_references(
         self,
         collection_id: str,
     ) -> SourceReferenceWorkflowResult:
-        references = self.source_artifact_repository.read_collection_references(
+        references = await self.source_artifact_repository.read_collection_references(
             collection_id
         )
         return SourceReferenceWorkflowResult(

@@ -61,6 +61,7 @@
       "created_at",
       "description",
       "name",
+      "owner_user_id",
       "status",
       "updated_at"
     ],

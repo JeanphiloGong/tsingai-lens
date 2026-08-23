@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+from asyncio import get_running_loop, run_coroutine_threadsafe
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -119,24 +119,6 @@ class CollectionBuildPipelineService:
             source_additional_context=source_additional_context,
         )
 
-    def run_task_blocking(
-        self,
-        task_id: str,
-        collection_id: str,
-        verbose: bool = False,
-        additional_context: dict | None = None,
-        request_id: str | None = None,
-    ) -> dict:
-        return asyncio.run(
-            self.run_task(
-                task_id,
-                collection_id,
-                verbose=verbose,
-                additional_context=additional_context,
-                request_id=request_id,
-            )
-        )
-
     async def run_task(
         self,
         task_id: str,
@@ -147,10 +129,10 @@ class CollectionBuildPipelineService:
     ) -> dict:
         request_token = bind_request_id(request_id) if request_id else None
         try:
-            build = self.task_service.repository.read_build(task_id)
+            build = await self.task_service.repository.read_build(task_id)
             if build is None or build.collection_id != collection_id:
                 raise RuntimeError(f"build not found for task: {task_id}")
-            task = self.task_service.get_task(task_id)
+            task = await self.task_service.get_task(task_id)
             config = self._build_pipeline_config(
                 collection_id,
                 mode=build.mode,
@@ -158,7 +140,9 @@ class CollectionBuildPipelineService:
                 source_additional_context=additional_context,
             )
             output_dir = Path(config.source.output.base_dir)
-            self.collection_service.update_collection(collection_id, status="running")
+            await self.collection_service.update_collection(
+                collection_id, status="running"
+            )
 
             context = CollectionBuildContext(
                 task_id=task_id,
@@ -202,7 +186,7 @@ class CollectionBuildPipelineService:
                 if isinstance(artifacts, dict)
                 else str(output_dir)
             )
-            final_task = self.task_service.finish_task(
+            final_task = await self.task_service.finish_task(
                 task_id,
                 status=final_status,
                 current_stage="artifacts_ready"
@@ -231,21 +215,21 @@ class CollectionBuildPipelineService:
                 final_task.get("progress_percent"),
                 final_task.get("status"),
             )
-            self.collection_service.update_collection(
+            await self.collection_service.update_collection(
                 collection_id, status=final_status
             )
-            return self.task_service.get_task(task_id)
+            return await self.task_service.get_task(task_id)
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "Build task failed task_id=%s collection_id=%s",
                 task_id,
                 collection_id,
             )
-            record = self.task_service.get_task(task_id)
+            record = await self.task_service.get_task(task_id)
             errors = list(record.get("errors", []))
             if str(exc) not in errors:
                 errors.append(str(exc))
-            self.task_service.finish_task(
+            await self.task_service.finish_task(
                 task_id,
                 status="failed",
                 current_stage="failed",
@@ -257,7 +241,9 @@ class CollectionBuildPipelineService:
                 },
                 errors=errors,
             )
-            self.collection_service.update_collection(collection_id, status="failed")
+            await self.collection_service.update_collection(
+                collection_id, status="failed"
+            )
             raise
         finally:
             if request_token is not None:
@@ -294,6 +280,7 @@ class CollectionBuildPipelineService:
         return "completed"
 
     def _build_objective_progress_callback(self, task_id: str, collection_id: str):
+        loop = get_running_loop()
         last_update: dict[str, tuple[str, int | None, int | None, int | None]] = {
             "value": ("", None, None, None),
         }
@@ -328,15 +315,18 @@ class CollectionBuildPipelineService:
                 phase,
                 "objective_discovery_started",
             )
-            record = self.task_service.update_task(
-                task_id,
-                current_stage=public_stage,
-                progress_percent=_OBJECTIVE_PROGRESS_STAGE_PERCENT.get(
-                    public_stage,
-                    76,
+            record = run_coroutine_threadsafe(
+                self.task_service.update_task(
+                    task_id,
+                    current_stage=public_stage,
+                    progress_percent=_OBJECTIVE_PROGRESS_STAGE_PERCENT.get(
+                        public_stage,
+                        76,
+                    ),
+                    progress_detail=progress_detail,
                 ),
-                progress_detail=progress_detail,
-            )
+                loop,
+            ).result()
             logger.info(
                 "Build task progress task_id=%s collection_id=%s stage=%s progress_percent=%s status=%s",
                 task_id,

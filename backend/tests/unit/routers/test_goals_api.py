@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +13,13 @@ from tests.support.collection_service import build_test_collection_service
 from application.goal.brief_service import GoalService
 from controllers.goal import intake as goals_controller
 from controllers.schemas.goal.intake import GoalIntakeRequest
+
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 def _request(goal_service, user_id: str = "local-user"):
@@ -31,11 +37,10 @@ def goal_services(tmp_path):
     return collection_service, goal_service
 
 
-def test_goals_route_returns_goal_contract(goal_services):
+async def test_goals_route_returns_goal_contract(goal_services):
     collection_service, goal_service = goal_services
 
-    response = asyncio.run(
-        goals_controller.intake_goal(
+    response = await goals_controller.intake_goal(
             GoalIntakeRequest(
                 material_system="PVDF",
                 target_property="adhesion strength",
@@ -44,9 +49,10 @@ def test_goals_route_returns_goal_contract(goal_services):
             ),
             _request(goal_service),
         )
-    )
 
-    collection = collection_service.get_collection(response.seed_collection.collection_id)
+    collection = await collection_service.get_collection(
+        response.seed_collection.collection_id
+    )
 
     assert response.coverage_assessment.level == "direct"
     assert response.entry_recommendation.recommended_mode == "comparison"
@@ -56,12 +62,11 @@ def test_goals_route_returns_goal_contract(goal_services):
     assert collection["collection_id"] == response.seed_collection.collection_id
 
 
-def test_goals_route_returns_400_for_empty_goal_signal(goal_services):
+async def test_goals_route_returns_400_for_empty_goal_signal(goal_services):
     _collection_service, goal_service = goal_services
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(
-            goals_controller.intake_goal(
+        await goals_controller.intake_goal(
                 GoalIntakeRequest(
                     material_system=None,
                     target_property=None,
@@ -71,7 +76,6 @@ def test_goals_route_returns_400_for_empty_goal_signal(goal_services):
                 ),
                 _request(goal_service),
             )
-        )
 
     exc = exc_info.value
     assert exc.status_code == 400

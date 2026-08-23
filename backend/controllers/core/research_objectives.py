@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from asyncio import CancelledError, Semaphore, Task, create_task, to_thread
+from asyncio import CancelledError, Semaphore, Task, create_task
 import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from starlette.concurrency import run_in_threadpool
 
 from controllers.schemas.core.research_objectives import (
     FindingDetailResponse,
@@ -35,9 +34,8 @@ async def list_collection_objectives(
     limit: int | None = Query(default=None, ge=1, le=100),
 ) -> PaginatedObjectiveListResponse:
     try:
-        objectives = await run_in_threadpool(
-            request.app.state.objective_repository.list_objectives,
-            collection_id,
+        objectives = await request.app.state.objective_repository.list_objectives(
+            collection_id
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -68,10 +66,7 @@ async def list_paper_study_inventory(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> PaperStudyInventoryResponse:
     try:
-        facts = await run_in_threadpool(
-            request.app.state.objective_repository.read,
-            collection_id,
-        )
+        facts = await request.app.state.objective_repository.read(collection_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -178,8 +173,7 @@ async def confirm_collection_objective(
     request: Request,
 ) -> ObjectiveAnalysisResponse:
     try:
-        payload = await run_in_threadpool(
-            request.app.state.objective_analysis_service.confirm_objective,
+        payload = await request.app.state.objective_analysis_service.confirm_objective(
             collection_id,
             objective_id,
         )
@@ -203,8 +197,7 @@ async def start_collection_objective_analysis(
 ) -> ObjectiveAnalysisResponse:
     service = request.app.state.objective_analysis_service
     try:
-        payload = await run_in_threadpool(
-            service.queue_analysis,
+        payload = await service.queue_analysis(
             collection_id,
             objective_id,
         )
@@ -240,8 +233,7 @@ async def start_collection_objective_analysis(
                 objective_id,
                 analysis.analysis_version,
             )
-            await run_in_threadpool(
-                service.fail_analysis_dispatch,
+            await service.fail_analysis_dispatch(
                 collection_id,
                 objective_id,
                 analysis.analysis_version,
@@ -300,8 +292,7 @@ async def list_objective_findings(
     limit: int = Query(default=50, ge=1, le=200),
 ) -> FindingListResponse:
     try:
-        payload = await run_in_threadpool(
-            request.app.state.objective_analysis_service.list_findings,
+        payload = await request.app.state.objective_analysis_service.list_findings(
             collection_id,
             objective_id,
             analysis_version=analysis_version,
@@ -328,8 +319,7 @@ async def get_objective_finding(
     analysis_version: int | None = Query(default=None, ge=1),
 ) -> FindingDetailResponse:
     try:
-        payload = await run_in_threadpool(
-            request.app.state.objective_analysis_service.get_finding,
+        payload = await request.app.state.objective_analysis_service.get_finding(
             collection_id,
             objective_id,
             finding_id,
@@ -357,8 +347,7 @@ async def list_objective_evidence(
     limit: int = Query(default=100, ge=1, le=500),
 ) -> ObjectiveEvidenceListResponse:
     try:
-        payload = await run_in_threadpool(
-            request.app.state.objective_analysis_service.list_evidence,
+        payload = await request.app.state.objective_analysis_service.list_evidence(
             collection_id,
             objective_id,
             analysis_version=analysis_version,
@@ -384,8 +373,7 @@ async def get_objective_evidence_map(
     request: Request,
 ) -> ObjectiveEvidenceMapResponse:
     try:
-        payload = await run_in_threadpool(
-            request.app.state.objective_analysis_service.get_evidence_map,
+        payload = await request.app.state.objective_analysis_service.get_evidence_map(
             collection_id,
             objective_id,
         )
@@ -402,8 +390,7 @@ async def _read_objective_analysis_response(
     request: Request,
 ) -> ObjectiveAnalysisResponse:
     try:
-        payload = await run_in_threadpool(
-            request.app.state.objective_analysis_service.get_analysis_state,
+        payload = await request.app.state.objective_analysis_service.get_analysis_state(
             collection_id,
             objective_id,
         )
@@ -452,8 +439,7 @@ async def _execute_queued_analysis(
     analysis_version: int,
 ) -> dict[str, Any]:
     async with semaphore:
-        return await to_thread(
-            service.execute_queued_analysis,
+        return await service.execute_queued_analysis(
             collection_id,
             objective_id,
             analysis_version,

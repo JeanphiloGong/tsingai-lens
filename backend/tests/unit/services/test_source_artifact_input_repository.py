@@ -13,6 +13,14 @@ from domain.source import (
     build_source_document_tree,
 )
 from application.source import artifact_input_service
+import pytest
+
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 class _SourceRepository:
@@ -24,14 +32,14 @@ class _SourceRepository:
         self.documents = documents
         self.references = references
 
-    def read_collection_documents(
+    async def read_collection_documents(
         self,
         collection_id: str,
         build_id: str | None = None,
     ) -> tuple[SourceDocument, ...]:
         return self.documents
 
-    def read_document_tree(
+    async def read_document_tree(
         self,
         collection_id: str,
         document_id: str,
@@ -50,7 +58,7 @@ class _SourceRepository:
         )
 
 
-def test_artifact_input_service_uses_explicit_source_repository():
+async def test_artifact_input_service_uses_explicit_source_repository():
     repository = _SourceRepository(
         assemble_source_documents(
             documents=(
@@ -117,15 +125,15 @@ def test_artifact_input_service_uses_explicit_source_repository():
             ),
         ),
     )
-    documents, text_units = artifact_input_service.load_collection_inputs(
+    documents, text_units = await artifact_input_service.load_collection_inputs(
         "col_source", repository
     )
-    blocks = artifact_input_service.load_blocks_artifact("col_source", repository)
-    tables = artifact_input_service.load_tables_artifact("col_source", repository)
-    table_rows = artifact_input_service.load_table_rows_artifact(
+    blocks = await artifact_input_service.load_blocks_artifact("col_source", repository)
+    tables = await artifact_input_service.load_tables_artifact("col_source", repository)
+    table_rows = await artifact_input_service.load_table_rows_artifact(
         "col_source", repository
     )
-    table_cells = artifact_input_service.load_table_cells_artifact(
+    table_cells = await artifact_input_service.load_table_cells_artifact(
         "col_source", repository
     )
 
@@ -138,7 +146,7 @@ def test_artifact_input_service_uses_explicit_source_repository():
     assert table_cells[0]["header_path"] == "Value"
 
 
-def test_artifact_input_service_loads_document_tree():
+async def test_artifact_input_service_loads_document_tree():
     source_repository = _SourceRepository(
         assemble_source_documents(
             documents=(
@@ -179,11 +187,11 @@ def test_artifact_input_service_loads_document_tree():
             )
         ),
     )
-    tree = artifact_input_service.load_document_tree(
+    tree = (await artifact_input_service.load_document_tree(
         "col_source",
         "doc-1",
         source_repository,
-    ).to_record()
+    )).to_record()
 
     assert tree["document_id"] == "doc-1"
     assert tree["collection_id"] == "col_source"

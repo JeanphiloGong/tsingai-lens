@@ -10,11 +10,11 @@ class InMemoryObjectiveReviewRepository:
         self.feedback: dict[str, FindingFeedback] = {}
         self.curations: dict[str, FindingCuration] = {}
 
-    def upsert_feedback(self, feedback: FindingFeedback):
+    async def upsert_feedback(self, feedback: FindingFeedback):
         self.feedback[feedback.feedback_id] = feedback
         return feedback
 
-    def list_feedback(
+    async def list_feedback(
         self,
         collection_id,
         objective_id=None,
@@ -33,11 +33,11 @@ class InMemoryObjectiveReviewRepository:
             and (finding_id is None or item.finding_id == finding_id)
         )
 
-    def upsert_curation(self, curation: FindingCuration):
+    async def upsert_curation(self, curation: FindingCuration):
         self.curations[curation.curation_id] = curation
         return curation
 
-    def list_curations(
+    async def list_curations(
         self,
         collection_id,
         objective_id=None,

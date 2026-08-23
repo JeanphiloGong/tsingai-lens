@@ -41,7 +41,7 @@ class CoreEvaluationService:
     ) -> None:
         self.evaluation_repository = evaluation_repository
 
-    def evaluate_snapshot(
+    async def evaluate_snapshot(
         self,
         *,
         collection_id: str,
@@ -51,10 +51,10 @@ class CoreEvaluationService:
         absolute_tolerance: float = DEFAULT_ABSOLUTE_TOLERANCE,
         relative_tolerance: float = DEFAULT_RELATIVE_TOLERANCE,
     ) -> EvaluationRun:
-        gold_set = self.evaluation_repository.read_gold_set(gold_id)
+        gold_set = await self.evaluation_repository.read_gold_set(gold_id)
         if gold_set is None or gold_set.collection_id != collection_id:
             raise EvaluationInputNotFoundError(f"gold set not found: {gold_id}")
-        snapshot = self.evaluation_repository.read_prediction_snapshot(
+        snapshot = await self.evaluation_repository.read_prediction_snapshot(
             prediction_snapshot_id
         )
         if snapshot is None or snapshot.collection_id != collection_id:
@@ -63,7 +63,7 @@ class CoreEvaluationService:
             )
 
         run_id = evaluation_run_id or f"eval_{collection_id}_{_timestamp_id()}"
-        gold_items = self.evaluation_repository.list_gold_items(gold_id)
+        gold_items = await self.evaluation_repository.list_gold_items(gold_id)
         results = tuple(
             self._evaluate_family(
                 run_id=run_id,
@@ -95,7 +95,7 @@ class CoreEvaluationService:
             scores=scores,
             failures=failures,
         )
-        self.evaluation_repository.upsert_evaluation_run(run)
+        await self.evaluation_repository.upsert_evaluation_run(run)
         return run
 
     def _evaluate_family(

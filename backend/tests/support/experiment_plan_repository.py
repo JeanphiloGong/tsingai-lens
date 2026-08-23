@@ -7,7 +7,7 @@ class InMemoryExperimentPlanRepository:
     def __init__(self) -> None:
         self.plans: dict[str, ExperimentPlanRecord] = {}
 
-    def upsert_plan(self, plan: ExperimentPlanRecord) -> ExperimentPlanRecord:
+    async def upsert_plan(self, plan: ExperimentPlanRecord) -> ExperimentPlanRecord:
         existing = self.plans.get(plan.plan_id)
         if existing is not None and (
             existing.collection_id != plan.collection_id
@@ -17,7 +17,7 @@ class InMemoryExperimentPlanRepository:
         self.plans[plan.plan_id] = plan
         return plan
 
-    def read_plan(
+    async def read_plan(
         self,
         collection_id: str,
         objective_id: str,
@@ -30,7 +30,7 @@ class InMemoryExperimentPlanRepository:
             return None
         return plan
 
-    def list_plans(
+    async def list_plans(
         self,
         collection_id: str,
         objective_id: str,

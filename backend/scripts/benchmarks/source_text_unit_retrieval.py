@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -250,7 +251,7 @@ def build_results(
     return method_results
 
 
-def main() -> int:
+async def main_async() -> int:
     args = parse_args()
     if args.k <= 0:
         raise SystemExit("--k must be greater than 0")
@@ -268,10 +269,10 @@ def main() -> int:
     engine = build_database_engine(DatabaseSettings())
     try:
         repository = PostgresSourceArtifactRepository(build_session_factory(engine))
-        text_units = repository.list_text_units(args.collection_id)
-        blocks = repository.list_blocks(args.collection_id)
+        text_units = await repository.list_text_units(args.collection_id)
+        blocks = await repository.list_blocks(args.collection_id)
     finally:
-        engine.dispose()
+        await engine.dispose()
     if not text_units:
         raise SystemExit(f"collection has no active Source text units: {args.collection_id}")
 
@@ -359,4 +360,4 @@ def _is_traceable(locator: dict[str, Any] | None) -> bool:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(asyncio.run(main_async()))

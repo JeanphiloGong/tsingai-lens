@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 if "devtools" not in sys.modules:
     sys.modules["devtools"] = SimpleNamespace(pformat=lambda value: str(value))
@@ -26,11 +26,6 @@ from application.core.objectives.research_objective_service import (
 from application.pipeline.collection_build.service import CollectionBuildPipelineService
 from application.source.artifact_registry_service import ArtifactRegistryService
 from application.source.task_service import TaskService
-from domain.source import (
-    SourceDocument,
-    SourceReferenceSet,
-    build_source_document_tree,
-)
 from infra.persistence.memory import MemoryBuildRepository
 from infra.source.config.pipeline_mode import IndexingMethod
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
@@ -43,6 +38,10 @@ from tests.support.collection_service import build_test_collection_service
 from tests.support.objective_extractor import FakeObjectiveExtractor
 from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
+from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+
+
+pytestmark = pytest.mark.anyio
 
 
 class DummyWorkflowOutput:
@@ -55,73 +54,6 @@ class DummyWorkflowOutput:
         self.workflow = workflow
         self.errors = errors
         self.result = result
-
-
-class MemorySourceArtifactRepository:
-    def __init__(self) -> None:
-        self._documents: dict[tuple[str, str], tuple[SourceDocument, ...]] = {}
-        self._references: dict[tuple[str, str], SourceReferenceSet] = {}
-
-    def replace_collection_documents(
-        self,
-        collection_id: str,
-        build_id: str,
-        documents: tuple[SourceDocument, ...],
-    ) -> None:
-        self._documents[(collection_id, build_id)] = documents
-
-    def read_collection_documents(
-        self,
-        collection_id: str,
-        *,
-        build_id: str | None = None,
-    ) -> tuple[SourceDocument, ...]:
-        if build_id is None:
-            return ()
-        return self._documents.get((collection_id, build_id), ())
-
-    def replace_collection_references(
-        self,
-        collection_id: str,
-        build_id: str,
-        references: SourceReferenceSet,
-    ) -> None:
-        self._references[(collection_id, build_id)] = references
-
-    def read_collection_references(
-        self,
-        collection_id: str,
-        *,
-        build_id: str | None = None,
-    ) -> SourceReferenceSet:
-        if build_id is None:
-            return SourceReferenceSet()
-        return self._references.get((collection_id, build_id), SourceReferenceSet())
-
-    def read_document_tree(
-        self,
-        collection_id: str,
-        document_id: str,
-        build_id: str | None = None,
-    ):
-        documents = self.read_collection_documents(
-            collection_id,
-            build_id=build_id,
-        )
-        document = next(
-            item for item in documents if item.document_id == document_id
-        )
-        return build_source_document_tree(
-            collection_id=collection_id,
-            document=document,
-            blocks=document.blocks,
-            tables=document.tables,
-            figures=document.figures,
-            references=self.read_collection_references(
-                collection_id,
-                build_id=build_id,
-            ),
-        )
 
 
 def _write_source_artifact_outputs(
@@ -248,7 +180,7 @@ def _build_runner(
     return runner, artifact_registry
 
 
-def test_build_pipeline_service_builds_runtime_config_without_config_file(
+async def test_build_pipeline_service_builds_runtime_config_without_config_file(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
@@ -259,7 +191,7 @@ def test_build_pipeline_service_builds_runtime_config_without_config_file(
         build_repository,
     )
 
-    collection = collection_service.create_collection("Direct Config Collection")
+    collection = await collection_service.create_collection("Direct Config Collection")
     paths = collection_service.get_paths(collection["collection_id"])
     config = runner._build_pipeline_config(collection["collection_id"])
 
@@ -273,7 +205,7 @@ def test_build_pipeline_service_builds_runtime_config_without_config_file(
     assert config.mode == IndexingMethod.Standard
 
 
-def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_path):
+async def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_path):
     import application.pipeline.collection_build.service as task_runner_module
 
     collection_service = build_test_collection_service(tmp_path / "collections")
@@ -285,9 +217,9 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
         build_repository,
     )
 
-    collection = collection_service.create_collection("Composite Papers")
+    collection = await collection_service.create_collection("Composite Papers")
     paths = collection_service.get_paths(collection["collection_id"])
-    collection_service.add_file(
+    await collection_service.add_file(
         collection["collection_id"],
         "paper.txt",
         b"Experimental Section\nMix and anneal.",
@@ -305,23 +237,23 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
         task_runner_module, "build_source_artifacts", fake_build_source_artifacts
     )
 
-    task = task_service.create_task(collection["collection_id"], "build")
-    result = asyncio.run(runner.run_task(task["task_id"], collection["collection_id"]))
+    task = await task_service.create_task(collection["collection_id"], "build")
+    result = await runner.run_task(task["task_id"], collection["collection_id"])
 
     assert result["status"] == "completed"
     assert result["current_stage"] == "artifacts_ready"
     assert result["progress_detail"]["phase"] == "artifacts_ready"
     assert captured["method"] == task_runner_module.IndexingMethod.Standard
     assert "is_update_run" not in captured
-    pipeline_run = task_service.read_pipeline_run(task["task_id"])
+    pipeline_run = await task_service.read_pipeline_run(task["task_id"])
     assert pipeline_run.status == "completed"
     assert pipeline_run.run_id == task["task_id"]
-    assert pipeline_run.output_build_id == build_repository.read_build(
-        task["task_id"]
-    ).build_id
+    stored_build = await build_repository.read_build(task["task_id"])
+    assert stored_build is not None
+    assert pipeline_run.output_build_id == stored_build.build_id
     assert pipeline_run.node("source_artifacts").output_summary["document_count"] == 1
     assert pipeline_run.stats.duration_ms is not None
-    artifacts = artifact_registry.get_for_task(task["task_id"])
+    artifacts = await artifact_registry.get_for_task(task["task_id"])
     assert artifacts["documents_generated"] is True
     assert artifacts["documents_ready"] is True
     assert artifacts["blocks_generated"] is True
@@ -332,15 +264,15 @@ def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_pat
     assert artifacts["table_rows_ready"] is False
     assert artifacts["table_cells_generated"] is True
     assert artifacts["table_cells_ready"] is False
-    objective_facts = runner.research_objective_service.objective_repository.read(
+    objective_facts = await runner.research_objective_service.objective_repository.read(
         collection["collection_id"],
-        build_id=artifact_registry.repository.read_build(task["task_id"]).build_id,
+        build_id=stored_build.build_id,
     )
     assert objective_facts.research_objectives_ready is True
     assert objective_facts.paper_skims
 
 
-def test_build_pipeline_removes_parser_nul_before_source_persistence(
+async def test_build_pipeline_removes_parser_nul_before_source_persistence(
     monkeypatch,
     tmp_path,
 ):
@@ -354,9 +286,9 @@ def test_build_pipeline_removes_parser_nul_before_source_persistence(
         collection_service,
         build_repository,
     )
-    collection = collection_service.create_collection("NUL Source Collection")
+    collection = await collection_service.create_collection("NUL Source Collection")
     paths = collection_service.get_paths(collection["collection_id"])
-    collection_service.add_file(
+    await collection_service.add_file(
         collection["collection_id"],
         "paper.txt",
         b"Experimental Section\nMix and anneal.",
@@ -378,22 +310,22 @@ def test_build_pipeline_removes_parser_nul_before_source_persistence(
         fake_build_source_artifacts,
     )
 
-    task = task_service.create_task(collection["collection_id"], "build")
-    result = asyncio.run(runner.run_task(task["task_id"], collection["collection_id"]))
+    task = await task_service.create_task(collection["collection_id"], "build")
+    result = await runner.run_task(task["task_id"], collection["collection_id"])
 
     assert result["status"] == "completed"
-    build = build_repository.read_build(task["task_id"])
+    build = await build_repository.read_build(task["task_id"])
     assert build is not None
-    source_document = runner.source_artifact_repository.read_collection_documents(
+    source_document = (await runner.source_artifact_repository.read_collection_documents(
         collection["collection_id"],
         build_id=build.build_id,
-    )[0]
+    ))[0]
     assert "\x00" not in source_document.title
     assert "\x00" not in source_document.text
     assert "\x00" not in source_document.tables[0].caption_text
 
 
-def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_coverage(
+async def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_coverage(
     monkeypatch,
     tmp_path,
 ):
@@ -427,9 +359,9 @@ def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_covera
     runner.research_objective_service._paper_study_window_extractor = failing_extractor
     runner.research_objective_service._paper_signal_reconciler = failing_extractor
 
-    collection = collection_service.create_collection("Partial PaperSkim Collection")
+    collection = await collection_service.create_collection("Partial PaperSkim Collection")
     paths = collection_service.get_paths(collection["collection_id"])
-    collection_service.add_file(
+    await collection_service.add_file(
         collection["collection_id"],
         "paper.txt",
         b"Experimental Section\nMix and anneal.",
@@ -444,8 +376,8 @@ def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_covera
         task_runner_module, "build_source_artifacts", fake_build_source_artifacts
     )
 
-    task = task_service.create_task(collection["collection_id"], "build")
-    result = asyncio.run(runner.run_task(task["task_id"], collection["collection_id"]))
+    task = await task_service.create_task(collection["collection_id"], "build")
+    result = await runner.run_task(task["task_id"], collection["collection_id"])
 
     assert result["status"] == "partial_success"
     assert result["errors"] == []
@@ -453,21 +385,23 @@ def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_covera
         "objective_candidates: 1 PaperSkim Source unit failed extraction "
         "permanently; candidate objectives were built from the remaining coverage."
     ]
-    pipeline_run = task_service.read_pipeline_run(task["task_id"])
+    pipeline_run = await task_service.read_pipeline_run(task["task_id"])
     objective_node = pipeline_run.node("objective_candidates")
     assert objective_node.status == "succeeded"
     assert objective_node.output_summary["extraction_failed_source_unit_count"] == 1
 
-    objective_facts = runner.research_objective_service.objective_repository.read(
+    build = await artifact_registry.repository.read_build(task["task_id"])
+    assert build is not None
+    objective_facts = await runner.research_objective_service.objective_repository.read(
         collection["collection_id"],
-        build_id=artifact_registry.repository.read_build(task["task_id"]).build_id,
+        build_id=build.build_id,
     )
     assert objective_facts.research_objectives_ready is True
     assert objective_facts.research_objectives
     assert any(not skim.coverage_complete for skim in objective_facts.paper_skims)
 
 
-def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch, tmp_path):
+async def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch, tmp_path):
     import application.pipeline.collection_build.service as task_runner_module
 
     collection_service = build_test_collection_service(tmp_path / "collections")
@@ -479,7 +413,7 @@ def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch, tmp_p
         build_repository,
     )
 
-    collection = collection_service.create_collection("Empty Collection")
+    collection = await collection_service.create_collection("Empty Collection")
 
     async def fail_build_source_artifacts(**kwargs):  # noqa: ANN003, ARG001
         raise AssertionError("source artifacts should not run for an empty collection")
@@ -488,8 +422,8 @@ def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch, tmp_p
         task_runner_module, "build_source_artifacts", fail_build_source_artifacts
     )
 
-    task = task_service.create_task(collection["collection_id"], "build")
-    result = asyncio.run(runner.run_task(task["task_id"], collection["collection_id"]))
+    task = await task_service.create_task(collection["collection_id"], "build")
+    result = await runner.run_task(task["task_id"], collection["collection_id"])
 
     assert result["status"] == "failed"
     assert result["current_stage"] == "failed"
@@ -498,7 +432,7 @@ def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch, tmp_p
     assert "source_artifacts: 集合内没有可构建文件" in result["errors"]
 
 
-def test_build_pipeline_service_marks_source_artifact_errors_failed(
+async def test_build_pipeline_service_marks_source_artifact_errors_failed(
     monkeypatch, tmp_path
 ):
     import application.pipeline.collection_build.service as task_runner_module
@@ -512,8 +446,10 @@ def test_build_pipeline_service_marks_source_artifact_errors_failed(
         build_repository,
     )
 
-    collection = collection_service.create_collection("Source Error Collection")
-    collection_service.add_file(collection["collection_id"], "paper.txt", b"bad pdf")
+    collection = await collection_service.create_collection("Source Error Collection")
+    await collection_service.add_file(
+        collection["collection_id"], "paper.txt", b"bad pdf"
+    )
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003, ARG001
         return [DummyWorkflowOutput(errors=["docling import failed"])]
@@ -522,22 +458,22 @@ def test_build_pipeline_service_marks_source_artifact_errors_failed(
         task_runner_module, "build_source_artifacts", fake_build_source_artifacts
     )
 
-    task = task_service.create_task(collection["collection_id"], "build")
-    result = asyncio.run(runner.run_task(task["task_id"], collection["collection_id"]))
+    task = await task_service.create_task(collection["collection_id"], "build")
+    result = await runner.run_task(task["task_id"], collection["collection_id"])
 
     assert result["status"] == "failed"
     assert result["current_stage"] == "failed"
     assert result["pipeline_nodes"]["source_artifacts"]["status"] == "failed"
     assert result["pipeline_nodes"]["artifact_registry"]["status"] == "skipped"
     assert result["errors"] == ["source_artifacts: docling import failed"]
-    pipeline_run = task_service.read_pipeline_run(task["task_id"])
+    pipeline_run = await task_service.read_pipeline_run(task["task_id"])
     assert pipeline_run.status == "failed"
     assert pipeline_run.node("artifact_registry").dependencies == (
         "source_artifacts",
     )
 
 
-def test_build_pipeline_service_logs_stage_progress(monkeypatch, tmp_path, caplog):
+async def test_build_pipeline_service_logs_stage_progress(monkeypatch, tmp_path, caplog):
     import application.pipeline.collection_build.service as task_runner_module
 
     collection_service = build_test_collection_service(tmp_path / "collections")
@@ -549,9 +485,9 @@ def test_build_pipeline_service_logs_stage_progress(monkeypatch, tmp_path, caplo
         build_repository,
     )
 
-    collection = collection_service.create_collection("Logging Progress Collection")
+    collection = await collection_service.create_collection("Logging Progress Collection")
     paths = collection_service.get_paths(collection["collection_id"])
-    collection_service.add_file(
+    await collection_service.add_file(
         collection["collection_id"],
         "paper.txt",
         b"Experimental Section\nMix and anneal.",
@@ -566,9 +502,9 @@ def test_build_pipeline_service_logs_stage_progress(monkeypatch, tmp_path, caplo
         task_runner_module, "build_source_artifacts", fake_build_source_artifacts
     )
 
-    task = task_service.create_task(collection["collection_id"], "build")
+    task = await task_service.create_task(collection["collection_id"], "build")
     with caplog.at_level("INFO"):
-        asyncio.run(runner.run_task(task["task_id"], collection["collection_id"]))
+        await runner.run_task(task["task_id"], collection["collection_id"])
 
     assert any(
         "Build task progress" in record.message
@@ -600,5 +536,5 @@ def test_build_pipeline_service_logs_stage_progress(monkeypatch, tmp_path, caplo
         and "progress_percent=100" in record.message
         for record in caplog.records
     )
-    final_task = task_service.get_task(task["task_id"])
+    final_task = await task_service.get_task(task["task_id"])
     assert final_task["progress_detail"]["phase"] == "artifacts_ready"

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import contextlib
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -125,10 +126,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+async def main_async() -> None:
     args = parse_args()
     manifest = load_acceptance_manifest(args.acceptance_manifest)
-    summary = check_objective_findings_projection(
+    summary = await check_objective_findings_projection(
         collection_id=args.collection_id,
         objective_ids=tuple(args.objective_ids),
         api_base_url=args.api_base_url,
@@ -139,7 +140,7 @@ def main() -> None:
         raise SystemExit(1)
 
 
-def check_objective_findings_projection(
+async def check_objective_findings_projection(
     *,
     collection_id: str,
     objective_ids: tuple[str, ...],
@@ -161,27 +162,26 @@ def check_objective_findings_projection(
     expected_document_ids: set[str] | None = None
     required_review_statuses: set[str] = set()
     manifest_objectives = _mapping_list(acceptance_manifest["objectives"])
-    expected_document_ids = _resolve_manifest_document_ids(
+    expected_document_ids = await _resolve_manifest_document_ids(
         collection_id,
         _mapping_list(acceptance_manifest["documents"]),
     )
     required_review_statuses = set(acceptance_manifest["required_review_statuses"])
-    source_index = _load_source_index(collection_id)
+    source_index = await _load_source_index(collection_id)
     cookie = _api_login_cookie(api_base_url.rstrip("/")) if api_base_url else ""
     objectives = []
     checks: list[dict[str, str]] = []
     matched_objective_keys: set[str] = set()
     for objective_id in objective_ids:
-        payload = (
-            _api_objective_bundle(
+        if api_base_url:
+            payload = _api_objective_bundle(
                 api_base_url=api_base_url or "",
                 cookie=cookie,
                 collection_id=collection_id,
                 objective_id=objective_id,
             )
-            if api_base_url
-            else _local_objective_bundle(collection_id, objective_id)
-        )
+        else:
+            payload = await _local_objective_bundle(collection_id, objective_id)
         expectation = (
             _manifest_objective_for_question(
                 _text(_mapping(payload.get("objective")).get("question")),
@@ -688,7 +688,10 @@ def evaluate_objective_bundle(
     }
 
 
-def _local_objective_bundle(collection_id: str, objective_id: str) -> dict[str, Any]:
+async def _local_objective_bundle(
+    collection_id: str,
+    objective_id: str,
+) -> dict[str, Any]:
     with contextlib.redirect_stdout(io.StringIO()):
         from infra.persistence.database import (  # noqa: PLC0415
             DatabaseSettings,
@@ -712,24 +715,26 @@ def _local_objective_bundle(collection_id: str, objective_id: str) -> dict[str, 
                 review_repository=review_repository,
                 objective_repository=repository,
             )
-            objective = repository.read_objective(collection_id, objective_id)
+            objective = await repository.read_objective(collection_id, objective_id)
             if objective is None or objective.published_analysis_version is None:
                 raise FileNotFoundError(
                     f"published research objective not found: {collection_id}/{objective_id}"
                 )
             version = objective.published_analysis_version
-            analysis = repository.read_analysis(collection_id, objective_id, version)
-            paper_contributions = repository.list_contributions(
+            analysis = await repository.read_analysis(
                 collection_id, objective_id, version
             )
-            findings, _ = repository.list_findings(
+            paper_contributions = await repository.list_contributions(
+                collection_id, objective_id, version
+            )
+            findings, _ = await repository.list_findings(
                 collection_id, objective_id, version, offset=0, limit=500
             )
             evidence_by_finding = {}
             feedback_by_finding = {}
             curations_by_finding = {}
             for finding in findings:
-                evidence, _ = repository.list_evidence(
+                evidence, _ = await repository.list_evidence(
                     collection_id,
                     objective_id,
                     version,
@@ -742,22 +747,22 @@ def _local_objective_bundle(collection_id: str, objective_id: str) -> dict[str, 
                 ]
                 feedback_by_finding[finding.finding_id] = [
                     item.to_record()
-                    for item in review_repository.list_feedback(
+                    for item in await review_repository.list_feedback(
                         collection_id, objective_id, version, finding.finding_id
                     )
                 ]
                 curations_by_finding[finding.finding_id] = [
                     item.to_record()
-                    for item in review_repository.list_curations(
+                    for item in await review_repository.list_curations(
                         collection_id, objective_id, version, finding.finding_id
                     )
                 ]
-            dataset = feedback_service.export_dataset(
+            dataset = await feedback_service.export_dataset(
                 collection_id=collection_id,
                 objective_id=objective_id,
             )
         finally:
-            engine.dispose()
+            await engine.dispose()
     return {
         "objective": objective.to_record(),
         "published_analysis": analysis.to_record() if analysis else None,
@@ -870,7 +875,7 @@ def _api_objective_bundle(
     }
 
 
-def _load_source_index(
+async def _load_source_index(
     collection_id: str,
 ) -> dict[tuple[str, str, str], dict[str, Any]]:
     with contextlib.redirect_stdout(io.StringIO()):
@@ -885,11 +890,11 @@ def _load_source_index(
 
         engine = build_database_engine(DatabaseSettings())
         try:
-            documents = PostgresSourceArtifactRepository(
+            documents = await PostgresSourceArtifactRepository(
                 build_session_factory(engine)
             ).read_collection_documents(collection_id)
         finally:
-            engine.dispose()
+            await engine.dispose()
     index: dict[tuple[str, str, str], dict[str, Any]] = {}
     for block in (item for document in documents for item in document.blocks):
         index[(block.document_id, "text_window", block.block_id)] = {
@@ -915,7 +920,7 @@ def _load_source_index(
     return index
 
 
-def _resolve_manifest_document_ids(
+async def _resolve_manifest_document_ids(
     collection_id: str,
     documents: list[dict[str, Any]],
 ) -> set[str]:
@@ -940,8 +945,8 @@ def _resolve_manifest_document_ids(
 
         engine = build_database_engine(DatabaseSettings())
         try:
-            with build_session_factory(engine)() as session:
-                rows = session.execute(
+            async with build_session_factory(engine)() as session:
+                rows = (await session.execute(
                     select(SourceDocument.source_document_id, DocumentVersion.sha256)
                     .join(
                         DocumentVersion,
@@ -957,9 +962,9 @@ def _resolve_manifest_document_ids(
                         SourceDocument.collection_id == collection_id,
                         DocumentVersion.sha256.in_(expected_hashes),
                     )
-                ).all()
+                )).all()
         finally:
-            engine.dispose()
+            await engine.dispose()
     document_ids_by_hash: dict[str, set[str]] = {}
     for document_id, digest in rows:
         document_ids_by_hash.setdefault(str(digest), set()).add(str(document_id))
@@ -2006,4 +2011,4 @@ def _int(value: Any) -> int:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main_async())

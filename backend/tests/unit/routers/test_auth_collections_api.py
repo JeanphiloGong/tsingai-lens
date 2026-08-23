@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
 import os
 from pathlib import Path
 import subprocess
 import sys
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 from fastapi.testclient import TestClient
 import pytest
@@ -16,35 +17,25 @@ BACKEND_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _app_repository_dependencies(auth_session_service) -> dict[str, object]:
-    from infra.persistence.postgres.chat_repository import PostgresChatRepository
-    from infra.persistence.postgres.experiment_plan_repository import (
-        PostgresExperimentPlanRepository,
+    from tests.support.experiment_plan_repository import (
+        InMemoryExperimentPlanRepository,
     )
-    from infra.persistence.postgres.finding_review_repository import (
-        PostgresFindingReviewRepository,
+    from tests.support.objective_repository import MemoryObjectiveRepository
+    from tests.support.objective_review_repository import (
+        InMemoryObjectiveReviewRepository,
     )
-    from infra.persistence.postgres.objective_repository import (
-        PostgresObjectiveRepository,
-    )
-    from infra.persistence.postgres.paper_fact_repository import (
-        PostgresPaperFactRepository,
-    )
-    from infra.persistence.postgres.source_artifact_repository import (
-        PostgresSourceArtifactRepository,
+    from tests.support.paper_fact_repository import MemoryPaperFactRepository
+    from tests.support.source_artifact_repository import (
+        MemorySourceArtifactRepository,
     )
 
-    session_factory = auth_session_service.repository.session_factory
     return {
-        "source_artifact_repository": PostgresSourceArtifactRepository(
-            session_factory
-        ),
-        "paper_fact_repository": PostgresPaperFactRepository(session_factory),
-        "objective_repository": PostgresObjectiveRepository(session_factory),
-        "finding_review_repository": PostgresFindingReviewRepository(session_factory),
-        "experiment_plan_repository": PostgresExperimentPlanRepository(
-            session_factory
-        ),
-        "chat_repository": PostgresChatRepository(session_factory),
+        "source_artifact_repository": MemorySourceArtifactRepository(),
+        "paper_fact_repository": MemoryPaperFactRepository(),
+        "objective_repository": MemoryObjectiveRepository(),
+        "finding_review_repository": InMemoryObjectiveReviewRepository(),
+        "experiment_plan_repository": InMemoryExperimentPlanRepository(),
+        "chat_repository": object(),
     }
 
 
@@ -116,8 +107,11 @@ def test_app_disposes_owned_database_engine_when_bootstrap_fails(monkeypatch) ->
     from main import create_app
 
     engine = Mock()
+    engine.dispose = AsyncMock()
     service = Mock()
-    service.ensure_bootstrap_user.side_effect = RuntimeError("bootstrap failed")
+    service.ensure_bootstrap_user = AsyncMock(
+        side_effect=RuntimeError("bootstrap failed")
+    )
     monkeypatch.setattr("main.DatabaseSettings", lambda: object())
     monkeypatch.setattr("main.build_database_engine", lambda _settings: engine)
     monkeypatch.setattr("main.build_session_factory", lambda _engine: object())
@@ -241,7 +235,12 @@ def test_collection_list_is_scoped_to_authenticated_owner(
         ]
 
         auth_service = client.app.state.auth_session_service
-        auth_service.create_user(email="other@example.com", password="other-password")
+        asyncio.run(
+            auth_service.create_user(
+            email="other@example.com",
+            password="other-password",
+            )
+        )
         client.cookies.clear()
         assert _login(client, "other@example.com", "other-password").status_code == 200
 

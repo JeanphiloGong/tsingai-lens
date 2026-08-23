@@ -11,6 +11,10 @@ this file owns resource boundaries and cross-endpoint semantics.
 - `POST /api/v1/auth/login` establishes an HttpOnly session cookie. Browser
   requests send that cookie through the same-origin `/api/v1/*` contract.
 - Every business response carries `X-Request-ID`.
+- Internal application logs correlate authenticated work by request ID and the
+  stable internal user ID. They do not log email addresses, session values, or
+  authentication credentials. Process-local background work inherits the
+  initiating request and user context.
 - A collection is the primary working scope; a document is a source inside it.
 - PostgreSQL is the structured runtime authority.
 - GET requests never trigger LLM analysis.
@@ -53,7 +57,9 @@ Objective readiness is derived from their owning repositories rather than
 duplicated into the task artifact registry.
 The build request accepts `mode: standard | fast` and defaults to `standard`.
 The selected mode is persisted before dispatch and determines the runtime
-dependency graph for that task.
+dependency graph for that task. The request starts a process-local asyncio task
+and returns immediately; clients read persisted task state through the task
+status endpoint. This handoff is not an external or durable queue.
 
 ### Goal Intake
 
@@ -221,17 +227,19 @@ polls `GET .../analysis`. Retry allocates a new version. A failed active version
 leaves the prior published version readable. Independent Objective analyses,
 including analyses from different collections, execute as process-local asyncio
 background tasks. An application semaphore bounds simultaneous analysis
-execution while the synchronous analysis pipeline runs outside the event-loop
-thread. The repository claim transition still allows only one task to execute a
-specific Objective analysis version, and persisted analysis state remains the
-status authority queried by the client. If the backend cannot create the
-background task, it records that version as failed and returns `503`, allowing
-the client to retry without leaving a permanently queued version. Only a
-complete succeeded version can become published. A succeeded version may have
-zero Findings when paper contributions and source-backed Evidence were
-published but no defensible comparison survived; this is a scientific
-abstention, not a technical failure. The Finding list then returns `total=0`
-without a placeholder Finding.
+execution. Tasks above that limit wait on the in-process semaphore; this is not
+a durable application queue. Synchronous model and scientific computations run
+outside the event-loop thread, while PostgreSQL reads and writes use awaited,
+task-local `AsyncSession` transactions. The repository claim transition still
+allows only one task to execute a specific Objective analysis version, and
+persisted analysis state remains the status authority queried by the client. If
+the backend cannot create the background task, it records that version as
+failed and returns `503`, allowing the client to retry without leaving a
+permanently queued version. Only a complete succeeded version can become
+published. A succeeded version may have zero Findings when paper contributions
+and source-backed Evidence were published but no defensible comparison
+survived; this is a scientific abstention, not a technical failure. The Finding
+list then returns `total=0` without a placeholder Finding.
 
 Objective document scope and current-analysis projection are build-scoped. A
 rebuild may preserve a confirmed Objective identity and all historical analysis
@@ -258,14 +266,15 @@ values as zero. A successful `comparable_evidence` contribution with no partial
 failure may have no reason.
 
 Each published contribution's `warnings` reports only final degraded coverage:
-conservative paper-framing fallback, PaperSkim Source units whose extraction
-ultimately failed, and selected Objective Evidence Sources whose extraction
-ultimately failed. A successful bounded retry or framing repair is not a
-warning. Warning text contains bounded counts rather than provider errors or
-raw exceptions. `ObjectiveAnalysisResponse.warnings` aggregates those persisted
-contribution warnings in paper order, prefixes each entry with `document_id`,
-and removes duplicates within the same paper. A clean published analysis
-returns an empty list.
+conservative paper-framing fallback, deterministic evidence-routing fallback,
+PaperSkim Source units whose extraction ultimately failed, and selected
+Objective Evidence Sources whose extraction ultimately failed. A successful
+bounded retry or framing repair is not a warning. Warning text contains bounded
+counts rather than provider errors or raw exceptions.
+`ObjectiveAnalysisResponse.warnings` aggregates those persisted contribution
+warnings in paper order, prefixes each entry with `document_id`, and removes
+duplicates within the same paper. A clean published analysis returns an empty
+list.
 
 ### Published Findings And Evidence
 
@@ -289,7 +298,9 @@ scientific contradiction. Multiple Evidence records with the same document,
 Source kind, and stable `source_ref` share one Source node. The endpoint performs
 no LLM call and persists no graph state. `projection_version` identifies the
 read model contract, while `analysis_version` identifies the published domain
-records from which it was produced.
+records from which it was produced. `complete` is true when every included paper
+reached a non-technical analysis outcome. A scientifically valid empty result is
+complete; any paper with `analysis_status=failed` makes it false.
 
 A Finding contains:
 

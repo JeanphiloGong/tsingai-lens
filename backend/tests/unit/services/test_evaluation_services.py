@@ -28,6 +28,13 @@ from tests.support.objective_repository import MemoryObjectiveRepository
 from tests.support.comparison_repository import MemoryComparisonRepository
 from tests.support.objective_review_repository import InMemoryObjectiveReviewRepository
 
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
 
 _TEMPERATURE_STRENGTH_RELATIONSHIP_ID = (
     "relationship-doc-1-temperature-strength"
@@ -51,17 +58,17 @@ class FakeCollectionService:
             ]
         }
 
-    def get_collection(self, collection_id: str) -> dict:
+    async def get_collection(self, collection_id: str) -> dict:
         if collection_id not in self.existing:
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return {"collection_id": collection_id, "name": "Gold collection"}
 
-    def list_files(self, collection_id: str) -> list[dict]:
-        self.get_collection(collection_id)
+    async def list_files(self, collection_id: str) -> list[dict]:
+        await self.get_collection(collection_id)
         return list(self.files_by_collection.get(collection_id, []))
 
-    def get_import_manifest(self, collection_id: str) -> dict:
-        self.get_collection(collection_id)
+    async def get_import_manifest(self, collection_id: str) -> dict:
+        await self.get_collection(collection_id)
         return {
             "schema_version": 1,
             "collection_id": collection_id,
@@ -90,30 +97,30 @@ class FakeEvaluationRepository:
         self.snapshot = None
         self.run = None
 
-    def upsert_gold_set(self, gold_set, gold_items) -> None:
+    async def upsert_gold_set(self, gold_set, gold_items) -> None:
         self.gold_set = gold_set
         self.gold_items = gold_items
 
-    def read_gold_set(self, gold_id: str):
+    async def read_gold_set(self, gold_id: str):
         if self.gold_set and self.gold_set.gold_id == gold_id:
             return self.gold_set
         return None
 
-    def list_gold_items(self, gold_id: str):  # noqa: ARG002
+    async def list_gold_items(self, gold_id: str):  # noqa: ARG002
         return self.gold_items
 
-    def upsert_prediction_snapshot(self, snapshot) -> None:
+    async def upsert_prediction_snapshot(self, snapshot) -> None:
         self.snapshot = snapshot
 
-    def read_prediction_snapshot(self, snapshot_id: str):
+    async def read_prediction_snapshot(self, snapshot_id: str):
         if self.snapshot and self.snapshot.snapshot_id == snapshot_id:
             return self.snapshot
         return None
 
-    def upsert_evaluation_run(self, run) -> None:
+    async def upsert_evaluation_run(self, run) -> None:
         self.run = run
 
-    def upsert_feedback(self, feedback):
+    async def upsert_feedback(self, feedback):
         self.feedback = (
             feedback,
             *(
@@ -124,7 +131,7 @@ class FakeEvaluationRepository:
         )
         return feedback
 
-    def upsert_curation(self, curation):
+    async def upsert_curation(self, curation):
         self.curations = (
             curation,
             *(
@@ -135,7 +142,7 @@ class FakeEvaluationRepository:
         )
         return curation
 
-    def list_curations(
+    async def list_curations(
         self,
         collection_id: str,
         objective_id: str | None = None,
@@ -154,7 +161,7 @@ class FakeEvaluationRepository:
             and (finding_id is None or curation.finding_id == finding_id)
         )
 
-    def list_feedback(
+    async def list_feedback(
         self,
         collection_id: str,
         objective_id: str | None = None,
@@ -174,14 +181,14 @@ class FakeEvaluationRepository:
         )
 
 
-def test_evaluation_gold_service_registers_gold_set_for_collection():
+async def test_evaluation_gold_service_registers_gold_set_for_collection():
     repository = FakeEvaluationRepository()
     service = EvaluationGoldService(
         collection_service=FakeCollectionService(),
         evaluation_repository=repository,
     )
 
-    gold_set = service.register_gold_set(
+    gold_set = await service.register_gold_set(
         collection_id="col-gold",
         gold_id="gold-v1",
         items=[
@@ -200,14 +207,14 @@ def test_evaluation_gold_service_registers_gold_set_for_collection():
     assert repository.gold_items[0].payload["value"] == 520
 
 
-def test_evaluation_gold_service_accepts_collection_file_storage_key():
+async def test_evaluation_gold_service_accepts_collection_file_storage_key():
     repository = FakeEvaluationRepository()
     service = EvaluationGoldService(
         collection_service=FakeCollectionService(),
         evaluation_repository=repository,
     )
 
-    service.register_gold_set(
+    await service.register_gold_set(
         collection_id="col-gold",
         gold_id="gold-by-storage-key",
         items=[
@@ -224,28 +231,28 @@ def test_evaluation_gold_service_accepts_collection_file_storage_key():
     assert repository.gold_items[0].document_id == "col-gold/input/paper-1.pdf"
 
 
-def test_evaluation_gold_service_rejects_missing_collection():
+async def test_evaluation_gold_service_rejects_missing_collection():
     service = EvaluationGoldService(
         collection_service=FakeCollectionService(existing=set()),
         evaluation_repository=FakeEvaluationRepository(),
     )
 
     with pytest.raises(FileNotFoundError):
-        service.register_gold_set(
+        await service.register_gold_set(
             collection_id="missing",
             gold_id="gold-v1",
             items=[],
         )
 
 
-def test_evaluation_gold_service_rejects_gold_item_outside_collection():
+async def test_evaluation_gold_service_rejects_gold_item_outside_collection():
     service = EvaluationGoldService(
         collection_service=FakeCollectionService(),
         evaluation_repository=FakeEvaluationRepository(),
     )
 
     with pytest.raises(ValueError, match="gold item document is not in collection"):
-        service.register_gold_set(
+        await service.register_gold_set(
             collection_id="col-gold",
             gold_id="gold-v1",
             items=[
@@ -264,7 +271,7 @@ def test_evaluation_gold_service_rejects_gold_item_outside_collection():
         )
 
 
-def _published_objective_repository() -> MemoryObjectiveRepository:
+async def _published_objective_repository() -> MemoryObjectiveRepository:
     repository = MemoryObjectiveRepository()
     objective = ResearchObjective.from_mapping(
         {
@@ -313,7 +320,7 @@ def _published_objective_repository() -> MemoryObjectiveRepository:
             "confidence": 0.9,
         }
     )
-    repository.replace(
+    await repository.replace(
         "col-gold",
         "build_test",
         ObjectiveFactSet(
@@ -333,15 +340,19 @@ def _published_objective_repository() -> MemoryObjectiveRepository:
             ),
         ),
     )
-    repository.confirm_objective("col-gold", "obj-1")
-    _, analysis = repository.queue_analysis(
+    await repository.confirm_objective("col-gold", "obj-1")
+    _, analysis = await repository.queue_analysis(
         "col-gold",
         "obj-1",
         pipeline_version="test.v1",
         model_name="model-1",
         prompt_versions={},
     )
-    running = repository.claim_analysis("col-gold", "obj-1", analysis.analysis_version)
+    running = await repository.claim_analysis(
+        "col-gold",
+        "obj-1",
+        analysis.analysis_version,
+    )
     assert running is not None
     evidence = ObjectiveEvidence.from_mapping(
         {
@@ -420,7 +431,7 @@ def _published_objective_repository() -> MemoryObjectiveRepository:
             ],
         }
     )
-    repository.publish_analysis(
+    await repository.publish_analysis(
         "col-gold",
         "obj-1",
         1,
@@ -444,10 +455,10 @@ def _published_objective_repository() -> MemoryObjectiveRepository:
     return repository
 
 
-def _finding_feedback_service() -> FindingFeedbackService:
+async def _finding_feedback_service() -> FindingFeedbackService:
     return FindingFeedbackService(
         review_repository=InMemoryObjectiveReviewRepository(),
-        objective_repository=_published_objective_repository(),
+        objective_repository=await _published_objective_repository(),
     )
 
 
@@ -467,12 +478,12 @@ def _prediction_snapshot_service(
     )
 
 
-def test_prediction_snapshot_exports_published_findings_with_exact_evidence() -> None:
+async def test_prediction_snapshot_exports_published_findings_with_exact_evidence() -> None:
     service, evaluation_repository = _prediction_snapshot_service(
-        _published_objective_repository()
+        await _published_objective_repository()
     )
 
-    snapshot = service.create_core_snapshot(
+    snapshot = await service.create_core_snapshot(
         collection_id="col-gold",
         fact_source="objective_first",
         snapshot_id="snapshot-1",
@@ -506,7 +517,7 @@ def test_prediction_snapshot_exports_published_findings_with_exact_evidence() ->
     )
 
 
-def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
+async def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
     objective = ResearchObjective.from_mapping(
         {
             "collection_id": "col-gold",
@@ -576,17 +587,17 @@ def test_prediction_snapshot_rejects_unconfirmed_objective() -> None:
     service, _evaluation_repository = _prediction_snapshot_service(repository)
 
     with pytest.raises(CoreArtifactsNotReadyForEvaluationError):
-        service.create_core_snapshot(
+        await service.create_core_snapshot(
             collection_id="col-gold",
             fact_source="objective_first",
         )
 
 
-def test_finding_feedback_rejects_stale_analysis_version() -> None:
-    service = _finding_feedback_service()
+async def test_finding_feedback_rejects_stale_analysis_version() -> None:
+    service = await _finding_feedback_service()
 
     with pytest.raises(ValueError, match="published analysis version"):
-        service.record_feedback(
+        await service.record_feedback(
             collection_id="col-gold",
             objective_id="obj-1",
             analysis_version=2,
@@ -596,11 +607,11 @@ def test_finding_feedback_rejects_stale_analysis_version() -> None:
         )
 
 
-def test_finding_feedback_rejects_inconsistent_review_decisions() -> None:
-    service = _finding_feedback_service()
+async def test_finding_feedback_rejects_inconsistent_review_decisions() -> None:
+    service = await _finding_feedback_service()
 
     with pytest.raises(ValueError, match="correct finding feedback cannot report"):
-        service.record_feedback(
+        await service.record_feedback(
             collection_id="col-gold",
             objective_id="obj-1",
             analysis_version=1,
@@ -609,7 +620,7 @@ def test_finding_feedback_rejects_inconsistent_review_decisions() -> None:
             issue_type="evidence_not_grounded",
         )
     with pytest.raises(ValueError, match="partial finding feedback requires an issue"):
-        service.record_feedback(
+        await service.record_feedback(
             collection_id="col-gold",
             objective_id="obj-1",
             analysis_version=1,
@@ -619,15 +630,15 @@ def test_finding_feedback_rejects_inconsistent_review_decisions() -> None:
         )
 
 
-def test_finding_review_rejects_unknown_status_values() -> None:
-    service = _finding_feedback_service()
-    published = service.objective_repository.read_finding(
+async def test_finding_review_rejects_unknown_status_values() -> None:
+    service = await _finding_feedback_service()
+    published = await service.objective_repository.read_finding(
         "col-gold", "obj-1", 1, "finding-1"
     )
     assert published is not None
 
     with pytest.raises(ValueError, match="unsupported finding review status"):
-        service.record_feedback(
+        await service.record_feedback(
             collection_id="col-gold",
             objective_id="obj-1",
             analysis_version=1,
@@ -636,7 +647,7 @@ def test_finding_review_rejects_unknown_status_values() -> None:
             issue_type="none",
         )
     with pytest.raises(ValueError, match="unsupported finding curation status"):
-        service.record_curation(
+        await service.record_curation(
             collection_id="col-gold",
             objective_id="obj-1",
             analysis_version=1,
@@ -646,9 +657,9 @@ def test_finding_review_rejects_unknown_status_values() -> None:
         )
 
 
-def test_finding_curation_rejects_evidence_outside_published_finding() -> None:
-    service = _finding_feedback_service()
-    published = service.objective_repository.read_finding(
+async def test_finding_curation_rejects_evidence_outside_published_finding() -> None:
+    service = await _finding_feedback_service()
+    published = await service.objective_repository.read_finding(
         "col-gold", "obj-1", 1, "finding-1"
     )
     assert published is not None
@@ -656,7 +667,7 @@ def test_finding_curation_rejects_evidence_outside_published_finding() -> None:
     curated["paper_contributions"][0]["supporting_evidence_ids"] = ["evidence-outside"]
 
     with pytest.raises(ValueError, match="references missing evidence"):
-        service.record_curation(
+        await service.record_curation(
             collection_id="col-gold",
             objective_id="obj-1",
             analysis_version=1,
@@ -666,15 +677,15 @@ def test_finding_curation_rejects_evidence_outside_published_finding() -> None:
         )
 
 
-def test_latest_feedback_or_curation_controls_dataset_status() -> None:
-    service = _finding_feedback_service()
-    candidate = service.export_dataset(collection_id="col-gold", objective_id="obj-1")[
-        "items"
-    ][0]
+async def test_latest_feedback_or_curation_controls_dataset_status() -> None:
+    service = await _finding_feedback_service()
+    candidate = (
+        await service.export_dataset(collection_id="col-gold", objective_id="obj-1")
+    )["items"][0]
     assert candidate["dataset_use_status"] == "review_candidate"
     assert candidate["training_messages"] == []
 
-    published = service.objective_repository.read_finding(
+    published = await service.objective_repository.read_finding(
         "col-gold", "obj-1", 1, "finding-1"
     )
     assert published is not None
@@ -684,7 +695,7 @@ def test_latest_feedback_or_curation_controls_dataset_status() -> None:
         "analysis_version": 1,
         "finding_id": "finding-1",
     }
-    service.review_repository.upsert_curation(
+    await service.review_repository.upsert_curation(
         FindingCuration.from_mapping(
             {
                 "curation_id": "curation-1",
@@ -695,7 +706,7 @@ def test_latest_feedback_or_curation_controls_dataset_status() -> None:
             }
         )
     )
-    service.review_repository.upsert_feedback(
+    await service.review_repository.upsert_feedback(
         FindingFeedback.from_mapping(
             {
                 "feedback_id": "feedback-1",
@@ -707,15 +718,15 @@ def test_latest_feedback_or_curation_controls_dataset_status() -> None:
         )
     )
 
-    rejected = service.export_dataset(collection_id="col-gold", objective_id="obj-1")[
-        "items"
-    ][0]
+    rejected = (
+        await service.export_dataset(collection_id="col-gold", objective_id="obj-1")
+    )["items"][0]
     assert rejected["label_status"] == "rejected"
     assert rejected["dataset_use_status"] == "rejected"
     assert rejected["expert_target"] is None
     assert rejected["training_messages"] == []
 
-    service.review_repository.upsert_curation(
+    await service.review_repository.upsert_curation(
         FindingCuration.from_mapping(
             {
                 "curation_id": "curation-1",
@@ -727,17 +738,17 @@ def test_latest_feedback_or_curation_controls_dataset_status() -> None:
         )
     )
 
-    curated = service.export_dataset(collection_id="col-gold", objective_id="obj-1")[
-        "items"
-    ][0]
+    curated = (
+        await service.export_dataset(collection_id="col-gold", objective_id="obj-1")
+    )["items"][0]
     assert curated["label_status"] == "gold"
     assert curated["dataset_use_status"] == "training_ready"
     assert curated["expert_target"] == published.to_record()
 
 
-def test_finding_feedback_export_contains_exact_source_text() -> None:
-    service = _finding_feedback_service()
-    service.record_feedback(
+async def test_finding_feedback_export_contains_exact_source_text() -> None:
+    service = await _finding_feedback_service()
+    await service.record_feedback(
         collection_id="col-gold",
         objective_id="obj-1",
         analysis_version=1,
@@ -747,7 +758,7 @@ def test_finding_feedback_export_contains_exact_source_text() -> None:
         reviewer="expert-1",
     )
 
-    dataset = service.export_dataset(
+    dataset = await service.export_dataset(
         collection_id="col-gold",
         objective_id="obj-1",
     )
@@ -778,12 +789,12 @@ def test_finding_feedback_export_contains_exact_source_text() -> None:
         ({"evidence_ids": ["evidence-replaced"]}, "source_evidence_ids_changed"),
     ],
 )
-def test_finding_source_snapshot_detects_each_stale_dimension(
+async def test_finding_source_snapshot_detects_each_stale_dimension(
     snapshot_change: dict,
     expected_reason: str,
 ) -> None:
-    service = _finding_feedback_service()
-    service.record_feedback(
+    service = await _finding_feedback_service()
+    await service.record_feedback(
         collection_id="col-gold",
         objective_id="obj-1",
         analysis_version=1,
@@ -791,10 +802,10 @@ def test_finding_source_snapshot_detects_each_stale_dimension(
         review_status="correct",
         issue_type="none",
     )
-    item = service.export_dataset(
+    item = (await service.export_dataset(
         collection_id="col-gold",
         objective_id="obj-1",
-    )["items"][0]
+    ))["items"][0]
     source_finding = {
         "finding_id": item["finding_id"],
         "analysis_version": item["analysis_version"],
@@ -804,7 +815,7 @@ def test_finding_source_snapshot_detects_each_stale_dimension(
         **snapshot_change,
     }
 
-    validity, reasons = service.source_snapshot_validity(
+    validity, reasons = await service.source_snapshot_validity(
         collection_id="col-gold",
         objective_id="obj-1",
         source_findings=[source_finding],
@@ -814,10 +825,10 @@ def test_finding_source_snapshot_detects_each_stale_dimension(
     assert reasons == [expected_reason]
 
 
-def test_finding_source_snapshot_is_stale_when_dataset_is_unavailable() -> None:
-    service = _finding_feedback_service()
+async def test_finding_source_snapshot_is_stale_when_dataset_is_unavailable() -> None:
+    service = await _finding_feedback_service()
 
-    validity, reasons = service.source_snapshot_validity(
+    validity, reasons = await service.source_snapshot_validity(
         collection_id="missing-collection",
         objective_id="missing-objective",
         source_findings=[{"finding_id": "finding-1"}],
@@ -827,17 +838,17 @@ def test_finding_source_snapshot_is_stale_when_dataset_is_unavailable() -> None:
     assert reasons == ["source_dataset_unavailable"]
 
 
-def test_only_training_ready_samples_include_training_messages() -> None:
-    candidate_service = _finding_feedback_service()
-    candidate = candidate_service.export_dataset(
+async def test_only_training_ready_samples_include_training_messages() -> None:
+    candidate_service = await _finding_feedback_service()
+    candidate = (await candidate_service.export_dataset(
         collection_id="col-gold",
         objective_id="obj-1",
-    )["items"][0]
+    ))["items"][0]
     assert candidate["dataset_use_status"] == "review_candidate"
     assert candidate["training_messages"] == []
 
-    rejected_service = _finding_feedback_service()
-    rejected_service.record_feedback(
+    rejected_service = await _finding_feedback_service()
+    await rejected_service.record_feedback(
         collection_id="col-gold",
         objective_id="obj-1",
         analysis_version=1,
@@ -845,9 +856,9 @@ def test_only_training_ready_samples_include_training_messages() -> None:
         review_status="incorrect",
         issue_type="overclaim",
     )
-    rejected = rejected_service.export_dataset(
+    rejected = (await rejected_service.export_dataset(
         collection_id="col-gold",
         objective_id="obj-1",
-    )["items"][0]
+    ))["items"][0]
     assert rejected["dataset_use_status"] == "rejected"
     assert rejected["training_messages"] == []

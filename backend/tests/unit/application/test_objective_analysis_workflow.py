@@ -4,8 +4,11 @@ from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from application.core.objectives.analysis import evidence_materialization
 from application.core.objectives.analysis.evidence_routing import (
+    EvidenceCandidate,
     StructuredEvidenceSelections,
 )
 from application.core.objectives.analysis.source_extraction import (
@@ -44,6 +47,13 @@ from tests.support.research_objective_service import (
     seed_document_profiles as _seed_document_profiles,
 )
 
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
 
 class _FailingRouteExtractor(_ObjectiveExtractor):
     def route_source(
@@ -66,18 +76,18 @@ class _FailingFrameExtractor(_ObjectiveExtractor):
 class _ActiveBuildScopeObjectiveRepository(MemoryObjectiveRepository):
     """Mirror production's global lifecycle plus active-build support scope."""
 
-    def read_objective(
+    async def read_objective(
         self,
         collection_id: str,
         objective_id: str,
     ) -> ResearchObjective | None:
-        lifecycle = super().read_objective(collection_id, objective_id)
+        lifecycle = await super().read_objective(collection_id, objective_id)
         if lifecycle is None:
             return None
         snapshot = next(
             (
                 objective
-                for objective in self.read(collection_id).research_objectives
+                for objective in (await self.read(collection_id)).research_objectives
                 if objective.objective_id == objective_id
             ),
             None,
@@ -168,23 +178,23 @@ def _paper_skim(
     )
 
 
-def test_memory_objective_repository_requires_explicit_activation():
+async def test_memory_objective_repository_requires_explicit_activation():
     repository = MemoryObjectiveRepository()
     active = ObjectiveFactSet(research_objectives_ready=True)
     pending = ObjectiveFactSet()
 
-    repository.replace("col-1", "build_test", active)
-    repository.replace("col-1", "build_pending", pending)
+    await repository.replace("col-1", "build_test", active)
+    await repository.replace("col-1", "build_pending", pending)
 
-    assert repository.read("col-1") == active
-    assert repository.read("col-1", build_id="build_pending") == pending
+    assert await repository.read("col-1") == active
+    assert await repository.read("col-1", build_id="build_pending") == pending
 
     repository.activate("build_pending")
 
-    assert repository.read("col-1") == pending
+    assert await repository.read("col-1") == pending
 
 
-def test_memory_objective_repository_records_analysis_execution_stats():
+async def test_memory_objective_repository_records_analysis_execution_stats():
     objective = _research_objective(
         {
             "collection_id": "col-1",
@@ -202,14 +212,14 @@ def test_memory_objective_repository_records_analysis_execution_stats():
             research_objectives=(objective,),
         ),
     )
-    _, analysis = repository.queue_analysis(
+    _, analysis = await repository.queue_analysis(
         "col-1",
         objective.objective_id,
         pipeline_version="test.v1",
         model_name=None,
         prompt_versions={},
     )
-    repository.claim_analysis("col-1", objective.objective_id, 1)
+    await repository.claim_analysis("col-1", objective.objective_id, 1)
     stats = ExecutionStats(
         model_usage=(
             ModelUsage(
@@ -224,7 +234,7 @@ def test_memory_objective_repository_records_analysis_execution_stats():
         ),
     )
 
-    updated = repository.update_analysis_execution_stats(
+    updated = await repository.update_analysis_execution_stats(
         "col-1",
         objective.objective_id,
         analysis.analysis_version,
@@ -241,7 +251,7 @@ def test_memory_objective_repository_records_analysis_execution_stats():
     }
 
 
-def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids():
+async def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids():
     objective = _research_objective(
         {
             "collection_id": "col-1",
@@ -445,7 +455,7 @@ def test_objective_analysis_preserves_claims_and_deduplicates_replayed_ids():
     assert contributions[0].failed_source_count == 1
 
 
-def test_objective_contribution_reports_only_final_degraded_source_outcomes():
+async def test_objective_contribution_reports_only_final_degraded_source_outcomes():
     objective = _research_objective(
         {
             "collection_id": "col-1",
@@ -541,22 +551,39 @@ def test_objective_contribution_reports_only_final_degraded_source_outcomes():
         objective=objective,
         paper_skims=(paper_skim,),
         frames=(frame,),
-        routes=(),
+        routes=(
+            EvidenceCandidate.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "source_kind": "block",
+                    "source_ref": "block-4",
+                    "role": "current_experimental_evidence",
+                    "extractable": True,
+                    "reason": (
+                        "Deterministic route built after model routing failed."
+                    ),
+                    "used_fallback": True,
+                    "confidence": 0.62,
+                }
+            ),
+        ),
         evidence_records=(failed_evidence,),
     )
 
     assert contributions[0].warnings == (
         "1 Source unit(s) used conservative paper framing fallback.",
+        "1 Source unit(s) used deterministic evidence routing fallback.",
         "1 PaperSkim Source unit(s) failed extraction before Objective analysis.",
         "1 selected source(s) failed extraction.",
     )
 
 
-def test_objective_analysis_uses_conservative_frame_batch_when_model_fails(
+async def test_objective_analysis_uses_conservative_frame_batch_when_model_fails(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    collection = collection_service.create_collection("Objective frame fallback")
+    collection = await collection_service.create_collection("Objective frame fallback")
     collection_id = collection["collection_id"]
     extractor = _FailingFrameExtractor()
     service = _build_research_objective_service(
@@ -564,7 +591,7 @@ def test_objective_analysis_uses_conservative_frame_batch_when_model_fails(
         response_client=extractor,
     )
     service.finding_synthesis_service.assertion_judge = extractor
-    service.source_artifact_repository.replace_collection_documents(
+    await service.source_artifact_repository.replace_collection_documents(
         collection_id,
         "build_test",
         source_documents_from_records(
@@ -592,7 +619,7 @@ def test_objective_analysis_uses_conservative_frame_batch_when_model_fails(
             tables=[],
         ),
     )
-    _seed_document_profiles(service, collection_id)
+    await _seed_document_profiles(service, collection_id)
     objective = _research_objective(
         {
             "collection_id": collection_id,
@@ -619,14 +646,18 @@ def test_objective_analysis_uses_conservative_frame_batch_when_model_fails(
         process_context=("LPBF",),
         source_ref="b1",
     )
-    service.objective_repository.replace(
+    await service.objective_repository.replace(
         collection_id,
         "build_test",
         _ready_objective_facts(paper_skim, objective),
     )
-    analysis = _queue_running_analysis(service, collection_id, objective.objective_id)
+    analysis = await _queue_running_analysis(
+        service,
+        collection_id,
+        objective.objective_id,
+    )
 
-    artifacts = service.generate_objective_analysis_artifacts(
+    artifacts = await service.generate_objective_analysis_artifacts(
         collection_id, analysis
     )
 
@@ -639,18 +670,18 @@ def test_objective_analysis_uses_conservative_frame_batch_when_model_fails(
     )
 
 
-def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
+async def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    collection = collection_service.create_collection("Objective stage retry")
+    collection = await collection_service.create_collection("Objective stage retry")
     collection_id = collection["collection_id"]
     service = _build_research_objective_service(
         collection_service=collection_service,
         response_client=_ObjectiveExtractor(),
     )
     service.finding_synthesis_service.assertion_judge = service._response_client
-    service.source_artifact_repository.replace_collection_documents(
+    await service.source_artifact_repository.replace_collection_documents(
         collection_id,
         "build_test",
         source_documents_from_records(
@@ -685,7 +716,7 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
             ],
         ),
     )
-    _seed_document_profiles(service, collection_id)
+    await _seed_document_profiles(service, collection_id)
     objective = _research_objective(
         {
             "collection_id": collection_id,
@@ -712,34 +743,41 @@ def test_objective_analysis_uses_deterministic_route_when_route_model_fails(
         process_context=("LPBF", "heat treatment"),
         source_ref="b1",
     )
-    service.objective_repository.replace(
+    await service.objective_repository.replace(
         collection_id,
         "build_test",
         _ready_objective_facts(paper_skim, objective),
     )
-    analysis = _queue_running_analysis(service, collection_id, objective.objective_id)
+    analysis = await _queue_running_analysis(
+        service,
+        collection_id,
+        objective.objective_id,
+    )
 
     failing_extractor = _FailingRouteExtractor()
     service._response_client = failing_extractor
     service._objective_evidence_router = failing_extractor
     service.finding_synthesis_service.assertion_judge = failing_extractor
-    artifacts = service.generate_objective_analysis_artifacts(
+    artifacts = await service.generate_objective_analysis_artifacts(
         collection_id, analysis
     )
 
     assert failing_extractor.route_payloads
     assert artifacts.contributions[0].document_id == "paper-1"
+    assert artifacts.contributions[0].warnings == (
+        "1 Source unit(s) used deterministic evidence routing fallback.",
+    )
     assert all(
         evidence.analysis_version == analysis.analysis_version
         for evidence in artifacts.evidence_records
     )
 
 
-def test_objective_analysis_does_not_mutate_active_objective_facts(
+async def test_objective_analysis_does_not_mutate_active_objective_facts(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    collection = collection_service.create_collection("Objective force rebuild")
+    collection = await collection_service.create_collection("Objective force rebuild")
     collection_id = collection["collection_id"]
     extractor = _ObjectiveExtractor()
     service = _build_research_objective_service(
@@ -747,7 +785,7 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
         response_client=extractor,
     )
     service.finding_synthesis_service.assertion_judge = extractor
-    service.source_artifact_repository.replace_collection_documents(
+    await service.source_artifact_repository.replace_collection_documents(
         collection_id,
         "build_test",
         source_documents_from_records(
@@ -783,7 +821,7 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
             ],
         ),
     )
-    _seed_document_profiles(service, collection_id)
+    await _seed_document_profiles(service, collection_id)
     objective = _research_objective(
         {
             "collection_id": collection_id,
@@ -810,32 +848,36 @@ def test_objective_analysis_does_not_mutate_active_objective_facts(
         process_context=("LPBF", "heat treatment"),
         source_ref="b1",
     )
-    service.objective_repository.replace(
+    await service.objective_repository.replace(
         collection_id,
         "build_test",
         _ready_objective_facts(paper_skim, objective),
     )
-    active_facts = service.objective_repository.read(collection_id)
-    analysis = _queue_running_analysis(service, collection_id, objective.objective_id)
+    active_facts = await service.objective_repository.read(collection_id)
+    analysis = await _queue_running_analysis(
+        service,
+        collection_id,
+        objective.objective_id,
+    )
 
-    artifacts = service.generate_objective_analysis_artifacts(
+    artifacts = await service.generate_objective_analysis_artifacts(
         collection_id, analysis
     )
 
-    facts = service.objective_repository.read(collection_id)
+    facts = await service.objective_repository.read(collection_id)
     assert extractor.frame_payloads
     assert extractor.route_payloads
     assert facts == active_facts
     assert artifacts.contributions
 
 
-def test_queued_analysis_uses_its_source_build_objective_scope_after_rebuild(
+async def test_queued_analysis_uses_its_source_build_objective_scope_after_rebuild(
     tmp_path,
 ):
     collection_service = build_test_collection_service(tmp_path / "collections")
-    collection_id = collection_service.create_collection("Build snapshot analysis")[
-        "collection_id"
-    ]
+    collection_id = (
+        await collection_service.create_collection("Build snapshot analysis")
+    )["collection_id"]
     extractor = _ObjectiveExtractor()
     repository = _ActiveBuildScopeObjectiveRepository()
     service = _build_research_objective_service(
@@ -844,7 +886,7 @@ def test_queued_analysis_uses_its_source_build_objective_scope_after_rebuild(
         objective_repository=repository,
     )
     service.finding_synthesis_service.assertion_judge = extractor
-    service.source_artifact_repository.replace_collection_documents(
+    await service.source_artifact_repository.replace_collection_documents(
         collection_id,
         "build_test",
         source_documents_from_records(
@@ -868,7 +910,7 @@ def test_queued_analysis_uses_its_source_build_objective_scope_after_rebuild(
             tables=[],
         ),
     )
-    _seed_document_profiles(service, collection_id)
+    await _seed_document_profiles(service, collection_id)
     queued_objective = _research_objective(
         {
             "collection_id": collection_id,
@@ -891,12 +933,12 @@ def test_queued_analysis_uses_its_source_build_objective_scope_after_rebuild(
         process_context=("LPBF",),
         source_ref="paper-1-results",
     )
-    repository.replace(
+    await repository.replace(
         collection_id,
         "build_test",
         _ready_objective_facts(queued_skim, queued_objective),
     )
-    analysis = _queue_running_analysis(
+    analysis = await _queue_running_analysis(
         service,
         collection_id,
         queued_objective.objective_id,
@@ -922,14 +964,14 @@ def test_queued_analysis_uses_its_source_build_objective_scope_after_rebuild(
         process_context=("LPBF",),
         source_ref="paper-2-results",
     )
-    repository.replace(
+    await repository.replace(
         collection_id,
         "build_rebuilt",
         _ready_objective_facts(rebuilt_skim, rebuilt_objective),
     )
     repository.activate("build_rebuilt")
 
-    service.generate_objective_analysis_artifacts(collection_id, analysis)
+    await service.generate_objective_analysis_artifacts(collection_id, analysis)
 
     frame_payload = extractor.frame_payloads[0]
     assert "seed_document_ids" not in frame_payload["objective"]

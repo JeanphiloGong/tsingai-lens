@@ -117,7 +117,7 @@ class CollectionService:
             raise OSError("figure object verification failed") from exc
 
     # define a method for creating a document collection
-    def create_collection(
+    async def create_collection(
         self,
         name: str,
         description: str | None = None,
@@ -134,32 +134,36 @@ class CollectionService:
         )
         self.workspace.create_collection_dirs(collection_id)
         try:
-            self.repository.add_collection(record)
+            await self.repository.add_collection(record)
         except Exception:
             self.workspace.delete_collection_dir(collection_id)
             raise
         return record.to_record()
 
-    def list_collections(self, owner_user_id: str | None = None) -> list[dict]:
+    async def list_collections(
+        self, owner_user_id: str | None = None
+    ) -> list[dict]:
         return [
             record.to_record()
-            for record in self.repository.list_collections(owner_user_id)
+            for record in await self.repository.list_collections(owner_user_id)
         ]
 
-    def get_collection(self, collection_id: str) -> dict:
-        record = self.repository.read_collection(collection_id)
+    async def get_collection(self, collection_id: str) -> dict:
+        record = await self.repository.read_collection(collection_id)
         if record is None:
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return record.to_record()
 
-    def get_collection_for_user(self, collection_id: str, owner_user_id: str) -> dict:
-        record = self.get_collection(collection_id)
+    async def get_collection_for_user(
+        self, collection_id: str, owner_user_id: str
+    ) -> dict:
+        record = await self.get_collection(collection_id)
         if record["owner_user_id"] != owner_user_id:
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return record
 
-    def update_collection(self, collection_id: str, **fields) -> dict:
-        record = dict(self.get_collection(collection_id))
+    async def update_collection(self, collection_id: str, **fields) -> dict:
+        record = dict(await self.get_collection(collection_id))
         record.update(fields)
         record["updated_at"] = _now_iso()
         normalized = CollectionRecord.from_mapping(
@@ -167,14 +171,14 @@ class CollectionService:
             collection_id,
             now_iso=record["updated_at"],
         )
-        if not self.repository.update_collection(normalized):
+        if not await self.repository.update_collection(normalized):
             raise FileNotFoundError(f"collection not found: {collection_id}")
         return normalized.to_record()
 
-    def delete_collection(self, collection_id: str) -> dict:
+    async def delete_collection(self, collection_id: str) -> dict:
         paths = self.get_paths(collection_id)
         target_dir = paths.collection_dir
-        if self.repository.read_collection(collection_id) is None:
+        if await self.repository.read_collection(collection_id) is None:
             raise FileNotFoundError(f"collection not found: {collection_id}")
 
         resolved_root = self.root_dir.resolve()
@@ -186,7 +190,7 @@ class CollectionService:
         if target_dir.is_symlink():
             raise ValueError("collection path cannot be a symlink")
 
-        for record in self.repository.list_collection_files(collection_id):
+        for record in await self.repository.list_collection_files(collection_id):
             storage_key = self._optional_text(record.storage_key)
             stored_filename = self._optional_text(record.stored_filename)
             if (
@@ -196,7 +200,7 @@ class CollectionService:
                 != self._input_storage_key(collection_id, stored_filename)
             ):
                 raise ValueError("invalid collection object key")
-        if not self.repository.delete_collection(collection_id):
+        if not await self.repository.delete_collection(collection_id):
             raise FileNotFoundError(f"collection not found: {collection_id}")
         self.workspace.delete_collection_dir(collection_id)
         return {
@@ -204,46 +208,52 @@ class CollectionService:
             "deleted_at": _now_iso(),
         }
 
-    def delete_collection_for_user(
+    async def delete_collection_for_user(
         self, collection_id: str, owner_user_id: str
     ) -> dict:
-        self.get_collection_for_user(collection_id, owner_user_id)
-        return self.delete_collection(collection_id)
+        await self.get_collection_for_user(collection_id, owner_user_id)
+        return await self.delete_collection(collection_id)
 
-    def list_files(self, collection_id: str) -> list[dict]:
-        self.get_collection(collection_id)
+    async def list_files(self, collection_id: str) -> list[dict]:
+        await self.get_collection(collection_id)
         return [
             record.to_record()
-            for record in self.repository.list_collection_files(collection_id)
+            for record in await self.repository.list_collection_files(
+                collection_id
+            )
         ]
 
-    def get_import_manifest(self, collection_id: str) -> dict[str, Any]:
-        self.get_collection(collection_id)
+    async def get_import_manifest(self, collection_id: str) -> dict[str, Any]:
+        await self.get_collection(collection_id)
         manifest = empty_import_manifest(collection_id)
         manifest["handoffs"] = [
             record.to_record()
-            for record in self.repository.list_collection_handoffs(collection_id)
+            for record in await self.repository.list_collection_handoffs(
+                collection_id
+            )
         ]
         manifest["imports"] = [
             record.to_record()
-            for record in self.repository.list_collection_imports(collection_id)
+            for record in await self.repository.list_collection_imports(
+                collection_id
+            )
         ]
         return manifest
 
-    def resolve_document_source_file(
+    async def resolve_document_source_file(
         self,
         collection_id: str,
         document_id: str,
         *,
         source_filename: str | None = None,
     ) -> dict[str, Any]:
-        self.get_collection(collection_id)
+        await self.get_collection(collection_id)
         document_key = str(document_id or "").strip()
         if not document_key:
             raise DocumentSourceUnavailableError(collection_id, document_key)
 
         match_keys = self._source_match_keys(document_key, source_filename)
-        manifest = self.get_import_manifest(collection_id)
+        manifest = await self.get_import_manifest(collection_id)
         manifest_documents = self._iter_manifest_documents(manifest)
         for document in manifest_documents:
             if self._source_document_record_matches(document, match_keys):
@@ -255,7 +265,7 @@ class CollectionService:
 
         file_matches = [
             record
-            for record in self.list_files(collection_id)
+            for record in await self.list_files(collection_id)
             if self._source_file_record_matches(record, match_keys)
         ]
         if len(file_matches) == 1:
@@ -277,7 +287,7 @@ class CollectionService:
             )
         raise DocumentSourceUnavailableError(collection_id, document_key)
 
-    def register_goal_brief_handoff(
+    async def register_goal_brief_handoff(
         self,
         collection_id: str,
         research_brief: dict[str, Any],
@@ -285,7 +295,7 @@ class CollectionService:
         *,
         source_channels: list[str] | None = None,
     ) -> dict[str, Any]:
-        self.get_collection(collection_id)
+        await self.get_collection(collection_id)
         handoff = CollectionHandoffRecord(
             handoff_id=f"handoff_{uuid4().hex[:12]}",
             collection_id=collection_id,
@@ -298,10 +308,10 @@ class CollectionService:
                 "coverage_assessment": dict(coverage_assessment),
             },
         )
-        self.repository.add_collection_handoff(handoff)
+        await self.repository.add_collection_handoff(handoff)
         return handoff.to_record()
 
-    def import_from_adapter(
+    async def import_from_adapter(
         self,
         collection_id: str,
         adapter: SourceAdapter,
@@ -311,7 +321,7 @@ class CollectionService:
         max_documents: int | None = None,
         constraints: dict[str, Any] | None = None,
     ) -> list[dict]:
-        self.get_collection(collection_id)
+        await self.get_collection(collection_id)
 
         request = SourceAdapterRequest(
             collection_id=collection_id,
@@ -322,14 +332,14 @@ class CollectionService:
         )
         batch = adapter.fetch(request)
         self._validate_adapter_batch(adapter, batch)
-        return self.import_normalized_batch(collection_id, batch)
+        return await self.import_normalized_batch(collection_id, batch)
 
-    def import_normalized_batch(
+    async def import_normalized_batch(
         self,
         collection_id: str,
         batch: NormalizedImportBatch,
     ) -> list[dict]:
-        self.get_collection(collection_id)
+        await self.get_collection(collection_id)
         if not batch.documents:
             raise ValueError(
                 "normalized import batch must include at least one document"
@@ -371,7 +381,7 @@ class CollectionService:
                 batch=batch,
                 created_files=created_files,
             )
-            self.repository.add_collection_import(
+            await self.repository.add_collection_import(
                 import_record,
                 updated_at=_now_iso(),
             )
@@ -379,7 +389,9 @@ class CollectionService:
             try:
                 registered_keys = {
                     record.storage_key
-                    for record in self.repository.list_collection_files(collection_id)
+                    for record in await self.repository.list_collection_files(
+                        collection_id
+                    )
                 }
             except Exception:
                 registered_keys = {record.storage_key for record in created_files}
@@ -389,20 +401,20 @@ class CollectionService:
             raise
         return [record.to_record() for record in created_files]
 
-    def add_file(
+    async def add_file(
         self,
         collection_id: str,
         filename: str,
         content: bytes,
         media_type: str | None = None,
     ) -> dict:
-        self.get_collection(collection_id)
+        await self.get_collection(collection_id)
         batch = normalize_upload(
             filename=filename,
             content=content,
             media_type=media_type,
         )
-        imported = self.import_normalized_batch(collection_id, batch)
+        imported = await self.import_normalized_batch(collection_id, batch)
         if not imported:
             raise ValueError("normalized upload produced no importable documents")
         return imported[0]

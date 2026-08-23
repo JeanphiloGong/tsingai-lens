@@ -29,7 +29,7 @@ class FindingFeedbackService:
         self.review_repository = review_repository
         self.objective_repository = objective_repository
 
-    def record_feedback(
+    async def record_feedback(
         self,
         *,
         collection_id: str,
@@ -41,7 +41,7 @@ class FindingFeedbackService:
         note: str | None = None,
         reviewer: str | None = None,
     ) -> FindingFeedback:
-        self._require_published_finding(
+        await self._require_published_finding(
             collection_id,
             objective_id,
             analysis_version,
@@ -73,9 +73,9 @@ class FindingFeedbackService:
                 "created_at": created_at,
             }
         )
-        return self.review_repository.upsert_feedback(feedback)
+        return await self.review_repository.upsert_feedback(feedback)
 
-    def list_feedback(
+    async def list_feedback(
         self,
         *,
         collection_id: str,
@@ -83,20 +83,20 @@ class FindingFeedbackService:
         analysis_version: int,
         finding_id: str,
     ) -> tuple[FindingFeedback, ...]:
-        self._require_published_finding(
+        await self._require_published_finding(
             collection_id,
             objective_id,
             analysis_version,
             finding_id,
         )
-        return self.review_repository.list_feedback(
+        return await self.review_repository.list_feedback(
             collection_id,
             objective_id,
             analysis_version,
             finding_id,
         )
 
-    def record_curation(
+    async def record_curation(
         self,
         *,
         collection_id: str,
@@ -108,7 +108,7 @@ class FindingFeedbackService:
         note: str | None = None,
         reviewer: str | None = None,
     ) -> FindingCuration:
-        candidate = self.validate_curation(
+        candidate = await self.validate_curation(
             collection_id=collection_id,
             objective_id=objective_id,
             analysis_version=analysis_version,
@@ -136,9 +136,9 @@ class FindingFeedbackService:
                 "updated_at": updated_at,
             }
         )
-        return self.review_repository.upsert_curation(curation)
+        return await self.review_repository.upsert_curation(curation)
 
-    def validate_curation(
+    async def validate_curation(
         self,
         *,
         collection_id: str,
@@ -147,7 +147,7 @@ class FindingFeedbackService:
         finding_id: str,
         curated_finding: Mapping[str, Any],
     ) -> Finding:
-        published = self._require_published_finding(
+        published = await self._require_published_finding(
             collection_id,
             objective_id,
             analysis_version,
@@ -169,10 +169,10 @@ class FindingFeedbackService:
         ):
             raise ValueError("curation cannot change Objective paper coverage")
 
-        evidence = self._finding_evidence(published)
+        evidence = await self._finding_evidence(published)
         candidate.validate_sources(
             evidence,
-            self.objective_repository.list_contributions(
+            await self.objective_repository.list_contributions(
                 collection_id,
                 objective_id,
                 analysis_version,
@@ -180,7 +180,7 @@ class FindingFeedbackService:
         )
         return candidate
 
-    def list_curations(
+    async def list_curations(
         self,
         *,
         collection_id: str,
@@ -188,20 +188,20 @@ class FindingFeedbackService:
         analysis_version: int,
         finding_id: str,
     ) -> tuple[FindingCuration, ...]:
-        self._require_published_finding(
+        await self._require_published_finding(
             collection_id,
             objective_id,
             analysis_version,
             finding_id,
         )
-        return self.review_repository.list_curations(
+        return await self.review_repository.list_curations(
             collection_id,
             objective_id,
             analysis_version,
             finding_id,
         )
 
-    def export_dataset(
+    async def export_dataset(
         self,
         *,
         collection_id: str,
@@ -209,7 +209,7 @@ class FindingFeedbackService:
         label_status: str | None = None,
         dataset_use_status: str | None = None,
     ) -> dict[str, Any]:
-        objective = self.objective_repository.read_objective(
+        objective = await self.objective_repository.read_objective(
             collection_id, objective_id
         )
         if objective is None:
@@ -223,7 +223,7 @@ class FindingFeedbackService:
             "schema_version": DATASET_SCHEMA_VERSION,
             "collection_id": collection_id,
             "objective_id": objective_id,
-            "items": self._dataset_items(
+            "items": await self._dataset_items(
                 collection_id,
                 objective_id,
                 version,
@@ -233,7 +233,7 @@ class FindingFeedbackService:
             "warnings": [],
         }
 
-    def export_collection_dataset(
+    async def export_collection_dataset(
         self,
         *,
         collection_id: str,
@@ -241,12 +241,14 @@ class FindingFeedbackService:
         dataset_use_status: str | None = None,
     ) -> dict[str, Any]:
         items: list[dict[str, Any]] = []
-        for objective in self.objective_repository.list_objectives(collection_id):
+        for objective in await self.objective_repository.list_objectives(
+            collection_id
+        ):
             version = objective.published_analysis_version
             if version is None:
                 continue
             items.extend(
-                self._dataset_items(
+                await self._dataset_items(
                     collection_id,
                     objective.objective_id,
                     version,
@@ -262,8 +264,10 @@ class FindingFeedbackService:
             "warnings": [],
         }
 
-    def export_gold_draft(self, *, collection_id: str) -> dict[str, Any]:
-        dataset = self.export_collection_dataset(
+    async def export_gold_draft(
+        self, *, collection_id: str
+    ) -> dict[str, Any]:
+        dataset = await self.export_collection_dataset(
             collection_id=collection_id,
             label_status="gold",
         )
@@ -276,7 +280,7 @@ class FindingFeedbackService:
             "items": dataset["items"],
         }
 
-    def source_snapshot_validity(
+    async def source_snapshot_validity(
         self,
         *,
         collection_id: str,
@@ -284,7 +288,7 @@ class FindingFeedbackService:
         source_findings: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]],
     ) -> tuple[str, list[str]]:
         try:
-            dataset = self.export_dataset(
+            dataset = await self.export_dataset(
                 collection_id=collection_id,
                 objective_id=objective_id,
             )
@@ -295,7 +299,7 @@ class FindingFeedbackService:
             return "stale", ["source_dataset_unavailable"]
         return _source_snapshot_validity(source_findings, items)
 
-    def _dataset_items(
+    async def _dataset_items(
         self,
         collection_id: str,
         objective_id: str,
@@ -304,21 +308,23 @@ class FindingFeedbackService:
         label_status: str | None,
         dataset_use_status: str | None,
     ) -> list[dict[str, Any]]:
-        objective = self.objective_repository.read_objective(
+        objective = await self.objective_repository.read_objective(
             collection_id, objective_id
         )
         assert objective is not None
-        findings = self._all_findings(collection_id, objective_id, analysis_version)
+        findings = await self._all_findings(
+            collection_id, objective_id, analysis_version
+        )
         result: list[dict[str, Any]] = []
         for finding in findings:
-            evidence = self._finding_evidence(finding)
-            feedback = self.review_repository.list_feedback(
+            evidence = await self._finding_evidence(finding)
+            feedback = await self.review_repository.list_feedback(
                 collection_id,
                 objective_id,
                 analysis_version,
                 finding.finding_id,
             )
-            curations = self.review_repository.list_curations(
+            curations = await self.review_repository.list_curations(
                 collection_id,
                 objective_id,
                 analysis_version,
@@ -395,7 +401,7 @@ class FindingFeedbackService:
             )
         return result
 
-    def _all_findings(
+    async def _all_findings(
         self,
         collection_id: str,
         objective_id: str,
@@ -404,7 +410,7 @@ class FindingFeedbackService:
         result: list[Finding] = []
         offset = 0
         while True:
-            page, total = self.objective_repository.list_findings(
+            page, total = await self.objective_repository.list_findings(
                 collection_id,
                 objective_id,
                 analysis_version,
@@ -418,11 +424,13 @@ class FindingFeedbackService:
             if not page:
                 raise RuntimeError("Finding pagination ended before the reported total")
 
-    def _finding_evidence(self, finding: Finding) -> tuple[ObjectiveEvidence, ...]:
+    async def _finding_evidence(
+        self, finding: Finding
+    ) -> tuple[ObjectiveEvidence, ...]:
         result: list[ObjectiveEvidence] = []
         offset = 0
         while True:
-            page, total = self.objective_repository.list_evidence(
+            page, total = await self.objective_repository.list_evidence(
                 finding.collection_id,
                 finding.objective_id,
                 finding.analysis_version,
@@ -437,14 +445,14 @@ class FindingFeedbackService:
             if not page:
                 raise RuntimeError("Evidence pagination ended before the reported total")
 
-    def _require_published_finding(
+    async def _require_published_finding(
         self,
         collection_id: str,
         objective_id: str,
         analysis_version: int,
         finding_id: str,
     ) -> Finding:
-        objective = self.objective_repository.read_objective(
+        objective = await self.objective_repository.read_objective(
             collection_id, objective_id
         )
         if objective is None:
@@ -453,7 +461,7 @@ class FindingFeedbackService:
             )
         if objective.published_analysis_version != analysis_version:
             raise ValueError("review must reference the published analysis version")
-        finding = self.objective_repository.read_finding(
+        finding = await self.objective_repository.read_finding(
             collection_id,
             objective_id,
             analysis_version,

@@ -11,12 +11,19 @@ from tests.support.experiment_plan_repository import (
     InMemoryExperimentPlanRepository,
 )
 
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
 
 class _FindingFeedbackService:
     def __init__(self, validity: str = "current") -> None:
         self.validity = validity
 
-    def source_snapshot_validity(self, **_kwargs):
+    async def source_snapshot_validity(self, **_kwargs):
         reasons = [] if self.validity == "current" else ["finding_changed"]
         return self.validity, reasons
 
@@ -67,11 +74,11 @@ def _historical_plan() -> ExperimentPlanRecord:
     )
 
 
-def test_manual_plan_creation_has_no_chat_provenance() -> None:
+async def test_manual_plan_creation_has_no_chat_provenance() -> None:
     repository = InMemoryExperimentPlanRepository()
     service = _service(repository)
 
-    draft = service.create_plan(
+    draft = await service.create_plan(
         collection_id="col_1",
         objective_id="objective_1",
         title="Manual validation plan",
@@ -83,12 +90,12 @@ def test_manual_plan_creation_has_no_chat_provenance() -> None:
     assert draft.source_message_id is None
     assert draft.source_links == ()
     assert draft.metadata == {"source": "manual"}
-    assert service.list_plans("col_1", "objective_1") == (draft,)
+    assert await service.list_plans("col_1", "objective_1") == (draft,)
 
 
-def test_manual_plan_can_be_edited_and_marked_ready() -> None:
+async def test_manual_plan_can_be_edited_and_marked_ready() -> None:
     service = _service()
-    draft = service.create_plan(
+    draft = await service.create_plan(
         collection_id="col_1",
         objective_id="objective_1",
         title="Initial",
@@ -96,7 +103,7 @@ def test_manual_plan_can_be_edited_and_marked_ready() -> None:
         created_by="expert-a",
     )
 
-    updated = service.update_plan(
+    updated = await service.update_plan(
         collection_id="col_1",
         objective_id="objective_1",
         plan_id=draft.plan_id,
@@ -110,9 +117,9 @@ def test_manual_plan_can_be_edited_and_marked_ready() -> None:
     assert updated.source_message_id is None
 
 
-def test_missing_plan_update_is_explicit() -> None:
+async def test_missing_plan_update_is_explicit() -> None:
     with pytest.raises(ExperimentPlanNotFoundError):
-        _service().update_plan(
+        await _service().update_plan(
             collection_id="col_1",
             objective_id="objective_1",
             plan_id="missing",
@@ -122,12 +129,12 @@ def test_missing_plan_update_is_explicit() -> None:
         )
 
 
-def test_historical_grounded_plan_remains_auditable_after_chat_cutover() -> None:
+async def test_historical_grounded_plan_remains_auditable_after_chat_cutover() -> None:
     repository = InMemoryExperimentPlanRepository()
     historical = _historical_plan()
-    repository.upsert_plan(historical)
+    await repository.upsert_plan(historical)
 
-    listed = _service(repository).list_plans("col_1", "objective_1")
+    listed = await _service(repository).list_plans("col_1", "objective_1")
 
     assert listed[0].source_message_id == "msg_legacy"
     assert listed[0].source_links == historical.source_links
@@ -135,13 +142,13 @@ def test_historical_grounded_plan_remains_auditable_after_chat_cutover() -> None
     assert listed[0].metadata["source_validity_reasons"] == []
 
 
-def test_stale_historical_plan_cannot_be_promoted() -> None:
+async def test_stale_historical_plan_cannot_be_promoted() -> None:
     repository = InMemoryExperimentPlanRepository()
     historical = _historical_plan()
-    repository.upsert_plan(historical)
+    await repository.upsert_plan(historical)
 
     with pytest.raises(ValueError, match="historical source Findings are stale"):
-        _service(repository, validity="stale").update_plan(
+        await _service(repository, validity="stale").update_plan(
             collection_id="col_1",
             objective_id="objective_1",
             plan_id=historical.plan_id,

@@ -22,17 +22,22 @@ _REQUEST_ID_CONTEXT: contextvars.ContextVar[str | None] = contextvars.ContextVar
     "request_id",
     default=None,
 )
-_REQUEST_ID_FORMAT_PLACEHOLDER = "-"
-_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_USER_ID_CONTEXT: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "user_id",
+    default=None,
+)
+_LOG_CONTEXT_PLACEHOLDER = "-"
+_LOG_CONTEXT_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
-class _RequestIdFilter(logging.Filter):
+class _RequestContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        record.request_id = get_request_id() or _REQUEST_ID_FORMAT_PLACEHOLDER
+        record.request_id = get_request_id() or _LOG_CONTEXT_PLACEHOLDER
+        record.user_id = get_user_id() or _LOG_CONTEXT_PLACEHOLDER
         return True
 
 
-_REQUEST_ID_FILTER = _RequestIdFilter()
+_REQUEST_CONTEXT_FILTER = _RequestContextFilter()
 
 
 def _configure_library_loggers() -> None:
@@ -59,11 +64,28 @@ def clear_request_id(token: contextvars.Token[str | None] | None = None) -> None
     _REQUEST_ID_CONTEXT.reset(token)
 
 
+def get_user_id() -> str | None:
+    return _USER_ID_CONTEXT.get()
+
+
+def bind_user_id(user_id: str) -> contextvars.Token[str | None]:
+    candidate = str(user_id or "").strip()
+    safe_user_id = candidate if _LOG_CONTEXT_PATTERN.fullmatch(candidate) else None
+    return _USER_ID_CONTEXT.set(safe_user_id)
+
+
+def clear_user_id(token: contextvars.Token[str | None] | None = None) -> None:
+    if token is None:
+        _USER_ID_CONTEXT.set(None)
+        return
+    _USER_ID_CONTEXT.reset(token)
+
+
 def is_valid_request_id(value: str | None) -> bool:
     if value is None:
         return False
     candidate = value.strip()
-    return bool(candidate) and bool(_REQUEST_ID_PATTERN.fullmatch(candidate))
+    return bool(candidate) and bool(_LOG_CONTEXT_PATTERN.fullmatch(candidate))
 
 
 def resolve_request_id(value: str | None) -> tuple[str, bool]:
@@ -77,7 +99,8 @@ def setup_logger(name: str = __name__) -> logging.Logger:
     logger.setLevel(logging.DEBUG)
 
     formatter = logging.Formatter(
-        "%(asctime)s | %(name)-24s | %(levelname)-8s | %(request_id)s | %(message)s",
+        "%(asctime)s | %(name)-24s | %(levelname)-8s | "
+        "%(request_id)s | %(user_id)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
@@ -127,8 +150,8 @@ def setup_logger(name: str = __name__) -> logging.Logger:
         return False
 
     for handler in handlers:
-        if _REQUEST_ID_FILTER not in handler.filters:
-            handler.addFilter(_REQUEST_ID_FILTER)
+        if _REQUEST_CONTEXT_FILTER not in handler.filters:
+            handler.addFilter(_REQUEST_CONTEXT_FILTER)
         if not _handler_exists(handler):
             root_logger.addHandler(handler)
             continue

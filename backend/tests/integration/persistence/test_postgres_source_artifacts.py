@@ -3,14 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
-import os
 from pathlib import Path
 
-from alembic import command
-from alembic.config import Config
 import pytest
-from sqlalchemy import URL, create_engine, event, select, text
-from sqlalchemy.engine import make_url
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from domain.source import (
@@ -33,7 +29,6 @@ from domain.source import (
     SourceTextUnit,
     TaskRecord,
 )
-from infra.persistence.database import build_session_factory
 from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.build_repository import PostgresBuildRepository
 from infra.persistence.postgres.collection_repository import (
@@ -43,9 +38,6 @@ from infra.persistence.postgres.models.source import SourceDocument as SourceDoc
 from infra.persistence.postgres.source_artifact_repository import (
     PostgresSourceArtifactRepository,
 )
-from tests.integration.persistence.database_cleanup import reset_postgres_schema
-
-
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 NOW = "2026-07-19T10:00:00+00:00"
 REAL_SOURCE_DOCUMENT_ID = "d" * 128
@@ -62,22 +54,13 @@ REAL_SOURCE_MENTION_ID = (
 )
 
 
+pytestmark = pytest.mark.anyio
+
+
 @pytest.fixture
-def source_repositories(tmp_path):
-    engine = create_engine(
-        URL.create("sqlite+pysqlite", database=str(tmp_path / "source.sqlite"))
-    )
-
-    @event.listens_for(engine, "connect")
-    def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
-        dbapi_connection.execute("PRAGMA foreign_keys=ON")
-
-    config = Config(str(BACKEND_ROOT / "alembic.ini"))
-    with engine.begin() as connection:
-        config.attributes["connection"] = connection
-        command.upgrade(config, "head")
-    sessions = build_session_factory(engine)
-    PostgresAuthRepository(sessions).add_user(
+async def source_repositories(postgres_session_factory):
+    sessions = postgres_session_factory
+    await PostgresAuthRepository(sessions).add_user(
         {
             "user_id": "user_source",
             "email": "source@example.com",
@@ -87,7 +70,7 @@ def source_repositories(tmp_path):
         }
     )
     collections = PostgresCollectionRepository(sessions)
-    collections.add_collection(
+    await collections.add_collection(
         CollectionRecord(
             collection_id="col_source",
             owner_user_id="user_source",
@@ -99,16 +82,13 @@ def source_repositories(tmp_path):
             updated_at=NOW,
         )
     )
-    collections.add_collection_import(
+    await collections.add_collection_import(
         _collection_import("stored-paper.pdf"), updated_at=NOW
     )
-    try:
-        yield (
-            PostgresSourceArtifactRepository(sessions),
-            PostgresBuildRepository(sessions),
-        )
-    finally:
-        engine.dispose()
+    return (
+        PostgresSourceArtifactRepository(sessions),
+        PostgresBuildRepository(sessions),
+    )
 
 
 def _collection_import(stored_filename: str) -> CollectionImportRecord:
@@ -421,11 +401,11 @@ def _real_shape_references() -> SourceReferenceSet:
     )
 
 
-def _finish(
+async def _finish(
     builds: PostgresBuildRepository, task: TaskRecord, *, success: bool
 ) -> None:
     status = "completed" if success else "failed"
-    builds.finish_build(
+    await builds.finish_build(
         replace(
             task,
             status=status,
@@ -440,122 +420,126 @@ def _finish(
     )
 
 
-def test_source_repository_round_trips_structure_with_document_lineage(
+async def test_source_repository_round_trips_structure_with_document_lineage(
     source_repositories,
 ) -> None:
     repository, builds = source_repositories
     task = _task("task_source")
-    builds.add_task(task, build_id="build_source")
+    await builds.add_task(task, build_id="build_source")
 
-    repository.replace_collection_documents("col_source", "build_source", _artifacts())
+    await repository.replace_collection_documents(
+        "col_source", "build_source", _artifacts()
+    )
 
-    assert not repository.read_collection_documents("col_source")
-    restored = repository.read_collection_documents(
+    assert not await repository.read_collection_documents("col_source")
+    restored = await repository.read_collection_documents(
         "col_source", build_id="build_source"
     )
     assert restored == _artifacts()
-    tree = repository.read_document_tree(
+    tree = await repository.read_document_tree(
         "col_source", "srcdoc_runtime", build_id="build_source"
     )
     assert tree.node_for_source_ref("block", "block-1") is not None
     assert tree.node_for_source_ref("table", "table-1") is not None
 
-    with repository.session_factory() as session:
-        row = session.scalar(select(SourceDocumentRow))
+    async with repository.session_factory() as session:
+        row = await session.scalar(select(SourceDocumentRow))
         assert row.collection_document_id.startswith("coldoc_")
         assert row.document_version_id.startswith("docver_")
         assert row.build_id == "build_source"
 
 
-def test_default_reads_keep_last_successful_build_when_next_build_fails(
+async def test_default_reads_keep_last_successful_build_when_next_build_fails(
     source_repositories,
 ) -> None:
     repository, builds = source_repositories
     first_task = _task("task_first")
-    builds.add_task(first_task, build_id="build_first")
-    repository.replace_collection_documents(
+    await builds.add_task(first_task, build_id="build_first")
+    await repository.replace_collection_documents(
         "col_source", "build_first", _artifacts("First")
     )
-    _finish(builds, first_task, success=True)
+    await _finish(builds, first_task, success=True)
     with pytest.raises(ValueError, match="collection build is not writable"):
-        repository.replace_collection_documents(
+        await repository.replace_collection_documents(
             "col_source", "build_first", _artifacts("Rewritten")
         )
-    assert repository.list_documents("col_source")[0].title == "First"
+    assert (await repository.list_documents("col_source"))[0].title == "First"
 
     second_task = _task("task_second")
-    builds.add_task(second_task, build_id="build_second")
-    repository.replace_collection_documents(
+    await builds.add_task(second_task, build_id="build_second")
+    await repository.replace_collection_documents(
         "col_source", "build_second", _artifacts("Pending")
     )
 
-    assert repository.list_documents("col_source")[0].title == "First"
+    assert (await repository.list_documents("col_source"))[0].title == "First"
     assert (
-        repository.list_documents("col_source", build_id="build_second")[0].title
+        (await repository.list_documents("col_source", build_id="build_second"))[0].title
         == "Pending"
     )
-    _finish(builds, second_task, success=False)
-    assert repository.list_documents("col_source")[0].title == "First"
+    await _finish(builds, second_task, success=False)
+    assert (await repository.list_documents("col_source"))[0].title == "First"
 
 
-def test_source_repository_versions_figures_and_references_with_the_source_build(
+async def test_source_repository_versions_figures_and_references_with_the_source_build(
     source_repositories,
 ) -> None:
     repository, builds = source_repositories
     task = _task("task_source_media")
     build_id = "build_source_media"
-    builds.add_task(task, build_id=build_id)
+    await builds.add_task(task, build_id=build_id)
     document = _artifacts()[0]
     artifacts = (replace(document, figures=(_figure(build_id),)),)
 
-    repository.replace_collection_documents("col_source", build_id, artifacts)
-    repository.replace_collection_references(
+    await repository.replace_collection_documents("col_source", build_id, artifacts)
+    await repository.replace_collection_references(
         "col_source",
         build_id,
         _references(),
     )
 
-    assert repository.list_figures("col_source") == []
-    assert repository.read_collection_references("col_source") == SourceReferenceSet()
-    assert repository.list_figures("col_source", build_id=build_id) == [
+    assert await repository.list_figures("col_source") == []
+    assert await repository.read_collection_references(
+        "col_source"
+    ) == SourceReferenceSet()
+    assert await repository.list_figures("col_source", build_id=build_id) == [
         _figure(build_id)
     ]
     assert (
-        repository.read_collection_references("col_source", build_id=build_id)
+        await repository.read_collection_references("col_source", build_id=build_id)
         == _references()
     )
 
-    _finish(builds, task, success=True)
+    await _finish(builds, task, success=True)
 
-    assert repository.list_figures("col_source") == [_figure(build_id)]
-    assert repository.read_collection_references("col_source") == _references()
-    tree = repository.read_document_tree("col_source", "srcdoc_runtime")
+    assert await repository.list_figures("col_source") == [_figure(build_id)]
+    assert await repository.read_collection_references("col_source") == _references()
+    tree = await repository.read_document_tree("col_source", "srcdoc_runtime")
     assert tree.node_for_source_ref("figure", "figure-1") is not None
     assert tree.node_for_source_ref("reference", "reference-1") is not None
     with pytest.raises(ValueError, match="collection build is not writable"):
-        repository.replace_collection_references(
+        await repository.replace_collection_references(
             "col_source",
             build_id,
             SourceReferenceSet(),
         )
 
 
-def test_collection_artifact_read_pins_one_active_build(
+async def test_collection_artifact_read_pins_one_active_build(
     source_repositories,
     monkeypatch,
 ) -> None:
     repository, builds = source_repositories
     first_task = _task("task_first_snapshot")
-    builds.add_task(first_task, build_id="build_first_snapshot")
-    repository.replace_collection_documents(
+    await builds.add_task(first_task, build_id="build_first_snapshot")
+    await repository.replace_collection_documents(
         "col_source", "build_first_snapshot", _artifacts("First")
     )
-    _finish(builds, first_task, success=True)
+    await _finish(builds, first_task, success=True)
 
     second_task = _task("task_second_snapshot")
     second_build_id = "build_second_snapshot"
-    builds.add_task(second_task, build_id=second_build_id)
-    repository.replace_collection_documents(
+    await builds.add_task(second_task, build_id=second_build_id)
+    await repository.replace_collection_documents(
         "col_source",
         second_build_id,
         (
@@ -567,9 +551,9 @@ def test_collection_artifact_read_pins_one_active_build(
     )
     original_list_text_units = repository.list_text_units
 
-    def activate_then_list_text_units(*args, **kwargs):
-        _finish(builds, second_task, success=True)
-        return original_list_text_units(*args, **kwargs)
+    async def activate_then_list_text_units(*args, **kwargs):
+        await _finish(builds, second_task, success=True)
+        return await original_list_text_units(*args, **kwargs)
 
     monkeypatch.setattr(
         repository,
@@ -577,31 +561,31 @@ def test_collection_artifact_read_pins_one_active_build(
         activate_then_list_text_units,
     )
 
-    artifacts = repository.read_collection_documents("col_source")
+    artifacts = await repository.read_collection_documents("col_source")
 
     assert artifacts[0].title == "First"
     assert artifacts[0].figures == ()
 
 
-def test_document_tree_read_pins_one_active_build(
+async def test_document_tree_read_pins_one_active_build(
     source_repositories,
     monkeypatch,
 ) -> None:
     repository, builds = source_repositories
     first_task = _task("task_first_tree")
-    builds.add_task(first_task, build_id="build_first_tree")
-    repository.replace_collection_documents(
+    await builds.add_task(first_task, build_id="build_first_tree")
+    await repository.replace_collection_documents(
         "col_source", "build_first_tree", _artifacts("First")
     )
-    repository.replace_collection_references(
+    await repository.replace_collection_references(
         "col_source", "build_first_tree", SourceReferenceSet()
     )
-    _finish(builds, first_task, success=True)
+    await _finish(builds, first_task, success=True)
 
     second_task = _task("task_second_tree")
     second_build_id = "build_second_tree"
-    builds.add_task(second_task, build_id=second_build_id)
-    repository.replace_collection_documents(
+    await builds.add_task(second_task, build_id=second_build_id)
+    await repository.replace_collection_documents(
         "col_source",
         second_build_id,
         (
@@ -611,62 +595,64 @@ def test_document_tree_read_pins_one_active_build(
             ),
         ),
     )
-    repository.replace_collection_references(
+    await repository.replace_collection_references(
         "col_source", second_build_id, _references()
     )
     original_list_blocks = repository.list_blocks
 
-    def activate_then_list_blocks(*args, **kwargs):
-        _finish(builds, second_task, success=True)
-        return original_list_blocks(*args, **kwargs)
+    async def activate_then_list_blocks(*args, **kwargs):
+        await _finish(builds, second_task, success=True)
+        return await original_list_blocks(*args, **kwargs)
 
     monkeypatch.setattr(repository, "list_blocks", activate_then_list_blocks)
 
-    tree = repository.read_document_tree("col_source", "srcdoc_runtime")
+    tree = await repository.read_document_tree("col_source", "srcdoc_runtime")
 
     assert tree.node_for_source_ref("figure", "figure-1") is None
     assert tree.node_for_source_ref("reference", "reference-1") is None
 
 
-def test_source_repository_rejects_unresolved_document_and_orphan_links(
+async def test_source_repository_rejects_unresolved_document_and_orphan_links(
     source_repositories,
 ) -> None:
     repository, builds = source_repositories
     task = _task("task_invalid")
-    builds.add_task(task, build_id="build_invalid")
+    await builds.add_task(task, build_id="build_invalid")
     document = _artifacts()[0]
     bad_document = replace(document, metadata={"source_path": "missing.pdf"})
     with pytest.raises(ValueError, match="exactly one collection file"):
-        repository.replace_collection_documents(
+        await repository.replace_collection_documents(
             "col_source",
             "build_invalid",
             (bad_document,),
         )
-    assert repository.read_collection_documents(
+    assert await repository.read_collection_documents(
         "col_source", build_id="build_invalid"
     ) == ()
     orphan_text_unit = replace(
         document.text_units[0], document_ids=("missing-document",)
     )
     with pytest.raises(IntegrityError):
-        repository.replace_collection_documents(
+        await repository.replace_collection_documents(
             "col_source",
             "build_invalid",
             (replace(document, text_units=(orphan_text_unit,)),),
         )
-    assert repository.read_collection_documents(
+    assert await repository.read_collection_documents(
         "col_source", build_id="build_invalid"
     ) == ()
 
 
-def test_source_repository_rejects_cross_document_and_orphan_reference_links(
+async def test_source_repository_rejects_cross_document_and_orphan_reference_links(
     source_repositories,
 ) -> None:
     repository, builds = source_repositories
     task = _task("task_invalid_references")
     build_id = "build_invalid_references"
-    builds.add_task(task, build_id=build_id)
-    PostgresCollectionRepository(repository.session_factory).add_collection_import(
+    await builds.add_task(task, build_id=build_id)
+    await PostgresCollectionRepository(
+        repository.session_factory
+    ).add_collection_import(
         _collection_import("stored-other.pdf"),
         updated_at=NOW,
     )
@@ -690,7 +676,7 @@ def test_source_repository_rejects_cross_document_and_orphan_reference_links(
         document_id="srcdoc_other",
         text_unit_ids=(),
     )
-    repository.replace_collection_documents(
+    await repository.replace_collection_documents(
         "col_source",
         build_id,
         first + (replace(second_document, blocks=(second_block,)),),
@@ -702,13 +688,13 @@ def test_source_repository_rejects_cross_document_and_orphan_reference_links(
         source_block_id="block-other",
     )
     with pytest.raises(IntegrityError):
-        repository.replace_collection_references(
+        await repository.replace_collection_references(
             "col_source",
             build_id,
             replace(references, mentions=(cross_document_mention,)),
         )
     with pytest.raises(IntegrityError):
-        repository.replace_collection_references(
+        await repository.replace_collection_references(
             "col_source",
             build_id,
             SourceReferenceSet(
@@ -718,125 +704,75 @@ def test_source_repository_rejects_cross_document_and_orphan_reference_links(
         )
 
 
-def test_postgresql_enforces_source_structure_contract() -> None:
-    database_url = os.getenv("LENS_TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("LENS_TEST_DATABASE_URL is not configured")
-    url = make_url(database_url)
-    if url.drivername != "postgresql+psycopg" or not str(url.database).endswith(
-        "_test"
-    ):
-        pytest.fail(
-            "LENS_TEST_DATABASE_URL must use postgresql+psycopg and a *_test database"
-        )
+async def test_postgresql_enforces_source_structure_contract(
+    source_repositories,
+) -> None:
+    repository, builds = source_repositories
+    task = _task("task_source")
+    await builds.add_task(task, build_id="build_source")
 
-    engine = create_engine(url)
-    config = Config(str(BACKEND_ROOT / "alembic.ini"))
-    try:
-        reset_postgres_schema(engine)
-        with engine.begin() as connection:
-            config.attributes["connection"] = connection
-            command.upgrade(config, "head")
-        sessions = build_session_factory(engine)
-        PostgresAuthRepository(sessions).add_user(
-            {
-                "user_id": "user_source",
-                "email": "source@example.com",
-                "display_name": None,
-                "password_hash": "synthetic-password-hash",
-                "created_at": datetime(2026, 7, 19, tzinfo=timezone.utc).isoformat(),
-            }
-        )
-        collections = PostgresCollectionRepository(sessions)
-        collections.add_collection(
-            CollectionRecord(
-                collection_id="col_source",
-                owner_user_id="user_source",
-                name="Source collection",
-                description=None,
-                status="idle",
-                paper_count=0,
-                created_at=NOW,
-                updated_at=NOW,
-            )
-        )
-        collections.add_collection_import(
-            _collection_import("stored-paper.pdf"), updated_at=NOW
-        )
-        builds = PostgresBuildRepository(sessions)
-        repository = PostgresSourceArtifactRepository(sessions)
-        task = _task("task_source")
-        builds.add_task(task, build_id="build_source")
+    real_shape_artifacts = _real_shape_artifacts()
+    await repository.replace_collection_documents(
+        "col_source", "build_source", real_shape_artifacts
+    )
+    assert await repository.read_collection_documents(
+        "col_source", build_id="build_source"
+    ) == real_shape_artifacts
 
-        real_shape_artifacts = _real_shape_artifacts()
-        repository.replace_collection_documents(
-            "col_source", "build_source", real_shape_artifacts
-        )
-        assert (
-            repository.read_collection_documents("col_source", build_id="build_source")
-            == real_shape_artifacts
-        )
-
-        unordered_references = _real_shape_references()
-        unordered_references = replace(
-            unordered_references,
-            entries=(
+    unordered_references = _real_shape_references()
+    unordered_references = replace(
+        unordered_references,
+        entries=(
+            unordered_references.entries[0],
+            replace(
                 unordered_references.entries[0],
-                replace(
-                    unordered_references.entries[0],
-                    reference_id="reference-null-index",
-                    raw_reference="Unnumbered reference.",
-                    reference_index=None,
-                    source_block_id=None,
-                ),
+                reference_id="reference-null-index",
+                raw_reference="Unnumbered reference.",
+                reference_index=None,
+                source_block_id=None,
             ),
-            mentions=(
+        ),
+        mentions=(
+            unordered_references.mentions[0],
+            replace(
                 unordered_references.mentions[0],
-                replace(
-                    unordered_references.mentions[0],
-                    mention_id="mention-null-position",
-                    reference_id=None,
-                    citation_marker="[?]",
-                    source_block_id=None,
-                ),
+                mention_id="mention-null-position",
+                reference_id=None,
+                citation_marker="[?]",
+                source_block_id=None,
             ),
-        )
-        repository.replace_collection_references(
-            "col_source", "build_source", unordered_references
-        )
-        ordered_references = repository.read_collection_references(
-            "col_source", build_id="build_source"
-        )
-        assert [entry.reference_id for entry in ordered_references.entries] == [
-            "reference-null-index",
-            REAL_SOURCE_REFERENCE_ID,
-        ]
-        assert [mention.mention_id for mention in ordered_references.mentions] == [
-            "mention-null-position",
-            REAL_SOURCE_MENTION_ID,
-        ]
+        ),
+    )
+    await repository.replace_collection_references(
+        "col_source", "build_source", unordered_references
+    )
+    ordered_references = await repository.read_collection_references(
+        "col_source", build_id="build_source"
+    )
+    assert [entry.reference_id for entry in ordered_references.entries] == [
+        "reference-null-index",
+        REAL_SOURCE_REFERENCE_ID,
+    ]
+    assert [mention.mention_id for mention in ordered_references.mentions] == [
+        "mention-null-position",
+        REAL_SOURCE_MENTION_ID,
+    ]
 
-        document = _artifacts()[0]
-        orphan_block = replace(
-            document.blocks[0], document_id="missing-document"
+    document = _artifacts()[0]
+    orphan_block = replace(document.blocks[0], document_id="missing-document")
+    with pytest.raises(IntegrityError):
+        await repository.replace_collection_documents(
+            "col_source",
+            "build_source",
+            (replace(document, blocks=(orphan_block,)),),
         )
-        with pytest.raises(IntegrityError):
-            repository.replace_collection_documents(
-                "col_source",
-                "build_source",
-                (replace(document, blocks=(orphan_block,)),),
-            )
-        assert (
-            repository.read_collection_documents("col_source", build_id="build_source")
-            == real_shape_artifacts
-        )
+    assert await repository.read_collection_documents(
+        "col_source", build_id="build_source"
+    ) == real_shape_artifacts
 
-        _finish(builds, task, success=True)
-        with pytest.raises(ValueError, match="collection build is not writable"):
-            repository.replace_collection_documents(
-                "col_source", "build_source", _artifacts("Rewritten")
-            )
-        assert repository.list_documents("col_source")[0].title == "Paper"
-    finally:
-        reset_postgres_schema(engine)
-        engine.dispose()
+    await _finish(builds, task, success=True)
+    with pytest.raises(ValueError, match="collection build is not writable"):
+        await repository.replace_collection_documents(
+            "col_source", "build_source", _artifacts("Rewritten")
+        )
+    assert (await repository.list_documents("col_source"))[0].title == "Paper"

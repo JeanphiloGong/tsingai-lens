@@ -36,16 +36,18 @@ class GetCollectionContextCapability:
         self.collection_service = collection_service
         self.objective_repository = objective_repository
 
-    def execute(
+    async def execute(
         self,
         context: CapabilityExecutionContext,
         _arguments: GetCollectionContextArguments,
     ) -> ChatToolResult:
-        collection = self.collection_service.get_collection_for_user(
+        collection = await self.collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        objectives = self.objective_repository.list_objectives(context.collection_id)
+        objectives = await self.objective_repository.list_objectives(
+            context.collection_id
+        )
         visible = objectives[:_OBJECTIVE_LIMIT]
         objective_records = [self._objective_summary(item) for item in visible]
         omitted = len(objectives) - len(visible)

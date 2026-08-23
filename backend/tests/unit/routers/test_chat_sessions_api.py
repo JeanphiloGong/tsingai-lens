@@ -56,32 +56,41 @@ class _Service:
             risk=ToolRisk.WRITE,
         ).require_approval()
 
-    def create_session(self, *, collection_id: str, user_id: str) -> ChatSession:
+    async def create_session(
+        self,
+        *,
+        collection_id: str,
+        user_id: str,
+    ) -> ChatSession:
         assert collection_id == "col-1"
         assert user_id == "user-1"
         return self.session
 
-    def get_session_for_user(self, session_id: str, user_id: str) -> ChatSession:
+    async def get_session_for_user(
+        self,
+        session_id: str,
+        user_id: str,
+    ) -> ChatSession:
         if session_id != "chat-1" or user_id != "user-1":
             raise ChatSessionNotFoundError(session_id)
         return self.session
 
-    def list_messages_for_user(self, session_id: str, user_id: str):
-        self.get_session_for_user(session_id, user_id)
+    async def list_messages_for_user(self, session_id: str, user_id: str):
+        await self.get_session_for_user(session_id, user_id)
         return self.messages
 
-    def get_pending_approval_for_user(self, session_id: str, user_id: str):
-        self.get_session_for_user(session_id, user_id)
+    async def get_pending_approval_for_user(self, session_id: str, user_id: str):
+        await self.get_session_for_user(session_id, user_id)
         return self.pending
 
-    def post_message_for_user(
+    async def post_message_for_user(
         self,
         session_id: str,
         user_id: str,
         *,
         message: str,
     ) -> dict:
-        self.get_session_for_user(session_id, user_id)
+        await self.get_session_for_user(session_id, user_id)
         if message == "blocked":
             raise ChatApprovalPendingError(self.pending.tool_call_id)
         assert message == "你好"
@@ -92,7 +101,7 @@ class _Service:
             "error_code": None,
         }
 
-    def decide_tool_call_for_user(
+    async def decide_tool_call_for_user(
         self,
         session_id: str,
         tool_call_id: str,
@@ -101,7 +110,7 @@ class _Service:
         arguments_digest: str,
         decision: str,
     ) -> dict:
-        self.get_session_for_user(session_id, user_id)
+        await self.get_session_for_user(session_id, user_id)
         assert tool_call_id == "call-1"
         if arguments_digest != self.pending.arguments_digest:
             raise ValueError("approval arguments digest does not match stored arguments")
@@ -200,10 +209,10 @@ def test_chat_sessions_api_rejects_a_new_turn_while_write_approval_is_pending() 
 
 
 class _AuthService:
-    def ensure_bootstrap_user(self) -> None:
+    async def ensure_bootstrap_user(self) -> None:
         return None
 
-    def resolve_session(self, session_id: str | None) -> dict:
+    async def resolve_session(self, session_id: str | None) -> dict:
         if session_id != "browser-session":
             from application.auth import SessionNotFoundError
 

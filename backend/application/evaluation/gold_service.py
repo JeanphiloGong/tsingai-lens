@@ -18,7 +18,7 @@ class EvaluationGoldService:
         self.collection_service = collection_service
         self.evaluation_repository = evaluation_repository
 
-    def register_gold_set(
+    async def register_gold_set(
         self,
         *,
         collection_id: str,
@@ -30,8 +30,10 @@ class EvaluationGoldService:
         metadata: Mapping[str, Any] | None = None,
         items: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
     ) -> EvaluationGoldSet:
-        self.collection_service.get_collection(collection_id)
-        collection_document_ids = self._collection_document_ids(collection_id)
+        await self.collection_service.get_collection(collection_id)
+        collection_document_ids = await self._collection_document_ids(
+            collection_id
+        )
         gold_set = EvaluationGoldSet.from_mapping(
             {
                 "gold_id": gold_id,
@@ -51,7 +53,7 @@ class EvaluationGoldService:
             collection_document_ids=collection_document_ids,
             gold_items=gold_items,
         )
-        self.evaluation_repository.upsert_gold_set(gold_set, gold_items)
+        await self.evaluation_repository.upsert_gold_set(gold_set, gold_items)
         return gold_set
 
     def _gold_item_from_input(
@@ -63,9 +65,9 @@ class EvaluationGoldService:
         payload["gold_id"] = gold_id
         return EvaluationGoldItem.from_mapping(payload)
 
-    def _collection_document_ids(self, collection_id: str) -> set[str]:
+    async def _collection_document_ids(self, collection_id: str) -> set[str]:
         keys: set[str] = set()
-        for record in self.collection_service.list_files(collection_id):
+        for record in await self.collection_service.list_files(collection_id):
             for field in (
                 "document_id",
                 "source_document_id",
@@ -75,7 +77,7 @@ class EvaluationGoldService:
                 "storage_key",
             ):
                 self._add_document_key(keys, record.get(field))
-        manifest = self.collection_service.get_import_manifest(collection_id)
+        manifest = await self.collection_service.get_import_manifest(collection_id)
         for import_record in manifest.get("imports", []):
             if not isinstance(import_record, Mapping):
                 continue

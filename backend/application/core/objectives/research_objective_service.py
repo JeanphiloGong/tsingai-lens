@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from asyncio import to_thread
 import logging
 from dataclasses import dataclass, replace
 from typing import Any, Callable
@@ -138,14 +139,14 @@ class ResearchObjectiveService:
         self.paper_skim_service = paper_skim_service
         self.objective_candidate_service = objective_candidate_service
 
-    def discover_and_replace_objective_candidates(
+    async def discover_and_replace_objective_candidates(
         self,
         collection_id: str,
         progress_callback: ProgressCallback | None = None,
         *,
         build_id: str,
     ) -> ObjectiveFactSet:
-        source_inputs = self._load_objective_source_inputs(
+        source_inputs = await self._load_objective_source_inputs(
             collection_id,
             build_id=build_id,
         )
@@ -161,7 +162,8 @@ class ResearchObjectiveService:
             self._axis_equivalence_classifier = ResearchAxisEquivalenceClassifier(
                 response_client
             )
-        paper_skims = self.paper_skim_service.build_collection_paper_skims(
+        paper_skims = await to_thread(
+            self.paper_skim_service.build_collection_paper_skims,
             collection_id,
             documents=documents,
             profiles_by_document_id=source_inputs["profiles_by_document_id"],
@@ -172,7 +174,7 @@ class ResearchObjectiveService:
             signal_reconciler=self._paper_signal_reconciler,
             progress_callback=progress_callback,
         )
-        self.objective_repository.replace(
+        await self.objective_repository.replace(
             collection_id,
             build_id,
             ObjectiveFactSet(
@@ -191,13 +193,14 @@ class ResearchObjectiveService:
                 ),
             ),
         )
-        candidate_facts = self.objective_candidate_service.discover_candidate_facts(
+        candidate_facts = await to_thread(
+            self.objective_candidate_service.discover_candidate_facts,
             collection_id,
             paper_skims=paper_skims,
             axis_equivalence_classifier=self._axis_equivalence_classifier,
             progress_callback=progress_callback,
         )
-        self.objective_repository.replace(
+        await self.objective_repository.replace(
             collection_id,
             build_id,
             candidate_facts,
@@ -211,7 +214,7 @@ class ResearchObjectiveService:
         )
         return candidate_facts
 
-    def create_chat_assisted_candidate(
+    async def create_chat_assisted_candidate(
         self,
         *,
         collection_id: str,
@@ -229,7 +232,9 @@ class ResearchObjectiveService:
     ) -> ResearchObjective:
         """Persist one user-approved candidate supported by PaperSkim context."""
 
-        self.collection_service.get_collection_for_user(collection_id, user_id)
+        await self.collection_service.get_collection_for_user(
+            collection_id, user_id
+        )
         if len(outcomes) != 1:
             raise ValueError("chat-assisted objective requires exactly one outcome")
         if not seed_document_ids:
@@ -256,7 +261,7 @@ class ResearchObjectiveService:
         if not is_question_shaped_objective(objective):
             raise ValueError("chat-assisted objective question is not question-shaped")
 
-        facts = self.objective_repository.read(collection_id)
+        facts = await self.objective_repository.read(collection_id)
         if not facts.research_objectives_ready:
             raise ResearchObjectivesNotReadyError(collection_id)
         skims_by_document_id = {
@@ -296,7 +301,7 @@ class ResearchObjectiveService:
                 "extracted Evidence."
             ),
         )
-        return self.objective_repository.create_authored_candidate(
+        return await self.objective_repository.create_authored_candidate(
             objective,
             created_by_user_id=user_id,
             created_by_tool_call_id=tool_call_id,
@@ -331,7 +336,7 @@ class ResearchObjectiveService:
             and property_matching.axis_values_match(objective.outcomes[0], outcome)
         )
 
-    def generate_objective_analysis_artifacts(
+    async def generate_objective_analysis_artifacts(
         self,
         collection_id: str,
         analysis: ObjectiveAnalysis,
@@ -339,17 +344,34 @@ class ResearchObjectiveService:
     ) -> ObjectiveAnalysisArtifacts:
         if analysis.collection_id != collection_id:
             raise ValueError("analysis belongs to another collection")
-        active_objective = self.objective_repository.read_objective(
+        active_objective = await self.objective_repository.read_objective(
             collection_id, analysis.objective_id
         )
         if active_objective is None:
             raise ResearchObjectiveNotFoundError(collection_id, analysis.objective_id)
         if active_objective.active_analysis_version != analysis.analysis_version:
             raise ValueError("analysis is not the active objective version")
-        objective_inputs = self._build_objective_analysis_inputs(
+        objective_inputs = await self._build_objective_analysis_inputs(
             collection_id,
             build_id=analysis.source_build_id,
         )
+        return await to_thread(
+            self._generate_objective_analysis_artifacts,
+            collection_id,
+            analysis,
+            active_objective,
+            objective_inputs,
+            progress_callback,
+        )
+
+    def _generate_objective_analysis_artifacts(
+        self,
+        collection_id: str,
+        analysis: ObjectiveAnalysis,
+        active_objective: ResearchObjective,
+        objective_inputs: dict[str, Any],
+        progress_callback: ProgressCallback | None,
+    ) -> ObjectiveAnalysisArtifacts:
         source_objective = (
             active_objective
             if active_objective.origin == "chat_assisted"
@@ -455,17 +477,20 @@ class ResearchObjectiveService:
             findings=findings,
         )
 
-    def _build_objective_analysis_inputs(
+    async def _build_objective_analysis_inputs(
         self,
         collection_id: str,
         *,
         build_id: str,
     ) -> dict[str, Any]:
-        source_inputs = self._load_objective_source_inputs(
+        source_inputs = await self._load_objective_source_inputs(
             collection_id,
             build_id=build_id,
         )
-        facts = self.objective_repository.read(collection_id, build_id=build_id)
+        facts = await self.objective_repository.read(
+            collection_id,
+            build_id=build_id,
+        )
         if facts.research_objectives_ready and facts.paper_skims:
             return {
                 **source_inputs,
@@ -474,24 +499,33 @@ class ResearchObjectiveService:
             }
         raise ResearchObjectivesNotReadyError(collection_id)
 
-    def _load_objective_source_inputs(
+    async def _load_objective_source_inputs(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
     ) -> dict[str, Any]:
-        self.collection_service.get_collection(collection_id)
+        await self.collection_service.get_collection(collection_id)
         try:
-            documents = self._load_source_documents(
+            documents = await self._load_source_documents(
                 collection_id, build_id=build_id
             )
-            profiles = self.document_profile_service.read_document_profiles(
+            profiles = await self.document_profile_service.read_document_profiles(
                 collection_id,
                 build_id=build_id,
             )
         except (FileNotFoundError, DocumentProfilesNotReadyError) as exc:
             raise ResearchObjectivesNotReadyError(collection_id) from exc
 
+        document_trees_by_document_id = {
+            document.document_id: await load_document_tree(
+                collection_id,
+                document.document_id,
+                self.source_artifact_repository,
+                build_id=build_id,
+            )
+            for document in documents
+        }
         return {
             "documents": documents,
             "profiles_by_document_id": {
@@ -514,15 +548,7 @@ class ResearchObjectiveService:
                 document.document_id: list(document.figures)
                 for document in documents
             },
-            "document_trees_by_document_id": {
-                document.document_id: load_document_tree(
-                    collection_id,
-                    document.document_id,
-                    self.source_artifact_repository,
-                    build_id=build_id,
-                )
-                for document in documents
-            },
+            "document_trees_by_document_id": document_trees_by_document_id,
             "response_client": self._get_response_client(),
         }
 
@@ -531,19 +557,21 @@ class ResearchObjectiveService:
             self._response_client = build_default_structured_response_client()
         return self._response_client
 
-    def _load_source_documents(
+    async def _load_source_documents(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
     ) -> tuple[SourceDocument, ...]:
         documents = (
-            self.source_artifact_repository.read_collection_documents(
+            await self.source_artifact_repository.read_collection_documents(
                 collection_id,
                 build_id=build_id,
             )
             if build_id is not None
-            else self.source_artifact_repository.read_collection_documents(collection_id)
+            else await self.source_artifact_repository.read_collection_documents(
+                collection_id
+            )
         )
         if not documents:
             raise FileNotFoundError(f"source artifacts not ready: {collection_id}")

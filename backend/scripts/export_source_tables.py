@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import ast
 from datetime import datetime
 import json
@@ -94,7 +95,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+async def main_async() -> None:
     args = parse_args()
     backend_root = args.backend_root.expanduser().resolve()
     collection_dir = _resolve_collection_dir(
@@ -106,7 +107,7 @@ def main() -> None:
     if args.reparse_inputs:
         engine = build_database_engine(DatabaseSettings())
         try:
-            frames = _reparse_collection_inputs(
+            frames = await _reparse_collection_inputs(
                 backend_root=backend_root,
                 collection_dir=collection_dir,
                 collection_repository=PostgresCollectionRepository(
@@ -116,10 +117,10 @@ def main() -> None:
                 limit=args.limit,
             )
         finally:
-            engine.dispose()
+            await engine.dispose()
         source_mode = "reparse_inputs"
     else:
-        frames = _load_existing_artifacts(
+        frames = await _load_existing_artifacts(
             backend_root=backend_root,
             collection_dir=collection_dir,
         )
@@ -150,7 +151,7 @@ def _resolve_collection_dir(
     raise SystemExit("--collection-id or --collection-dir is required")
 
 
-def _load_existing_artifacts(
+async def _load_existing_artifacts(
     *,
     backend_root: Path,
     collection_dir: Path,
@@ -158,11 +159,11 @@ def _load_existing_artifacts(
     collection_id = collection_dir.name
     engine = build_database_engine(DatabaseSettings())
     try:
-        documents = PostgresSourceArtifactRepository(
+        documents = await PostgresSourceArtifactRepository(
             build_session_factory(engine)
         ).read_collection_documents(collection_id)
     finally:
-        engine.dispose()
+        await engine.dispose()
     if not documents:
         raise SystemExit(f"source artifacts not found: {collection_id}")
     return {
@@ -192,7 +193,7 @@ def _records_to_frame(records: tuple[Any, ...]) -> pd.DataFrame:
     return _normalize_frame(pd.DataFrame([record.to_record() for record in records]))
 
 
-def _reparse_collection_inputs(
+async def _reparse_collection_inputs(
     *,
     backend_root: Path,
     collection_dir: Path,
@@ -200,7 +201,7 @@ def _reparse_collection_inputs(
     document_id: str | None,
     limit: int | None,
 ) -> dict[str, pd.DataFrame]:
-    inputs = _collection_input_rows(collection_repository, collection_dir.name)
+    inputs = await _collection_input_rows(collection_repository, collection_dir.name)
     if document_id:
         inputs = [item for item in inputs if str(item.get("id") or "") == document_id]
     if limit is not None:
@@ -259,12 +260,12 @@ def _reparse_collection_inputs(
     }
 
 
-def _collection_input_rows(
+async def _collection_input_rows(
     collection_repository: CollectionRepository,
     collection_id: str,
 ) -> list[dict[str, Any]]:
     rows = []
-    for import_record in collection_repository.list_collection_imports(collection_id):
+    for import_record in await collection_repository.list_collection_imports(collection_id):
         for document in import_record.documents:
             file_record = document.file
             storage_key = file_record.storage_key.strip()
@@ -286,7 +287,7 @@ def _collection_input_rows(
     if rows:
         return rows
 
-    for file_record in collection_repository.list_collection_files(collection_id):
+    for file_record in await collection_repository.list_collection_files(collection_id):
         storage_key = file_record.storage_key.strip()
         if not storage_key.lower().endswith(".pdf"):
             continue
@@ -647,4 +648,4 @@ def _safe_name(value: Any) -> str:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main_async())

@@ -60,58 +60,64 @@ class CollectionPaths:
 
 
 class CollectionRepository(Protocol):
-    def add_collection(self, record: CollectionRecord) -> None: ...
+    async def add_collection(self, record: CollectionRecord) -> None: ...
 
-    def list_collections(
+    async def list_collections(
         self,
         owner_user_id: str | None = None,
     ) -> tuple[CollectionRecord, ...]: ...
 
-    def read_collection(self, collection_id: str) -> CollectionRecord | None: ...
+    async def read_collection(
+        self, collection_id: str
+    ) -> CollectionRecord | None: ...
 
-    def update_collection(self, record: CollectionRecord) -> bool: ...
+    async def update_collection(self, record: CollectionRecord) -> bool: ...
 
-    def add_collection_import(
+    async def add_collection_import(
         self,
         record: CollectionImportRecord,
         *,
         updated_at: str,
     ) -> None: ...
 
-    def list_collection_files(
+    async def list_collection_files(
         self,
         collection_id: str,
     ) -> tuple[CollectionFileRecord, ...]: ...
 
-    def list_collection_imports(
+    async def list_collection_imports(
         self,
         collection_id: str,
     ) -> tuple[CollectionImportRecord, ...]: ...
 
-    def read_document(self, document_id: str) -> DocumentRecord | None: ...
+    async def read_document(
+        self, document_id: str
+    ) -> DocumentRecord | None: ...
 
-    def read_document_version(
+    async def read_document_version(
         self,
         document_version_id: str,
     ) -> DocumentVersionRecord | None: ...
 
-    def list_collection_documents(
+    async def list_collection_documents(
         self,
         collection_id: str,
     ) -> tuple[CollectionDocumentRecord, ...]: ...
 
-    def add_collection_handoff(self, record: CollectionHandoffRecord) -> None: ...
+    async def add_collection_handoff(
+        self, record: CollectionHandoffRecord
+    ) -> None: ...
 
-    def list_collection_handoffs(
+    async def list_collection_handoffs(
         self,
         collection_id: str,
     ) -> tuple[CollectionHandoffRecord, ...]: ...
 
-    def delete_collection(self, collection_id: str) -> bool: ...
+    async def delete_collection(self, collection_id: str) -> bool: ...
 
 
 class BuildRepository(Protocol):
-    def add_task(
+    async def add_task(
         self,
         record: TaskRecord,
         *,
@@ -119,9 +125,9 @@ class BuildRepository(Protocol):
         mode: str = "standard",
     ) -> CollectionBuildRecord: ...
 
-    def read_task(self, task_id: str) -> TaskRecord | None: ...
+    async def read_task(self, task_id: str) -> TaskRecord | None: ...
 
-    def list_tasks(
+    async def list_tasks(
         self,
         *,
         collection_id: str | None = None,
@@ -130,29 +136,33 @@ class BuildRepository(Protocol):
         offset: int = 0,
     ) -> tuple[TaskRecord, ...]: ...
 
-    def update_task(
+    async def update_task(
         self,
         record: TaskRecord,
         *,
         stages: tuple[BuildStageRecord, ...] | None = None,
     ) -> bool: ...
 
-    def read_build(self, task_id: str) -> CollectionBuildRecord | None: ...
+    async def read_build(
+        self, task_id: str
+    ) -> CollectionBuildRecord | None: ...
 
-    def list_stages(self, task_id: str) -> tuple[BuildStageRecord, ...]: ...
+    async def list_stages(
+        self, task_id: str
+    ) -> tuple[BuildStageRecord, ...]: ...
 
-    def add_artifact_versions(
+    async def add_artifact_versions(
         self,
         task_id: str,
         records: tuple[ArtifactVersionRecord, ...],
     ) -> None: ...
 
-    def list_artifact_versions(
+    async def list_artifact_versions(
         self,
         task_id: str,
     ) -> tuple[ArtifactVersionRecord, ...]: ...
 
-    def finish_build(
+    async def finish_build(
         self,
         record: TaskRecord,
         *,
@@ -160,22 +170,26 @@ class BuildRepository(Protocol):
         activate: bool,
     ) -> CollectionBuildRecord: ...
 
-    def read_active_build(
+    async def read_active_build(
         self,
         collection_id: str,
     ) -> CollectionBuildRecord | None: ...
 
 
 class ChatRepository(Protocol):
-    def add_session(self, record: ChatSession) -> None: ...
+    async def add_session(self, record: ChatSession) -> None: ...
 
-    def read_session(self, session_id: str) -> ChatSession | None: ...
+    async def read_session(self, session_id: str) -> ChatSession | None: ...
 
-    def read_messages(self, session_id: str) -> tuple[ChatMessage, ...]: ...
+    async def read_messages(
+        self, session_id: str
+    ) -> tuple[ChatMessage, ...]: ...
 
-    def read_tool_call(self, tool_call_id: str) -> ChatToolCall | None: ...
+    async def read_tool_call(
+        self, tool_call_id: str
+    ) -> ChatToolCall | None: ...
 
-    def save_trajectory(
+    async def save_trajectory(
         self,
         *,
         session: ChatSession,
@@ -184,7 +198,7 @@ class ChatRepository(Protocol):
         tool_results: tuple[ChatToolResult, ...],
     ) -> None: ...
 
-    def decide_tool_call(
+    async def decide_tool_call(
         self,
         *,
         session_id: str,
@@ -197,16 +211,18 @@ class ChatRepository(Protocol):
 
 
 class ExperimentPlanRepository(Protocol):
-    def upsert_plan(self, plan: ExperimentPlanRecord) -> ExperimentPlanRecord: ...
+    async def upsert_plan(
+        self, plan: ExperimentPlanRecord
+    ) -> ExperimentPlanRecord: ...
 
-    def read_plan(
+    async def read_plan(
         self,
         collection_id: str,
         objective_id: str,
         plan_id: str,
     ) -> ExperimentPlanRecord | None: ...
 
-    def list_plans(
+    async def list_plans(
         self,
         collection_id: str,
         objective_id: str,
@@ -216,34 +232,34 @@ class ExperimentPlanRepository(Protocol):
 class SourceArtifactRepository(Protocol):
     backend_name: str
 
-    def replace_collection_documents(
+    async def replace_collection_documents(
         self,
         collection_id: str,
         build_id: str,
         documents: tuple[SourceDocument, ...],
     ) -> None: ...
 
-    def read_collection_documents(
+    async def read_collection_documents(
         self,
         collection_id: str,
         build_id: str | None = None,
     ) -> tuple[SourceDocument, ...]: ...
 
-    def read_document_tree(
+    async def read_document_tree(
         self,
         collection_id: str,
         document_id: str,
         build_id: str | None = None,
     ) -> SourceDocumentTree: ...
 
-    def list_documents(
+    async def list_documents(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
     ) -> list[SourceDocument]: ...
 
-    def list_text_units(
+    async def list_text_units(
         self,
         collection_id: str,
         document_id: str | None = None,
@@ -251,7 +267,7 @@ class SourceArtifactRepository(Protocol):
         build_id: str | None = None,
     ) -> list[SourceTextUnit]: ...
 
-    def list_blocks(
+    async def list_blocks(
         self,
         collection_id: str,
         document_id: str | None = None,
@@ -259,7 +275,7 @@ class SourceArtifactRepository(Protocol):
         build_id: str | None = None,
     ) -> list[SourceBlock]: ...
 
-    def list_tables(
+    async def list_tables(
         self,
         collection_id: str,
         document_id: str | None = None,
@@ -267,7 +283,7 @@ class SourceArtifactRepository(Protocol):
         build_id: str | None = None,
     ) -> list[SourceTable]: ...
 
-    def list_table_rows(
+    async def list_table_rows(
         self,
         collection_id: str,
         table_id: str | None = None,
@@ -275,7 +291,7 @@ class SourceArtifactRepository(Protocol):
         build_id: str | None = None,
     ) -> list[SourceTableRow]: ...
 
-    def list_table_cells(
+    async def list_table_cells(
         self,
         collection_id: str,
         table_id: str | None = None,
@@ -284,20 +300,20 @@ class SourceArtifactRepository(Protocol):
         build_id: str | None = None,
     ) -> list[SourceTableCell]: ...
 
-    def replace_collection_references(
+    async def replace_collection_references(
         self,
         collection_id: str,
         build_id: str,
         references: SourceReferenceSet,
     ) -> None: ...
 
-    def read_collection_references(
+    async def read_collection_references(
         self,
         collection_id: str,
         build_id: str | None = None,
     ) -> SourceReferenceSet: ...
 
-    def list_figures(
+    async def list_figures(
         self,
         collection_id: str,
         document_id: str | None = None,
@@ -309,21 +325,21 @@ class SourceArtifactRepository(Protocol):
 class PaperFactRepository(Protocol):
     backend_name: str
 
-    def replace_document_profiles(
+    async def replace_document_profiles(
         self,
         collection_id: str,
         build_id: str,
         profiles: tuple[DocumentProfile, ...],
     ) -> None: ...
 
-    def replace_paper_facts(
+    async def replace_paper_facts(
         self,
         collection_id: str,
         build_id: str,
         facts: PaperFactSet,
     ) -> None: ...
 
-    def read(
+    async def read(
         self,
         collection_id: str,
         *,
@@ -334,26 +350,26 @@ class PaperFactRepository(Protocol):
 class ObjectiveRepository(Protocol):
     backend_name: str
 
-    def replace(
+    async def replace(
         self,
         collection_id: str,
         build_id: str,
         facts: ObjectiveFactSet,
     ) -> None: ...
 
-    def read(
+    async def read(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
     ) -> ObjectiveFactSet: ...
 
-    def list_objectives(
+    async def list_objectives(
         self,
         collection_id: str,
     ) -> tuple[ResearchObjective, ...]: ...
 
-    def create_authored_candidate(
+    async def create_authored_candidate(
         self,
         objective: ResearchObjective,
         *,
@@ -361,19 +377,19 @@ class ObjectiveRepository(Protocol):
         created_by_tool_call_id: str,
     ) -> ResearchObjective: ...
 
-    def read_objective(
+    async def read_objective(
         self,
         collection_id: str,
         objective_id: str,
     ) -> ResearchObjective | None: ...
 
-    def confirm_objective(
+    async def confirm_objective(
         self,
         collection_id: str,
         objective_id: str,
     ) -> ResearchObjective: ...
 
-    def queue_analysis(
+    async def queue_analysis(
         self,
         collection_id: str,
         objective_id: str,
@@ -383,14 +399,14 @@ class ObjectiveRepository(Protocol):
         prompt_versions: dict[str, str],
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]: ...
 
-    def claim_analysis(
+    async def claim_analysis(
         self,
         collection_id: str,
         objective_id: str,
         analysis_version: int,
     ) -> ObjectiveAnalysis | None: ...
 
-    def update_analysis_progress(
+    async def update_analysis_progress(
         self,
         collection_id: str,
         objective_id: str,
@@ -403,7 +419,7 @@ class ObjectiveRepository(Protocol):
         progress_message: str | None,
     ) -> ObjectiveAnalysis: ...
 
-    def update_analysis_execution_stats(
+    async def update_analysis_execution_stats(
         self,
         collection_id: str,
         objective_id: str,
@@ -415,7 +431,7 @@ class ObjectiveRepository(Protocol):
         diagnostics: tuple[dict[str, Any], ...],
     ) -> ObjectiveAnalysis: ...
 
-    def fail_analysis(
+    async def fail_analysis(
         self,
         collection_id: str,
         objective_id: str,
@@ -426,7 +442,7 @@ class ObjectiveRepository(Protocol):
         expected_status: str | None = None,
     ) -> ObjectiveAnalysis: ...
 
-    def publish_analysis(
+    async def publish_analysis(
         self,
         collection_id: str,
         objective_id: str,
@@ -437,27 +453,27 @@ class ObjectiveRepository(Protocol):
         findings: tuple[Finding, ...],
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]: ...
 
-    def read_analysis(
+    async def read_analysis(
         self,
         collection_id: str,
         objective_id: str,
         analysis_version: int | None = None,
     ) -> ObjectiveAnalysis | None: ...
 
-    def read_published_analysis(
+    async def read_published_analysis(
         self,
         collection_id: str,
         objective_id: str,
     ) -> ObjectiveAnalysis | None: ...
 
-    def list_contributions(
+    async def list_contributions(
         self,
         collection_id: str,
         objective_id: str,
         analysis_version: int,
     ) -> tuple[PaperContribution, ...]: ...
 
-    def list_findings(
+    async def list_findings(
         self,
         collection_id: str,
         objective_id: str,
@@ -467,7 +483,7 @@ class ObjectiveRepository(Protocol):
         limit: int = 50,
     ) -> tuple[tuple[Finding, ...], int]: ...
 
-    def read_finding(
+    async def read_finding(
         self,
         collection_id: str,
         objective_id: str,
@@ -475,7 +491,7 @@ class ObjectiveRepository(Protocol):
         finding_id: str,
     ) -> Finding | None: ...
 
-    def list_evidence(
+    async def list_evidence(
         self,
         collection_id: str,
         objective_id: str,
@@ -490,14 +506,14 @@ class ObjectiveRepository(Protocol):
 class ComparisonRepository(Protocol):
     backend_name: str
 
-    def replace(
+    async def replace(
         self,
         collection_id: str,
         build_id: str,
         facts: ComparisonFactSet,
     ) -> None: ...
 
-    def read(
+    async def read(
         self,
         collection_id: str,
         *,
@@ -508,12 +524,12 @@ class ComparisonRepository(Protocol):
 class FindingReviewRepository(Protocol):
     backend_name: str
 
-    def upsert_feedback(
+    async def upsert_feedback(
         self,
         feedback: FindingFeedback,
     ) -> FindingFeedback: ...
 
-    def list_feedback(
+    async def list_feedback(
         self,
         collection_id: str,
         objective_id: str | None = None,
@@ -521,12 +537,12 @@ class FindingReviewRepository(Protocol):
         finding_id: str | None = None,
     ) -> tuple[FindingFeedback, ...]: ...
 
-    def upsert_curation(
+    async def upsert_curation(
         self,
         curation: FindingCuration,
     ) -> FindingCuration: ...
 
-    def list_curations(
+    async def list_curations(
         self,
         collection_id: str,
         objective_id: str | None = None,
@@ -538,28 +554,36 @@ class FindingReviewRepository(Protocol):
 class EvaluationRepository(Protocol):
     backend_name: str
 
-    def upsert_gold_set(
+    async def upsert_gold_set(
         self,
         gold_set: EvaluationGoldSet,
         gold_items: tuple[EvaluationGoldItem, ...],
     ) -> None: ...
 
-    def read_gold_set(self, gold_id: str) -> EvaluationGoldSet | None: ...
+    async def read_gold_set(
+        self, gold_id: str
+    ) -> EvaluationGoldSet | None: ...
 
-    def list_gold_items(self, gold_id: str) -> tuple[EvaluationGoldItem, ...]: ...
+    async def list_gold_items(
+        self, gold_id: str
+    ) -> tuple[EvaluationGoldItem, ...]: ...
 
-    def upsert_prediction_snapshot(
+    async def upsert_prediction_snapshot(
         self,
         snapshot: EvaluationPredictionSnapshot,
     ) -> None: ...
 
-    def read_prediction_snapshot(
+    async def read_prediction_snapshot(
         self,
         snapshot_id: str,
     ) -> EvaluationPredictionSnapshot | None: ...
 
-    def upsert_evaluation_run(self, run: EvaluationRun) -> None: ...
+    async def upsert_evaluation_run(self, run: EvaluationRun) -> None: ...
 
-    def read_evaluation_run(self, evaluation_run_id: str) -> EvaluationRun | None: ...
+    async def read_evaluation_run(
+        self, evaluation_run_id: str
+    ) -> EvaluationRun | None: ...
 
-    def list_evaluation_runs(self, collection_id: str) -> tuple[EvaluationRun, ...]: ...
+    async def list_evaluation_runs(
+        self, collection_id: str
+    ) -> tuple[EvaluationRun, ...]: ...

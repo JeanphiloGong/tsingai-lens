@@ -494,7 +494,12 @@ class ObjectiveEvidenceMapResponse(BaseModel):
     objective_id: str
     analysis_version: int = Field(..., ge=1)
     projection_version: Literal["objective-evidence-map.v1"]
-    complete: bool
+    complete: bool = Field(
+        ...,
+        description=(
+            "Whether every included paper reached a non-technical analysis outcome."
+        ),
+    )
     nodes: list[ObjectiveEvidenceMapNodeResponse]
     edges: list[ObjectiveEvidenceMapEdgeResponse]
     coverage: ObjectiveEvidenceMapCoverageResponse

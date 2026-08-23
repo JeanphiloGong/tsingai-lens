@@ -8,12 +8,14 @@ from domain.source import (
 
 
 class MemorySourceArtifactRepository:
+    backend_name = "memory"
+
     def __init__(self, *, active_build_id: str = "build_test") -> None:
         self.active_build_id = active_build_id
         self._documents: dict[tuple[str, str], tuple[SourceDocument, ...]] = {}
         self._references: dict[tuple[str, str], SourceReferenceSet] = {}
 
-    def replace_collection_documents(
+    async def replace_collection_documents(
         self,
         collection_id: str,
         build_id: str,
@@ -21,7 +23,7 @@ class MemorySourceArtifactRepository:
     ) -> None:
         self._documents[(collection_id, build_id)] = documents
 
-    def read_collection_documents(
+    async def read_collection_documents(
         self,
         collection_id: str,
         build_id: str | None = None,
@@ -29,7 +31,7 @@ class MemorySourceArtifactRepository:
         selected_build_id = build_id or self.active_build_id
         return self._documents.get((collection_id, selected_build_id), ())
 
-    def replace_collection_references(
+    async def replace_collection_references(
         self,
         collection_id: str,
         build_id: str,
@@ -37,7 +39,7 @@ class MemorySourceArtifactRepository:
     ) -> None:
         self._references[(collection_id, build_id)] = references
 
-    def read_collection_references(
+    async def read_collection_references(
         self,
         collection_id: str,
         build_id: str | None = None,
@@ -47,16 +49,14 @@ class MemorySourceArtifactRepository:
             (collection_id, selected_build_id), SourceReferenceSet()
         )
 
-    def read_document_tree(
+    async def read_document_tree(
         self,
         collection_id: str,
         document_id: str,
         build_id: str | None = None,
     ):
-        documents = self.read_collection_documents(
-            collection_id,
-            build_id=build_id,
-        )
+        selected_build_id = build_id or self.active_build_id
+        documents = self._documents.get((collection_id, selected_build_id), ())
         document = next(
             item for item in documents if item.document_id == document_id
         )
@@ -66,11 +66,112 @@ class MemorySourceArtifactRepository:
             blocks=document.blocks,
             tables=document.tables,
             figures=document.figures,
-            references=self.read_collection_references(
-                collection_id,
-                build_id=build_id,
+            references=self._references.get(
+                (collection_id, selected_build_id),
+                SourceReferenceSet(),
             ),
         )
+
+    async def list_documents(
+        self,
+        collection_id: str,
+        *,
+        build_id: str | None = None,
+    ) -> list[SourceDocument]:
+        selected_build_id = build_id or self.active_build_id
+        return list(self._documents.get((collection_id, selected_build_id), ()))
+
+    async def list_text_units(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+        *,
+        build_id: str | None = None,
+    ) -> list:
+        documents = await self.list_documents(collection_id, build_id=build_id)
+        return [
+            item
+            for document in documents
+            if document_id is None or document.document_id == document_id
+            for item in document.text_units
+        ]
+
+    async def list_blocks(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+        *,
+        build_id: str | None = None,
+    ) -> list:
+        documents = await self.list_documents(collection_id, build_id=build_id)
+        return [
+            item
+            for document in documents
+            if document_id is None or document.document_id == document_id
+            for item in document.blocks
+        ]
+
+    async def list_tables(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+        *,
+        build_id: str | None = None,
+    ) -> list:
+        documents = await self.list_documents(collection_id, build_id=build_id)
+        return [
+            item
+            for document in documents
+            if document_id is None or document.document_id == document_id
+            for item in document.tables
+        ]
+
+    async def list_table_rows(
+        self,
+        collection_id: str,
+        table_id: str | None = None,
+        *,
+        build_id: str | None = None,
+    ) -> list:
+        documents = await self.list_documents(collection_id, build_id=build_id)
+        return [
+            item
+            for document in documents
+            for item in document.table_rows
+            if table_id is None or item.table_id == table_id
+        ]
+
+    async def list_table_cells(
+        self,
+        collection_id: str,
+        table_id: str | None = None,
+        row_index: int | None = None,
+        *,
+        build_id: str | None = None,
+    ) -> list:
+        documents = await self.list_documents(collection_id, build_id=build_id)
+        return [
+            item
+            for document in documents
+            for item in document.table_cells
+            if (table_id is None or item.table_id == table_id)
+            and (row_index is None or item.row_index == row_index)
+        ]
+
+    async def list_figures(
+        self,
+        collection_id: str,
+        document_id: str | None = None,
+        *,
+        build_id: str | None = None,
+    ) -> list:
+        documents = await self.list_documents(collection_id, build_id=build_id)
+        return [
+            item
+            for document in documents
+            if document_id is None or document.document_id == document_id
+            for item in document.figures
+        ]
 
     def activate(self, build_id: str) -> None:
         self.active_build_id = build_id

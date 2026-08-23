@@ -9,11 +9,18 @@ from application.source.reference_extraction_service import (
     SourceReferenceExtractionService,
 )
 from domain.source import SourceBlock, SourceDocument, assemble_source_documents
-from infra.persistence.sqlite import SqliteSourceArtifactRepository
+from tests.support.source_artifact_repository import MemorySourceArtifactRepository
+
+pytestmark = pytest.mark.anyio
 
 
-def test_source_reference_workflow_builds_and_persists_refs(tmp_path):
-    repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+async def test_source_reference_workflow_builds_and_persists_refs(tmp_path):
+    repository = MemorySourceArtifactRepository()
     artifacts = assemble_source_documents(
         documents=(
             SourceDocument(
@@ -47,16 +54,17 @@ def test_source_reference_workflow_builds_and_persists_refs(tmp_path):
             ),
         ),
     )
-    repository.replace_collection_documents("col_refs", artifacts)
-    repository.replace_collection_references(
+    await repository.replace_collection_documents("col_refs", "build_test", artifacts)
+    await repository.replace_collection_references(
         "col_refs",
+        "build_test",
         SourceReferenceExtractionService().extract(artifacts),
     )
     service = SourceReferenceWorkflowService(
         source_artifact_repository=repository,
     )
 
-    result = service.build_collection_references("col_refs")
+    result = await service.build_collection_references("col_refs")
 
     assert result.to_summary() == {
         "collection_id": "col_refs",
@@ -65,17 +73,17 @@ def test_source_reference_workflow_builds_and_persists_refs(tmp_path):
         "resolution_count": 0,
         "candidate_count": 1,
     }
-    restored = service.read_collection_references("col_refs")
+    restored = await service.read_collection_references("col_refs")
     assert restored.references.entries[0].reference_id == "ref-doc-1-0001"
     assert restored.references.mentions[0].reference_id == "ref-doc-1-0001"
     assert restored.references.candidates[0].mention_count == 1
 
 
-def test_source_reference_workflow_requires_source_artifacts(tmp_path):
-    repository = SqliteSourceArtifactRepository(tmp_path / "lens.sqlite")
+async def test_source_reference_workflow_requires_source_artifacts(tmp_path):
+    repository = MemorySourceArtifactRepository()
     service = SourceReferenceWorkflowService(
         source_artifact_repository=repository,
     )
 
     with pytest.raises(FileNotFoundError, match="source artifacts not ready"):
-        service.build_collection_references("missing_collection")
+        await service.build_collection_references("missing_collection")

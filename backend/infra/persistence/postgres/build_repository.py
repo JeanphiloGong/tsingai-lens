@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.pipeline import (
     ExecutionStats,
@@ -30,30 +30,32 @@ from infra.persistence.postgres.models.collection import Collection
 
 
 class PostgresBuildRepository:
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         self.session_factory = session_factory
 
-    def add_task(
+    async def add_task(
         self,
         record: TaskRecord,
         *,
         build_id: str,
         mode: str = "standard",
     ) -> CollectionBuildRecord:
-        with self.session_factory.begin() as session:
-            collection = session.scalar(
+        async with self.session_factory.begin() as session:
+            collection = await session.scalar(
                 select(Collection)
                 .where(Collection.collection_id == record.collection_id)
                 .with_for_update()
             )
-            current_number = session.scalar(
+            current_number = await session.scalar(
                 select(func.max(CollectionBuild.build_number)).where(
                     CollectionBuild.collection_id == record.collection_id
                 )
             )
             build_number = int(current_number or 0) + 1
             session.add(_task_row(record))
-            session.flush()
+            await session.flush()
             build = CollectionBuild(
                 build_id=str(build_id),
                 task_id=record.task_id,
@@ -67,16 +69,16 @@ class PostgresBuildRepository:
             )
             session.add(build)
             if collection is None:
-                session.flush()
+                await session.flush()
             result = _build_record(build)
         return result
 
-    def read_task(self, task_id: str) -> TaskRecord | None:
-        with self.session_factory() as session:
-            row = session.get(Task, task_id)
+    async def read_task(self, task_id: str) -> TaskRecord | None:
+        async with self.session_factory() as session:
+            row = await session.get(Task, task_id)
             return _task_record(row) if row is not None else None
 
-    def list_tasks(
+    async def list_tasks(
         self,
         *,
         collection_id: str | None = None,
@@ -94,21 +96,22 @@ class PostgresBuildRepository:
             statement = statement.offset(offset)
         if limit is not None:
             statement = statement.limit(limit)
-        with self.session_factory() as session:
-            return tuple(_task_record(row) for row in session.scalars(statement))
+        async with self.session_factory() as session:
+            rows = await session.scalars(statement)
+            return tuple(_task_record(row) for row in rows)
 
-    def update_task(
+    async def update_task(
         self,
         record: TaskRecord,
         *,
         stages: tuple[BuildStageRecord, ...] | None = None,
     ) -> bool:
-        with self.session_factory.begin() as session:
-            task = session.get(Task, record.task_id)
+        async with self.session_factory.begin() as session:
+            task = await session.get(Task, record.task_id)
             if task is None:
                 return False
             _update_task_row(task, record)
-            build = session.scalar(
+            build = await session.scalar(
                 select(CollectionBuild).where(CollectionBuild.task_id == record.task_id)
             )
             if build is None:
@@ -124,44 +127,51 @@ class PostgresBuildRepository:
                         raise ValueError(
                             f"stage build mismatch: {stage_record.stage_id}"
                         )
-                    stage = session.get(BuildStage, stage_record.stage_id)
+                    stage = await session.get(
+                        BuildStage, stage_record.stage_id
+                    )
                     if stage is None:
                         session.add(_stage_row(stage_record))
                     else:
                         _update_stage_row(stage, stage_record)
             return True
 
-    def read_build(self, task_id: str) -> CollectionBuildRecord | None:
-        with self.session_factory() as session:
-            build = session.scalar(
+    async def read_build(
+        self, task_id: str
+    ) -> CollectionBuildRecord | None:
+        async with self.session_factory() as session:
+            build = await session.scalar(
                 select(CollectionBuild).where(CollectionBuild.task_id == task_id)
             )
             return _build_record(build) if build is not None else None
 
-    def list_stages(self, task_id: str) -> tuple[BuildStageRecord, ...]:
+    async def list_stages(
+        self, task_id: str
+    ) -> tuple[BuildStageRecord, ...]:
         statement = (
             select(BuildStage)
             .join(CollectionBuild, CollectionBuild.build_id == BuildStage.build_id)
             .where(CollectionBuild.task_id == task_id)
             .order_by(BuildStage.stage_order, BuildStage.stage_id)
         )
-        with self.session_factory() as session:
-            return tuple(_stage_record(row) for row in session.scalars(statement))
+        async with self.session_factory() as session:
+            rows = await session.scalars(statement)
+            return tuple(_stage_record(row) for row in rows)
 
-    def add_artifact_versions(
+    async def add_artifact_versions(
         self,
         task_id: str,
         records: tuple[ArtifactVersionRecord, ...],
     ) -> None:
-        with self.session_factory.begin() as session:
-            build = session.scalar(
+        async with self.session_factory.begin() as session:
+            build = await session.scalar(
                 select(CollectionBuild).where(CollectionBuild.task_id == task_id)
             )
             if build is None:
                 raise FileNotFoundError(f"build not found for task: {task_id}")
             stage_ids = {record.build_stage_id for record in records}
             owned_stage_ids = set(
-                session.scalars(
+                await session.scalars(
                     select(BuildStage.stage_id).where(
                         BuildStage.build_id == build.build_id,
                         BuildStage.stage_id.in_(stage_ids),
@@ -172,7 +182,7 @@ class PostgresBuildRepository:
                 raise ValueError(f"artifact stage does not belong to task: {task_id}")
             session.add_all(_artifact_row(record) for record in records)
 
-    def list_artifact_versions(
+    async def list_artifact_versions(
         self,
         task_id: str,
     ) -> tuple[ArtifactVersionRecord, ...]:
@@ -185,22 +195,23 @@ class PostgresBuildRepository:
                 ArtifactVersion.artifact_kind, ArtifactVersion.artifact_version_id
             )
         )
-        with self.session_factory() as session:
-            return tuple(_artifact_record(row) for row in session.scalars(statement))
+        async with self.session_factory() as session:
+            rows = await session.scalars(statement)
+            return tuple(_artifact_record(row) for row in rows)
 
-    def finish_build(
+    async def finish_build(
         self,
         record: TaskRecord,
         *,
         build_status: str,
         activate: bool,
     ) -> CollectionBuildRecord:
-        with self.session_factory.begin() as session:
-            task = session.get(Task, record.task_id)
+        async with self.session_factory.begin() as session:
+            task = await session.get(Task, record.task_id)
             if task is None:
                 raise FileNotFoundError(f"task not found: {record.task_id}")
             _update_task_row(task, record)
-            build = session.scalar(
+            build = await session.scalar(
                 select(CollectionBuild)
                 .where(CollectionBuild.task_id == record.task_id)
                 .with_for_update()
@@ -213,11 +224,11 @@ class PostgresBuildRepository:
             if activate:
                 if build_status != "succeeded":
                     raise ValueError("only succeeded builds can become active")
-                self._activate_if_newer(session, build)
+                await self._activate_if_newer(session, build)
             result = _build_record(build)
         return result
 
-    def read_active_build(
+    async def read_active_build(
         self,
         collection_id: str,
     ) -> CollectionBuildRecord | None:
@@ -229,20 +240,22 @@ class PostgresBuildRepository:
             )
             .where(CollectionActiveBuild.collection_id == collection_id)
         )
-        with self.session_factory() as session:
-            build = session.scalar(statement)
+        async with self.session_factory() as session:
+            build = await session.scalar(statement)
             return _build_record(build) if build is not None else None
 
     @staticmethod
-    def _activate_if_newer(session: Session, build: CollectionBuild) -> None:
-        collection = session.scalar(
+    async def _activate_if_newer(
+        session: AsyncSession, build: CollectionBuild
+    ) -> None:
+        collection = await session.scalar(
             select(Collection)
             .where(Collection.collection_id == build.collection_id)
             .with_for_update()
         )
         if collection is None:
             raise RuntimeError(f"collection not found: {build.collection_id}")
-        active = session.get(CollectionActiveBuild, build.collection_id)
+        active = await session.get(CollectionActiveBuild, build.collection_id)
         if active is None:
             session.add(
                 CollectionActiveBuild(
@@ -251,7 +264,7 @@ class PostgresBuildRepository:
                 )
             )
             return
-        current = session.get(CollectionBuild, active.build_id)
+        current = await session.get(CollectionBuild, active.build_id)
         if current is None or current.build_number < build.build_number:
             active.build_id = build.build_id
 

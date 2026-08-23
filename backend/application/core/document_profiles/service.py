@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from asyncio import to_thread
 import ast
 import json
 import logging
@@ -101,13 +102,13 @@ class DocumentProfileService:
         self.paper_fact_repository = paper_fact_repository
         self.source_artifact_repository = source_artifact_repository
 
-    def list_document_profiles(
+    async def list_document_profiles(
         self,
         collection_id: str,
         offset: int = 0,
         limit: int = 50,
     ) -> dict[str, Any]:
-        profiles = self.read_document_profiles(collection_id)
+        profiles = await self.read_document_profiles(collection_id)
         summary = self.summarize_document_profiles(profiles)
         items = [
             self._serialize_profile_record(profile)
@@ -121,29 +122,29 @@ class DocumentProfileService:
             "items": items,
         }
 
-    def get_document_summary(self, collection_id: str) -> dict[str, Any]:
-        profiles = self.read_document_profiles(collection_id)
+    async def get_document_summary(self, collection_id: str) -> dict[str, Any]:
+        profiles = await self.read_document_profiles(collection_id)
         return self.summarize_document_profiles(profiles)
 
-    def get_document_profile(
+    async def get_document_profile(
         self,
         collection_id: str,
         document_id: str,
     ) -> dict[str, Any]:
-        profiles = self.read_document_profiles(collection_id)
+        profiles = await self.read_document_profiles(collection_id)
         for profile in profiles:
             if str(profile.document_id) == str(document_id):
                 return self._serialize_profile_record(profile)
         raise DocumentNotFoundError(collection_id, document_id)
 
-    def get_document_content(
+    async def get_document_content(
         self,
         collection_id: str,
         document_id: str,
     ) -> dict[str, Any]:
-        self.collection_service.get_collection(collection_id)
+        await self.collection_service.get_collection(collection_id)
         try:
-            documents = self._load_source_documents(collection_id)
+            documents = await self._load_source_documents(collection_id)
         except FileNotFoundError as exc:
             raise DocumentContentNotReadyError(collection_id) from exc
 
@@ -163,8 +164,8 @@ class DocumentProfileService:
             document.document_id: [block.to_record() for block in document.blocks]
             for document in documents
         }
-        profile = self._find_profile_row(collection_id, document_id)
-        file_lookup = self._build_collection_file_lookup(collection_id)
+        profile = await self._find_profile_row(collection_id, document_id)
+        file_lookup = await self._build_collection_file_lookup(collection_id)
 
         full_text = str(row.get("text") or "").strip()
         block_payload = self._build_document_content_blocks(
@@ -201,14 +202,16 @@ class DocumentProfileService:
             "warnings": warnings,
         }
 
-    def read_document_profiles(
+    async def read_document_profiles(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
     ) -> tuple[DocumentProfile, ...]:
-        self.collection_service.get_collection(collection_id)
-        facts = self.paper_fact_repository.read(collection_id, build_id=build_id)
+        await self.collection_service.get_collection(collection_id)
+        facts = await self.paper_fact_repository.read(
+            collection_id, build_id=build_id
+        )
         if facts.document_profiles:
             return self._normalize_profile_records(
                 facts.document_profiles,
@@ -216,15 +219,15 @@ class DocumentProfileService:
             )
         raise DocumentProfilesNotReadyError(collection_id)
 
-    def build_document_profiles(
+    async def build_document_profiles(
         self,
         collection_id: str,
         *,
         build_id: str,
     ) -> tuple[DocumentProfile, ...]:
-        self.collection_service.get_collection(collection_id)
+        await self.collection_service.get_collection(collection_id)
         try:
-            documents = self._load_source_documents(
+            documents = await self._load_source_documents(
                 collection_id, build_id=build_id
             )
         except FileNotFoundError as exc:
@@ -234,7 +237,7 @@ class DocumentProfileService:
             document.document_id: [block.to_record() for block in document.blocks]
             for document in documents
         }
-        file_lookup = self._build_collection_file_lookup(collection_id)
+        file_lookup = await self._build_collection_file_lookup(collection_id)
         logger.info(
             "Document profile build started collection_id=%s document_count=%s block_count=%s",
             collection_id,
@@ -246,7 +249,8 @@ class DocumentProfileService:
         for row in document_records:
             document_id = str(row.get("paper_id") or row.get("document_id") or "")
             document_blocks = blocks_by_doc.get(document_id, [])
-            profiled = self._profile_document_row(
+            profiled = await to_thread(
+                self._profile_document_row,
                 collection_id=collection_id,
                 build_id=build_id,
                 row=row,
@@ -266,7 +270,7 @@ class DocumentProfileService:
             profiles,
             collection_id,
         )
-        self.paper_fact_repository.replace_document_profiles(
+        await self.paper_fact_repository.replace_document_profiles(
             collection_id,
             build_id,
             normalized_profiles,
@@ -283,19 +287,21 @@ class DocumentProfileService:
             self._document_profile_extractor = build_default_document_profile_extractor()
         return self._document_profile_extractor
 
-    def _load_source_documents(
+    async def _load_source_documents(
         self,
         collection_id: str,
         *,
         build_id: str | None = None,
     ) -> tuple[SourceDocument, ...]:
         documents = (
-            self.source_artifact_repository.read_collection_documents(
+            await self.source_artifact_repository.read_collection_documents(
                 collection_id,
                 build_id=build_id,
             )
             if build_id is not None
-            else self.source_artifact_repository.read_collection_documents(collection_id)
+            else await self.source_artifact_repository.read_collection_documents(
+                collection_id
+            )
         )
         if not documents:
             raise FileNotFoundError(f"source artifacts not ready: {collection_id}")
@@ -566,13 +572,13 @@ class DocumentProfileService:
         text = str(value).strip()
         return text or None
 
-    def _find_profile_row(
+    async def _find_profile_row(
         self,
         collection_id: str,
         document_id: str,
     ) -> dict[str, Any] | None:
         try:
-            profiles = self.read_document_profiles(collection_id)
+            profiles = await self.read_document_profiles(collection_id)
         except DocumentProfilesNotReadyError:
             return None
 
@@ -653,9 +659,11 @@ class DocumentProfileService:
             return None
         return number if math.isfinite(number) else None
 
-    def _build_collection_file_lookup(self, collection_id: str) -> dict[str, Any]:
+    async def _build_collection_file_lookup(
+        self, collection_id: str
+    ) -> dict[str, Any]:
         try:
-            files = self.collection_service.list_files(collection_id)
+            files = await self.collection_service.list_files(collection_id)
         except FileNotFoundError:
             files = []
 

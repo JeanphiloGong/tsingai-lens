@@ -123,7 +123,7 @@ async def list_collection_document_profiles(
     offset: Annotated[int, Query(ge=0, description="偏移量")] = 0,
 ) -> DocumentProfileListResponse:
     try:
-        payload = request.app.state.document_profile_service.list_document_profiles(
+        payload = await request.app.state.document_profile_service.list_document_profiles(
             collection_id,
             offset=offset,
             limit=limit,
@@ -149,7 +149,7 @@ async def get_collection_document_profile(
     request: Request,
 ) -> DocumentProfileItemResponse:
     try:
-        payload = request.app.state.document_profile_service.get_document_profile(
+        payload = await request.app.state.document_profile_service.get_document_profile(
             collection_id,
             document_id,
         )
@@ -184,7 +184,7 @@ async def get_collection_document_content(
     request: Request,
 ) -> DocumentContentResponse:
     try:
-        payload = request.app.state.document_profile_service.get_document_content(
+        payload = await request.app.state.document_profile_service.get_document_content(
             collection_id,
             document_id,
         )
@@ -219,7 +219,7 @@ async def get_collection_document_markdown(
     request: Request,
 ) -> DocumentMarkdownResponse:
     try:
-        payload = request.app.state.document_markdown_service.get_document_markdown(
+        payload = await request.app.state.document_markdown_service.get_document_markdown(
             collection_id,
             document_id,
         )
@@ -255,7 +255,7 @@ async def get_collection_document_source(
     document_profile_service = request.app.state.document_profile_service
     source_filename: str | None = None
     try:
-        profile = document_profile_service.get_document_profile(
+        profile = await document_profile_service.get_document_profile(
             collection_id, document_id
         )
         source_filename = profile.get("source_filename")
@@ -263,7 +263,7 @@ async def get_collection_document_source(
         source_filename = None
 
     try:
-        payload = request.app.state.collection_service.resolve_document_source_file(
+        payload = await request.app.state.collection_service.resolve_document_source_file(
             collection_id,
             document_id,
             source_filename=source_filename,
@@ -308,7 +308,7 @@ async def get_collection_document_figure_image(
     request: Request,
 ) -> Response:
     try:
-        payload = request.app.state.document_markdown_service.resolve_figure_image_file(
+        payload = await request.app.state.document_markdown_service.resolve_figure_image_file(
             collection_id,
             document_id,
             figure_id,

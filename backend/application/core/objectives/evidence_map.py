@@ -193,12 +193,15 @@ def build_objective_evidence_map(
             *finding.contradicting_evidence_ids,
         )
     }
+    failed_document_count = sum(
+        item.analysis_status == "failed" for item in contributions
+    )
     return {
         "collection_id": objective.collection_id,
         "objective_id": objective.objective_id,
         "analysis_version": version,
         "projection_version": PROJECTION_VERSION,
-        "complete": True,
+        "complete": failed_document_count == 0,
         "nodes": nodes,
         "edges": edges,
         "coverage": {
@@ -209,9 +212,7 @@ def build_objective_evidence_map(
             "excluded_document_count": sum(
                 item.analysis_status == "excluded" for item in contributions
             ),
-            "failed_document_count": sum(
-                item.analysis_status == "failed" for item in contributions
-            ),
+            "failed_document_count": failed_document_count,
             "direct_evidence_document_count": len(direct_document_ids),
             "finding_count": len(findings),
             "evidence_count": len(evidence_records),

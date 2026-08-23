@@ -194,6 +194,7 @@ class EvidenceCandidate:
     column_roles: dict[str, Any]
     join_plan: dict[str, Any]
     confidence: float
+    used_fallback: bool = False
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "EvidenceCandidate":
@@ -209,6 +210,7 @@ class EvidenceCandidate:
             column_roles=_mapping(payload.get("column_roles")),
             join_plan=_mapping(payload.get("join_plan")),
             confidence=normalize_objective_confidence(payload.get("confidence")),
+            used_fallback=bool(payload.get("used_fallback")),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -224,6 +226,7 @@ class EvidenceCandidate:
             "column_roles": dict(self.column_roles),
             "join_plan": dict(self.join_plan),
             "confidence": self.confidence,
+            "used_fallback": self.used_fallback,
         }
 
 
@@ -565,6 +568,7 @@ def _build_deterministic_objective_route_record(
         "extractable": extractable,
         "reason": "Deterministic route built after model routing failed.",
         "confidence": 0.62 if extractable else 0.55,
+        "used_fallback": True,
     }
 
 

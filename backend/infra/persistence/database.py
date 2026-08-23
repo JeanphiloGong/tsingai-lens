@@ -1,13 +1,17 @@
-"""Synchronous PostgreSQL engine and session construction."""
+"""Asynchronous PostgreSQL engine and session construction."""
 
 from __future__ import annotations
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy import Engine, create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from config import ENV_FILE_PATH
 
@@ -23,7 +27,7 @@ class DatabaseSettings(BaseSettings):
     database_url: SecretStr
 
 
-def build_database_engine(settings: DatabaseSettings) -> Engine:
+def build_database_engine(settings: DatabaseSettings) -> AsyncEngine:
     try:
         database_url = make_url(settings.database_url.get_secret_value())
     except ArgumentError as exc:
@@ -32,8 +36,10 @@ def build_database_engine(settings: DatabaseSettings) -> Engine:
         raise ValueError("LENS_DATABASE_URL must use postgresql+psycopg.")
     if not database_url.database:
         raise ValueError("LENS_DATABASE_URL must include a database name.")
-    return create_engine(database_url)
+    return create_async_engine(database_url)
 
 
-def build_session_factory(engine: Engine) -> sessionmaker[Session]:
-    return sessionmaker(engine)
+def build_session_factory(
+    engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(engine)

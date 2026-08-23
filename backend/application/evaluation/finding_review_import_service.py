@@ -33,7 +33,7 @@ class FindingReviewImportService:
             raise ValueError("feedback_service is required")
         self.feedback_service = feedback_service
 
-    def import_rows(
+    async def import_rows(
         self,
         *,
         rows: list[dict[str, Any]],
@@ -45,7 +45,9 @@ class FindingReviewImportService:
         errors: list[dict[str, Any]] = []
         for line_number, row in enumerate(rows, start=1):
             try:
-                validated.append(self._decision(row, line_number=line_number))
+                validated.append(
+                    await self._decision(row, line_number=line_number)
+                )
             except ValueError as exc:
                 errors.append({"line": line_number, "message": str(exc)})
         if errors:
@@ -65,12 +67,12 @@ class FindingReviewImportService:
                     continue
                 payload = dict(decision["payload"])
                 if action == "correct":
-                    self.feedback_service.record_curation(
+                    await self.feedback_service.record_curation(
                         reviewer=reviewer,
                         **payload,
                     )
                 else:
-                    self.feedback_service.record_feedback(
+                    await self.feedback_service.record_feedback(
                         reviewer=reviewer,
                         **payload,
                     )
@@ -83,20 +85,25 @@ class FindingReviewImportService:
             written_count=written_count,
         )
 
-    def import_jsonl_file(
+    async def import_jsonl_file(
         self,
         *,
         input_path: Path,
         reviewer: str,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        return self.import_rows(
+        return await self.import_rows(
             rows=read_review_jsonl(input_path),
             reviewer=reviewer,
             dry_run=dry_run,
         )
 
-    def _decision(self, row: dict[str, Any], *, line_number: int) -> dict[str, Any]:
+    async def _decision(
+        self,
+        row: dict[str, Any],
+        *,
+        line_number: int,
+    ) -> dict[str, Any]:
         if "expert_action" in row or "expert_note" in row:
             raise ValueError("expert_action and expert_note are not review JSONL fields")
         action = _text(row.get("action")).lower()
@@ -107,7 +114,7 @@ class FindingReviewImportService:
             return {"line": line_number, "action": action, "payload": identity}
 
         if action == "accept":
-            self._require_dataset_item(identity)
+            await self._require_dataset_item(identity)
             return {
                 "line": line_number,
                 "action": action,
@@ -119,7 +126,7 @@ class FindingReviewImportService:
                 },
             }
         if action == "reject":
-            self._require_dataset_item(identity)
+            await self._require_dataset_item(identity)
             issue_type = _text(row.get("issue_type")).lower()
             if issue_type not in _ISSUES:
                 raise ValueError("reject requires a valid issue_type")
@@ -137,7 +144,7 @@ class FindingReviewImportService:
         curated_finding = row.get("curated_finding")
         if not isinstance(curated_finding, dict):
             raise ValueError("correct requires one complete curated_finding")
-        candidate = self.feedback_service.validate_curation(
+        candidate = await self.feedback_service.validate_curation(
             **identity,
             curated_finding=curated_finding,
         )
@@ -155,8 +162,11 @@ class FindingReviewImportService:
             },
         }
 
-    def _require_dataset_item(self, identity: dict[str, Any]) -> dict[str, Any]:
-        dataset = self.feedback_service.export_dataset(
+    async def _require_dataset_item(
+        self,
+        identity: dict[str, Any],
+    ) -> dict[str, Any]:
+        dataset = await self.feedback_service.export_dataset(
             collection_id=identity["collection_id"],
             objective_id=identity["objective_id"],
         )

@@ -17,9 +17,10 @@ Set the PostgreSQL URL before any backend command that constructs persistence:
 export LENS_DATABASE_URL='postgresql+psycopg://lens:<password>@localhost:5432/lens-postgres-dev'
 ```
 
-The URL is required, must use the synchronous `postgresql+psycopg` driver, and
-must name a database. Keep credentials in `backend/.env` or the shell; never
-commit them.
+The URL is required, must use the `postgresql+psycopg` dialect, and must name a
+database. The backend constructs it with SQLAlchemy `create_async_engine`,
+which selects psycopg's async implementation for this URL. Keep credentials in
+`backend/.env` or the shell; never commit them.
 
 Set backend LLM runtime variables before local runs that invoke model-backed
 features:
@@ -108,12 +109,15 @@ duplicate its destructive restore commands.
   `/api/v1/*` for business APIs.
 - Collection artifact readiness should be checked before calling graph
   endpoints from clients.
-- Collection build tasks run in a dedicated single-worker thread inside the
-  backend process. The task creation request returns after queueing, and
-  clients should poll `GET /api/v1/tasks/{task_id}` for progress.
+- Collection build tasks start as process-local asyncio background tasks. The
+  task creation request returns after scheduling, and clients should poll
+  `GET /api/v1/tasks/{task_id}` for persisted progress. There is no dedicated
+  build executor queue or external task broker.
 - Objective analysis starts as a process-local asyncio background task. An
   application semaphore allows four analyses to execute concurrently per
-  backend process, and the existing synchronous analysis pipeline runs outside
-  the event-loop thread. There is no dedicated Objective executor queue or
-  external task broker; persisted Objective analysis rows remain the status
-  authority used by the polling API.
+  backend process. Additional in-process tasks wait on that semaphore; this is
+  concurrency admission, not a durable queue. Synchronous model and scientific
+  computations run outside the event-loop thread, while all PostgreSQL access
+  uses awaited task-local `AsyncSession` transactions. There is no dedicated
+  Objective executor queue or external task broker; persisted Objective
+  analysis rows remain the status authority used by the polling API.

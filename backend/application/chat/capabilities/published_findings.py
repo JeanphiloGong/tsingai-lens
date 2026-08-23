@@ -61,16 +61,18 @@ class QueryPublishedFindingsCapability:
         self.objective_repository = objective_repository
         self.objective_analysis_service = objective_analysis_service
 
-    def execute(
+    async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: QueryPublishedFindingsArguments,
     ) -> ChatToolResult:
-        self.collection_service.get_collection_for_user(
+        await self.collection_service.get_collection_for_user(
             context.collection_id,
             context.user_id,
         )
-        objectives = self.objective_repository.list_objectives(context.collection_id)
+        objectives = await self.objective_repository.list_objectives(
+            context.collection_id
+        )
         objectives_by_id = {item.objective_id: item for item in objectives}
         requested_ids = arguments.objective_ids or [
             item.objective_id for item in objectives[:_OBJECTIVE_LIMIT]
@@ -92,14 +94,14 @@ class QueryPublishedFindingsCapability:
             if version is None:
                 unpublished_count += 1
                 continue
-            findings = self.objective_analysis_service.list_findings(
+            findings = await self.objective_analysis_service.list_findings(
                 context.collection_id,
                 objective.objective_id,
                 analysis_version=version,
                 offset=0,
                 limit=arguments.finding_limit_per_objective,
             )
-            evidence = self.objective_analysis_service.list_evidence(
+            evidence = await self.objective_analysis_service.list_evidence(
                 context.collection_id,
                 objective.objective_id,
                 analysis_version=version,

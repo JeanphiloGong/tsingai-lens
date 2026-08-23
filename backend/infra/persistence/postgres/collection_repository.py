@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import delete, func, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.source import (
     CollectionDocumentRecord,
@@ -73,11 +73,13 @@ from infra.persistence.postgres.models.source import (
 
 
 class PostgresCollectionRepository:
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         self.session_factory = session_factory
 
-    def add_collection(self, record: CollectionRecord) -> None:
-        with self.session_factory.begin() as session:
+    async def add_collection(self, record: CollectionRecord) -> None:
+        async with self.session_factory.begin() as session:
             session.add(
                 Collection(
                     collection_id=record.collection_id,
@@ -91,24 +93,27 @@ class PostgresCollectionRepository:
                 )
             )
 
-    def list_collections(
+    async def list_collections(
         self,
         owner_user_id: str | None = None,
     ) -> tuple[CollectionRecord, ...]:
         statement = select(Collection).order_by(Collection.collection_id)
         if owner_user_id is not None:
             statement = statement.where(Collection.owner_user_id == owner_user_id)
-        with self.session_factory() as session:
-            return tuple(_to_record(row) for row in session.scalars(statement))
+        async with self.session_factory() as session:
+            rows = await session.scalars(statement)
+            return tuple(_to_record(row) for row in rows)
 
-    def read_collection(self, collection_id: str) -> CollectionRecord | None:
-        with self.session_factory() as session:
-            row = session.get(Collection, collection_id)
+    async def read_collection(
+        self, collection_id: str
+    ) -> CollectionRecord | None:
+        async with self.session_factory() as session:
+            row = await session.get(Collection, collection_id)
             return _to_record(row) if row is not None else None
 
-    def update_collection(self, record: CollectionRecord) -> bool:
-        with self.session_factory.begin() as session:
-            row = session.get(Collection, record.collection_id)
+    async def update_collection(self, record: CollectionRecord) -> bool:
+        async with self.session_factory.begin() as session:
+            row = await session.get(Collection, record.collection_id)
             if row is None:
                 return False
             row.owner_user_id = record.owner_user_id
@@ -120,7 +125,7 @@ class PostgresCollectionRepository:
             row.updated_at = _datetime(record.updated_at)
             return True
 
-    def add_collection_import(
+    async def add_collection_import(
         self,
         record: CollectionImportRecord,
         *,
@@ -134,8 +139,8 @@ class PostgresCollectionRepository:
         ):
             raise ValueError("collection import file belongs to another collection")
 
-        with self.session_factory.begin() as session:
-            collection = session.get(
+        async with self.session_factory.begin() as session:
+            collection = await session.get(
                 Collection,
                 record.collection_id,
                 with_for_update=True,
@@ -144,7 +149,7 @@ class PostgresCollectionRepository:
                 raise FileNotFoundError(f"collection not found: {record.collection_id}")
             next_file_order = (
                 int(
-                    session.scalar(
+                    await session.scalar(
                         select(
                             func.coalesce(func.max(CollectionFile.file_order), -1)
                         ).where(CollectionFile.collection_id == record.collection_id)
@@ -154,7 +159,7 @@ class PostgresCollectionRepository:
             )
             next_import_order = (
                 int(
-                    session.scalar(
+                    await session.scalar(
                         select(
                             func.coalesce(func.max(CollectionImport.import_order), -1)
                         ).where(CollectionImport.collection_id == record.collection_id)
@@ -193,14 +198,17 @@ class PostgresCollectionRepository:
                     record.collection_id,
                     document_id,
                 )
-                if session.get(Document, document_id) is None:
+                if await session.get(Document, document_id) is None:
                     session.add(
                         Document(
                             document_id=document_id,
                             created_at=_datetime(file_record.created_at),
                         )
                     )
-                if session.get(DocumentVersion, document_version_id) is None:
+                if (
+                    await session.get(DocumentVersion, document_version_id)
+                    is None
+                ):
                     session.add(
                         DocumentVersion(
                             document_version_id=document_version_id,
@@ -210,7 +218,12 @@ class PostgresCollectionRepository:
                             created_at=_datetime(file_record.created_at),
                         )
                     )
-                if session.get(CollectionDocument, collection_document_id) is None:
+                if (
+                    await session.get(
+                        CollectionDocument, collection_document_id
+                    )
+                    is None
+                ):
                     session.add(
                         CollectionDocument(
                             collection_document_id=collection_document_id,
@@ -261,14 +274,14 @@ class PostgresCollectionRepository:
                 )
 
             session.add_all(object_rows)
-            session.flush()
+            await session.flush()
             session.add_all(file_rows)
-            session.flush()
+            await session.flush()
             session.add_all(document_rows)
 
-            session.flush()
+            await session.flush()
             collection.paper_count = int(
-                session.scalar(
+                await session.scalar(
                     select(func.count(CollectionDocument.collection_document_id)).where(
                         CollectionDocument.collection_id == record.collection_id
                     )
@@ -277,20 +290,22 @@ class PostgresCollectionRepository:
             collection.status = "ready"
             collection.updated_at = _datetime(updated_at)
 
-    def read_document(self, document_id: str) -> DocumentRecord | None:
-        with self.session_factory() as session:
-            row = session.get(Document, document_id)
+    async def read_document(
+        self, document_id: str
+    ) -> DocumentRecord | None:
+        async with self.session_factory() as session:
+            row = await session.get(Document, document_id)
             return _to_document_record(row) if row is not None else None
 
-    def read_document_version(
+    async def read_document_version(
         self,
         document_version_id: str,
     ) -> DocumentVersionRecord | None:
-        with self.session_factory() as session:
-            row = session.get(DocumentVersion, document_version_id)
+        async with self.session_factory() as session:
+            row = await session.get(DocumentVersion, document_version_id)
             return _to_document_version_record(row) if row is not None else None
 
-    def list_collection_documents(
+    async def list_collection_documents(
         self,
         collection_id: str,
     ) -> tuple[CollectionDocumentRecord, ...]:
@@ -302,13 +317,14 @@ class PostgresCollectionRepository:
                 CollectionDocument.collection_document_id,
             )
         )
-        with self.session_factory() as session:
+        async with self.session_factory() as session:
+            rows = await session.scalars(statement)
             return tuple(
                 _to_collection_document_record(row)
-                for row in session.scalars(statement)
+                for row in rows
             )
 
-    def list_collection_files(
+    async def list_collection_files(
         self,
         collection_id: str,
     ) -> tuple[CollectionFileRecord, ...]:
@@ -318,13 +334,14 @@ class PostgresCollectionRepository:
             .where(CollectionFile.collection_id == collection_id)
             .order_by(CollectionFile.file_order)
         )
-        with self.session_factory() as session:
+        async with self.session_factory() as session:
+            rows = await session.execute(statement)
             return tuple(
                 _to_file_record(file_row, object_row)
-                for file_row, object_row in session.execute(statement)
+                for file_row, object_row in rows
             )
 
-    def list_collection_imports(
+    async def list_collection_imports(
         self,
         collection_id: str,
     ) -> tuple[CollectionImportRecord, ...]:
@@ -346,13 +363,13 @@ class PostgresCollectionRepository:
                 CollectionImportDocument.document_order,
             )
         )
-        with self.session_factory() as session:
-            import_rows = tuple(session.scalars(import_statement))
+        async with self.session_factory() as session:
+            import_rows = tuple(await session.scalars(import_statement))
             documents_by_import: dict[
                 str,
                 list[CollectionImportDocumentRecord],
             ] = {}
-            for document_row, file_row, object_row in session.execute(
+            for document_row, file_row, object_row in await session.execute(
                 document_statement
             ):
                 documents_by_import.setdefault(document_row.import_id, []).append(
@@ -366,9 +383,11 @@ class PostgresCollectionRepository:
                 for import_row in import_rows
             )
 
-    def add_collection_handoff(self, record: CollectionHandoffRecord) -> None:
-        with self.session_factory.begin() as session:
-            collection = session.get(
+    async def add_collection_handoff(
+        self, record: CollectionHandoffRecord
+    ) -> None:
+        async with self.session_factory.begin() as session:
+            collection = await session.get(
                 Collection,
                 record.collection_id,
                 with_for_update=True,
@@ -377,7 +396,7 @@ class PostgresCollectionRepository:
                 raise FileNotFoundError(f"collection not found: {record.collection_id}")
             next_handoff_order = (
                 int(
-                    session.scalar(
+                    await session.scalar(
                         select(
                             func.coalesce(func.max(CollectionHandoff.handoff_order), -1)
                         ).where(CollectionHandoff.collection_id == record.collection_id)
@@ -398,7 +417,7 @@ class PostgresCollectionRepository:
                 )
             )
 
-    def list_collection_handoffs(
+    async def list_collection_handoffs(
         self,
         collection_id: str,
     ) -> tuple[CollectionHandoffRecord, ...]:
@@ -407,23 +426,24 @@ class PostgresCollectionRepository:
             .where(CollectionHandoff.collection_id == collection_id)
             .order_by(CollectionHandoff.handoff_order)
         )
-        with self.session_factory() as session:
-            return tuple(_to_handoff_record(row) for row in session.scalars(statement))
+        async with self.session_factory() as session:
+            rows = await session.scalars(statement)
+            return tuple(_to_handoff_record(row) for row in rows)
 
-    def delete_collection(self, collection_id: str) -> bool:
-        with self.session_factory.begin() as session:
-            row = session.get(Collection, collection_id)
+    async def delete_collection(self, collection_id: str) -> bool:
+        async with self.session_factory.begin() as session:
+            row = await session.get(Collection, collection_id)
             if row is None:
                 return False
             object_ids = tuple(
-                session.scalars(
+                await session.scalars(
                     select(CollectionFile.object_id).where(
                         CollectionFile.collection_id == collection_id
                     )
                 )
             )
             memberships = tuple(
-                session.scalars(
+                await session.scalars(
                     select(CollectionDocument).where(
                         CollectionDocument.collection_id == collection_id
                     )
@@ -434,7 +454,7 @@ class PostgresCollectionRepository:
             }
             document_ids = {membership.document_id for membership in memberships}
             build_ids = tuple(
-                session.scalars(
+                await session.scalars(
                     select(CollectionBuild.build_id).where(
                         CollectionBuild.collection_id == collection_id
                     )
@@ -443,58 +463,58 @@ class PostgresCollectionRepository:
 
             # Remove collection-scoped derived records before their RESTRICTed
             # source/build parents. Everything remains in this transaction.
-            session.execute(
+            await session.execute(
                 delete(objective_finding_relation_evidence_links).where(
                     objective_finding_relation_evidence_links.c.collection_id
                     == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(objective_finding_evidence_links).where(
                     objective_finding_evidence_links.c.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(ObjectivePaperContributionRecord).where(
                     ObjectivePaperContributionRecord.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(ObjectiveAnalysisRecord).where(
                     ObjectiveAnalysisRecord.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(objective_build_candidates).where(
                     objective_build_candidates.c.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(objective_document_scope).where(
                     objective_document_scope.c.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(ObjectivePaperSkim).where(
                     ObjectivePaperSkim.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(ObjectiveBuild).where(
                     ObjectiveBuild.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(ObjectiveExperimentPlan).where(
                     ObjectiveExperimentPlan.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(ChatSessionRow).where(
                     ChatSessionRow.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(ObjectiveResearchRecord).where(
                     ObjectiveResearchRecord.collection_id == collection_id
                 )
@@ -508,132 +528,132 @@ class PostgresCollectionRepository:
                 comparable_result_observation_links,
             ):
                 if build_ids:
-                    session.execute(delete(table).where(table.c.build_id.in_(build_ids)))
+                    await session.execute(delete(table).where(table.c.build_id.in_(build_ids)))
             if build_ids:
-                session.execute(
+                await session.execute(
                     delete(CollectionComparableResultRecord).where(
                         CollectionComparableResultRecord.build_id.in_(build_ids)
                     )
                 )
-                session.execute(
+                await session.execute(
                     delete(PairwiseComparisonRelationRecord).where(
                         PairwiseComparisonRelationRecord.build_id.in_(build_ids)
                     )
                 )
-                session.execute(
+                await session.execute(
                     delete(ComparableResultRecord).where(
                         ComparableResultRecord.build_id.in_(build_ids)
                     )
                 )
-                session.execute(
+                await session.execute(
                     delete(ComparisonBuild).where(
                         ComparisonBuild.build_id.in_(build_ids)
                     )
                 )
 
-            session.execute(
+            await session.execute(
                 delete(EvaluationRunRecord).where(
                     EvaluationRunRecord.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(EvaluationGoldSetRecord).where(
                     EvaluationGoldSetRecord.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(EvaluationPredictionSnapshotRecord).where(
                     EvaluationPredictionSnapshotRecord.collection_id
                     == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(SourceReferenceCandidate).where(
                     SourceReferenceCandidate.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(SourceReferenceResolution).where(
                     SourceReferenceResolution.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(SourceReferenceMention).where(
                     SourceReferenceMention.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(SourceReferenceEntry).where(
                     SourceReferenceEntry.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(SourceDocument).where(
                     SourceDocument.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(CollectionBuild).where(
                     CollectionBuild.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(CollectionImportDocument).where(
                     CollectionImportDocument.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(CollectionHandoff).where(
                     CollectionHandoff.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(CollectionImport).where(
                     CollectionImport.collection_id == collection_id
                 )
             )
-            session.execute(
+            await session.execute(
                 delete(CollectionFile).where(
                     CollectionFile.collection_id == collection_id
                 )
             )
             if object_ids:
-                session.execute(
+                await session.execute(
                     delete(StoredObject).where(StoredObject.object_id.in_(object_ids))
                 )
-            session.execute(
+            await session.execute(
                 delete(CollectionDocument).where(
                     CollectionDocument.collection_id == collection_id
                 )
             )
-            session.flush()
+            await session.flush()
             for document_version_id in document_version_ids:
-                has_membership = session.scalar(
+                has_membership = await session.scalar(
                     select(func.count(CollectionDocument.collection_document_id)).where(
                         CollectionDocument.document_version_id == document_version_id
                     )
                 )
-                has_object = session.scalar(
+                has_object = await session.scalar(
                     select(func.count(StoredObject.object_id)).where(
                         StoredObject.document_version_id == document_version_id
                     )
                 )
                 if not has_membership and not has_object:
-                    version = session.get(DocumentVersion, document_version_id)
+                    version = await session.get(DocumentVersion, document_version_id)
                     if version is not None:
-                        session.delete(version)
-            session.flush()
+                        await session.delete(version)
+            await session.flush()
             for document_id in document_ids:
-                has_version = session.scalar(
+                has_version = await session.scalar(
                     select(func.count(DocumentVersion.document_version_id)).where(
                         DocumentVersion.document_id == document_id
                     )
                 )
                 if not has_version:
-                    document = session.get(Document, document_id)
+                    document = await session.get(Document, document_id)
                     if document is not None:
-                        session.delete(document)
-            session.delete(row)
+                        await session.delete(document)
+            await session.delete(row)
             return True
 
 

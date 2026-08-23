@@ -5,6 +5,7 @@ from hashlib import sha256
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from application.pipeline.collection_build.config import CollectionBuildPipelineConfig
 from application.pipeline.collection_build.context import CollectionBuildContext
@@ -25,6 +26,13 @@ from infra.llm.usage import record_llm_completion, record_llm_prompt_version
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
 from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 
+pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
 
 class MemoryTaskService:
     def __init__(self) -> None:
@@ -40,11 +48,11 @@ class MemoryTaskService:
         }
         self.pipeline_run = None
 
-    def get_task(self, task_id: str):
+    async def get_task(self, task_id: str):
         assert task_id == self.record["task_id"]
         return dict(self.record)
 
-    def update_task(self, task_id: str, **fields):  # noqa: ANN001
+    async def update_task(self, task_id: str, **fields):  # noqa: ANN001
         assert task_id == self.record["task_id"]
         pipeline_run = fields.pop("pipeline_run", None)
         if pipeline_run is not None:
@@ -59,8 +67,8 @@ class RecordingTaskService(MemoryTaskService):
         super().__init__()
         self.progress_updates = []
 
-    def update_task(self, task_id: str, **fields):  # noqa: ANN001
-        record = super().update_task(task_id, **fields)
+    async def update_task(self, task_id: str, **fields):  # noqa: ANN001
+        record = await super().update_task(task_id, **fields)
         if "progress_detail" in fields:
             self.progress_updates.append(fields["progress_detail"])
         return record
@@ -104,7 +112,7 @@ def build_run(node_dependencies) -> PipelineRun:  # noqa: ANN001
     )
 
 
-def test_objective_progress_persists_each_window_for_the_active_document():
+async def test_objective_progress_persists_each_window_for_the_active_document():
     task_service = RecordingTaskService()
     service = CollectionBuildPipelineService(
         collection_service=SimpleNamespace(),
@@ -117,7 +125,8 @@ def test_objective_progress_persists_each_window_for_the_active_document():
     callback = service._build_objective_progress_callback("task_1", "col_1")
 
     for window_position in (1, 2, 3):
-        callback(
+        await asyncio.to_thread(
+            callback,
             {
                 "phase": "objective_paper_skim_started",
                 "current": 2,
@@ -134,7 +143,7 @@ def test_objective_progress_persists_each_window_for_the_active_document():
     ] == [1, 2, 3]
 
 
-def test_objective_progress_projects_internal_phase_to_public_task_stage():
+async def test_objective_progress_projects_internal_phase_to_public_task_stage():
     task_service = RecordingTaskService()
     service = CollectionBuildPipelineService(
         collection_service=SimpleNamespace(),
@@ -145,7 +154,8 @@ def test_objective_progress_projects_internal_phase_to_public_task_stage():
         research_objective_service=SimpleNamespace(),
     )
 
-    service._build_objective_progress_callback("task_1", "col_1")(
+    await asyncio.to_thread(
+        service._build_objective_progress_callback("task_1", "col_1"),
         {
             "phase": "objective_discovery_batch_finished",
             "current": 1,
@@ -171,7 +181,7 @@ def test_objective_progress_projects_internal_phase_to_public_task_stage():
     )
 
 
-def test_collection_build_pipeline_runner_uses_run_dependencies_not_config_order():
+async def test_collection_build_pipeline_runner_uses_run_dependencies_not_config_order():
     task_service = MemoryTaskService()
     calls: list[str] = []
     definitions = (
@@ -195,8 +205,7 @@ def test_collection_build_pipeline_runner_uses_run_dependencies_not_config_order
         assert context.state["first_seen"] is True
         calls.append("second")
 
-    result = asyncio.run(
-        CollectionBuildPipelineRunner(
+    result = await CollectionBuildPipelineRunner(
             {"first": first, "second": second},
             definitions=definitions,
         ).run(
@@ -204,7 +213,6 @@ def test_collection_build_pipeline_runner_uses_run_dependencies_not_config_order
             build_config(),
             build_run({"second": ("first",), "first": ()}),
         )
-    )
 
     assert calls == ["first", "second"]
     assert result.errors == ()
@@ -213,7 +221,7 @@ def test_collection_build_pipeline_runner_uses_run_dependencies_not_config_order
     assert task_service.record["pipeline_nodes"]["second"]["status"] == "succeeded"
 
 
-def test_collection_build_pipeline_runner_persists_provider_usage_per_node():
+async def test_collection_build_pipeline_runner_persists_provider_usage_per_node():
     task_service = MemoryTaskService()
     definitions = (
         CollectionBuildNodeDefinition(
@@ -239,8 +247,7 @@ def test_collection_build_pipeline_runner_persists_provider_usage_per_node():
             requested_model="configured-model",
         )
 
-    result = asyncio.run(
-        CollectionBuildPipelineRunner(
+    result = await CollectionBuildPipelineRunner(
             {"model_node": model_node},
             definitions=definitions,
         ).run(
@@ -248,7 +255,6 @@ def test_collection_build_pipeline_runner_persists_provider_usage_per_node():
             build_config(),
             build_run({"model_node": ()}),
         )
-    )
 
     expected = (
         ModelUsage("model-a", 1, TokenUsage(120, 30, 150)),
@@ -261,7 +267,7 @@ def test_collection_build_pipeline_runner_persists_provider_usage_per_node():
     assert result.stats.prompt_versions == {"paper_framing": "paper_framing.v1"}
 
 
-def test_objective_candidate_node_reports_permanent_source_unit_failures():
+async def test_objective_candidate_node_reports_permanent_source_unit_failures():
     paper_skim = SimpleNamespace(
         source_unit_coverage=(
             SimpleNamespace(status="relationship_emitted"),
@@ -272,12 +278,19 @@ def test_objective_candidate_node_reports_permanent_source_unit_failures():
         research_objectives=(object(),),
         paper_skims=(paper_skim,),
     )
+
+    async def return_facts(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
+        return facts
+
     context = build_context(MemoryTaskService())
     context.research_objective_service = SimpleNamespace(
-        discover_and_replace_objective_candidates=lambda *args, **kwargs: facts
+        discover_and_replace_objective_candidates=return_facts
     )
 
-    result = nodes.discover_and_replace_objective_candidates(context, build_config())
+    result = await nodes.discover_and_replace_objective_candidates(
+        context,
+        build_config(),
+    )
 
     assert result["objective_candidate_count"] == 1
     assert result["paper_skim_count"] == 1
@@ -289,7 +302,7 @@ def test_objective_candidate_node_reports_permanent_source_unit_failures():
     ]
 
 
-def test_collection_build_final_status_is_partial_when_paper_skim_coverage_failed():
+async def test_collection_build_final_status_is_partial_when_paper_skim_coverage_failed():
     pipeline_run = PipelineRun.create(
         pipeline_name="collection_build",
         mode="standard",
@@ -328,7 +341,7 @@ def test_collection_build_final_status_is_partial_when_paper_skim_coverage_faile
     )
 
 
-def test_collection_build_pipeline_runner_keeps_usage_from_failed_node():
+async def test_collection_build_pipeline_runner_keeps_usage_from_failed_node():
     task_service = MemoryTaskService()
     definitions = (
         CollectionBuildNodeDefinition(
@@ -344,8 +357,7 @@ def test_collection_build_pipeline_runner_keeps_usage_from_failed_node():
         record_llm_completion(None, requested_model="model-a")
         raise RuntimeError("invalid model output")
 
-    result = asyncio.run(
-        CollectionBuildPipelineRunner(
+    result = await CollectionBuildPipelineRunner(
             {"model_node": model_node},
             definitions=definitions,
         ).run(
@@ -353,14 +365,13 @@ def test_collection_build_pipeline_runner_keeps_usage_from_failed_node():
             build_config(),
             build_run({"model_node": ()}),
         )
-    )
 
     assert result.node("model_node").stats.model_usage == (
         ModelUsage("model-a", 1, None, 1),
     )
 
 
-def test_source_node_persists_figure_metadata_and_references_before_activation():
+async def test_source_node_persists_figure_metadata_and_references_before_activation():
     content = b"figure-bytes"
     digest = sha256(content).hexdigest()
     bundle = SourceArtifactBundle(
@@ -421,11 +432,14 @@ def test_source_node_persists_figure_metadata_and_references_before_activation()
     async def build_source_artifacts(**kwargs):  # noqa: ANN003, ARG001
         return [SimpleNamespace(result=bundle, errors=[])]
 
-    def replace_artifacts(collection_id, build_id, artifacts):  # noqa: ANN001
+    async def replace_artifacts(collection_id, build_id, artifacts):  # noqa: ANN001
         calls.append(("artifacts", collection_id, build_id, artifacts))
 
-    def replace_references(collection_id, build_id, references):  # noqa: ANN001
+    async def replace_references(collection_id, build_id, references):  # noqa: ANN001
         calls.append(("references", collection_id, build_id, references))
+
+    async def list_files(collection_id):  # noqa: ANN001
+        return [{"collection_id": collection_id}]
 
     context = CollectionBuildContext(
         task_id="task-1",
@@ -433,7 +447,7 @@ def test_source_node_persists_figure_metadata_and_references_before_activation()
         collection_id="col-1",
         task_service=SimpleNamespace(),
         collection_service=SimpleNamespace(
-            list_files=lambda collection_id: [{"collection_id": collection_id}],
+            list_files=list_files,
             write_figure_asset=lambda *args: (
                 f"col-1/objects/source/build-1/figures/{digest}.png"
             )
@@ -448,7 +462,7 @@ def test_source_node_persists_figure_metadata_and_references_before_activation()
         build_source_artifacts=build_source_artifacts,
     )
 
-    result = asyncio.run(nodes.build_source_artifacts(context, build_config()))
+    result = await nodes.build_source_artifacts(context, build_config())
 
     assert [call[0] for call in calls] == ["artifacts", "references"]
     assert calls[0][3][0].figures[0].image_path.endswith(f"{digest}.png")
@@ -459,7 +473,7 @@ def test_source_node_persists_figure_metadata_and_references_before_activation()
     assert result["figure_count"] == 1
 
 
-def test_collection_build_pipeline_runner_skips_downstream_nodes_after_failure():
+async def test_collection_build_pipeline_runner_skips_downstream_nodes_after_failure():
     task_service = MemoryTaskService()
     definitions = (
         CollectionBuildNodeDefinition(
@@ -494,8 +508,7 @@ def test_collection_build_pipeline_runner_skips_downstream_nodes_after_failure()
     def paper_facts(context, config):  # noqa: ANN001, ARG001
         raise AssertionError("paper_facts should be skipped")
 
-    result = asyncio.run(
-        CollectionBuildPipelineRunner(
+    result = await CollectionBuildPipelineRunner(
             {
                 "source_artifacts": source_artifacts,
                 "document_profiles": document_profiles,
@@ -513,7 +526,6 @@ def test_collection_build_pipeline_runner_skips_downstream_nodes_after_failure()
                 }
             ),
         )
-    )
 
     assert result.node("source_artifacts").status == "succeeded"
     assert result.node("document_profiles").status == "failed"
@@ -524,7 +536,7 @@ def test_collection_build_pipeline_runner_skips_downstream_nodes_after_failure()
     assert task_service.record["current_stage"] == "failed"
 
 
-def test_collection_build_pipeline_runner_continues_independent_branch_after_failure():
+async def test_collection_build_pipeline_runner_continues_independent_branch_after_failure():
     task_service = MemoryTaskService()
     calls: list[str] = []
     definitions = (
@@ -571,8 +583,7 @@ def test_collection_build_pipeline_runner_continues_independent_branch_after_fai
     def artifact_registry(context, config):  # noqa: ANN001, ARG001
         calls.append("artifact_registry")
 
-    result = asyncio.run(
-        CollectionBuildPipelineRunner(
+    result = await CollectionBuildPipelineRunner(
             {
                 "source_artifacts": source_artifacts,
                 "document_profiles": document_profiles,
@@ -592,7 +603,6 @@ def test_collection_build_pipeline_runner_continues_independent_branch_after_fai
                 }
             ),
         )
-    )
 
     assert calls == [
         "source_artifacts",
@@ -603,7 +613,7 @@ def test_collection_build_pipeline_runner_continues_independent_branch_after_fai
     assert result.node("artifact_registry").status == "succeeded"
 
 
-def test_default_collection_build_pipeline_stops_after_objective_candidates():
+async def test_default_collection_build_pipeline_stops_after_objective_candidates():
     node_ids = tuple(
         definition.node_id for definition in COLLECTION_BUILD_NODE_DEFINITIONS
     )

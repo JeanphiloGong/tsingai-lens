@@ -59,7 +59,7 @@ class ToolSpec:
 class CapabilityHandler(Protocol):
     spec: ToolSpec
 
-    def execute(
+    async def execute(
         self,
         context: CapabilityExecutionContext,
         arguments: BaseModel,

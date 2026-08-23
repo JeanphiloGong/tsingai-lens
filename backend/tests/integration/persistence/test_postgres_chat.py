@@ -10,31 +10,49 @@ from domain.chat import (
     ToolCallStatus,
     ToolRisk,
 )
+from domain.source import CollectionRecord
+from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 from infra.persistence.postgres.chat_repository import PostgresChatRepository
+from infra.persistence.postgres.collection_repository import (
+    PostgresCollectionRepository,
+)
 
 
-def test_chat_repository_round_trips_trajectory_and_resumable_approval(
-    auth_session_service,
-    collection_service,
+pytestmark = pytest.mark.anyio
+
+
+async def test_chat_repository_round_trips_trajectory_and_resumable_approval(
+    postgres_session_factory,
 ) -> None:
-    user = auth_session_service.create_user(
-        email="researcher@example.com",
-        password="test-password",
-    )
-    collection = collection_service.create_collection(
-        "Agent collection",
+    user = {
+        "user_id": "user-chat",
+        "email": "researcher@example.com",
+        "display_name": None,
+        "password_hash": "synthetic-password-hash",
+        "created_at": "2026-08-19T00:00:00+00:00",
+    }
+    await PostgresAuthRepository(postgres_session_factory).add_user(user)
+    collection = CollectionRecord(
+        collection_id="col-chat",
         owner_user_id=user["user_id"],
+        name="Agent collection",
+        description=None,
+        status="idle",
+        paper_count=0,
+        created_at="2026-08-19T00:00:00+00:00",
+        updated_at="2026-08-19T00:00:00+00:00",
     )
-    repository = PostgresChatRepository(
-        auth_session_service.repository.session_factory
+    await PostgresCollectionRepository(postgres_session_factory).add_collection(
+        collection
     )
+    repository = PostgresChatRepository(postgres_session_factory)
     chat = ChatSession.create(
         session_id="chat-1",
         user_id=user["user_id"],
-        collection_id=collection["collection_id"],
+        collection_id=collection.collection_id,
         created_at="2026-08-19T00:00:00+00:00",
     )
-    repository.add_session(chat)
+    await repository.add_session(chat)
 
     user_message = ChatMessage.user(
         message_id="msg-1",
@@ -78,7 +96,7 @@ def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         content="当前 collection 有 10 篇文献。",
         created_at="2026-08-19T00:00:06+00:00",
     )
-    repository.save_trajectory(
+    await repository.save_trajectory(
         session=chat.update(
             user_id=chat.user_id,
             collection_id=chat.collection_id,
@@ -89,14 +107,16 @@ def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         tool_results=(read_result,),
     )
 
-    assert repository.read_session(chat.session_id).collection_id == chat.collection_id
-    assert repository.read_messages(chat.session_id) == (
+    stored_chat = await repository.read_session(chat.session_id)
+    assert stored_chat is not None
+    assert stored_chat.collection_id == chat.collection_id
+    assert await repository.read_messages(chat.session_id) == (
         user_message,
         assistant_call,
         tool_message,
         final_message,
     )
-    assert repository.read_tool_call(read_call.tool_call_id) == read_call
+    assert await repository.read_tool_call(read_call.tool_call_id) == read_call
 
     write_message = ChatMessage.assistant_tool_call(
         message_id="msg-5",
@@ -115,19 +135,19 @@ def test_chat_repository_round_trips_trajectory_and_resumable_approval(
         arguments=write_message.tool_arguments or {},
         risk=ToolRisk.WRITE,
     ).require_approval()
-    repository.save_trajectory(
+    await repository.save_trajectory(
         session=chat.update(
             user_id=chat.user_id,
             collection_id=chat.collection_id,
             updated_at="2026-08-19T00:01:00+00:00",
         ),
-        messages=(*repository.read_messages(chat.session_id), write_message),
+        messages=(*(await repository.read_messages(chat.session_id)), write_message),
         tool_calls=(read_call, pending),
         tool_results=(read_result,),
     )
 
     with pytest.raises(ValueError, match="arguments digest"):
-        repository.decide_tool_call(
+        await repository.decide_tool_call(
             session_id=chat.session_id,
             tool_call_id=pending.tool_call_id,
             user_id=user["user_id"],
@@ -136,7 +156,7 @@ def test_chat_repository_round_trips_trajectory_and_resumable_approval(
             decided_at="2026-08-19T00:01:01+00:00",
         )
 
-    approved = repository.decide_tool_call(
+    approved = await repository.decide_tool_call(
         session_id=chat.session_id,
         tool_call_id=pending.tool_call_id,
         user_id=user["user_id"],
@@ -146,9 +166,9 @@ def test_chat_repository_round_trips_trajectory_and_resumable_approval(
     )
 
     assert approved.status is ToolCallStatus.APPROVED
-    assert repository.read_tool_call(pending.tool_call_id) == approved
+    assert await repository.read_tool_call(pending.tool_call_id) == approved
     assert (
-        repository.decide_tool_call(
+        await repository.decide_tool_call(
             session_id=chat.session_id,
             tool_call_id=pending.tool_call_id,
             user_id=user["user_id"],

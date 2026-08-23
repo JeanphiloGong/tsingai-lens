@@ -1,22 +1,33 @@
 from __future__ import annotations
 
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
+
+import pytest
 
 from application.core.workspace_overview_service import WorkspaceService
 from domain.core import ObjectiveFactSet
 from tests.support.objective_repository import MemoryObjectiveRepository
 
+pytestmark = pytest.mark.anyio
 
-def _service(
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+async def _service(
     *,
     source_documents: tuple[object, ...] = (),
     objective_facts: ObjectiveFactSet | None = None,
 ) -> WorkspaceService:
     source_repository = Mock()
-    source_repository.read_collection_documents.return_value = source_documents
+    source_repository.read_collection_documents = AsyncMock(
+        return_value=source_documents
+    )
     objective_repository = MemoryObjectiveRepository()
     if objective_facts is not None:
-        objective_repository.replace("col_test", "build_test", objective_facts)
+        await objective_repository.replace("col_test", "build_test", objective_facts)
     return WorkspaceService(
         collection_service=Mock(),
         task_service=Mock(),
@@ -26,13 +37,13 @@ def _service(
     )
 
 
-def test_workspace_artifacts_only_report_the_maintained_build_outputs():
-    service = _service(
+async def test_workspace_artifacts_only_report_the_maintained_build_outputs():
+    service = await _service(
         source_documents=(object(),),
         objective_facts=ObjectiveFactSet(research_objectives_ready=True),
     )
 
-    artifacts = service._build_artifacts(
+    artifacts = await service._build_artifacts(
         "col_test",
         {"updated_at": "2026-08-20T00:00:00Z"},
         {"total_documents": 1},
@@ -46,12 +57,12 @@ def test_workspace_artifacts_only_report_the_maintained_build_outputs():
     }
 
 
-def test_workspace_marks_zero_candidate_objective_discovery_as_completed():
-    service = _service(
+async def test_workspace_marks_zero_candidate_objective_discovery_as_completed():
+    service = await _service(
         source_documents=(object(),),
         objective_facts=ObjectiveFactSet(research_objectives_ready=True),
     )
-    artifacts = service._build_artifacts(
+    artifacts = await service._build_artifacts(
         "col_test",
         {"updated_at": "2026-08-20T00:00:00Z"},
         {"total_documents": 1},
@@ -76,8 +87,8 @@ def test_workspace_marks_zero_candidate_objective_discovery_as_completed():
     }
 
 
-def test_workspace_does_not_report_retired_graph_or_result_capabilities():
-    service = _service()
+async def test_workspace_does_not_report_retired_graph_or_result_capabilities():
+    service = await _service()
 
     capabilities = service._build_capabilities(
         {

@@ -34,7 +34,7 @@ class ExperimentPlanService:
         self.repository = repository
         self.finding_feedback_service = finding_feedback_service
 
-    def create_plan(
+    async def create_plan(
         self,
         *,
         collection_id: str,
@@ -66,22 +66,24 @@ class ExperimentPlanService:
                 "updated_at": now,
             }
         )
-        return self.repository.upsert_plan(plan)
+        return await self.repository.upsert_plan(plan)
 
-    def list_plans(
+    async def list_plans(
         self,
         collection_id: str,
         objective_id: str,
     ) -> tuple[ExperimentPlanRecord, ...]:
-        plans = self.repository.list_plans(collection_id, objective_id)
-        return tuple(
-            self._with_source_validity(plan)
-            if _is_historical_grounded_plan(plan)
-            else plan
-            for plan in plans
-        )
+        plans = await self.repository.list_plans(collection_id, objective_id)
+        result: list[ExperimentPlanRecord] = []
+        for plan in plans:
+            result.append(
+                await self._with_source_validity(plan)
+                if _is_historical_grounded_plan(plan)
+                else plan
+            )
+        return tuple(result)
 
-    def update_plan(
+    async def update_plan(
         self,
         *,
         collection_id: str,
@@ -91,17 +93,19 @@ class ExperimentPlanService:
         content: str,
         status: str,
     ) -> ExperimentPlanRecord:
-        plan = self.repository.read_plan(collection_id, objective_id, plan_id)
+        plan = await self.repository.read_plan(
+            collection_id, objective_id, plan_id
+        )
         if plan is None:
             raise ExperimentPlanNotFoundError(collection_id, objective_id, plan_id)
         historical = _is_historical_grounded_plan(plan)
         if historical:
             _validate_historical_plan_edit(plan, content)
             if status == "ready_for_review":
-                checked = self._with_source_validity(plan)
+                checked = await self._with_source_validity(plan)
                 if checked.metadata.get("source_validity") != "current":
                     raise ValueError("historical source Findings are stale")
-        stored = self.repository.upsert_plan(
+        stored = await self.repository.upsert_plan(
             plan.with_updates(
                 title=title,
                 content=content,
@@ -109,9 +113,9 @@ class ExperimentPlanService:
                 updated_at=_now_iso(),
             )
         )
-        return self._with_source_validity(stored) if historical else stored
+        return await self._with_source_validity(stored) if historical else stored
 
-    def _with_source_validity(
+    async def _with_source_validity(
         self,
         plan: ExperimentPlanRecord,
     ) -> ExperimentPlanRecord:
@@ -125,7 +129,7 @@ class ExperimentPlanService:
                 for item in plan.metadata.get("source_findings", [])
                 if isinstance(item, dict)
             )
-            validity, reasons = self.finding_feedback_service.source_snapshot_validity(
+            validity, reasons = await self.finding_feedback_service.source_snapshot_validity(
                 collection_id=plan.collection_id,
                 objective_id=plan.objective_id,
                 source_findings=source_findings,

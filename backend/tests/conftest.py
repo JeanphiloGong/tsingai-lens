@@ -2,12 +2,58 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any, Mapping
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+
+class MemoryAuthRepository:
+    def __init__(self) -> None:
+        self.users: dict[str, dict[str, Any]] = {}
+        self.user_ids_by_email: dict[str, str] = {}
+        self.sessions_by_token_hash: dict[str, dict[str, Any]] = {}
+
+    async def read_user_by_email(self, email: str) -> dict[str, Any] | None:
+        user_id = self.user_ids_by_email.get(email.strip().lower())
+        return dict(self.users[user_id]) if user_id is not None else None
+
+    async def read_user(self, user_id: str) -> dict[str, Any] | None:
+        user = self.users.get(user_id)
+        return dict(user) if user is not None else None
+
+    async def add_user(self, payload: Mapping[str, Any]) -> None:
+        user = dict(payload)
+        email = str(user["email"]).strip().lower()
+        if email in self.user_ids_by_email:
+            raise ValueError("user email already exists")
+        user_id = str(user["user_id"])
+        self.users[user_id] = user
+        self.user_ids_by_email[email] = user_id
+
+    async def read_session_by_token_hash(
+        self,
+        token_hash: str,
+    ) -> dict[str, Any] | None:
+        session = self.sessions_by_token_hash.get(token_hash)
+        return dict(session) if session is not None else None
+
+    async def add_session(self, payload: Mapping[str, Any]) -> None:
+        session = dict(payload)
+        token_hash = str(session["token_hash"])
+        self.sessions_by_token_hash[token_hash] = session
+
+    async def revoke_session_by_token_hash(
+        self,
+        token_hash: str,
+        revoked_at: str,
+    ) -> None:
+        session = self.sessions_by_token_hash.get(token_hash)
+        if session is not None:
+            session["revoked_at"] = revoked_at
 
 
 @pytest.fixture(autouse=True)
@@ -39,43 +85,18 @@ def _patch_domain_model_extractors(monkeypatch):
 
 @pytest.fixture
 def auth_session_service(tmp_path):
-    from alembic import command
-    from alembic.config import Config
-    from sqlalchemy import URL, create_engine
-
     from application.auth import AuthSessionService
-    from infra.persistence.database import build_session_factory
-    from infra.persistence.postgres.auth_repository import PostgresAuthRepository
 
-    engine = create_engine(
-        URL.create(
-            "sqlite+pysqlite",
-            database=str(tmp_path / "auth.sqlite"),
-        ),
-        connect_args={"check_same_thread": False},
-    )
-    config = Config(str(ROOT / "alembic.ini"))
-    with engine.begin() as connection:
-        config.attributes["connection"] = connection
-        command.upgrade(config, "head")
-    service = AuthSessionService(PostgresAuthRepository(build_session_factory(engine)))
-    try:
-        yield service
-    finally:
-        engine.dispose()
+    return AuthSessionService(MemoryAuthRepository())
 
 
 @pytest.fixture
 def collection_service(tmp_path, auth_session_service):
     from application.source.collection_service import CollectionService
     from infra.persistence.file import FileCollectionWorkspace
-    from infra.persistence.postgres.collection_repository import (
-        PostgresCollectionRepository,
-    )
+    from infra.persistence.memory import MemoryCollectionRepository
 
     return CollectionService(
-        repository=PostgresCollectionRepository(
-            auth_session_service.repository.session_factory
-        ),
+        repository=MemoryCollectionRepository(),
         workspace=FileCollectionWorkspace(tmp_path / "collections"),
     )

@@ -14,20 +14,20 @@ def auth_required_detail() -> dict[str, str]:
     }
 
 
-def require_current_user(request: Request) -> dict[str, Any]:
+async def require_current_user(request: Request) -> dict[str, Any]:
     current_user = getattr(request.state, "current_user", None)
     if current_user:
         return dict(current_user)
     try:
-        return request.app.state.auth_session_service.resolve_session(
+        return await request.app.state.auth_session_service.resolve_session(
             request.cookies.get(SESSION_COOKIE_NAME)
         )
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=401, detail=auth_required_detail()) from exc
 
 
-def current_user_id(request: Request) -> str:
-    return str(require_current_user(request)["user_id"])
+async def current_user_id(request: Request) -> str:
+    return str((await require_current_user(request))["user_id"])
 
 
 __all__ = ["auth_required_detail", "current_user_id", "require_current_user"]

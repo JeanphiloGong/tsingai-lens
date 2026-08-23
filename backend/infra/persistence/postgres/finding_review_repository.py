@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from domain.evaluation import FindingCuration, FindingFeedback
 from infra.persistence.postgres.models.evaluation import (
@@ -17,12 +17,18 @@ from infra.persistence.postgres.models.evaluation import (
 class PostgresFindingReviewRepository:
     backend_name = "postgresql"
 
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
         self.session_factory = session_factory
 
-    def upsert_feedback(self, feedback: FindingFeedback) -> FindingFeedback:
-        with self.session_factory.begin() as session:
-            existing = session.get(FindingFeedbackRecord, feedback.feedback_id)
+    async def upsert_feedback(
+        self, feedback: FindingFeedback
+    ) -> FindingFeedback:
+        async with self.session_factory.begin() as session:
+            existing = await session.get(
+                FindingFeedbackRecord, feedback.feedback_id
+            )
             if existing is not None and _feedback_key(existing) != _feedback_key(
                 feedback
             ):
@@ -39,17 +45,17 @@ class PostgresFindingReviewRepository:
             row.created_at = _datetime(feedback.created_at)
             if existing is None:
                 session.add(row)
-            session.flush()
+            await session.flush()
             return _feedback(row)
 
-    def list_feedback(
+    async def list_feedback(
         self,
         collection_id: str,
         objective_id: str | None = None,
         analysis_version: int | None = None,
         finding_id: str | None = None,
     ) -> tuple[FindingFeedback, ...]:
-        with self.session_factory() as session:
+        async with self.session_factory() as session:
             statement = select(FindingFeedbackRecord).where(
                 FindingFeedbackRecord.collection_id == collection_id
             )
@@ -65,7 +71,7 @@ class PostgresFindingReviewRepository:
                 statement = statement.where(
                     FindingFeedbackRecord.finding_id == finding_id
                 )
-            rows = session.scalars(
+            rows = await session.scalars(
                 statement.order_by(
                     FindingFeedbackRecord.created_at,
                     FindingFeedbackRecord.feedback_id,
@@ -73,9 +79,13 @@ class PostgresFindingReviewRepository:
             )
             return tuple(_feedback(row) for row in rows)
 
-    def upsert_curation(self, curation: FindingCuration) -> FindingCuration:
-        with self.session_factory.begin() as session:
-            existing = session.get(FindingCurationRecord, curation.curation_id)
+    async def upsert_curation(
+        self, curation: FindingCuration
+    ) -> FindingCuration:
+        async with self.session_factory.begin() as session:
+            existing = await session.get(
+                FindingCurationRecord, curation.curation_id
+            )
             if existing is not None and _curation_key(existing) != _curation_key(
                 curation
             ):
@@ -92,17 +102,17 @@ class PostgresFindingReviewRepository:
             row.updated_at = _datetime(curation.updated_at)
             if existing is None:
                 session.add(row)
-            session.flush()
+            await session.flush()
             return _curation(row)
 
-    def list_curations(
+    async def list_curations(
         self,
         collection_id: str,
         objective_id: str | None = None,
         analysis_version: int | None = None,
         finding_id: str | None = None,
     ) -> tuple[FindingCuration, ...]:
-        with self.session_factory() as session:
+        async with self.session_factory() as session:
             statement = select(FindingCurationRecord).where(
                 FindingCurationRecord.collection_id == collection_id
             )
@@ -118,7 +128,7 @@ class PostgresFindingReviewRepository:
                 statement = statement.where(
                     FindingCurationRecord.finding_id == finding_id
                 )
-            rows = session.scalars(
+            rows = await session.scalars(
                 statement.order_by(
                     FindingCurationRecord.updated_at,
                     FindingCurationRecord.curation_id,

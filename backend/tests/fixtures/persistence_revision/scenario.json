@@ -5,6 +5,7 @@
     "collections": [
       {
         "collection_id": "col_baseline",
+        "owner_user_id": "user_baseline",
         "name": "Synthetic Strength Review",
         "description": "Non-sensitive persistence migration fixture.",
         "status": "ready",

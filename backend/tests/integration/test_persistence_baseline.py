@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -57,6 +58,7 @@ from infra.persistence.postgres.chat_repository import PostgresChatRepository
 from infra.persistence.postgres.experiment_plan_repository import (
     PostgresExperimentPlanRepository,
 )
+from infra.persistence.postgres.models.objective import ObjectiveResearchRecord
 from infra.persistence.sqlite import SqliteSourceArtifactRepository
 from scripts.persistence.capture_baseline import capture_baseline
 from tests.support.paper_fact_repository import MemoryPaperFactRepository
@@ -251,18 +253,44 @@ async def test_current_repositories_round_trip_the_reviewed_persistence_baseline
         ),
     )
 
+    research_objectives = tuple(
+        ResearchObjective.from_mapping(
+            {"collection_id": collection_id, **item}
+        )
+        for item in records["research_objectives"]
+    )
     await objective_repository.replace(
         collection_id,
         "build_baseline",
         ObjectiveFactSet(
-                research_objectives=tuple(
-                    ResearchObjective.from_mapping(
-                        {"collection_id": collection_id, **item}
-                    )
-                    for item in records["research_objectives"]
-                ),
+            research_objectives=research_objectives,
         ),
     )
+    objective = research_objectives[0]
+    objective_timestamp = datetime.fromisoformat(
+        records["collections"][0]["created_at"]
+    )
+    async with postgres_session_factory.begin() as session:
+        session.add(
+            ObjectiveResearchRecord(
+                collection_id=objective.collection_id,
+                objective_id=objective.objective_id,
+                question=objective.question,
+                material_scope=list(objective.material_scope),
+                variables=list(objective.variables),
+                outcomes=list(objective.outcomes),
+                mechanisms=list(objective.mechanisms),
+                constraints=list(objective.constraints),
+                requested_comparator=objective.requested_comparator,
+                confidence=objective.confidence,
+                reason=objective.reason,
+                confirmation_status=objective.confirmation_status,
+                active_analysis_version=None,
+                published_analysis_version=None,
+                created_at=objective_timestamp,
+                updated_at=objective_timestamp,
+            )
+        )
     await paper_fact_repository.replace_document_profiles(
         collection_id,
         "build_test",

@@ -14,9 +14,13 @@ import pytest
 from sqlalchemy import Column, Integer, MetaData, Table, Text, create_engine, inspect, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import URL, make_url
-from sqlalchemy.orm import sessionmaker
 
 from domain.core import Finding, ObjectiveEvidence, PaperContribution
+from infra.persistence.database import (
+    DatabaseSettings,
+    build_database_engine,
+    build_session_factory,
+)
 from infra.persistence.postgres.base import Base
 from infra.persistence.postgres.objective_repository import PostgresObjectiveRepository
 from tests.integration.persistence.database_cleanup import reset_postgres_schema
@@ -1583,7 +1587,8 @@ def test_postgresql_curation_contract_migration_discards_retired_rows() -> None:
         engine.dispose()
 
 
-def test_postgresql_migration_lifecycle_matches_models() -> None:
+@pytest.mark.anyio
+async def test_postgresql_migration_lifecycle_matches_models() -> None:
     database_url = os.getenv("LENS_TEST_DATABASE_URL")
     if not database_url:
         pytest.skip("LENS_TEST_DATABASE_URL is not configured")
@@ -1597,6 +1602,9 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
 
     engine = create_engine(url)
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    async_engine = build_database_engine(
+        DatabaseSettings(database_url=database_url)
+    )
     try:
         reset_postgres_schema(engine)
         with engine.begin() as connection:
@@ -2184,16 +2192,16 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
             )
 
         repository = PostgresObjectiveRepository(
-            sessionmaker(bind=engine, expire_on_commit=False)
+            build_session_factory(async_engine)
         )
-        _objective, queued = repository.queue_analysis(
+        _objective, queued = await repository.queue_analysis(
             "col-evidence-pg",
             "obj-evidence-pg",
             pipeline_version="objective-analysis.v2",
             model_name="migration-test-model",
             prompt_versions={},
         )
-        claimed = repository.claim_analysis(
+        claimed = await repository.claim_analysis(
             "col-evidence-pg", "obj-evidence-pg", queued.analysis_version
         )
         assert claimed is not None
@@ -2336,7 +2344,7 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
                 "assertion_strength": "associative",
                 "attribution_scope": "isolated_effect",
                 "synthesis_status": "condition_dependent",
-                "certainty": 0.8,
+                "certainty": 0.7,
                 "display_rank": 0,
                 "mechanisms": [
                     {
@@ -2368,7 +2376,7 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
                 ],
             }
         )
-        repository.publish_analysis(
+        await repository.publish_analysis(
             "col-evidence-pg",
             "obj-evidence-pg",
             analysis_version,
@@ -2376,13 +2384,14 @@ def test_postgresql_migration_lifecycle_matches_models() -> None:
             evidence_records=evidence_records,
             findings=(finding,),
         )
-        restored, total = repository.list_findings(
+        restored, total = await repository.list_findings(
             "col-evidence-pg", "obj-evidence-pg", analysis_version
         )
         assert total == 1
         assert restored == (finding,)
 
     finally:
+        await async_engine.dispose()
         reset_postgres_schema(engine)
         engine.dispose()
 

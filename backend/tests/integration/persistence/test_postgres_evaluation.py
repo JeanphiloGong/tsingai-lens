@@ -44,7 +44,7 @@ async def test_postgres_evaluation_repository_preserves_lineage_and_scope(
             CollectionRecord.from_mapping(
                 {
                     "collection_id": collection_id,
-                    "owner_id": "user-evaluation",
+                    "owner_user_id": "user-evaluation",
                     "name": collection_id,
                     "description": None,
                     "created_at": "2026-07-20T00:00:00+00:00",

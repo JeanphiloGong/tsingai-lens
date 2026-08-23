@@ -219,7 +219,7 @@ def test_evidence_map_projects_published_scientific_and_source_lineage() -> None
 
     assert payload["projection_version"] == "objective-evidence-map.v1"
     assert payload["analysis_version"] == 1
-    assert payload["complete"] is True
+    assert payload["complete"] is False
     assert payload["coverage"] == {
         "total_document_count": 3,
         "analyzed_document_count": 2,
@@ -260,6 +260,41 @@ def test_evidence_map_projects_published_scientific_and_source_lineage() -> None
         for edge in payload["edges"]
         if edge["target"].endswith("paper-3")
     ]
+
+
+def test_evidence_map_is_complete_for_scientific_abstention() -> None:
+    contribution = PaperContribution.from_mapping(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-1",
+            "analysis_version": 1,
+            "document_id": "paper-1",
+            "analysis_status": "analyzed",
+            "relevance": "high",
+            "paper_role": "primary_experiment",
+            "confidence": 0.8,
+            "evidence_disposition": "no_routable_evidence",
+            "evidence_disposition_reason": (
+                "No source in this paper was selected for Objective extraction."
+            ),
+            "routed_source_count": 0,
+            "extracted_source_count": 0,
+            "comparable_evidence_count": 0,
+            "failed_source_count": 0,
+        }
+    )
+    payload = build_objective_evidence_map(
+        objective=_objective(),
+        analysis=_analysis(),
+        contributions=(contribution,),
+        findings=(),
+        evidence_records=(),
+        profiles=(),
+    )
+
+    assert payload["complete"] is True
+    assert payload["coverage"]["failed_document_count"] == 0
+    assert payload["coverage"]["direct_evidence_document_count"] == 0
 
 
 def test_evidence_map_rejects_an_unpublished_or_cross_version_projection() -> None:

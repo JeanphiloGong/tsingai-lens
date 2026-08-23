@@ -8,6 +8,7 @@ import pytest
 
 from application.core.objectives.analysis import evidence_materialization
 from application.core.objectives.analysis.evidence_routing import (
+    EvidenceCandidate,
     StructuredEvidenceSelections,
 )
 from application.core.objectives.analysis.source_extraction import (
@@ -550,12 +551,29 @@ async def test_objective_contribution_reports_only_final_degraded_source_outcome
         objective=objective,
         paper_skims=(paper_skim,),
         frames=(frame,),
-        routes=(),
+        routes=(
+            EvidenceCandidate.from_mapping(
+                {
+                    "objective_id": objective.objective_id,
+                    "document_id": "paper-1",
+                    "source_kind": "block",
+                    "source_ref": "block-4",
+                    "role": "current_experimental_evidence",
+                    "extractable": True,
+                    "reason": (
+                        "Deterministic route built after model routing failed."
+                    ),
+                    "used_fallback": True,
+                    "confidence": 0.62,
+                }
+            ),
+        ),
         evidence_records=(failed_evidence,),
     )
 
     assert contributions[0].warnings == (
         "1 Source unit(s) used conservative paper framing fallback.",
+        "1 Source unit(s) used deterministic evidence routing fallback.",
         "1 PaperSkim Source unit(s) failed extraction before Objective analysis.",
         "1 selected source(s) failed extraction.",
     )
@@ -746,6 +764,9 @@ async def test_objective_analysis_uses_deterministic_route_when_route_model_fail
 
     assert failing_extractor.route_payloads
     assert artifacts.contributions[0].document_id == "paper-1"
+    assert artifacts.contributions[0].warnings == (
+        "1 Source unit(s) used deterministic evidence routing fallback.",
+    )
     assert all(
         evidence.analysis_version == analysis.analysis_version
         for evidence in artifacts.evidence_records

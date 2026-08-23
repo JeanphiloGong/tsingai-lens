@@ -250,6 +250,13 @@ def _analysis_contributions(
             disposition.disposition == "fallback_relevant"
             for disposition in frame.source_dispositions
         )
+        routing_fallback_source_count = len(
+            {
+                (route.source_kind, route.source_ref)
+                for route in routes
+                if route.document_id == frame.document_id and route.used_fallback
+            }
+        )
         paper_skim = paper_skims_by_document_id.get(frame.document_id)
         paper_skim_failure_count = sum(
             coverage.status is PaperSourceUnitCoverageStatus.EXTRACTION_FAILED
@@ -262,6 +269,11 @@ def _analysis_contributions(
             warnings.append(
                 f"{fallback_source_count} Source unit(s) used conservative "
                 "paper framing fallback."
+            )
+        if routing_fallback_source_count:
+            warnings.append(
+                f"{routing_fallback_source_count} Source unit(s) used deterministic "
+                "evidence routing fallback."
             )
         if paper_skim_failure_count:
             warnings.append(

@@ -452,13 +452,16 @@ class FindingSynthesisService:
                     request_payload["candidate_rejection"] = candidate_rejection
                 try:
                     parsed = self.assertion_judge.judge_result_set(request_payload)
-                except Exception:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001
                     logger.exception(
                         "Finding synthesis failed result_set_id=%s semantic_attempt=%s",
                         expected_result_set_id,
                         semantic_attempt + 1,
                     )
-                    break
+                    raise RuntimeError(
+                        "Finding synthesis failed for result set "
+                        f"{expected_result_set_id}"
+                    ) from exc
                 parsed_record = (
                     parsed.model_dump()
                     if hasattr(parsed, "model_dump")
@@ -533,7 +536,10 @@ class FindingSynthesisService:
                             "previous_candidate": candidate,
                         }
                         continue
-                    break
+                    raise RuntimeError(
+                        "Finding synthesis remained invalid after repair for "
+                        f"result set {expected_result_set_id}"
+                    ) from exc
                 findings.append(finding)
                 break
         return tuple(findings)

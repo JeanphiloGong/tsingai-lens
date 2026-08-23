@@ -2755,7 +2755,7 @@ def test_synthesis_excludes_unattributable_and_context_only_evidence() -> None:
     assert extractor.payloads == []
 
 
-def test_synthesis_continues_after_one_result_set_provider_failure() -> None:
+def test_synthesis_fails_atomically_after_one_result_set_provider_failure() -> None:
     extractor = _Extractor(
         [
             ValueError("invalid JSON"),
@@ -2768,24 +2768,27 @@ def test_synthesis_continues_after_one_result_set_provider_failure() -> None:
         ]
     )
     service = FindingSynthesisService(assertion_judge=extractor)
-    findings = service.synthesize(
-        collection_id="col-1",
-        objective=_objective(outcomes=["elongation", "relative density"]),
-        analysis=_analysis(),
-        contributions=(_contribution("paper-1"),),
-        evidence_records=(
-            _evidence(
-                "elongation-1",
-                "paper-1",
-                outcome="elongation",
-                direction="decrease",
+    with pytest.raises(
+        RuntimeError,
+        match="Finding synthesis failed for result set",
+    ):
+        service.synthesize(
+            collection_id="col-1",
+            objective=_objective(outcomes=["elongation", "relative density"]),
+            analysis=_analysis(),
+            contributions=(_contribution("paper-1"),),
+            evidence_records=(
+                _evidence(
+                    "elongation-1",
+                    "paper-1",
+                    outcome="elongation",
+                    direction="decrease",
+                ),
+                _evidence("ev-1", "paper-1"),
             ),
-            _evidence("ev-1", "paper-1"),
-        ),
-    )
+        )
 
-    assert len(extractor.payloads) == 2
-    assert [finding.outcome for finding in findings] == ["relative density"]
+    assert len(extractor.payloads) == 1
 
 
 def test_synthesis_repairs_unavailable_context_reference_once() -> None:
@@ -2840,22 +2843,25 @@ def test_synthesis_repairs_unavailable_context_reference_once() -> None:
     }
 
 
-def test_synthesis_stops_after_one_semantic_repair(caplog) -> None:
+def test_synthesis_fails_after_one_unsuccessful_semantic_repair(caplog) -> None:
     rejected = _candidate(
         context_evidence_ids=["missing-context"],
     )
     extractor = _Extractor([rejected, rejected])
     service = FindingSynthesisService(assertion_judge=extractor)
 
-    findings = service.synthesize(
-        collection_id="col-1",
-        objective=_objective(),
-        analysis=_analysis(),
-        contributions=(_contribution("paper-1"),),
-        evidence_records=(_evidence("ev-1", "paper-1"),),
-    )
+    with pytest.raises(
+        RuntimeError,
+        match="Finding synthesis remained invalid after repair",
+    ):
+        service.synthesize(
+            collection_id="col-1",
+            objective=_objective(),
+            analysis=_analysis(),
+            contributions=(_contribution("paper-1"),),
+            evidence_records=(_evidence("ev-1", "paper-1"),),
+        )
 
-    assert findings == ()
     assert len(extractor.payloads) == 2
     assert "semantic_repair_attempted=True" in caplog.text
 

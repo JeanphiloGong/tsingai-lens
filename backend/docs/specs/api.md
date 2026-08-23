@@ -266,14 +266,15 @@ values as zero. A successful `comparable_evidence` contribution with no partial
 failure may have no reason.
 
 Each published contribution's `warnings` reports only final degraded coverage:
-conservative paper-framing fallback, PaperSkim Source units whose extraction
-ultimately failed, and selected Objective Evidence Sources whose extraction
-ultimately failed. A successful bounded retry or framing repair is not a
-warning. Warning text contains bounded counts rather than provider errors or
-raw exceptions. `ObjectiveAnalysisResponse.warnings` aggregates those persisted
-contribution warnings in paper order, prefixes each entry with `document_id`,
-and removes duplicates within the same paper. A clean published analysis
-returns an empty list.
+conservative paper-framing fallback, deterministic evidence-routing fallback,
+PaperSkim Source units whose extraction ultimately failed, and selected
+Objective Evidence Sources whose extraction ultimately failed. A successful
+bounded retry or framing repair is not a warning. Warning text contains bounded
+counts rather than provider errors or raw exceptions.
+`ObjectiveAnalysisResponse.warnings` aggregates those persisted contribution
+warnings in paper order, prefixes each entry with `document_id`, and removes
+duplicates within the same paper. A clean published analysis returns an empty
+list.
 
 ### Published Findings And Evidence
 
@@ -297,7 +298,9 @@ scientific contradiction. Multiple Evidence records with the same document,
 Source kind, and stable `source_ref` share one Source node. The endpoint performs
 no LLM call and persists no graph state. `projection_version` identifies the
 read model contract, while `analysis_version` identifies the published domain
-records from which it was produced.
+records from which it was produced. `complete` is true when every included paper
+reached a non-technical analysis outcome. A scientifically valid empty result is
+complete; any paper with `analysis_status=failed` makes it false.
 
 A Finding contains:
 

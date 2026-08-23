@@ -102,11 +102,12 @@ related locators, and deduplicates only replayed drafts with the same stable
 figure, or paragraph can support several measurements or comparisons.
 `PaperContribution` route, extracted, failed, and comparable counts are computed
 from that complete claim set. Contribution warnings count only final framing
-fallback, PaperSkim coverage gaps, and failed Evidence Sources; successful
-repair is not a warning. It does not persist artifacts or synthesize a
-cross-paper claim. Its private materialization trace records only bounded counts
-and paper dispositions, so an empty result can be distinguished from filtering
-and technical extraction failure without storing Source content in diagnostics.
+fallback, deterministic evidence-routing fallback, PaperSkim coverage gaps, and
+failed Evidence Sources; successful repair is not a warning. It does not persist
+artifacts or synthesize a cross-paper claim. Its private materialization trace
+records only bounded counts and paper dispositions, so an empty result can be
+distinguished from filtering and technical extraction failure without storing
+Source content in diagnostics.
 
 An analysis that inspects its paper scope but finds no grounded Objective
 Evidence publishes an empty Finding set as a scientific abstention. This is not
@@ -123,7 +124,10 @@ and derives the published statement, status, certainty, limitations, identity,
 and provenance. `FindingAssertionJudge` decides only assertion strength and
 optional context or mechanism annotations for one backend-owned result set. It
 cannot change result-set membership, scientific direction, Evidence bindings,
-or any published Finding identity.
+or any published Finding identity. A schema-valid abstention may produce no
+Finding. Provider, parsing, or repeated semantic-contract failure instead aborts
+the analysis version so it cannot publish an apparently scientific empty or
+partial Finding set.
 
 Technical JSON parsing, provider retries, usage accounting, and trace capture
 live in `llm/structured_response.py`; they support this process but do not

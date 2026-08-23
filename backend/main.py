@@ -96,7 +96,9 @@ from infra.persistence.postgres.source_artifact_repository import (
 from utils.logger import (
     REQUEST_ID_HEADER,
     bind_request_id,
+    bind_user_id,
     clear_request_id,
+    clear_user_id,
     resolve_request_id,
     setup_logger,
 )
@@ -386,24 +388,28 @@ def create_app(
                 },
             )
 
-        request.state.current_user = user
-        collection_id = _extract_collection_id(request.url.path)
-        if collection_id and not await _user_owns_collection(
-            request.app.state.collection_service,
-            collection_id,
-            user["user_id"],
-        ):
-            return JSONResponse(
-                status_code=404,
-                content={
-                    "detail": {
-                        "code": "collection_not_found",
-                        "message": f"collection not found: {collection_id}",
-                        "collection_id": collection_id,
-                    }
-                },
-            )
-        return await call_next(request)
+        user_token = bind_user_id(str(user["user_id"]))
+        try:
+            request.state.current_user = user
+            collection_id = _extract_collection_id(request.url.path)
+            if collection_id and not await _user_owns_collection(
+                request.app.state.collection_service,
+                collection_id,
+                user["user_id"],
+            ):
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "detail": {
+                            "code": "collection_not_found",
+                            "message": f"collection not found: {collection_id}",
+                            "collection_id": collection_id,
+                        }
+                    },
+                )
+            return await call_next(request)
+        finally:
+            clear_user_id(user_token)
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     app.include_router(auth.router, prefix=PUBLIC_API_V1_PREFIX)

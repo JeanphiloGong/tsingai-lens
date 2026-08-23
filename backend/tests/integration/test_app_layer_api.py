@@ -198,12 +198,13 @@ def test_request_id_is_echoed_and_propagated_to_background_build(
     app_client, monkeypatch
 ):
     import application.pipeline.collection_build.service as task_runner_module
-    from utils.logger import REQUEST_ID_HEADER, get_request_id
+    from utils.logger import REQUEST_ID_HEADER, get_request_id, get_user_id
 
     captured: dict[str, str | None] = {}
 
     async def fake_build_source_artifacts(**kwargs):  # noqa: ANN003
         captured["bound_request_id"] = get_request_id()
+        captured["bound_user_id"] = get_user_id()
         output_dir = Path(kwargs["config"].output.base_dir)
         return [DummyWorkflowOutput(result=_write_source_artifact_outputs(output_dir))]
 
@@ -241,6 +242,9 @@ def test_request_id_is_echoed_and_propagated_to_background_build(
     final_task = _wait_for_task_terminal(app_client, task_resp.json()["task_id"])
     assert final_task["status"] == "completed"
     assert captured["bound_request_id"] == request_id
+    assert captured["bound_user_id"] == next(
+        iter(app_client.app.state.auth_session_service.repository.users)
+    )
 
 
 def test_build_task_route_schedules_async_entry_without_waiting(

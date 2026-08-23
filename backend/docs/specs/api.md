@@ -11,6 +11,10 @@ this file owns resource boundaries and cross-endpoint semantics.
 - `POST /api/v1/auth/login` establishes an HttpOnly session cookie. Browser
   requests send that cookie through the same-origin `/api/v1/*` contract.
 - Every business response carries `X-Request-ID`.
+- Internal application logs correlate authenticated work by request ID and the
+  stable internal user ID. They do not log email addresses, session values, or
+  authentication credentials. Process-local background work inherits the
+  initiating request and user context.
 - A collection is the primary working scope; a document is a source inside it.
 - PostgreSQL is the structured runtime authority.
 - GET requests never trigger LLM analysis.

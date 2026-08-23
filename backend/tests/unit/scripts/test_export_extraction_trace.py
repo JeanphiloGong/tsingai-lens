@@ -40,6 +40,10 @@ def _load_trace_module():
 @pytest.mark.anyio
 async def test_export_trace_writes_readable_artifact_views(tmp_path, monkeypatch):
     trace = _load_trace_module()
+    monkeypatch.setenv(
+        "LENS_DATABASE_URL",
+        "postgresql+psycopg://test:test@localhost/test",
+    )
     backend_root = tmp_path / "backend"
     collection_id = "col-test"
     source_repository = MemorySourceArtifactRepository()

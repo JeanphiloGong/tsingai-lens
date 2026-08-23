@@ -64,6 +64,10 @@ async def test_export_prediction_bundle_writes_gold_aligned_system_output(
     monkeypatch,
 ):
     exporter = _load_exporter_module()
+    monkeypatch.setenv(
+        "LENS_DATABASE_URL",
+        "postgresql+psycopg://test:test@localhost/test",
+    )
     backend_root = tmp_path / "backend"
     collection_id = "col-test"
     source_repository, paper_fact_repository, comparison_repository = (
@@ -251,6 +255,10 @@ def test_prediction_bundle_exports_published_findings_and_exact_evidence(tmp_pat
 @pytest.mark.anyio
 async def test_export_prediction_bundle_allows_missing_artifacts(tmp_path, monkeypatch):
     exporter = _load_exporter_module()
+    monkeypatch.setenv(
+        "LENS_DATABASE_URL",
+        "postgresql+psycopg://test:test@localhost/test",
+    )
     backend_root = tmp_path / "backend"
     collection_id = "col-empty"
     prediction_path = tmp_path / "generated" / "prediction_bundle.json"

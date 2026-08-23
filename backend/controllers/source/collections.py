@@ -177,7 +177,10 @@ async def create_collection_source_archive(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except CollectionSourceArchiveError as exc:
-        status_code = 404 if exc.code == "collection_source_file_not_found" else 409
+        status_code = {
+            "collection_source_file_not_found": 404,
+            "collection_source_archive_too_large": 413,
+        }.get(exc.code, 409)
         raise HTTPException(
             status_code=status_code,
             detail=_source_archive_error_detail(exc),

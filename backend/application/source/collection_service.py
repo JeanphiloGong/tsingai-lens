@@ -32,6 +32,10 @@ from infra.source.ingestion import (
 )
 
 
+_SOURCE_ARCHIVE_MAX_MIB = 256
+_SOURCE_ARCHIVE_MAX_BYTES = _SOURCE_ARCHIVE_MAX_MIB * 1024 * 1024
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -279,6 +283,20 @@ class CollectionService:
                     file_id=file_id,
                 )
             selected_records.append((file_id, record))
+
+        selected_size_bytes = sum(
+            max(int(record.get("size_bytes") or 0), 0)
+            for _file_id, record in selected_records
+        )
+        if selected_size_bytes > _SOURCE_ARCHIVE_MAX_BYTES:
+            raise CollectionSourceArchiveError(
+                collection_id,
+                code="collection_source_archive_too_large",
+                message=(
+                    "Selected source files exceed the "
+                    f"{_SOURCE_ARCHIVE_MAX_MIB} MiB archive limit."
+                ),
+            )
 
         return await asyncio.to_thread(
             self._write_source_archive,

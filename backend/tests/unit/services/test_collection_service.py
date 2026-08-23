@@ -7,6 +7,7 @@ import json
 from zipfile import ZipFile
 import pytest
 
+import application.source.collection_service as collection_service_module
 from application.source.collection_service import (
     CollectionService,
     CollectionSourceArchiveError,
@@ -131,6 +132,39 @@ async def test_build_source_archive_rejects_missing_file_before_reading(
 
     assert exc_info.value.code == "collection_source_file_not_found"
     assert exc_info.value.file_id == "file_missing"
+
+
+async def test_build_source_archive_rejects_oversized_selection_before_reading(
+    monkeypatch,
+    tmp_path,
+):
+    service = build_test_collection_service(tmp_path / "collections")
+    collection = await service.create_collection("Oversized source archive")
+    first = await service.add_file(
+        collection["collection_id"],
+        "first.pdf",
+        b"1234",
+    )
+    second = await service.add_file(
+        collection["collection_id"],
+        "second.pdf",
+        b"5678",
+    )
+    monkeypatch.setattr(collection_service_module, "_SOURCE_ARCHIVE_MAX_BYTES", 7)
+
+    def fail_if_read(*_args, **_kwargs):
+        raise AssertionError("oversized archive selection must fail before byte reads")
+
+    monkeypatch.setattr(service.object_store, "read", fail_if_read)
+
+    with pytest.raises(CollectionSourceArchiveError) as exc_info:
+        await service.build_source_archive(
+            collection["collection_id"],
+            [first["file_id"], second["file_id"]],
+        )
+
+    assert exc_info.value.code == "collection_source_archive_too_large"
+    assert exc_info.value.file_id is None
 
 
 async def test_build_source_archive_rejects_unsafe_collection_storage_key(tmp_path):

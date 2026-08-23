@@ -58,12 +58,15 @@ Objective readiness is derived from their owning repositories rather than
 duplicated into the task artifact registry.
 
 The source archive request accepts between one and 100 unique collection
-`file_id` values and returns an `application/zip` attachment. The archive
-contains the selected original uploads under `sources/` plus `manifest.json`
-with their stable file IDs, archive paths, media types, sizes, and SHA-256
-digests. Selection is atomic: a missing, unsafe, unavailable, or
-integrity-failing source prevents the complete archive from being returned.
+`file_id` values with at most 256 MiB of persisted source bytes and returns an
+`application/zip` attachment. The archive contains the selected original
+uploads under `sources/` plus `manifest.json` with their stable file IDs,
+archive paths, media types, sizes, and SHA-256 digests. Selection is atomic: a
+missing, oversized, unsafe, unavailable, or integrity-failing source prevents
+the complete archive from being returned.
 An unknown selected ID returns `404 collection_source_file_not_found`.
+An oversized selection returns `413 collection_source_archive_too_large`
+before any selected Source bytes are read.
 Persisted metadata whose bytes are unavailable, unsafe, or fail integrity
 verification returns `409` with the corresponding bounded
 `collection_source_*` code; storage paths are never returned.

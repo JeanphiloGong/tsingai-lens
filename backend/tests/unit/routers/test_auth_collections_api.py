@@ -15,6 +15,7 @@ from zipfile import ZipFile
 from fastapi.testclient import TestClient
 import pytest
 
+import application.source.collection_service as collection_service_module
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 
@@ -424,4 +425,41 @@ def test_collection_source_archive_returns_bounded_missing_file_error(
             "message": "A requested source file does not exist in this collection.",
             "collection_id": collection_id,
             "file_id": "file_missing",
+        }
+
+
+def test_collection_source_archive_returns_413_for_oversized_selection(
+    monkeypatch,
+    tmp_path,
+    auth_session_service,
+    collection_service,
+):
+    monkeypatch.setattr(collection_service_module, "_SOURCE_ARCHIVE_MAX_BYTES", 3)
+    with _build_client(
+        monkeypatch,
+        tmp_path,
+        auth_session_service,
+        collection_service,
+    ) as client:
+        assert _login(client).status_code == 200
+        created = client.post(
+            "/api/v1/collections",
+            json={"name": "Oversized archive"},
+        )
+        collection_id = created.json()["collection_id"]
+        upload = client.post(
+            f"/api/v1/collections/{collection_id}/files",
+            files={"file": ("paper.pdf", b"1234", "application/pdf")},
+        )
+
+        response = client.post(
+            f"/api/v1/collections/{collection_id}/source-archives",
+            json={"file_ids": [upload.json()["file_id"]]},
+        )
+
+        assert response.status_code == 413
+        assert response.json()["detail"] == {
+            "code": "collection_source_archive_too_large",
+            "message": "Selected source files exceed the 256 MiB archive limit.",
+            "collection_id": collection_id,
         }

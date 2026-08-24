@@ -55,3 +55,17 @@ def test_invalid_user_id_is_not_written_to_log_context() -> None:
         assert get_user_id() is None
     finally:
         clear_user_id(token)
+
+
+def test_setup_logger_suppresses_docling_page_profiling() -> None:
+    docling_logger = logging.getLogger("docling.pipeline.standard_pdf_pipeline")
+    original_level = docling_logger.level
+    docling_logger.setLevel(logging.DEBUG)
+
+    try:
+        lens_logger = setup_logger("application.source.document_parsing")
+
+        assert docling_logger.getEffectiveLevel() == logging.WARNING
+        assert lens_logger.getEffectiveLevel() == logging.DEBUG
+    finally:
+        docling_logger.setLevel(original_level)

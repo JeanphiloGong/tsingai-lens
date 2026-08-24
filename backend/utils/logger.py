@@ -12,6 +12,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 _QUIET_LIBRARY_LOGGERS = (
     "LiteLLM",
+    "docling.pipeline.standard_pdf_pipeline",
     "litellm",
     "openai",
     "httpx",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
@@ -45,6 +46,12 @@ _SKIM_HEADING_LIMIT = 16
 _SKIM_WARNING_LIMIT = 2
 _SKIM_SINGLE_SOURCE_RECOVERY_MIN_CHARS = 800
 _SKIM_SINGLE_SOURCE_RECOVERY_MAX_DEPTH = 2
+_SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT = 2
+_SKIM_COMPACT_RETRY_FAILURE_KINDS = {
+    "empty_response",
+    "malformed_json",
+    "no_json_object",
+}
 _SKIM_WINDOW_ROLES = ("overview", "methods", "results", "conclusion", "unknown")
 _SKIM_ROLE_BY_SEMANTIC_ROLE = {
     "abstract": "overview",
@@ -57,6 +64,10 @@ _EVIDENCE_DENSITY_RANK = {"unknown": 0, "low": 1, "medium": 2, "high": 3}
 _SIGNAL_RECONCILIATION_SIGNAL_LIMIT = 12
 _SIGNAL_RECONCILIATION_NEARBY_SOURCE_UNIT_DISTANCE = 12
 _DEFAULT_MAX_EXTRACTION_CONCURRENCY = 4
+_NUMBERED_CITATION_PATTERN = re.compile(
+    r"\[(?:\s*\d{1,4}\s*(?:(?:,|[-\u2013])\s*\d{1,4}\s*)*)\]"
+)
+_NAMED_PRIOR_AUTHOR_PATTERN = re.compile(r"\bet\s+al\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -889,6 +900,8 @@ class PaperSkimService:
                 return tuple(child_skims), tuple(child_signals)
 
             failure_kind = self._single_source_recovery_kind(exc)
+            final_error = exc
+            final_failure_kind = failure_kind
             if (
                 len(source_units) == 1
                 and failure_kind is not None
@@ -936,6 +949,80 @@ class PaperSkimService:
                         tuple(fragment_signals),
                     )
 
+            if len(source_units) == 1 and failure_kind == "output_saturated":
+                for compact_attempt in range(
+                    1,
+                    _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT + 1,
+                ):
+                    try:
+                        compact = study_window_extractor.extract_source_signals(
+                            dict(payload)
+                        )
+                        fallback_warning = (
+                            "Full study reconstruction saturated for one Source; "
+                            "retained explicit source-local signals for paper "
+                            "reconciliation."
+                        )
+                        compact = compact.model_copy(
+                            update={
+                                "warnings": [
+                                    fallback_warning,
+                                    *compact.warnings,
+                                ][:2]
+                            }
+                        )
+                        window_skim, window_signals = self._resolve_window_result(
+                            document_id=document_id,
+                            payload=payload,
+                            parsed=compact,
+                        )
+                        logger.warning(
+                            "Paper skim singleton recovered through source-local "
+                            "signals collection_id=%s document_id=%s window_id=%s "
+                            "attempt=%s compact_attempt=%s source_unit_count=1 "
+                            "signal_count=%s",
+                            collection_id,
+                            document_id,
+                            payload.get("window_id"),
+                            attempt,
+                            compact_attempt,
+                            len(compact.unresolved_signals),
+                        )
+                        return (window_skim,), window_signals
+                    except Exception as compact_exc:  # noqa: BLE001
+                        compact_failure_kind = self._single_source_recovery_kind(
+                            compact_exc
+                        )
+                        final_error = compact_exc
+                        final_failure_kind = (
+                            f"compact_{compact_failure_kind}"
+                            if compact_failure_kind
+                            else "compact_non_recoverable"
+                        )
+                        will_retry = (
+                            compact_attempt < _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT
+                            and compact_failure_kind
+                            in _SKIM_COMPACT_RETRY_FAILURE_KINDS
+                        )
+                        logger.warning(
+                            "Paper skim compact singleton recovery failed "
+                            "collection_id=%s document_id=%s window_id=%s attempt=%s "
+                            "compact_attempt=%s compact_attempt_limit=%s "
+                            "failure_kind=%s will_retry=%s error=%s",
+                            collection_id,
+                            document_id,
+                            payload.get("window_id"),
+                            attempt,
+                            compact_attempt,
+                            _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT,
+                            compact_failure_kind or "non_recoverable",
+                            will_retry,
+                            compact_exc,
+                        )
+                        if will_retry:
+                            continue
+                        break
+
             logger.warning(
                 "Paper skim Source-unit extraction failed permanently "
                 "collection_id=%s document_id=%s window_id=%s attempt=%s "
@@ -945,15 +1032,15 @@ class PaperSkimService:
                 payload.get("window_id"),
                 attempt,
                 len(source_units),
-                exc,
-                failure_kind or "non_recoverable",
+                final_error,
+                final_failure_kind or "non_recoverable",
             )
             return (
                 (
                     self._failed_source_unit_skim(
                         document_id=document_id,
                         payload=payload,
-                        failure_kind=failure_kind,
+                        failure_kind=final_failure_kind,
                     ),
                 ),
                 (),
@@ -1218,14 +1305,23 @@ class PaperSkimService:
         if len(study_identities) != len(set(study_identities)):
             raise ValueError("paper skim response contains duplicate study identities")
         studies: list[PaperStudy] = []
-        signals = [
-            self._signal_from_window_result(
-                item.model_dump(),
-                document_id=document_id,
+        signals = []
+        for item in parsed.unresolved_signals:
+            signal_payload = item.model_dump()
+            signal_payload["claim_scope"] = self._claim_scope_for_document(
+                claim_scope=item.claim_scope,
+                experiment_label=item.experiment_label,
+                source_unit_ids=item.source_unit_ids,
+                payload=payload,
                 source_units=source_units,
             )
-            for item in parsed.unresolved_signals
-        ]
+            signals.append(
+                self._signal_from_window_result(
+                    signal_payload,
+                    document_id=document_id,
+                    source_units=source_units,
+                )
+            )
         relationship_source_unit_ids: list[str] = []
         signal_source_unit_ids = [
             source_unit_id
@@ -1233,6 +1329,21 @@ class PaperSkimService:
             for source_unit_id in item.source_unit_ids
         ]
         for study in parsed.studies:
+            study = study.model_copy(
+                update={
+                    "claim_scope": self._claim_scope_for_document(
+                        claim_scope=study.claim_scope,
+                        experiment_label=study.experiment_label,
+                        source_unit_ids=[
+                            source_unit_id
+                            for relationship in study.relationships
+                            for source_unit_id in relationship.source_unit_ids
+                        ],
+                        payload=payload,
+                        source_units=source_units,
+                    )
+                }
+            )
             retained_relationships = []
             for relationship in study.relationships:
                 if self._relationship_conflicts_with_fixed_conditions(
@@ -1505,13 +1616,53 @@ class PaperSkimService:
 
     @staticmethod
     def _source_excerpt(content: Any) -> str:
+        return PaperSkimService._source_content_text(content)[:800]
+
+    @staticmethod
+    def _source_content_text(content: Any) -> str:
         if isinstance(content, str):
-            return content[:800]
+            return content
         return json.dumps(
             content,
             ensure_ascii=False,
             separators=(",", ":"),
-        )[:800]
+        )
+
+    @classmethod
+    def _claim_scope_for_document(
+        cls,
+        *,
+        claim_scope: str,
+        experiment_label: str | None,
+        source_unit_ids: Iterable[str],
+        payload: Mapping[str, Any],
+        source_units: Mapping[str, Mapping[str, Any]],
+    ) -> str:
+        profile = payload.get("document_profile")
+        doc_type = (
+            str(profile.get("doc_type") or "").strip()
+            if isinstance(profile, Mapping)
+            else ""
+        )
+        if doc_type != "review" or claim_scope != "current_work":
+            return claim_scope
+
+        resolved = tuple(
+            source_units[source_unit_id]
+            for source_unit_id in dict.fromkeys(
+                str(value or "").strip() for value in source_unit_ids
+            )
+            if source_unit_id in source_units
+        )
+        source_text = "\n".join(
+            cls._source_content_text(unit.get("content")) for unit in resolved
+        )
+        if _NUMBERED_CITATION_PATTERN.search(source_text) or (
+            experiment_label
+            and _NAMED_PRIOR_AUTHOR_PATTERN.search(experiment_label)
+        ):
+            return "background"
+        return "uncertain"
 
     def _reconcile_paper_signals(
         self,
@@ -2077,6 +2228,7 @@ class PaperSkimService:
         *,
         profile: Any,
     ) -> PaperSkim:
+        doc_role = self._consolidate_doc_role(window_skims, profile=profile)
         studies = self._consolidate_studies(
             tuple(
                 study
@@ -2085,9 +2237,16 @@ class PaperSkimService:
             ),
             document_id=document_id,
         )
+        if doc_role == "review":
+            studies = tuple(
+                self._study_with_claim_scope(study, "uncertain")
+                if study.claim_scope == "current_work"
+                else study
+                for study in studies
+            )
         return PaperSkim(
             document_id=document_id,
-            doc_role=self._consolidate_doc_role(window_skims, profile=profile),
+            doc_role=doc_role,
             studies=studies,
             evidence_density=max(
                 (skim.evidence_density for skim in window_skims),
@@ -2104,6 +2263,21 @@ class PaperSkimService:
                 for item in skim.source_unit_coverage
             ),
         )
+
+    @staticmethod
+    def _study_with_claim_scope(study: PaperStudy, claim_scope: str) -> PaperStudy:
+        record = study.to_record()
+        record.pop("study_id", None)
+        record["claim_scope"] = claim_scope
+        record["relationships"] = [
+            {
+                key: value
+                for key, value in relationship.items()
+                if key != "relationship_id"
+            }
+            for relationship in record["relationships"]
+        ]
+        return PaperStudy.from_mapping(record)
 
     @classmethod
     def _consolidate_studies(

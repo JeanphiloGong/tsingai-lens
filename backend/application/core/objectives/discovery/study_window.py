@@ -1,15 +1,27 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from application.core.objectives import property_matching
-from application.core.objectives.llm.structured_response import StructuredResponseClient
+from application.core.objectives.llm.structured_response import (
+    StructuredOutputSaturatedError,
+    StructuredResponseClient,
+)
 
 PAPER_SKIM_PROMPT_VERSION = "paper_skim.v6"
+PAPER_SOURCE_SIGNAL_PROMPT_VERSION = "paper_source_signal.v1"
 PAPER_SKIM_PROMPT_TOKEN_LIMIT = 12_288
 PAPER_SKIM_SOURCE_UNIT_LIMIT = 12
 PAPER_SKIM_WARNING_LIMIT = (2, 240)
@@ -20,10 +32,15 @@ PAPER_SKIM_UNRESOLVED_SIGNAL_LIMIT = 12
 _STUDY_CONTEXT_LIMIT = 12
 _STUDY_CONTEXT_VALUE_CHARS = 160
 _VARIED_FACTOR_LIMIT = 12
+_SOURCE_SIGNAL_CONTEXT_LIMIT = 4
+_SOURCE_SIGNAL_LIMIT = 12
 
 _MAX_COMPLETION_TOKENS = 4096
+_SOURCE_SIGNAL_MAX_COMPLETION_TOKENS = 2048
 _DOC_ROLES = {"experimental", "review", "modeling", "mixed", "uncertain"}
 _EVIDENCE_DENSITIES = {"high", "medium", "low", "unknown"}
+
+logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """
 You are screening one bounded Source window for a traceable literature map.
@@ -44,6 +61,22 @@ def _normalize_choice(value: object, *, allowed: set[str], default: str) -> str:
 
 def _normalize_list(value: object) -> object:
     return [] if value is None else value
+
+
+def _normalize_warnings(value: object) -> object:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return value
+    normalized: list[object] = []
+    for item in value[: PAPER_SKIM_WARNING_LIMIT[0]]:
+        if not isinstance(item, str):
+            normalized.append(item)
+            continue
+        text = item.strip()
+        if text:
+            normalized.append(text[: PAPER_SKIM_WARNING_LIMIT[1]])
+    return normalized
 
 
 class _PaperSkimResponse(BaseModel):
@@ -247,6 +280,165 @@ class StructuredPaperStudySignal(_PaperSkimResponse):
         return self
 
 
+class StructuredPaperSourceSignal(_PaperSkimResponse):
+    """One explicit scientific axis from one Source, before relationship assembly."""
+
+    signal_type: Literal["variable", "outcome"]
+    label: Annotated[str, Field(min_length=1, max_length=80)]
+    experiment_label: str | None = Field(default=None, max_length=120)
+    design_type: Literal[
+        "experimental",
+        "observational",
+        "modeling",
+        "mixed",
+        "uncertain",
+    ] = "uncertain"
+    claim_scope: Literal[
+        "current_work",
+        "synthesis",
+        "background",
+        "uncertain",
+    ] = "uncertain"
+    material_scope: list[
+        Annotated[str, Field(max_length=80)]
+    ] = Field(default_factory=list, max_length=_SOURCE_SIGNAL_CONTEXT_LIMIT)
+    process_context: list[
+        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
+    ] = Field(default_factory=list, max_length=_SOURCE_SIGNAL_CONTEXT_LIMIT)
+    sample_context: list[
+        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
+    ] = Field(default_factory=list, max_length=_SOURCE_SIGNAL_CONTEXT_LIMIT)
+    test_context: list[
+        Annotated[str, Field(max_length=_STUDY_CONTEXT_VALUE_CHARS)]
+    ] = Field(default_factory=list, max_length=_SOURCE_SIGNAL_CONTEXT_LIMIT)
+    comparator: str | None = Field(default=None, max_length=160)
+    fixed_conditions: list[
+        Annotated[str, Field(max_length=120)]
+    ] = Field(default_factory=list, max_length=_SOURCE_SIGNAL_CONTEXT_LIMIT)
+    confidence: float = 0.0
+
+    @field_validator(
+        "material_scope",
+        "process_context",
+        "sample_context",
+        "test_context",
+        "fixed_conditions",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list(value)
+
+    def identity_key(self) -> tuple[object, ...]:
+        def normalized_values(values: list[str]) -> tuple[str, ...]:
+            return tuple(
+                sorted(
+                    {
+                        value.strip().casefold()
+                        for value in values
+                        if value.strip()
+                    }
+                )
+            )
+
+        return (
+            self.signal_type,
+            self.label.strip().casefold(),
+            self.experiment_label.strip().casefold()
+            if self.experiment_label
+            else None,
+            self.design_type,
+            self.claim_scope,
+            normalized_values(self.material_scope),
+            normalized_values(self.process_context),
+            normalized_values(self.sample_context),
+            normalized_values(self.test_context),
+            self.comparator.strip().casefold() if self.comparator else None,
+            normalized_values(self.fixed_conditions),
+        )
+
+
+class StructuredPaperSourceSignalScreen(_PaperSkimResponse):
+    """Bounded source-local signals used when full study reconstruction saturates."""
+
+    doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
+        "uncertain"
+    )
+    signals: list[StructuredPaperSourceSignal] = Field(
+        default_factory=list,
+        max_length=_SOURCE_SIGNAL_LIMIT,
+    )
+    output_saturated: bool = False
+    evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
+    confidence: float = 0.0
+    warnings: list[
+        Annotated[str, Field(max_length=PAPER_SKIM_WARNING_LIMIT[1])]
+    ] = Field(default_factory=list, max_length=PAPER_SKIM_WARNING_LIMIT[0])
+
+    @model_validator(mode="before")
+    @classmethod
+    def _isolate_malformed_signals(cls, value: object) -> object:
+        if not isinstance(value, Mapping):
+            return value
+        raw_signals = value.get("signals")
+        if not isinstance(raw_signals, list):
+            return value
+
+        signals: list[StructuredPaperSourceSignal] = []
+        malformed_count = 0
+        for raw_signal in raw_signals:
+            try:
+                signals.append(StructuredPaperSourceSignal.model_validate(raw_signal))
+            except ValidationError:
+                malformed_count += 1
+        if not malformed_count:
+            return value
+
+        signal_label = "signal" if malformed_count == 1 else "signals"
+        warning = (
+            f"Omitted {malformed_count} malformed source {signal_label}; retained "
+            "the valid source-local signals."
+        )
+        existing_warnings = (
+            value.get("warnings") if isinstance(value.get("warnings"), list) else []
+        )
+        updated = dict(value)
+        updated["signals"] = signals
+        updated["warnings"] = [warning, *existing_warnings][
+            : PAPER_SKIM_WARNING_LIMIT[0]
+        ]
+        if raw_signals and not signals:
+            updated["output_saturated"] = True
+        return updated
+
+    @field_validator("signals", mode="before")
+    @classmethod
+    def _normalize_signals(cls, value: object) -> object:
+        return _normalize_list(value)
+
+    @field_validator("warnings", mode="before")
+    @classmethod
+    def _normalize_diagnostic_warnings(cls, value: object) -> object:
+        return _normalize_warnings(value)
+
+    @field_validator("doc_role", mode="before")
+    @classmethod
+    def _normalize_doc_role(cls, value: object) -> str:
+        return _normalize_choice(value, allowed=_DOC_ROLES, default="uncertain")
+
+    @field_validator("evidence_density", mode="before")
+    @classmethod
+    def _normalize_evidence_density(cls, value: object) -> str:
+        return _normalize_choice(value, allowed=_EVIDENCE_DENSITIES, default="unknown")
+
+    @model_validator(mode="after")
+    def _validate_signal_identities(self) -> StructuredPaperSourceSignalScreen:
+        identities = [signal.identity_key() for signal in self.signals]
+        if len(identities) != len(set(identities)):
+            raise ValueError("source signal screen contains duplicate signal identities")
+        return self
+
+
 class StructuredPaperSkim(_PaperSkimResponse):
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
         "uncertain"
@@ -372,19 +564,7 @@ class StructuredPaperSkim(_PaperSkimResponse):
     @field_validator("warnings", mode="before")
     @classmethod
     def _normalize_warnings(cls, value: object) -> object:
-        if value is None:
-            return []
-        if not isinstance(value, list):
-            return value
-        normalized: list[object] = []
-        for item in value[: PAPER_SKIM_WARNING_LIMIT[0]]:
-            if not isinstance(item, str):
-                normalized.append(item)
-                continue
-            text = item.strip()
-            if text:
-                normalized.append(text[: PAPER_SKIM_WARNING_LIMIT[1]])
-        return normalized
+        return _normalize_warnings(value)
 
     @field_validator("doc_role", mode="before")
     @classmethod
@@ -558,6 +738,84 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     return _SYSTEM_PROMPT, user_prompt
 
 
+_SOURCE_SIGNAL_SYSTEM_PROMPT = """
+You screen one Source from a scientific paper for explicit research signals.
+Return one compact JSON object. Preserve uncertainty and Source-local meaning.
+Do not construct experiments, relationships, findings, or research objectives.
+""".strip()
+
+
+def build_paper_source_signal_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    user_prompt = (
+        "TASK MODEL\n"
+        "Perform source-local scientific signal screening after full PaperSkim "
+        "study reconstruction exceeded its bounded output. This is explicit-axis "
+        "extraction for later paper-level reconciliation, not relationship "
+        "construction, causal interpretation, evidence synthesis, or objective "
+        "generation.\n\n"
+        "INPUT SCHEMA\n"
+        "- The input contains exactly one Source unit from one paper.\n"
+        "- Source content is the scientific authority. Document and section metadata "
+        "provide provenance and orientation only.\n"
+        "- The downstream backend binds Source identity and performs paper-level "
+        "reconciliation.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "DECISION PROCESS\n"
+        "1. Decide whether the Source explicitly names a changed, compared, or modeled "
+        "variable and/or a measured, observed, or predicted outcome.\n"
+        "2. Return each explicit research axis as one neutral, concise signal. An "
+        "axis is what was changed or measured, not a value, direction, phase, grain "
+        "shape, or other observation on that axis. Group multiple morphology or phase "
+        "observations from one characterization result under one outcome such as "
+        "microstructure or phase constitution. Keep genuinely different measurements, "
+        "such as tensile strength and hardness, as separate outcomes. Do not return an "
+        "umbrella outcome and its explicitly named members together.\n"
+        "3. Classify whose work the statement describes. Use "
+        "claim_scope=current_work only for this paper's own work, synthesis for the "
+        "review authors' explicit synthesis, and claim_scope=background for a cited "
+        "or named prior study.\n"
+        "4. Copy only context explicitly supported by this Source. Use a concise "
+        "experiment label when the Source supplies an author name, group label, or "
+        "other identity needed to keep studies separate.\n"
+        "5. If no explicit scientific axis is present, return signals=[].\n\n"
+        "HARD RULES\n"
+        "- Do not infer a causal relationship or pair variable and outcome signals.\n"
+        "- Do not turn fixed settings, material identity, or test conditions into "
+        "variables.\n"
+        "- Do not return or copy Source-unit IDs; the backend owns identity and "
+        "lineage.\n"
+        "- Do not complete missing experiment context from general knowledge.\n"
+        "- Open-list words such as 'etc.' or 'including' do not name hidden axes and "
+        "must not cause output_saturated=true.\n"
+        "- Keep cited studies in reviews separate from the review authors' synthesis "
+        "and from this paper's own experiments.\n\n"
+        "BOUNDARY EXAMPLES\n"
+        "- Primary result: 'We varied laser power and measured porosity.' Return a "
+        "current_work variable signal 'laser power' and outcome signal 'porosity'.\n"
+        "- Review citation: 'Miranda et al. increased build plate temperature and "
+        "reported lower residual stress.' Return background signals with "
+        "experiment_label='Miranda et al.'; do not treat them as current_work.\n"
+        "- Synthesis: 'Across the reviewed studies, preheating generally reduced "
+        "residual stress.' Return synthesis signals only for axes explicitly named.\n"
+        "- One characterization axis: 'After three reheats, the CGHAZ contained "
+        "equiaxed ferrite, refined ferrite, and scattered lamellar pearlite.' Return "
+        "variable='reheating cycles' and outcome='microstructure'; the named "
+        "morphologies are observations, not separate outcome axes.\n"
+        "- Explicit measurement list: 'IHT enhanced tensile strength, hardness, "
+        "ductility, and fatigue.' Return one IHT variable and four distinct outcome "
+        "signals; do not also return 'mechanical properties'.\n"
+        "- Background only: 'Additive manufacturing is widely used in aerospace.' "
+        "Return signals=[].\n\n"
+        "OUTPUT CONTRACT\n"
+        "Return doc_role, signals, output_saturated, evidence_density, confidence, and "
+        "warnings. Return at most 12 signals and at most four values in each context "
+        "list. Set output_saturated=true only when more than 12 distinct explicit "
+        "research axes are present; omitted descriptive details do not count as omitted "
+        "axes. Return only schema-valid JSON."
+    )
+    return _SOURCE_SIGNAL_SYSTEM_PROMPT, user_prompt
+
+
 class PaperStudyWindowExtractor:
     """Extract supported study structure from one bounded Source window."""
 
@@ -636,20 +894,127 @@ class PaperStudyWindowExtractor:
                 fail_on_output_saturation=True,
             )
 
-        response = self.response_client.complete(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_model=StructuredPaperSkim,
-            max_completion_tokens=_MAX_COMPLETION_TOKENS,
-            json_text_parser=parse_json_text_with_contract,
-            parsed_validator=validate_output_contract,
-            fail_on_output_saturation=True,
-            task_type="paper_skim",
-            prompt_version=PAPER_SKIM_PROMPT_VERSION,
-        )
+        try:
+            response = self.response_client.complete(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_model=StructuredPaperSkim,
+                max_completion_tokens=_MAX_COMPLETION_TOKENS,
+                json_text_parser=parse_json_text_with_contract,
+                parsed_validator=validate_output_contract,
+                fail_on_output_saturation=True,
+                task_type="paper_skim",
+                prompt_version=PAPER_SKIM_PROMPT_VERSION,
+            )
+        except StructuredOutputSaturatedError:
+            self._log_saturation_trace(payload, contract="paper_skim")
+            raise
         if not isinstance(response, StructuredPaperSkim):
             raise TypeError("unexpected paper skim response type")
         return response
+
+    def extract_source_signals(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+        source_units = [
+            unit
+            for unit in payload.get("source_units") or ()
+            if isinstance(unit, Mapping)
+        ]
+        if len(source_units) != 1:
+            raise ValueError("source signal screening requires exactly one Source unit")
+        source_unit_id = str(source_units[0].get("source_unit_id") or "").strip()
+        if not source_unit_id:
+            raise ValueError("source signal screening requires a Source-unit id")
+
+        system_prompt, user_prompt = build_paper_source_signal_prompt(payload)
+        try:
+            response = self.response_client.complete(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_model=StructuredPaperSourceSignalScreen,
+                max_completion_tokens=_SOURCE_SIGNAL_MAX_COMPLETION_TOKENS,
+                fail_on_output_saturation=True,
+                task_type="paper_source_signal",
+                prompt_version=PAPER_SOURCE_SIGNAL_PROMPT_VERSION,
+            )
+        except StructuredOutputSaturatedError:
+            self._log_saturation_trace(payload, contract="paper_source_signal")
+            raise
+        if not isinstance(response, StructuredPaperSourceSignalScreen):
+            raise TypeError("unexpected paper source signal response type")
+        if response.output_saturated:
+            self._log_saturation_trace(payload, contract="paper_source_signal")
+            raise StructuredOutputSaturatedError(
+                "Paper source signal output omitted visible scientific axes"
+            )
+
+        return StructuredPaperSkim.model_validate(
+            {
+                "doc_role": response.doc_role,
+                "unresolved_signals": [
+                    {
+                        **signal.model_dump(),
+                        "source_unit_ids": [source_unit_id],
+                    }
+                    for signal in response.signals
+                ],
+                "evidence_density": response.evidence_density,
+                "confidence": response.confidence,
+                "warnings": response.warnings,
+            }
+        )
+
+    def _log_saturation_trace(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        contract: str,
+    ) -> None:
+        source_units = [
+            unit
+            for unit in payload.get("source_units") or ()
+            if isinstance(unit, Mapping)
+        ]
+        source_unit_ids = [
+            str(unit.get("source_unit_id") or "").strip()
+            for unit in source_units
+            if str(unit.get("source_unit_id") or "").strip()
+        ]
+        input_chars = sum(
+            self._source_content_chars(unit.get("content"))
+            for unit in source_units
+        )
+        trace = self.response_client.peek_last_trace() or {}
+        attempts = []
+        for attempt in trace.get("attempts") or ():
+            if not isinstance(attempt, Mapping):
+                continue
+            attempts.append(
+                {
+                    "attempt": attempt.get("attempt"),
+                    "finish_reason": attempt.get("finish_reason"),
+                    "response_chars": attempt.get("response_chars"),
+                    "response_preview": str(
+                        attempt.get("response_preview") or ""
+                    )[:1000],
+                }
+            )
+        logger.warning(
+            "Paper skim saturation trace contract=%s window_id=%s "
+            "source_unit_ids=%s input_chars=%s attempts=%s",
+            contract,
+            payload.get("window_id"),
+            json.dumps(source_unit_ids, ensure_ascii=True, separators=(",", ":")),
+            input_chars,
+            json.dumps(attempts, ensure_ascii=True, separators=(",", ":")),
+        )
+
+    @staticmethod
+    def _source_content_chars(content: object) -> int:
+        if isinstance(content, str):
+            return len(content)
+        if content is None:
+            return 0
+        return len(json.dumps(content, ensure_ascii=False, separators=(",", ":")))
 
     def estimate_prompt_tokens(self, payload: dict[str, Any]) -> int:
         """Count the complete repair-capable prompt before model execution."""
@@ -665,10 +1030,14 @@ class PaperStudyWindowExtractor:
 __all__ = [
     "PAPER_SKIM_PROMPT_TOKEN_LIMIT",
     "PAPER_SKIM_SOURCE_UNIT_LIMIT",
+    "PAPER_SOURCE_SIGNAL_PROMPT_VERSION",
     "PaperStudyWindowExtractor",
     "StructuredPaperSkim",
+    "StructuredPaperSourceSignal",
+    "StructuredPaperSourceSignalScreen",
     "StructuredPaperStudy",
     "StructuredPaperStudyRelationship",
     "StructuredPaperStudySignal",
     "build_paper_skim_prompt",
+    "build_paper_source_signal_prompt",
 ]

@@ -6,9 +6,20 @@ from types import SimpleNamespace
 
 import pandas as pd
 from PIL import Image
+import pytest
 
 from domain.source import resolve_heading_path_for_page
 from infra.source.config.source_runtime_config import SourceRuntimeConfig
+from infra.source.contracts.artifact_schemas import (
+    BLOCKS_FINAL_COLUMNS,
+    DOCUMENTS_FINAL_COLUMNS,
+    FIGURES_FINAL_COLUMNS,
+    TABLE_CELLS_FINAL_COLUMNS,
+    TABLES_FINAL_COLUMNS,
+    TABLE_ROWS_FINAL_COLUMNS,
+    TEXT_UNITS_FINAL_COLUMNS,
+)
+from infra.source.runtime.artifact_bundle import SourceArtifactBundle
 from infra.source.runtime.mapping.block_artifacts import collect_pdf_text_items
 from infra.source.runtime.mapping.table_artifacts import build_pdf_table_cells
 from infra.source.runtime.parsers.docling_pdf import build_pdf_bundle, build_pdf_converter
@@ -17,6 +28,40 @@ from infra.source.runtime.source_evidence import (
     build_table_cells,
     build_table_rows,
 )
+from infra.source.runtime.workflows.create_source_artifacts import (
+    create_source_artifacts,
+)
+
+
+def _source_bundle(document_id: str) -> SourceArtifactBundle:
+    return SourceArtifactBundle(
+        documents=pd.DataFrame(
+            [
+                {
+                    "id": document_id,
+                    "document_order": 0,
+                    "title": f"{document_id}.pdf",
+                    "text": "Readable research paper.",
+                    "text_unit_ids": [],
+                    "creation_date": None,
+                    "metadata": {"source_parser": "docling"},
+                }
+            ],
+            columns=DOCUMENTS_FINAL_COLUMNS,
+        ),
+        text_units=pd.DataFrame(columns=TEXT_UNITS_FINAL_COLUMNS),
+        blocks=pd.DataFrame(columns=BLOCKS_FINAL_COLUMNS),
+        figures=pd.DataFrame(columns=FIGURES_FINAL_COLUMNS),
+        tables=pd.DataFrame(columns=TABLES_FINAL_COLUMNS),
+        table_rows=pd.DataFrame(columns=TABLE_ROWS_FINAL_COLUMNS),
+        table_cells=pd.DataFrame(columns=TABLE_CELLS_FINAL_COLUMNS),
+        figure_assets={},
+    )
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
 
 
 def test_default_source_pipeline_uses_structure_first_handoff_workflow():
@@ -48,6 +93,101 @@ def test_default_source_pipeline_uses_structure_first_handoff_workflow():
     assert workflow_names == [
         "create_source_artifacts",
     ]
+
+
+@pytest.mark.anyio
+async def test_create_source_artifacts_keeps_valid_pdf_when_one_pdf_fails(
+    monkeypatch,
+    tmp_path,
+):
+    inventory = pd.DataFrame(
+        [
+            {
+                "id": "doc-bad",
+                "title": "damaged.pdf",
+                "source_path": "stored-damaged.pdf",
+            },
+            {
+                "id": "doc-good",
+                "title": "valid.pdf",
+                "source_path": "stored-valid.pdf",
+            },
+        ]
+    )
+
+    class InputStorage:
+        async def get(self, path, **_kwargs):  # noqa: ANN001
+            return {"stored-damaged.pdf": b"bad", "stored-valid.pdf": b"valid"}[path]
+
+    def parse_pdf(*, row, **_kwargs):  # noqa: ANN001
+        if row["id"] == "doc-bad":
+            raise RuntimeError("PDFium data format error")
+        return _source_bundle("doc-good")
+
+    monkeypatch.setattr(
+        "infra.source.runtime.workflows.create_source_artifacts.build_pdf_converter",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "infra.source.runtime.workflows.create_source_artifacts.build_pdf_bundle",
+        parse_pdf,
+    )
+    context = SimpleNamespace(input_storage=InputStorage(), state={})
+
+    result = await create_source_artifacts(
+        inventory=inventory,
+        config=SourceRuntimeConfig(root_dir=str(tmp_path)),
+        context=context,
+    )
+
+    assert result.documents["id"].tolist() == ["doc-good"]
+    assert context.state["source_document_failures"] == [
+        {
+            "source_path": "stored-damaged.pdf",
+            "error_code": "source_pdf_parse_failed",
+            "error_type": "RuntimeError",
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_create_source_artifacts_fails_when_every_pdf_fails(
+    monkeypatch,
+    tmp_path,
+):
+    inventory = pd.DataFrame(
+        [
+            {
+                "id": "doc-bad",
+                "title": "damaged.pdf",
+                "source_path": "stored-damaged.pdf",
+            }
+        ]
+    )
+
+    class InputStorage:
+        async def get(self, _path, **_kwargs):  # noqa: ANN001
+            return b"bad"
+
+    monkeypatch.setattr(
+        "infra.source.runtime.workflows.create_source_artifacts.build_pdf_converter",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "infra.source.runtime.workflows.create_source_artifacts.build_pdf_bundle",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("PDFium data format error")),
+    )
+    context = SimpleNamespace(input_storage=InputStorage(), state={})
+
+    with pytest.raises(
+        RuntimeError,
+        match="Source parsing failed for all 1 input document",
+    ):
+        await create_source_artifacts(
+            inventory=inventory,
+            config=SourceRuntimeConfig(root_dir=str(tmp_path)),
+            context=context,
+        )
 
 
 def test_build_blocks_emits_structure_first_blocks_with_heading_context():

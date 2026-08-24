@@ -50,10 +50,12 @@ class DummyWorkflowOutput:
         workflow: str = "build",
         errors: list[str] | None = None,
         result=None,  # noqa: ANN001
+        state: dict | None = None,
     ):
         self.workflow = workflow
         self.errors = errors
         self.result = result
+        self.state = state or {}
 
 
 def _write_source_artifact_outputs(
@@ -399,6 +401,77 @@ async def test_build_pipeline_service_keeps_objectives_and_reports_partial_skim_
     assert objective_facts.research_objectives_ready is True
     assert objective_facts.research_objectives
     assert any(not skim.coverage_complete for skim in objective_facts.paper_skims)
+
+
+async def test_build_pipeline_service_reports_partial_source_coverage(
+    monkeypatch,
+    tmp_path,
+):
+    import application.pipeline.collection_build.service as task_runner_module
+
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    build_repository = MemoryBuildRepository()
+    task_service = TaskService(build_repository)
+    runner, _artifact_registry = _build_runner(
+        tmp_path,
+        collection_service,
+        build_repository,
+    )
+    collection = await collection_service.create_collection("Partial Source Collection")
+    paths = collection_service.get_paths(collection["collection_id"])
+    await collection_service.add_file(
+        collection["collection_id"],
+        "valid.txt",
+        b"Experimental Section\nMix and anneal.",
+    )
+    await collection_service.add_file(
+        collection["collection_id"],
+        "damaged.txt",
+        b"unreadable source placeholder",
+    )
+    files = await collection_service.list_files(collection["collection_id"])
+    damaged = next(
+        item for item in files if item["original_filename"] == "damaged.txt"
+    )
+
+    async def fake_build_source_artifacts(**_kwargs):
+        return [
+            DummyWorkflowOutput(
+                result=_write_source_artifact_outputs(paths.output_dir),
+                state={
+                    "source_document_failures": [
+                        {
+                            "source_path": damaged["stored_filename"],
+                            "error_code": "source_text_parse_failed",
+                            "error_type": "UnicodeDecodeError",
+                        }
+                    ]
+                },
+            )
+        ]
+
+    monkeypatch.setattr(
+        task_runner_module,
+        "build_source_artifacts",
+        fake_build_source_artifacts,
+    )
+
+    task = await task_service.create_task(collection["collection_id"], "build")
+    result = await runner.run_task(task["task_id"], collection["collection_id"])
+
+    assert result["status"] == "partial_success"
+    assert result["errors"] == []
+    assert result["warnings"] == [
+        "source_artifacts: 1 Source document could not be parsed and was excluded; "
+        "the build continued with 1 parsed document."
+    ]
+    pipeline_run = await task_service.read_pipeline_run(task["task_id"])
+    source_node = pipeline_run.node("source_artifacts")
+    assert source_node.status == "succeeded"
+    assert source_node.output_summary["source_failed_document_count"] == 1
+    assert source_node.output_summary["source_failed_documents"][0]["file_id"] == (
+        damaged["file_id"]
+    )
 
 
 async def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch, tmp_path):

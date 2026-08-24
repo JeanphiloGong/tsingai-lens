@@ -52,6 +52,15 @@ Collection build parses Source, creates document profiles and reusable paper
 facts, and discovers Objective candidates. It does not run confirmed Objective
 deep analysis. Task responses expose current stage, progress, terminal error,
 and retry-appropriate status; a failed task is never presented as a new task.
+PDF uploads are opened with the Source PDF engine before persistence. A damaged,
+incomplete, password-protected, or otherwise unreadable PDF returns `400` and is
+not added to the collection. This check establishes parser readability only;
+scientific structure extraction still belongs to the collection build.
+For already-persisted inputs and other import channels, a per-document Source
+parse failure is isolated. When other documents parse successfully, the task
+returns `partial_success`; the Source pipeline node warning and output summary
+identify each excluded file by bounded `file_id`, original filename, error code,
+and exception class. If every input fails, the task returns `failed`.
 The task artifact registry reports only persisted Source artifacts (documents,
 blocks, figures, table rows, and table cells). Workspace document-profile and
 Objective readiness is derived from their owning repositories rather than

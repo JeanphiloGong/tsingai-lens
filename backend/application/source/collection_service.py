@@ -568,7 +568,8 @@ class CollectionService:
         media_type: str | None = None,
     ) -> dict:
         await self.get_collection(collection_id)
-        batch = normalize_upload(
+        batch = await asyncio.to_thread(
+            normalize_upload,
             filename=filename,
             content=content,
             media_type=media_type,

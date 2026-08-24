@@ -53,21 +53,6 @@ async def list_collection_objectives(
     )
 
 
-@router.get(
-    "/{collection_id}/objectives/{objective_id}",
-    response_model=ObjectiveAnalysisResponse,
-    summary="Read a research objective",
-)
-async def get_collection_objective(
-    collection_id: str,
-    objective_id: str,
-    request: Request,
-) -> ObjectiveAnalysisResponse:
-    return await _read_objective_analysis_response(
-        collection_id, objective_id, request
-    )
-
-
 @router.post(
     "/{collection_id}/objectives/{objective_id}/confirm",
     response_model=ObjectiveAnalysisResponse,
@@ -179,9 +164,14 @@ async def get_collection_objective_analysis_state(
     objective_id: str,
     request: Request,
 ) -> ObjectiveAnalysisResponse:
-    return await _read_objective_analysis_response(
-        collection_id, objective_id, request
-    )
+    try:
+        payload = await request.app.state.objective_analysis_service.get_analysis_state(
+            collection_id,
+            objective_id,
+        )
+    except FileNotFoundError as exc:
+        raise _objective_not_found(collection_id, objective_id, exc) from exc
+    return _to_objective_analysis_response(payload)
 
 
 @router.get(
@@ -288,21 +278,6 @@ async def get_objective_evidence_map(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return ObjectiveEvidenceMapResponse(**payload)
-
-
-async def _read_objective_analysis_response(
-    collection_id: str,
-    objective_id: str,
-    request: Request,
-) -> ObjectiveAnalysisResponse:
-    try:
-        payload = await request.app.state.objective_analysis_service.get_analysis_state(
-            collection_id,
-            objective_id,
-        )
-    except FileNotFoundError as exc:
-        raise _objective_not_found(collection_id, objective_id, exc) from exc
-    return _to_objective_analysis_response(payload)
 
 
 def _to_objective_analysis_response(payload: dict) -> ObjectiveAnalysisResponse:

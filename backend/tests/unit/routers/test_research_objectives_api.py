@@ -672,8 +672,15 @@ def test_start_analysis_fails_queued_version_when_async_task_creation_fails(
     assert service.dispatch_failure_version == 1
 
 
-def test_objective_api_exposes_definition_and_separate_analysis_state() -> None:
+def test_duplicate_objective_detail_route_is_not_registered() -> None:
     response = _client().get("/collections/col-1/objectives/obj-1")
+
+    assert response.status_code == 404
+
+
+def test_objective_analysis_api_exposes_definition_and_separate_analysis_state(
+) -> None:
+    response = _client().get("/collections/col-1/objectives/obj-1/analysis")
 
     assert response.status_code == 200
     payload = response.json()

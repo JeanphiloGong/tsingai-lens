@@ -181,13 +181,13 @@ All routes are under `/api/v1/collections/{collection_id}`.
 ### Objective lifecycle
 
 - `GET /objectives`
-- `GET /objectives/{objective_id}`
 - `POST /objectives/{objective_id}/confirm`
 - `POST /objectives/{objective_id}/analysis`
 - `GET /objectives/{objective_id}/analysis`
 
-The detail/analysis response contains `objective`, `active_analysis`,
-`published_analysis`, and warnings. It never embeds all Findings or Evidence.
+The analysis-state and command responses contain `objective`,
+`active_analysis`, `published_analysis`, and warnings. They never embed all
+Findings or Evidence.
 
 ### Published result reads
 

@@ -22,7 +22,6 @@
 - 集合文件：`GET|POST /api/v1/collections/{collection_id}/files`
 - 工作区概览：`GET /api/v1/collections/{collection_id}/workspace`
 - 研究目标工作区：`GET /api/v1/collections/{collection_id}/objectives`、
-  `GET /api/v1/collections/{collection_id}/objectives/{objective_id}`、
   `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/confirm`、
   `GET|POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`、
   `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`、

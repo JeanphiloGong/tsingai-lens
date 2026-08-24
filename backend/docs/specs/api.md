@@ -170,13 +170,13 @@ can be inspected.
 ### Research Objectives
 
 - `GET /api/v1/collections/{collection_id}/objectives`
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}`
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/confirm`
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 
 `ResearchObjective` is the only business aggregate root. Its identity is
-`(collection_id, objective_id)`. The Objective response contains:
+`(collection_id, objective_id)`. The analysis-state and command responses
+contain:
 
 - question and material/process/property/comparison scope;
 - included and excluded document IDs;
@@ -187,7 +187,7 @@ can be inspected.
 - ordered `source_relationship_ids` linking the Objective to paper-study
   relationships;
 - `active_analysis`, `published_analysis`, analysis-level
-  `paper_contributions`, and warnings on detail responses.
+  `paper_contributions`, and warnings.
 
 The Objective list places active generated candidates in persisted
 collection-build rank, followed by durable Chat-assisted candidates in creation
@@ -247,8 +247,8 @@ historical `analysis_version`.
 extraction, and comparability for each paper in the published analysis version.
 It is empty until an analysis is published. If a newer active version is queued,
 running, or failed, the list still belongs to `published_analysis`, not that
-newer version. The Objective detail, confirm, start-analysis, and analysis-status
-routes share this response contract.
+newer version. The confirm, start-analysis, and analysis-status routes share
+this response contract.
 
 Each analysis-level contribution exposes `evidence_disposition`,
 `routed_source_count`, `extracted_source_count`,

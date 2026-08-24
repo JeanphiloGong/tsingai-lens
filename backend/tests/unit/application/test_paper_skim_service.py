@@ -14,6 +14,9 @@ from application.core.objectives.discovery.signal_reconciliation import (
 from application.core.objectives.discovery.study_window import (
     StructuredPaperSkim,
 )
+from application.core.objectives.llm.structured_response import (
+    StructuredOutputSaturatedError,
+)
 from application.core.objectives.paper_skim_service import PaperSkimService
 from domain.core import PaperSkim, PaperStudy
 from domain.source import (
@@ -966,6 +969,213 @@ def test_model_declared_output_saturation_splits_without_losing_source_units():
         item.status.value == "no_study_signal"
         for item in skim.source_unit_coverage
     )
+
+
+def test_dense_single_source_recovers_through_lossless_content_fragments():
+    source_text = (
+        "VARIABLE_SIGNAL "
+        + "A" * 1000
+        + ". "
+        + "OUTCOME_SIGNAL "
+        + "B" * 1000
+    )
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("results", "Results", 1),
+            _paragraph("dense-result", source_text, 2, "Results"),
+        ]
+    )
+
+    class DenseSourceExtractor(_WindowExtractor):
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            content = str(payload["source_units"][0]["content"])
+            if len(content) > 1200:
+                self.payloads.append(payload)
+                raise StructuredOutputSaturatedError("dense singleton output")
+            return super().extract(payload)
+
+    extractor = DenseSourceExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 3
+    parent_id = extractor.payloads[0]["source_units"][0]["source_unit_id"]
+    child_units = [
+        payload["source_units"][0] for payload in extractor.payloads[1:]
+    ]
+    assert "".join(str(unit["content"]) for unit in child_units) == source_text
+    assert {unit["source_unit_id"] for unit in child_units} == {parent_id}
+    assert {unit["source_kind"] for unit in child_units} == {"block"}
+    assert {unit["source_ref"] for unit in child_units} == {"dense-result"}
+    assert [payload["window_id"] for payload in extractor.payloads[1:]] == [
+        "results-1.content-left",
+        "results-1.content-right",
+    ]
+    assert len(skim.source_unit_coverage) == 1
+    assert skim.source_unit_coverage[0].source_unit_id == parent_id
+    assert skim.source_unit_coverage[0].status.value == (
+        "unresolved_signal_emitted"
+    )
+    assert skim.coverage_complete is True
+    assert len(skim.studies) == 1
+    assert skim.studies[0].relationships[0].varied_factors == ("laser power",)
+    assert skim.studies[0].relationships[0].outcome == "relative density"
+
+
+def test_successful_fragment_survives_while_failed_parent_coverage_stays_incomplete():
+    source_text = (
+        "RESULT_CANDIDATE "
+        + "A" * 1000
+        + ". "
+        + "PERMANENT_EMPTY "
+        + "B" * 1000
+    )
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("results", "Results", 1),
+            _paragraph("partial-result", source_text, 2, "Results"),
+        ]
+    )
+
+    class PartiallyRecoveringExtractor(_WindowExtractor):
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            content = str(payload["source_units"][0]["content"])
+            if len(content) > 1200:
+                self.payloads.append(payload)
+                raise StructuredOutputSaturatedError("dense singleton output")
+            if "PERMANENT_EMPTY" in content:
+                self.payloads.append(payload)
+                raise RuntimeError(
+                    "structured extraction returned empty response content"
+                )
+            return super().extract(payload)
+
+    extractor = PartiallyRecoveringExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 3
+    assert len(skim.studies) == 1
+    assert skim.studies[0].relationships[0].outcome == "porosity"
+    assert len(skim.source_unit_coverage) == 1
+    assert skim.source_unit_coverage[0].status.value == "extraction_failed"
+    assert "empty_response" in str(skim.source_unit_coverage[0].reason)
+    assert skim.coverage_complete is False
+
+
+def test_single_source_content_recovery_preserves_structured_table_context():
+    row_text = "sample A | 950 MPa | " + "B" * 1900
+    source_unit = {
+        "source_unit_id": "source-unit-000123",
+        "source_kind": "table_row",
+        "source_ref": "row-7",
+        "section_path": "Results > Tensile properties",
+        "content": {
+            "table_context": {
+                "caption_text": "Table 3. Tensile properties",
+                "column_headers": ["Sample", "Yield strength (MPa)"],
+            },
+            "row_id": "row-7",
+            "row_text": row_text,
+        },
+    }
+
+    fragments = PaperSkimService._split_single_source_unit_for_retry(source_unit)
+
+    assert len(fragments) == 2
+    assert "".join(
+        str(fragment["content"]["row_text"]) for fragment in fragments
+    ) == row_text
+    assert all(
+        fragment["content"]["table_context"]
+        == source_unit["content"]["table_context"]
+        for fragment in fragments
+    )
+    assert {
+        (
+            fragment["source_unit_id"],
+            fragment["source_kind"],
+            fragment["source_ref"],
+        )
+        for fragment in fragments
+    } == {("source-unit-000123", "table_row", "row-7")}
+
+
+def test_semantic_single_source_failure_does_not_trigger_content_splitting():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("results", "Results", 1),
+            _paragraph("invalid-result", "A" * 2500, 2, "Results"),
+        ]
+    )
+
+    class SemanticFailureExtractor(_WindowExtractor):
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            self.payloads.append(payload)
+            raise ValueError("paper skim references unknown Source-unit ids")
+
+    extractor = SemanticFailureExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 1
+    assert [item.status.value for item in skim.source_unit_coverage] == [
+        "extraction_failed"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_kind"),
+    [
+        (
+            StructuredOutputSaturatedError("completion limit reached"),
+            "output_saturated",
+        ),
+        (
+            RuntimeError("structured extraction returned empty response content"),
+            "empty_response",
+        ),
+        (
+            RuntimeError("structured extraction returned no JSON object"),
+            "no_json_object",
+        ),
+        (
+            json.JSONDecodeError("invalid JSON", "{", 1),
+            "malformed_json",
+        ),
+        (RuntimeError("model unavailable"), None),
+        (ValueError("unknown Source-unit id"), None),
+    ],
+)
+def test_single_source_recovery_classifies_only_density_shaped_failures(
+    error: Exception,
+    expected_kind: str | None,
+) -> None:
+    assert PaperSkimService._single_source_recovery_kind(error) == expected_kind
+
+
+def test_single_source_content_recovery_has_a_fixed_request_bound():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("results", "Results", 1),
+            _paragraph("always-dense", "A" * 4000, 2, "Results"),
+        ]
+    )
+
+    class AlwaysSaturatedExtractor(_WindowExtractor):
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            self.payloads.append(payload)
+            raise StructuredOutputSaturatedError("dense singleton output")
+
+    extractor = AlwaysSaturatedExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 7
+    assert [item.status.value for item in skim.source_unit_coverage] == [
+        "extraction_failed"
+    ]
+    assert skim.coverage_complete is False
 
 
 def test_late_results_content_is_screened_after_the_first_four_thousand_characters():

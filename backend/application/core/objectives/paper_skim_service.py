@@ -43,6 +43,8 @@ ProgressCallback = Callable[[dict[str, Any]], None]
 _SKIM_SOURCE_UNIT_CHARS = 4000
 _SKIM_HEADING_LIMIT = 16
 _SKIM_WARNING_LIMIT = 2
+_SKIM_SINGLE_SOURCE_RECOVERY_MIN_CHARS = 800
+_SKIM_SINGLE_SOURCE_RECOVERY_MAX_DEPTH = 2
 _SKIM_WINDOW_ROLES = ("overview", "methods", "results", "conclusion", "unknown")
 _SKIM_ROLE_BY_SEMANTIC_ROLE = {
     "abstract": "overview",
@@ -836,6 +838,7 @@ class PaperSkimService:
         payload: Mapping[str, Any],
         study_window_extractor: PaperStudyWindowExtractor,
         attempt: int = 1,
+        content_split_depth: int = 0,
     ) -> tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]]:
         try:
             parsed = study_window_extractor.extract(dict(payload))
@@ -885,26 +888,246 @@ class PaperSkimService:
                     child_signals.extend(retry_signals)
                 return tuple(child_skims), tuple(child_signals)
 
+            failure_kind = self._single_source_recovery_kind(exc)
+            if (
+                len(source_units) == 1
+                and failure_kind is not None
+                and content_split_depth < _SKIM_SINGLE_SOURCE_RECOVERY_MAX_DEPTH
+            ):
+                fragments = self._split_single_source_unit_for_retry(source_units[0])
+                if fragments:
+                    logger.warning(
+                        "Paper skim singleton failed; splitting Source content "
+                        "collection_id=%s document_id=%s window_id=%s attempt=%s "
+                        "content_split_depth=%s failure_kind=%s",
+                        collection_id,
+                        document_id,
+                        payload.get("window_id"),
+                        attempt,
+                        content_split_depth,
+                        failure_kind,
+                    )
+                    fragment_skims: list[PaperSkim] = []
+                    fragment_signals: list[_PaperSignalInput] = []
+                    for branch, fragment in zip(
+                        ("left", "right"),
+                        fragments,
+                        strict=True,
+                    ):
+                        retry_skims, retry_signals = self._extract_window_batch(
+                            collection_id=collection_id,
+                            document_id=document_id,
+                            payload=self._payload_with_source_units(
+                                payload,
+                                source_units=(fragment,),
+                                suffix=f"content-{branch}",
+                            ),
+                            study_window_extractor=study_window_extractor,
+                            attempt=attempt + 1,
+                            content_split_depth=content_split_depth + 1,
+                        )
+                        fragment_skims.extend(retry_skims)
+                        fragment_signals.extend(retry_signals)
+                    return (
+                        self._collapse_single_source_fragment_coverage(
+                            payload=payload,
+                            skims=tuple(fragment_skims),
+                        ),
+                        tuple(fragment_signals),
+                    )
+
             logger.warning(
                 "Paper skim Source-unit extraction failed permanently "
                 "collection_id=%s document_id=%s window_id=%s attempt=%s "
-                "source_unit_count=%s error=%s",
+                "source_unit_count=%s error=%s failure_kind=%s",
                 collection_id,
                 document_id,
                 payload.get("window_id"),
                 attempt,
                 len(source_units),
                 exc,
+                failure_kind or "non_recoverable",
             )
             return (
                 (
                     self._failed_source_unit_skim(
                         document_id=document_id,
                         payload=payload,
+                        failure_kind=failure_kind,
                     ),
                 ),
                 (),
             )
+
+    @staticmethod
+    def _single_source_recovery_kind(error: Exception) -> str | None:
+        if isinstance(error, StructuredOutputSaturatedError):
+            return "output_saturated"
+        if isinstance(error, json.JSONDecodeError):
+            return "malformed_json"
+        if not isinstance(error, RuntimeError):
+            return None
+        message = str(error).casefold()
+        if "empty response content" in message or "empty json text" in message:
+            return "empty_response"
+        if "no json object" in message:
+            return "no_json_object"
+        return None
+
+    @classmethod
+    def _split_single_source_unit_for_retry(
+        cls,
+        source_unit: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], ...]:
+        content = source_unit.get("content")
+        path: tuple[str | int, ...] | None = None
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, Mapping):
+            candidates = [
+                (candidate_path, value)
+                for candidate_path, value in cls._structured_source_leaves(content)
+                if isinstance(value, str)
+            ]
+            if not candidates:
+                return ()
+            path, text = max(candidates, key=lambda item: len(item[1]))
+        else:
+            return ()
+
+        minimum = _SKIM_SINGLE_SOURCE_RECOVERY_MIN_CHARS
+        if len(text) < minimum * 2:
+            return ()
+        midpoint = len(text) // 2
+        hard_end = min(
+            len(text) - minimum,
+            midpoint + min(200, len(text) // 10),
+        )
+        split_at = cls._natural_text_split(text, 0, hard_end)
+        if split_at < minimum or len(text) - split_at < minimum:
+            split_at = midpoint
+        if split_at < minimum or len(text) - split_at < minimum:
+            return ()
+
+        left_text, right_text = text[:split_at], text[split_at:]
+        if path is None:
+            fragment_contents: tuple[Any, Any] = (left_text, right_text)
+        else:
+            left_content = cls._replace_structured_path_value(
+                content,
+                path,
+                left_text,
+            )
+            right_content = cls._replace_structured_path_value(
+                content,
+                path,
+                right_text,
+            )
+            if path == ("fragment",) and isinstance(right_content, dict):
+                start = int(right_content.get("fragment_start") or 0)
+                right_content["fragment_start"] = start + split_at
+            fragment_contents = (left_content, right_content)
+
+        return tuple(
+            {**dict(source_unit), "content": fragment_content}
+            for fragment_content in fragment_contents
+        )
+
+    @classmethod
+    def _replace_structured_path_value(
+        cls,
+        value: Any,
+        path: tuple[str | int, ...],
+        replacement: Any,
+    ) -> Any:
+        if not path:
+            return replacement
+        part, remaining = path[0], path[1:]
+        if isinstance(value, Mapping):
+            copied = dict(value)
+            copied[part] = cls._replace_structured_path_value(
+                value[part],
+                remaining,
+                replacement,
+            )
+            return copied
+        if isinstance(value, (list, tuple)) and isinstance(part, int):
+            copied_values = list(value)
+            copied_values[part] = cls._replace_structured_path_value(
+                value[part],
+                remaining,
+                replacement,
+            )
+            return copied_values
+        raise ValueError("paper skim structured Source path cannot be replaced")
+
+    @staticmethod
+    def _collapse_single_source_fragment_coverage(
+        *,
+        payload: Mapping[str, Any],
+        skims: tuple[PaperSkim, ...],
+    ) -> tuple[PaperSkim, ...]:
+        source_units = [
+            unit
+            for unit in payload.get("source_units") or ()
+            if isinstance(unit, Mapping)
+        ]
+        if len(source_units) != 1:
+            raise ValueError("content-fragment recovery requires one Source unit")
+        source_unit = source_units[0]
+        source_unit_id = str(source_unit.get("source_unit_id") or "")
+        coverage = tuple(
+            item for skim in skims for item in skim.source_unit_coverage
+        )
+        if not coverage or any(
+            item.source_unit_id != source_unit_id for item in coverage
+        ):
+            raise ValueError(
+                "content-fragment recovery produced invalid Source coverage"
+            )
+
+        statuses = {item.status for item in coverage}
+        if PaperSourceUnitCoverageStatus.EXTRACTION_FAILED in statuses:
+            status = PaperSourceUnitCoverageStatus.EXTRACTION_FAILED
+            reason = next(
+                (
+                    item.reason
+                    for item in coverage
+                    if item.status is status and item.reason
+                ),
+                "Paper skim Source-unit extraction remained incomplete after "
+                "bounded content splitting.",
+            )
+        elif PaperSourceUnitCoverageStatus.RELATIONSHIP_EMITTED in statuses:
+            status = PaperSourceUnitCoverageStatus.RELATIONSHIP_EMITTED
+            reason = None
+        elif PaperSourceUnitCoverageStatus.UNRESOLVED_SIGNAL_EMITTED in statuses:
+            status = PaperSourceUnitCoverageStatus.UNRESOLVED_SIGNAL_EMITTED
+            reason = None
+        else:
+            status = PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL
+            reason = (
+                "No study relationship or unresolved signal was emitted for this "
+                "Source unit."
+            )
+
+        parent_coverage = PaperSourceUnitCoverage.from_mapping(
+            {
+                "source_unit_id": source_unit_id,
+                "window_id": payload.get("window_id"),
+                "source_kind": source_unit.get("source_kind"),
+                "source_ref": source_unit.get("source_ref"),
+                "status": status.value,
+                "reason": reason,
+            }
+        )
+        return tuple(
+            replace(
+                skim,
+                source_unit_coverage=(parent_coverage,) if position == 0 else (),
+            )
+            for position, skim in enumerate(skims)
+        )
 
     @staticmethod
     def _payload_with_source_units(
@@ -1144,8 +1367,11 @@ class PaperSkimService:
         *,
         document_id: str,
         payload: Mapping[str, Any],
+        failure_kind: str | None = None,
     ) -> PaperSkim:
-        reason = "Paper skim Source-unit extraction failed after batch splitting."
+        reason = "Paper skim Source-unit extraction failed after bounded retries."
+        if failure_kind:
+            reason = f"{reason} Failure type: {failure_kind}."
         return PaperSkim.from_mapping(
             {
                 "document_id": document_id,

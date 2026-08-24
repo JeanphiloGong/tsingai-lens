@@ -364,7 +364,7 @@ async function mockApis(page: Page) {
 				})
 			);
 		}
-		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}`) {
+		if (path === `/api/v1/collections/${collectionId}/objectives/${objectiveId}/analysis`) {
 			return route.fulfill(
 				json({
 					collection_id: collectionId,

@@ -476,18 +476,6 @@ export async function fetchCollectionObjectives(collectionId: string): Promise<O
 	return normalizeObjectiveList(data, collectionId);
 }
 
-export async function fetchObjective(
-	collectionId: string,
-	objectiveId: string
-): Promise<ObjectiveAnalysis> {
-	const encodedCollection = encodeURIComponent(collectionId);
-	const encodedObjective = encodeURIComponent(objectiveId);
-	const data = await requestJson(
-		`/collections/${encodedCollection}/objectives/${encodedObjective}`
-	);
-	return normalizeObjectiveAnalysis(data, collectionId);
-}
-
 function normalizeObjectiveAnalysis(value: unknown, collectionId: string): ObjectiveAnalysis {
 	const record = asRecord(value) ?? {};
 	const objective = normalizeObjectiveSummary(record.objective);

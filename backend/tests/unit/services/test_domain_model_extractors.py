@@ -888,6 +888,63 @@ def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
         )
 
     assert len(client.chat.completions.calls) == 1
+    trace = extractor.consume_last_trace()
+    assert trace is not None
+    assert trace["trace_status"] == "failed"
+    assert trace["error_type"] == "StructuredOutputSaturatedError"
+    assert trace["error"] == (
+        "PaperSkim JSON output reached the completion-token limit"
+    )
+    assert trace["raw_output"] == '{"studies":[]}'
+    assert trace["attempts"] == [
+        {
+            "attempt": 1,
+            "finish_reason": "length",
+            "response_chars": len('{"studies":[]}'),
+            "response_preview": '{"studies":[]}',
+            "error_type": "StructuredOutputSaturatedError",
+            "error": "PaperSkim JSON output reached the completion-token limit",
+        }
+    ]
+
+
+def test_shared_structured_failure_trace_preserves_each_invalid_json_attempt():
+    invalid_output = "classification: experimental"
+    extractor = _response_client(_FakeOpenAIClient(invalid_output))
+
+    with pytest.raises(RuntimeError, match="returned no JSON object"):
+        extractor.complete(
+            system_prompt="Return structured findings.",
+            user_prompt="No Source content is needed for this transport test.",
+            response_model=StructuredFindingSynthesis,
+            task_type="finding_synthesis",
+            prompt_version="finding_synthesis.test",
+        )
+
+    trace = extractor.consume_last_trace()
+    assert trace is not None
+    assert trace["trace_status"] == "failed"
+    assert trace["error_type"] == "RuntimeError"
+    assert trace["error"] == "structured extraction returned no JSON object"
+    assert trace["raw_output"] == invalid_output
+    assert trace["attempts"] == [
+        {
+            "attempt": 1,
+            "finish_reason": "stop",
+            "response_chars": len(invalid_output),
+            "response_preview": invalid_output,
+            "error_type": "RuntimeError",
+            "error": "structured extraction returned no JSON object",
+        },
+        {
+            "attempt": 2,
+            "finish_reason": "stop",
+            "response_chars": len(invalid_output),
+            "response_preview": invalid_output,
+            "error_type": "RuntimeError",
+            "error": "structured extraction returned no JSON object",
+        },
+    ]
 
 
 def test_domain_model_extractors_synthesizes_goal_findings_with_distinct_trace():

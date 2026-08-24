@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from asyncio import to_thread
 import logging
 from pathlib import Path
 import re
@@ -73,39 +74,72 @@ async def create_source_artifacts(
     bundles: list[SourceArtifactBundle] = []
     figure_assets: dict[str, bytes] = {}
     pdf_converter: Any | None = None
+    failures: list[dict[str, str]] = []
+    context.state["source_document_failures"] = failures
 
     for _, row in inventory.iterrows():
         source_path = str(row.get("source_path") or "").strip()
         suffix = Path(source_path).suffix.lower()
-        if source_path and suffix == ".pdf":
-            if pdf_converter is None:
-                pdf_converter = build_pdf_converter()
-            payload = await context.input_storage.get(source_path, as_bytes=True)
-            if payload is None:
-                raise FileNotFoundError(f"input document not found: {source_path}")
+        try:
+            if source_path and suffix == ".pdf":
+                if pdf_converter is None:
+                    pdf_converter = await to_thread(build_pdf_converter)
+                payload = await context.input_storage.get(source_path, as_bytes=True)
+                if payload is None:
+                    raise FileNotFoundError(
+                        f"input document not found: {source_path}"
+                    )
+                bundles.append(
+                    await to_thread(
+                        build_pdf_bundle,
+                        row=row,
+                        payload=payload,
+                        config=config,
+                        converter=pdf_converter,
+                    )
+                )
+                figure_assets.update(bundles[-1].figure_assets)
+                continue
+
+            text = row.get("text")
+            if text is None and source_path:
+                text = await context.input_storage.get(
+                    source_path,
+                    encoding=config.input.encoding,
+                )
             bundles.append(
-                build_pdf_bundle(
+                build_text_bundle(
                     row=row,
-                    payload=payload,
+                    text=str(text or ""),
                     config=config,
-                    converter=pdf_converter,
+                    callbacks=context.callbacks,
                 )
             )
             figure_assets.update(bundles[-1].figure_assets)
-            continue
-
-        text = row.get("text")
-        if text is None and source_path:
-            text = await context.input_storage.get(source_path, encoding=config.input.encoding)
-        bundles.append(
-            build_text_bundle(
-                row=row,
-                text=str(text or ""),
-                config=config,
-                callbacks=context.callbacks,
+        except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, FileNotFoundError):
+                error_code = "source_input_unavailable"
+            elif suffix == ".pdf":
+                error_code = "source_pdf_parse_failed"
+            else:
+                error_code = "source_text_parse_failed"
+            failure = {
+                "source_path": source_path or str(row.get("title") or "").strip(),
+                "error_code": error_code,
+                "error_type": type(exc).__name__,
+            }
+            failures.append(failure)
+            logger.exception(
+                "Source document parsing failed source_path=%r error_code=%s",
+                failure["source_path"],
+                error_code,
             )
+
+    if failures and not bundles:
+        unit = "document" if len(failures) == 1 else "documents"
+        raise RuntimeError(
+            f"Source parsing failed for all {len(failures)} input {unit}"
         )
-        figure_assets.update(bundles[-1].figure_assets)
 
     documents = _concat_frames([bundle.documents for bundle in bundles], DOCUMENTS_FINAL_COLUMNS)
     text_units = _concat_frames([bundle.text_units for bundle in bundles], TEXT_UNITS_FINAL_COLUMNS)

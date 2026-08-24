@@ -9,6 +9,11 @@ from typing import Any
 from uuid import uuid4
 
 
+_UNREADABLE_PDF_MESSAGE = (
+    "PDF is damaged, incomplete, password-protected, or otherwise unreadable."
+)
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -102,8 +107,12 @@ def normalize_upload(
                 char_count=len(text),
             ),
         )
-    elif suffix != ".pdf":
-        raise ValueError(f"unsupported upload type for normalization: {normalized_filename}")
+    elif suffix == ".pdf":
+        _validate_pdf_upload(content)
+    else:
+        raise ValueError(
+            f"unsupported upload type for normalization: {normalized_filename}"
+        )
 
     document = NormalizedImportDocument(
         source_document_id=source_document_id,
@@ -138,6 +147,21 @@ def _decode_text_upload(content: bytes) -> str:
         return content.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ValueError("text upload must be valid UTF-8") from exc
+
+
+def _validate_pdf_upload(content: bytes) -> None:
+    from pypdfium2 import PdfDocument
+
+    try:
+        document = PdfDocument(content)
+        try:
+            page_count = len(document)
+        finally:
+            document.close()
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(_UNREADABLE_PDF_MESSAGE) from exc
+    if page_count < 1:
+        raise ValueError(_UNREADABLE_PDF_MESSAGE)
 
 
 def _is_text_upload(*, filename: str, media_type: str | None) -> bool:

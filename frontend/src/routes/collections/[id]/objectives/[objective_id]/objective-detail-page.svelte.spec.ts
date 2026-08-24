@@ -323,15 +323,6 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 					})
 				);
 			}
-			if (current.path.endsWith('/confirm') && current.method === 'POST') {
-				return jsonResponse(
-					objectiveResponse({
-						objective: objective({ published_analysis_version: null }),
-						active_analysis: null,
-						published_analysis: null
-					})
-				);
-			}
 			if (current.path.endsWith('/analysis') && current.method === 'POST') {
 				return jsonResponse(
 					objectiveResponse({
@@ -353,13 +344,10 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			.element(browserPage.getByText('Objective analysis is queued.'))
 			.toBeInTheDocument();
 		expect(requests).toContainEqual({
-			path: '/api/v1/collections/col_123/objectives/obj_1/confirm',
-			method: 'POST'
-		});
-		expect(requests).toContainEqual({
 			path: '/api/v1/collections/col_123/objectives/obj_1/analysis',
 			method: 'POST'
 		});
+		expect(requests.filter((item) => item.method === 'POST')).toHaveLength(1);
 	});
 
 	it('keeps the published Finding readable while a failed retry is shown', async () => {

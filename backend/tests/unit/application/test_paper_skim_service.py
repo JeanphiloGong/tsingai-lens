@@ -971,6 +971,250 @@ def test_model_declared_output_saturation_splits_without_losing_source_units():
     )
 
 
+def test_short_singleton_saturation_recovers_through_source_local_signals():
+    source_text = (
+        "Miranda et al. increased build plate temperature and reported lower "
+        "residual stress in laser powder bed fusion Ti-6Al-4V."
+    )
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("review", "Review", 1),
+            _paragraph("short-review-result", source_text, 2, "Review"),
+        ]
+    )
+
+    class CompactFallbackExtractor(_WindowExtractor):
+        def __init__(self) -> None:
+            super().__init__()
+            self.compact_payloads: list[dict[str, Any]] = []
+
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            self.payloads.append(payload)
+            raise StructuredOutputSaturatedError("singleton output saturated")
+
+        def extract_source_signals(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredPaperSkim:
+            self.compact_payloads.append(payload)
+            source_unit_id = payload["source_units"][0]["source_unit_id"]
+            return StructuredPaperSkim.model_validate(
+                {
+                    "doc_role": "review",
+                    "unresolved_signals": [
+                        {
+                            "signal_type": "variable",
+                            "label": "build plate temperature",
+                            "experiment_label": "Miranda et al.",
+                            "claim_scope": "background",
+                            "material_scope": ["Ti-6Al-4V"],
+                            "process_context": ["laser powder bed fusion"],
+                            "source_unit_ids": [source_unit_id],
+                            "confidence": 0.88,
+                        },
+                        {
+                            "signal_type": "outcome",
+                            "label": "residual stress",
+                            "experiment_label": "Miranda et al.",
+                            "claim_scope": "background",
+                            "material_scope": ["Ti-6Al-4V"],
+                            "process_context": ["laser powder bed fusion"],
+                            "source_unit_ids": [source_unit_id],
+                            "confidence": 0.86,
+                        },
+                    ],
+                    "evidence_density": "medium",
+                    "confidence": 0.87,
+                    "warnings": ["model warning one", "model warning two"],
+                }
+            )
+
+    extractor = CompactFallbackExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 1
+    assert len(extractor.compact_payloads) == 1
+    assert len(skim.studies) == 1
+    assert skim.studies[0].claim_scope == "background"
+    assert skim.studies[0].relationships[0].varied_factors == (
+        "build plate temperature",
+    )
+    assert skim.studies[0].relationships[0].outcome == "residual stress"
+    assert [item.status.value for item in skim.source_unit_coverage] == [
+        "unresolved_signal_emitted"
+    ]
+    assert skim.coverage_complete is True
+    assert "source-local signals" in skim.warnings[0]
+    assert skim.warnings[1] == "model warning one"
+
+
+@pytest.mark.parametrize(
+    "full_failure",
+    [
+        RuntimeError("structured extraction returned no JSON object"),
+        json.JSONDecodeError("Expecting ':' delimiter", "{bad", 4),
+        RuntimeError("structured extraction returned empty response content"),
+    ],
+    ids=["no-json-object", "malformed-json", "empty-response"],
+)
+def test_short_singleton_structured_failure_recovers_source_local_signals(
+    full_failure: Exception,
+):
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("results", "Results", 1),
+            _paragraph(
+                "short-result",
+                "Reheating changed the observed grain morphology.",
+                2,
+                "Results",
+            ),
+        ]
+    )
+
+    class CompactFallbackExtractor(_WindowExtractor):
+        def __init__(self) -> None:
+            super().__init__()
+            self.compact_payloads: list[dict[str, Any]] = []
+
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            self.payloads.append(payload)
+            raise full_failure
+
+        def extract_source_signals(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredPaperSkim:
+            self.compact_payloads.append(payload)
+            source_unit_id = payload["source_units"][0]["source_unit_id"]
+            return StructuredPaperSkim.model_validate(
+                {
+                    "doc_role": "experimental",
+                    "unresolved_signals": [
+                        {
+                            "signal_type": "outcome",
+                            "label": "grain morphology",
+                            "claim_scope": "current_work",
+                            "source_unit_ids": [source_unit_id],
+                            "confidence": 0.86,
+                        }
+                    ],
+                }
+            )
+
+    extractor = CompactFallbackExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 1
+    assert len(extractor.compact_payloads) == 1
+    assert [signal.label for signal in skim.unresolved_signals] == ["grain morphology"]
+    assert [item.status.value for item in skim.source_unit_coverage] == [
+        "unresolved_signal_emitted"
+    ]
+    assert skim.coverage_complete is True
+    assert "source-local signals" in skim.warnings[0]
+
+
+def test_compact_singleton_retries_one_transient_empty_response():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("review", "Review", 1),
+            _paragraph(
+                "review-result",
+                "Three reheating cycles changed the observed microstructure.",
+                2,
+                "Review",
+            ),
+        ]
+    )
+
+    class TransientCompactExtractor(_WindowExtractor):
+        def __init__(self) -> None:
+            super().__init__()
+            self.compact_attempts = 0
+
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            self.payloads.append(payload)
+            raise StructuredOutputSaturatedError("singleton output saturated")
+
+        def extract_source_signals(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredPaperSkim:
+            self.compact_attempts += 1
+            if self.compact_attempts == 1:
+                raise RuntimeError(
+                    "structured extraction returned empty response content"
+                )
+            source_unit_id = payload["source_units"][0]["source_unit_id"]
+            return StructuredPaperSkim.model_validate(
+                {
+                    "doc_role": "review",
+                    "unresolved_signals": [
+                        {
+                            "signal_type": "outcome",
+                            "label": "microstructure",
+                            "claim_scope": "background",
+                            "source_unit_ids": [source_unit_id],
+                        }
+                    ],
+                }
+            )
+
+    extractor = TransientCompactExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert extractor.compact_attempts == 2
+    assert [item.status.value for item in skim.source_unit_coverage] == [
+        "unresolved_signal_emitted"
+    ]
+
+
+def test_compact_singleton_records_the_final_technical_failure_kind():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("review", "Review", 1),
+            _paragraph(
+                "review-result",
+                "Three reheating cycles changed the observed microstructure.",
+                2,
+                "Review",
+            ),
+        ]
+    )
+
+    class EmptyCompactExtractor(_WindowExtractor):
+        def __init__(self) -> None:
+            super().__init__()
+            self.compact_attempts = 0
+
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            self.payloads.append(payload)
+            raise StructuredOutputSaturatedError("singleton output saturated")
+
+        def extract_source_signals(
+            self,
+            _payload: dict[str, Any],
+        ) -> StructuredPaperSkim:
+            self.compact_attempts += 1
+            raise RuntimeError(
+                "structured extraction returned empty response content"
+            )
+
+    extractor = EmptyCompactExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert extractor.compact_attempts == 2
+    assert [item.status.value for item in skim.source_unit_coverage] == [
+        "extraction_failed"
+    ]
+    assert "compact_empty_response" in skim.source_unit_coverage[0].reason
+
+
 def test_dense_single_source_recovers_through_lossless_content_fragments():
     source_text = (
         "VARIABLE_SIGNAL "
@@ -1049,6 +1293,12 @@ def test_successful_fragment_survives_while_failed_parent_coverage_stays_incompl
                     "structured extraction returned empty response content"
                 )
             return super().extract(payload)
+
+        def extract_source_signals(
+            self,
+            _payload: dict[str, Any],
+        ) -> StructuredPaperSkim:
+            raise RuntimeError("structured extraction returned empty response content")
 
     extractor = PartiallyRecoveringExtractor()
 
@@ -1661,6 +1911,63 @@ def test_each_source_text_and_caption_is_assigned_once_and_references_are_exclud
     assert all_figure_captions == ["FIGURE_SOURCE"]
 
 
+def test_tables_and_figures_with_filename_heading_paths_reach_paper_skim_before_references():
+    artifacts, tree = _artifacts(
+        blocks=[
+            {**_heading("results", "Results", 1), "page": 2},
+            {
+                **_paragraph("result", "RESULT_SOURCE", 2, "Results"),
+                "page": 2,
+            },
+            {**_heading("references", "References", 10), "page": 9},
+            {
+                **_paragraph("reference", "REFERENCE_SOURCE", 11, "References"),
+                "page": 9,
+            },
+        ],
+        tables=[
+            {
+                "table_id": "table-filename-heading",
+                "document_id": "paper-1",
+                "table_order": 1,
+                "caption_text": "TABLE_SOURCE",
+                "page": 4,
+                "heading_path": "uploaded-paper.pdf",
+                "column_headers": ["condition", "result"],
+                "table_matrix": [["condition", "result"], ["A", "99.1"]],
+            }
+        ],
+        figures=[
+            {
+                "figure_id": "figure-filename-heading",
+                "document_id": "paper-1",
+                "figure_order": 1,
+                "figure_label": "Figure 1",
+                "caption_text": "FIGURE_SOURCE",
+                "page": 5,
+                "heading_path": "uploaded-paper.pdf",
+            }
+        ],
+    )
+    extractor = _WindowExtractor()
+
+    _build_skims(artifacts, tree, extractor)
+
+    source_keys = {
+        (unit["source_kind"], unit["source_ref"])
+        for payload in extractor.payloads
+        for unit in payload["source_units"]
+    }
+    all_content = "\n".join(
+        str(unit["content"])
+        for payload in extractor.payloads
+        for unit in payload["source_units"]
+    )
+    assert ("table", "table-filename-heading") in source_keys
+    assert ("figure", "figure-filename-heading") in source_keys
+    assert "REFERENCE_SOURCE" not in all_content
+
+
 def test_complete_window_candidate_keeps_its_stable_source_reference():
     artifacts, tree = _artifacts(
         blocks=[
@@ -1799,6 +2106,67 @@ def test_broad_microstructure_theme_is_not_retained_as_a_relationship():
     assert [item.status.value for item in skim.source_unit_coverage] == [
         "unresolved_signal_emitted"
     ]
+
+
+def test_review_cited_experiment_cannot_become_current_work():
+    source_unit_id = "source-review-citation"
+    payload = {
+        "window_id": "results-1",
+        "document_profile": {"doc_type": "review"},
+        "source_units": [
+            {
+                "source_unit_id": source_unit_id,
+                "source_kind": "block",
+                "source_ref": "review-result-87",
+                "section_path": "Results and discussion",
+                "content": (
+                    "In the SAAM experiment, C-Mn steel specimens were reheated "
+                    "and the microstructure was characterized [87]."
+                ),
+            }
+        ],
+    }
+    parsed = StructuredPaperSkim(
+        doc_role="review",
+        studies=[
+            {
+                "experiment_label": "SAAM C-Mn steel experiment",
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "material_scope": ["C-Mn steel"],
+                "process_context": ["reheating"],
+                "relationships": [
+                    {
+                        "varied_factors": ["reheating condition"],
+                        "outcome": "martensite fraction",
+                        "source_unit_ids": [source_unit_id],
+                        "confidence": 0.9,
+                    }
+                ],
+                "confidence": 0.9,
+            }
+        ],
+        unresolved_signals=[
+            {
+                "signal_type": "outcome",
+                "label": "phase constitution",
+                "experiment_label": "SAAM C-Mn steel experiment",
+                "design_type": "experimental",
+                "claim_scope": "current_work",
+                "source_unit_ids": [source_unit_id],
+                "confidence": 0.8,
+            }
+        ],
+    )
+
+    skim, signals = PaperSkimService()._resolve_window_result(
+        document_id="review-paper",
+        payload=payload,
+        parsed=parsed,
+    )
+
+    assert skim.studies[0].claim_scope == "background"
+    assert signals[0].signal.claim_scope == "background"
 
 
 def test_unknown_source_unit_id_marks_the_window_failed():
@@ -2807,6 +3175,48 @@ def test_document_profile_owns_the_paper_role_across_windows():
     )
 
     assert skim.doc_role == "experimental"
+
+
+@pytest.mark.parametrize(
+    ("profile_doc_type", "input_scope", "expected_scope"),
+    [
+        ("review", "synthesis", "synthesis"),
+        ("review", "current_work", "uncertain"),
+        ("experimental", "current_work", "current_work"),
+    ],
+)
+def test_document_profile_bounds_study_claim_scope(
+    profile_doc_type: str,
+    input_scope: str,
+    expected_scope: str,
+):
+    study = PaperStudy.from_mapping(
+        {
+            **_study(
+                varied_factors=["reheating condition"],
+                outcome="martensite fraction",
+                confidence=0.9,
+            ),
+            "document_id": "paper-1",
+            "claim_scope": input_scope,
+        }
+    )
+
+    skim = PaperSkimService()._consolidate_window_skims(
+        "paper-1",
+        [
+            PaperSkim.from_mapping(
+                {
+                    "document_id": "paper-1",
+                    "doc_role": profile_doc_type,
+                    "studies": [study.to_record()],
+                }
+            )
+        ],
+        profile=SimpleNamespace(doc_type=profile_doc_type),
+    )
+
+    assert skim.studies[0].claim_scope == expected_scope
 
 
 def test_progress_remains_document_scoped_and_exposes_window_position():

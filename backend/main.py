@@ -1,11 +1,13 @@
 import os
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass
 from time import perf_counter
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from application.auth import AuthSessionService, SessionNotFoundError
 from application.chat import (
@@ -120,200 +122,281 @@ def _parse_cors_allowed_origins() -> list[str]:
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
-def create_app(
-    *,
-    auth_session_service: AuthSessionService | None = None,
-    collection_service: CollectionService | None = None,
-    task_service: TaskService | None = None,
-    source_artifact_repository: SourceArtifactRepository | None = None,
-    paper_fact_repository: PaperFactRepository | None = None,
-    objective_repository: ObjectiveRepository | None = None,
-    finding_review_repository: (
-        FindingReviewRepository | None
-    ) = None,
-    experiment_plan_repository: ExperimentPlanRepository | None = None,
-    chat_repository: ChatRepository | None = None,
-    chat_session_service: ChatSessionService | None = None,
-) -> FastAPI:
+AppLifespan = Callable[[FastAPI], AbstractAsyncContextManager[None]]
+
+
+@dataclass(frozen=True)
+class ApplicationOverrides:
+    """Dependencies supplied by tests or alternate application hosts."""
+
+    auth_session_service: AuthSessionService | None = None
+    collection_service: CollectionService | None = None
+    task_service: TaskService | None = None
+    source_artifact_repository: SourceArtifactRepository | None = None
+    paper_fact_repository: PaperFactRepository | None = None
+    objective_repository: ObjectiveRepository | None = None
+    finding_review_repository: FindingReviewRepository | None = None
+    experiment_plan_repository: ExperimentPlanRepository | None = None
+    chat_repository: ChatRepository | None = None
+    chat_session_service: ChatSessionService | None = None
+
+    def requires_database(self) -> bool:
+        required_dependencies = (
+            self.auth_session_service,
+            self.collection_service,
+            self.task_service,
+            self.source_artifact_repository,
+            self.paper_fact_repository,
+            self.objective_repository,
+            self.finding_review_repository,
+            self.experiment_plan_repository,
+        )
+        return any(value is None for value in required_dependencies) or (
+            self.chat_session_service is None and self.chat_repository is None
+        )
+
+
+@dataclass(frozen=True)
+class ApplicationRuntime:
+    """Resolved services and resources owned by one FastAPI app instance."""
+
+    database_engine: AsyncEngine | None
+    auth_session_service: AuthSessionService
+    collection_service: CollectionService
+    task_service: TaskService
+    paper_fact_repository: PaperFactRepository
+    objective_repository: ObjectiveRepository
+    finding_review_repository: FindingReviewRepository
+    finding_feedback_service: FindingFeedbackService
+    artifact_registry_service: ArtifactRegistryService
+    document_profile_service: DocumentProfileService
+    document_markdown_service: DocumentMarkdownService
+    reference_workflow_service: SourceReferenceWorkflowService
+    research_objective_service: ResearchObjectiveService
+    workspace_service: WorkspaceService
+    build_pipeline_service: CollectionBuildPipelineService
+    goal_service: GoalService
+    chat_session_service: ChatSessionService
+    experiment_plan_service: ExperimentPlanService
+    objective_analysis_service: ObjectiveAnalysisService
+
+    async def close(self) -> None:
+        if self.database_engine is not None:
+            await self.database_engine.dispose()
+
+
+async def build_application_runtime(
+    overrides: ApplicationOverrides,
+) -> ApplicationRuntime:
+    """Compose the explicit repository and application-service dependency graph."""
+
+    database_engine: AsyncEngine | None = None
+    try:
+        # Resolve persistence dependencies before composing their consumers.
+        session_factory = None
+        if overrides.requires_database():
+            database_engine = build_database_engine(DatabaseSettings())
+            session_factory = build_session_factory(database_engine)
+
+        if overrides.auth_session_service is None:
+            auth_session_service = AuthSessionService(
+                PostgresAuthRepository(session_factory)
+            )
+        else:
+            auth_session_service = overrides.auth_session_service
+        await auth_session_service.ensure_bootstrap_user()
+
+        collection_service = overrides.collection_service or CollectionService(
+            repository=PostgresCollectionRepository(session_factory),
+            workspace=FileCollectionWorkspace(),
+        )
+        task_service = overrides.task_service or TaskService(
+            PostgresBuildRepository(session_factory)
+        )
+        source_artifact_repository = (
+            overrides.source_artifact_repository
+            or PostgresSourceArtifactRepository(session_factory)
+        )
+        paper_fact_repository = (
+            overrides.paper_fact_repository
+            or PostgresPaperFactRepository(session_factory)
+        )
+        objective_repository = (
+            overrides.objective_repository
+            or PostgresObjectiveRepository(session_factory)
+        )
+        finding_review_repository = (
+            overrides.finding_review_repository
+            or PostgresFindingReviewRepository(session_factory)
+        )
+        experiment_plan_repository = (
+            overrides.experiment_plan_repository
+            or PostgresExperimentPlanRepository(session_factory)
+        )
+        chat_repository = overrides.chat_repository or (
+            PostgresChatRepository(session_factory)
+            if overrides.chat_session_service is None
+            else None
+        )
+
+        # Services share the resolved objects above; no service locator is used.
+        artifact_registry_service = ArtifactRegistryService(
+            task_service.repository,
+            source_artifact_repository,
+        )
+        document_profile_service = DocumentProfileService(
+            collection_service=collection_service,
+            source_artifact_repository=source_artifact_repository,
+            paper_fact_repository=paper_fact_repository,
+        )
+        finding_synthesis_service = FindingSynthesisService()
+        finding_feedback_service = FindingFeedbackService(
+            review_repository=finding_review_repository,
+            objective_repository=objective_repository,
+        )
+        research_objective_service = ResearchObjectiveService(
+            collection_service=collection_service,
+            source_artifact_repository=source_artifact_repository,
+            paper_fact_repository=paper_fact_repository,
+            objective_repository=objective_repository,
+            document_profile_service=document_profile_service,
+            finding_synthesis_service=finding_synthesis_service,
+            paper_skim_service=PaperSkimService(),
+            objective_candidate_service=ObjectiveCandidateService(),
+        )
+        workspace_service = WorkspaceService(
+            collection_service=collection_service,
+            task_service=task_service,
+            source_artifact_repository=source_artifact_repository,
+            objective_repository=objective_repository,
+            document_profile_service=document_profile_service,
+        )
+        document_markdown_service = DocumentMarkdownService(
+            collection_service=collection_service,
+            source_artifact_repository=source_artifact_repository,
+        )
+        reference_workflow_service = SourceReferenceWorkflowService(
+            source_artifact_repository=source_artifact_repository,
+        )
+        build_pipeline_service = CollectionBuildPipelineService(
+            collection_service=collection_service,
+            task_service=task_service,
+            artifact_registry_service=artifact_registry_service,
+            source_artifact_repository=source_artifact_repository,
+            document_profile_service=document_profile_service,
+            research_objective_service=research_objective_service,
+        )
+        goal_service = GoalService(collection_service)
+        objective_analysis_service = ObjectiveAnalysisService(
+            objective_repository=objective_repository,
+            research_objective_service=research_objective_service,
+        )
+
+        if overrides.chat_session_service is None:
+            chat_session_service = ChatSessionService(
+                collection_service=collection_service,
+                repository=chat_repository,
+                runner=ResearchAgentRunner(
+                    model=OpenAIChatModel(),
+                    capabilities=CapabilityRegistry(
+                        (
+                            GetCollectionContextCapability(
+                                collection_service=collection_service,
+                                objective_repository=objective_repository,
+                            ),
+                            QueryPublishedFindingsCapability(
+                                collection_service=collection_service,
+                                objective_repository=objective_repository,
+                                objective_analysis_service=objective_analysis_service,
+                            ),
+                            ProposeObjectiveDraftsCapability(
+                                collection_service=collection_service,
+                                objective_repository=objective_repository,
+                            ),
+                            CreateObjectiveCandidateCapability(
+                                research_objective_service=research_objective_service,
+                            ),
+                        )
+                    ),
+                ),
+            )
+        else:
+            chat_session_service = overrides.chat_session_service
+
+        return ApplicationRuntime(
+            database_engine=database_engine,
+            auth_session_service=auth_session_service,
+            collection_service=collection_service,
+            task_service=task_service,
+            paper_fact_repository=paper_fact_repository,
+            objective_repository=objective_repository,
+            finding_review_repository=finding_review_repository,
+            finding_feedback_service=finding_feedback_service,
+            artifact_registry_service=artifact_registry_service,
+            document_profile_service=document_profile_service,
+            document_markdown_service=document_markdown_service,
+            reference_workflow_service=reference_workflow_service,
+            research_objective_service=research_objective_service,
+            workspace_service=workspace_service,
+            build_pipeline_service=build_pipeline_service,
+            goal_service=goal_service,
+            chat_session_service=chat_session_service,
+            experiment_plan_service=ExperimentPlanService(
+                repository=experiment_plan_repository,
+                finding_feedback_service=finding_feedback_service,
+            ),
+            objective_analysis_service=objective_analysis_service,
+        )
+    except BaseException:
+        if database_engine is not None:
+            await database_engine.dispose()
+        raise
+
+
+def install_application_runtime(
+    application: FastAPI,
+    runtime: ApplicationRuntime,
+) -> None:
+    """Expose resolved controller dependencies through FastAPI state."""
+
+    application.state.auth_session_service = runtime.auth_session_service
+    application.state.collection_service = runtime.collection_service
+    application.state.task_service = runtime.task_service
+    application.state.paper_fact_repository = runtime.paper_fact_repository
+    application.state.objective_repository = runtime.objective_repository
+    application.state.finding_review_repository = runtime.finding_review_repository
+    application.state.finding_feedback_service = runtime.finding_feedback_service
+    application.state.artifact_registry_service = runtime.artifact_registry_service
+    application.state.document_profile_service = runtime.document_profile_service
+    application.state.document_markdown_service = runtime.document_markdown_service
+    application.state.reference_workflow_service = runtime.reference_workflow_service
+    application.state.research_objective_service = runtime.research_objective_service
+    application.state.workspace_service = runtime.workspace_service
+    application.state.build_pipeline_service = runtime.build_pipeline_service
+    application.state.goal_service = runtime.goal_service
+    application.state.chat_session_service = runtime.chat_session_service
+    application.state.experiment_plan_service = runtime.experiment_plan_service
+    application.state.objective_analysis_service = runtime.objective_analysis_service
+
+
+def create_lifespan(overrides: ApplicationOverrides) -> AppLifespan:
+    """Create the FastAPI lifecycle for one set of dependency overrides."""
+
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        engine = None
+        runtime = await build_application_runtime(overrides)
         try:
-            session_factory = None
-            if (
-                auth_session_service is None
-                or collection_service is None
-                or task_service is None
-                or source_artifact_repository is None
-                or paper_fact_repository is None
-                or objective_repository is None
-                or finding_review_repository is None
-                or experiment_plan_repository is None
-                or (chat_session_service is None and chat_repository is None)
-            ):
-                engine = build_database_engine(DatabaseSettings())
-                session_factory = build_session_factory(engine)
-            if auth_session_service is None:
-                active_auth_session_service = AuthSessionService(
-                    PostgresAuthRepository(session_factory)
-                )
-                application.state.auth_session_service = active_auth_session_service
-                await active_auth_session_service.ensure_bootstrap_user()
-            else:
-                active_auth_session_service = auth_session_service
-                application.state.auth_session_service = active_auth_session_service
-                await active_auth_session_service.ensure_bootstrap_user()
-
-            active_collection_service = collection_service or CollectionService(
-                repository=PostgresCollectionRepository(session_factory),
-                workspace=FileCollectionWorkspace(),
-            )
-            active_task_service = task_service or TaskService(
-                PostgresBuildRepository(session_factory)
-            )
-            active_source_artifact_repository = (
-                source_artifact_repository
-                or PostgresSourceArtifactRepository(session_factory)
-            )
-            active_paper_fact_repository = (
-                paper_fact_repository or PostgresPaperFactRepository(session_factory)
-            )
-            active_objective_repository = (
-                objective_repository or PostgresObjectiveRepository(session_factory)
-            )
-            active_review_repository = (
-                finding_review_repository
-                or PostgresFindingReviewRepository(session_factory)
-            )
-            active_experiment_plan_repository = (
-                experiment_plan_repository
-                or PostgresExperimentPlanRepository(session_factory)
-            )
-            active_chat_repository = (
-                chat_repository
-                or (
-                    PostgresChatRepository(session_factory)
-                    if chat_session_service is None
-                    else None
-                )
-            )
-            artifact_registry_service = ArtifactRegistryService(
-                active_task_service.repository,
-                active_source_artifact_repository,
-            )
-            document_profile_service = DocumentProfileService(
-                collection_service=active_collection_service,
-                source_artifact_repository=active_source_artifact_repository,
-                paper_fact_repository=active_paper_fact_repository,
-            )
-            finding_synthesis_service = FindingSynthesisService()
-            finding_feedback_service = (
-                FindingFeedbackService(
-                    review_repository=active_review_repository,
-                    objective_repository=active_objective_repository,
-                )
-            )
-            research_objective_service = ResearchObjectiveService(
-                collection_service=active_collection_service,
-                source_artifact_repository=active_source_artifact_repository,
-                paper_fact_repository=active_paper_fact_repository,
-                objective_repository=active_objective_repository,
-                document_profile_service=document_profile_service,
-                finding_synthesis_service=finding_synthesis_service,
-                paper_skim_service=PaperSkimService(),
-                objective_candidate_service=ObjectiveCandidateService(),
-            )
-            workspace_service = WorkspaceService(
-                collection_service=active_collection_service,
-                task_service=active_task_service,
-                source_artifact_repository=active_source_artifact_repository,
-                objective_repository=active_objective_repository,
-                document_profile_service=document_profile_service,
-            )
-            application.state.collection_service = active_collection_service
-            application.state.task_service = active_task_service
-            application.state.paper_fact_repository = active_paper_fact_repository
-            application.state.objective_repository = active_objective_repository
-            application.state.finding_review_repository = active_review_repository
-            application.state.finding_feedback_service = (
-                finding_feedback_service
-            )
-            application.state.artifact_registry_service = artifact_registry_service
-            application.state.document_profile_service = document_profile_service
-            application.state.document_markdown_service = DocumentMarkdownService(
-                collection_service=active_collection_service,
-                source_artifact_repository=active_source_artifact_repository,
-            )
-            application.state.reference_workflow_service = (
-                SourceReferenceWorkflowService(
-                    source_artifact_repository=active_source_artifact_repository,
-                )
-            )
-            application.state.research_objective_service = research_objective_service
-            application.state.workspace_service = workspace_service
-            application.state.build_pipeline_service = CollectionBuildPipelineService(
-                collection_service=active_collection_service,
-                task_service=active_task_service,
-                artifact_registry_service=artifact_registry_service,
-                source_artifact_repository=active_source_artifact_repository,
-                document_profile_service=document_profile_service,
-                research_objective_service=research_objective_service,
-            )
-            application.state.goal_service = GoalService(active_collection_service)
-            objective_analysis_service = ObjectiveAnalysisService(
-                objective_repository=active_objective_repository,
-                research_objective_service=research_objective_service,
-            )
-            application.state.chat_session_service = (
-                chat_session_service
-                or ChatSessionService(
-                    collection_service=active_collection_service,
-                    repository=active_chat_repository,
-                    runner=ResearchAgentRunner(
-                        model=OpenAIChatModel(),
-                        capabilities=CapabilityRegistry(
-                            (
-                                GetCollectionContextCapability(
-                                    collection_service=active_collection_service,
-                                    objective_repository=active_objective_repository,
-                                ),
-                                QueryPublishedFindingsCapability(
-                                    collection_service=active_collection_service,
-                                    objective_repository=active_objective_repository,
-                                    objective_analysis_service=objective_analysis_service,
-                                ),
-                                ProposeObjectiveDraftsCapability(
-                                    collection_service=active_collection_service,
-                                    objective_repository=active_objective_repository,
-                                ),
-                                CreateObjectiveCandidateCapability(
-                                    research_objective_service=research_objective_service,
-                                ),
-                            )
-                        ),
-                    ),
-                )
-            )
-            application.state.experiment_plan_service = ExperimentPlanService(
-                repository=active_experiment_plan_repository,
-                finding_feedback_service=finding_feedback_service,
-            )
-            application.state.objective_analysis_service = objective_analysis_service
+            install_application_runtime(application, runtime)
             yield
         finally:
-            if engine is not None:
-                await engine.dispose()
+            await runtime.close()
 
-    app = FastAPI(
-        title="TsingAI-Lens API",
-        version="0.12.6",
-        docs_url=f"{PUBLIC_API_PREFIX}/docs",
-        redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
-        openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",
-        lifespan=lifespan,
-    )
-    if auth_session_service is not None:
-        app.state.auth_session_service = auth_session_service
+    return lifespan
+
+
+def configure_middleware(app: FastAPI) -> None:
+    """Install CORS, request-correlation, and authentication middleware."""
+
     cors_allowed_origins = _parse_cors_allowed_origins()
     app.add_middleware(
         CORSMiddleware,
@@ -411,6 +494,10 @@ def create_app(
         finally:
             clear_user_id(user_token)
 
+
+def register_routes(app: FastAPI) -> None:
+    """Register the public Lens API routers."""
+
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     app.include_router(auth.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(collections.router, prefix=PUBLIC_API_V1_PREFIX)
@@ -422,9 +509,46 @@ def create_app(
     app.include_router(workspace.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(documents.router, prefix=PUBLIC_API_V1_PREFIX)
     app.include_router(research_objectives.router, prefix=PUBLIC_API_V1_PREFIX)
-    app.include_router(
-        finding_review.router, prefix=PUBLIC_API_V1_PREFIX
+    app.include_router(finding_review.router, prefix=PUBLIC_API_V1_PREFIX)
+
+
+def create_app(
+    *,
+    auth_session_service: AuthSessionService | None = None,
+    collection_service: CollectionService | None = None,
+    task_service: TaskService | None = None,
+    source_artifact_repository: SourceArtifactRepository | None = None,
+    paper_fact_repository: PaperFactRepository | None = None,
+    objective_repository: ObjectiveRepository | None = None,
+    finding_review_repository: FindingReviewRepository | None = None,
+    experiment_plan_repository: ExperimentPlanRepository | None = None,
+    chat_repository: ChatRepository | None = None,
+    chat_session_service: ChatSessionService | None = None,
+) -> FastAPI:
+    overrides = ApplicationOverrides(
+        auth_session_service=auth_session_service,
+        collection_service=collection_service,
+        task_service=task_service,
+        source_artifact_repository=source_artifact_repository,
+        paper_fact_repository=paper_fact_repository,
+        objective_repository=objective_repository,
+        finding_review_repository=finding_review_repository,
+        experiment_plan_repository=experiment_plan_repository,
+        chat_repository=chat_repository,
+        chat_session_service=chat_session_service,
     )
+    app = FastAPI(
+        title="TsingAI-Lens API",
+        version="0.12.6",
+        docs_url=f"{PUBLIC_API_PREFIX}/docs",
+        redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
+        openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",
+        lifespan=create_lifespan(overrides),
+    )
+    if auth_session_service is not None:
+        app.state.auth_session_service = auth_session_service
+    configure_middleware(app)
+    register_routes(app)
     return app
 
 

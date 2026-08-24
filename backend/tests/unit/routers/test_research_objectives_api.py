@@ -185,9 +185,6 @@ class _Repository:
     def __init__(self, facts: ObjectiveFactSet | None = None) -> None:
         self.facts = facts or _default_objective_facts()
 
-    async def read(self, collection_id):
-        return self.facts
-
     async def list_objectives(self, collection_id):
         return self.facts.research_objectives
 
@@ -196,9 +193,6 @@ class _Service:
     def __init__(self, *, queued: bool = False) -> None:
         self.analysis_status = "queued" if queued else "succeeded"
         self.dispatch_failure_version: int | None = None
-
-    async def confirm_objective(self, collection_id, objective_id):
-        return await self.get_analysis_state(collection_id, objective_id)
 
     async def queue_analysis(self, collection_id, objective_id):
         return await self.get_analysis_state(collection_id, objective_id)
@@ -518,12 +512,6 @@ def test_objective_list_exposes_candidates_after_rank_six() -> None:
 
 def test_objective_list_hides_stale_objectives_from_an_unready_build() -> None:
     class UnreadyRepository(_Repository):
-        async def read(self, collection_id):
-            return ObjectiveFactSet(
-                research_objectives_ready=False,
-                research_objectives=(_objective(),),
-            )
-
         async def list_objectives(self, collection_id):
             return ()
 
@@ -534,202 +522,6 @@ def test_objective_list_hides_stale_objectives_from_an_unready_build() -> None:
     assert response.status_code == 200
     assert response.json()["objectives"] == []
     assert response.json()["total"] == 0
-
-
-def test_paper_study_inventory_preserves_relationships_dispositions_and_signals(
-) -> None:
-    skim = PaperSkim.from_mapping(
-        {
-            "document_id": "paper-1",
-            "doc_role": "experimental",
-            "studies": [
-                {
-                    "study_id": "study-1",
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "experiment_label": "temperature series",
-                    "material_scope": ["Alloy A"],
-                    "process_context": ["heat treatment"],
-                    "sample_context": ["dog-bone specimen"],
-                    "test_context": ["room-temperature tensile test"],
-                    "comparator": "400 C versus 500 C",
-                    "fixed_conditions": ["30 minute hold"],
-                    "relationships": [
-                        {
-                            "relationship_id": "relationship-1",
-                            "varied_factors": ["temperature"],
-                            "outcome": "strength",
-                            "confidence": 0.9,
-                            "source_refs": [
-                                {"source_kind": "block", "source_ref": "block-7"}
-                            ],
-                        },
-                        {
-                            "relationship_id": "relationship-2",
-                            "varied_factors": ["scan speed"],
-                            "outcome": "porosity",
-                            "confidence": 0.8,
-                            "source_refs": [
-                                {
-                                    "source_kind": "table_row",
-                                    "source_ref": "row-2",
-                                }
-                            ],
-                        },
-                    ],
-                    "confidence": 0.9,
-                },
-            ],
-            "unresolved_signals": [
-                {
-                    "signal_id": "signal-1",
-                    "signal_type": "variable",
-                    "label": "grain size",
-                    "design_type": "experimental",
-                    "claim_scope": "current_work",
-                    "experiment_label": "microstructure series",
-                    "material_scope": ["Alloy A"],
-                    "source_refs": [
-                        {"source_kind": "block", "source_ref": "block-11"}
-                    ],
-                    "confidence": 0.7,
-                    "reason": "no outcome signal was found in this paper",
-                }
-            ],
-            "source_unit_coverage": [
-                {
-                    "source_unit_id": "results-1-source-1",
-                    "window_id": "results-1",
-                    "source_kind": "block",
-                    "source_ref": "block-7",
-                    "status": "relationship_emitted",
-                },
-                {
-                    "source_unit_id": "results-1-source-2",
-                    "window_id": "results-1",
-                    "source_kind": "block",
-                    "source_ref": "block-11",
-                    "status": "unresolved_signal_emitted",
-                },
-                {
-                    "source_unit_id": "results-1-source-3",
-                    "window_id": "results-1",
-                    "source_kind": "block",
-                    "source_ref": "block-12",
-                    "status": "no_study_signal",
-                    "reason": "The unit contains only background context.",
-                },
-                {
-                    "source_unit_id": "results-1-source-4",
-                    "window_id": "results-1",
-                    "source_kind": "table_row",
-                    "source_ref": "row-3",
-                    "status": "extraction_failed",
-                    "reason": "The window response failed validation.",
-                },
-            ],
-        }
-    )
-    repository = _Repository(
-        ObjectiveFactSet(
-            research_objectives_ready=True,
-            paper_skims=(skim,),
-            research_objectives=(_objective(),),
-            study_dispositions=(
-                PaperStudyDisposition.from_mapping(
-                    {
-                        "document_id": "paper-1",
-                        "study_id": "study-1",
-                        "relationship_id": "relationship-1",
-                        "status": "promoted",
-                        "objective_id": "obj-1",
-                    }
-                ),
-                PaperStudyDisposition.from_mapping(
-                    {
-                        "document_id": "paper-1",
-                        "study_id": "study-1",
-                        "relationship_id": "relationship-2",
-                        "status": "rejected",
-                        "reason": "The relationship lacks a defensible comparison.",
-                    }
-                ),
-            ),
-        )
-    )
-
-    response = _client(repository=repository).get(
-        "/collections/col-1/paper-study-inventory",
-        params={"offset": 0, "limit": 20},
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["total"] == 6
-    assert payload["research_objectives_ready"] is True
-    assert payload["coverage_complete"] is False
-    assert payload["source_unit_coverage_counts"] == {
-        "relationship_emitted": 1,
-        "unresolved_signal_emitted": 1,
-        "no_study_signal": 1,
-        "extraction_failed": 1,
-    }
-    study, unresolved, *coverage = payload["items"]
-    assert study["item_type"] == "paper_study"
-    assert study["study_id"] == "study-1"
-    assert study["experiment_label"] == "temperature series"
-    promoted, rejected = study["relationships"]
-    assert promoted["relationship_id"] == "relationship-1"
-    assert promoted["disposition"] == {
-        "status": "promoted",
-        "objective_id": "obj-1",
-        "reason": None,
-    }
-    assert promoted["source_refs"] == [
-        {"source_kind": "block", "source_ref": "block-7"}
-    ]
-    assert rejected["relationship_id"] == "relationship-2"
-    assert rejected["disposition"] == {
-        "status": "rejected",
-        "objective_id": None,
-        "reason": "The relationship lacks a defensible comparison.",
-    }
-    assert rejected["source_refs"] == [
-        {"source_kind": "table_row", "source_ref": "row-2"}
-    ]
-    assert unresolved["item_type"] == "unresolved_signal"
-    assert unresolved["reason"] == (
-        "no outcome signal was found in this paper"
-    )
-    assert unresolved["source_refs"] == [
-        {"source_kind": "block", "source_ref": "block-11"}
-    ]
-    assert [item["item_type"] for item in coverage] == [
-        "source_unit_coverage"
-    ] * 4
-    assert coverage[-1] == {
-        "item_type": "source_unit_coverage",
-        "document_id": "paper-1",
-        "doc_role": "experimental",
-        "source_unit_id": "results-1-source-4",
-        "window_id": "results-1",
-        "source_kind": "table_row",
-        "source_ref": "row-3",
-        "status": "extraction_failed",
-        "reason": "The window response failed validation.",
-    }
-
-    second_page = _client(repository=repository).get(
-        "/collections/col-1/paper-study-inventory",
-        params={"offset": 1, "limit": 1},
-    )
-
-    assert second_page.status_code == 200
-    second_page_payload = second_page.json()
-    assert second_page_payload["total"] == 6
-    assert second_page_payload["offset"] == 1
-    assert second_page_payload["limit"] == 1
-    assert second_page_payload["items"][0]["signal_id"] == "signal-1"
 
 
 def test_start_analysis_dispatches_an_asyncio_background_task(monkeypatch) -> None:
@@ -877,8 +669,21 @@ def test_start_analysis_fails_queued_version_when_async_task_creation_fails(
     assert service.dispatch_failure_version == 1
 
 
-def test_objective_api_exposes_definition_and_separate_analysis_state() -> None:
+def test_duplicate_objective_detail_route_is_not_registered() -> None:
     response = _client().get("/collections/col-1/objectives/obj-1")
+
+    assert response.status_code == 404
+
+
+def test_confirm_objective_route_is_not_registered() -> None:
+    response = _client().post("/collections/col-1/objectives/obj-1/confirm")
+
+    assert response.status_code == 404
+
+
+def test_objective_analysis_api_exposes_definition_and_separate_analysis_state(
+) -> None:
+    response = _client().get("/collections/col-1/objectives/obj-1/analysis")
 
     assert response.status_code == 200
     payload = response.json()

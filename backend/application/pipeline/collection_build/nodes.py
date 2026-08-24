@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from application.pipeline.collection_build.config import CollectionBuildPipelineConfig
@@ -18,7 +19,7 @@ async def build_source_artifacts(
 ) -> dict[str, Any]:
     files = await context.collection_service.list_files(context.collection_id)
     if not files:
-        raise RuntimeError("集合内没有可构建文件")
+        raise RuntimeError("The collection contains no files available for building")
     context.state["file_count"] = len(files)
 
     outputs = await context.build_source_artifacts(
@@ -30,16 +31,42 @@ async def build_source_artifacts(
     errors = [str(err) for output in outputs for err in (output.errors or [])]
     if errors:
         raise RuntimeError("; ".join(errors))
-    bundle = next(
+    bundle_output = next(
         (
-            output.result
+            output
             for output in reversed(outputs)
             if isinstance(output.result, SourceArtifactBundle)
         ),
         None,
     )
-    if bundle is None:
+    if bundle_output is None:
         raise RuntimeError("Source pipeline did not return an artifact bundle")
+    bundle = bundle_output.result
+    runtime_state = getattr(bundle_output, "state", {}) or {}
+    runtime_failures = runtime_state.get("source_document_failures") or []
+    files_by_stored_filename = {
+        Path(str(item.get("stored_filename") or "")).name: item
+        for item in files
+        if str(item.get("stored_filename") or "").strip()
+    }
+    failed_documents: list[dict[str, Any]] = []
+    for failure in runtime_failures:
+        if not isinstance(failure, dict):
+            continue
+        stored_filename = Path(str(failure.get("source_path") or "")).name
+        file_record = files_by_stored_filename.get(stored_filename, {})
+        failed_documents.append(
+            {
+                "file_id": file_record.get("file_id"),
+                "filename": str(
+                    file_record.get("original_filename") or stored_filename
+                ),
+                "error_code": str(
+                    failure.get("error_code") or "source_parse_failed"
+                ),
+                "error_type": str(failure.get("error_type") or "Exception"),
+            }
+        )
     documents = bundle.to_documents()
     persisted_documents = []
     referenced_assets: set[str] = set()
@@ -91,10 +118,22 @@ async def build_source_artifacts(
         context.build_id,
         references,
     )
+    warnings = []
+    if failed_documents:
+        failed_unit = "document" if len(failed_documents) == 1 else "documents"
+        parsed_unit = "document" if len(documents) == 1 else "documents"
+        warnings.append(
+            f"{len(failed_documents)} Source {failed_unit} could not be parsed "
+            f"and {'was' if len(failed_documents) == 1 else 'were'} excluded; "
+            f"the build continued with {len(documents)} parsed {parsed_unit}."
+        )
     return {
         "document_count": len(documents),
         "table_count": sum(len(document.tables) for document in documents),
         "figure_count": sum(len(document.figures) for document in documents),
+        "source_failed_document_count": len(failed_documents),
+        "source_failed_documents": failed_documents,
+        "warnings": warnings,
     }
 
 

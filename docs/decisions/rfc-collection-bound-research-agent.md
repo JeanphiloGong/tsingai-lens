@@ -37,8 +37,8 @@ whether the collection supports a relationship between energy input and grain
 morphology. The Agent may inspect collection context and published Findings. If
 the evidence is incomplete, it says so and may propose a focused Objective
 draft. Only after the researcher reviews and approves the exact candidate does
-Lens create an unconfirmed Objective. The researcher then uses the existing
-Objective workspace to confirm it and start evidence analysis.
+Lens create an unconfirmed Objective. The researcher then uses one action in
+the existing Objective workspace to confirm it and start evidence analysis.
 
 This maps to implementation responsibilities as follows:
 

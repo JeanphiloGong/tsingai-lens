@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
+from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from types import SimpleNamespace
 
@@ -52,7 +52,9 @@ from application.core.objectives.discovery.signal_reconciliation import (
 from application.core.objectives.discovery.study_window import (
     PaperStudyWindowExtractor,
     StructuredPaperSkim,
+    StructuredPaperSourceSignalScreen,
     build_paper_skim_prompt,
+    build_paper_source_signal_prompt,
 )
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
@@ -104,6 +106,206 @@ def test_paper_skim_contract_bounds_model_output():
     assert "source_unit_coverage" not in schema
     assert "StructuredPaperSourceUnitCoverage" not in model_schema.get("$defs", {})
     assert schema["warnings"]["items"]["maxLength"] == 240
+
+
+def test_paper_source_signal_screen_contract_is_source_local_and_compact():
+    model_schema = StructuredPaperSourceSignalScreen.model_json_schema()
+    schema = model_schema["properties"]
+    signal_schema = model_schema["$defs"]["StructuredPaperSourceSignal"][
+        "properties"
+    ]
+
+    assert schema["signals"]["maxItems"] == 12
+    assert schema["output_saturated"]["type"] == "boolean"
+    assert signal_schema["signal_type"]["enum"] == ["variable", "outcome"]
+    assert signal_schema["material_scope"]["maxItems"] == 4
+    assert signal_schema["process_context"]["maxItems"] == 4
+    assert signal_schema["sample_context"]["maxItems"] == 4
+    assert signal_schema["test_context"]["maxItems"] == 4
+    assert signal_schema["fixed_conditions"]["maxItems"] == 4
+    assert "source_unit_ids" not in signal_schema
+    assert "relationships" not in schema
+    assert "studies" not in schema
+
+
+@pytest.mark.parametrize(
+    ("left_context", "right_context"),
+    [
+        ({"design_type": "experimental"}, {"design_type": "observational"}),
+        ({"comparator": "as-built"}, {"comparator": "heat-treated"}),
+        (
+            {"fixed_conditions": ["room temperature"]},
+            {"fixed_conditions": ["400 C"]},
+        ),
+    ],
+)
+def test_paper_source_signal_identity_preserves_distinct_experiment_context(
+    left_context: dict[str, object],
+    right_context: dict[str, object],
+):
+    common = {
+        "signal_type": "outcome",
+        "label": "yield strength",
+        "experiment_label": "tensile test",
+        "claim_scope": "current_work",
+        "material_scope": ["Ti-6Al-4V"],
+    }
+
+    parsed = StructuredPaperSourceSignalScreen.model_validate(
+        {
+            "signals": [
+                {**common, **left_context},
+                {**common, **right_context},
+            ]
+        }
+    )
+
+    assert len(parsed.signals) == 2
+
+
+def test_paper_source_signal_screen_isolates_one_malformed_signal():
+    parsed = StructuredPaperSourceSignalScreen.model_validate(
+        {
+            "signals": [
+                {"signal_type": "variable", "label": "reheating cycle"},
+                {"signal_type": "outcome", "label": "grain morphology"},
+                {
+                    "signal_type": "outcome",
+                    "label": "a complete observation sentence " * 4,
+                },
+            ]
+        }
+    )
+
+    assert [signal.label for signal in parsed.signals] == [
+        "reheating cycle",
+        "grain morphology",
+    ]
+    assert parsed.output_saturated is False
+    assert parsed.warnings == [
+        (
+            "Omitted 1 malformed source signal; retained the valid source-local "
+            "signals."
+        )
+    ]
+
+
+def test_paper_source_signal_screen_marks_all_malformed_signals_incomplete():
+    parsed = StructuredPaperSourceSignalScreen.model_validate(
+        {
+            "signals": [
+                {
+                    "signal_type": "outcome",
+                    "label": "a complete observation sentence " * 4,
+                }
+            ]
+        }
+    )
+
+    assert parsed.signals == []
+    assert parsed.output_saturated is True
+
+
+def test_paper_source_signal_prompt_preserves_review_and_primary_source_roles():
+    _, user_prompt = build_paper_source_signal_prompt(
+        {
+            "document_id": "review-paper",
+            "title": "Heat treatment review",
+            "window_id": "results-1.retry-left",
+            "window_role": "results",
+            "source_units": [
+                {
+                    "source_unit_id": "source-unit-000071",
+                    "source_kind": "block",
+                    "source_ref": "block-71",
+                    "section_path": "Review > Preheating",
+                    "content": (
+                        "Miranda et al. increased build plate temperature and "
+                        "reported lower residual stress."
+                    ),
+                }
+            ],
+        }
+    )
+
+    assert "source-local scientific signal screening" in user_prompt
+    assert "not relationship construction" in user_prompt
+    assert "paper-level reconciliation" in user_prompt
+    assert "claim_scope=background" in user_prompt
+    assert "claim_scope=current_work" in user_prompt
+    assert "Do not return or copy Source-unit IDs" in user_prompt
+    assert "Do not infer a causal relationship" in user_prompt
+    assert "Miranda et al." in user_prompt
+    assert "phase, grain shape, or other observation on that axis" in user_prompt
+    assert "outcome='microstructure'" in user_prompt
+    assert "do not also return 'mechanical properties'" in user_prompt
+    assert "'etc.' or 'including' do not name hidden axes" in user_prompt
+    assert "only when more than 12 distinct explicit research axes" in user_prompt
+
+
+def test_paper_source_signal_screen_binds_source_identity_in_backend():
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "doc_role": "review",
+                "signals": [
+                    {
+                        "signal_type": "variable",
+                        "label": "build plate temperature",
+                        "experiment_label": "Miranda et al.",
+                        "claim_scope": "background",
+                        "material_scope": ["Ti-6Al-4V"],
+                        "process_context": ["laser powder bed fusion"],
+                        "confidence": 0.88,
+                    },
+                    {
+                        "signal_type": "outcome",
+                        "label": "residual stress",
+                        "experiment_label": "Miranda et al.",
+                        "claim_scope": "background",
+                        "material_scope": ["Ti-6Al-4V"],
+                        "process_context": ["laser powder bed fusion"],
+                        "confidence": 0.86,
+                    },
+                ],
+                "evidence_density": "medium",
+                "confidence": 0.87,
+            }
+        )
+    )
+    extractor = PaperStudyWindowExtractor(_response_client(client))
+
+    skim = extractor.extract_source_signals(
+        {
+            "document_id": "review-paper",
+            "window_id": "results-1.retry-left",
+            "window_role": "results",
+            "source_units": [
+                {
+                    "source_unit_id": "source-unit-000071",
+                    "source_kind": "block",
+                    "source_ref": "block-71",
+                    "section_path": "Review > Preheating",
+                    "content": (
+                        "Miranda et al. increased build plate temperature and "
+                        "reported lower residual stress."
+                    ),
+                }
+            ],
+        }
+    )
+
+    assert skim.studies == []
+    assert skim.doc_role == "review"
+    assert [signal.claim_scope for signal in skim.unresolved_signals] == [
+        "background",
+        "background",
+    ]
+    assert [signal.source_unit_ids for signal in skim.unresolved_signals] == [
+        ["source-unit-000071"],
+        ["source-unit-000071"],
+    ]
+    assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
 
 
 def test_paper_skim_contract_represents_a_full_bounded_experiment_context():
@@ -858,7 +1060,7 @@ def test_paper_skim_provider_length_finish_skips_whole_window_json_repair():
 def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
     client = _FakeOpenAIClient('{"studies":[]}')
 
-    def create_with_length_finish(**kwargs):  # noqa: ANN003
+    def create_with_length_finish(**kwargs):
         client.chat.completions.calls.append(kwargs)
         return SimpleNamespace(
             choices=[
@@ -906,6 +1108,65 @@ def test_paper_skim_json_length_finish_skips_whole_window_json_repair():
             "error": "PaperSkim JSON output reached the completion-token limit",
         }
     ]
+
+
+def test_paper_skim_saturation_logs_bounded_source_trace(caplog):
+    raw_output = '{"studies":[' + ('"repeated",' * 400) + "]}"
+    client = _FakeOpenAIClient(raw_output)
+
+    def create_with_length_finish(**kwargs):
+        client.chat.completions.calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    finish_reason="length",
+                    message=SimpleNamespace(content=raw_output),
+                )
+            ]
+        )
+
+    client.chat.completions.create = create_with_length_finish
+    extractor = PaperStudyWindowExtractor(
+        StructuredResponseClient(
+            client=client,
+            model="fake-model",
+            extraction_mode="json_text",
+        )
+    )
+    source_text = "Laser power was varied and porosity was measured."
+
+    with caplog.at_level(
+        "WARNING",
+        logger="application.core.objectives.discovery.study_window",
+    ), pytest.raises(StructuredOutputSaturatedError):
+        extractor.extract(
+            {
+                "document_id": "paper-1",
+                "window_id": "results-1",
+                "window_role": "results",
+                "source_units": [
+                    {
+                        "source_unit_id": "source-unit-000071",
+                        "source_kind": "block",
+                        "source_ref": "block-71",
+                        "content": source_text,
+                    }
+                ],
+            }
+        )
+
+    trace_message = next(
+        record.getMessage()
+        for record in caplog.records
+        if "Paper skim saturation trace" in record.getMessage()
+    )
+    assert "contract=paper_skim" in trace_message
+    assert "window_id=results-1" in trace_message
+    assert 'source_unit_ids=["source-unit-000071"]' in trace_message
+    assert f"input_chars={len(source_text)}" in trace_message
+    assert '"finish_reason":"length"' in trace_message
+    assert f'"response_chars":{len(raw_output)}' in trace_message
+    assert len(trace_message) < 2_000
 
 
 def test_shared_structured_failure_trace_preserves_each_invalid_json_attempt():

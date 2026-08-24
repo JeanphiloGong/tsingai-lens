@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 
+from pypdf import PdfWriter
 import pytest
 
 from infra.source.ingestion.normalized_import import normalize_upload
+
+
+def _valid_pdf_bytes() -> bytes:
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    payload = BytesIO()
+    writer.write(payload)
+    return payload.getvalue()
 
 
 def test_normalize_upload_builds_text_batch_for_plain_text():
@@ -31,9 +41,10 @@ def test_normalize_upload_builds_text_batch_for_plain_text():
 
 
 def test_normalize_upload_preserves_pdf_payload_for_pdf():
+    content = _valid_pdf_bytes()
     batch = normalize_upload(
         filename="paper.pdf",
-        content=b"%PDF-1.4 test",
+        content=content,
         media_type="application/pdf",
         adapter_name="upload_pdf",
         goal_context={"intent": "compare"},
@@ -41,10 +52,22 @@ def test_normalize_upload_preserves_pdf_payload_for_pdf():
 
     assert batch.documents[0].original_filename == "paper.pdf"
     assert batch.documents[0].stored_filename.endswith("_paper.pdf")
-    assert base64.b64decode(batch.documents[0].storage_payload_base64) == b"%PDF-1.4 test"
+    assert base64.b64decode(batch.documents[0].storage_payload_base64) == content
     assert batch.text_units == ()
     assert batch.source_metadata.adapter_name == "upload_pdf"
     assert batch.source_metadata.goal_context == {"intent": "compare"}
+
+
+def test_normalize_upload_rejects_truncated_pdf():
+    with pytest.raises(
+        ValueError,
+        match="PDF is damaged, incomplete, password-protected, or otherwise unreadable",
+    ):
+        normalize_upload(
+            filename="truncated.pdf",
+            content=_valid_pdf_bytes()[:100],
+            media_type="application/pdf",
+        )
 
 
 def test_normalize_upload_rejects_unsupported_binary_upload():

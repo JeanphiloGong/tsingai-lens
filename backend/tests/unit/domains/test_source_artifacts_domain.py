@@ -366,6 +366,82 @@ def test_source_document_tree_builds_section_parent_child_links():
     assert figure_node.child_ids == ("node_doc-1_figure_caption_fig-density",)
 
 
+def test_source_document_tree_uses_page_section_for_non_block_sources_with_unusable_heading_path():
+    document = SourceDocument(
+        document_id="doc-review",
+        document_order=0,
+        title="Review paper",
+        text="",
+    )
+    results_heading = SourceBlock(
+        block_id="blk-results",
+        document_id=document.document_id,
+        block_type="heading",
+        text="Results and discussion",
+        block_order=20,
+        heading_path="Results and discussion",
+        heading_level=1,
+        page=4,
+    )
+    references_heading = SourceBlock(
+        block_id="blk-references",
+        document_id=document.document_id,
+        block_type="heading",
+        text="References",
+        block_order=200,
+        heading_path="References",
+        heading_level=1,
+        page=18,
+    )
+    table = SourceTable(
+        table_id="tbl-review-results",
+        document_id=document.document_id,
+        table_order=1,
+        caption_text="Table 1 Reported process-property relationships.",
+        caption_block_id=None,
+        page=6,
+        heading_path="review-paper.pdf",
+        column_headers=("Process", "Outcome"),
+        table_matrix=(("Process", "Outcome"), ("LPBF", "Strength")),
+    )
+    figure = SourceFigure(
+        figure_id="fig-review-results",
+        document_id=document.document_id,
+        figure_order=1,
+        figure_label="Figure 1",
+        caption_text="Figure 1 Microstructure observations.",
+        caption_block_id=None,
+        page=7,
+        heading_path="review-paper.pdf",
+        image_path="image_assets/fig-review-results.png",
+        image_mime_type="image/png",
+        image_width=20,
+        image_height=10,
+        asset_sha256="abc",
+    )
+
+    tree = build_source_document_tree(
+        document=document,
+        blocks=(results_heading, references_heading),
+        tables=(table,),
+        figures=(figure,),
+    )
+
+    results = tree.node_for_source_ref("block", results_heading.block_id)
+    references = tree.node_for_source_ref("block", references_heading.block_id)
+    table_node = tree.node_for_source_ref("table", table.table_id)
+    figure_node = tree.node_for_source_ref("figure", figure.figure_id)
+
+    assert results is not None
+    assert references is not None
+    assert table_node is not None
+    assert figure_node is not None
+    assert table_node.parent_id == results.node_id
+    assert figure_node.parent_id == results.node_id
+    assert table_node.parent_id != references.node_id
+    assert figure_node.parent_id != references.node_id
+
+
 def test_source_document_tree_keeps_references_as_records_linking_to_future_trees():
     document = SourceDocument(
         document_id="doc-1",

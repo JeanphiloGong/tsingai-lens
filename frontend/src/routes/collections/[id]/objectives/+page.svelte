@@ -4,7 +4,6 @@
 	import { page } from '$app/stores';
 	import { errorMessage } from '../../../_shared/api';
 	import {
-		confirmObjective,
 		fetchCollectionObjectives,
 		fetchObjectiveAnalysis,
 		runObjectiveAnalysis,
@@ -116,9 +115,6 @@
 		actionObjectiveId = objective.objective_id;
 		error = '';
 		try {
-			if (objective.confirmation_status === 'candidate') {
-				await confirmObjective(collectionId, objective.objective_id);
-			}
 			await runObjectiveAnalysis(collectionId, objective.objective_id);
 			await goto(objectiveHref(objective.objective_id));
 		} catch (err) {
@@ -155,7 +151,10 @@
 				当前没有候选同时满足材料范围、研究变量、结果指标和来源支持规则。这不表示目标级证据分析已经完成。
 			</p>
 			<div class="actions">
-				<a class="btn btn--ghost btn--small" href={resolve('/collections/[id]', { id: collectionId })}>
+				<a
+					class="btn btn--ghost btn--small"
+					href={resolve('/collections/[id]', { id: collectionId })}
+				>
 					返回集合概览
 				</a>
 				<a

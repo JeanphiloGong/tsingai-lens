@@ -11,7 +11,7 @@ router = APIRouter(prefix="/goals", tags=["goals"])
 @router.post(
     "/intake",
     response_model=GoalIntakeResponse,
-    summary="创建 Goal Brief / Intake 入口",
+    summary="Create a Goal Brief / Intake entry",
 )
 async def intake_goal(
     payload: GoalIntakeRequest,

@@ -7,7 +7,11 @@ from controllers.schemas.core.workspace import WorkspaceOverviewResponse
 router = APIRouter(prefix="/collections", tags=["workspace"])
 
 
-@router.get("/{collection_id}/workspace", response_model=WorkspaceOverviewResponse, summary="获取集合工作区概览")
+@router.get(
+    "/{collection_id}/workspace",
+    response_model=WorkspaceOverviewResponse,
+    summary="Get a collection workspace overview",
+)
 async def get_collection_workspace(
     collection_id: str,
     request: Request,

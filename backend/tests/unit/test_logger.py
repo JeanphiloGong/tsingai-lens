@@ -12,8 +12,8 @@ from utils.logger import (
 )
 
 
-def test_log_formatter_includes_bounded_user_context() -> None:
-    logger = setup_logger("test.user-context")
+def test_log_formatter_prioritizes_request_context_and_short_component() -> None:
+    logger = setup_logger("application.core.objectives.llm.structured_response")
     handler = next(
         handler
         for handler in logging.getLogger().handlers
@@ -26,7 +26,7 @@ def test_log_formatter_includes_bounded_user_context() -> None:
         record = logger.makeRecord(
             logger.name,
             logging.INFO,
-            __file__,
+            "/app/application/core/objectives/llm/structured_response.py",
             1,
             "user-scoped event",
             (),
@@ -38,7 +38,14 @@ def test_log_formatter_includes_bounded_user_context() -> None:
         clear_user_id(user_token)
         clear_request_id(request_token)
 
-    assert "| req-test | user-123 | user-scoped event" in rendered
+    assert [field.strip() for field in rendered.split("|", maxsplit=5)][1:] == [
+        "req-test",
+        "user-123",
+        "INFO",
+        "structured_response",
+        "user-scoped event",
+    ]
+    assert "application.core.objectives.llm.structured_response" not in rendered
     assert get_user_id() is None
 
 
@@ -48,3 +55,17 @@ def test_invalid_user_id_is_not_written_to_log_context() -> None:
         assert get_user_id() is None
     finally:
         clear_user_id(token)
+
+
+def test_setup_logger_suppresses_docling_page_profiling() -> None:
+    docling_logger = logging.getLogger("docling.pipeline.standard_pdf_pipeline")
+    original_level = docling_logger.level
+    docling_logger.setLevel(logging.DEBUG)
+
+    try:
+        lens_logger = setup_logger("application.source.document_parsing")
+
+        assert docling_logger.getEffectiveLevel() == logging.WARNING
+        assert lens_logger.getEffectiveLevel() == logging.DEBUG
+    finally:
+        docling_logger.setLevel(original_level)

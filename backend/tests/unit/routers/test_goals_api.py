@@ -79,4 +79,4 @@ async def test_goals_route_returns_400_for_empty_goal_signal(goal_services):
 
     exc = exc_info.value
     assert exc.status_code == 400
-    assert "至少提供" in str(exc.detail)
+    assert "Provide at least one" in str(exc.detail)

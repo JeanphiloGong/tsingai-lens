@@ -35,7 +35,11 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _objective(*, published: int | None = None) -> ResearchObjective:
+def _objective(
+    *,
+    published: int | None = None,
+    confirmation_status: str = "confirmed",
+) -> ResearchObjective:
     return ResearchObjective.from_mapping(
         {
             "collection_id": "collection-1",
@@ -46,7 +50,7 @@ def _objective(*, published: int | None = None) -> ResearchObjective:
             "outcomes": ["strength"],
             "seed_document_ids": ["paper-1"],
             "confidence": 0.9,
-            "confirmation_status": "confirmed",
+            "confirmation_status": confirmation_status,
             "active_analysis_version": published,
             "published_analysis_version": published,
         }
@@ -194,8 +198,12 @@ class FakeObjectiveRepository:
         claim_error: Exception | None = None,
         claim_before_fail: bool = False,
         candidate_document_count: int = 1,
+        confirmation_status: str = "confirmed",
     ) -> None:
-        self.objective = _objective(published=1 if published else None)
+        self.objective = _objective(
+            published=1 if published else None,
+            confirmation_status=confirmation_status,
+        )
         self.analyses: dict[int, ObjectiveAnalysis] = (
             {1: _analysis(1, "succeeded")} if published else {}
         )
@@ -213,12 +221,9 @@ class FakeObjectiveRepository:
     async def read_objective(self, collection_id, objective_id):
         return self.objective
 
-    async def confirm_objective(self, collection_id, objective_id):
+    async def queue_analysis(self, collection_id, objective_id, **_kwargs):
         if self.objective.confirmation_status == "candidate":
             self.objective = self.objective.confirm()
-        return self.objective
-
-    async def queue_analysis(self, collection_id, objective_id, **_kwargs):
         if any(item.status in {"queued", "running"} for item in self.analyses.values()):
             analysis = next(
                 item
@@ -436,6 +441,18 @@ async def test_objective_analysis_publishes_one_complete_version() -> None:
     assert result["paper_contributions"] == _artifacts(1).contributions
     assert result["warnings"] == []
     assert repository.published_calls == 1
+
+
+async def test_queue_analysis_confirms_a_candidate_and_queues_version_one() -> None:
+    repository = FakeObjectiveRepository(confirmation_status="candidate")
+    service, _, _ = _service(repository=repository)
+
+    result = await service.queue_analysis("collection-1", "objective-1")
+
+    assert result["objective"].confirmation_status == "confirmed"
+    assert result["objective"].active_analysis_version == 1
+    assert result["analysis"].analysis_version == 1
+    assert result["analysis"].status == "queued"
 
 
 async def test_objective_analysis_aggregates_persisted_contribution_warnings() -> None:

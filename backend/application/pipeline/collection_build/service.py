@@ -272,6 +272,14 @@ class CollectionBuildPipelineService:
             return "failed"
         if pipeline_run.errors:
             return "partial_success"
+        failed_source_document_count = pipeline_run.node(
+            SOURCE_ARTIFACTS
+        ).output_summary.get("source_failed_document_count", 0)
+        if (
+            isinstance(failed_source_document_count, int)
+            and failed_source_document_count > 0
+        ):
+            return "partial_success"
         failed_source_unit_count = pipeline_run.node(
             OBJECTIVE_CANDIDATES
         ).output_summary.get("extraction_failed_source_unit_count", 0)

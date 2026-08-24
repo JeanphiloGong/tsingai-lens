@@ -3,8 +3,10 @@ from __future__ import annotations
 import base64
 from dataclasses import replace
 from hashlib import sha256
+from io import BytesIO
 import json
 from zipfile import ZipFile
+from pypdf import PdfWriter
 import pytest
 
 import application.source.collection_service as collection_service_module
@@ -27,6 +29,15 @@ from infra.source.ingestion.source_adapter import SourceAdapterRequest
 from tests.support.collection_service import build_test_collection_service
 
 pytestmark = pytest.mark.anyio
+
+
+def _valid_pdf_bytes(title: str = "Test paper") -> bytes:
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    writer.add_metadata({"/Title": title})
+    payload = BytesIO()
+    writer.write(payload)
+    return payload.getvalue()
 
 
 @pytest.fixture
@@ -67,16 +78,18 @@ async def test_build_source_archive_preserves_requested_files_and_manifest(tmp_p
     service = build_test_collection_service(tmp_path / "collections")
     collection = await service.create_collection("Reproduction sources")
     collection_id = collection["collection_id"]
+    first_payload = _valid_pdf_bytes("First paper")
+    second_payload = _valid_pdf_bytes("Second paper")
     first = await service.add_file(
         collection_id,
         "paper.pdf",
-        b"%PDF-1.4\nfirst paper\n",
+        first_payload,
         "application/pdf",
     )
     second = await service.add_file(
         collection_id,
         "paper.pdf",
-        b"%PDF-1.4\nsecond paper\n",
+        second_payload,
         "application/pdf",
     )
 
@@ -97,8 +110,8 @@ async def test_build_source_archive_preserves_requested_files_and_manifest(tmp_p
                 second["file_id"],
                 first["file_id"],
             ]
-            assert archive.read(archive_paths[0]) == b"%PDF-1.4\nsecond paper\n"
-            assert archive.read(archive_paths[1]) == b"%PDF-1.4\nfirst paper\n"
+            assert archive.read(archive_paths[0]) == second_payload
+            assert archive.read(archive_paths[1]) == first_payload
             assert manifest["collection_id"] == collection_id
             assert manifest["schema_version"] == 1
             assert manifest["files"][0]["sha256"] == second["sha256"]
@@ -116,7 +129,7 @@ async def test_build_source_archive_rejects_missing_file_before_reading(
     uploaded = await service.add_file(
         collection["collection_id"],
         "paper.pdf",
-        b"%PDF-1.4\nsource\n",
+        _valid_pdf_bytes(),
     )
 
     def fail_if_read(*_args, **_kwargs):
@@ -143,12 +156,12 @@ async def test_build_source_archive_rejects_oversized_selection_before_reading(
     first = await service.add_file(
         collection["collection_id"],
         "first.pdf",
-        b"1234",
+        _valid_pdf_bytes("First"),
     )
     second = await service.add_file(
         collection["collection_id"],
         "second.pdf",
-        b"5678",
+        _valid_pdf_bytes("Second"),
     )
     monkeypatch.setattr(collection_service_module, "_SOURCE_ARCHIVE_MAX_BYTES", 7)
 
@@ -174,7 +187,7 @@ async def test_build_source_archive_rejects_unsafe_collection_storage_key(tmp_pa
     foreign_file = await service.add_file(
         second["collection_id"],
         "foreign.pdf",
-        b"%PDF-1.4\nforeign source\n",
+        _valid_pdf_bytes("Foreign source"),
     )
     foreign_record = (
         await service.repository.list_collection_files(second["collection_id"])
@@ -253,7 +266,7 @@ async def test_identical_uploads_share_identity_but_keep_collection_scoped_downl
     service = build_test_collection_service(tmp_path / "collections")
     first = await service.create_collection("First")
     second = await service.create_collection("Second")
-    payload = b"%PDF-1.4\nshared content\n"
+    payload = _valid_pdf_bytes("Shared content")
 
     first_file = await service.add_file(first["collection_id"], "first.pdf", payload)
     second_file = await service.add_file(second["collection_id"], "second.pdf", payload)

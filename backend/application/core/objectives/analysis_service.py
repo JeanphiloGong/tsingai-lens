@@ -35,12 +35,6 @@ class ObjectiveAnalysisService:
         self.objective_repository = objective_repository
         self.research_objective_service = research_objective_service
 
-    async def confirm_objective(self, collection_id: str, objective_id: str) -> dict[str, Any]:
-        objective = await self.objective_repository.confirm_objective(
-            collection_id, objective_id
-        )
-        return await self._result(collection_id, objective)
-
     async def queue_analysis(self, collection_id: str, objective_id: str) -> dict[str, Any]:
         objective, analysis = await self.objective_repository.queue_analysis(
             collection_id,

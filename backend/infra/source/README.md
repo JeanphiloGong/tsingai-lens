@@ -40,6 +40,13 @@ or text document. It does not construct a repository or persist authoritative
 rows; the application Source node persists its returned bundle with the pending
 collection `build_id`.
 
+Each inventory document is parsed independently. A technical read or parser
+failure produces no `SourceDocument` and no scientific absence claim. The
+runtime logs the private exception and returns bounded failure lineage to the
+collection-build Source node. When at least one document succeeds, valid Source
+artifacts continue downstream and the build is `partial_success`; when every
+document fails, Source construction fails.
+
 After Source finishes, `application/source` starts Core post-processing:
 
 ```text

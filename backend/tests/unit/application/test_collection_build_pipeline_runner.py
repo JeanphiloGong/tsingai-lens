@@ -341,6 +341,45 @@ async def test_collection_build_final_status_is_partial_when_paper_skim_coverage
     )
 
 
+async def test_collection_build_final_status_is_partial_when_source_documents_failed():
+    pipeline_run = PipelineRun.create(
+        pipeline_name="collection_build",
+        mode="standard",
+        run_id="task_1",
+        scope_type="collection",
+        scope_id="col_1",
+        node_dependencies={
+            SOURCE_ARTIFACTS: (),
+            OBJECTIVE_CANDIDATES: (SOURCE_ARTIFACTS,),
+        },
+        created_at="2026-08-11T01:00:00+00:00",
+        output_build_id="build_1",
+    )
+    pipeline_run = pipeline_run.with_node(
+        pipeline_run.node(SOURCE_ARTIFACTS).succeed(
+            "2026-08-11T01:00:01+00:00",
+            output_summary={"source_failed_document_count": 1},
+        )
+    )
+    pipeline_run = pipeline_run.with_node(
+        pipeline_run.node(OBJECTIVE_CANDIDATES).succeed(
+            "2026-08-11T01:00:02+00:00",
+        )
+    )
+    service = CollectionBuildPipelineService(
+        collection_service=SimpleNamespace(),
+        task_service=SimpleNamespace(),
+        artifact_registry_service=SimpleNamespace(),
+        source_artifact_repository=SimpleNamespace(),
+        document_profile_service=SimpleNamespace(),
+        research_objective_service=SimpleNamespace(),
+    )
+
+    assert service._resolve_final_status(SimpleNamespace(), pipeline_run) == (
+        "partial_success"
+    )
+
+
 async def test_collection_build_pipeline_runner_keeps_usage_from_failed_node():
     task_service = MemoryTaskService()
     definitions = (
@@ -471,6 +510,88 @@ async def test_source_node_persists_figure_metadata_and_references_before_activa
     assert len(calls[1][3].mentions) == 1
     assert context.state["file_count"] == 1
     assert result["figure_count"] == 1
+
+
+async def test_source_node_reports_failed_collection_file_lineage():
+    bundle = SourceArtifactBundle(
+        documents=pd.DataFrame(
+            [{"id": "doc-1", "title": "Valid paper", "text": "Methods."}]
+        ),
+        text_units=pd.DataFrame(),
+        blocks=pd.DataFrame(),
+        figures=pd.DataFrame(),
+        tables=pd.DataFrame(),
+        table_rows=pd.DataFrame(),
+        table_cells=pd.DataFrame(),
+        figure_assets={},
+    )
+
+    async def build_source_artifacts(**_kwargs):
+        return [
+            SimpleNamespace(
+                result=bundle,
+                errors=[],
+                state={
+                    "source_document_failures": [
+                        {
+                            "source_path": "stored-damaged.pdf",
+                            "error_code": "source_pdf_parse_failed",
+                            "error_type": "RuntimeError",
+                        }
+                    ]
+                },
+            )
+        ]
+
+    async def list_files(_collection_id):
+        return [
+            {
+                "file_id": "file-good",
+                "stored_filename": "stored-valid.pdf",
+                "original_filename": "valid.pdf",
+            },
+            {
+                "file_id": "file-bad",
+                "stored_filename": "stored-damaged.pdf",
+                "original_filename": "damaged.pdf",
+            },
+        ]
+
+    async def replace_records(*_args):
+        return None
+
+    context = CollectionBuildContext(
+        task_id="task-1",
+        build_id="build-1",
+        collection_id="col-1",
+        task_service=SimpleNamespace(),
+        collection_service=SimpleNamespace(list_files=list_files),
+        artifact_registry_service=SimpleNamespace(),
+        source_artifact_repository=SimpleNamespace(
+            replace_collection_documents=replace_records,
+            replace_collection_references=replace_records,
+        ),
+        document_profile_service=SimpleNamespace(),
+        research_objective_service=SimpleNamespace(),
+        build_source_artifacts=build_source_artifacts,
+    )
+
+    result = await nodes.build_source_artifacts(context, build_config())
+
+    assert result["document_count"] == 1
+    assert result["source_failed_document_count"] == 1
+    assert result["source_failed_documents"] == [
+        {
+            "file_id": "file-bad",
+            "filename": "damaged.pdf",
+            "error_code": "source_pdf_parse_failed",
+            "error_type": "RuntimeError",
+        }
+    ]
+    assert result["warnings"] == [
+        "1 Source document could not be parsed and was excluded; "
+        "the build continued with 1 parsed document."
+    ]
 
 
 async def test_collection_build_pipeline_runner_skips_downstream_nodes_after_failure():

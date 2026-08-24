@@ -6,85 +6,117 @@ from pydantic import BaseModel, Field
 
 
 class SourceReferenceEntryResponse(BaseModel):
-    reference_id: str = Field(..., description="引用条目 ID")
-    document_id: str = Field(..., description="来源文档 ID")
-    raw_reference: str = Field(..., description="原始引用文本")
-    reference_index: str | None = Field(default=None, description="论文内引用编号")
-    title: str | None = Field(default=None, description="解析出的标题")
-    authors_text: str | None = Field(default=None, description="解析出的作者文本")
-    year: int | None = Field(default=None, description="解析出的年份")
-    doi: str | None = Field(default=None, description="解析出的 DOI")
-    source_block_id: str | None = Field(default=None, description="引用条目来源 block")
-    page: int | None = Field(default=None, description="引用条目页码")
-    confidence: float = Field(default=0.0, description="引用解析置信度")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="扩展元数据")
+    reference_id: str = Field(..., description="Reference entry ID")
+    document_id: str = Field(..., description="Source document ID")
+    raw_reference: str = Field(..., description="Raw reference text")
+    reference_index: str | None = Field(
+        default=None,
+        description="Reference index within the paper",
+    )
+    title: str | None = Field(default=None, description="Parsed title")
+    authors_text: str | None = Field(default=None, description="Parsed author text")
+    year: int | None = Field(default=None, description="Parsed publication year")
+    doi: str | None = Field(default=None, description="Parsed DOI")
+    source_block_id: str | None = Field(
+        default=None,
+        description="Source block for the reference entry",
+    )
+    page: int | None = Field(default=None, description="Reference entry page")
+    confidence: float = Field(default=0.0, description="Reference parsing confidence")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Extended metadata"
+    )
 
 
 class SourceReferenceMentionResponse(BaseModel):
-    mention_id: str = Field(..., description="正文 citation mention ID")
-    document_id: str = Field(..., description="来源文档 ID")
-    reference_id: str | None = Field(default=None, description="匹配到的引用条目 ID")
-    citation_marker: str = Field(..., description="正文 citation marker")
-    context_text: str = Field(..., description="citation 附近正文上下文")
-    source_block_id: str | None = Field(default=None, description="正文来源 block")
-    page: int | None = Field(default=None, description="正文页码")
-    confidence: float = Field(default=0.0, description="mention 解析置信度")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="扩展元数据")
+    mention_id: str = Field(..., description="In-text citation mention ID")
+    document_id: str = Field(..., description="Source document ID")
+    reference_id: str | None = Field(
+        default=None,
+        description="Matched reference entry ID",
+    )
+    citation_marker: str = Field(..., description="In-text citation marker")
+    context_text: str = Field(..., description="Text surrounding the citation")
+    source_block_id: str | None = Field(
+        default=None,
+        description="Source block containing the citation",
+    )
+    page: int | None = Field(default=None, description="In-text citation page")
+    confidence: float = Field(default=0.0, description="Mention parsing confidence")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Extended metadata"
+    )
 
 
 class SourceReferenceResolutionResponse(BaseModel):
-    resolution_id: str = Field(..., description="外部元数据解析 ID")
-    reference_id: str = Field(..., description="引用条目 ID")
-    provider: str = Field(..., description="解析来源")
-    status: str = Field(..., description="解析状态")
-    resolved_title: str | None = Field(default=None, description="解析标题")
-    resolved_authors_text: str | None = Field(default=None, description="解析作者文本")
-    resolved_year: int | None = Field(default=None, description="解析年份")
-    resolved_venue: str | None = Field(default=None, description="解析期刊/会议")
-    resolved_doi: str | None = Field(default=None, description="解析 DOI")
-    resolved_url: str | None = Field(default=None, description="解析 URL")
-    open_access_url: str | None = Field(default=None, description="开放访问 URL")
-    confidence: float = Field(default=0.0, description="解析置信度")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="扩展元数据")
+    resolution_id: str = Field(..., description="External metadata resolution ID")
+    reference_id: str = Field(..., description="Reference entry ID")
+    provider: str = Field(..., description="Resolution provider")
+    status: str = Field(..., description="Resolution status")
+    resolved_title: str | None = Field(default=None, description="Resolved title")
+    resolved_authors_text: str | None = Field(
+        default=None,
+        description="Resolved author text",
+    )
+    resolved_year: int | None = Field(default=None, description="Resolved year")
+    resolved_venue: str | None = Field(default=None, description="Resolved venue")
+    resolved_doi: str | None = Field(default=None, description="Resolved DOI")
+    resolved_url: str | None = Field(default=None, description="Resolved URL")
+    open_access_url: str | None = Field(default=None, description="Open-access URL")
+    confidence: float = Field(default=0.0, description="Resolution confidence")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Extended metadata"
+    )
 
 
 class SourceReferenceCandidateResponse(BaseModel):
-    candidate_id: str = Field(..., description="候选引用文献 ID")
-    reference_id: str = Field(..., description="引用条目 ID")
-    status: str = Field(..., description="候选状态")
-    relevance_score: float = Field(default=0.0, description="相关性分数")
-    relevance_reason: str | None = Field(default=None, description="相关性说明")
-    cited_by_document_id: str | None = Field(default=None, description="引用它的文档 ID")
-    mention_count: int = Field(default=0, description="正文引用次数")
-    representative_context: str | None = Field(default=None, description="代表性上下文")
-    resolved_doi: str | None = Field(default=None, description="解析 DOI")
-    resolved_url: str | None = Field(default=None, description="解析 URL")
-    open_access_url: str | None = Field(default=None, description="开放访问 URL")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="扩展元数据")
+    candidate_id: str = Field(..., description="Candidate reference ID")
+    reference_id: str = Field(..., description="Reference entry ID")
+    status: str = Field(..., description="Candidate status")
+    relevance_score: float = Field(default=0.0, description="Relevance score")
+    relevance_reason: str | None = Field(
+        default=None,
+        description="Relevance rationale",
+    )
+    cited_by_document_id: str | None = Field(
+        default=None,
+        description="ID of the citing document",
+    )
+    mention_count: int = Field(default=0, description="In-text citation count")
+    representative_context: str | None = Field(
+        default=None,
+        description="Representative citation context",
+    )
+    resolved_doi: str | None = Field(default=None, description="Resolved DOI")
+    resolved_url: str | None = Field(default=None, description="Resolved URL")
+    open_access_url: str | None = Field(default=None, description="Open-access URL")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Extended metadata"
+    )
 
 
 class SourceReferenceSummaryResponse(BaseModel):
-    collection_id: str = Field(..., description="集合 ID")
-    entry_count: int = Field(default=0, description="引用条目数量")
-    mention_count: int = Field(default=0, description="正文 citation mention 数量")
-    resolution_count: int = Field(default=0, description="外部解析数量")
-    candidate_count: int = Field(default=0, description="候选引用文献数量")
+    collection_id: str = Field(..., description="Collection ID")
+    entry_count: int = Field(default=0, description="Reference entry count")
+    mention_count: int = Field(default=0, description="In-text citation mention count")
+    resolution_count: int = Field(default=0, description="External resolution count")
+    candidate_count: int = Field(default=0, description="Candidate reference count")
 
 
 class SourceReferenceSetResponse(SourceReferenceSummaryResponse):
     entries: list[SourceReferenceEntryResponse] = Field(
         default_factory=list,
-        description="引用条目",
+        description="Reference entries",
     )
     mentions: list[SourceReferenceMentionResponse] = Field(
         default_factory=list,
-        description="正文 citation mentions",
+        description="In-text citation mentions",
     )
     resolutions: list[SourceReferenceResolutionResponse] = Field(
         default_factory=list,
-        description="外部解析结果",
+        description="External resolution results",
     )
     candidates: list[SourceReferenceCandidateResponse] = Field(
         default_factory=list,
-        description="候选引用文献",
+        description="Candidate references",
     )

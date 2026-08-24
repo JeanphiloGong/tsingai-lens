@@ -18,7 +18,7 @@ async def build_source_artifacts(
 ) -> dict[str, Any]:
     files = await context.collection_service.list_files(context.collection_id)
     if not files:
-        raise RuntimeError("集合内没有可构建文件")
+        raise RuntimeError("The collection contains no files available for building")
     context.state["file_count"] = len(files)
 
     outputs = await context.build_source_artifacts(

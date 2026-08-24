@@ -127,7 +127,7 @@ class GoalService:
             or normalized_context
         ):
             raise ValueError(
-                "至少提供 material_system、target_property 或 context 之一。"
+                "Provide at least one of material_system, target_property, or context."
             )
 
         objective = self._build_objective(

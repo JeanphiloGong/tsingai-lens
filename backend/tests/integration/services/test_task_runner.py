@@ -429,7 +429,10 @@ async def test_build_pipeline_service_marks_empty_collection_failed(monkeypatch,
     assert result["current_stage"] == "failed"
     assert "files_registered" not in result["pipeline_nodes"]
     assert result["pipeline_nodes"]["source_artifacts"]["status"] == "failed"
-    assert "source_artifacts: 集合内没有可构建文件" in result["errors"]
+    assert (
+        "source_artifacts: The collection contains no files available for building"
+        in result["errors"]
+    )
 
 
 async def test_build_pipeline_service_marks_source_artifact_errors_failed(

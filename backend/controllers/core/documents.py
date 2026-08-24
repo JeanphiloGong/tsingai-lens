@@ -114,13 +114,13 @@ def _figure_image_unavailable_detail(
 @router.get(
     "/{collection_id}/documents/profiles",
     response_model=DocumentProfileListResponse,
-    summary="列出 collection 的 document profiles",
+    summary="List document profiles in a collection",
 )
 async def list_collection_document_profiles(
     collection_id: str,
     request: Request,
-    limit: Annotated[int, Query(ge=1, le=500, description="返回数量")] = 50,
-    offset: Annotated[int, Query(ge=0, description="偏移量")] = 0,
+    limit: Annotated[int, Query(ge=1, le=500, description="Number to return")] = 50,
+    offset: Annotated[int, Query(ge=0, description="Result offset")] = 0,
 ) -> DocumentProfileListResponse:
     try:
         payload = await request.app.state.document_profile_service.list_document_profiles(
@@ -141,7 +141,7 @@ async def list_collection_document_profiles(
 @router.get(
     "/{collection_id}/documents/{document_id}/profile",
     response_model=DocumentProfileItemResponse,
-    summary="读取 collection 内单个文档的 profile",
+    summary="Read a document profile from a collection",
 )
 async def get_collection_document_profile(
     collection_id: str,
@@ -176,7 +176,7 @@ async def get_collection_document_profile(
 @router.get(
     "/{collection_id}/documents/{document_id}/content",
     response_model=DocumentContentResponse,
-    summary="读取 collection 内单个文档的查看器内容",
+    summary="Read document viewer content from a collection",
 )
 async def get_collection_document_content(
     collection_id: str,
@@ -211,7 +211,7 @@ async def get_collection_document_content(
 @router.get(
     "/{collection_id}/documents/{document_id}/markdown",
     response_model=DocumentMarkdownResponse,
-    summary="读取 collection 内单个文档的 Markdown 展示投影",
+    summary="Read a document Markdown projection from a collection",
 )
 async def get_collection_document_markdown(
     collection_id: str,

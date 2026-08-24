@@ -20,7 +20,7 @@ router = APIRouter(
 @router.post(
     "/build",
     response_model=SourceReferenceSummaryResponse,
-    summary="构建集合引用文献候选池",
+    summary="Build the collection reference candidate pool",
 )
 async def build_collection_references(
     collection_id: str,
@@ -39,7 +39,7 @@ async def build_collection_references(
 @router.get(
     "",
     response_model=SourceReferenceSetResponse,
-    summary="读取集合引用文献候选池",
+    summary="Read the collection reference candidate pool",
 )
 async def get_collection_references(
     collection_id: str,

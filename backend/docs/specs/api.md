@@ -52,6 +52,15 @@ Collection build parses Source, creates document profiles and reusable paper
 facts, and discovers Objective candidates. It does not run confirmed Objective
 deep analysis. Task responses expose current stage, progress, terminal error,
 and retry-appropriate status; a failed task is never presented as a new task.
+PDF uploads are opened with the Source PDF engine before persistence. A damaged,
+incomplete, password-protected, or otherwise unreadable PDF returns `400` and is
+not added to the collection. This check establishes parser readability only;
+scientific structure extraction still belongs to the collection build.
+For already-persisted inputs and other import channels, a per-document Source
+parse failure is isolated. When other documents parse successfully, the task
+returns `partial_success`; the Source pipeline node warning and output summary
+identify each excluded file by bounded `file_id`, original filename, error code,
+and exception class. If every input fails, the task returns `failed`.
 The task artifact registry reports only persisted Source artifacts (documents,
 blocks, figures, table rows, and table cells). Workspace document-profile and
 Objective readiness is derived from their owning repositories rather than
@@ -170,14 +179,12 @@ can be inspected.
 ### Research Objectives
 
 - `GET /api/v1/collections/{collection_id}/objectives`
-- `GET /api/v1/collections/{collection_id}/paper-study-inventory`
-- `GET /api/v1/collections/{collection_id}/objectives/{objective_id}`
-- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/confirm`
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 
 `ResearchObjective` is the only business aggregate root. Its identity is
-`(collection_id, objective_id)`. The Objective response contains:
+`(collection_id, objective_id)`. The analysis-state and command responses
+contain:
 
 - question and material/process/property/comparison scope;
 - included and excluded document IDs;
@@ -188,7 +195,7 @@ can be inspected.
 - ordered `source_relationship_ids` linking the Objective to paper-study
   relationships;
 - `active_analysis`, `published_analysis`, analysis-level
-  `paper_contributions`, and warnings on detail responses.
+  `paper_contributions`, and warnings.
 
 The Objective list places active generated candidates in persisted
 collection-build rank, followed by durable Chat-assisted candidates in creation
@@ -199,46 +206,9 @@ every Objective from `offset` onward so lower-ranked candidates remain visible
 without client pagination. An explicit `limit` applies ordinary pagination. The
 response contains `total`, `offset`, and the applied `limit` (`null` when
 omitted), and each Objective contains its one-based `rank`. Rank is for
-researcher prioritization and never removes a paper-study relationship from the
-persisted inventory.
-
-The paper-study inventory reads the active persisted Objective build and
-supports `offset` and `limit`. Its response contains `total`, `offset`, `limit`,
-`research_objectives_ready`, and a mixed `items` sequence containing:
-
-- one `paper_study` entry for each paper-local experiment, observation, or
-  modeling study, including design, claim scope, material/process/sample/test
-  context, comparator, and fixed conditions;
-- every study relationship as one complete jointly varied factor set and one
-  outcome with exact `source_kind + source_ref` locators; supported kinds are
-  `document`, `block`, `table`, `table_row`, and `figure`, and `table_row`
-  references the persisted Source `row_id` rather than its enclosing table;
-- each relationship's `pending | promoted | rejected` disposition, linked
-  Objective id for promoted relationships, or explicit backend-derived reason
-  for rejection; the discovery model does not reject relationships, and a
-  relationship too large for model labeling uses a backend-built standalone
-  Objective fallback;
-- one `unresolved_signal` entry for every source-backed variable or outcome
-  that could not yet form a defensible relationship, preserving the same study
-  context, exact Source locators, confidence, and reason;
-- one `source_unit_coverage` entry for every eligible first-stage Source unit,
-  preserving `source_unit_id`, `window_id`, exact Source kind/reference, and one
-  of `relationship_emitted`, `unresolved_signal_emitted`, `no_study_signal`, or
-  backend-derived `extraction_failed`.
-
-The inventory is a typed audit projection of `ObjectiveFactSet`; it is not a
-second aggregate and does not trigger extraction, grouping, or analysis.
-First-stage Source windows split rather than truncate scientific text, table
-metadata, or figure captions. Cross-window reconciliation may receive bounded
-excerpts, while the persisted signal keeps its complete structured fields and
-exact Source locator; failure leaves the signal unresolved. The inventory still
-does not guarantee that the first-stage LLM extracted every source-supported
-study or relationship, so it is complete for extracted records rather than proof
-of complete paper interpretation. `source_unit_coverage_counts` always contains
-all four status counts. `coverage_complete` is `false` when any window produced
-`extraction_failed`; `true` means every eligible Source unit received a
-contract-valid first-stage outcome. It measures extraction execution, not
-scientific recall, relevance certainty, or systematic-review completeness.
+researcher prioritization. Ranking does not remove extracted paper studies,
+relationships, dispositions, unresolved signals, or Source-unit coverage from
+the persisted Objective build.
 
 `ObjectiveAnalysis` is addressed by the Objective identity plus a positive
 `analysis_version`. It contains immutable Source/pipeline/model/prompt lineage,
@@ -255,10 +225,13 @@ or omitted token fields. Token totals contain only reported usage and remain
 `null` when no call reported usage; the backend never estimates missing tokens
 from prompt or response text.
 
-Confirmation does not start analysis. `POST .../analysis` creates the next
-analysis version with `queued` status and returns immediately. The frontend
-polls `GET .../analysis`. Retry allocates a new version. A failed active version
-leaves the prior published version readable. Independent Objective analyses,
+`POST .../analysis` expresses researcher approval of the Objective definition.
+For a candidate, it atomically changes `confirmation_status` to `confirmed` and
+creates the next analysis version with `queued` status. For an already confirmed
+Objective, it creates or reuses the active analysis normally. The command returns
+immediately, and the frontend polls `GET .../analysis`. Retry allocates a new
+version. A failed active version leaves the prior published version readable.
+Independent Objective analyses,
 including analyses from different collections, execute as process-local asyncio
 background tasks. An application semaphore bounds simultaneous analysis
 execution. Tasks above that limit wait on the in-process semaphore; this is not
@@ -285,8 +258,8 @@ historical `analysis_version`.
 extraction, and comparability for each paper in the published analysis version.
 It is empty until an analysis is published. If a newer active version is queued,
 running, or failed, the list still belongs to `published_analysis`, not that
-newer version. The Objective detail, confirm, start-analysis, and analysis-status
-routes share this response contract.
+newer version. The analysis command and analysis-status route share this
+response contract.
 
 Each analysis-level contribution exposes `evidence_disposition`,
 `routed_source_count`, `extracted_source_count`,

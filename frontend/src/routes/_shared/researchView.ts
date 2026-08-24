@@ -574,16 +574,6 @@ export async function fetchObjectiveEvidenceMap(
 	return requestJson(path) as Promise<ObjectiveEvidenceMap>;
 }
 
-export async function confirmObjective(collectionId: string, objectiveId: string) {
-	const encodedCollection = encodeURIComponent(collectionId);
-	const encodedObjective = encodeURIComponent(objectiveId);
-	const data = await requestJson(
-		`/collections/${encodedCollection}/objectives/${encodedObjective}/confirm`,
-		{ method: 'POST' }
-	);
-	return normalizeObjectiveAnalysis(data, collectionId);
-}
-
 export async function runObjectiveAnalysis(collectionId: string, objectiveId: string) {
 	const encodedCollection = encodeURIComponent(collectionId);
 	const encodedObjective = encodeURIComponent(objectiveId);

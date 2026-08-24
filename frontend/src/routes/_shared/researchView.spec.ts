@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { requestJson } from './api';
 import {
-	confirmObjective,
 	createFindingCuration,
 	createFindingFeedback,
 	fetchCollectionObjectives,
@@ -128,7 +127,7 @@ describe('objective Finding API', () => {
 		expect(result.active_analysis?.status).toBe('succeeded');
 	});
 
-	it('uses the same lifecycle response for confirm, queue, and poll', async () => {
+	it('uses the same lifecycle response for queue and poll', async () => {
 		request.mockResolvedValue({
 			collection_id: 'col_123',
 			objective,
@@ -137,17 +136,13 @@ describe('objective Finding API', () => {
 			warnings: []
 		});
 
-		await confirmObjective('col_123', 'obj_1');
 		await runObjectiveAnalysis('col_123', 'obj_1');
 		await fetchObjectiveAnalysis('col_123', 'obj_1');
 
-		expect(request).toHaveBeenNthCalledWith(1, '/collections/col_123/objectives/obj_1/confirm', {
+		expect(request).toHaveBeenNthCalledWith(1, '/collections/col_123/objectives/obj_1/analysis', {
 			method: 'POST'
 		});
-		expect(request).toHaveBeenNthCalledWith(2, '/collections/col_123/objectives/obj_1/analysis', {
-			method: 'POST'
-		});
-		expect(request).toHaveBeenNthCalledWith(3, '/collections/col_123/objectives/obj_1/analysis');
+		expect(request).toHaveBeenNthCalledWith(2, '/collections/col_123/objectives/obj_1/analysis');
 	});
 
 	it('requests versioned Finding and exact Evidence pages', async () => {

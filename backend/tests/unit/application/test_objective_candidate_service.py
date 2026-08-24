@@ -862,6 +862,114 @@ def test_cross_paper_theme_keeps_joint_and_isolated_interventions_distinct():
     assert skims[1].studies[0].relationships[0].varied_factors == ("laser power",)
 
 
+def test_discovery_trace_accounts_for_relationships_signals_and_source_coverage(
+    caplog: pytest.LogCaptureFixture,
+):
+    current_work_skim = _paper_skim(
+        document_id="paper-accounting",
+        relationship_id="relationship-promoted",
+        factors=("laser power",),
+        outcome="relative density",
+    )
+    background_study = _paper_skim(
+        document_id="paper-accounting",
+        relationship_id="relationship-rejected",
+        factors=("scan speed",),
+        outcome="surface roughness",
+        claim_scope="background",
+    ).studies[0].to_record()
+    skim = PaperSkim.from_mapping(
+        {
+            **current_work_skim.to_record(),
+            "studies": [
+                current_work_skim.studies[0].to_record(),
+                {
+                    **background_study,
+                    "study_id": "study-paper-accounting-background",
+                },
+            ],
+            "unresolved_signals": [
+                {
+                    "signal_id": "signal-unresolved",
+                    "signal_type": "outcome",
+                    "label": "melt-pool morphology",
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "source_refs": [
+                        {
+                            "source_kind": "figure",
+                            "source_ref": "figure-unresolved",
+                        }
+                    ],
+                    "confidence": 0.72,
+                    "reason": "No defensible varied factor was extracted.",
+                }
+            ],
+            "source_unit_coverage": [
+                {
+                    "source_unit_id": "unit-relationship",
+                    "window_id": "window-relationship",
+                    "source_kind": "block",
+                    "source_ref": "block-relationship",
+                    "status": "relationship_emitted",
+                },
+                {
+                    "source_unit_id": "unit-unresolved",
+                    "window_id": "window-unresolved",
+                    "source_kind": "figure",
+                    "source_ref": "figure-unresolved",
+                    "status": "unresolved_signal_emitted",
+                },
+                {
+                    "source_unit_id": "unit-no-signal",
+                    "window_id": "window-no-signal",
+                    "source_kind": "block",
+                    "source_ref": "block-no-signal",
+                    "status": "no_study_signal",
+                    "reason": "The Source unit contains no study signal.",
+                },
+                {
+                    "source_unit_id": "unit-failed",
+                    "window_id": "window-failed",
+                    "source_kind": "table",
+                    "source_ref": "table-failed",
+                    "status": "extraction_failed",
+                    "reason": "The extraction response was invalid.",
+                },
+            ],
+        }
+    )
+    caplog.set_level(
+        "INFO",
+        logger="application.core.objectives.objective_candidate_service",
+    )
+
+    ObjectiveCandidateService().discover_candidate_facts(
+        "collection-accounting",
+        paper_skims=(skim,),
+        axis_equivalence_classifier=_GroupingExtractor(),
+    )
+
+    trace = next(
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("Research objective discovery finished")
+    )
+    assert "relationship_count=2" in trace
+    assert "promoted_relationship_count=1" in trace
+    assert "rejected_relationship_count=1" in trace
+    assert "pending_relationship_count=0" in trace
+    assert "relationship_accounting_complete=True" in trace
+    assert "unresolved_signal_count=1" in trace
+    assert "relationship_emitted_count=1" in trace
+    assert "unresolved_signal_emitted_count=1" in trace
+    assert "no_study_signal_count=1" in trace
+    assert "extraction_failed_count=1" in trace
+    assert "coverage_complete=False" in trace
+    assert "laser power" not in trace
+    assert "melt-pool morphology" not in trace
+
+
 def test_shared_parent_theme_keeps_each_papers_complete_intervention():
     class LocalTopicClassifier(_GroupingExtractor):
         def classify(

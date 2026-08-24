@@ -8,7 +8,6 @@
 	import { errorMessage } from '../../../../_shared/api';
 	import { fetchDocumentProfiles } from '../../../../_shared/documents';
 	import {
-		confirmObjective,
 		fetchObjective,
 		fetchObjectiveAnalysis,
 		fetchObjectiveEvidence,
@@ -189,9 +188,6 @@
 		actionRunning = true;
 		actionError = '';
 		try {
-			if (analysis.objective.confirmation_status === 'candidate') {
-				analysis = await confirmObjective(collectionId, objectiveId);
-			}
 			analysis = await runObjectiveAnalysis(collectionId, objectiveId);
 			schedulePoll();
 		} catch (err) {

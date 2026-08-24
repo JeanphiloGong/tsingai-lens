@@ -383,12 +383,6 @@ class ObjectiveRepository(Protocol):
         objective_id: str,
     ) -> ResearchObjective | None: ...
 
-    async def confirm_objective(
-        self,
-        collection_id: str,
-        objective_id: str,
-    ) -> ResearchObjective: ...
-
     async def queue_analysis(
         self,
         collection_id: str,

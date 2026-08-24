@@ -56,7 +56,7 @@ async def create_collection(
     return CollectionResponse(**record)
 
 
-@router.get("", response_model=CollectionListResponse, summary="列出论文集合")
+@router.get("", response_model=CollectionListResponse, summary="List paper collections")
 async def list_collections(request: Request) -> CollectionListResponse:
     items = [
         CollectionResponse(**record)
@@ -67,7 +67,7 @@ async def list_collections(request: Request) -> CollectionListResponse:
     return CollectionListResponse(items=items)
 
 
-@router.get("/{collection_id}", response_model=CollectionResponse, summary="获取集合详情")
+@router.get("/{collection_id}", response_model=CollectionResponse, summary="Get collection details")
 async def get_collection(collection_id: str, request: Request) -> CollectionResponse:
     try:
         record = await request.app.state.collection_service.get_collection_for_user(
@@ -82,7 +82,7 @@ async def get_collection(collection_id: str, request: Request) -> CollectionResp
 @router.delete(
     "/{collection_id}",
     response_model=CollectionDeleteResponse,
-    summary="删除论文集合",
+    summary="Delete a paper collection",
 )
 async def delete_collection(collection_id: str, request: Request) -> CollectionDeleteResponse:
     try:
@@ -100,7 +100,7 @@ async def delete_collection(collection_id: str, request: Request) -> CollectionD
 @router.post(
     "/{collection_id}/files",
     response_model=CollectionFileResponse,
-    summary="上传论文到集合",
+    summary="Upload a paper to a collection",
 )
 async def upload_collection_file(
     collection_id: str,
@@ -121,8 +121,10 @@ async def upload_collection_file(
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"文件上传失败: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"File upload failed: {exc}") from exc
     return CollectionFileResponse(
         **record,
         stored_path=str(record["storage_key"]),
@@ -132,7 +134,7 @@ async def upload_collection_file(
 @router.get(
     "/{collection_id}/files",
     response_model=CollectionFileListResponse,
-    summary="列出集合文件",
+    summary="List collection files",
 )
 async def list_collection_files(
     collection_id: str,

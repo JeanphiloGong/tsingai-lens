@@ -20,9 +20,11 @@ This node owns browser-side helpers shared across frontend routes.
 - `researchView.ts`
   Canonical Objective/Finding API client. The Objective flow reads
   summary/analysis state, paginated Findings, one Finding detail, and paginated
-  versioned Evidence. It also reads the deterministic Evidence Map for one
-  Objective's published analysis; that read model does not create a second
-  research identity. Feedback, curation, and dataset export use only
+  versioned Evidence. Its analysis command atomically confirms candidate
+  Objectives and queues analysis through the same endpoint. It also reads the
+  deterministic Evidence Map for one Objective's published analysis; that read
+  model does not create a second research identity. Feedback, curation, and
+  dataset export use only
   `(collection_id, objective_id, analysis_version, finding_id)`.
 - `chatSessions.ts`
   Collection-bound Research Agent sessions, typed trajectories, streamed text

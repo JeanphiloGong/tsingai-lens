@@ -13,11 +13,20 @@ from unittest.mock import AsyncMock, Mock
 from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
+from pypdf import PdfWriter
 import pytest
 
 import application.source.collection_service as collection_service_module
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _valid_pdf_bytes() -> bytes:
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    payload = BytesIO()
+    writer.write(payload)
+    return payload.getvalue()
 
 
 def _app_repository_dependencies(auth_session_service) -> dict[str, object]:
@@ -295,12 +304,13 @@ def test_collection_source_archive_downloads_selected_original_files(
             json={"name": "Failed paper reproduction"},
         )
         collection_id = created.json()["collection_id"]
+        source_pdf = _valid_pdf_bytes()
         upload = client.post(
             f"/api/v1/collections/{collection_id}/files",
             files={
                 "file": (
                     "failed.pdf",
-                    b"%PDF-1.4\nfailed source\n",
+                    source_pdf,
                     "application/pdf",
                 )
             },
@@ -318,9 +328,46 @@ def test_collection_source_archive_downloads_selected_original_files(
         with ZipFile(BytesIO(response.content)) as archive:
             manifest = json.loads(archive.read("manifest.json"))
             assert manifest["files"][0]["file_id"] == file_id
-            assert archive.read(manifest["files"][0]["archive_path"]) == (
-                b"%PDF-1.4\nfailed source\n"
-            )
+            assert archive.read(manifest["files"][0]["archive_path"]) == source_pdf
+
+
+def test_collection_upload_rejects_unreadable_pdf_without_persisting_it(
+    monkeypatch,
+    tmp_path,
+    auth_session_service,
+    collection_service,
+):
+    with _build_client(
+        monkeypatch,
+        tmp_path,
+        auth_session_service,
+        collection_service,
+    ) as client:
+        assert _login(client).status_code == 200
+        created = client.post(
+            "/api/v1/collections",
+            json={"name": "Upload validation"},
+        )
+        collection_id = created.json()["collection_id"]
+
+        response = client.post(
+            f"/api/v1/collections/{collection_id}/files",
+            files={
+                "file": (
+                    "truncated.pdf",
+                    _valid_pdf_bytes()[:100],
+                    "application/pdf",
+                )
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == (
+            "PDF is damaged, incomplete, password-protected, or otherwise unreadable."
+        )
+        files = client.get(f"/api/v1/collections/{collection_id}/files")
+        assert files.status_code == 200
+        assert files.json()["items"] == []
 
 
 def test_collection_source_archive_is_scoped_to_authenticated_owner(
@@ -449,7 +496,7 @@ def test_collection_source_archive_returns_413_for_oversized_selection(
         collection_id = created.json()["collection_id"]
         upload = client.post(
             f"/api/v1/collections/{collection_id}/files",
-            files={"file": ("paper.pdf", b"1234", "application/pdf")},
+            files={"file": ("paper.pdf", _valid_pdf_bytes(), "application/pdf")},
         )
 
         response = client.post(

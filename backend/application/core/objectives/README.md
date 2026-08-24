@@ -223,6 +223,10 @@ Objective analysis.
   while unresolved study signals remain separately visible. No second model
   call can move a relationship outside its backend-owned group, reject an input
   relationship, or remove records from persisted accounting.
+  The completion trace reports count-only relationship dispositions, unresolved
+  signals, and Source-unit coverage, including whether relationship accounting
+  is complete and whether any extraction failed. It does not emit scientific
+  labels, Source locators, excerpts, rejection reasons, or inventory records.
   The model does not generate collection Objectives: it is used only for bounded
   axis-equivalence decisions. The backend constructs each question, variable,
   outcome, seed-document set, and `source_relationship_ids` from the accepted

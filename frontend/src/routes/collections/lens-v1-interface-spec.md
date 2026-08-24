@@ -87,7 +87,7 @@ The Objective list separates:
 
 Actions are state-specific:
 
-- candidate: Confirm;
+- candidate: Confirm and analyze;
 - confirmed without analysis: Analyze;
 - queued/running: show phase and current paper, then poll;
 - failed: Retry;

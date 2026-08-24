@@ -86,18 +86,6 @@ class MemoryObjectiveRepository:
     ) -> ResearchObjective | None:
         return self._objectives.get((collection_id, objective_id))
 
-    async def confirm_objective(
-        self,
-        collection_id: str,
-        objective_id: str,
-    ) -> ResearchObjective:
-        key = (collection_id, objective_id)
-        objective = self._require_objective(*key)
-        if objective.confirmation_status == "candidate":
-            objective = objective.confirm()
-            self._objectives[key] = objective
-        return objective
-
     async def queue_analysis(
         self,
         collection_id: str,
@@ -109,8 +97,9 @@ class MemoryObjectiveRepository:
     ) -> tuple[ResearchObjective, ObjectiveAnalysis]:
         key = (collection_id, objective_id)
         objective = self._require_objective(*key)
-        if objective.confirmation_status != "confirmed":
-            raise ValueError("objective must be confirmed before analysis")
+        if objective.confirmation_status == "candidate":
+            objective = objective.confirm()
+            self._objectives[key] = objective
         existing = next(
             (
                 analysis

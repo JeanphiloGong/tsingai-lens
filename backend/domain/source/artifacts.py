@@ -1263,7 +1263,10 @@ class _SourceDocumentTreeBuilder:
         for table in sorted(tables, key=lambda item: (item.table_order, item.table_id)):
             if table.document_id != self.document.document_id:
                 continue
-            parent_id = self._parent_for_heading_path(table.heading_path)
+            parent_id = self._parent_for_non_block_source(
+                heading_path=table.heading_path,
+                page=table.page,
+            )
             node_id = _source_node_id(
                 self.document.document_id, "table", table.table_id
             )
@@ -1311,7 +1314,10 @@ class _SourceDocumentTreeBuilder:
         ):
             if figure.document_id != self.document.document_id:
                 continue
-            parent_id = self._parent_for_heading_path(figure.heading_path)
+            parent_id = self._parent_for_non_block_source(
+                heading_path=figure.heading_path,
+                page=figure.page,
+            )
             node_id = _source_node_id(
                 self.document.document_id, "figure", figure.figure_id
             )
@@ -1481,6 +1487,30 @@ class _SourceDocumentTreeBuilder:
         if heading_path and heading_path in self.sections_by_heading_path:
             return self.sections_by_heading_path[heading_path]
         return self.section_stack[-1][1] if self.section_stack else self.root_node_id
+
+    def _parent_for_non_block_source(
+        self,
+        *,
+        heading_path: str | None,
+        page: int | None,
+    ) -> str:
+        if heading_path and heading_path in self.sections_by_heading_path:
+            return self.sections_by_heading_path[heading_path]
+        if page is None:
+            return self.root_node_id
+        preceding_sections = [
+            node
+            for node in self.nodes.values()
+            if node.node_type == "section"
+            and node.page_start is not None
+            and node.page_start <= page
+        ]
+        if not preceding_sections:
+            return self.root_node_id
+        return max(
+            preceding_sections,
+            key=lambda node: (node.page_start or 0, node.order),
+        ).node_id
 
     def _insert_node(self, node: SourceDocumentNode) -> None:
         self.nodes[node.node_id] = node

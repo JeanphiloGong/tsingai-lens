@@ -424,7 +424,6 @@ def _analysis_evidence(version: int) -> tuple[ObjectiveEvidence, ...]:
 
 
 async def _queue_and_claim(repository: PostgresObjectiveRepository):
-    await repository.confirm_objective("col_source", "objective-1")
     objective, queued = await repository.queue_analysis(
         "col_source",
         "objective-1",
@@ -432,6 +431,7 @@ async def _queue_and_claim(repository: PostgresObjectiveRepository):
         model_name="test-model",
         prompt_versions={"finding": "v1"},
     )
+    assert objective.confirmation_status == "confirmed"
     claimed = await repository.claim_analysis(
         "col_source", "objective-1", queued.analysis_version
     )
@@ -798,7 +798,13 @@ async def test_rebuild_rejects_reused_objective_id_for_another_scientific_defini
     repository = await _prepare_studies(
         source_repository, builds, "build_confirmed_identity"
     )
-    await repository.confirm_objective("col_source", "objective-1")
+    await repository.queue_analysis(
+        "col_source",
+        "objective-1",
+        pipeline_version="test.v1",
+        model_name="test-model",
+        prompt_versions={},
+    )
 
     initial_facts = _study_facts()
     skim = initial_facts.paper_skims[0]
@@ -1140,9 +1146,6 @@ async def test_authored_candidate_is_idempotent_and_survives_collection_rebuild(
     assert restored.source_build_id == "build_authored_source"
     assert restored.rank == 2
 
-    confirmed = await repository.confirm_objective(
-        "col_source", created.objective_id
-    )
     queued_objective, analysis = await repository.queue_analysis(
         "col_source",
         created.objective_id,
@@ -1150,7 +1153,7 @@ async def test_authored_candidate_is_idempotent_and_survives_collection_rebuild(
         model_name="test-model",
         prompt_versions={"finding": "v1"},
     )
-    assert confirmed.confirmation_status == "confirmed"
+    assert queued_objective.confirmation_status == "confirmed"
     assert queued_objective.active_analysis_version == 1
     assert analysis.source_build_id == "build_authored_source"
 

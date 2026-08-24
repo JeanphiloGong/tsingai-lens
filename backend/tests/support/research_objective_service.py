@@ -121,7 +121,6 @@ async def queue_running_analysis(
     collection_id: str,
     objective_id: str,
 ) -> ObjectiveAnalysis:
-    await service.objective_repository.confirm_objective(collection_id, objective_id)
     _, queued = await service.objective_repository.queue_analysis(
         collection_id,
         objective_id,

@@ -120,9 +120,7 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 		await expect
 			.element(browserPage.getByRole('heading', { name: '没有可供确认的研究目标' }))
 			.toBeInTheDocument();
-		await expect
-			.element(browserPage.getByText(/不表示目标级证据分析已经完成/))
-			.toBeInTheDocument();
+		await expect.element(browserPage.getByText(/不表示目标级证据分析已经完成/)).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByRole('link', { name: '检查文献' }))
 			.toHaveAttribute('href', '/collections/col_123/documents');
@@ -135,15 +133,6 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 			requests.push(current);
 			if (current.path.endsWith('/objectives') && current.method === 'GET') {
 				return jsonResponse({ collection_id: 'col_123', objectives: [objective()] });
-			}
-			if (current.path.endsWith('/obj_heat_strength/confirm') && current.method === 'POST') {
-				return jsonResponse({
-					collection_id: 'col_123',
-					objective: objective({ confirmation_status: 'confirmed' }),
-					active_analysis: null,
-					published_analysis: null,
-					warnings: []
-				});
 			}
 			if (current.path.endsWith('/obj_heat_strength/analysis') && current.method === 'POST') {
 				return jsonResponse({
@@ -162,13 +151,10 @@ describe('collections/[id]/objectives/+page.svelte', () => {
 
 		await vi.waitFor(() => {
 			expect(requests).toContainEqual({
-				path: '/api/v1/collections/col_123/objectives/obj_heat_strength/confirm',
-				method: 'POST'
-			});
-			expect(requests).toContainEqual({
 				path: '/api/v1/collections/col_123/objectives/obj_heat_strength/analysis',
 				method: 'POST'
 			});
+			expect(requests.filter((item) => item.method === 'POST')).toHaveLength(1);
 			expect(goto).toHaveBeenCalledWith('/collections/col_123/objectives/obj_heat_strength');
 		});
 	});

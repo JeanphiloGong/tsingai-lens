@@ -42,10 +42,11 @@ Research Objective
      -> feedback action
 ```
 
-Objective confirmation state and analysis execution state are separate. The
-page handles these states explicitly:
+Objective confirmation state and analysis execution state remain separate
+domain states, but one analysis command owns the approval-and-queue transition.
+The page handles these states explicitly:
 
-- candidate: confirm is the primary action;
+- candidate: confirm and analyze is the primary action;
 - confirmed without analysis: start analysis;
 - queued/running: poll and show current phase/document progress;
 - failed without a published result: retry;
@@ -89,10 +90,10 @@ Objective Findings. It does not rebuild conclusions from legacy comparison
 rows, Evidence cards, material projections, or collection-wide graph
 projections. The Objective Evidence Map is a read-only view of those same
 published records, not another aggregate or analysis path. The Objective
-workspace owns confirmation and analysis; the Finding workspace owns expert
-review; the document reader owns Source verification. The Research Agent and
-experiment plans may consume published Findings, but they do not introduce a
-second conclusion identity.
+workspace owns the single confirmation-and-analysis command; the Finding
+workspace owns expert review; the document reader owns Source verification.
+The Research Agent and experiment plans may consume published Findings, but
+they do not introduce a second conclusion identity.
 
 ## Current Contract Docs
 

@@ -628,49 +628,6 @@ class PostgresObjectiveRepository:
                 authored=authored,
             )
 
-    async def confirm_objective(
-        self,
-        collection_id: str,
-        objective_id: str,
-    ) -> ResearchObjective:
-        async with self.session_factory.begin() as session:
-            link = await self._require_objective_build_link(
-                session,
-                collection_id,
-                objective_id,
-            )
-            row = await self._locked_objective(session, collection_id, objective_id)
-            if row.confirmation_status == "candidate":
-                row.confirmation_status = "confirmed"
-                row.updated_at = datetime.now(timezone.utc)
-            source_relationship_ids, rank, build_id = link
-            authored = await self._authored_candidate(
-                session,
-                collection_id,
-                objective_id,
-            )
-            scope = await self._objective_scope(
-                session,
-                collection_id,
-                objective_id,
-                build_id=build_id,
-                authored=authored,
-            )
-            return self._objective_record(
-                row,
-                scope,
-                source_relationship_ids=source_relationship_ids,
-                rank=rank,
-                analysis_versions=(
-                    await self._analysis_versions_by_objective(
-                        session,
-                        collection_id,
-                        build_id,
-                    )
-                ).get(objective_id, (None, None)),
-                authored=authored,
-            )
-
     async def queue_analysis(
         self,
         collection_id: str,
@@ -693,8 +650,10 @@ class PostgresObjectiveRepository:
                 collection_id,
                 objective_id,
             )
-            if row.confirmation_status != "confirmed":
-                raise ValueError("objective must be confirmed before analysis")
+            now = datetime.now(timezone.utc)
+            if row.confirmation_status == "candidate":
+                row.confirmation_status = "confirmed"
+                row.updated_at = now
             existing = await session.scalar(
                 select(ObjectiveAnalysisRecord).where(
                     ObjectiveAnalysisRecord.collection_id == collection_id,
@@ -754,7 +713,6 @@ class PostgresObjectiveRepository:
             )
             if total_documents == 0:
                 total_documents = len(scope.get("seed", ()))
-            now = datetime.now(timezone.utc)
             analysis_row = ObjectiveAnalysisRecord(
                 collection_id=collection_id,
                 objective_id=objective_id,

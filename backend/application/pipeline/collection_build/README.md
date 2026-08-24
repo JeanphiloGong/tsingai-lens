@@ -23,6 +23,18 @@ the task as `partial_success`, while successful candidate Objectives remain part
 of the activated build. A build with complete PaperSkim coverage remains
 `completed`.
 
+The Source node follows the same honest partial-result rule at document scope.
+If some stored inputs cannot be read or parsed, it persists artifacts from the
+successful documents, records bounded `file_id`, filename, and technical error
+classification in its output summary, and exposes a node warning. The build is
+`partial_success`. If no input produces a Source document, the Source node and
+build fail; failed inputs are never represented as empty scientific documents.
+Synchronous Docling setup and per-document PDF conversion run outside the API
+event-loop thread, while documents within one build remain sequential and reuse
+one converter. A researcher can therefore inspect task and collection state
+while a large paper is being converted without changing Source artifact or
+partial-result semantics.
+
 The pipeline layer does not parse documents or extract facts directly. Each
 node delegates to the owning implementation module for one concrete step.
 

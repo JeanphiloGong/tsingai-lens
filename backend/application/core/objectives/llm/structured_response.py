@@ -580,6 +580,12 @@ class StructuredResponseClient:
         self._last_trace.set(None)
         return dict(trace) if trace else None
 
+    def peek_last_trace(self) -> dict[str, Any] | None:
+        """Return the current call trace without clearing its downstream owner."""
+
+        trace = self._last_trace.get()
+        return dict(trace) if trace else None
+
     @staticmethod
     def _build_attempt_trace(
         *,

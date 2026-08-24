@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import ast
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 import pandas as pd
@@ -93,6 +95,82 @@ def test_default_source_pipeline_uses_structure_first_handoff_workflow():
     assert workflow_names == [
         "create_source_artifacts",
     ]
+
+
+@pytest.mark.anyio
+async def test_create_source_artifacts_keeps_event_loop_responsive_during_pdf_work(
+    monkeypatch,
+    tmp_path,
+):
+    inventory = pd.DataFrame(
+        [
+            {
+                "id": "doc-large",
+                "title": "large-review.pdf",
+                "source_path": "stored-large-review.pdf",
+            }
+        ]
+    )
+
+    class InputStorage:
+        async def get(self, _path, **_kwargs):  # noqa: ANN001
+            return b"pdf"
+
+    converter_started = Event()
+    release_converter = Event()
+    bundle_started = Event()
+    release_bundle = Event()
+
+    def build_converter():
+        converter_started.set()
+        if not release_converter.wait(timeout=1.0):
+            raise RuntimeError("event loop stalled while creating PDF converter")
+        return object()
+
+    def parse_pdf(**_kwargs):
+        bundle_started.set()
+        if not release_bundle.wait(timeout=1.0):
+            raise RuntimeError("event loop stalled while parsing PDF")
+        return _source_bundle("doc-large")
+
+    monkeypatch.setattr(
+        "infra.source.runtime.workflows.create_source_artifacts.build_pdf_converter",
+        build_converter,
+    )
+    monkeypatch.setattr(
+        "infra.source.runtime.workflows.create_source_artifacts.build_pdf_bundle",
+        parse_pdf,
+    )
+    context = SimpleNamespace(input_storage=InputStorage(), state={})
+
+    build_task = asyncio.create_task(
+        create_source_artifacts(
+            inventory=inventory,
+            config=SourceRuntimeConfig(root_dir=str(tmp_path)),
+            context=context,
+        )
+    )
+    try:
+        for _ in range(100):
+            if converter_started.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert converter_started.is_set()
+        release_converter.set()
+
+        for _ in range(100):
+            if bundle_started.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert bundle_started.is_set()
+        release_bundle.set()
+
+        result = await build_task
+    finally:
+        release_converter.set()
+        release_bundle.set()
+
+    assert result.documents["id"].tolist() == ["doc-large"]
 
 
 @pytest.mark.anyio

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from asyncio import to_thread
 import logging
 from pathlib import Path
 import re
@@ -82,14 +83,15 @@ async def create_source_artifacts(
         try:
             if source_path and suffix == ".pdf":
                 if pdf_converter is None:
-                    pdf_converter = build_pdf_converter()
+                    pdf_converter = await to_thread(build_pdf_converter)
                 payload = await context.input_storage.get(source_path, as_bytes=True)
                 if payload is None:
                     raise FileNotFoundError(
                         f"input document not found: {source_path}"
                     )
                 bundles.append(
-                    build_pdf_bundle(
+                    await to_thread(
+                        build_pdf_bundle,
                         row=row,
                         payload=payload,
                         config=config,

@@ -33,6 +33,10 @@ is no separate collection-wide artifact aggregate in the domain.
 `SourceDocumentTree` is a per-document projection over one `SourceDocument`.
 It groups headings, paragraphs, tables, figures, captions, and reference-list
 entries into parent/child section nodes for downstream Core consumers.
+Tables and figures use an exact heading-path match when available. If a parser
+supplies an unusable path, they bind to the nearest preceding non-reference
+section by page; without page evidence they remain at the document root rather
+than inheriting the final section visited while the tree was built.
 Reference-list entries remain citation metadata for the current document; if a
 cited paper is crawled and parsed later, it should become its own
 `SourceDocumentTree` and be linked by reference metadata rather than embedded as

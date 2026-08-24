@@ -194,9 +194,6 @@ class _Service:
         self.analysis_status = "queued" if queued else "succeeded"
         self.dispatch_failure_version: int | None = None
 
-    async def confirm_objective(self, collection_id, objective_id):
-        return await self.get_analysis_state(collection_id, objective_id)
-
     async def queue_analysis(self, collection_id, objective_id):
         return await self.get_analysis_state(collection_id, objective_id)
 
@@ -674,6 +671,12 @@ def test_start_analysis_fails_queued_version_when_async_task_creation_fails(
 
 def test_duplicate_objective_detail_route_is_not_registered() -> None:
     response = _client().get("/collections/col-1/objectives/obj-1")
+
+    assert response.status_code == 404
+
+
+def test_confirm_objective_route_is_not_registered() -> None:
+    response = _client().post("/collections/col-1/objectives/obj-1/confirm")
 
     assert response.status_code == 404
 

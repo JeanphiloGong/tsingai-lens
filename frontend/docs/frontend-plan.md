@@ -22,7 +22,6 @@
 - 集合文件：`GET|POST /api/v1/collections/{collection_id}/files`
 - 工作区概览：`GET /api/v1/collections/{collection_id}/workspace`
 - 研究目标工作区：`GET /api/v1/collections/{collection_id}/objectives`、
-  `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/confirm`、
   `GET|POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`、
   `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings`、
   `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/findings/{finding_id}`、
@@ -30,6 +29,10 @@
   `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/evidence-map`、
   `GET|POST /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans`、
   `PATCH /api/v1/collections/{collection_id}/objectives/{objective_id}/experiment-plans/{plan_id}`
+
+  其中 `POST .../analysis` 是唯一的确认并分析命令：候选 Objective 会在同一事务中
+  固化为 `confirmed` 并进入排队状态；已确认 Objective 则直接创建或复用分析版本。
+
 - 启动构建任务：`POST /api/v1/collections/{collection_id}/tasks/build`
 - 查询任务与产物：`GET /api/v1/collections/{collection_id}/tasks`、`GET /api/v1/tasks/{task_id}`、`GET /api/v1/tasks/{task_id}/artifacts`
 - 文档与 Source 核验：`GET /api/v1/collections/{collection_id}/documents/profiles`、

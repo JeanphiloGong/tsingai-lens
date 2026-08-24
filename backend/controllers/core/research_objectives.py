@@ -54,31 +54,9 @@ async def list_collection_objectives(
 
 
 @router.post(
-    "/{collection_id}/objectives/{objective_id}/confirm",
-    response_model=ObjectiveAnalysisResponse,
-    summary="Confirm a research objective",
-)
-async def confirm_collection_objective(
-    collection_id: str,
-    objective_id: str,
-    request: Request,
-) -> ObjectiveAnalysisResponse:
-    try:
-        payload = await request.app.state.objective_analysis_service.confirm_objective(
-            collection_id,
-            objective_id,
-        )
-    except FileNotFoundError as exc:
-        raise _objective_not_found(collection_id, objective_id, exc) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return _to_objective_analysis_response(payload)
-
-
-@router.post(
     "/{collection_id}/objectives/{objective_id}/analysis",
     response_model=ObjectiveAnalysisResponse,
-    summary="Start a research objective analysis",
+    summary="Confirm a research objective and start analysis",
     name="run_collection_objective_analysis",  # Preserve the OpenAPI operation ID.
 )
 async def start_collection_objective_analysis(

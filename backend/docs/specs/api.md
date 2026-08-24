@@ -170,7 +170,6 @@ can be inspected.
 ### Research Objectives
 
 - `GET /api/v1/collections/{collection_id}/objectives`
-- `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/confirm`
 - `POST /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 - `GET /api/v1/collections/{collection_id}/objectives/{objective_id}/analysis`
 
@@ -217,10 +216,13 @@ or omitted token fields. Token totals contain only reported usage and remain
 `null` when no call reported usage; the backend never estimates missing tokens
 from prompt or response text.
 
-Confirmation does not start analysis. `POST .../analysis` creates the next
-analysis version with `queued` status and returns immediately. The frontend
-polls `GET .../analysis`. Retry allocates a new version. A failed active version
-leaves the prior published version readable. Independent Objective analyses,
+`POST .../analysis` expresses researcher approval of the Objective definition.
+For a candidate, it atomically changes `confirmation_status` to `confirmed` and
+creates the next analysis version with `queued` status. For an already confirmed
+Objective, it creates or reuses the active analysis normally. The command returns
+immediately, and the frontend polls `GET .../analysis`. Retry allocates a new
+version. A failed active version leaves the prior published version readable.
+Independent Objective analyses,
 including analyses from different collections, execute as process-local asyncio
 background tasks. An application semaphore bounds simultaneous analysis
 execution. Tasks above that limit wait on the in-process semaphore; this is not
@@ -247,8 +249,8 @@ historical `analysis_version`.
 extraction, and comparability for each paper in the published analysis version.
 It is empty until an analysis is published. If a newer active version is queued,
 running, or failed, the list still belongs to `published_analysis`, not that
-newer version. The confirm, start-analysis, and analysis-status routes share
-this response contract.
+newer version. The analysis command and analysis-status route share this
+response contract.
 
 Each analysis-level contribution exposes `evidence_disposition`,
 `routed_source_count`, `extracted_source_count`,

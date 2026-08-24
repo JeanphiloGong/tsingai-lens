@@ -340,7 +340,6 @@ async def _published_objective_repository() -> MemoryObjectiveRepository:
             ),
         ),
     )
-    await repository.confirm_objective("col-gold", "obj-1")
     _, analysis = await repository.queue_analysis(
         "col-gold",
         "obj-1",

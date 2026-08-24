@@ -181,13 +181,18 @@ All routes are under `/api/v1/collections/{collection_id}`.
 ### Objective lifecycle
 
 - `GET /objectives`
-- `POST /objectives/{objective_id}/confirm`
 - `POST /objectives/{objective_id}/analysis`
 - `GET /objectives/{objective_id}/analysis`
 
 The analysis-state and command responses contain `objective`,
 `active_analysis`, `published_analysis`, and warnings. They never embed all
 Findings or Evidence.
+
+`POST .../analysis` is the single approval-and-analysis command. For a
+candidate Objective, it atomically freezes the accepted definition as
+`confirmed` and queues analysis version 1. For an already confirmed Objective,
+it creates or reuses the appropriate active version. There is no separate
+confirmation command.
 
 ### Published result reads
 
@@ -222,7 +227,7 @@ or curation event controls review and training status.
 
 ## Frontend States
 
-- `candidate`: show confirmation action.
+- `candidate`: show confirm-and-analyze action.
 - `confirmed` with no active version: show start-analysis action.
 - `queued | running`: poll and display phase/document progress.
 - `failed` without a published version: show retry as primary action.

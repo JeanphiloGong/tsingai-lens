@@ -17,6 +17,7 @@ from application.core.objectives.discovery.axis_equivalence import (
 from domain.core import (
     ObjectiveFactSet,
     PaperSkim,
+    PaperSourceUnitCoverageStatus,
     PaperStudy,
     PaperStudyDisposition,
     PaperStudyDispositionStatus,
@@ -205,6 +206,21 @@ class ObjectiveCandidateService:
             relationship_inventory=relationship_inventory,
             terminal_rejections=terminal_rejections,
         )
+        disposition_counts = {
+            status: sum(disposition.status is status for disposition in dispositions)
+            for status in PaperStudyDispositionStatus
+        }
+        coverage_counts = {
+            status: sum(
+                coverage.status is status
+                for skim in paper_skims
+                for coverage in skim.source_unit_coverage
+            )
+            for status in PaperSourceUnitCoverageStatus
+        }
+        relationship_accounting_complete = {
+            disposition.relationship_id for disposition in dispositions
+        } == set(relationship_inventory)
         facts = ObjectiveFactSet(
             research_objectives_ready=True,
             paper_skims=paper_skims,
@@ -214,15 +230,33 @@ class ObjectiveCandidateService:
         logger.info(
             "Research objective discovery finished collection_id=%s "
             "paper_skim_count=%s relationship_count=%s group_count=%s "
-            "objective_count=%s rejected_relationship_count=%s",
+            "objective_count=%s promoted_relationship_count=%s "
+            "rejected_relationship_count=%s pending_relationship_count=%s "
+            "relationship_accounting_complete=%s unresolved_signal_count=%s "
+            "relationship_emitted_count=%s unresolved_signal_emitted_count=%s "
+            "no_study_signal_count=%s extraction_failed_count=%s "
+            "coverage_complete=%s",
             collection_id,
             len(paper_skims),
             len(relationship_inventory),
             len(relationship_groups),
             len(research_objectives),
-            sum(
-                disposition.status is PaperStudyDispositionStatus.REJECTED
-                for disposition in dispositions
+            disposition_counts[PaperStudyDispositionStatus.PROMOTED],
+            disposition_counts[PaperStudyDispositionStatus.REJECTED],
+            disposition_counts[PaperStudyDispositionStatus.PENDING],
+            relationship_accounting_complete,
+            sum(len(skim.unresolved_signals) for skim in paper_skims),
+            coverage_counts[
+                PaperSourceUnitCoverageStatus.RELATIONSHIP_EMITTED
+            ],
+            coverage_counts[
+                PaperSourceUnitCoverageStatus.UNRESOLVED_SIGNAL_EMITTED
+            ],
+            coverage_counts[PaperSourceUnitCoverageStatus.NO_STUDY_SIGNAL],
+            coverage_counts[PaperSourceUnitCoverageStatus.EXTRACTION_FAILED],
+            (
+                coverage_counts[PaperSourceUnitCoverageStatus.EXTRACTION_FAILED]
+                == 0
             ),
         )
         return facts

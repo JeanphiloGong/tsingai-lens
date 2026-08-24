@@ -18,6 +18,28 @@ from tests.support.research_objective_service import (
 )
 
 
+def test_objective_evidence_route_prompt_uses_response_schema_field_name():
+    system_prompt, user_prompt = (
+        evidence_routing.build_objective_evidence_route_prompt(
+            {
+                "objective": {
+                    "question": "How does scan strategy affect residual stress?",
+                },
+                "current_source": {
+                    "source_kind": "text_window",
+                    "text": "Residual stress depends on the selected scan strategy.",
+                },
+            }
+        )
+    )
+
+    for prompt in (system_prompt, user_prompt):
+        assert "`selections`" in prompt
+        assert '{"selections": []}' in prompt
+        assert "`routes`" not in prompt
+        assert '{"routes": []}' not in prompt
+
+
 def test_research_objective_service_forces_extractable_objective_route_roles():
 
     assert evidence_routing._normalize_route_extractable(

@@ -51,7 +51,7 @@ _OBJECTIVE_ROUTE_ROLES = {
 }
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _ROUTE_MAX_COMPLETION_TOKENS = 512
-_ROUTE_PROMPT_VERSION = "objective_evidence_route.v1"
+_ROUTE_PROMPT_VERSION = "objective_evidence_route.v2"
 _ROUTE_SYSTEM_PROMPT = """
 You are routing source units for one research objective in an evidence-backed literature comparison backend.
 
@@ -64,8 +64,8 @@ Non-negotiable rules:
 - Do not emit measurement results, sample variants, evidence anchors, or backend persistence ids.
 - Do not output table schemas, column roles, join keys, join plans, source text, sample rows, explanations, or copied input JSON.
 - For low-value, review, literature-comparison, composition-only, or unrelated
-  units, return an empty `routes` array instead of writing a low-value route
-  unless the source is explicitly frame-excluded.
+  units, return an empty `selections` array (`{"selections": []}`) instead of
+  writing a low-value route unless the source is explicitly frame-excluded.
 - Prefer fewer, higher-confidence extractable routes over speculative coverage.
 """.strip()
 
@@ -126,9 +126,9 @@ def build_objective_evidence_route_prompt(
     user_prompt = (
         "Route the current source unit for this one research objective.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
-        "Return only schema-valid structured data with a `routes` array.\n"
+        "Return only schema-valid structured data with a `selections` array.\n"
         "Return at most one route for `current_source`. If it is not useful "
-        "for later objective-scoped extraction, return `{\"routes\": []}`.\n"
+        "for later objective-scoped extraction, return `{\"selections\": []}`.\n"
         "Each route may contain only `role`, `extractable`, and `confidence`. "
         "Do not return `source_kind`, `source_ref`, ids, copied source text, "
         "explanations, or any nested input object.\n"

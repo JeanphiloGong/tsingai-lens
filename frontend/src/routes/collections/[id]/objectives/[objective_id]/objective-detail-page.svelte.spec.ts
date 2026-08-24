@@ -265,7 +265,7 @@ function installPublishedResponses(
 				summary: { total_documents: 1, doc_type_counts: {}, warnings: [] }
 			});
 		}
-		if (current.path.endsWith('/objectives/obj_1') && current.method === 'GET') {
+		if (current.path.endsWith('/objectives/obj_1/analysis') && current.method === 'GET') {
 			return jsonResponse(response);
 		}
 		if (current.path.endsWith('/objectives/obj_1/findings')) {
@@ -310,7 +310,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
 			requests.push({ path: current.path, method: current.method });
-			if (current.path.endsWith('/objectives/obj_1') && current.method === 'GET') {
+			if (current.path.endsWith('/objectives/obj_1/analysis') && current.method === 'GET') {
 				return jsonResponse(
 					objectiveResponse({
 						objective: objective({
@@ -500,7 +500,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
 			const params = new URLSearchParams(current.search);
-			if (current.path.endsWith('/objectives/obj_1') && current.method === 'GET') {
+			if (current.path.endsWith('/objectives/obj_1/analysis') && current.method === 'GET') {
 				return jsonResponse(objectiveResponse());
 			}
 			if (current.path.endsWith('/objectives/obj_1/findings')) {
@@ -579,7 +579,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
-			if (current.path.endsWith('/objectives/obj_1') && current.method === 'GET') {
+			if (current.path.endsWith('/objectives/obj_1/analysis') && current.method === 'GET') {
 				return jsonResponse(objectiveResponse());
 			}
 			if (current.path.endsWith('/objectives/obj_1/findings')) {
@@ -654,14 +654,13 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 			source_excerpt: 'Current version 2 source excerpt.'
 		};
 		const slowEvidenceResponse = deferredResponse();
+		let analysisStarted = false;
 
 		fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
 			const current = request(input, init);
 			const params = new URLSearchParams(current.search);
-			if (current.path.endsWith('/objectives/obj_1') && current.method === 'GET') {
-				return jsonResponse(objectiveResponse());
-			}
 			if (current.path.endsWith('/objectives/obj_1/analysis') && current.method === 'POST') {
+				analysisStarted = true;
 				return jsonResponse(
 					objectiveResponse({
 						objective: objective({ active_analysis_version: 2 }),
@@ -671,6 +670,7 @@ describe('collections/[id]/objectives/[objective_id]/+page.svelte', () => {
 				);
 			}
 			if (current.path.endsWith('/objectives/obj_1/analysis') && current.method === 'GET') {
+				if (!analysisStarted) return jsonResponse(objectiveResponse());
 				return jsonResponse(
 					objectiveResponse({
 						objective: objective({

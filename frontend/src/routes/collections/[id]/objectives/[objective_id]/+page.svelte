@@ -8,7 +8,6 @@
 	import { errorMessage } from '../../../../_shared/api';
 	import { fetchDocumentProfiles } from '../../../../_shared/documents';
 	import {
-		fetchObjective,
 		fetchObjectiveAnalysis,
 		fetchObjectiveEvidence,
 		fetchObjectiveFindings,
@@ -56,7 +55,7 @@
 		clearPoll();
 		try {
 			const [objectiveResult, profilesResult] = await Promise.allSettled([
-				fetchObjective(collectionId, objectiveId),
+				fetchObjectiveAnalysis(collectionId, objectiveId),
 				fetchDocumentProfiles(collectionId)
 			]);
 			if (objectiveResult.status === 'rejected') throw objectiveResult.reason;

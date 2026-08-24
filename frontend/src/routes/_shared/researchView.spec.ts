@@ -7,7 +7,6 @@ import {
 	fetchCollectionObjectives,
 	fetchFindingCurations,
 	fetchFindingFeedback,
-	fetchObjective,
 	fetchObjectiveAnalysis,
 	fetchObjectiveEvidence,
 	fetchObjectiveEvidenceMap,
@@ -111,22 +110,6 @@ describe('objective Finding API', () => {
 		expect(result.objectives[0]).not.toHaveProperty('evidence_unit_count');
 	});
 
-	it('loads Objective and analysis lifecycle separately', async () => {
-		request.mockResolvedValue({
-			collection_id: 'col_123',
-			objective,
-			active_analysis: analysis,
-			published_analysis: analysis,
-			warnings: []
-		});
-
-		const result = await fetchObjective('col_123', 'obj_1');
-
-		expect(request).toHaveBeenCalledWith('/collections/col_123/objectives/obj_1');
-		expect(result.objective.confirmation_status).toBe('confirmed');
-		expect(result.active_analysis?.status).toBe('succeeded');
-	});
-
 	it('uses the same lifecycle response for queue and poll', async () => {
 		request.mockResolvedValue({
 			collection_id: 'col_123',
@@ -137,12 +120,14 @@ describe('objective Finding API', () => {
 		});
 
 		await runObjectiveAnalysis('col_123', 'obj_1');
-		await fetchObjectiveAnalysis('col_123', 'obj_1');
+		const result = await fetchObjectiveAnalysis('col_123', 'obj_1');
 
 		expect(request).toHaveBeenNthCalledWith(1, '/collections/col_123/objectives/obj_1/analysis', {
 			method: 'POST'
 		});
 		expect(request).toHaveBeenNthCalledWith(2, '/collections/col_123/objectives/obj_1/analysis');
+		expect(result.objective.confirmation_status).toBe('confirmed');
+		expect(result.active_analysis?.status).toBe('succeeded');
 	});
 
 	it('requests versioned Finding and exact Evidence pages', async () => {

@@ -11,8 +11,8 @@ collection Objective. It does not own confirmed-Objective Evidence analysis.
    its compact source-signal contract extracts only explicit axes and minimal
    context for later reconciliation. The backend binds Source identity.
 2. `paper_skim_service.py` in the parent package batches all Sources, retries
-   failed batches, invokes compact singleton recovery only for output
-   saturation, and consolidates window results into one paper map.
+   failed batches, invokes compact singleton recovery for recoverable structured
+   output failures, and consolidates window results into one paper map.
 3. `signal_reconciliation.py` decides whether compatible signals found in
    different windows belong to the same within-paper experiment.
 4. `axis_equivalence.py` classifies only backend-proposed label pairs as the

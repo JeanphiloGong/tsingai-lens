@@ -1049,6 +1049,74 @@ def test_short_singleton_saturation_recovers_through_source_local_signals():
     assert skim.warnings[1] == "model warning one"
 
 
+@pytest.mark.parametrize(
+    "full_failure",
+    [
+        RuntimeError("structured extraction returned no JSON object"),
+        json.JSONDecodeError("Expecting ':' delimiter", "{bad", 4),
+        RuntimeError("structured extraction returned empty response content"),
+    ],
+    ids=["no-json-object", "malformed-json", "empty-response"],
+)
+def test_short_singleton_structured_failure_recovers_source_local_signals(
+    full_failure: Exception,
+):
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("results", "Results", 1),
+            _paragraph(
+                "short-result",
+                "Reheating changed the observed grain morphology.",
+                2,
+                "Results",
+            ),
+        ]
+    )
+
+    class CompactFallbackExtractor(_WindowExtractor):
+        def __init__(self) -> None:
+            super().__init__()
+            self.compact_payloads: list[dict[str, Any]] = []
+
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            self.payloads.append(payload)
+            raise full_failure
+
+        def extract_source_signals(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredPaperSkim:
+            self.compact_payloads.append(payload)
+            source_unit_id = payload["source_units"][0]["source_unit_id"]
+            return StructuredPaperSkim.model_validate(
+                {
+                    "doc_role": "experimental",
+                    "unresolved_signals": [
+                        {
+                            "signal_type": "outcome",
+                            "label": "grain morphology",
+                            "claim_scope": "current_work",
+                            "source_unit_ids": [source_unit_id],
+                            "confidence": 0.86,
+                        }
+                    ],
+                }
+            )
+
+    extractor = CompactFallbackExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 1
+    assert len(extractor.compact_payloads) == 1
+    assert [signal.label for signal in skim.unresolved_signals] == ["grain morphology"]
+    assert [item.status.value for item in skim.source_unit_coverage] == [
+        "unresolved_signal_emitted"
+    ]
+    assert skim.coverage_complete is True
+    assert "source-local signals" in skim.warnings[0]
+
+
 def test_compact_singleton_retries_one_transient_empty_response():
     artifacts, tree = _artifacts(
         blocks=[
@@ -1225,6 +1293,12 @@ def test_successful_fragment_survives_while_failed_parent_coverage_stays_incompl
                     "structured extraction returned empty response content"
                 )
             return super().extract(payload)
+
+        def extract_source_signals(
+            self,
+            _payload: dict[str, Any],
+        ) -> StructuredPaperSkim:
+            raise RuntimeError("structured extraction returned empty response content")
 
     extractor = PartiallyRecoveringExtractor()
 

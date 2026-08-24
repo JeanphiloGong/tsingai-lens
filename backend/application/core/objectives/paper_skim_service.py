@@ -47,7 +47,7 @@ _SKIM_WARNING_LIMIT = 2
 _SKIM_SINGLE_SOURCE_RECOVERY_MIN_CHARS = 800
 _SKIM_SINGLE_SOURCE_RECOVERY_MAX_DEPTH = 2
 _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT = 2
-_SKIM_COMPACT_RETRY_FAILURE_KINDS = {
+_SKIM_TRANSIENT_STRUCTURED_FAILURE_KINDS = {
     "empty_response",
     "malformed_json",
     "no_json_object",
@@ -949,7 +949,10 @@ class PaperSkimService:
                         tuple(fragment_signals),
                     )
 
-            if len(source_units) == 1 and failure_kind == "output_saturated":
+            if len(source_units) == 1 and (
+                failure_kind == "output_saturated"
+                or failure_kind in _SKIM_TRANSIENT_STRUCTURED_FAILURE_KINDS
+            ):
                 for compact_attempt in range(
                     1,
                     _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT + 1,
@@ -959,9 +962,9 @@ class PaperSkimService:
                             dict(payload)
                         )
                         fallback_warning = (
-                            "Full study reconstruction saturated for one Source; "
-                            "retained explicit source-local signals for paper "
-                            "reconciliation."
+                            "Full study reconstruction could not produce valid "
+                            "structured output for one Source; retained explicit "
+                            "source-local signals for paper reconciliation."
                         )
                         compact = compact.model_copy(
                             update={
@@ -980,12 +983,13 @@ class PaperSkimService:
                             "Paper skim singleton recovered through source-local "
                             "signals collection_id=%s document_id=%s window_id=%s "
                             "attempt=%s compact_attempt=%s source_unit_count=1 "
-                            "signal_count=%s",
+                            "full_failure_kind=%s signal_count=%s",
                             collection_id,
                             document_id,
                             payload.get("window_id"),
                             attempt,
                             compact_attempt,
+                            failure_kind,
                             len(compact.unresolved_signals),
                         )
                         return (window_skim,), window_signals
@@ -1002,7 +1006,7 @@ class PaperSkimService:
                         will_retry = (
                             compact_attempt < _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT
                             and compact_failure_kind
-                            in _SKIM_COMPACT_RETRY_FAILURE_KINDS
+                            in _SKIM_TRANSIENT_STRUCTURED_FAILURE_KINDS
                         )
                         logger.warning(
                             "Paper skim compact singleton recovery failed "

@@ -12,8 +12,8 @@ from utils.logger import (
 )
 
 
-def test_log_formatter_includes_bounded_user_context() -> None:
-    logger = setup_logger("test.user-context")
+def test_log_formatter_prioritizes_request_context_and_short_component() -> None:
+    logger = setup_logger("application.core.objectives.llm.structured_response")
     handler = next(
         handler
         for handler in logging.getLogger().handlers
@@ -26,7 +26,7 @@ def test_log_formatter_includes_bounded_user_context() -> None:
         record = logger.makeRecord(
             logger.name,
             logging.INFO,
-            __file__,
+            "/app/application/core/objectives/llm/structured_response.py",
             1,
             "user-scoped event",
             (),
@@ -38,7 +38,14 @@ def test_log_formatter_includes_bounded_user_context() -> None:
         clear_user_id(user_token)
         clear_request_id(request_token)
 
-    assert "| req-test | user-123 | user-scoped event" in rendered
+    assert [field.strip() for field in rendered.split("|", maxsplit=5)][1:] == [
+        "req-test",
+        "user-123",
+        "INFO",
+        "structured_response",
+        "user-scoped event",
+    ]
+    assert "application.core.objectives.llm.structured_response" not in rendered
     assert get_user_id() is None
 
 

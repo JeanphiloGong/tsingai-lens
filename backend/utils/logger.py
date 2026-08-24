@@ -99,8 +99,8 @@ def setup_logger(name: str = __name__) -> logging.Logger:
     logger.setLevel(logging.DEBUG)
 
     formatter = logging.Formatter(
-        "%(asctime)s | %(name)-24s | %(levelname)-8s | "
-        "%(request_id)s | %(user_id)s | %(message)s",
+        "%(asctime)s | %(request_id)s | %(user_id)s | %(levelname)-8s | "
+        "%(module)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 

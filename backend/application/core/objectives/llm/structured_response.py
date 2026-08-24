@@ -29,6 +29,7 @@ _EXTRACTION_MODE_JSON_TEXT = "json_text"
 _EXTRACTION_MODE_PROVIDER_PARSE = "provider_parse"
 _DEFAULT_EXTRACTION_MODE = _EXTRACTION_MODE_PROVIDER_PARSE
 _TRACE_TEXT_LIMIT = 8000
+_TRACE_OUTPUT_PREVIEW_CHARS = 1000
 _SUPPORTED_EXTRACTION_MODES = {
     _EXTRACTION_MODE_JSON_TEXT,
     _EXTRACTION_MODE_PROVIDER_PARSE,
@@ -67,6 +68,10 @@ class StructuredResponseClient:
         self._last_trace: ContextVar[dict[str, Any] | None] = ContextVar(
             "structured_response_last_trace",
             default=None,
+        )
+        self._last_attempts: ContextVar[tuple[dict[str, Any], ...]] = ContextVar(
+            "structured_response_last_attempts",
+            default=(),
         )
         self.client = client or OpenAI(
             api_key=(api_key or os.getenv("LLM_API_KEY", "").strip() or "not-needed"),
@@ -125,6 +130,7 @@ class StructuredResponseClient:
             include_schema=self.extraction_mode != _EXTRACTION_MODE_PROVIDER_PARSE,
         )
         self._last_trace.set(None)
+        self._last_attempts.set(())
         started_at = perf_counter()
         trace_extraction_mode = self.extraction_mode
         try:
@@ -145,10 +151,31 @@ class StructuredResponseClient:
                             parsed = validated
                 except LengthFinishReasonError as exc:
                     if fail_on_output_saturation:
-                        raise StructuredOutputSaturatedError(
+                        error = StructuredOutputSaturatedError(
                             "PaperSkim provider output reached the completion-token "
                             "limit"
-                        ) from exc
+                        )
+                        completion = getattr(exc, "completion", None)
+                        choice = (
+                            completion.choices[0]
+                            if completion is not None
+                            and getattr(completion, "choices", None)
+                            else None
+                        )
+                        raw_content = coerce_message_content(
+                            getattr(getattr(choice, "message", None), "content", None)
+                        )
+                        self._last_attempts.set(
+                            (
+                                self._build_attempt_trace(
+                                    attempt=1,
+                                    finish_reason=self._finish_reason_from_exception(exc),
+                                    raw_content=raw_content,
+                                    error=error,
+                                ),
+                            )
+                        )
+                        raise error from exc
                     logger.warning(
                         "Objective provider output reached the completion-token limit; "
                         "retrying with json_text model=%s response_model=%s",
@@ -218,8 +245,9 @@ class StructuredResponseClient:
                     response_model=response_model,
                     max_completion_tokens=max_completion_tokens,
                 )
-        except Exception:
+        except Exception as exc:
             elapsed_s = perf_counter() - started_at
+            attempts = self._last_attempts.get()
             self._last_trace.set(
                 self._build_trace(
                     task_type=task_type,
@@ -229,7 +257,14 @@ class StructuredResponseClient:
                     extraction_mode=trace_extraction_mode,
                     trace_status="failed",
                     elapsed_s=elapsed_s,
-                    error="structured extraction failed",
+                    raw_content=(
+                        str(attempts[-1].get("response_preview") or "")
+                        if attempts
+                        else None
+                    ),
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                    attempts=attempts,
                 )
             )
             logger.exception(
@@ -253,6 +288,7 @@ class StructuredResponseClient:
                 elapsed_s=elapsed_s,
                 raw_content=raw_content,
                 parsed_output=parsed,
+                attempts=self._last_attempts.get(),
             )
         )
         logger.debug(
@@ -325,6 +361,8 @@ class StructuredResponseClient:
         if max_completion_tokens is not None:
             request_kwargs["max_completion_tokens"] = max_completion_tokens
         last_error: Exception | None = None
+        attempts: list[dict[str, Any]] = []
+        self._last_attempts.set(())
         for attempt in range(max_attempts):
             attempt_kwargs = dict(request_kwargs)
             attempt_messages = [*messages]
@@ -359,6 +397,8 @@ class StructuredResponseClient:
                     response_model.__name__,
                 )
             try:
+                raw_content = ""
+                finish_reason: str | None = None
                 try:
                     completion = self.client.chat.completions.create(**attempt_kwargs)
                 except Exception as exc:
@@ -366,19 +406,41 @@ class StructuredResponseClient:
                         getattr(exc, "completion", None),
                         requested_model=self.model,
                     )
+                    completion = getattr(exc, "completion", None)
+                    choice = (
+                        completion.choices[0]
+                        if completion is not None
+                        and getattr(completion, "choices", None)
+                        else None
+                    )
+                    raw_content = coerce_message_content(
+                        getattr(getattr(choice, "message", None), "content", None)
+                    )
+                    attempts.append(
+                        self._build_attempt_trace(
+                            attempt=attempt + 1,
+                            finish_reason=self._finish_reason_from_exception(exc),
+                            raw_content=raw_content,
+                            error=exc,
+                        )
+                    )
+                    self._last_attempts.set(tuple(attempts))
                     raise
                 record_llm_completion(completion, requested_model=self.model)
                 choice = completion.choices[0] if completion.choices else None
+                finish_reason = (
+                    str(getattr(choice, "finish_reason", "") or "").strip() or None
+                )
+                raw_content = coerce_message_content(
+                    choice.message.content if choice is not None else None
+                )
                 if (
                     fail_on_output_saturation
-                    and getattr(choice, "finish_reason", None) == "length"
+                    and finish_reason == "length"
                 ):
                     raise StructuredOutputSaturatedError(
                         "PaperSkim JSON output reached the completion-token limit"
                     )
-                raw_content = coerce_message_content(
-                    choice.message.content if choice is not None else None
-                )
                 if not raw_content:
                     raise RuntimeError(
                         "structured extraction returned empty response content"
@@ -392,6 +454,14 @@ class StructuredResponseClient:
                         validated = parsed_validator(parsed)
                         if validated is not None:
                             parsed = validated
+                    attempts.append(
+                        self._build_attempt_trace(
+                            attempt=attempt + 1,
+                            finish_reason=finish_reason,
+                            raw_content=raw_content,
+                        )
+                    )
+                    self._last_attempts.set(tuple(attempts))
                     return parsed, raw_content
                 except ValidationError:
                     if isinstance(payload, dict):
@@ -409,8 +479,27 @@ class StructuredResponseClient:
                                 validated = parsed_validator(parsed)
                                 if validated is not None:
                                     parsed = validated
+                            attempts.append(
+                                self._build_attempt_trace(
+                                    attempt=attempt + 1,
+                                    finish_reason=finish_reason,
+                                    raw_content=raw_content,
+                                )
+                            )
+                            self._last_attempts.set(tuple(attempts))
                             return parsed, raw_content
                     raise
+            except StructuredOutputSaturatedError as exc:
+                attempts.append(
+                    self._build_attempt_trace(
+                        attempt=attempt + 1,
+                        finish_reason=finish_reason,
+                        raw_content=raw_content,
+                        error=exc,
+                    )
+                )
+                self._last_attempts.set(tuple(attempts))
+                raise
             except (
                 RuntimeError,
                 ValueError,
@@ -419,6 +508,15 @@ class StructuredResponseClient:
             ) as exc:
                 if validation_error_observer is not None:
                     validation_error_observer(exc)
+                attempts.append(
+                    self._build_attempt_trace(
+                        attempt=attempt + 1,
+                        finish_reason=finish_reason,
+                        raw_content=raw_content,
+                        error=exc,
+                    )
+                )
+                self._last_attempts.set(tuple(attempts))
                 last_error = exc
                 if attempt < max_attempts - 1:
                     continue
@@ -482,6 +580,43 @@ class StructuredResponseClient:
         self._last_trace.set(None)
         return dict(trace) if trace else None
 
+    @staticmethod
+    def _build_attempt_trace(
+        *,
+        attempt: int,
+        finish_reason: str | None,
+        raw_content: str,
+        error: Exception | None = None,
+    ) -> dict[str, Any]:
+        trace = {
+            "attempt": attempt,
+            "finish_reason": finish_reason,
+            "response_chars": len(raw_content),
+            "response_preview": trace_text(
+                raw_content,
+                _TRACE_OUTPUT_PREVIEW_CHARS,
+            ),
+        }
+        if error is not None:
+            trace["error_type"] = type(error).__name__
+            trace["error"] = trace_text(str(error), 1000)
+        return trace
+
+    @staticmethod
+    def _finish_reason_from_exception(error: Exception) -> str | None:
+        completion = getattr(error, "completion", None)
+        choice = (
+            completion.choices[0]
+            if completion is not None and getattr(completion, "choices", None)
+            else None
+        )
+        finish_reason = getattr(choice, "finish_reason", None)
+        if finish_reason is not None:
+            return str(finish_reason).strip() or None
+        if isinstance(error, LengthFinishReasonError):
+            return "length"
+        return None
+
     def _build_trace(
         self,
         *,
@@ -495,6 +630,8 @@ class StructuredResponseClient:
         raw_content: str | None = None,
         parsed_output: BaseModel | None = None,
         error: str | None = None,
+        error_type: str | None = None,
+        attempts: tuple[dict[str, Any], ...] = (),
     ) -> dict[str, Any]:
         return {
             "task_type": task_type or response_model.__name__,
@@ -515,6 +652,8 @@ class StructuredResponseClient:
             "parsed_output": trace_json(
                 parsed_output.model_dump(mode="json") if parsed_output else None
             ),
+            "attempts": [dict(attempt) for attempt in attempts],
+            "error_type": trace_text(error_type, 160),
             "error": trace_text(error, 1000),
         }
 

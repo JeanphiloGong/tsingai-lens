@@ -230,16 +230,13 @@ class ResearchObjectiveService:
         seed_document_ids: list[str],
         excluded_document_ids: list[str],
     ) -> ResearchObjective:
-        """Persist one user-approved candidate supported by PaperSkim context."""
+        """Persist one user-approved, explicitly untested research question."""
 
         await self.collection_service.get_collection_for_user(
             collection_id, user_id
         )
         if len(outcomes) != 1:
             raise ValueError("chat-assisted objective requires exactly one outcome")
-        if not seed_document_ids:
-            raise ValueError("chat-assisted objective requires seed documents")
-
         objective = ResearchObjective.from_mapping(
             {
                 "collection_id": collection_id,
@@ -264,76 +261,22 @@ class ResearchObjectiveService:
         facts = await self.objective_repository.read(collection_id)
         if not facts.research_objectives_ready:
             raise ResearchObjectivesNotReadyError(collection_id)
-        skims_by_document_id = {
-            skim.document_id: skim for skim in facts.paper_skims
-        }
-        support_confidences: list[float] = []
-        for document_id in objective.seed_document_ids:
-            skim = skims_by_document_id.get(document_id)
-            matches = (
-                [
-                    relationship.confidence
-                    for study in skim.studies
-                    for relationship in study.relationships
-                    if self._paper_relationship_supports_objective(
-                        objective,
-                        study.material_scope,
-                        relationship.varied_factors,
-                        relationship.outcome,
-                    )
-                ]
-                if skim is not None
-                else []
-            )
-            if not matches:
-                raise ValueError(
-                    "seed PaperSkim context does not support the Objective axes: "
-                    f"{document_id}"
-                )
-            support_confidences.append(max(matches))
-
         objective = replace(
             objective,
-            confidence=sum(support_confidences) / len(support_confidences),
+            confidence=0,
             reason=(
-                "User-approved candidate supported by PaperSkim relationship context "
-                f"from {len(support_confidences)} seed document(s); support is not "
-                "extracted Evidence."
+                "User-approved untested research question with "
+                f"{len(objective.seed_document_ids)} paper scope hypothesis(es); "
+                "Paper Map scope is not Evidence and analysis has not tested support."
+                if objective.seed_document_ids
+                else "User-approved untested research question; paper scope and "
+                "Evidence support have not been established."
             ),
         )
         return await self.objective_repository.create_authored_candidate(
             objective,
             created_by_user_id=user_id,
             created_by_tool_call_id=tool_call_id,
-        )
-
-    @staticmethod
-    def _paper_relationship_supports_objective(
-        objective: ResearchObjective,
-        study_materials: tuple[str, ...],
-        varied_factors: tuple[str, ...],
-        outcome: str,
-    ) -> bool:
-        material_matches = (
-            not objective.material_scope
-            or not study_materials
-            or any(
-                property_matching.axis_values_match(target, observed)
-                for target in objective.material_scope
-                for observed in study_materials
-            )
-        )
-        variables_match = all(
-            any(
-                property_matching.axis_values_match(variable, factor)
-                for factor in varied_factors
-            )
-            for variable in objective.variables
-        )
-        return (
-            material_matches
-            and variables_match
-            and property_matching.axis_values_match(objective.outcomes[0], outcome)
         )
 
     async def generate_objective_analysis_artifacts(

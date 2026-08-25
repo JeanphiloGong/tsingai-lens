@@ -18,9 +18,12 @@ from application.chat import (
 from application.chat.capabilities import (
     CreateObjectiveCandidateCapability,
     GetCollectionContextCapability,
+    InspectObjectiveAnalysisCapability,
     InspectResearchProcessCapability,
+    PreviewResearchScopeCapability,
     ProposeObjectiveDraftsCapability,
     QueryPublishedFindingsCapability,
+    StartObjectiveAnalysisCapability,
     StartResearchProcessCapability,
 )
 from application.core.document_profiles.service import (
@@ -325,8 +328,20 @@ async def build_application_runtime(
                                 collection_service=collection_service,
                                 objective_repository=objective_repository,
                             ),
+                            PreviewResearchScopeCapability(
+                                collection_service=collection_service,
+                                objective_repository=objective_repository,
+                            ),
                             CreateObjectiveCandidateCapability(
                                 research_objective_service=research_objective_service,
+                            ),
+                            StartObjectiveAnalysisCapability(
+                                collection_service=collection_service,
+                                objective_analysis_service=objective_analysis_service,
+                            ),
+                            InspectObjectiveAnalysisCapability(
+                                collection_service=collection_service,
+                                objective_analysis_service=objective_analysis_service,
                             ),
                         )
                     ),

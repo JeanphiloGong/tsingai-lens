@@ -135,6 +135,8 @@ def _study_facts(objective: ResearchObjective | None = None) -> ObjectiveFactSet
                     ],
                     "evidence_density": "high",
                     "confidence": 0.9,
+                    "map_status": "sufficient",
+                    "map_limitations": ["source_extraction_incomplete"],
                 }
             ),
         ),
@@ -465,6 +467,73 @@ async def test_study_build_round_trips_without_analysis_artifacts(
         }
         for item in _study_facts().research_objectives
     )
+
+
+async def test_review_synthesis_map_round_trips_with_source_lineage(
+    source_repositories,
+) -> None:
+    source_repository, builds = source_repositories
+    build_id = "build_review_map"
+    repository = await _prepare_studies(source_repository, builds, build_id)
+    review_skim = PaperSkim.from_mapping(
+        {
+            "document_id": "srcdoc_runtime",
+            "doc_role": "review",
+            "map_status": "sufficient",
+            "review_synthesis": {
+                "synthesis_claims": [
+                    {
+                        "content": "Temperature effects depend on alloy state.",
+                        "variables": ["temperature"],
+                        "outcomes": ["strength"],
+                        "conditions": ["alloy state"],
+                        "source_refs": [
+                            {
+                                "source_kind": "block",
+                                "source_ref": "block-context",
+                            }
+                        ],
+                        "confidence": 0.82,
+                    }
+                ],
+                "citation_leads": [
+                    {
+                        "content": "Primary study [12]",
+                        "variables": ["temperature"],
+                        "source_refs": [
+                            {
+                                "source_kind": "block",
+                                "source_ref": "block-context",
+                            }
+                        ],
+                        "confidence": 0.7,
+                    }
+                ],
+            },
+            "source_unit_coverage": [
+                {
+                    "source_unit_id": "review-source-1",
+                    "window_id": "overview-1",
+                    "source_kind": "block",
+                    "source_ref": "block-context",
+                    "status": "no_study_signal",
+                    "reason": "The Source contributes review knowledge only.",
+                }
+            ],
+        }
+    )
+    await repository.replace(
+        "col_source",
+        build_id,
+        ObjectiveFactSet(
+            research_objectives_ready=False,
+            paper_skims=(review_skim,),
+        ),
+    )
+
+    restored = await repository.read("col_source", build_id=build_id)
+
+    assert restored.paper_skims == (review_skim,)
     assert (await repository.list_objectives("col_source"))[0].objective_id == (
         "objective-1"
     )
@@ -1156,6 +1225,59 @@ async def test_authored_candidate_is_idempotent_and_survives_collection_rebuild(
     assert queued_objective.confirmation_status == "confirmed"
     assert queued_objective.active_analysis_version == 1
     assert analysis.source_build_id == "build_authored_source"
+
+
+async def test_seedless_authored_candidate_round_trips_and_queues_collection_analysis(
+    source_repositories,
+) -> None:
+    source_repository, builds = source_repositories
+    repository = await _prepare_studies(
+        source_repository,
+        builds,
+        "build_seedless_authored",
+    )
+    candidate = ResearchObjective.from_mapping(
+        {
+            "collection_id": "col_source",
+            "question": "How does oxygen content affect elongation?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["oxygen content"],
+            "outcomes": ["elongation"],
+            "seed_document_ids": [],
+            "confidence": 0,
+            "reason": (
+                "User-approved untested research question; paper scope and "
+                "Evidence support have not been established."
+            ),
+            "origin": "chat_assisted",
+            "created_by_user_id": "user_source",
+            "created_by_tool_call_id": "call-seedless-authored",
+        }
+    )
+
+    created = await repository.create_authored_candidate(
+        candidate,
+        created_by_user_id="user_source",
+        created_by_tool_call_id="call-seedless-authored",
+    )
+    restored = await repository.read_objective("col_source", created.objective_id)
+
+    assert restored is not None
+    assert restored.seed_document_ids == ()
+    assert restored.confirmation_status == "candidate"
+    assert restored.confidence == 0
+
+    confirmed, analysis = await repository.queue_analysis(
+        "col_source",
+        created.objective_id,
+        pipeline_version="test.v1",
+        model_name="test-model",
+        prompt_versions={},
+    )
+
+    assert confirmed.confirmation_status == "confirmed"
+    assert analysis.status == "queued"
+    assert analysis.total_document_count == 4
 
 
 async def test_authored_candidate_rejects_reusing_tool_call_for_other_arguments(

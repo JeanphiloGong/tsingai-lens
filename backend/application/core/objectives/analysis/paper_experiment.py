@@ -18,6 +18,13 @@ logger = logging.getLogger(__name__)
 
 _OBJECTIVE_PAIRWISE_SCOPE_LIMIT = 48
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
+_RESULT_SERIES_MEASUREMENT_PATTERN = re.compile(
+    rf"(?P<value>{_NUMBER_PATTERN.pattern})\s*"
+    r"(?P<unit>%|[A-Za-z\u00b5\u03bc\u00b0][A-Za-z0-9\u00b5\u03bc\u00b0/^.\-]*)?\s*"
+    rf"(?:(?:\u00b1|\+/-)\s*{_NUMBER_PATTERN.pattern}\s*"
+    r"(?:%|[A-Za-z\u00b5\u03bc\u00b0][A-Za-z0-9\u00b5\u03bc\u00b0/^.\-]*)?)?\s*"
+    r"[([]?\s*$"
+)
 
 
 def _objective_pairwise_attribution_scope(
@@ -341,14 +348,18 @@ def _bind_objective_result_process_context(
         conflicting_samples,
     ) = _objective_condition_registry(units)
 
-    bound: list[ExtractedEvidenceDraft] = []
-    for unit in units:
-        scope = (unit.objective_id, unit.document_id)
-        unit = _objective_result_with_registered_condition_comparison(
+    expanded_units = tuple(
+        expanded
+        for unit in units
+        for expanded in _objective_results_with_registered_condition_comparisons(
             unit,
             process_context_by_sample=process_context_by_sample,
             conflicting_samples=conflicting_samples,
         )
+    )
+    bound: list[ExtractedEvidenceDraft] = []
+    for unit in expanded_units:
+        scope = (unit.objective_id, unit.document_id)
         comparison = unit.comparison
         pending_process_binding = bool(
             unit.source_kind == "text_window"
@@ -721,22 +732,22 @@ def _objective_merge_condition_context(
     return ExtractedEvidenceDraft.from_mapping(payload)
 
 
-def _objective_result_with_registered_condition_comparison(
+def _objective_results_with_registered_condition_comparisons(
     unit: ExtractedEvidenceDraft,
     *,
     process_context_by_sample: dict[
         tuple[str, str, str], ExtractedEvidenceDraft
     ],
     conflicting_samples: set[tuple[str, str, str]],
-) -> ExtractedEvidenceDraft:
+) -> tuple[ExtractedEvidenceDraft, ...]:
     if (
         unit.source_kind != "text_window"
         or unit.reported_result is None
-        or unit.reported_result.direction != "no_change"
         or unit.comparison is not None
         or unit.changed_variables
+        or unit.reported_result.direction in {"unknown", "mixed"}
     ):
-        return unit
+        return (unit,)
 
     source_text = "\n".join(
         str(ref.get("source_excerpt") or "").strip()
@@ -744,81 +755,163 @@ def _objective_result_with_registered_condition_comparison(
         if str(ref.get("source_excerpt") or "").strip()
     )
     if not source_text:
-        return unit
+        return (unit,)
     result_position = _objective_exact_label_position(
         source_text,
         unit.reported_result.result_text,
     )
     if result_position < 0:
-        return unit
+        return (unit,)
     claim_context = source_text[
         max(0, result_position - 800) : result_position
         + len(unit.reported_result.result_text)
         + 400
     ]
+    label_context = (
+        claim_context
+        if unit.reported_result.direction == "no_change"
+        else _objective_directional_result_claim_context(
+            source_text,
+            result_position=result_position,
+            result_text=unit.reported_result.result_text,
+        )
+    )
 
     scope = (unit.objective_id, unit.document_id)
     if any(
         key[:2] == scope
-        and _objective_exact_label_position(claim_context, key[2]) >= 0
+        and _objective_exact_label_position(label_context, key[2]) >= 0
         for key in conflicting_samples
     ):
-        return unit
+        return (unit,)
 
-    mentioned: list[tuple[int, str, ExtractedEvidenceDraft]] = []
+    mentioned: list[tuple[int, int, str, ExtractedEvidenceDraft]] = []
     for key, condition in process_context_by_sample.items():
         if key[:2] != scope:
             continue
         label = _objective_explicit_sample_label(condition)
         if label is None:
             continue
-        position = _objective_exact_label_position(claim_context, label)
-        if position >= 0:
-            mentioned.append((position, label, condition))
+        span = _objective_exact_label_span(label_context, label)
+        if span is not None:
+            mentioned.append((*span, label, condition))
     mentioned.sort(key=lambda item: item[0])
     if len(mentioned) < 2:
-        return unit
+        return (unit,)
 
-    _baseline_position, baseline_label, baseline = mentioned[0]
-    _target_position, target_label, target = mentioned[-1]
-    baseline_process = {
-        property_matching.normalize_property_label(item.name)
-        or _objective_column_key(item.name): item
-        for item in baseline.scientific_context.process
-    }
-    target_process = {
-        property_matching.normalize_property_label(item.name)
-        or _objective_column_key(item.name): item
-        for item in target.scientific_context.process
-    }
-    if set(baseline_process) != set(target_process):
-        return unit
-    changed = [
-        target_process[key]
-        for key in sorted(baseline_process)
-        if (
-            baseline_process[key].value != target_process[key].value
-            or baseline_process[key].unit != target_process[key].unit
+    measurements = None
+    if unit.reported_result.direction != "no_change":
+        measurements = _objective_result_series_measurements(
+            label_context,
+            mentioned,
+            fallback_unit=unit.reported_result.unit,
         )
-    ]
-    if len(changed) != 1:
-        return unit
+        if measurements is None:
+            return (unit,)
+        pairs = tuple(zip(mentioned, mentioned[1:]))
+    else:
+        pairs = ((mentioned[0], mentioned[-1]),)
 
-    payload = unit.to_record()
-    payload["comparison"] = {
-        "baseline_label": baseline_label,
-        "target_label": target_label,
-        "axis_names": [changed[0].name],
-        "comparable": True,
-        "incomparability_reasons": [],
-    }
-    payload["attribution_scope"] = "association_only"
-    payload["resolution_status"] = "partial"
-    payload["selection_reason"] = (
-        "Result groups were bound to unambiguous same-document experimental "
-        "conditions; process attribution awaits deterministic comparison."
+    generated: list[ExtractedEvidenceDraft] = []
+    for pair_index, (baseline_item, target_item) in enumerate(pairs):
+        _baseline_start, _baseline_end, baseline_label, baseline = baseline_item
+        _target_start, _target_end, target_label, target = target_item
+        baseline_process = {
+            property_matching.normalize_property_label(item.name)
+            or _objective_column_key(item.name): item
+            for item in baseline.scientific_context.process
+        }
+        target_process = {
+            property_matching.normalize_property_label(item.name)
+            or _objective_column_key(item.name): item
+            for item in target.scientific_context.process
+        }
+        if set(baseline_process) != set(target_process):
+            return (unit,)
+        changed = [
+            target_process[key]
+            for key in sorted(baseline_process)
+            if (
+                baseline_process[key].value != target_process[key].value
+                or baseline_process[key].unit != target_process[key].unit
+            )
+        ]
+        if len(changed) != 1:
+            return (unit,)
+
+        payload = unit.to_record()
+        if len(pairs) > 1:
+            identity = json.dumps(
+                [unit.evidence_id, baseline_label, target_label],
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+            payload["evidence_id"] = (
+                f"evd_{sha1(identity.encode('utf-8')).hexdigest()[:24]}"
+            )
+        payload["comparison"] = {
+            "baseline_label": baseline_label,
+            "target_label": target_label,
+            "axis_names": [changed[0].name],
+            "comparable": True,
+            "incomparability_reasons": [],
+        }
+        if measurements is not None:
+            baseline_value, baseline_unit = measurements[pair_index]
+            target_value, target_unit = measurements[pair_index + 1]
+            pair_direction, comparable_values, _reason = (
+                _objective_pairwise_result_direction(
+                    baseline_value,
+                    target_value,
+                )
+            )
+            source_direction = unit.reported_result.direction
+            if not comparable_values or (
+                source_direction in {"increase", "decrease"}
+                and pair_direction != source_direction
+            ):
+                return (unit,)
+            result_payload = unit.reported_result.to_record()
+            result_payload.update(
+                {
+                    "value": target_value,
+                    "baseline_value": baseline_value,
+                    "target_value": target_value,
+                    "unit": target_unit or baseline_unit,
+                    "direction": (
+                        source_direction
+                        if source_direction in {"improve", "worsen"}
+                        else pair_direction
+                    ),
+                }
+            )
+            payload["reported_result"] = result_payload
+        payload["attribution_scope"] = "association_only"
+        payload["resolution_status"] = "partial"
+        payload["selection_reason"] = (
+            "Result groups were bound to unambiguous same-document experimental "
+            "conditions; process attribution awaits deterministic comparison."
+        )
+        generated.append(ExtractedEvidenceDraft.from_mapping(payload))
+    return tuple(generated)
+
+
+def _objective_directional_result_claim_context(
+    source_text: str,
+    *,
+    result_position: int,
+    result_text: str,
+) -> str:
+    claim_tail = source_text[
+        result_position : result_position + len(result_text) + 400
+    ]
+    sentence_end = re.compile(r"(?<=[.!?])(?:\s+|$)").search(
+        claim_tail,
+        min(len(result_text), len(claim_tail)),
     )
-    return ExtractedEvidenceDraft.from_mapping(payload)
+    if sentence_end is None:
+        return claim_tail
+    return claim_tail[: sentence_end.start()]
 
 
 def _objective_explicit_sample_label(
@@ -837,15 +930,64 @@ def _objective_explicit_sample_label(
 
 
 def _objective_exact_label_position(source_text: str, label: str) -> int:
+    span = _objective_exact_label_span(source_text, label)
+    return span[0] if span is not None else -1
+
+
+def _objective_exact_label_span(
+    source_text: str,
+    label: str,
+) -> tuple[int, int] | None:
     parts = tuple(re.findall(r"[^\W\d_]+|\d+", str(label), flags=re.UNICODE))
     if not parts:
-        return -1
-    match = re.search(
-        r"(?<!\w)" + r"[\W_]*".join(re.escape(part) for part in parts) + r"(?!\w)",
-        source_text,
-        flags=re.IGNORECASE,
+        return None
+    patterns = tuple(
+        (
+            r"\s*".join(re.escape(character) for character in part)
+            if part.isdigit() and len(part) > 1
+            else re.escape(part)
+        )
+        for part in parts
     )
-    return match.start() if match is not None else -1
+    pattern = r"(?<!\w)" + r"[\W_]*".join(patterns) + r"(?!\w)"
+    for match in re.finditer(pattern, source_text, flags=re.IGNORECASE):
+        preceding = source_text[: match.start()].rstrip()
+        following = source_text[match.end() :].lstrip()
+        if parts[0].isdigit() and preceding and preceding[-1].isdigit():
+            continue
+        if parts[-1].isdigit() and following and following[0].isdigit():
+            continue
+        return match.start(), match.end()
+    return None
+
+
+def _objective_result_series_measurements(
+    source_text: str,
+    mentioned: list[tuple[int, int, str, ExtractedEvidenceDraft]],
+    *,
+    fallback_unit: str | None,
+) -> tuple[tuple[int | float, str | None], ...] | None:
+    measurements: list[tuple[int | float, str | None]] = []
+    previous_label_end = 0
+    for label_start, label_end, _label, _condition in mentioned:
+        segment = source_text[previous_label_end:label_start]
+        match = _RESULT_SERIES_MEASUREMENT_PATTERN.search(segment)
+        if match is None:
+            return None
+        value_text = match.group("value")
+        value = float(value_text)
+        if (
+            value.is_integer()
+            and "." not in value_text
+            and "e" not in value_text.casefold()
+        ):
+            value = int(value)
+        measurements.append((value, match.group("unit") or fallback_unit))
+        previous_label_end = label_end
+    units = {unit.casefold() for _value, unit in measurements if unit}
+    if len(units) > 1:
+        return None
+    return tuple(measurements)
 
 
 def _objective_explicit_sample_identity(

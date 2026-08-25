@@ -5,10 +5,14 @@ from application.core.objectives.analysis.diagnostics import (
 )
 from application.core.objectives.analysis.evidence_materialization import (
     _analysis_contributions,
+    _canonical_objective_evidence_axes,
     _record_material_scope_exclusions,
     materialize_evidence,
 )
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
+from application.core.objectives.analysis.finding_synthesis import (
+    FindingSynthesisService,
+)
 from application.core.objectives.analysis.source_extraction import (
     ExtractedEvidenceDraft,
 )
@@ -180,6 +184,81 @@ def test_out_of_scope_result_records_bounded_no_comparable_evidence_trace() -> N
         "evidence_record_count": 0,
         "paper_disposition_counts": {"no_comparable_evidence": 1},
     }
+
+
+def test_materialization_canonicalizes_elongation_to_ductility_objective() -> None:
+    objective = research_objective(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-energy-ductility",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["energy input"],
+            "outcomes": ["ductility"],
+        }
+    )
+    draft = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "draft-energy-ductility",
+            "objective_id": objective.objective_id,
+            "document_id": "paper-1",
+            "source_kind": "text_window",
+            "source_ref": "result-1",
+            "evidence_role": "direct_result",
+            "selection_status": "extracted",
+            "changed_variables": [
+                {
+                    "name": "Laser power, P",
+                    "baseline_value": "1000 W",
+                    "target_value": "850 W",
+                }
+            ],
+            "comparison": {
+                "baseline_label": "200-1000",
+                "target_label": "200-850",
+                "axis_names": ["Laser power, P"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "reported_result": {
+                "outcome": "elongation",
+                "baseline_value": 20.1,
+                "target_value": 17.0,
+                "value": 17.0,
+                "unit": "%",
+                "direction": "decrease",
+                "result_text": "elongation decreased from 20.1% to 17.0%",
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {
+                "material": [{"name": "material", "value": "Ti-6Al-4V"}],
+                "process": [
+                    {
+                        "name": "Input current (induction heater), I",
+                        "value": "200 A",
+                    }
+                ],
+            },
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        }
+    )
+
+    canonical = _canonical_objective_evidence_axes(draft, objective=objective)
+    evidence = ObjectiveEvidence.from_mapping(
+        {
+            **canonical.to_record(),
+            "collection_id": objective.collection_id,
+            "analysis_version": 1,
+            "source_excerpt": "elongation decreased from 20.1% to 17.0%",
+        }
+    )
+
+    assert canonical.reported_result is not None
+    assert canonical.reported_result.outcome == "ductility"
+    assert FindingSynthesisService.is_comparable_result_evidence(
+        objective,
+        evidence,
+    )
 
 
 def test_material_scope_exclusion_records_source_decision_trace() -> None:

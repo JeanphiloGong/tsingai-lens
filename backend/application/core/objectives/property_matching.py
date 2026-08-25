@@ -209,9 +209,12 @@ _VARIABLE_THEME_PATTERNS = (
     (
         "laser exposure condition",
         re.compile(
-            r"\b(?:laser (?:power|energy)|scann?ing (?:speed|strategy)|"
+            r"(?:\b(?:laser (?:power|energy)|scann?ing (?:speed|strategy)|"
             r"scan speed|hatch spacing|volumetric energy density|"
-            r"energy density|exposure time)\b",
+            r"energy density|exposure time|"
+            r"induct(?:ive|ion(?: heating)?) energy|"
+            r"induction (?:heater |heating )?input current)\b|"
+            r"\binput current\s*\(\s*induction heater\s*\))",
             re.IGNORECASE,
         ),
     ),
@@ -231,6 +234,10 @@ _VARIABLE_THEME_PATTERNS = (
     ),
 )
 _VARIABLE_THEME_LABELS = frozenset(label for label, _ in _VARIABLE_THEME_PATTERNS)
+_OBJECTIVE_VARIABLE_THEME_ALIASES = {
+    "energy input": "laser exposure condition",
+    "laser energy input": "laser exposure condition",
+}
 _STRUCTURAL_TARGET_AXES = frozenset(
     {"densification", "relative density", "microstructure"}
 )
@@ -689,19 +696,29 @@ def variable_matches_objective_scope(
         return False
     if axis_values_match(source, objective):
         return True
-    objective_key = axis_key(objective)
-    return (
-        objective_key in _VARIABLE_THEME_LABELS
-        and objective_key in variable_theme_labels(source)
+    objective_theme = objective_variable_theme(objective)
+    return bool(
+        objective_theme and objective_theme in variable_theme_labels(source)
     )
+
+
+def objective_variable_theme(value: Any) -> str | None:
+    """Resolve an explicit umbrella Objective variable to one research theme."""
+
+    key = axis_key(value)
+    if key in _VARIABLE_THEME_LABELS:
+        return key
+    return _OBJECTIVE_VARIABLE_THEME_ALIASES.get(key)
 
 
 def source_text_mentions_objective_variable(text: str, objective_variable: str) -> bool:
     if source_text_mentions_axis(text, objective_variable):
         return True
-    objective_key = axis_key(objective_variable)
+    objective_theme = objective_variable_theme(objective_variable)
+    if objective_theme is None:
+        return False
     return any(
-        label == objective_key and pattern.search(text) is not None
+        label == objective_theme and pattern.search(text) is not None
         for label, pattern in _VARIABLE_THEME_PATTERNS
     )
 
@@ -850,7 +867,7 @@ def _source_text_mentions_single_axis(text: str, axis: str) -> bool:
             flags=re.IGNORECASE,
         )
     text_tokens = axis_tokens(axis_key(text))
-    axis_token_values = axis_tokens(axis_key(axis))
+    axis_token_values = axis_tokens(axis_key(normalized_axis or axis))
     if not axis_token_values or not text_tokens:
         return False
     if normalized_axis:

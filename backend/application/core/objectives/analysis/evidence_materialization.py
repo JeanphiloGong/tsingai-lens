@@ -567,7 +567,7 @@ def _canonical_objective_evidence_axes(
                 if property_matching.property_matches_target_axes(
                     source_outcome,
                     target_axes=(
-                        axis,
+                        property_matching.normalize_property_label(axis) or axis,
                         *property_matching.broad_outcome_expansions(axis),
                     ),
                 )

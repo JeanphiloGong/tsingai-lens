@@ -119,6 +119,51 @@ def test_variable_theme_membership_does_not_create_axis_equivalence() -> None:
     )
 
 
+def test_energy_input_scope_covers_precise_laser_interventions_without_equating_them() -> None:
+    assert property_matching.variable_matches_objective_scope(
+        "laser power",
+        "energy input",
+    )
+    assert property_matching.variable_matches_objective_scope(
+        "scan speed",
+        "energy input",
+    )
+    assert property_matching.variable_matches_objective_scope(
+        "volumetric energy density",
+        "energy input (laser power, scan speed, energy density)",
+    )
+    assert not property_matching.axis_values_match("laser power", "scan speed")
+    assert (
+        property_matching.resolve_objective_axis(
+            "laser power",
+            ("energy input (laser power, scan speed, energy density)",),
+        )
+        is None
+    )
+
+
+def test_source_text_matches_normalized_objective_outcome_alias() -> None:
+    assert property_matching.source_text_mentions_axis(
+        "Increasing laser power enhanced elongation from 15.4% to 20.1%.",
+        "ductility",
+    )
+
+
+@pytest.mark.parametrize(
+    "source_text",
+    (
+        "Input current (induction heater), I",
+        "The inductive energy was increased during deposition.",
+        "The induction heating input current was 200 A.",
+    ),
+)
+def test_energy_input_scope_covers_induction_heating_energy(source_text: str) -> None:
+    assert property_matching.source_text_mentions_objective_variable(
+        source_text,
+        "energy input",
+    )
+
+
 def test_build_preheating_is_outside_the_thermal_post_processing_theme() -> None:
     assert not property_matching.variable_matches_objective_scope(
         "base plate preheating temperature",

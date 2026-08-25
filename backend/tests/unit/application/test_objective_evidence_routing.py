@@ -1683,6 +1683,36 @@ def test_research_objective_tree_routing_recognizes_preheating_crack_results():
     )
 
 
+def test_research_objective_tree_routing_recognizes_energy_input_ductility_result():
+    objective_context = _research_objective(
+        {
+            "objective_id": "obj-energy-ductility",
+            "variables": ["energy input"],
+            "outcomes": ["ductility"],
+        }
+    )
+
+    direct_results = (
+        (
+            "The increases in input energy including laser power and input "
+            "current lead to the reduction in tensile strength while enhancing "
+            "the elongation from 14.2% to 20.1%."
+        ),
+        (
+            "Increasing laser power enhanced elongation from 15.4% to 20.1% in "
+            "the Ti-6Al-4V samples."
+        ),
+    )
+
+    assert all(
+        evidence_routing._route_text_candidate_is_direct_result(
+            objective_context=objective_context,
+            candidate={"text": text},
+        )
+        for text in direct_results
+    )
+
+
 def test_research_objective_tree_routing_excludes_non_block_caption_refs():
     frame = PaperAnalysisFrame.from_mapping(
         {

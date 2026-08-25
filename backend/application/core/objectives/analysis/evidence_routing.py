@@ -1685,7 +1685,7 @@ def _route_text_candidate_is_direct_result(
     if not text:
         return False
     mentions_variable = any(
-        property_matching.source_text_mentions_axis(text, axis)
+        property_matching.source_text_mentions_objective_variable(text, axis)
         for axis in objective_context.variables
     )
     mentions_outcome = any(
@@ -1721,11 +1721,14 @@ def _route_text_candidate_is_direct_result(
             "compared with",
             "compared to",
             "comparing",
-            "decreased",
+            "decreas",
             "diminish",
+            "enhanc",
             "exhibited",
             "higher than",
-            "increased",
+            "improv",
+            "increas",
+            "lead to",
             "lower than",
             "not significantly influence",
             "observed",
@@ -1865,7 +1868,10 @@ def _route_text_candidate_score(
         property_matching.axis_key(term)
         for term in (*objective_context.variables, *objective_context.outcomes)
     }
-    for term in (*objective_context.variables, *objective_context.outcomes):
+    for term in objective_context.variables:
+        if property_matching.source_text_mentions_objective_variable(text, term):
+            score += 4
+    for term in objective_context.outcomes:
         if property_matching.source_text_mentions_axis(text, term):
             score += 4
     for term in (*frame.changed_variables, *frame.measured_property_scope):

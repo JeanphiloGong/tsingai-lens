@@ -2399,6 +2399,47 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
                         "source_unit_ids": [source_ids["review-citation"]],
                     }
                 ],
+                review_synthesis={
+                    "synthesis_claims": [
+                        {
+                            "content": (
+                                "Across the reviewed studies, preheating generally "
+                                "reduced residual stress."
+                            ),
+                            "variables": ["preheating condition"],
+                            "outcomes": ["residual stress"],
+                            "source_unit_ids": [source_ids["review-synthesis"]],
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "disputes": [
+                        {
+                            "content": "Porosity trends disagree across scan strategies.",
+                            "variables": ["scan strategy"],
+                            "outcomes": ["porosity"],
+                            "source_unit_ids": [source_ids["review-synthesis"]],
+                            "confidence": 0.7,
+                        }
+                    ],
+                    "evidence_gaps": [
+                        {
+                            "content": "Few studies validate residual stress in situ.",
+                            "outcomes": ["residual stress"],
+                            "conditions": ["in situ validation"],
+                            "source_unit_ids": [source_ids["review-synthesis"]],
+                            "confidence": 0.75,
+                        }
+                    ],
+                    "citation_leads": [
+                        {
+                            "content": "Miranda et al. [20]",
+                            "variables": ["build plate temperature"],
+                            "outcomes": ["residual stress"],
+                            "source_unit_ids": [source_ids["review-citation"]],
+                            "confidence": 0.8,
+                        }
+                    ],
+                },
             )
 
     extractor = ReviewExtractor()
@@ -2425,6 +2466,17 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
         "no_study_signal",
         "relationship_emitted",
     ]
+    assert skim.review_synthesis.synthesis_claims[0].source_refs[0].source_ref == (
+        "review-synthesis"
+    )
+    assert skim.review_synthesis.disputes[0].outcomes == ("porosity",)
+    assert skim.review_synthesis.evidence_gaps[0].conditions == (
+        "in situ validation",
+    )
+    assert skim.review_synthesis.citation_leads[0].content == "Miranda et al. [20]"
+    assert all(
+        study.experiment_label != "Miranda et al." for study in skim.studies
+    )
 
 
 def test_unknown_source_unit_id_marks_the_window_failed():

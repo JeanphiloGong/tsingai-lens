@@ -178,6 +178,107 @@ def _paper_study_source_refs(value: Any) -> tuple[PaperStudySourceRef, ...]:
 
 
 @dataclass(frozen=True)
+class ReviewKnowledgeItem:
+    """One review-author judgment or primary-paper navigation lead."""
+
+    content: str
+    material_scope: tuple[str, ...]
+    variables: tuple[str, ...]
+    outcomes: tuple[str, ...]
+    conditions: tuple[str, ...]
+    source_refs: tuple[PaperStudySourceRef, ...]
+    confidence: float
+
+    def __post_init__(self) -> None:
+        if not self.content.strip():
+            raise ValueError("review knowledge content cannot be empty")
+        if not self.source_refs:
+            raise ValueError("review knowledge requires a source reference")
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any]) -> "ReviewKnowledgeItem":
+        return cls(
+            content=_text(payload.get("content")) or "",
+            material_scope=normalize_objective_terms(payload.get("material_scope")),
+            variables=normalize_objective_terms(payload.get("variables")),
+            outcomes=normalize_objective_terms(payload.get("outcomes")),
+            conditions=normalize_objective_terms(payload.get("conditions")),
+            source_refs=_paper_study_source_refs(payload.get("source_refs")),
+            confidence=normalize_objective_confidence(payload.get("confidence")),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "content": self.content,
+            "material_scope": list(self.material_scope),
+            "variables": list(self.variables),
+            "outcomes": list(self.outcomes),
+            "conditions": list(self.conditions),
+            "source_refs": [item.to_record() for item in self.source_refs],
+            "confidence": self.confidence,
+        }
+
+
+@dataclass(frozen=True)
+class ReviewSynthesisMap:
+    """Source-linked knowledge expressed by a review's authors."""
+
+    synthesis_claims: tuple[ReviewKnowledgeItem, ...] = ()
+    disputes: tuple[ReviewKnowledgeItem, ...] = ()
+    evidence_gaps: tuple[ReviewKnowledgeItem, ...] = ()
+    citation_leads: tuple[ReviewKnowledgeItem, ...] = ()
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "synthesis_claims",
+            "disputes",
+            "evidence_gaps",
+            "citation_leads",
+        ):
+            object.__setattr__(self, field_name, tuple(getattr(self, field_name)))
+
+    @property
+    def is_empty(self) -> bool:
+        return not any(
+            (
+                self.synthesis_claims,
+                self.disputes,
+                self.evidence_gaps,
+                self.citation_leads,
+            )
+        )
+
+    @classmethod
+    def from_mapping(cls, payload: Mapping[str, Any] | None) -> "ReviewSynthesisMap":
+        source = payload or {}
+
+        def items(field_name: str) -> tuple[ReviewKnowledgeItem, ...]:
+            return tuple(
+                ReviewKnowledgeItem.from_mapping(item)
+                for item in source.get(field_name) or ()
+                if isinstance(item, Mapping)
+            )
+
+        return cls(
+            synthesis_claims=items("synthesis_claims"),
+            disputes=items("disputes"),
+            evidence_gaps=items("evidence_gaps"),
+            citation_leads=items("citation_leads"),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            field_name: [item.to_record() for item in getattr(self, field_name)]
+            for field_name in (
+                "synthesis_claims",
+                "disputes",
+                "evidence_gaps",
+                "citation_leads",
+            )
+        }
+
+
+@dataclass(frozen=True)
 class PaperStudyRelationship:
     """One Source-supported joint-factor-to-outcome candidate-scope link."""
 
@@ -692,6 +793,7 @@ class PaperSkim:
     source_unit_coverage: tuple[PaperSourceUnitCoverage, ...] = ()
     map_status: str = "unknown"
     map_limitations: tuple[str, ...] = ()
+    review_synthesis: ReviewSynthesisMap = field(default_factory=ReviewSynthesisMap)
 
     def __post_init__(self) -> None:
         if not self.document_id.strip():
@@ -710,6 +812,10 @@ class PaperSkim:
             "map_limitations",
             normalize_objective_terms(self.map_limitations),
         )
+        if not isinstance(self.review_synthesis, ReviewSynthesisMap):
+            raise TypeError("paper skim review_synthesis must be a ReviewSynthesisMap")
+        if self.doc_role != "review" and not self.review_synthesis.is_empty:
+            raise ValueError("review synthesis requires a review paper")
         if any(study.document_id != self.document_id for study in self.studies):
             raise ValueError("paper skim contains a study owned by another document")
         study_ids = [study.study_id for study in self.studies]
@@ -758,6 +864,11 @@ class PaperSkim:
             map_limitations=normalize_objective_terms(
                 payload.get("map_limitations")
             ),
+            review_synthesis=ReviewSynthesisMap.from_mapping(
+                payload.get("review_synthesis")
+                if isinstance(payload.get("review_synthesis"), Mapping)
+                else None
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -776,6 +887,7 @@ class PaperSkim:
             ],
             "map_status": self.map_status,
             "map_limitations": list(self.map_limitations),
+            "review_synthesis": self.review_synthesis.to_record(),
         }
 
 

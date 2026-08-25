@@ -91,13 +91,20 @@ Objective analysis.
   prompt, response schema, or domain state.
 - `paper_skim_service.py`
   Orchestrates the pre-Objective paper-map stage. From every parsed paper it
-  selects at most 16 high-level Source items: abstract/highlights, conclusion or
-  summary, a bounded overview sample, and a few table/figure captions. When a
-  poorly structured paper has none of those sections, it samples the first and
-  last four narrative items. Detailed Methods, Results paragraphs, and table
-  rows remain available to confirmed-Objective analysis but do not enter
-  automatic Objective discovery. Table-map input carries a compact caption and
-  bounded column headers; it never carries measurement rows.
+  first selects at most 16 high-level Source items: abstract/highlights,
+  conclusion or summary, a bounded overview sample, and balanced table/figure
+  captions. When that round cannot establish one usable research scope or one
+  review-author judgment, it performs one targeted expansion of at most eight
+  previously unread Sources for the missing variable, outcome, ownership, or
+  outcome specificity. There is no third scientific reading round. Remaining
+  uncertainty is persisted as `insufficient_map` with explicit
+  `map_limitations`; it is not treated as evidence that the paper is irrelevant.
+  When a poorly structured paper has none of the high-level sections, the first
+  round samples the first and last four narrative items. Detailed Methods and
+  Results paragraphs plus unread visual summaries remain available to targeted
+  expansion. Table measurement rows remain exclusive to confirmed-Objective
+  analysis. Table-map input carries a compact caption and bounded column
+  headers; it never carries measurement rows.
 
   Selected items retain their original document-order identity, are grouped by
   broad reading role, packed up to 12 per request, and preflighted with the
@@ -122,7 +129,11 @@ Objective analysis.
   unresolved instead of being guessed. Review input retains only review-author
   synthesis and never reconstructs a cited primary experiment. The resulting
   `PaperSkim` persists Source-linked candidate-scope relationships, unresolved
-  axes, and one coverage result for every selected Source unit. Coverage
+  axes, final map sufficiency, and one coverage result for every selected Source
+  unit. For review papers it separately persists Source-linked author synthesis,
+  disputes, evidence gaps, and citation leads. Citation leads are navigation to
+  candidate primary papers only; none of these review records is experimental
+  Evidence or a reconstructed cited experiment. Coverage
   completeness refers to that bounded map, not to every Source in the full
   paper.
 - `discovery/study_window.py`
@@ -232,14 +243,17 @@ build, allocates a new `analysis_version`, and returns:
 - `Finding[]`
 
 Objective discovery has separate prompt and output bounds. Per-paper mapping
-uses a deterministic researcher-like skim rather than full-document extraction:
-abstract/highlights, conclusion or summary, a bounded overview sample, and a few
-visual captions. A poorly structured document falls back to bounded narrative
-edge sampling. At most 16 selected items can enter this stage, and no table row
-does. The exact system message, user message, payload, and response schema are
-counted against a 12,288-token prompt budget before execution. Independent broad
-reading-role windows run with `CORE_EXTRACTION_MAX_CONCURRENCY` (default `4`)
-and merge back in Source order.
+starts with a deterministic researcher-like skim rather than full-document
+extraction: abstract/highlights, conclusion or summary, a bounded overview
+sample, and balanced visual captions. A poorly structured document falls back
+to bounded narrative edge sampling. At most 16 selected items enter this first
+round. If its scientific map is incomplete, one targeted round may inspect at
+most eight previously unread Sources, including detailed text needed to resolve
+the named gap. After that round, absence remains `insufficient_map` rather than
+triggering unbounded reading or automatic exclusion. The exact system message,
+user message, payload, and response schema are counted against a 12,288-token
+prompt budget before execution. Independent reading-role windows run with
+`CORE_EXTRACTION_MAX_CONCURRENCY` (default `4`) and merge back in Source order.
 
 Each model relationship maps an explicitly stated joint factor set to one
 specific outcome axis. It authorizes a candidate question only; it does not

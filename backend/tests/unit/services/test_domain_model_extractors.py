@@ -106,6 +106,19 @@ def test_paper_skim_contract_bounds_model_output():
     assert "source_unit_coverage" not in schema
     assert "StructuredPaperSourceUnitCoverage" not in model_schema.get("$defs", {})
     assert schema["warnings"]["items"]["maxLength"] == 240
+    review_schema = model_schema["$defs"]["StructuredReviewSynthesisMap"][
+        "properties"
+    ]
+    review_item_schema = model_schema["$defs"]["StructuredReviewKnowledgeItem"][
+        "properties"
+    ]
+    assert review_schema["synthesis_claims"]["maxItems"] == 4
+    assert review_schema["disputes"]["maxItems"] == 4
+    assert review_schema["evidence_gaps"]["maxItems"] == 4
+    assert review_schema["citation_leads"]["maxItems"] == 6
+    assert review_item_schema["content"]["maxLength"] == 400
+    assert review_item_schema["source_unit_ids"]["minItems"] == 1
+    assert review_item_schema["source_unit_ids"]["maxItems"] == 4
 
 
 def test_paper_source_signal_screen_contract_is_source_local_and_compact():
@@ -547,6 +560,11 @@ def test_review_paper_skim_prompt_extracts_synthesis_not_cited_experiments():
     assert "return no study or unresolved signal" in user_prompt
     assert "Across studies, preheating generally reduced residual stress" in user_prompt
     assert "Miranda et al. [20]" in user_prompt
+    assert "synthesis_claims" in user_prompt
+    assert "disputes" in user_prompt
+    assert "evidence_gaps" in user_prompt
+    assert "citation_leads" in user_prompt
+    assert "never primary Evidence" in user_prompt
 
 
 def test_review_paper_skim_extractor_keeps_only_review_author_synthesis():
@@ -587,6 +605,25 @@ def test_review_paper_skim_extractor_keeps_only_review_author_synthesis():
                         "source_unit_ids": [source_unit_id],
                     }
                 ],
+                "review_synthesis": {
+                    "synthesis_claims": [
+                        {
+                            "content": "Preheating generally reduces residual stress.",
+                            "variables": ["preheating condition"],
+                            "outcomes": ["residual stress"],
+                            "source_unit_ids": [source_unit_id],
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "citation_leads": [
+                        {
+                            "content": "Miranda et al. [20]",
+                            "outcomes": ["residual stress"],
+                            "source_unit_ids": [source_unit_id],
+                            "confidence": 0.8,
+                        }
+                    ],
+                },
             }
         )
     )
@@ -613,6 +650,10 @@ def test_review_paper_skim_extractor_keeps_only_review_author_synthesis():
     assert [study.claim_scope for study in skim.studies] == ["synthesis"]
     assert skim.studies[0].relationships[0].outcome == "residual stress"
     assert skim.unresolved_signals == []
+    assert skim.review_synthesis.synthesis_claims[0].content.startswith(
+        "Preheating"
+    )
+    assert skim.review_synthesis.citation_leads[0].content == "Miranda et al. [20]"
 
 
 def test_research_axis_canonicalization_prompt_defines_membership_boundaries():

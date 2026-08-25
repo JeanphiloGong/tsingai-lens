@@ -25,6 +25,7 @@ from application.core.objectives.discovery.study_window import (
     StructuredPaperSkim,
     StructuredPaperStudy,
     StructuredPaperStudyRelationship,
+    StructuredReviewSynthesisMap,
     _review_synthesis_only,
 )
 from application.core.objectives.llm.structured_response import (
@@ -37,6 +38,8 @@ from domain.core import (
     PaperStudy,
     PaperStudyRelationship,
     PaperStudySignal,
+    ReviewKnowledgeItem,
+    ReviewSynthesisMap,
 )
 from domain.source import SourceDocument, SourceDocumentTree
 
@@ -1762,9 +1765,10 @@ class PaperSkimService:
         parsed: StructuredPaperSkim,
     ) -> tuple[PaperSkim, tuple[_PaperSignalInput, ...]]:
         document_profile = payload.get("document_profile")
-        if isinstance(document_profile, Mapping) and (
+        is_review = isinstance(document_profile, Mapping) and (
             str(document_profile.get("doc_type") or "").strip() == "review"
-        ):
+        )
+        if is_review:
             parsed = _review_synthesis_only(parsed)
         if parsed.output_saturated:
             raise StructuredOutputSaturatedError(
@@ -1885,6 +1889,14 @@ class PaperSkimService:
             relationship_source_unit_ids=relationship_source_unit_ids,
             signal_source_unit_ids=signal_source_unit_ids,
         )
+        review_synthesis = (
+            self._review_synthesis_from_window_result(
+                parsed.review_synthesis,
+                source_units=source_units,
+            )
+            if is_review
+            else ReviewSynthesisMap()
+        )
         return (
             PaperSkim.from_mapping(
                 {
@@ -1897,6 +1909,7 @@ class PaperSkimService:
                     "source_unit_coverage": [
                         item.to_record() for item in source_unit_coverage
                     ],
+                    "review_synthesis": review_synthesis.to_record(),
                 }
             ),
             tuple(signals),
@@ -2035,6 +2048,39 @@ class PaperSkimService:
                 "relationships": relationship_records,
             }
         )
+
+    @classmethod
+    def _review_synthesis_from_window_result(
+        cls,
+        review_map: StructuredReviewSynthesisMap,
+        *,
+        source_units: Mapping[str, Mapping[str, Any]],
+    ) -> ReviewSynthesisMap:
+        record: dict[str, list[dict[str, Any]]] = {}
+        for field_name in (
+            "synthesis_claims",
+            "disputes",
+            "evidence_gaps",
+            "citation_leads",
+        ):
+            items: list[dict[str, Any]] = []
+            for item in getattr(review_map, field_name):
+                resolved = cls._resolved_source_units(
+                    item.source_unit_ids,
+                    source_units=source_units,
+                )
+                if resolved is None:
+                    raise ValueError(
+                        "review knowledge contains an unknown Source-unit id"
+                    )
+                items.append(
+                    {
+                        **item.model_dump(exclude={"source_unit_ids"}),
+                        "source_refs": cls._source_refs_from_units(resolved),
+                    }
+                )
+            record[field_name] = items
+        return ReviewSynthesisMap.from_mapping(record)
 
     @staticmethod
     def _relationship_conflicts_with_fixed_conditions(
@@ -2772,6 +2818,13 @@ class PaperSkimService:
                 for skim in window_skims
                 for item in skim.source_unit_coverage
             ),
+            review_synthesis=(
+                self._consolidate_review_synthesis(
+                    tuple(skim.review_synthesis for skim in window_skims)
+                )
+                if doc_role == "review"
+                else ReviewSynthesisMap()
+            ),
         )
 
     @staticmethod
@@ -2793,7 +2846,14 @@ class PaperSkimService:
         limitations: list[str] = []
         if not skim.coverage_complete:
             limitations.append("source_extraction_incomplete")
-        if owned_relationships:
+        has_review_judgment = skim.doc_role == "review" and any(
+            (
+                skim.review_synthesis.synthesis_claims,
+                skim.review_synthesis.disputes,
+                skim.review_synthesis.evidence_gaps,
+            )
+        )
+        if owned_relationships or has_review_judgment:
             return _PaperMapAssessment(
                 status="sufficient",
                 limitations=tuple(limitations),
@@ -2849,6 +2909,59 @@ class PaperSkimService:
             limitations=tuple(limitations or ("missing_research_scope",)),
             expansion_focus=focus,
         )
+
+    @classmethod
+    def _consolidate_review_synthesis(
+        cls,
+        maps: tuple[ReviewSynthesisMap, ...],
+    ) -> ReviewSynthesisMap:
+        return ReviewSynthesisMap(
+            **{
+                field_name: cls._merge_review_knowledge_items(
+                    tuple(
+                        item
+                        for review_map in maps
+                        for item in getattr(review_map, field_name)
+                    )
+                )
+                for field_name in (
+                    "synthesis_claims",
+                    "disputes",
+                    "evidence_gaps",
+                    "citation_leads",
+                )
+            }
+        )
+
+    @staticmethod
+    def _merge_review_knowledge_items(
+        items: tuple[ReviewKnowledgeItem, ...],
+    ) -> tuple[ReviewKnowledgeItem, ...]:
+        merged: list[ReviewKnowledgeItem] = []
+        identities: dict[tuple[object, ...], int] = {}
+        for item in items:
+            identity = (
+                item.content.casefold(),
+                tuple(value.casefold() for value in item.material_scope),
+                tuple(value.casefold() for value in item.variables),
+                tuple(value.casefold() for value in item.outcomes),
+                tuple(value.casefold() for value in item.conditions),
+            )
+            position = identities.get(identity)
+            if position is None:
+                identities[identity] = len(merged)
+                merged.append(item)
+                continue
+            existing = merged[position]
+            source_refs = tuple(
+                dict.fromkeys((*existing.source_refs, *item.source_refs))
+            )
+            merged[position] = replace(
+                existing,
+                source_refs=source_refs,
+                confidence=max(existing.confidence, item.confidence),
+            )
+        return tuple(merged)
 
     @staticmethod
     def _study_with_claim_scope(study: PaperStudy, claim_scope: str) -> PaperStudy:

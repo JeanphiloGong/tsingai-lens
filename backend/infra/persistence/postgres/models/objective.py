@@ -54,6 +54,10 @@ class ObjectivePaperSkim(Base):
     __tablename__ = "objective_paper_skims"
     __table_args__ = (
         CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
+        CheckConstraint(
+            "map_status IN ('unknown', 'sufficient', 'insufficient_map')",
+            name="paper_map_status_valid",
+        ),
         ForeignKeyConstraint(
             ["collection_id", "build_id"],
             ["objective_builds.collection_id", "objective_builds.build_id"],
@@ -80,6 +84,15 @@ class ObjectivePaperSkim(Base):
     evidence_density: Mapped[str] = mapped_column(String(64), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     warnings: Mapped[list[str]] = mapped_column(_JSON_DOCUMENT, nullable=False)
+    map_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    map_limitations: Mapped[list[str]] = mapped_column(
+        _JSON_DOCUMENT,
+        nullable=False,
+    )
+    review_synthesis: Mapped[dict[str, Any]] = mapped_column(
+        _JSON_DOCUMENT,
+        nullable=False,
+    )
 
 
 class ObjectivePaperSourceUnitCoverage(Base):

@@ -34,6 +34,8 @@ _STUDY_CONTEXT_VALUE_CHARS = 160
 _VARIED_FACTOR_LIMIT = 12
 _SOURCE_SIGNAL_CONTEXT_LIMIT = 4
 _SOURCE_SIGNAL_LIMIT = 12
+_REVIEW_KNOWLEDGE_ITEM_LIMIT = 4
+_REVIEW_CITATION_LEAD_LIMIT = 6
 
 _MAX_COMPLETION_TOKENS = 2048
 _SOURCE_SIGNAL_MAX_COMPLETION_TOKENS = 2048
@@ -451,6 +453,81 @@ class StructuredPaperSourceSignalScreen(_PaperSkimResponse):
         return self
 
 
+class StructuredReviewKnowledgeItem(_PaperSkimResponse):
+    """One bounded, Source-linked review-author statement or citation lead."""
+
+    content: Annotated[str, Field(min_length=1, max_length=400)]
+    material_scope: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+    variables: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+    outcomes: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+    conditions: list[Annotated[str, Field(max_length=160)]] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+    source_unit_ids: list[
+        Annotated[str, Field(min_length=1, max_length=160)]
+    ] = Field(min_length=1, max_length=4)
+    confidence: float = 0.0
+
+    @field_validator(
+        "material_scope",
+        "variables",
+        "outcomes",
+        "conditions",
+        "source_unit_ids",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list(value)
+
+    @model_validator(mode="after")
+    def _validate_source_unit_ids(self) -> "StructuredReviewKnowledgeItem":
+        normalized = [value.strip() for value in self.source_unit_ids]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("review knowledge Source-unit ids must be unique")
+        return self
+
+
+class StructuredReviewSynthesisMap(_PaperSkimResponse):
+    synthesis_claims: list[StructuredReviewKnowledgeItem] = Field(
+        default_factory=list,
+        max_length=_REVIEW_KNOWLEDGE_ITEM_LIMIT,
+    )
+    disputes: list[StructuredReviewKnowledgeItem] = Field(
+        default_factory=list,
+        max_length=_REVIEW_KNOWLEDGE_ITEM_LIMIT,
+    )
+    evidence_gaps: list[StructuredReviewKnowledgeItem] = Field(
+        default_factory=list,
+        max_length=_REVIEW_KNOWLEDGE_ITEM_LIMIT,
+    )
+    citation_leads: list[StructuredReviewKnowledgeItem] = Field(
+        default_factory=list,
+        max_length=_REVIEW_CITATION_LEAD_LIMIT,
+    )
+
+    @field_validator(
+        "synthesis_claims",
+        "disputes",
+        "evidence_gaps",
+        "citation_leads",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list(value)
+
+
 class StructuredPaperSkim(_PaperSkimResponse):
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
         "uncertain"
@@ -462,6 +539,9 @@ class StructuredPaperSkim(_PaperSkimResponse):
     unresolved_signals: list[StructuredPaperStudySignal] = Field(
         default_factory=list,
         max_length=PAPER_SKIM_UNRESOLVED_SIGNAL_LIMIT,
+    )
+    review_synthesis: StructuredReviewSynthesisMap = Field(
+        default_factory=StructuredReviewSynthesisMap
     )
     output_saturated: bool = False
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
@@ -663,6 +743,10 @@ def _build_review_synthesis_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "unresolved signal.\n"
         "5. Copy only context and Source-unit IDs that directly support the retained "
         "review-author synthesis. Preserve ambiguity with confidence and warnings.\n\n"
+        "6. Record the review authors' statement in `review_synthesis`: use "
+        "`synthesis_claims` for cross-study judgments, `disputes` for explicit "
+        "conflict, `evidence_gaps` for missing evidence or validation, and "
+        "`citation_leads` for named or numbered primary papers worth inspecting.\n\n"
         "HARD RULES\n"
         "- Return no claim_scope=current_work, background, or uncertain study or "
         "signal from a review window; only claim_scope=synthesis is eligible.\n"
@@ -670,6 +754,8 @@ def _build_review_synthesis_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "of an individually cited paper. Those facts require the primary Source.\n"
         "- Do not turn a list of citations into independent support or a causal "
         "relationship.\n"
+        "- Citation leads are navigation only and are never primary Evidence. Keep "
+        "them out of studies and unresolved_signals.\n"
         "- Do not infer scientific content from the title, section name, filename, "
         "or general knowledge.\n"
         "- Return empty arrays when the review authors do not make an eligible "
@@ -688,7 +774,8 @@ def _build_review_synthesis_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "Return empty studies and unresolved_signals.\n\n"
         "OUTPUT CONTRACT\n"
         "- Return doc_role='review', studies, unresolved_signals, evidence_density, "
-        "confidence, warnings, and output_saturated.\n"
+        "confidence, warnings, output_saturated, and `review_synthesis` with "
+        "`synthesis_claims`, `disputes`, `evidence_gaps`, and `citation_leads`.\n"
         "- Every returned study or signal must use claim_scope=synthesis. A study "
         "contains one or more source-supported relationships; every relationship and "
         "signal copies only allowed Source-unit IDs.\n"
@@ -696,6 +783,9 @@ def _build_review_synthesis_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "unresolved synthesis signals. Set output_saturated=true only if eligible "
         "review-author synthesis exceeds these limits. Individually cited studies do "
         "not count toward saturation.\n"
+        "- Return at most 4 synthesis claims, 4 disputes, 4 evidence gaps, and 6 "
+        "citation leads. Each item copies 1-4 allowed Source-unit IDs and includes "
+        "content, scientific scope, and confidence.\n"
         "- Return only compact schema-valid JSON.\n\n"
         "BATCH LINEAGE CONTRACT\n"
         f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}\n"

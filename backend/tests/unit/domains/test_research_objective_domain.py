@@ -17,12 +17,63 @@ from domain.core import (
     PaperStudyDispositionStatus,
     PaperStudyRelationship,
     PaperSkim,
+    ReviewKnowledgeItem,
+    ReviewSynthesisMap,
     ResearchObjective,
     build_research_objective_id,
     is_question_shaped_objective,
     normalize_objective_confidence,
     normalize_objective_terms,
 )
+
+
+def test_review_synthesis_map_round_trips_source_linked_research_judgments() -> None:
+    item = ReviewKnowledgeItem.from_mapping(
+        {
+            "content": "Reported porosity trends disagree across scan strategies.",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["scan strategy"],
+            "outcomes": ["porosity"],
+            "conditions": ["laser powder bed fusion"],
+            "source_refs": [
+                {"source_kind": "block", "source_ref": "review-conclusion"}
+            ],
+            "confidence": 0.82,
+        }
+    )
+    skim = PaperSkim.from_mapping(
+        {
+            "document_id": "review-paper",
+            "doc_role": "review",
+            "review_synthesis": ReviewSynthesisMap(disputes=(item,)).to_record(),
+        }
+    )
+
+    restored = PaperSkim.from_mapping(skim.to_record())
+
+    assert restored == skim
+    assert restored.review_synthesis.disputes == (item,)
+    assert restored.review_synthesis.citation_leads == ()
+
+
+def test_non_review_paper_rejects_review_synthesis_map() -> None:
+    with pytest.raises(ValueError, match="review synthesis requires a review paper"):
+        PaperSkim.from_mapping(
+            {
+                "document_id": "experimental-paper",
+                "doc_role": "experimental",
+                "review_synthesis": {
+                    "evidence_gaps": [
+                        {
+                            "content": "More validation is needed.",
+                            "source_refs": [
+                                {"source_kind": "block", "source_ref": "block-1"}
+                            ],
+                        }
+                    ]
+                },
+            }
+        )
 
 
 def test_paper_source_unit_coverage_requires_status_specific_reason() -> None:

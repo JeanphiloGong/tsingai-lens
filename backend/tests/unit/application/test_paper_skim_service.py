@@ -550,6 +550,21 @@ def test_paper_skim_record_keeps_only_the_stable_source_link():
     assert "source_filename" not in record
 
 
+def test_paper_skim_record_preserves_explicit_map_insufficiency():
+    skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "map_status": "insufficient_map",
+            "map_limitations": ["missing_outcome"],
+        }
+    )
+
+    restored = PaperSkim.from_mapping(skim.to_record())
+
+    assert restored.map_status == "insufficient_map"
+    assert restored.map_limitations == ("missing_outcome",)
+
+
 def test_every_source_unit_receives_one_explicit_coverage_outcome():
     artifacts, tree = _artifacts(
         blocks=[
@@ -741,7 +756,7 @@ def test_failed_window_preserves_valid_results_from_other_windows():
     assert skim.coverage_complete is False
 
 
-def test_unstructured_paper_map_samples_source_edges_with_one_bounded_window():
+def test_unstructured_paper_map_samples_edges_then_expands_once_without_duplicates():
     artifacts, tree = _artifacts(
         blocks=[
             _heading("results", "Results", 1),
@@ -760,18 +775,15 @@ def test_unstructured_paper_map_samples_source_edges_with_one_bounded_window():
 
     skim = _build_skims(artifacts, tree, extractor)[0]
 
-    assert len(extractor.payloads) == 1
+    assert len(extractor.payloads) == 2
     assert all(len(payload["source_units"]) <= 12 for payload in extractor.payloads)
-    assert [item.source_ref for item in skim.source_unit_coverage] == [
-        "result-0",
-        "result-1",
-        "result-2",
-        "result-3",
-        "result-21",
-        "result-22",
-        "result-23",
-        "result-24",
+    covered_refs = [item.source_ref for item in skim.source_unit_coverage]
+    assert covered_refs[:8] == [
+        "result-0", "result-1", "result-2", "result-3",
+        "result-21", "result-22", "result-23", "result-24",
     ]
+    assert len(covered_refs) == len(set(covered_refs)) == 16
+    assert skim.map_status == "insufficient_map"
 
 
 def test_independent_windows_run_concurrently_and_merge_in_source_order(monkeypatch):
@@ -1529,6 +1541,128 @@ def test_paper_map_reads_high_level_scope_before_detailed_experiment_sources():
     assert mapped_refs == {"abstract-scope", "conclusion-scope"}
 
 
+def test_paper_map_balances_table_and_figure_summaries():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("abstract", "Abstract", 1),
+            _paragraph(
+                "abstract-scope",
+                "METHOD_CANDIDATE summarizes the research scope.",
+                2,
+                "Abstract",
+            ),
+        ],
+        tables=[
+            {
+                "table_id": f"table-{position}",
+                "document_id": "paper-1",
+                "table_order": position,
+                "caption_text": f"Table {position} scope",
+                "heading_path": "Results",
+                "column_headers": ["condition", "response"],
+                "table_matrix": [],
+            }
+            for position in range(1, 5)
+        ],
+        figures=[
+            {
+                "figure_id": f"figure-{position}",
+                "document_id": "paper-1",
+                "figure_order": position,
+                "caption_text": f"Figure {position} scope",
+                "heading_path": "Results",
+            }
+            for position in range(1, 5)
+        ],
+    )
+    extractor = _WindowExtractor()
+
+    _build_skims(artifacts, tree, extractor)
+
+    selected_kinds = {
+        str(unit["source_kind"])
+        for payload in extractor.payloads
+        for unit in payload["source_units"]
+    }
+    assert {"table", "figure"} <= selected_kinds
+
+
+def test_paper_map_expands_once_to_results_when_high_level_scope_lacks_outcome():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("abstract", "Abstract", 1),
+            _paragraph(
+                "abstract-variable",
+                "VARIABLE_SIGNAL",
+                2,
+                "Abstract",
+            ),
+            _heading("results", "Results", 3),
+            _paragraph(
+                "result-scope",
+                "RESULT_CANDIDATE",
+                4,
+                "Results",
+            ),
+            _heading("methods", "Materials and Methods", 5),
+            _paragraph(
+                "method-detail",
+                "Detailed preparation remains deferred.",
+                6,
+                "Materials and Methods",
+            ),
+        ]
+    )
+    extractor = _WindowExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert [
+        [unit["source_ref"] for unit in payload["source_units"]]
+        for payload in extractor.payloads
+    ] == [["abstract-variable"], ["result-scope"]]
+    assert skim.map_status == "sufficient"
+    assert skim.map_limitations == ()
+
+
+def test_paper_map_stops_after_one_targeted_expansion_and_records_insufficiency():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("abstract", "Abstract", 1),
+            _paragraph(
+                "abstract-variable",
+                "VARIABLE_SIGNAL",
+                2,
+                "Abstract",
+            ),
+            _heading("results", "Results", 3),
+            _paragraph(
+                "result-background",
+                "No measured response is stated here.",
+                4,
+                "Results",
+            ),
+            _heading("methods", "Materials and Methods", 5),
+            _paragraph(
+                "method-background",
+                "The specimen preparation does not identify a response.",
+                6,
+                "Materials and Methods",
+            ),
+        ]
+    )
+    extractor = _WindowExtractor(reconciliation="unresolved")
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 2
+    assert extractor.payloads[1]["source_units"][0]["source_ref"] == (
+        "result-background"
+    )
+    assert skim.map_status == "insufficient_map"
+    assert "missing_outcome" in skim.map_limitations
+
+
 def test_spaced_abstract_heading_prevents_detailed_source_fallback():
     artifacts, tree = _artifacts(
         blocks=[
@@ -1866,7 +2000,7 @@ def test_paper_map_compacts_figure_caption_before_model_screening():
     assert skim.studies == ()
 
 
-def test_only_high_level_text_and_visual_captions_enter_paper_mapping():
+def test_initial_high_level_map_can_expand_to_results_but_still_defers_methods():
     artifacts, tree = _artifacts(
         blocks=[
             _heading("abstract", "Abstract", 1),
@@ -1925,7 +2059,7 @@ def test_only_high_level_text_and_visual_captions_enter_paper_mapping():
     ]
     assert all_text.count("OVERVIEW_SOURCE") == 1
     assert "METHOD_SOURCE" not in all_text
-    assert "RESULT_SOURCE" not in all_text
+    assert all_text.count("RESULT_SOURCE") == 1
     assert "REFERENCE_SOURCE" not in all_text
     assert all_table_captions == ["TABLE_SOURCE"]
     assert all_figure_captions == ["FIGURE_SOURCE"]
@@ -3358,9 +3492,12 @@ def test_progress_remains_document_scoped_and_exposes_window_position():
 
     _build_skims(artifacts, tree, _WindowExtractor(), progress=progress)
 
-    assert [item["current"] for item in progress] == [1]
-    assert [item["total"] for item in progress] == [1]
-    assert [item["unit"] for item in progress] == ["documents"]
-    assert [item["active_window_position"] for item in progress] == [1]
-    assert [item["active_window_count"] for item in progress] == [1]
-    assert [item["active_window_role"] for item in progress] == ["overview"]
+    assert [item["current"] for item in progress] == [1, 1]
+    assert [item["total"] for item in progress] == [1, 1]
+    assert [item["unit"] for item in progress] == ["documents", "documents"]
+    assert [item["active_window_position"] for item in progress] == [1, 1]
+    assert [item["active_window_count"] for item in progress] == [1, 1]
+    assert [item["active_window_role"] for item in progress] == [
+        "overview",
+        "targeted_missing_outcome",
+    ]

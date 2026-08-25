@@ -690,6 +690,8 @@ class PaperSkim:
     warnings: tuple[str, ...]
     unresolved_signals: tuple[PaperStudySignal, ...] = ()
     source_unit_coverage: tuple[PaperSourceUnitCoverage, ...] = ()
+    map_status: str = "unknown"
+    map_limitations: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.document_id.strip():
@@ -700,6 +702,13 @@ class PaperSkim:
             self,
             "source_unit_coverage",
             tuple(self.source_unit_coverage),
+        )
+        if self.map_status not in {"unknown", "sufficient", "insufficient_map"}:
+            raise ValueError(f"unsupported paper map status: {self.map_status}")
+        object.__setattr__(
+            self,
+            "map_limitations",
+            normalize_objective_terms(self.map_limitations),
         )
         if any(study.document_id != self.document_id for study in self.studies):
             raise ValueError("paper skim contains a study owned by another document")
@@ -745,6 +754,10 @@ class PaperSkim:
                 for item in payload.get("source_unit_coverage") or ()
                 if isinstance(item, Mapping)
             ),
+            map_status=_text(payload.get("map_status")) or "unknown",
+            map_limitations=normalize_objective_terms(
+                payload.get("map_limitations")
+            ),
         )
 
     def to_record(self) -> dict[str, Any]:
@@ -761,6 +774,8 @@ class PaperSkim:
             "source_unit_coverage": [
                 item.to_record() for item in self.source_unit_coverage
             ],
+            "map_status": self.map_status,
+            "map_limitations": list(self.map_limitations),
         }
 
 

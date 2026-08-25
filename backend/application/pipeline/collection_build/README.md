@@ -16,6 +16,14 @@ newer build; failed or older concurrent builds remain diagnostic history.
 Public task and artifact responses remain projections of these relational rows,
 not file-backed JSON documents.
 
+`CollectionBuildPipelineService.queue_build()` is the single asynchronous
+submission entry used by both the workspace HTTP command and the Research Agent
+capability. It validates that uploaded papers exist, creates the durable task and
+build identities, retains the process-local background task, and returns the
+queued task without waiting for document preparation or Paper Map completion.
+The Agent cannot bypass its write-approval boundary, and its follow-up progress
+read projects this same task rather than maintaining a second process state.
+
 An Objective candidate node can succeed with incomplete PaperSkim coverage.
 It records the processed and permanently failed Source-unit counts in its output
 summary and exposes a node warning. A nonzero permanent failure count finalizes

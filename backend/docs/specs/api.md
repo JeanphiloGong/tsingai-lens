@@ -137,6 +137,20 @@ approve or reject the exact pending action before starting another turn.
 The production Research Agent currently exposes these automatic capabilities:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
+- `inspect_research_process` reads the latest canonical collection build and
+  projects paper-content preparation, paper type and research-role assessment,
+  material/variable/result identification, and candidate research-question
+  synthesis. A successful read may report a failed or partial process; the
+  result exposes observable progress and warnings, never model chain-of-thought,
+  prompt repair, or retry internals;
+- `start_research_process` is a `write` capability. After exact-argument
+  approval, it submits the same standard collection build used by the workspace
+  and returns a queued collection-build task immediately. That process prepares
+  paper content, classifies each paper, builds lightweight Paper Map context,
+  and synthesizes Objective candidates. It does not confirm an Objective, run
+  Objective-specific Evidence extraction, or publish a Finding. A collection
+  with no uploaded papers returns the stable
+  `collection_has_no_papers` tool failure before any task is created;
 - `query_published_findings` returns bounded Finding and Evidence summaries
   only from published Objective analysis versions; an empty successful result
   is a scientific absence, not a provider failure;
@@ -145,9 +159,25 @@ The production Research Agent currently exposes these automatic capabilities:
   proposal context, but they are never presented as Evidence and this call does
   not persist, confirm, analyze, or publish a Core Objective;
 - `create_objective_candidate` is a `write` capability. After exact-argument
-  approval, it creates one unconfirmed `chat_assisted` Core candidate supported
-  by PaperSkim relationship context. It never confirms the Objective or starts
-  analysis. Repeating the same approved tool call is idempotent.
+  approval, it creates one unconfirmed `chat_assisted` Core candidate. Optional
+  seed-document IDs record an untested paper-scope hypothesis, not support or
+  Evidence; an empty seed set is valid. The candidate has zero confidence until
+  Objective analysis tests it. It never confirms the Objective or starts
+  analysis. Repeating the same approved tool call is idempotent;
+- `preview_research_scope` is a `read` capability. For one proposed material,
+  variable, and outcome scope, it projects mapped papers as
+  `likely_relevant`, `needs_inspection`, or `confidently_out_of_scope`.
+  `insufficient_map` papers always need inspection, and review citation leads
+  can request inspection but cannot establish relevance or Evidence. Results
+  and full counts are bounded independently;
+- `start_objective_analysis` is a `write` capability. A separate exact-argument
+  approval confirms the chosen candidate and calls the same canonical
+  `ObjectiveAnalysisService.start_analysis()` used by the HTTP route. It
+  returns the persisted queued, running, succeeded, or failed state and never
+  introduces a Chat-owned analysis path;
+- `inspect_objective_analysis` is a `read` capability. It returns the current
+  canonical Objective analysis version, paper progress, terminal error, and
+  published-version identity without starting or retrying work.
 
 Model context is a bounded recent suffix of the durable trajectory. An
 assistant tool call and its following tool result are retained or omitted as one
@@ -247,6 +277,11 @@ published. A succeeded version may have zero Findings when paper contributions
 and source-backed Evidence were published but no defensible comparison
 survived; this is a scientific abstention, not a technical failure. The Finding
 list then returns `total=0` without a placeholder Finding.
+
+`ObjectiveAnalysisService` owns queue-and-dispatch for both this HTTP command
+and the Research Agent capability. This keeps confirmation, version allocation,
+the process-local concurrency limit, dispatch-failure persistence, retry, and
+published-state semantics identical for both consumers.
 
 Objective document scope and current-analysis projection are build-scoped. A
 rebuild may preserve a confirmed Objective identity and all historical analysis

@@ -75,7 +75,7 @@ _OBJECTIVE_NON_RESULT_VALUE_COLUMN_TERMS = (
 )
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _SOURCE_EXTRACTION_MAX_COMPLETION_TOKENS = 2048
-_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v5"
+_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v7"
 _SOURCE_EXTRACTION_ROLES = {
     "direct_result",
     "condition_context",
@@ -142,9 +142,11 @@ DECISION PROCESS
    its baseline and target endpoints. Never borrow a factor or endpoint from the
    OBJECTIVE, ROUTE HINT, another section, or general scientific knowledge. If this
    SOURCE compares explicit group labels such as Sample S1 and Sample S2 but their
-   process definitions are elsewhere, return no changed variables, keep those exact
-   labels in `comparison`, use only a SOURCE-local grouping axis such as `sample`,
-   and use `association_only`. The backend may bind another grounded Source later.
+   process definitions are elsewhere, return no changed variables and keep those
+   exact labels in `comparison`. When SOURCE explicitly names the varied factor,
+   use that exact factor in `axis_names`; otherwise use only a SOURCE-local grouping
+   axis such as `sample`. Use `association_only`; the backend may bind another
+   grounded Source later.
 5. One extraction represents one baseline-to-target comparison interval. If SOURCE
    reports an ordered condition series and explicitly states how the objective
    outcome changes with that order, choose one adjacent source-supported pair. For
@@ -178,6 +180,10 @@ HARD RULES
   mechanism. Use `mixed` for an unordered qualitative change.
 - When SOURCE mixes current work with cited literature, extract current work only.
   Conditions from cited literature are not current-work comparison conditions.
+- For a direct result, return the material in `scientific_context.material` when
+  SOURCE explicitly binds a material to that result. If SOURCE discusses several
+  materials or cited studies and does not bind one material to the returned result,
+  return no direct result. Never copy the OBJECTIVE material into this field.
 - Generic composition or background is irrelevant unless OBJECTIVE explicitly
   asks about that composition, material identity, or background concept.
 - For a comparable comparison, `incomparability_reasons` must be empty. For an
@@ -204,6 +210,12 @@ OBJECTIVE VARIABLES: cooling rate
 OBJECTIVE OUTCOME: total elongation
 SOURCE: At 800 C, groups 800-S, 800-M, and 800-F used progressively faster cooling. Total elongation was not statistically different between the three groups.
 OUTPUT: {"extractions":[{"evidence_role":"direct_result","changed_variables":[],"comparison":{"baseline_label":"800-M","target_label":"800-F","axis_names":["cooling rate"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"total elongation","value":null,"unit":null,"direction":"no_change","result_text":"Total elongation was not statistically different between the three groups"},"attribution_scope":"association_only","scientific_context":{},"resolution_status":"partial","confidence":0.85}]}
+
+Directional result groups whose process values are in another Source:
+OBJECTIVE VARIABLES: energy input
+OBJECTIVE OUTCOME: ductility
+SOURCE: With decreasing laser power, elongation decreases from 20.1% (200-1000) to 17.0% (200-850).
+OUTPUT: {"extractions":[{"evidence_role":"direct_result","changed_variables":[],"comparison":{"baseline_label":"200-1000","target_label":"200-850","axis_names":["laser power"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"elongation","value":17.0,"baseline_value":20.1,"target_value":17.0,"unit":"%","direction":"decrease","result_text":"elongation decreases from 20.1% (200-1000) to 17.0% (200-850)"},"attribution_scope":"association_only","scientific_context":{},"resolution_status":"partial","confidence":0.9}]}
 
 Joint result source:
 {"extractions":[{"evidence_role":"direct_result","changed_variables":[{"name":"laser power","baseline_value":100,"target_value":200,"unit":"W"},{"name":"scan speed","baseline_value":500,"target_value":900,"unit":"mm/s"}],"comparison":{"baseline_label":"A","target_label":"B","axis_names":["laser power","scan speed"],"comparable":true,"incomparability_reasons":[]},"reported_result":{"outcome":"relative density","value":98.0,"unit":"%","direction":"increase","result_text":"relative density increased to 98.0%"},"attribution_scope":"joint_effect","scientific_context":{"material":[],"sample":[],"process":[],"test":[]},"resolution_status":"resolved","confidence":0.9}]}
@@ -294,6 +306,8 @@ class StructuredEvidenceComparison(_SourceExtractionResponse):
 class StructuredEvidenceResult(_SourceExtractionResponse):
     outcome: str
     value: ScientificScalar | None = None
+    baseline_value: ScientificScalar | None = None
+    target_value: ScientificScalar | None = None
     unit: str | None = None
     direction: Literal[
         "increase",

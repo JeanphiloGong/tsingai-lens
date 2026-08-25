@@ -540,41 +540,6 @@ def _build_skims(
     )
 
 
-def _reconstruct_structured_value(
-    source_units: list[dict[str, Any]],
-    *path: str | int,
-) -> Any:
-    for unit in source_units:
-        content = unit["content"]
-        if not isinstance(content, dict) or "structured_path" in content:
-            continue
-        value: Any = content
-        try:
-            for part in path:
-                value = value[part]
-        except (KeyError, IndexError, TypeError):
-            continue
-        return value
-
-    fragments = [
-        content
-        for unit in source_units
-        if isinstance((content := unit["content"]), dict)
-        and content.get("structured_path") == list(path)
-    ]
-    if not fragments:
-        raise AssertionError(f"structured Source path was not transported: {path!r}")
-    if "fragment" not in fragments[0]:
-        return fragments[0]["value"]
-    return "".join(
-        str(fragment["fragment"])
-        for fragment in sorted(
-            fragments,
-            key=lambda fragment: int(fragment["fragment_start"]),
-        )
-    )
-
-
 def test_paper_skim_record_keeps_only_the_stable_source_link():
     skim = PaperSkim.from_mapping({"document_id": "paper-1"})
 
@@ -583,6 +548,21 @@ def test_paper_skim_record_keeps_only_the_stable_source_link():
     assert record["document_id"] == "paper-1"
     assert "title" not in record
     assert "source_filename" not in record
+
+
+def test_paper_skim_record_preserves_explicit_map_insufficiency():
+    skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-1",
+            "map_status": "insufficient_map",
+            "map_limitations": ["missing_outcome"],
+        }
+    )
+
+    restored = PaperSkim.from_mapping(skim.to_record())
+
+    assert restored.map_status == "insufficient_map"
+    assert restored.map_limitations == ("missing_outcome",)
 
 
 def test_every_source_unit_receives_one_explicit_coverage_outcome():
@@ -776,7 +756,7 @@ def test_failed_window_preserves_valid_results_from_other_windows():
     assert skim.coverage_complete is False
 
 
-def test_source_unit_count_bound_creates_more_windows_without_dropping_units():
+def test_unstructured_paper_map_samples_edges_then_expands_once_without_duplicates():
     artifacts, tree = _artifacts(
         blocks=[
             _heading("results", "Results", 1),
@@ -795,26 +775,39 @@ def test_source_unit_count_bound_creates_more_windows_without_dropping_units():
 
     skim = _build_skims(artifacts, tree, extractor)[0]
 
-    assert len(extractor.payloads) == 3
+    assert len(extractor.payloads) == 2
     assert all(len(payload["source_units"]) <= 12 for payload in extractor.payloads)
-    assert len(skim.source_unit_coverage) == 25
-    assert {item.source_ref for item in skim.source_unit_coverage} == {
-        f"result-{position}" for position in range(25)
-    }
+    covered_refs = [item.source_ref for item in skim.source_unit_coverage]
+    assert covered_refs[:8] == [
+        "result-0", "result-1", "result-2", "result-3",
+        "result-21", "result-22", "result-23", "result-24",
+    ]
+    assert len(covered_refs) == len(set(covered_refs)) == 16
+    assert skim.map_status == "insufficient_map"
 
 
 def test_independent_windows_run_concurrently_and_merge_in_source_order(monkeypatch):
     artifacts, tree = _artifacts(
         blocks=[
-            _heading("results", "Results", 1),
+            _heading("abstract", "Abstract", 1),
             *[
                 _paragraph(
-                    f"result-{position:02d}",
-                    f"BACKGROUND_ONLY_{position}",
+                    f"abstract-{position:02d}",
+                    f"ABSTRACT_SCOPE_{position}",
                     position + 2,
-                    "Results",
+                    "Abstract",
                 )
-                for position in range(25)
+                for position in range(4)
+            ],
+            _heading("conclusion", "Conclusions", 10),
+            *[
+                _paragraph(
+                    f"conclusion-{position:02d}",
+                    f"CONCLUSION_SCOPE_{position}",
+                    position + 11,
+                    "Conclusions",
+                )
+                for position in range(4)
             ],
         ]
     )
@@ -858,9 +851,10 @@ def test_independent_windows_run_concurrently_and_merge_in_source_order(monkeypa
         skim = _build_skims(artifacts, tree, extractor)[0]
 
     assert extractor.max_active_calls == 2
-    assert usage.execution_stats().model_usage[0].request_count == 3
+    assert usage.execution_stats().model_usage[0].request_count == 2
     assert [item.source_ref for item in skim.source_unit_coverage] == [
-        f"result-{position:02d}" for position in range(25)
+        *[f"abstract-{position:02d}" for position in range(4)],
+        *[f"conclusion-{position:02d}" for position in range(4)],
     ]
 
 
@@ -883,7 +877,7 @@ def test_complete_prompt_budget_packs_source_units_beyond_four_thousand_chars():
     assert len(skim.source_unit_coverage) == 2
 
 
-def test_same_role_sections_are_screened_in_separate_contiguous_batches():
+def test_paper_map_groups_bounded_sources_by_reading_role():
     artifacts, tree = _artifacts(
         blocks=[
             _heading("methods-a", "Materials and Methods", 1),
@@ -896,14 +890,14 @@ def test_same_role_sections_are_screened_in_separate_contiguous_batches():
 
     _build_skims(artifacts, tree, extractor)
 
-    assert [payload["section_paths"] for payload in extractor.payloads] == [
-        ["Materials and Methods"],
-        ["Validation Methods"],
-    ]
+    assert [payload["section_paths"] for payload in extractor.payloads] == [[
+        "Materials and Methods",
+        "Validation Methods",
+    ]]
     assert [
         [unit["source_ref"] for unit in payload["source_units"]]
         for payload in extractor.payloads
-    ] == [["method-a"], ["method-b"]]
+    ] == [["method-a", "method-b"]]
 
 
 def test_complete_prompt_token_preflight_splits_before_model_execution():
@@ -1421,7 +1415,7 @@ def test_single_source_content_recovery_has_a_fixed_request_bound():
 
     skim = _build_skims(artifacts, tree, extractor)[0]
 
-    assert len(extractor.payloads) == 7
+    assert len(extractor.payloads) == 4
     assert [item.status.value for item in skim.source_unit_coverage] == [
         "extraction_failed"
     ]
@@ -1482,8 +1476,8 @@ def test_paper_recovery_budget_bounds_saturated_batch_and_preserves_coverage():
 
     skim = _build_skims(artifacts, tree, extractor)[0]
 
-    assert len(extractor.payloads) + len(extractor.compact_payloads) <= 18
-    assert len(skim.source_unit_coverage) == 13
+    assert len(extractor.payloads) + len(extractor.compact_payloads) <= 8
+    assert len(skim.source_unit_coverage) == 8
     assert [study.relationships[0].outcome for study in skim.studies] == [
         "relative density"
     ]
@@ -1497,39 +1491,245 @@ def test_paper_recovery_budget_bounds_saturated_batch_and_preserves_coverage():
     )
 
 
-def test_late_results_content_is_screened_after_the_first_four_thousand_characters():
+def test_paper_map_reads_high_level_scope_before_detailed_experiment_sources():
     artifacts, tree = _artifacts(
         blocks=[
             _heading("abstract", "Abstract", 1),
-            _paragraph("lead", "A" * 4000, 2, "Abstract"),
-            _heading("results", "Results", 3),
             _paragraph(
-                "late-result",
-                "RESULT_CANDIDATE appears only in the late results section.",
+                "abstract-scope",
+                "METHOD_CANDIDATE summarizes the paper research scope.",
+                2,
+                "Abstract",
+            ),
+            _heading("methods", "Materials and Methods", 3),
+            _paragraph(
+                "method-detail",
+                "Detailed specimen preparation that must wait for an Objective.",
                 4,
+                "Materials and Methods",
+            ),
+            _heading("results", "Results", 5),
+            _paragraph(
+                "result-detail",
+                "RESULT_CANDIDATE appears only in detailed Results.",
+                6,
                 "Results",
+            ),
+            _heading("conclusion", "Conclusions", 7),
+            _paragraph(
+                "conclusion-scope",
+                "The paper concludes with its high-level material response scope.",
+                8,
+                "Conclusions",
             ),
         ]
     )
     extractor = _WindowExtractor()
 
-    skims = _build_skims(artifacts, tree, extractor)
+    skim = _build_skims(artifacts, tree, extractor)[0]
 
     assert [
         relationship.varied_factors
-        for study in skims[0].studies
+        for study in skim.studies
         for relationship in study.relationships
-    ] == [
-        ("scan speed",)
-    ]
-    assert any(
-        payload["window_role"] == "results"
-        and any(
-            "RESULT_CANDIDATE" in str(unit["content"])
-            for unit in payload["source_units"]
-        )
+    ] == [("laser power",)]
+    mapped_refs = {
+        str(unit["source_ref"])
         for payload in extractor.payloads
+        for unit in payload["source_units"]
+    }
+    assert mapped_refs == {"abstract-scope", "conclusion-scope"}
+
+
+def test_paper_map_balances_table_and_figure_summaries():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("abstract", "Abstract", 1),
+            _paragraph(
+                "abstract-scope",
+                "METHOD_CANDIDATE summarizes the research scope.",
+                2,
+                "Abstract",
+            ),
+        ],
+        tables=[
+            {
+                "table_id": f"table-{position}",
+                "document_id": "paper-1",
+                "table_order": position,
+                "caption_text": f"Table {position} scope",
+                "heading_path": "Results",
+                "column_headers": ["condition", "response"],
+                "table_matrix": [],
+            }
+            for position in range(1, 5)
+        ],
+        figures=[
+            {
+                "figure_id": f"figure-{position}",
+                "document_id": "paper-1",
+                "figure_order": position,
+                "caption_text": f"Figure {position} scope",
+                "heading_path": "Results",
+            }
+            for position in range(1, 5)
+        ],
     )
+    extractor = _WindowExtractor()
+
+    _build_skims(artifacts, tree, extractor)
+
+    selected_kinds = {
+        str(unit["source_kind"])
+        for payload in extractor.payloads
+        for unit in payload["source_units"]
+    }
+    assert {"table", "figure"} <= selected_kinds
+
+
+def test_paper_map_expands_once_to_results_when_high_level_scope_lacks_outcome():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("abstract", "Abstract", 1),
+            _paragraph(
+                "abstract-variable",
+                "VARIABLE_SIGNAL",
+                2,
+                "Abstract",
+            ),
+            _heading("results", "Results", 3),
+            _paragraph(
+                "result-scope",
+                "RESULT_CANDIDATE",
+                4,
+                "Results",
+            ),
+            _heading("methods", "Materials and Methods", 5),
+            _paragraph(
+                "method-detail",
+                "Detailed preparation remains deferred.",
+                6,
+                "Materials and Methods",
+            ),
+        ]
+    )
+    extractor = _WindowExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert [
+        [unit["source_ref"] for unit in payload["source_units"]]
+        for payload in extractor.payloads
+    ] == [["abstract-variable"], ["result-scope"]]
+    assert skim.map_status == "sufficient"
+    assert skim.map_limitations == ()
+
+
+def test_paper_map_stops_after_one_targeted_expansion_and_records_insufficiency():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("abstract", "Abstract", 1),
+            _paragraph(
+                "abstract-variable",
+                "VARIABLE_SIGNAL",
+                2,
+                "Abstract",
+            ),
+            _heading("results", "Results", 3),
+            _paragraph(
+                "result-background",
+                "No measured response is stated here.",
+                4,
+                "Results",
+            ),
+            _heading("methods", "Materials and Methods", 5),
+            _paragraph(
+                "method-background",
+                "The specimen preparation does not identify a response.",
+                6,
+                "Materials and Methods",
+            ),
+        ]
+    )
+    extractor = _WindowExtractor(reconciliation="unresolved")
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 2
+    assert extractor.payloads[1]["source_units"][0]["source_ref"] == (
+        "result-background"
+    )
+    assert skim.map_status == "insufficient_map"
+    assert "missing_outcome" in skim.map_limitations
+
+
+def test_spaced_abstract_heading_prevents_detailed_source_fallback():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("abstract", "a b s t r a c t", 1),
+            _paragraph(
+                "abstract-scope",
+                "METHOD_CANDIDATE states the paper research scope.",
+                2,
+                "a b s t r a c t",
+            ),
+            _heading("introduction", "1. Introduction", 3),
+            _paragraph(
+                "introduction-scope",
+                "The introduction orients the research question.",
+                4,
+                "1. Introduction",
+            ),
+            _heading("methods", "2. Materials and Methods", 5),
+            _paragraph(
+                "method-detail",
+                "RESULT_CANDIDATE belongs to confirmed-Objective inspection.",
+                6,
+                "2. Materials and Methods",
+            ),
+        ]
+    )
+    extractor = _WindowExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert [
+        relationship.varied_factors
+        for study in skim.studies
+        for relationship in study.relationships
+    ] == [("laser power",)]
+    mapped_refs = {
+        str(unit["source_ref"])
+        for payload in extractor.payloads
+        for unit in payload["source_units"]
+    }
+    assert mapped_refs == {"abstract-scope", "introduction-scope"}
+
+
+def test_paper_map_fallback_samples_both_ends_under_a_global_source_limit():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _paragraph(
+                f"unstructured-{position:02d}",
+                f"Unstructured paper content {position}",
+                position,
+                "Unsectioned",
+            )
+            for position in range(1, 41)
+        ]
+    )
+    extractor = _WindowExtractor()
+
+    _build_skims(artifacts, tree, extractor)
+
+    mapped_refs = [
+        str(unit["source_ref"])
+        for payload in extractor.payloads
+        for unit in payload["source_units"]
+    ]
+    assert len(mapped_refs) <= 16
+    assert "unstructured-01" in mapped_refs
+    assert "unstructured-40" in mapped_refs
 
 
 def test_one_long_source_paragraph_is_split_into_bounded_units_without_text_loss():
@@ -1650,11 +1850,17 @@ def test_later_table_captions_are_assigned_to_a_screening_window():
     assert table_ids == ["table-1", "table-2", "table-3", "table-4"]
 
 
-def test_table_rows_are_screened_without_a_global_row_limit():
+def test_paper_map_keeps_table_caption_but_defers_table_rows_until_analysis():
     artifacts, tree = _artifacts(
         blocks=[
-            _heading("results", "Results", 1),
-            _paragraph("result", "Results summary.", 2, "Results"),
+            _heading("abstract", "Abstract", 1),
+            _paragraph(
+                "abstract-scope",
+                "This paper studies process conditions and measured density.",
+                2,
+                "Abstract",
+            ),
+            _heading("results", "Results", 3),
         ],
         tables=[
             {
@@ -1683,76 +1889,23 @@ def test_table_rows_are_screened_without_a_global_row_limit():
 
     _build_skims(artifacts, tree, extractor)
 
-    row_records = [
-        unit["content"]
-        for payload in extractor.payloads
-        for unit in payload["source_units"]
-        if unit["source_kind"] == "table_row"
-        and isinstance(unit["content"], dict)
-        and "row_id" in unit["content"]
-    ]
-    assert [record["row_id"] for record in row_records] == [
-        f"row-{position}" for position in range(1, 31)
-    ]
-
-
-def test_table_row_relationship_preserves_its_stable_row_locator():
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("results", "Results", 1),
-            _paragraph("result", "Results summary.", 2, "Results"),
-        ],
-        tables=[
-            {
-                "table_id": "table-results",
-                "document_id": "paper-1",
-                "table_order": 1,
-                "caption_text": "Process conditions and measured porosity",
-                "heading_path": "Results",
-                "column_headers": ["scan speed", "porosity"],
-                "table_matrix": [],
-            }
-        ],
-        table_rows=[
-            {
-                "row_id": "row-result-7",
-                "document_id": "paper-1",
-                "table_id": "table-results",
-                "row_index": 7,
-                "row_text": "RESULT_CANDIDATE scan speed=900 | porosity=0.2",
-                "heading_path": "Results",
-            }
-        ],
-    )
-    extractor = _WindowExtractor()
-
-    skim = _build_skims(artifacts, tree, extractor)[0]
-
-    row_units = [
+    source_units = [
         unit
         for payload in extractor.payloads
         for unit in payload["source_units"]
-        if isinstance(unit.get("content"), dict)
-        and unit["content"].get("row_id") == "row-result-7"
     ]
-    assert [
-        (unit["source_kind"], unit["source_ref"]) for unit in row_units
-    ] == [("table_row", "row-result-7")]
-    assert row_units[0]["content"]["table_context"]["caption_text"] == (
-        "Process conditions and measured porosity"
+    assert not any(unit["source_kind"] == "table_row" for unit in source_units)
+    assert any(
+        unit["source_kind"] == "table"
+        and unit["source_ref"] == "table-results"
+        and isinstance(unit["content"], dict)
+        and unit["content"]["caption_text"]
+        == "Process conditions and measured density"
+        for unit in source_units
     )
-    assert row_units[0]["content"]["table_context"]["column_headers"] == [
-        "scan speed",
-        "porosity",
-    ]
-    assert row_units[0]["content"]["table_context"]["heading_path"] == "Results"
-    assert [
-        source_ref.to_record()
-        for source_ref in skim.studies[0].relationships[0].source_refs
-    ] == [{"source_kind": "table_row", "source_ref": "row-result-7"}]
 
 
-def test_table_metadata_is_lossless_across_bounded_source_chunks():
+def test_paper_map_compacts_table_metadata_without_losing_axis_headers():
     caption = f"Table 1. {' '.join(['caption detail'] * 700)}"
     headers = [
         f"header-{position}-"
@@ -1787,11 +1940,11 @@ def test_table_metadata_is_lossless_across_bounded_source_chunks():
         if unit["source_kind"] == "table"
         and unit["source_ref"] == "table-long-metadata"
     ]
-    assert _reconstruct_structured_value(source_units, "caption_text") == caption
-    assert [
-        _reconstruct_structured_value(source_units, "column_headers", position)
-        for position in range(len(headers))
-    ] == headers
+    assert len(source_units) == 1
+    assert source_units[0]["content"]["caption_text"] == caption[:1600]
+    assert source_units[0]["content"]["column_headers"] == [
+        value[:120] for value in headers
+    ]
     assert all(
         len(json.dumps(unit["content"], ensure_ascii=False, separators=(",", ":")))
         <= 4000
@@ -1802,7 +1955,7 @@ def test_table_metadata_is_lossless_across_bounded_source_chunks():
     } == {("table", "table-long-metadata")}
 
 
-def test_figure_caption_is_lossless_across_bounded_source_chunks():
+def test_paper_map_compacts_figure_caption_before_model_screening():
     caption = (
         f"Figure 1. {' '.join(['microstructure detail'] * 600)} "
         "RESULT_CANDIDATE"
@@ -1834,7 +1987,8 @@ def test_figure_caption_is_lossless_across_bounded_source_chunks():
         if unit["source_kind"] == "figure"
         and unit["source_ref"] == "figure-long-caption"
     ]
-    assert _reconstruct_structured_value(source_units, "caption_text") == caption
+    assert len(source_units) == 1
+    assert source_units[0]["content"]["caption_text"] == caption[:3500]
     assert all(
         len(json.dumps(unit["content"], ensure_ascii=False, separators=(",", ":")))
         <= 4000
@@ -1843,79 +1997,10 @@ def test_figure_caption_is_lossless_across_bounded_source_chunks():
     assert {
         (unit["source_kind"], unit["source_ref"]) for unit in source_units
     } == {("figure", "figure-long-caption")}
-    assert [
-        ref.to_record()
-        for ref in skim.studies[0].relationships[0].source_refs
-    ] == [{"source_kind": "figure", "source_ref": "figure-long-caption"}]
+    assert skim.studies == ()
 
 
-def test_oversized_structured_table_row_is_split_without_text_loss():
-    row_text = f"sample=A | {'reported result ' * 700}"
-    artifacts, tree = _artifacts(
-        blocks=[
-            _heading("results", "Results", 1),
-            _paragraph("result", "Results summary.", 2, "Results"),
-        ],
-        tables=[
-            {
-                "table_id": "table-long-row",
-                "document_id": "paper-1",
-                "table_order": 1,
-                "caption_text": "Long result row",
-                "heading_path": "Results",
-                "column_headers": ["sample", "reported result"],
-                "table_matrix": [],
-            }
-        ],
-        table_rows=[
-            {
-                "row_id": "row-long",
-                "document_id": "paper-1",
-                "table_id": "table-long-row",
-                "row_index": 1,
-                "row_text": row_text,
-                "heading_path": "Results",
-            }
-        ],
-    )
-    extractor = _WindowExtractor()
-
-    _build_skims(artifacts, tree, extractor)
-
-    source_units = [
-        unit
-        for payload in extractor.payloads
-        for unit in payload["source_units"]
-        if unit["source_kind"] == "table_row"
-        and unit["source_ref"] == "row-long"
-        and isinstance(unit["content"], dict)
-        and unit["content"].get("structured_path") == ["row_text"]
-    ]
-    assert _reconstruct_structured_value(source_units, "row_text") == row_text
-    assert all(
-        len(json.dumps(unit["content"], ensure_ascii=False, separators=(",", ":")))
-        <= 4000
-        for unit in source_units
-    )
-    assert {
-        (unit["source_kind"], unit["source_ref"]) for unit in source_units
-    } == {("table_row", "row-long")}
-    assert all(
-        unit["content"]["table_context"]["caption_text"] == "Long result row"
-        for unit in source_units
-    )
-    assert all(
-        unit["content"]["table_context"]["column_headers"]
-        == ["sample", "reported result"]
-        for unit in source_units
-    )
-    assert all(
-        unit["content"]["table_context"]["heading_path"] == "Results"
-        for unit in source_units
-    )
-
-
-def test_each_source_text_and_caption_is_assigned_once_and_references_are_excluded():
+def test_initial_high_level_map_can_expand_to_results_but_still_defers_methods():
     artifacts, tree = _artifacts(
         blocks=[
             _heading("abstract", "Abstract", 1),
@@ -1973,7 +2058,7 @@ def test_each_source_text_and_caption_is_assigned_once_and_references_are_exclud
         if item["source_kind"] == "figure"
     ]
     assert all_text.count("OVERVIEW_SOURCE") == 1
-    assert all_text.count("METHOD_SOURCE") == 1
+    assert "METHOD_SOURCE" not in all_text
     assert all_text.count("RESULT_SOURCE") == 1
     assert "REFERENCE_SOURCE" not in all_text
     assert all_table_captions == ["TABLE_SOURCE"]
@@ -2125,6 +2210,10 @@ def test_fixed_process_setting_is_not_retained_as_a_varied_factor_relationship()
         "unresolved_signal_emitted",
         "relationship_emitted",
     ]
+    assert skim.studies[0].sample_context == ()
+    assert skim.studies[0].test_context == ()
+    assert skim.studies[0].comparator is None
+    assert skim.studies[0].fixed_conditions == ()
 
 
 def test_broad_microstructure_theme_is_not_retained_as_a_relationship():
@@ -2310,6 +2399,47 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
                         "source_unit_ids": [source_ids["review-citation"]],
                     }
                 ],
+                review_synthesis={
+                    "synthesis_claims": [
+                        {
+                            "content": (
+                                "Across the reviewed studies, preheating generally "
+                                "reduced residual stress."
+                            ),
+                            "variables": ["preheating condition"],
+                            "outcomes": ["residual stress"],
+                            "source_unit_ids": [source_ids["review-synthesis"]],
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "disputes": [
+                        {
+                            "content": "Porosity trends disagree across scan strategies.",
+                            "variables": ["scan strategy"],
+                            "outcomes": ["porosity"],
+                            "source_unit_ids": [source_ids["review-synthesis"]],
+                            "confidence": 0.7,
+                        }
+                    ],
+                    "evidence_gaps": [
+                        {
+                            "content": "Few studies validate residual stress in situ.",
+                            "outcomes": ["residual stress"],
+                            "conditions": ["in situ validation"],
+                            "source_unit_ids": [source_ids["review-synthesis"]],
+                            "confidence": 0.75,
+                        }
+                    ],
+                    "citation_leads": [
+                        {
+                            "content": "Miranda et al. [20]",
+                            "variables": ["build plate temperature"],
+                            "outcomes": ["residual stress"],
+                            "source_unit_ids": [source_ids["review-citation"]],
+                            "confidence": 0.8,
+                        }
+                    ],
+                },
             )
 
     extractor = ReviewExtractor()
@@ -2336,6 +2466,17 @@ def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
         "no_study_signal",
         "relationship_emitted",
     ]
+    assert skim.review_synthesis.synthesis_claims[0].source_refs[0].source_ref == (
+        "review-synthesis"
+    )
+    assert skim.review_synthesis.disputes[0].outcomes == ("porosity",)
+    assert skim.review_synthesis.evidence_gaps[0].conditions == (
+        "in situ validation",
+    )
+    assert skim.review_synthesis.citation_leads[0].content == "Miranda et al. [20]"
+    assert all(
+        study.experiment_label != "Miranda et al." for study in skim.studies
+    )
 
 
 def test_unknown_source_unit_id_marks_the_window_failed():
@@ -2386,6 +2527,91 @@ def test_methods_variable_and_results_outcome_reconcile_into_one_candidate():
     assert any(
         item.get("active_operation") == "paper_reconciliation" for item in progress
     )
+
+
+def test_reconciliation_shares_the_paper_judgment_budget(monkeypatch):
+    monkeypatch.setenv("CORE_PAPER_SKIM_MAX_RECOVERY_CALLS", "0")
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("abstract", "Abstract", 1),
+            _paragraph(
+                "scope-signals",
+                "VARIABLE_SIGNAL OUTCOME_SIGNAL",
+                2,
+                "Abstract",
+            ),
+        ]
+    )
+    extractor = _WindowExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 1
+    assert extractor.reconciliation_payloads == []
+    assert skim.studies == ()
+    assert {signal.label for signal in skim.unresolved_signals} == {
+        "laser power",
+        "relative density",
+    }
+    assert all(
+        signal.reason == "paper-map judgment budget exhausted before reconciliation"
+        for signal in skim.unresolved_signals
+    )
+    assert {item.status.value for item in skim.source_unit_coverage} == {
+        "unresolved_signal_emitted"
+    }
+
+
+def test_reconciliation_stops_after_using_the_remaining_paper_budget(monkeypatch):
+    monkeypatch.setenv("CORE_PAPER_SKIM_MAX_RECOVERY_CALLS", "1")
+    signal_specs = {
+        "power": {
+            "signal_type": "variable",
+            "label": "laser power",
+            "process_context": ["LPBF"],
+        },
+        "speed": {
+            "signal_type": "variable",
+            "label": "scan speed",
+            "process_context": ["LPBF"],
+        },
+        "density": {
+            "signal_type": "outcome",
+            "label": "relative density",
+            "process_context": ["LPBF"],
+        },
+        "porosity": {
+            "signal_type": "outcome",
+            "label": "porosity",
+            "process_context": ["LPBF"],
+        },
+    }
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("abstract", "Abstract", 1),
+            *[
+                _paragraph(source_ref, source_ref, position + 2, "Abstract")
+                for position, source_ref in enumerate(signal_specs)
+            ],
+        ]
+    )
+    extractor = _BoundedSignalReconciliationExtractor(signal_specs)
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 1
+    assert len(extractor.reconciliation_payloads) == 1
+    assert {
+        relationship.outcome
+        for study in skim.studies
+        for relationship in study.relationships
+    } == {"relative density"}
+    assert [(signal.label, signal.reason) for signal in skim.unresolved_signals] == [
+        (
+            "porosity",
+            "paper-map judgment budget exhausted before reconciliation",
+        )
+    ]
 
 
 def test_reconciliation_batches_repeat_one_outcome_without_dropping_variables():
@@ -2543,7 +2769,7 @@ def test_material_only_distant_signals_do_not_enter_reconciliation():
         "relative density",
     }
     assert all(
-        signal.reason == "no experiment-evidence bridge was found in this paper"
+        signal.reason == "no paper-scope bridge was found in this paper"
         for signal in skim.unresolved_signals
     )
 
@@ -3403,13 +3629,12 @@ def test_progress_remains_document_scoped_and_exposes_window_position():
 
     _build_skims(artifacts, tree, _WindowExtractor(), progress=progress)
 
-    assert [item["current"] for item in progress] == [1, 1, 1]
-    assert [item["total"] for item in progress] == [1, 1, 1]
-    assert [item["unit"] for item in progress] == ["documents"] * 3
-    assert [item["active_window_position"] for item in progress] == [1, 2, 3]
-    assert [item["active_window_count"] for item in progress] == [3, 3, 3]
+    assert [item["current"] for item in progress] == [1, 1]
+    assert [item["total"] for item in progress] == [1, 1]
+    assert [item["unit"] for item in progress] == ["documents", "documents"]
+    assert [item["active_window_position"] for item in progress] == [1, 1]
+    assert [item["active_window_count"] for item in progress] == [1, 1]
     assert [item["active_window_role"] for item in progress] == [
         "overview",
-        "methods",
-        "results",
+        "targeted_missing_outcome",
     ]

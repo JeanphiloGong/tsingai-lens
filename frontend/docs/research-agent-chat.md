@@ -30,6 +30,9 @@ fact store.
 - Chat owns sessions, ordered messages, capability activity, and approval
   decisions.
 - Core owns Research Objectives, Evidence, Findings, and Analysis.
+- Collection build tasks remain the single runtime authority for research
+  preparation progress. Chat reads that state; it does not persist another
+  workflow.
 - PaperSkim relationships may support an Objective proposal but are labeled as
   proposal context, never Evidence.
 - A created Objective remains an unconfirmed candidate. Confirmation and
@@ -87,6 +90,7 @@ answer. The result panel shows:
 - the named Lens capability;
 - a bounded human-readable summary;
 - structured Objective drafts when present;
+- the observable research stages and active paper when process status is read;
 - warnings and scientific absence;
 - links to canonical collection, Objective, Finding, or Evidence records.
 
@@ -95,6 +99,8 @@ shows the canonical analysis or task link and lets the researcher continue the
 conversation instead of waiting for the long-running operation.
 
 Raw tool JSON is not presented as an assistant claim.
+The process view shows persisted stage decisions and warnings, not model
+chain-of-thought, prompts, JSON repair, or retry mechanics.
 
 ### Write approval
 
@@ -141,16 +147,17 @@ The focused browser suite covers:
 1. greeting with no capability;
 2. collection read with structured result, warning, resource link, and final
    answer;
-3. Objective draft proposal without a Core write;
-4. pending write with exact arguments and blocked composer;
-5. rejection with no Objective;
-6. approval with a canonical Objective link;
-7. refresh recovery of persisted approval;
-8. removal of stale legacy browser session keys without calling a retired API;
-9. queued capability presentation with a canonical resource link;
-10. a visible mobile composer across consecutive turns and reduced viewport
+3. canonical research-process status with user-visible scientific stages;
+4. Objective draft proposal without a Core write;
+5. pending write with exact arguments and blocked composer;
+6. rejection with no Objective;
+7. approval with a canonical Objective link;
+8. refresh recovery of persisted approval;
+9. removal of stale legacy browser session keys without calling a retired API;
+10. queued capability presentation with a canonical resource link;
+11. a visible mobile composer across consecutive turns and reduced viewport
     height;
-11. text visible before the final persisted turn arrives.
+12. text visible before the final persisted turn arrives.
 
 The page audit additionally verifies desktop and mobile framing, accessible
 interaction names, horizontal overflow, and browser console errors.

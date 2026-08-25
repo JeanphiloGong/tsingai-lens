@@ -311,16 +311,96 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeInTheDocument();
 	});
 
+	it('shows the canonical research process without technical recovery details', async () => {
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_1', 'user', 'How far has the collection analysis progressed?'),
+					message('msg_call_1', 'assistant', '', {
+						tool_call_id: 'call_process_1',
+						tool_name: 'inspect_research_process',
+						tool_arguments: {}
+					}),
+					message('msg_result_1', 'tool', '', {
+						tool_call_id: 'call_process_1',
+						tool_result: {
+							tool_call_id: 'call_process_1',
+							status: 'succeeded',
+							data: {
+								process: {
+									status: 'running',
+									current_step: 'research_scope_screening',
+									summary: 'Screening paper Sources for research themes.',
+									progress_percent: 72,
+									document_progress: { current: 3, total: 10 },
+									active_document: {
+										document_id: 'paper-3',
+										title: 'LPBF process review'
+									},
+									steps: [
+										{ step_id: 'source_understanding', status: 'completed' },
+										{ step_id: 'paper_classification', status: 'completed' },
+										{ step_id: 'research_scope_screening', status: 'running' },
+										{ step_id: 'objective_formation', status: 'queued' }
+									],
+									failures: []
+								}
+							},
+							resource_refs: [
+								{
+									resource_type: 'collection',
+									resource_id: 'col_123',
+									href: '/collections/col_123'
+								}
+							],
+							warnings: [],
+							error_code: null,
+							error_message: null
+						}
+					}),
+					message('msg_assistant_2', 'assistant', 'The collection is currently being screened.')
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		await send('How far has the collection analysis progressed?');
+
+		await expect
+			.element(browserPage.getByText('Literature analysis progress', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Literature analysis is in progress.'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Prepare paper contents')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Assess paper type and role')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Identify materials, variables, and results'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Synthesize candidate research questions'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('LPBF process review · paper 3 of 10'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Screening paper Sources for research themes.'))
+			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText(/retry|window/i)).not.toBeInTheDocument();
+	});
+
 	it('renders a queued capability as started with a traceable resource', async () => {
 		installApi({
 			messageTurn: {
 				status: 'completed',
 				messages: [
-					message('msg_user_1', 'user', 'Start the analysis'),
+					message('msg_user_1', 'user', 'Start understanding these papers'),
 					message('msg_call_1', 'assistant', '', {
 						tool_call_id: 'call_queued_1',
-						tool_name: 'start_objective_analysis',
-						tool_arguments: { objective_id: 'obj_1' }
+						tool_name: 'start_research_process',
+						tool_arguments: {}
 					}),
 					message('msg_result_1', 'tool', '', {
 						tool_call_id: 'call_queued_1',
@@ -330,9 +410,9 @@ describe('collections/[id]/assistant Research Agent', () => {
 							data: {},
 							resource_refs: [
 								{
-									resource_type: 'objective_analysis',
-									resource_id: 'obj_1:1',
-									href: '/collections/col_123/objectives/obj_1'
+									resource_type: 'collection_build_task',
+									resource_id: 'task_1',
+									href: '/collections/col_123'
 								}
 							],
 							warnings: [],
@@ -347,15 +427,15 @@ describe('collections/[id]/assistant Research Agent', () => {
 			}
 		});
 
-		await send('Start the analysis');
+		await send('Start understanding these papers');
 
-		await expect.element(browserPage.getByText('Research capability started')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Literature analysis started')).toBeInTheDocument();
 		await expect
 			.element(browserPage.getByText('Task queued. You can continue while it runs.'))
 			.toBeInTheDocument();
 		await expect
-			.element(browserPage.getByRole('link', { name: 'Open analysis' }))
-			.toHaveAttribute('href', '/collections/col_123/objectives/obj_1');
+			.element(browserPage.getByRole('link', { name: 'Open literature analysis' }))
+			.toHaveAttribute('href', '/collections/col_123');
 	});
 
 	it('shows objective drafts as proposals without creating Core records', async () => {
@@ -447,6 +527,119 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect
 			.element(browserPage.getByRole('button', { name: 'Approve and create' }))
 			.toBeInTheDocument();
+	});
+
+	it('describes starting literature analysis as an approved action without fake arguments', async () => {
+		const call = pendingCall({
+			name: 'start_research_process',
+			arguments: {}
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Start understanding these papers'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Start understanding these papers');
+
+		await expect
+			.element(browserPage.getByText('Literature analysis', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Prepare and classify the uploaded papers, build a lightweight Paper Map, and form candidate research questions.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and start' }))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Proposed values')).not.toBeInTheDocument();
+	});
+
+	it('requires a separate approval before analyzing one research question', async () => {
+		const call = pendingCall({
+			name: 'start_objective_analysis',
+			arguments: { objective_id: 'obj_energy_1' }
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Analyze this question'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Analyze this question');
+
+		await expect
+			.element(browserPage.getByText('Research question evidence analysis', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Inspect the selected papers, extract source-backed facts, and compare the result for this research question.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and analyze' }))
+			.toBeInTheDocument();
+	});
+
+	it('records a rejected literature-analysis start without implying that work ran', async () => {
+		const call = pendingCall({
+			name: 'start_research_process',
+			arguments: {}
+		});
+		installApi({
+			trajectory: {
+				items: [
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call
+			},
+			decisionTurn: {
+				status: 'rejected',
+				messages: [],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+		localStorage.setItem('lens.chatSession.col_123', session.session_id);
+		render(Page);
+
+		await browserPage.getByRole('button', { name: 'Reject' }).click();
+
+		await expect
+			.element(browserPage.getByText('Literature analysis was not started.'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('link', { name: 'Open literature analysis' }))
+			.not.toBeInTheDocument();
 	});
 
 	it('records an exact rejection and creates no objective resource', async () => {

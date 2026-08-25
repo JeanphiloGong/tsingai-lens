@@ -18,8 +18,13 @@ from application.chat import (
 from application.chat.capabilities import (
     CreateObjectiveCandidateCapability,
     GetCollectionContextCapability,
+    InspectObjectiveAnalysisCapability,
+    InspectResearchProcessCapability,
+    PreviewResearchScopeCapability,
     ProposeObjectiveDraftsCapability,
     QueryPublishedFindingsCapability,
+    StartObjectiveAnalysisCapability,
+    StartResearchProcessCapability,
 )
 from application.core.document_profiles.service import (
     DocumentProfileService,
@@ -304,6 +309,16 @@ async def build_application_runtime(
                                 collection_service=collection_service,
                                 objective_repository=objective_repository,
                             ),
+                            InspectResearchProcessCapability(
+                                collection_service=collection_service,
+                                task_service=task_service,
+                            ),
+                            StartResearchProcessCapability(
+                                collection_service=collection_service,
+                                collection_build_pipeline_service=(
+                                    build_pipeline_service
+                                ),
+                            ),
                             QueryPublishedFindingsCapability(
                                 collection_service=collection_service,
                                 objective_repository=objective_repository,
@@ -313,8 +328,20 @@ async def build_application_runtime(
                                 collection_service=collection_service,
                                 objective_repository=objective_repository,
                             ),
+                            PreviewResearchScopeCapability(
+                                collection_service=collection_service,
+                                objective_repository=objective_repository,
+                            ),
                             CreateObjectiveCandidateCapability(
                                 research_objective_service=research_objective_service,
+                            ),
+                            StartObjectiveAnalysisCapability(
+                                collection_service=collection_service,
+                                objective_analysis_service=objective_analysis_service,
+                            ),
+                            InspectObjectiveAnalysisCapability(
+                                collection_service=collection_service,
+                                objective_analysis_service=objective_analysis_service,
                             ),
                         )
                     ),
@@ -539,7 +566,7 @@ def create_app(
     )
     app = FastAPI(
         title="TsingAI-Lens API",
-        version="0.12.9",
+        version="0.12.10",
         docs_url=f"{PUBLIC_API_PREFIX}/docs",
         redoc_url=f"{PUBLIC_API_PREFIX}/redoc",
         openapi_url=f"{PUBLIC_API_PREFIX}/openapi.json",

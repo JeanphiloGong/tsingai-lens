@@ -74,8 +74,8 @@ def test_paper_skim_contract_bounds_model_output():
     model_schema = StructuredPaperSkim.model_json_schema()
     schema = model_schema["properties"]
 
-    assert schema["studies"]["maxItems"] == 8
-    assert schema["unresolved_signals"]["maxItems"] == 12
+    assert schema["studies"]["maxItems"] == 4
+    assert schema["unresolved_signals"]["maxItems"] == 8
     assert schema["output_saturated"]["type"] == "boolean"
     study_schema = model_schema["$defs"]["StructuredPaperStudy"]["properties"]
     relationship_schema = model_schema["$defs"][
@@ -89,7 +89,7 @@ def test_paper_skim_contract_bounds_model_output():
     assert study_schema["test_context"]["maxItems"] == 12
     assert study_schema["test_context"]["items"]["maxLength"] == 160
     assert study_schema["fixed_conditions"]["maxItems"] == 12
-    assert study_schema["relationships"]["maxItems"] == 8
+    assert study_schema["relationships"]["maxItems"] == 6
     assert relationship_schema["varied_factors"]["maxItems"] == 12
     assert relationship_schema["source_unit_ids"]["minItems"] == 1
     assert relationship_schema["source_unit_ids"]["maxItems"] == 12
@@ -106,6 +106,19 @@ def test_paper_skim_contract_bounds_model_output():
     assert "source_unit_coverage" not in schema
     assert "StructuredPaperSourceUnitCoverage" not in model_schema.get("$defs", {})
     assert schema["warnings"]["items"]["maxLength"] == 240
+    review_schema = model_schema["$defs"]["StructuredReviewSynthesisMap"][
+        "properties"
+    ]
+    review_item_schema = model_schema["$defs"]["StructuredReviewKnowledgeItem"][
+        "properties"
+    ]
+    assert review_schema["synthesis_claims"]["maxItems"] == 4
+    assert review_schema["disputes"]["maxItems"] == 4
+    assert review_schema["evidence_gaps"]["maxItems"] == 4
+    assert review_schema["citation_leads"]["maxItems"] == 6
+    assert review_item_schema["content"]["maxLength"] == 400
+    assert review_item_schema["source_unit_ids"]["minItems"] == 1
+    assert review_item_schema["source_unit_ids"]["maxItems"] == 4
 
 
 def test_paper_source_signal_screen_contract_is_source_local_and_compact():
@@ -411,6 +424,22 @@ def test_paper_signal_reconciliation_contract_is_bounded_to_one_neighborhood():
     assert study_schema["relationships"]["maxItems"] == 11
 
 
+def test_paper_signal_reconciliation_bounds_diagnostic_reason_text():
+    parsed = StructuredPaperSignalReconciliation.model_validate(
+        {
+            "studies": [],
+            "unresolved_signals": [
+                {
+                    "signal_id": "signal-outcome",
+                    "reason": "reason " * 100,
+                }
+            ],
+        }
+    )
+
+    assert len(parsed.unresolved_signals[0].reason) == 240
+
+
 def test_paper_skim_contract_bounds_diagnostic_warnings():
     parsed = StructuredPaperSkim.model_validate(
         {"warnings": ["w" * 241, "second", "third"]}
@@ -451,7 +480,7 @@ def test_paper_skim_contract_rejects_duplicate_source_unit_ids(payload):
         StructuredPaperSkim.model_validate(payload)
 
 
-def test_paper_skim_prompt_defines_structured_research_map_contract():
+def test_paper_skim_prompt_defines_lightweight_research_map_contract():
     _, user_prompt = build_paper_skim_prompt(
         {
             "document_id": "paper-1",
@@ -473,30 +502,27 @@ def test_paper_skim_prompt_defines_structured_research_map_contract():
     )
 
     assert "TASK MODEL" in user_prompt
-    assert "Extract source-supported paper studies" in user_prompt
+    assert "Map the paper's stated research scope" in user_prompt
+    assert "not full experiment reconstruction" in user_prompt
+    assert "candidate scope, not proven Evidence" in user_prompt
+    assert "Leave sample_context, test_context, comparator, and fixed_conditions empty" in user_prompt
     assert "`window_id` is this bounded window's identity" in user_prompt
     assert "absence from this window is not evidence of absence elsewhere" in user_prompt
     assert "return one relationship per outcome" in user_prompt
     assert "full jointly varied, compared, or modeled factor set" in user_prompt
     assert "never label the cited study current_work" in user_prompt
-    assert "listed Methods setting alone is not an intervention" in user_prompt
     assert "Miranda et al. [20]" in user_prompt
-    assert "Laser power belongs only in fixed_conditions" in user_prompt
     assert "Return empty arrays rather than guessing" in user_prompt
-    assert "Return every distinct, explicitly supported study and relationship" in user_prompt
     assert "Return `studies=[]`; do not" in user_prompt
     assert "Return the explicit axis in `unresolved_signals`" in user_prompt
     assert "copy `source_unit_ids`" in user_prompt
     assert "at most 12 unique `source_unit_ids`" in user_prompt
-    assert "Return two studies" in user_prompt
     assert "up to 2 `warnings`, each at most 240 characters" in user_prompt
-    assert "up to 8 studies" in user_prompt
-    assert "up to 8 relationships per study" in user_prompt
-    assert "up to 12 unresolved signals" in user_prompt
+    assert "up to 4 studies" in user_prompt
+    assert "up to 6 relationships per study" in user_prompt
+    assert "up to 8 unresolved signals" in user_prompt
     assert "output_saturated=true" in user_prompt
     assert "neutral scientific axis" in user_prompt
-    assert "at most 12 process, sample, and test context values" in user_prompt
-    assert "each context value is at most 160 characters" in user_prompt
     assert "at most 12 varied-factor labels" in user_prompt
     assert "L-VED, M-VED, and H-VED" in user_prompt
     assert "varied_factors=['volumetric energy density']" in user_prompt
@@ -528,12 +554,17 @@ def test_review_paper_skim_prompt_extracts_synthesis_not_cited_experiments():
         }
     )
 
-    assert "review-author synthesis screening" in user_prompt
+    assert "review-author synthesis mapping" in user_prompt
     assert "not cited-study reconstruction" in user_prompt
     assert "claim_scope=synthesis" in user_prompt
     assert "return no study or unresolved signal" in user_prompt
     assert "Across studies, preheating generally reduced residual stress" in user_prompt
     assert "Miranda et al. [20]" in user_prompt
+    assert "synthesis_claims" in user_prompt
+    assert "disputes" in user_prompt
+    assert "evidence_gaps" in user_prompt
+    assert "citation_leads" in user_prompt
+    assert "never primary Evidence" in user_prompt
 
 
 def test_review_paper_skim_extractor_keeps_only_review_author_synthesis():
@@ -574,6 +605,25 @@ def test_review_paper_skim_extractor_keeps_only_review_author_synthesis():
                         "source_unit_ids": [source_unit_id],
                     }
                 ],
+                "review_synthesis": {
+                    "synthesis_claims": [
+                        {
+                            "content": "Preheating generally reduces residual stress.",
+                            "variables": ["preheating condition"],
+                            "outcomes": ["residual stress"],
+                            "source_unit_ids": [source_unit_id],
+                            "confidence": 0.9,
+                        }
+                    ],
+                    "citation_leads": [
+                        {
+                            "content": "Miranda et al. [20]",
+                            "outcomes": ["residual stress"],
+                            "source_unit_ids": [source_unit_id],
+                            "confidence": 0.8,
+                        }
+                    ],
+                },
             }
         )
     )
@@ -600,6 +650,10 @@ def test_review_paper_skim_extractor_keeps_only_review_author_synthesis():
     assert [study.claim_scope for study in skim.studies] == ["synthesis"]
     assert skim.studies[0].relationships[0].outcome == "residual stress"
     assert skim.unresolved_signals == []
+    assert skim.review_synthesis.synthesis_claims[0].content.startswith(
+        "Preheating"
+    )
+    assert skim.review_synthesis.citation_leads[0].content == "Miranda et al. [20]"
 
 
 def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
@@ -696,6 +750,7 @@ def test_paper_signal_reconciliation_prompt_defines_backend_owned_accounting():
     )
 
     assert "membership adjudication" in user_prompt
+    assert "same stated paper-owned research scope" in user_prompt
     assert "one bounded candidate neighborhood" in user_prompt
     assert "exactly one outcome anchor" in user_prompt
     assert "omitted paper signals are outside this batch" in user_prompt
@@ -705,8 +760,9 @@ def test_paper_signal_reconciliation_prompt_defines_backend_owned_accounting():
     assert "never invent a reason merely to repeat an ID" in user_prompt
     assert "copy only input `signal_id` values" in user_prompt
     assert "same signal membership more than once" in user_prompt
-    assert "Methods variable and Results outcome" in user_prompt
-    assert "different experiments" in user_prompt.lower()
+    assert "Split high-level statement" in user_prompt
+    assert "Different scopes" in user_prompt
+    assert "Do not infer sample groups, controls, test settings" in user_prompt
 
 
 class _FakeCompletions:
@@ -1611,7 +1667,7 @@ def test_domain_model_extractors_validates_paper_skim_response():
     assert skim.doc_role == "experimental"
     assert skim.studies[0].material_scope == ["316L stainless steel"]
     assert skim.studies[0].relationships[0].outcome == "corrosion current density"
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 4096
+    assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
 
 
 def test_paper_skim_bounds_diagnostic_warnings_without_retrying_scientific_output():
@@ -3701,7 +3757,7 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     assert "must not become evidence" not in prompt
     assert "must not be copied" not in prompt
     assert "Return a changed variable only when this SOURCE explicitly names" in contract
-    assert "The backend may bind another grounded Source later" in contract
+    assert "the backend may bind another grounded Source later" in contract
     assert "absent, off, or without condition to numeric 0" in contract
     assert "one baseline-to-target comparison interval" in contract
     assert "Never repeat a changed-variable name" in contract

@@ -22,6 +22,19 @@ This node owns the collection workspace route family.
   Collection-bound Research Agent conversation with transient streamed text,
   capability activity, structured results, canonical resource links, and exact
   write approval.
+  Its research-process capability projects the same persisted build task used
+  by the workspace into user-visible scientific stages; Chat does not own a
+  second progress model or expose model reasoning and retry internals.
+  The Agent may also propose starting that canonical collection process. The
+  exact action requires user approval, returns a queued task linked to the
+  collection workspace, and does not confirm an Objective or start deep
+  Objective analysis.
+  For a researcher-authored question, the Agent can preview a bounded paper
+  scope without claiming that mapped relationships or review citations are
+  Evidence. Creating the untested Objective candidate requires approval, and
+  starting its canonical Objective analysis requires a separate approval. The
+  Agent can then inspect the same persisted analysis state and paper progress
+  shown by the Objective workspace.
   This route remains available before Objective discovery finishes so the
   researcher can converse, inspect readiness, and form Objective proposals;
   capabilities must still expose missing or incomplete collection artifacts.

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event, Lock
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from httpx import Request, Response
-from openai import BadRequestError
-
 from application.core.objectives import property_matching
 from application.core.objectives.analysis import (
     evidence_materialization,
@@ -34,6 +33,8 @@ from application.core.objectives.analysis.source_screening import (
 from application.core.paper_facts.schemas import StructuredTableMatrixRepair
 from domain.core import ObjectiveAnalysis, PaperSkim
 from domain.source import SourceDocumentNode, SourceDocumentTree, SourceTable
+from httpx import Request, Response
+from openai import BadRequestError
 from tests.support.research_objective_service import (
     research_objective as _research_objective,
 )
@@ -138,6 +139,36 @@ class _BoundedFrameExtractor:
             relevant_source_unit_ids=relevant_source_unit_ids,
             excluded_source_unit_ids=excluded_source_unit_ids,
         )
+
+
+class _BlockingFrameExtractor(_BoundedFrameExtractor):
+    def __init__(self, *, expected_concurrency: int) -> None:
+        super().__init__(max_source_units=1)
+        self.expected_concurrency = expected_concurrency
+        self.release = Event()
+        self.expected_workers_started = Event()
+        self._lock = Lock()
+        self.active_calls = 0
+        self.call_count = 0
+        self.peak_concurrency = 0
+
+    def screen_batch(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredPaperFrameBatch:
+        with self._lock:
+            self.active_calls += 1
+            self.call_count += 1
+            self.peak_concurrency = max(self.peak_concurrency, self.active_calls)
+            if self.active_calls == self.expected_concurrency:
+                self.expected_workers_started.set()
+        try:
+            if not self.release.wait(timeout=5):
+                raise TimeoutError("framing concurrency test did not release workers")
+            return super().screen_batch(payload)
+        finally:
+            with self._lock:
+                self.active_calls -= 1
 
 
 def _frame_test_tree(*section_specs: tuple[str, str, str]) -> SourceDocumentTree:
@@ -1042,11 +1073,9 @@ def test_objective_paper_framing_batches_every_stable_source_once():
         document_trees_by_document_id={"paper-1": document_tree},
     )
 
-    assert [len(payload["source_units"]) for payload in extractor.frame_payloads] == [
-        2,
-        2,
-        1,
-    ]
+    assert sorted(
+        len(payload["source_units"]) for payload in extractor.frame_payloads
+    ) == [1, 2, 2]
     sent_ids = [
         unit["source_unit_id"]
         for payload in extractor.frame_payloads
@@ -1075,6 +1104,190 @@ def test_objective_paper_framing_batches_every_stable_source_once():
         and not item.accounting_errors
         for item in frames[0].source_dispositions
     )
+
+
+def test_objective_paper_framing_honors_configured_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OBJECTIVE_PAPER_FRAMING_MAX_CONCURRENCY", "10")
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    document_tree = _frame_test_tree(
+        *tuple(
+            (
+                f"section-{position}",
+                f"Section {position}",
+                f"Laser power and relative density observation {position}.",
+            )
+            for position in range(12)
+        )
+    )
+    extractor = _BlockingFrameExtractor(expected_concurrency=10)
+
+    with ThreadPoolExecutor(max_workers=1) as runner:
+        future = runner.submit(
+            source_screening.screen_sources,
+            collection_id="col-test",
+            source_screener=extractor,
+            objectives=(objective,),
+            paper_skims=(),
+            documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
+            profiles_by_document_id={},
+            blocks_by_document_id={},
+            tables_by_document_id={},
+            document_trees_by_document_id={"paper-1": document_tree},
+        )
+        try:
+            assert extractor.expected_workers_started.wait(timeout=1)
+            with extractor._lock:
+                assert extractor.active_calls == 10
+                assert extractor.call_count == 10
+        finally:
+            extractor.release.set()
+        frames = future.result(timeout=5)
+
+    assert extractor.call_count == 12
+    assert extractor.peak_concurrency == 10
+    assert len(frames) == 1
+    assert [item.source_ref for item in frames[0].source_dispositions] == [
+        f"section-{position}" for position in range(12)
+    ]
+
+
+def test_objective_paper_framing_shares_concurrency_across_papers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OBJECTIVE_PAPER_FRAMING_MAX_CONCURRENCY", "10")
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    documents = tuple(
+        SimpleNamespace(document_id=f"paper-{position}", title=f"Paper {position}")
+        for position in range(12)
+    )
+    trees = {
+        document.document_id: _frame_test_tree(
+            (
+                f"results-{position}",
+                "Results",
+                f"Laser power and relative density observation {position}.",
+            )
+        )
+        for position, document in enumerate(documents)
+    }
+    extractor = _BlockingFrameExtractor(expected_concurrency=10)
+
+    with ThreadPoolExecutor(max_workers=1) as runner:
+        future = runner.submit(
+            source_screening.screen_sources,
+            collection_id="col-test",
+            source_screener=extractor,
+            objectives=(objective,),
+            paper_skims=(),
+            documents=documents,
+            profiles_by_document_id={},
+            blocks_by_document_id={},
+            tables_by_document_id={},
+            document_trees_by_document_id=trees,
+        )
+        try:
+            assert extractor.expected_workers_started.wait(timeout=1)
+            with extractor._lock:
+                assert extractor.active_calls == 10
+                assert extractor.call_count == 10
+        finally:
+            extractor.release.set()
+        frames = future.result(timeout=5)
+
+    assert extractor.call_count == 12
+    assert extractor.peak_concurrency == 10
+    assert [frame.document_id for frame in frames] == [
+        document.document_id for document in documents
+    ]
+
+
+def test_objective_paper_framing_progress_counts_completed_papers() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    documents = (
+        SimpleNamespace(document_id="paper-1", title="Paper 1"),
+        SimpleNamespace(document_id="paper-2", title="Paper 2"),
+    )
+    progress: list[dict[str, Any]] = []
+
+    source_screening.screen_sources(
+        collection_id="col-test",
+        source_screener=_BoundedFrameExtractor(max_source_units=1),
+        objectives=(objective,),
+        paper_skims=(),
+        documents=documents,
+        profiles_by_document_id={},
+        blocks_by_document_id={},
+        tables_by_document_id={},
+        document_trees_by_document_id={
+            "paper-1": _frame_test_tree(
+                ("results-1", "Results", "Relative density result 1.")
+            ),
+            "paper-2": _frame_test_tree(
+                ("results-2", "Results", "Relative density result 2.")
+            ),
+        },
+        progress_callback=progress.append,
+    )
+
+    assert [item["current"] for item in progress] == [0, 1, 2]
+    assert [item["phase"] for item in progress] == [
+        "objective_paper_framing_started",
+        "objective_paper_framing_completed",
+        "objective_paper_framing_completed",
+    ]
+    assert [item.get("active_document_id") for item in progress] == [
+        None,
+        "paper-1",
+        "paper-2",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("configured_value", "expected"),
+    [
+        (None, 10),
+        ("3", 3),
+        ("invalid", 10),
+        ("0", 10),
+    ],
+)
+def test_objective_paper_framing_concurrency_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_value: str | None,
+    expected: int,
+) -> None:
+    if configured_value is None:
+        monkeypatch.delenv("OBJECTIVE_PAPER_FRAMING_MAX_CONCURRENCY", raising=False)
+    else:
+        monkeypatch.setenv(
+            "OBJECTIVE_PAPER_FRAMING_MAX_CONCURRENCY",
+            configured_value,
+        )
+
+    assert source_screening._paper_framing_max_concurrency() == expected
 
 
 def test_objective_paper_frame_routes_duplicate_headings_by_selected_source_ref(
@@ -1803,6 +2016,185 @@ def test_research_objective_keeps_unbound_result_as_descriptive_evidence():
     assert drafts[0].resolution_status == "partial"
 
 
+def test_research_objective_binds_directional_result_series_to_process_table() -> None:
+    def condition(
+        sample: str,
+        laser_power: str,
+        input_current: str = "200 A",
+    ) -> ExtractedEvidenceDraft:
+        return ExtractedEvidenceDraft.from_mapping(
+            {
+                "evidence_id": f"condition-{sample}",
+                "objective_id": "obj-energy-ductility",
+                "document_id": "paper-sild",
+                "source_kind": "table",
+                "source_ref": "table-2",
+                "evidence_role": "condition_context",
+                "selection_status": "extracted",
+                "changed_variables": [],
+                "comparison": None,
+                "reported_result": None,
+                "attribution_scope": "not_attributable",
+                "scientific_context": {
+                    "sample": [{"name": "Sample", "value": sample}],
+                    "process": [
+                        {
+                            "name": "Input current (induction heater), I",
+                            "value": input_current,
+                        },
+                        {"name": "Laser power, P", "value": laser_power},
+                    ],
+                },
+                "source_refs": [
+                    {
+                        "source_kind": "table",
+                        "source_ref": "table-2",
+                        "source_excerpt": (
+                            f"Sample: {sample} | Input current: 200 A | "
+                            f"Laser power: {laser_power}"
+                        ),
+                    }
+                ],
+                "resolution_status": "resolved",
+                "confidence": 0.95,
+            }
+        )
+
+    result_text = (
+        "the elongation decreases from 20.1% ± 0.5% (20 0-10 0 0) to "
+        "17.0% ± 0.7% (20 0-850)"
+    )
+    source_text = (
+        "With decreasing laser power, the UTS increases from 867 ± 5 MPa "
+        "(20 0-10 0 0) to 876 ± 8 MPa (20 0-850), and then to 892 ± 3 MPa "
+        "(20 0-70 0), "
+        f"{result_text} and then to 15.4% ± 1.3% (20 0-70 0)."
+    )
+    result = ExtractedEvidenceDraft.from_mapping(
+        {
+            "evidence_id": "result-ductility",
+            "objective_id": "obj-energy-ductility",
+            "document_id": "paper-sild",
+            "source_kind": "text_window",
+            "source_ref": "results-ductility",
+            "evidence_role": "direct_result",
+            "selection_status": "extracted",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "elongation",
+                "value": 17.0,
+                "unit": "%",
+                "direction": "decrease",
+                "result_text": result_text,
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {},
+            "source_refs": [
+                {
+                    "source_kind": "text_window",
+                    "source_ref": "results-ductility",
+                    "source_excerpt": source_text,
+                }
+            ],
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        }
+    )
+
+    drafts = paper_experiment._bind_objective_result_process_context(
+        (
+            condition("0-1000", "1000 W", "0 A"),
+            condition("100-1000", "1000 W", "100 A"),
+            condition("200-1000", "1000 W"),
+            condition("200-850", "850 W"),
+            condition("200-700", "700 W"),
+            result,
+        )
+    )
+    bound = [
+        item
+        for item in drafts
+        if item.source_ref == result.source_ref and item.comparison is not None
+    ]
+
+    assert [
+        (
+            item.comparison.baseline_label,
+            item.comparison.target_label,
+            item.reported_result.baseline_value,
+            item.reported_result.target_value,
+        )
+        for item in bound
+    ] == [
+        ("200-1000", "200-850", 20.1, 17.0),
+        ("200-850", "200-700", 17.0, 15.4),
+    ]
+    assert [
+        [variable.to_record() for variable in item.changed_variables]
+        for item in bound
+    ] == [
+        [
+            {
+                "name": "Laser power, P",
+                "baseline_value": "1000 W",
+                "target_value": "850 W",
+                "unit": None,
+            }
+        ],
+        [
+            {
+                "name": "Laser power, P",
+                "baseline_value": "850 W",
+                "target_value": "700 W",
+                "unit": None,
+            }
+        ],
+    ]
+    assert all(item.reported_result.unit == "%" for item in bound)
+    assert all(item.reported_result.direction == "decrease" for item in bound)
+    assert all(item.comparison.comparable for item in bound)
+    assert all(item.attribution_scope == "isolated_effect" for item in bound)
+
+
+def test_objective_extraction_contract_keeps_result_comparison_values() -> None:
+    response = StructuredEvidenceExtractions.model_validate(
+        {
+            "extractions": [
+                {
+                    "evidence_role": "direct_result",
+                    "changed_variables": [],
+                    "comparison": {
+                        "baseline_label": "200-1000",
+                        "target_label": "200-850",
+                        "axis_names": ["laser power"],
+                        "comparable": True,
+                        "incomparability_reasons": [],
+                    },
+                    "reported_result": {
+                        "outcome": "elongation",
+                        "value": 17.0,
+                        "baseline_value": 20.1,
+                        "target_value": 17.0,
+                        "unit": "%",
+                        "direction": "decrease",
+                        "result_text": "elongation decreases from 20.1% to 17.0%",
+                    },
+                    "attribution_scope": "association_only",
+                    "scientific_context": {},
+                    "resolution_status": "partial",
+                    "confidence": 0.9,
+                }
+            ]
+        }
+    )
+
+    result = response.extractions[0].reported_result
+    assert result is not None
+    assert result.baseline_value == 20.1
+    assert result.target_value == 17.0
+
+
 def test_research_objective_abstains_without_target_result():
     objective = _research_objective({"objective_id": "obj-microstructure"})
     block = _study_source_block(
@@ -2047,6 +2439,130 @@ def test_source_validation_does_not_invent_series_from_generic_sample_labels():
     assert records[0]["attribution_scope"] == "not_attributable"
 
 
+def test_source_validation_recovers_explicit_direction_from_result_text() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-energy-ductility",
+            "question": "How does laser power affect elongation?",
+            "variables": ["laser power"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-sild",
+            "source_kind": "text_window",
+            "source_ref": "results-ductility",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    result_text = (
+        "elongation decreases from 20.1% (200-1000) to 17.0% (200-850)"
+    )
+
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": result_text,
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "elongation",
+                "value": 17.0,
+                "unit": "%",
+                "direction": "unknown",
+                "result_text": result_text,
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert records[0]["reported_result"]["direction"] == "decrease"
+
+
+def test_source_validation_recovers_material_bound_by_source_heading() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-energy-ductility",
+            "question": "How does laser power affect elongation?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["laser power"],
+            "outcomes": ["elongation"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-sild",
+            "source_kind": "text_window",
+            "source_ref": "results-ductility",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+    result_text = "elongation decreases from 20.1% to 17.0%"
+    extracted_record = {
+        "evidence_role": "direct_result",
+        "changed_variables": [],
+        "comparison": None,
+        "reported_result": {
+            "outcome": "elongation",
+            "value": 17.0,
+            "unit": "%",
+            "direction": "decrease",
+            "result_text": result_text,
+        },
+        "attribution_scope": "descriptive_only",
+        "scientific_context": {},
+        "resolution_status": "partial",
+        "confidence": 0.9,
+    }
+
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "heading_path": (
+                "Mechanical properties in SILD-fabricated Ti-6Al-4V"
+            ),
+            "text": result_text,
+        },
+        objective_context=objective,
+        extracted_record=extracted_record,
+    )
+
+    assert records[0]["scientific_context"]["material"] == [
+        {"name": "material", "value": "Ti-6Al-4V", "unit": None}
+    ]
+
+    other_material_records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "heading_path": "Mechanical properties in SLM-fabricated 316L",
+            "text": result_text,
+        },
+        objective_context=objective,
+        extracted_record=extracted_record,
+    )
+    assert other_material_records[0]["scientific_context"]["material"] == []
+
+
 def test_llm_objective_evidence_accepts_source_grounded_axis_and_values():
     objective = _research_objective(
         {
@@ -2101,6 +2617,8 @@ def test_llm_objective_evidence_accepts_source_grounded_axis_and_values():
             "reported_result": {
                 "outcome": "yield strength",
                 "value": 351.9,
+                "baseline_value": 334.2,
+                "target_value": 351.9,
                 "unit": "MPa",
                 "direction": "increase",
                 "result_text": "Yield strength increased from 334.2 to 351.9 MPa.",
@@ -2118,6 +2636,58 @@ def test_llm_objective_evidence_accepts_source_grounded_axis_and_values():
     )
 
     assert len(records) == 1
+
+
+def test_llm_objective_evidence_rejects_ungrounded_result_endpoint() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-angle-effects",
+            "question": "How does scan rotation affect yield strength?",
+            "variables": ["scan strategy rotation angle"],
+            "outcomes": ["yield strength"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-angle",
+            "source_kind": "text_window",
+            "source_ref": "result-angle",
+            "role": "current_experimental_evidence",
+            "extractable": True,
+            "confidence": 0.9,
+        }
+    )
+
+    records = source_validation.validate_source_fact(
+        route=route,
+        source={
+            "source_kind": "text_window",
+            "source_ref": route.source_ref,
+            "text": "Yield strength increased from 334.2 to 351.9 MPa.",
+        },
+        objective_context=objective,
+        extracted_record={
+            "evidence_role": "direct_result",
+            "changed_variables": [],
+            "comparison": None,
+            "reported_result": {
+                "outcome": "yield strength",
+                "value": 351.9,
+                "baseline_value": 999.0,
+                "target_value": 351.9,
+                "unit": "MPa",
+                "direction": "increase",
+                "result_text": "Yield strength increased from 334.2 to 351.9 MPa.",
+            },
+            "attribution_scope": "descriptive_only",
+            "scientific_context": {},
+            "resolution_status": "partial",
+            "confidence": 0.9,
+        },
+    )
+
+    assert records == ()
 
 
 def test_llm_objective_evidence_completes_grounded_categorical_endpoints():
@@ -2874,6 +3444,24 @@ def test_research_objective_prompt_source_uses_complete_markdown_without_raw_cel
     )
     assert "CAPTION: Measured density" in prompt
     assert "| A | 99.6 |" in prompt
+
+
+def test_objective_evidence_prompt_does_not_copy_objective_material() -> None:
+    system_prompt, _user_prompt = source_extraction.build_objective_evidence_prompt(
+        {
+            "objective": {
+                "question": "How does scanning strategy affect porosity?",
+                "material_scope": ["Ti-6Al-4V"],
+                "variables": ["scanning strategy"],
+                "outcomes": ["porosity"],
+            },
+            "source": {
+                "text": "Scan X reduced porosity in 17-4PH stainless steel."
+            },
+        }
+    )
+
+    assert "Never copy the OBJECTIVE material" in system_prompt
 
 
 def test_research_objective_evidence_prompt_compacts_long_text_source(
@@ -3833,6 +4421,94 @@ def test_research_objective_service_skips_non_target_result_property_columns(
     )
 
     assert records == ()
+
+
+def test_energy_input_process_table_preserves_induction_current() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-energy-ductility",
+            "variables": ["energy input"],
+            "outcomes": ["ductility"],
+        }
+    )
+    route = EvidenceCandidate.from_mapping(
+        {
+            "objective_id": objective.objective_id,
+            "document_id": "paper-sild",
+            "source_kind": "table",
+            "source_ref": "table-2",
+            "role": "process_or_treatment",
+            "extractable": True,
+            "confidence": 0.95,
+        }
+    )
+
+    records = source_extraction._objective_table_matrix_evidence_records(
+        route=route,
+        objective_context=objective,
+        source={
+            "source_kind": "table",
+            "source_ref": "table-2",
+            "caption_text": (
+                "DED processing parameters used for synchronous induction "
+                "assisted laser deposition experiments."
+            ),
+            "column_headers": [
+                "Sample",
+                "Input current (induction heater), I",
+                "Laser power, P",
+            ],
+            "table_matrix": [
+                [
+                    "Sample",
+                    "Input current (induction heater), I",
+                    "Laser power, P",
+                ],
+                ["0-1000", "0 A", "1000 W"],
+                ["200-850", "200 A", "850 W"],
+            ],
+        },
+    )
+
+    process_by_sample = {
+        next(
+            item["value"]
+            for item in record["scientific_context"]["sample"]
+            if item["name"] == "Sample"
+        ): {
+            item["name"]: item["value"]
+            for item in record["scientific_context"]["process"]
+        }
+        for record in records
+    }
+    assert process_by_sample == {
+        "0-1000": {
+            "Input current (induction heater), I": "0 A",
+            "Laser power, P": "1000 W",
+        },
+        "200-850": {
+            "Input current (induction heater), I": "200 A",
+            "Laser power, P": "850 W",
+        },
+    }
+
+
+def test_objective_evidence_prompt_teaches_cross_source_energy_group_binding() -> None:
+    system_prompt, _user_prompt = source_extraction.build_objective_evidence_prompt(
+        {
+            "objective": {
+                "question": "How does energy input affect ductility?",
+                "variables": ["energy input"],
+                "outcomes": ["ductility"],
+            },
+            "source": {"text": "A source-local result."},
+        }
+    )
+
+    assert '"baseline_label":"200-1000"' in system_prompt
+    assert '"target_label":"200-850"' in system_prompt
+    assert '"axis_names":["laser power"]' in system_prompt
+    assert '"attribution_scope":"association_only"' in system_prompt
 
 
 def test_research_objective_service_uses_objective_scientific_intent_directly(

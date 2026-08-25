@@ -990,12 +990,75 @@ class FindingSynthesisService:
     ) -> bool:
         if not cls._eligible_result_evidence(evidence):
             return False
-        assert evidence.reported_result is not None
+        return cls.evidence_matches_objective_axes(
+            objective,
+            evidence,
+        ) and cls.material_scope_status(objective, evidence) in {
+            "matched",
+            "not_required",
+        }
+
+    @classmethod
+    def evidence_matches_objective_axes(
+        cls,
+        objective: ResearchObjective,
+        evidence: ObjectiveEvidence,
+    ) -> bool:
+        if evidence.reported_result is None or not evidence.changed_variables:
+            return False
         return cls._within_objective_scope(
             factors=tuple(item.name for item in evidence.changed_variables),
             outcome=evidence.reported_result.outcome,
             objective=objective,
         )
+
+    @staticmethod
+    def material_scope_status(
+        objective: ResearchObjective,
+        evidence: ObjectiveEvidence,
+    ) -> str:
+        """Classify whether Evidence can answer the Objective material scope."""
+
+        if not objective.material_scope:
+            return "not_required"
+        evidence_values = tuple(
+            attribute.value
+            for attribute in evidence.scientific_context.material
+            if attribute.value not in (None, "")
+        )
+        if not evidence_values:
+            return "unresolved"
+
+        relationships: list[str] = []
+        for evidence_value in evidence_values:
+            if any(
+                property_matching.material_value_matches_objective_comparison_scope(
+                    evidence_value,
+                    objective_value,
+                )
+                for objective_value in objective.material_scope
+            ):
+                relationships.append("matched")
+                continue
+            if any(
+                property_matching.material_values_match_for_scope(
+                    evidence_value,
+                    objective_value,
+                )
+                for objective_value in objective.material_scope
+            ):
+                relationships.append("unresolved")
+                continue
+            if property_matching.material_scope_value_is_specific(evidence_value):
+                relationships.append("mismatched")
+            else:
+                relationships.append("unresolved")
+
+        if "mismatched" in relationships:
+            return "mismatched"
+        if relationships and all(item == "matched" for item in relationships):
+            return "matched"
+        return "unresolved"
 
     @staticmethod
     def _within_objective_scope(

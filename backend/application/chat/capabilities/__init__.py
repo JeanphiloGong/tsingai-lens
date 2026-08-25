@@ -17,9 +17,27 @@ from application.chat.capabilities.objective_candidate import (
     CreateObjectiveCandidateArguments,
     CreateObjectiveCandidateCapability,
 )
+from application.chat.capabilities.objective_analysis import (
+    InspectObjectiveAnalysisArguments,
+    InspectObjectiveAnalysisCapability,
+    StartObjectiveAnalysisArguments,
+    StartObjectiveAnalysisCapability,
+)
 from application.chat.capabilities.published_findings import (
     QueryPublishedFindingsArguments,
     QueryPublishedFindingsCapability,
+)
+from application.chat.capabilities.research_process import (
+    InspectResearchProcessArguments,
+    InspectResearchProcessCapability,
+)
+from application.chat.capabilities.research_process_start import (
+    StartResearchProcessArguments,
+    StartResearchProcessCapability,
+)
+from application.chat.capabilities.research_scope import (
+    PreviewResearchScopeArguments,
+    PreviewResearchScopeCapability,
 )
 from application.chat.capabilities.registry import CapabilityRegistry
 
@@ -32,10 +50,20 @@ __all__ = [
     "CreateObjectiveCandidateCapability",
     "GetCollectionContextArguments",
     "GetCollectionContextCapability",
+    "InspectObjectiveAnalysisArguments",
+    "InspectObjectiveAnalysisCapability",
+    "InspectResearchProcessArguments",
+    "InspectResearchProcessCapability",
     "ObjectiveDraftInput",
     "ProposeObjectiveDraftsArguments",
     "ProposeObjectiveDraftsCapability",
+    "PreviewResearchScopeArguments",
+    "PreviewResearchScopeCapability",
     "QueryPublishedFindingsArguments",
     "QueryPublishedFindingsCapability",
+    "StartResearchProcessArguments",
+    "StartResearchProcessCapability",
+    "StartObjectiveAnalysisArguments",
+    "StartObjectiveAnalysisCapability",
     "ToolSpec",
 ]

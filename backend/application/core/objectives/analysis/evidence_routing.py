@@ -11,6 +11,9 @@ from typing import Any, Callable, Iterable, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from application.core.objectives import property_matching
+from application.core.objectives.analysis.diagnostics import (
+    record_analysis_diagnostic,
+)
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 from domain.core import (
@@ -386,6 +389,29 @@ def route_sources(
                 collection_id,
                 frame.objective_id,
                 frame.document_id,
+                frame.document_id,
+                frame_position,
+                frame_count,
+                frame_position,
+                max(frame_count - frame_position, 0),
+            )
+            continue
+        if frame.paper_role == "review":
+            record_analysis_diagnostic(
+                {
+                    "trace_type": "objective_review_routing",
+                    "collection_id": collection_id,
+                    "objective_id": frame.objective_id,
+                    "document_id": frame.document_id,
+                    "paper_role": frame.paper_role,
+                    "disposition": "citation_lead_only",
+                    "reason": "review_sources_are_not_primary_evidence",
+                }
+            )
+            logger.info(
+                "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s frame_position=%s frame_count=%s reason=review_sources_are_not_primary_evidence completed_frames=%s remaining_frames=%s",
+                collection_id,
+                frame.objective_id,
                 frame.document_id,
                 frame_position,
                 frame_count,
@@ -1659,7 +1685,7 @@ def _route_text_candidate_is_direct_result(
     if not text:
         return False
     mentions_variable = any(
-        property_matching.source_text_mentions_axis(text, axis)
+        property_matching.source_text_mentions_objective_variable(text, axis)
         for axis in objective_context.variables
     )
     mentions_outcome = any(
@@ -1695,11 +1721,14 @@ def _route_text_candidate_is_direct_result(
             "compared with",
             "compared to",
             "comparing",
-            "decreased",
+            "decreas",
             "diminish",
+            "enhanc",
             "exhibited",
             "higher than",
-            "increased",
+            "improv",
+            "increas",
+            "lead to",
             "lower than",
             "not significantly influence",
             "observed",
@@ -1839,7 +1868,10 @@ def _route_text_candidate_score(
         property_matching.axis_key(term)
         for term in (*objective_context.variables, *objective_context.outcomes)
     }
-    for term in (*objective_context.variables, *objective_context.outcomes):
+    for term in objective_context.variables:
+        if property_matching.source_text_mentions_objective_variable(text, term):
+            score += 4
+    for term in objective_context.outcomes:
         if property_matching.source_text_mentions_axis(text, term):
             score += 4
     for term in (*frame.changed_variables, *frame.measured_property_scope):

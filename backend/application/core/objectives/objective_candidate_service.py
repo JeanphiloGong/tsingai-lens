@@ -491,7 +491,8 @@ class ObjectiveCandidateService:
         if not key or key in _MISSING_CONTEXT_VALUES:
             return None
         if re.search(
-            r"(?<![a-z0-9])ti[\s-]*(?:6[\s-]*al[\s-]*4[\s-]*v|64)" r"(?![a-z0-9])",
+            r"(?<![a-z0-9])ti[\s-]*(?:6[\s-]*al[\s-]*4[\s-]*v|"
+            r"al[\s-]*6[\s-]*v[\s-]*4|64)(?![a-z0-9])",
             key,
         ):
             return "titanium-alloy:ti-6al-4v"

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import asyncio
-from threading import Event
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from controllers.core import research_objectives
+from application.core.objectives.analysis_service import (
+    ObjectiveAnalysisDispatchError,
+)
 from controllers.core.research_objectives import router
 from domain.core import (
     Finding,
@@ -193,6 +192,11 @@ class _Service:
     def __init__(self, *, queued: bool = False) -> None:
         self.analysis_status = "queued" if queued else "succeeded"
         self.dispatch_failure_version: int | None = None
+        self.start_calls: list[tuple[str, str]] = []
+
+    async def start_analysis(self, collection_id, objective_id):
+        self.start_calls.append((collection_id, objective_id))
+        return await self.queue_analysis(collection_id, objective_id)
 
     async def queue_analysis(self, collection_id, objective_id):
         return await self.get_analysis_state(collection_id, objective_id)
@@ -353,15 +357,10 @@ def _client(
     *,
     repository: _Repository | None = None,
     raise_server_exceptions: bool = True,
-    analysis_max_concurrency: int | None = None,
 ) -> TestClient:
     app = FastAPI()
     app.state.objective_repository = repository or _Repository()
     app.state.objective_analysis_service = service or _Service()
-    if analysis_max_concurrency is not None:
-        app.state.objective_analysis_semaphore = asyncio.Semaphore(
-            analysis_max_concurrency
-        )
     app.include_router(router)
     return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
@@ -524,30 +523,8 @@ def test_objective_list_hides_stale_objectives_from_an_unready_build() -> None:
     assert response.json()["total"] == 0
 
 
-def test_start_analysis_dispatches_an_asyncio_background_task(monkeypatch) -> None:
+def test_start_analysis_uses_the_canonical_service_dispatch() -> None:
     service = _Service(queued=True)
-    submitted: dict[str, object] = {}
-
-    class _SubmittedTask:
-        def __init__(self) -> None:
-            self.callbacks = []
-
-        def add_done_callback(self, callback) -> None:
-            self.callbacks.append(callback)
-
-    submitted_task = _SubmittedTask()
-
-    def create_task(coroutine):
-        submitted["coroutine"] = coroutine
-        coroutine.close()
-        return submitted_task
-
-    monkeypatch.setattr(
-        research_objectives,
-        "create_task",
-        create_task,
-        raising=False,
-    )
 
     response = _client(service).post(
         "/collections/col-1/objectives/obj-1/analysis"
@@ -555,118 +532,21 @@ def test_start_analysis_dispatches_an_asyncio_background_task(monkeypatch) -> No
 
     assert response.status_code == 200
     assert response.json()["active_analysis"]["status"] == "queued"
-    assert submitted["coroutine"] is not None
-    assert research_objectives._log_unexpected_analysis_failure in (
-        submitted_task.callbacks
-    )
+    assert service.start_calls == [("col-1", "obj-1")]
 
 
-def test_start_analysis_runs_different_collections_concurrently() -> None:
-    release_workers = Event()
-    collection_started = {
-        "col-1": Event(),
-        "col-2": Event(),
-    }
-    collection_completed = {
-        "col-1": Event(),
-        "col-2": Event(),
-    }
+def test_start_analysis_preserves_the_dispatch_failure_http_contract() -> None:
+    class DispatchFailureService(_Service):
+        async def start_analysis(self, collection_id, objective_id):
+            raise ObjectiveAnalysisDispatchError(collection_id, objective_id, 1)
 
-    class ConcurrentService(_Service):
-        async def execute_queued_analysis(
-            self,
-            collection_id,
-            objective_id,
-            analysis_version,
-        ):
-            collection_started[collection_id].set()
-            await asyncio.to_thread(release_workers.wait, 5)
-            collection_completed[collection_id].set()
-            return await self.get_analysis_state(collection_id, objective_id)
-
-    with _client(ConcurrentService(queued=True)) as client:
-        try:
-            first_response = client.post(
-                "/collections/col-1/objectives/obj-1/analysis"
-            )
-            assert first_response.status_code == 200
-            assert collection_started["col-1"].wait(timeout=1)
-
-            second_response = client.post(
-                "/collections/col-2/objectives/obj-1/analysis"
-            )
-            assert second_response.status_code == 200
-            assert collection_started["col-2"].wait(timeout=1)
-        finally:
-            release_workers.set()
-
-    assert collection_completed["col-1"].wait(timeout=1)
-    assert collection_completed["col-2"].wait(timeout=1)
-
-
-def test_start_analysis_limits_asyncio_background_concurrency() -> None:
-    release_first = Event()
-    first_started = Event()
-    second_started = Event()
-
-    class LimitedService(_Service):
-        async def execute_queued_analysis(
-            self,
-            collection_id,
-            objective_id,
-            analysis_version,
-        ):
-            if collection_id == "col-1":
-                first_started.set()
-                await asyncio.to_thread(release_first.wait, 5)
-            else:
-                second_started.set()
-            return await self.get_analysis_state(collection_id, objective_id)
-
-    with _client(
-        LimitedService(queued=True),
-        analysis_max_concurrency=1,
-    ) as client:
-        try:
-            assert client.post(
-                "/collections/col-1/objectives/obj-1/analysis"
-            ).status_code == 200
-            assert first_started.wait(timeout=1)
-
-            assert client.post(
-                "/collections/col-2/objectives/obj-1/analysis"
-            ).status_code == 200
-            assert not second_started.wait(timeout=0.1)
-        finally:
-            release_first.set()
-
-        assert second_started.wait(timeout=1)
-
-
-def test_start_analysis_fails_queued_version_when_async_task_creation_fails(
-    monkeypatch,
-) -> None:
-    service = _Service(queued=True)
-
-    def create_task(coroutine):
-        coroutine.close()
-        raise RuntimeError("event loop unavailable")
-
-    monkeypatch.setattr(
-        research_objectives,
-        "create_task",
-        create_task,
-        raising=False,
-    )
-
-    response = _client(service, raise_server_exceptions=False).post(
+    response = _client(DispatchFailureService(), raise_server_exceptions=False).post(
         "/collections/col-1/objectives/obj-1/analysis"
     )
 
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "objective_analysis_dispatch_failed"
-    assert service.analysis_status == "failed"
-    assert service.dispatch_failure_version == 1
+    assert response.json()["detail"]["analysis_version"] == 1
 
 
 def test_duplicate_objective_detail_route_is_not_registered() -> None:

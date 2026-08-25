@@ -21,7 +21,7 @@ from domain.chat import ChatResourceRef, ChatToolResult, ToolRisk
 class CreateObjectiveCandidateArguments(ObjectiveDraftInput):
     model_config = ConfigDict(extra="forbid")
 
-    seed_document_ids: list[ShortText] = Field(min_length=1, max_length=24)
+    seed_document_ids: list[ShortText] = Field(default_factory=list, max_length=24)
     excluded_document_ids: list[ShortText] = Field(default_factory=list, max_length=24)
 
     @field_validator("seed_document_ids", "excluded_document_ids")
@@ -35,10 +35,10 @@ class CreateObjectiveCandidateCapability:
         name="create_objective_candidate",
         description=(
             "Create one durable Research Objective candidate from an already reviewed "
-            "focused draft. The candidate must have exactly one outcome and at least "
-            "one supporting seed document returned by proposal context. This is a write "
-            "that requires explicit backend approval. It does not confirm the Objective "
-            "or start analysis."
+            "focused draft. The candidate must have exactly one outcome. Seed papers, "
+            "when supplied, are a proposed inspection scope rather than Evidence. This "
+            "write requires explicit backend approval and records the question as "
+            "untested; it does not confirm the Objective or start analysis."
         ),
         risk=ToolRisk.WRITE,
         input_model=CreateObjectiveCandidateArguments,
@@ -67,6 +67,7 @@ class CreateObjectiveCandidateCapability:
                 "origin": objective.origin,
                 "source_build_id": objective.source_build_id,
                 "analysis_started": objective.active_analysis_version is not None,
+                "research_status": "untested",
             },
             resource_refs=(
                 ChatResourceRef(

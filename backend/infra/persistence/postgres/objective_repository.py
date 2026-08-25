@@ -1741,6 +1741,9 @@ class PostgresObjectiveRepository:
                 "evidence_density": row.evidence_density,
                 "confidence": row.confidence,
                 "warnings": row.warnings,
+                "map_status": row.map_status,
+                "map_limitations": row.map_limitations,
+                "review_synthesis": row.review_synthesis,
             }
         )
 
@@ -1772,6 +1775,9 @@ class PostgresObjectiveRepository:
             evidence_density=skim.evidence_density,
             confidence=skim.confidence,
             warnings=list(skim.warnings),
+            map_status=skim.map_status,
+            map_limitations=list(skim.map_limitations),
+            review_synthesis=skim.review_synthesis.to_record(),
         )
 
     @staticmethod
@@ -1793,6 +1799,16 @@ class PostgresObjectiveRepository:
             for refs in (
                 *(relationship.source_refs for study in skim.studies for relationship in study.relationships),
                 *(signal.source_refs for signal in skim.unresolved_signals),
+                *(
+                    item.source_refs
+                    for field_name in (
+                        "synthesis_claims",
+                        "disputes",
+                        "evidence_gaps",
+                        "citation_leads",
+                    )
+                    for item in getattr(skim.review_synthesis, field_name)
+                ),
                 skim.source_unit_coverage,
             )
             for ref in refs

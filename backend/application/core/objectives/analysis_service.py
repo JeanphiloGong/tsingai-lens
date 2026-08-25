@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from asyncio import get_running_loop, run_coroutine_threadsafe
+from asyncio import (
+    CancelledError,
+    Semaphore,
+    Task,
+    create_task,
+    get_running_loop,
+    run_coroutine_threadsafe,
+)
+from collections.abc import Coroutine
 import logging
 from time import perf_counter
 from typing import Any, Callable
@@ -21,6 +29,24 @@ from infra.llm.usage import capture_llm_usage
 logger = logging.getLogger(__name__)
 
 _PIPELINE_VERSION = "objective-analysis.v2"
+_ANALYSIS_MAX_CONCURRENCY = 4
+
+
+class ObjectiveAnalysisDispatchError(RuntimeError):
+    """A queued Objective analysis could not be handed to an asyncio worker."""
+
+    def __init__(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> None:
+        super().__init__(
+            "Objective analysis could not be scheduled. Retry the analysis."
+        )
+        self.collection_id = collection_id
+        self.objective_id = objective_id
+        self.analysis_version = analysis_version
 
 
 class ObjectiveAnalysisService:
@@ -31,9 +57,59 @@ class ObjectiveAnalysisService:
         *,
         objective_repository: ObjectiveRepository,
         research_objective_service: ResearchObjectiveService,
+        max_concurrency: int = _ANALYSIS_MAX_CONCURRENCY,
+        task_factory: Callable[[Coroutine[Any, Any, dict[str, Any]]], Any] = create_task,
     ) -> None:
+        if max_concurrency < 1:
+            raise ValueError("objective analysis concurrency must be positive")
         self.objective_repository = objective_repository
         self.research_objective_service = research_objective_service
+        self._analysis_semaphore = Semaphore(max_concurrency)
+        self._task_factory = task_factory
+        self._analysis_tasks: set[Any] = set()
+
+    async def start_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+    ) -> dict[str, Any]:
+        """Confirm, queue, and asynchronously dispatch one canonical analysis."""
+
+        payload = await self.queue_analysis(collection_id, objective_id)
+        analysis = payload.get("analysis")
+        if analysis is None or analysis.status != "queued":
+            return payload
+
+        coroutine = self._execute_scheduled_analysis(
+            collection_id,
+            objective_id,
+            analysis.analysis_version,
+        )
+        try:
+            task = self._task_factory(coroutine)
+        except Exception as exc:  # noqa: BLE001
+            coroutine.close()
+            logger.exception(
+                "Objective analysis dispatch failed collection_id=%s "
+                "objective_id=%s analysis_version=%s",
+                collection_id,
+                objective_id,
+                analysis.analysis_version,
+            )
+            await self.fail_analysis_dispatch(
+                collection_id,
+                objective_id,
+                analysis.analysis_version,
+            )
+            raise ObjectiveAnalysisDispatchError(
+                collection_id,
+                objective_id,
+                analysis.analysis_version,
+            ) from exc
+        self._analysis_tasks.add(task)
+        task.add_done_callback(self._analysis_tasks.discard)
+        task.add_done_callback(self._log_unexpected_analysis_failure)
+        return payload
 
     async def queue_analysis(self, collection_id: str, objective_id: str) -> dict[str, Any]:
         objective, analysis = await self.objective_repository.queue_analysis(
@@ -327,6 +403,28 @@ class ObjectiveAnalysisService:
             objective = await self._require_objective(collection_id, objective_id)
             return await self._result(collection_id, objective, analysis=current)
 
+    async def _execute_scheduled_analysis(
+        self,
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> dict[str, Any]:
+        async with self._analysis_semaphore:
+            return await self.execute_queued_analysis(
+                collection_id,
+                objective_id,
+                analysis_version,
+            )
+
+    @staticmethod
+    def _log_unexpected_analysis_failure(task: Task[dict[str, Any]]) -> None:
+        try:
+            task.result()
+        except CancelledError:
+            logger.info("Objective analysis task cancelled during backend shutdown")
+        except Exception:  # noqa: BLE001
+            logger.exception("Objective analysis crashed after service scheduling")
+
     @staticmethod
     def _validate_artifacts(artifacts: ObjectiveAnalysisArtifacts) -> None:
         if not artifacts.contributions:
@@ -492,4 +590,4 @@ class ObjectiveAnalysisService:
         return "objective_analysis_failed"
 
 
-__all__ = ["ObjectiveAnalysisService"]
+__all__ = ["ObjectiveAnalysisDispatchError", "ObjectiveAnalysisService"]

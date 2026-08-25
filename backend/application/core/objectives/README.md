@@ -90,72 +90,62 @@ Objective analysis.
   and complete prompt-token estimation. It does not own a scientific judgment,
   prompt, response schema, or domain state.
 - `paper_skim_service.py`
-  Orchestrates the per-document discovery stage. It assigns every eligible
-  non-reference text node, table row, and table/figure caption to one full
-  section-path group. `overview`, `methods`, `results`, `conclusion`, and
-  `unknown` remain window metadata; they no longer collect unrelated sections
-  into one global role bucket. Oversized Source units are split losslessly at
-  4,000 characters; units in one section are then packed by the 12-unit limit
-  and complete prompt-token preflight rather than a second character limit.
-  Independent windows execute with bounded extraction concurrency and their
-  results return to Source order before paper-level reconciliation. Every table
-  row repeats its table caption, heading path, and column headers while retaining
-  the row locator as Source authority. The complete serialized prompt, including
-  the response schema, is preflighted against a 12,288-token prompt budget
-  before the model receives it; PaperSkim generation has a separate 4,096-token
-  completion budget. A relationship or unresolved signal may reference at most
-  the same 12 unique Source-unit ids available in one input batch. The prompt and repair
-  instruction both repeat that batch's exact allowed-ID list so the model cannot
-  continue a document-wide numeric sequence. Duplicate or non-input ids remain
-  invalid and enter one bounded structured repair. Prompt overflow
-  splits before execution. Provider length termination or model-declared output
-  saturation enters the same recursive Source-unit subdivision path as a failed
-  multi-unit batch, preserving stable Source-unit ids until only a terminal
-  singleton can become `extraction_failed`. A relationship with no varied
-  factor, or with a descriptive factor clause that cannot be a bounded neutral
-  axis, is retained as an unresolved outcome signal when its outcome and Source
-  lineage are valid. Compound outcomes and multi-measurement family labels such
-  as `microstructure` are also retained as unresolved signals until the Source
-  supports one specific measurement or observed feature. The backend preserves
-  the broad label and lineage; it does not guess grain size, texture, morphology,
-  or phase fraction. Diagnostic warnings are stripped, limited to two, and bounded to 240
-  characters without retrying otherwise valid scientific output. The backend
-  does not invent a missing factor or outcome and does not discard valid sibling
-  relationships.
-  Successful siblings are retained. Paper-level consolidation treats window
-  output as experiment fragments rather than independent claims. Compatible
-  fragments with the same explicit experiment label are merged even when they
-  contribute different outcomes for the same complete varied-factor set. A
-  repeated relationship with one missing label
-  can merge only with positive non-material experiment identity such as a shared
-  sample, test, comparator, fixed condition, or Source. Material, generic process,
-  or matching axes alone never authorize a merge. Duplicate studies are consolidated and
-  unresolved study signals are reconciled only after every terminal batch has
-  finished. Before a window becomes domain data, a relationship whose alleged
-  varied factor is also recorded as fixed in the same study is downgraded to an
-  unresolved outcome signal; valid sibling relationships remain intact. The
-  extraction contract also separates the paper's current experiment from named
-  authors and numbered citations. The resulting one `PaperSkim` per document
-  retains every distinct internally consistent `PaperStudy` and its complete
-  `PaperStudyRelationship` records.
-  The backend derives one first-stage
-  extraction outcome for every eligible Source unit from validated relationship
-  and signal references: `relationship_emitted`, `unresolved_signal_emitted`,
-  `no_study_signal`, or `extraction_failed`. Jointly varied factors remain
-  attached to one outcome and exact Source locators. Parsed table rows use
-  `table_row + row_id`, while table captions and headers use
-  `table + table_id`; inline table-matrix rows without a persisted row identity
-  remain table-level. A skim retains only the stable Source `document_id`;
-  title, filename, and window metadata remain Source-owned or transient.
+  Orchestrates the pre-Objective paper-map stage. From every parsed paper it
+  first selects at most 16 high-level Source items: abstract/highlights,
+  conclusion or summary, a bounded overview sample, and balanced table/figure
+  captions. When that round cannot establish one usable research scope or one
+  review-author judgment, it performs one targeted expansion of at most eight
+  previously unread Sources for the missing variable, outcome, ownership, or
+  outcome specificity. There is no third scientific reading round. Remaining
+  uncertainty is persisted as `insufficient_map` with explicit
+  `map_limitations`; it is not treated as evidence that the paper is irrelevant.
+  When a poorly structured paper has none of the high-level sections, the first
+  round samples the first and last four narrative items. Detailed Methods and
+  Results paragraphs plus unread visual summaries remain available to targeted
+  expansion. Table measurement rows remain exclusive to confirmed-Objective
+  analysis. Table-map input carries a compact caption and bounded column
+  headers; it never carries measurement rows.
+
+  Selected items retain their original document-order identity, are grouped by
+  broad reading role, packed up to 12 per request, and preflighted with the
+  complete schema-bearing prompt against 12,288 tokens. Paper-map generation
+  has a 2,048-token completion budget and returns at most four scope groups, six
+  relationships per group, and eight unresolved signals. A relationship means
+  that a high-level Source states the paper investigates the supplied material,
+  joint intervention axes, and one specific outcome. It is candidate scope, not
+  `ObjectiveEvidence`, a measured effect, or proof that two experiments are
+  comparable. Sample context, test context, comparator, and fixed conditions
+  are removed at this boundary; confirmed-Objective extraction owns them.
+
+  Duplicate or non-input Source ids remain invalid and enter one bounded
+  structured repair. Prompt overflow and output saturation can subdivide only
+  the already bounded selected Sources. Initial mapping, one focused expansion,
+  technical recovery, and signal reconciliation share one per-paper judgment
+  budget and a five-minute deadline. The extra call allowance defaults to 4-12
+  beyond the initial high-level windows. Successful siblings survive while a
+  terminal Source extraction failure becomes `extraction_failed`; signals that
+  cannot be reconciled within the remaining budget stay unresolved rather than
+  becoming scientific or Source failures. Broad or compound outcomes remain
+  unresolved instead of being guessed. Review input retains only review-author
+  synthesis and never reconstructs a cited primary experiment. The resulting
+  `PaperSkim` persists Source-linked candidate-scope relationships, unresolved
+  axes, final map sufficiency, and one coverage result for every selected Source
+  unit. For review papers it separately persists Source-linked author synthesis,
+  disputes, evidence gaps, and citation leads. Citation leads are navigation to
+  candidate primary papers only; none of these review records is experimental
+  Evidence or a reconstructed cited experiment. Coverage
+  completeness refers to that bounded map, not to every Source in the full
+  paper.
 - `discovery/study_window.py`
   Owns the model judgment for one bounded PaperSkim Source window: its prompt,
   response schema, scientific bounds, repair instruction, stable-identity
-  validation, token budget, and model call. It reports studies, relationships,
-  and unresolved signals supported by that window; it does not batch Sources,
-  combine windows, or create collection Objectives.
+  validation, token budget, and model call. It maps stated paper-owned research
+  axes and unresolved signals; it does not reconstruct complete experiments,
+  batch Sources, combine windows, or create collection Objectives.
 - `discovery/signal_reconciliation.py`
-  Owns the model judgment that decides whether variable and outcome signals
-  found in different windows belong to one compatible experiment. Its prompt,
+  Owns the model judgment that decides whether incomplete variable and outcome
+  signals found in different high-level windows describe one paper-owned
+  research scope. It does not reconstruct an experiment. Its prompt,
   response schema, context-conflict validation, bounded repair, deterministic
   conflict removal, token budget, and model call live together. Paper-wide
   signal accounting and study consolidation remain in `paper_skim_service.py`.
@@ -252,68 +242,40 @@ build, allocates a new `analysis_version`, and returns:
 - `ObjectiveEvidence[]`
 - `Finding[]`
 
-Objective discovery has separate prompt and output bounds. Per-paper screening
-uses as many full-section-path batches as the paper requires. One oversized
-Source unit is split losslessly at 4,000 characters. Units in one section are
-packed up to 12 at a time, then the exact system message, user message, input
-payload, and response schema are counted against a 12,288-token prompt budget.
-Prompt overflow splits before execution. Independent windows run with
+Objective discovery has separate prompt and output bounds. Per-paper mapping
+starts with a deterministic researcher-like skim rather than full-document
+extraction: abstract/highlights, conclusion or summary, a bounded overview
+sample, and balanced visual captions. A poorly structured document falls back
+to bounded narrative edge sampling. At most 16 selected items enter this first
+round. If its scientific map is incomplete, one targeted round may inspect at
+most eight previously unread Sources, including detailed text needed to resolve
+the named gap. After that round, absence remains `insufficient_map` rather than
+triggering unbounded reading or automatic exclusion. The exact system message,
+user message, payload, and response schema are counted against a 12,288-token
+prompt budget before execution. Independent reading-role windows run with
 `CORE_EXTRACTION_MAX_CONCURRENCY` (default `4`) and merge back in Source order.
-Every eligible non-reference text node, table row,
-and caption is assigned once, so later Methods, Results, Conclusions, and later
-figure/table content are not dropped merely by position. Unusually long text
-and structured Source content are split into contiguous bounded pieces without
-truncating captions, headers, or row text. Each table-row unit repeats the full
-caption, heading path, and column headers needed to interpret that row.
-Cross-window reconciliation is outcome-centered. For each measured or predicted
-outcome, the backend selects variable signals that have no hard context conflict
-and share positive experiment evidence: an exact Source locator, nearby stable
-Source-unit position, explicit experiment label, or overlapping process, sample,
-test, fixed-condition, or comparator context. Shared material alone is not enough
-to propose a link. Candidate variables are packed with one repeated outcome anchor
-into batches of at most 12 signals, and the complete schema-bearing prompt is
-preflighted against a 12,288-token budget. Omitted signals remain outside that
-batch rather than becoming negative evidence. Model payloads receive bounded
-excerpts and stable Source-unit positions while exact Source locators remain
-backend-owned. The model decides only supported memberships and may explain
-rejected candidates. The backend derives unresolved records for omitted inputs,
-ignores an unresolved copy of an already linked signal, and permits only the
-single outcome anchor, never a variable, to support multiple valid study groups.
-Before a reconciliation leaves the extractor, every relationship
-is checked against the input signals' material, process, sample, test, fixed,
-experiment, comparator, design, and claim contexts. A conflict triggers one
-bounded repair with the conflicting relationship, signal IDs, and context fields.
-If the repaired response still contains a conflict, only that relationship is
-discarded: signals not retained by another valid relationship become unresolved,
-while valid relationships in the same response survive. The PaperSkim service
-canonicalizes each relationship's unordered signal membership, merges repeated
-memberships, and deduplicates relationships that resolve to the same factors,
-outcome, and Source lineage before constructing a `PaperStudy`. All signal ids
-from merged copies remain linked, and the lowest duplicate confidence is kept.
-Failed reconciliation batches do not erase successful sibling batches, and a
-relationship established in any batch overrides another batch's local unresolved
-decision. After all batches finish, the backend derives final paper-wide signal
-accounting. The PaperSkim service repeats the same deterministic context check as
-a final boundary guard and separates individually valid relationships into
-distinct PaperStudies when their contexts do not belong to one study. A broader
-reconciliation failure leaves all affected signals unresolved instead of removing
-them. Every emitted relationship and signal Source-unit ID must resolve to the
-exact batch input.
-The backend derives coverage from those validated references; an unreferenced unit becomes
-`no_study_signal` without requiring the model to repeat a coverage object. A
-failed call, invalid reference, 4,096-token output termination, or explicit
-`output_saturated=true` result causes a multi-unit batch to split recursively.
-Successful siblings survive, while only a terminal failed singleton becomes
-`extraction_failed`. After all terminal batches finish, deterministic study
-consolidation and paper-level unresolved-signal reconciliation remain the final
-paper authority. `coverage_complete` therefore means that every eligible
-Source unit was processed by a contract-valid first-stage extraction; it does
-not prove that the model found every scientifically relevant study,
-relationship, variable, or outcome. Model-call count grows with document length
-and with failed-batch subdivision. Permanent singleton failures are included in
-the Objective node summary and warnings. The collection build finishes as
-`partial_success` while candidates derived from successful Source units remain
-readable.
+
+Each model relationship maps an explicitly stated joint factor set to one
+specific outcome axis. It authorizes a candidate question only; it does not
+claim a direction, value, isolated effect, or comparable experiment. Incomplete
+variable or outcome axes remain unresolved. Bounded cross-window reconciliation
+may link only signals with positive paper-scope evidence such as an exact Source,
+nearby original document position, explicit paper-owned label, or compatible
+process context. Shared material alone remains insufficient, and any hard
+context conflict rejects only the affected relationship.
+
+The backend derives selected-Source coverage from validated references; an
+unreferenced selected unit becomes `no_study_signal` without requiring the model
+to return coverage. A failed call, invalid reference, 2,048-token output
+termination, or explicit `output_saturated=true` result can subdivide only this
+bounded map input. The default shared recovery budget is 4-12 calls per paper.
+Successful siblings survive, while a terminal failure becomes
+`extraction_failed`. `coverage_complete` therefore means that every selected
+paper-map Source received a valid first-stage outcome; it does not mean that
+every full-paper Source was read or that every relevant study was found. Those
+full-paper judgments begin after Objective confirmation. Permanent failures
+remain in the Objective node summary and warnings, and candidates from successful
+Sources remain readable.
 
 Objective paper framing is also source-batched. Explicitly excluded documents
 are rejected by the backend without entering the model. The framing prior
@@ -346,8 +308,8 @@ sources routable and cannot erase successful sibling decisions or mark their
 paper role irrelevant. A paper becomes `irrelevant` only when every visible
 source unit was explicitly excluded by a model or repaired decision.
 
-After screening, the backend persists extracted studies, relationships,
-unresolved signals, and Source-unit coverage before collection grouping. It
+After mapping, the backend persists paper-scope groups, relationships,
+unresolved signals, and selected-Source coverage before collection grouping. It
 normalizes material, variable, and outcome labels before computing candidate
 membership. Exact-equivalence candidates require high label overlap. Additional
 low-overlap alias candidates come from a sparse index over one exact outcome,

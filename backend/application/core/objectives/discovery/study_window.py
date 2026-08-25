@@ -20,22 +20,24 @@ from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
 )
 
-PAPER_SKIM_PROMPT_VERSION = "paper_skim.v7"
+PAPER_SKIM_PROMPT_VERSION = "paper_map.v1"
 PAPER_SOURCE_SIGNAL_PROMPT_VERSION = "paper_source_signal.v1"
 PAPER_SKIM_PROMPT_TOKEN_LIMIT = 12_288
 PAPER_SKIM_SOURCE_UNIT_LIMIT = 12
 PAPER_SKIM_WARNING_LIMIT = (2, 240)
-PAPER_SKIM_STUDY_LIMIT = 8
-PAPER_SKIM_RELATIONSHIP_LIMIT = 8
-PAPER_SKIM_UNRESOLVED_SIGNAL_LIMIT = 12
+PAPER_SKIM_STUDY_LIMIT = 4
+PAPER_SKIM_RELATIONSHIP_LIMIT = 6
+PAPER_SKIM_UNRESOLVED_SIGNAL_LIMIT = 8
 
 _STUDY_CONTEXT_LIMIT = 12
 _STUDY_CONTEXT_VALUE_CHARS = 160
 _VARIED_FACTOR_LIMIT = 12
 _SOURCE_SIGNAL_CONTEXT_LIMIT = 4
 _SOURCE_SIGNAL_LIMIT = 12
+_REVIEW_KNOWLEDGE_ITEM_LIMIT = 4
+_REVIEW_CITATION_LEAD_LIMIT = 6
 
-_MAX_COMPLETION_TOKENS = 4096
+_MAX_COMPLETION_TOKENS = 2048
 _SOURCE_SIGNAL_MAX_COMPLETION_TOKENS = 2048
 _DOC_ROLES = {"experimental", "review", "modeling", "mixed", "uncertain"}
 _EVIDENCE_DENSITIES = {"high", "medium", "low", "unknown"}
@@ -43,10 +45,10 @@ _EVIDENCE_DENSITIES = {"high", "medium", "low", "unknown"}
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """
-You are screening one bounded Source window for a traceable literature map.
+You are mapping one paper's stated research scope for traceable Objective discovery.
 
 Non-negotiable rules:
-- This is high-recall study-design screening, not final fact extraction or synthesis.
+- This is lightweight paper mapping, not experiment reconstruction or Evidence extraction.
 - Return exactly one JSON object and nothing else.
 - Scientific labels must be supported by supplied Source-unit content.
 - Copy only supplied `source_unit_id` values; never invent or rewrite an id.
@@ -371,7 +373,7 @@ class StructuredPaperSourceSignal(_PaperSkimResponse):
 
 
 class StructuredPaperSourceSignalScreen(_PaperSkimResponse):
-    """Bounded source-local signals used when full study reconstruction saturates."""
+    """Bounded source-local signals used when paper-scope mapping fails."""
 
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
         "uncertain"
@@ -451,6 +453,81 @@ class StructuredPaperSourceSignalScreen(_PaperSkimResponse):
         return self
 
 
+class StructuredReviewKnowledgeItem(_PaperSkimResponse):
+    """One bounded, Source-linked review-author statement or citation lead."""
+
+    content: Annotated[str, Field(min_length=1, max_length=400)]
+    material_scope: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+    variables: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+    outcomes: list[Annotated[str, Field(max_length=120)]] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+    conditions: list[Annotated[str, Field(max_length=160)]] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+    source_unit_ids: list[
+        Annotated[str, Field(min_length=1, max_length=160)]
+    ] = Field(min_length=1, max_length=4)
+    confidence: float = 0.0
+
+    @field_validator(
+        "material_scope",
+        "variables",
+        "outcomes",
+        "conditions",
+        "source_unit_ids",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list(value)
+
+    @model_validator(mode="after")
+    def _validate_source_unit_ids(self) -> "StructuredReviewKnowledgeItem":
+        normalized = [value.strip() for value in self.source_unit_ids]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("review knowledge Source-unit ids must be unique")
+        return self
+
+
+class StructuredReviewSynthesisMap(_PaperSkimResponse):
+    synthesis_claims: list[StructuredReviewKnowledgeItem] = Field(
+        default_factory=list,
+        max_length=_REVIEW_KNOWLEDGE_ITEM_LIMIT,
+    )
+    disputes: list[StructuredReviewKnowledgeItem] = Field(
+        default_factory=list,
+        max_length=_REVIEW_KNOWLEDGE_ITEM_LIMIT,
+    )
+    evidence_gaps: list[StructuredReviewKnowledgeItem] = Field(
+        default_factory=list,
+        max_length=_REVIEW_KNOWLEDGE_ITEM_LIMIT,
+    )
+    citation_leads: list[StructuredReviewKnowledgeItem] = Field(
+        default_factory=list,
+        max_length=_REVIEW_CITATION_LEAD_LIMIT,
+    )
+
+    @field_validator(
+        "synthesis_claims",
+        "disputes",
+        "evidence_gaps",
+        "citation_leads",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_lists(cls, value: object) -> object:
+        return _normalize_list(value)
+
+
 class StructuredPaperSkim(_PaperSkimResponse):
     doc_role: Literal["experimental", "review", "modeling", "mixed", "uncertain"] = (
         "uncertain"
@@ -462,6 +539,9 @@ class StructuredPaperSkim(_PaperSkimResponse):
     unresolved_signals: list[StructuredPaperStudySignal] = Field(
         default_factory=list,
         max_length=PAPER_SKIM_UNRESOLVED_SIGNAL_LIMIT,
+    )
+    review_synthesis: StructuredReviewSynthesisMap = Field(
+        default_factory=StructuredReviewSynthesisMap
     )
     output_saturated: bool = False
     evidence_density: Literal["high", "medium", "low", "unknown"] = "unknown"
@@ -628,7 +708,8 @@ def _build_review_synthesis_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     )
     user_prompt = (
         "TASK MODEL\n"
-        "Perform review-author synthesis screening for one bounded Source window. "
+        "Perform lightweight review-author synthesis mapping for one bounded "
+        "high-level Source window. "
         "This is thematic and comparative synthesis extraction, not cited-study "
         "reconstruction, primary-paper Evidence extraction, or Objective generation. "
         "The downstream backend uses the result to identify research themes worth "
@@ -662,6 +743,10 @@ def _build_review_synthesis_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "unresolved signal.\n"
         "5. Copy only context and Source-unit IDs that directly support the retained "
         "review-author synthesis. Preserve ambiguity with confidence and warnings.\n\n"
+        "6. Record the review authors' statement in `review_synthesis`: use "
+        "`synthesis_claims` for cross-study judgments, `disputes` for explicit "
+        "conflict, `evidence_gaps` for missing evidence or validation, and "
+        "`citation_leads` for named or numbered primary papers worth inspecting.\n\n"
         "HARD RULES\n"
         "- Return no claim_scope=current_work, background, or uncertain study or "
         "signal from a review window; only claim_scope=synthesis is eligible.\n"
@@ -669,6 +754,8 @@ def _build_review_synthesis_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "of an individually cited paper. Those facts require the primary Source.\n"
         "- Do not turn a list of citations into independent support or a causal "
         "relationship.\n"
+        "- Citation leads are navigation only and are never primary Evidence. Keep "
+        "them out of studies and unresolved_signals.\n"
         "- Do not infer scientific content from the title, section name, filename, "
         "or general knowledge.\n"
         "- Return empty arrays when the review authors do not make an eligible "
@@ -687,14 +774,18 @@ def _build_review_synthesis_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "Return empty studies and unresolved_signals.\n\n"
         "OUTPUT CONTRACT\n"
         "- Return doc_role='review', studies, unresolved_signals, evidence_density, "
-        "confidence, warnings, and output_saturated.\n"
+        "confidence, warnings, output_saturated, and `review_synthesis` with "
+        "`synthesis_claims`, `disputes`, `evidence_gaps`, and `citation_leads`.\n"
         "- Every returned study or signal must use claim_scope=synthesis. A study "
         "contains one or more source-supported relationships; every relationship and "
         "signal copies only allowed Source-unit IDs.\n"
-        "- Return at most 8 synthesis studies, 8 relationships per study, and 12 "
+        "- Return at most 4 synthesis studies, 6 relationships per study, and 8 "
         "unresolved synthesis signals. Set output_saturated=true only if eligible "
         "review-author synthesis exceeds these limits. Individually cited studies do "
         "not count toward saturation.\n"
+        "- Return at most 4 synthesis claims, 4 disputes, 4 evidence gaps, and 6 "
+        "citation leads. Each item copies 1-4 allowed Source-unit IDs and includes "
+        "content, scientific scope, and confidence.\n"
         "- Return only compact schema-valid JSON.\n\n"
         "BATCH LINEAGE CONTRACT\n"
         f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}\n"
@@ -723,70 +814,63 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     )
     user_prompt = (
         "TASK MODEL\n"
-        "Extract source-supported paper studies from one bounded Source window. "
-        "This is high-recall study-structure extraction, not objective wording, "
-        "collection grouping, final measurement extraction, or synthesis.\n\n"
+        "Map the paper's stated research scope from one bounded high-level Source "
+        "window. This is candidate-scope extraction for Objective discovery, not "
+        "full experiment reconstruction, final fact extraction, causal synthesis, "
+        "or Objective wording. A returned relationship is candidate scope, not "
+        "proven Evidence.\n\n"
         "INPUT SCHEMA\n"
         "- `document_id` and `title` identify the Source paper.\n"
         "- `window_id` is this bounded window's identity; `window_role` is one of "
         "overview, methods, results, conclusion, or unknown.\n"
-        "- `source_units` contains every Source item assigned to this window. Each "
+        "- `source_units` contains a bounded researcher-like skim selected from "
+        "abstract, conclusion or summary, overview, and visual captions. Each "
         "unit has an opaque `source_unit_id`, stable Source kind/reference, section "
         "path, and text or caption content. Source identity is provenance; content "
         "is the scientific authority.\n"
         "- `document_profile` is a coarse paper-level classification hint.\n"
         "This is one incomplete view of the paper; absence from this window is not "
-        "evidence of absence elsewhere. Window metadata describes input provenance "
-        "and must not appear in output.\n\n"
+        "evidence of absence elsewhere. Detailed Methods, Results, and table rows "
+        "are inspected only after a user confirms an Objective. Window metadata "
+        "describes input provenance and must not appear in output.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
         "DECISION PROCESS\n"
-        "1. Classify the paper role from explicit study-design signals.\n"
-        "2. Reconstruct each distinct experiment, observational design, or model "
-        "represented in this window. One study is the paper-owned design, not one "
-        "sentence, Source unit, treatment level, specimen group, response metric, or "
-        "section mention. Keep fragments separate only when the Source establishes "
-        "different experiment identities or incompatible process, sample, test, or "
-        "comparator boundaries. Use one stable concise `experiment_label` for the same "
-        "design within this window; prefer an explicit author label or group identity.\n"
-        "3. For each study, record design_type and claim_scope. Only claims about the "
-        "paper's own work use claim_scope=current_work; review synthesis and cited "
-        "background remain synthesis or background. When a Source window mixes the "
-        "paper's experiment with named prior authors or numbered citations, keep them "
-        "as separate studies and never label the cited study current_work.\n"
+        "1. Classify the paper role from explicit high-level study-design signals.\n"
+        "2. Identify the paper-owned research themes stated in the supplied Source: "
+        "material scope, process or treatment family, changed/compared/modeled axes, "
+        "and measured/observed/predicted outcome axes. Do not reconstruct specimen "
+        "groups, factor levels, controls, test settings, or experimental routes.\n"
+        "3. Use claim_scope=current_work only for the paper's own stated research. "
+        "Review synthesis and cited background remain synthesis or background. When "
+        "a Source mixes the paper's scope with Miranda et al. [20] or another named "
+        "citation, never label the cited study current_work.\n"
         "4. Express every factor and outcome as a neutral scientific axis. A factor "
-        "names what was varied, compared, or modeled, not its tested levels. An "
-        "outcome names one specific outcome that was measured or predicted, not the "
-        "result direction, value, or comparison sentence; it must also not be a broad "
-        "property family or compound outcome. Split strength and ductility, for "
-        "example, into separate relationships with the same factor set and Source "
-        "lineage. If the Source does not support a specific component, retain the "
-        "supplied label as an outcome in `unresolved_signals` instead of inventing "
-        "one. A research theme such as microstructure is not itself a completed "
-        "outcome when the Source does not identify the measured or observed feature.\n"
-        "5. Within each study, return one relationship per outcome. `varied_factors` "
-        "must contain the full jointly varied, compared, or modeled factor set. Never "
-        "split a joint-factor experiment into isolated effects.\n"
-        "6. Record material, process, sample, test, comparator, and fixed-condition "
-        "context only when explicitly supported.\n"
+        "names what the paper states was varied, compared, or modeled, not its levels. "
+        "An outcome names one specific outcome that was measured, observed, or "
+        "predicted, not the result direction, value, or comparison sentence. Split "
+        "strength and ductility into separate relationships when both are explicit. "
+        "If only a broad family such as mechanical properties or microstructure, or "
+        "a compound outcome without one measurement identity, is supplied, retain it "
+        "as an unresolved outcome signal instead of inventing a metric.\n"
+        "5. Group axes only when the supplied high-level Source explicitly states that "
+        "they belong to the same paper-owned research scope. Within each group, return "
+        "one relationship per outcome. `varied_factors` must contain the full jointly "
+        "varied, compared, or modeled factor set.\n"
+        "6. Record material_scope and concise process_context when explicit. Leave "
+        "sample_context, test_context, comparator, and fixed_conditions empty; those "
+        "belong to confirmed-Objective experiment reconstruction.\n"
         "7. Copy every unique Source-unit id that directly supports each relationship "
         "or unresolved signal. Each item may contain at most 12 unique "
         "`source_unit_ids`.\n"
-        "8. When the window explicitly identifies a varied/modeled variable but no "
+        "8. When the Source explicitly identifies a varied/modeled variable but no "
         "response, or a measured/predicted outcome but no changed variable, return "
-        "the explicit axis in `unresolved_signals` for paper-level reconciliation.\n"
+        "the explicit axis in `unresolved_signals` for bounded paper-level "
+        "reconciliation.\n"
         "9. Use evidence density, confidence, and warnings to expose incomplete or "
         "ambiguous input rather than filling gaps.\n\n"
         "HARD RULES\n"
-        "- Return only the schema object. Return every distinct, explicitly supported "
-        "study and relationship visible in this Source window; do not discard one "
-        "because another appears more central.\n"
-        "- Extract only relationships supported inside this window. Do not guess what "
-        "another section may contain. Repeating a study fragment found in another "
-        "window is acceptable; backend consolidation is authoritative.\n"
+        "- Return only the schema object and only axes supported inside this window.\n"
         "- Never move a factor, outcome, or context between studies.\n"
-        "- A fixed process, sample, or test condition is not a varied factor. Never "
-        "return the same axis in `varied_factors` when the study records that axis in "
-        "`fixed_conditions`; a listed Methods setting alone is not an intervention.\n"
         "- Every relationship and unresolved signal must copy `source_unit_ids` that "
         "directly support it. Do not return an id absent from `source_units`, repeat an "
         "id inside one item, or return more than 12 IDs for one item.\n"
@@ -799,28 +883,24 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "OUTPUT CONTRACT\n"
         "- Return `studies`, `unresolved_signals`, doc_role, evidence_density, "
         "confidence, warnings, and `output_saturated`. A study has "
-        "experiment/design/context fields and "
+        "paper-scope design/context fields and "
         "one or more relationships. A relationship has `varied_factors`, one "
         "`outcome`, `source_unit_ids`, and confidence.\n"
-        "- Return up to 8 studies, up to 8 relationships per study, and up to 12 "
+        "- Return up to 4 studies, up to 6 relationships per study, and up to 8 "
         "unresolved signals. If every visible fact fits, set "
         "`output_saturated=false`. If any distinct supported study, relationship, "
         "or signal would exceed those limits, set `output_saturated=true`; the "
-        "backend will split and retry the Source window. Never silently choose a "
-        "subset.\n"
+        "backend may inspect a smaller high-level Source window.\n"
         "- Each relationship and unresolved signal returns at most 12 unique "
         "`source_unit_ids`, matching the maximum Source units in one input window.\n"
-        "- Each study or unresolved signal returns at most 12 process, sample, and "
-        "test context values; each context value is at most 160 characters. Each "
-        "relationship returns at most 12 varied-factor labels, each at most 80 "
-        "characters. Preserve distinct supported context and the full joint-factor "
-        "set within these bounds.\n"
+        "- Each relationship returns at most 12 varied-factor labels, each at most 80 "
+        "characters. Preserve the full joint-factor set within these bounds.\n"
         "- Return up to 2 `warnings`, each at most 240 characters.\n"
         "- Keep each value concise and preserve exact joint-factor-to-outcome links.\n\n"
         "BOUNDARY EXAMPLES\n"
-        "- Supported relationship: text says laser power was varied and relative "
-        "density and porosity were measured. Return one study with two relationships; "
-        "each has varied_factors=['laser power'] and one distinct outcome.\n"
+        "- Common path: an abstract says laser power was varied and relative density "
+        "and porosity were measured. Return one paper-scope study with two "
+        "relationships; each has varied_factors=['laser power'] and one outcome.\n"
         "- Joint factors: power and speed changed together. Keep "
         "varied_factors=['power','speed']; do not emit isolated power or speed effects.\n"
         "- Factor levels: specimens use L-VED, M-VED, and H-VED. Return "
@@ -846,15 +926,9 @@ def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
         "- Cited result: text says 'Miranda et al. [20] increased laser power and "
         "reduced porosity.' This is a background study, not the current paper's "
         "experiment; use claim_scope=background and do not merge it with current work.\n"
-        "- Fixed setting: Methods says all specimens used 200 W laser power while build "
-        "platform temperature was varied. Laser power belongs only in fixed_conditions; "
-        "the varied factor is build platform temperature.\n"
-        "- Separate relationships: one experiment links scan speed to porosity and "
-        "another links heat treatment to yield strength. Return two studies.\n\n"
-        "- Repeated experiment mentions: Methods defines heat-treated coupon groups, "
-        "a table reports grain size, and Results reports phase fraction for those same "
-        "groups. These are complementary relationships inside one experiment, not "
-        "three studies; attach each relationship only to its direct Source ids.\n\n"
+        "- Detailed condition: a caption lists sample A, 200 W, and 900 mm/s but does "
+        "not say which axis was compared. Do not turn settings into varied factors; "
+        "confirmed-Objective extraction will inspect the table rows and Methods.\n\n"
         "BATCH LINEAGE CONTRACT\n"
         f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}\n"
         "Copy IDs only from this exact list. Do not continue its numbering or cite "
@@ -873,8 +947,8 @@ Do not construct experiments, relationships, findings, or research objectives.
 def build_paper_source_signal_prompt(payload: dict[str, Any]) -> tuple[str, str]:
     user_prompt = (
         "TASK MODEL\n"
-        "Perform source-local scientific signal screening after full PaperSkim "
-        "study reconstruction exceeded its bounded output. This is explicit-axis "
+        "Perform source-local scientific signal screening after paper-scope mapping "
+        "could not produce bounded structured output. This is explicit-axis "
         "extraction for later paper-level reconciliation, not relationship "
         "construction, causal interpretation, evidence synthesis, or objective "
         "generation.\n\n"
@@ -942,7 +1016,7 @@ def build_paper_source_signal_prompt(payload: dict[str, Any]) -> tuple[str, str]
 
 
 class PaperStudyWindowExtractor:
-    """Extract supported study structure from one bounded Source window."""
+    """Map supported paper scope from one bounded high-level Source window."""
 
     def __init__(self, response_client: StructuredResponseClient) -> None:
         self.response_client = response_client
@@ -979,13 +1053,15 @@ class PaperStudyWindowExtractor:
                     f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}"
                 )
             return (
-                "Previous PaperSkim output was invalid: "
-                f"{repair_detail}. Preserve every distinct supported study, "
-                "relationship, and unresolved signal. Copy only unique Source-unit "
+                "Previous paper-map output was invalid: "
+                f"{repair_detail}. Preserve every distinct supported paper-scope "
+                "group, relationship, and unresolved signal. Do not reconstruct "
+                "samples, tests, comparators, fixed conditions, or factor levels. "
+                "Leave sample_context, test_context, comparator, and fixed_conditions "
+                "empty. Copy only unique Source-unit "
                 f"IDs from the input, with at most {PAPER_SKIM_SOURCE_UNIT_LIMIT} IDs "
-                "per relationship or unresolved signal. Keep at most 12 process, "
-                "sample, and test context values and at most 12 varied factors per "
-                "relationship. Set output_saturated=true "
+                "per relationship or unresolved signal. Keep at most 12 varied factors "
+                "per relationship. Set output_saturated=true "
                 "instead of silently omitting a scientific item. Return only compact "
                 "schema-valid JSON.\n"
                 f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}"

@@ -110,6 +110,11 @@ def validate_source_fact(
         record,
         source=source,
     )
+    record = _objective_recover_source_bound_objective_material(
+        record,
+        source=source,
+        objective_context=objective_context,
+    )
     record = _objective_normalize_explicit_no_change_direction(record)
     reported_result = record.get("reported_result")
     if isinstance(reported_result, Mapping):
@@ -173,6 +178,14 @@ def validate_source_fact(
                 "remained_constant",
             ),
         }
+        explicit_directions = [
+            candidate_direction
+            for candidate_direction, terms in direction_terms.items()
+            if any(f"_{term}_" in result_text for term in terms)
+        ]
+        if direction == "unknown" and len(explicit_directions) == 1:
+            direction = explicit_directions[0]
+            normalized_result["direction"] = direction
         if (
             not _NUMBER_PATTERN.search(str(result_value or ""))
             and direction in direction_terms
@@ -509,15 +522,17 @@ def _objective_evidence_result_grounding_errors(
     unit = str(reported_result.get("unit") or "").strip()
     if unit and _objective_column_key(unit) not in _objective_column_key(source_text):
         errors.append(f"reported_result.unit={unit!r} is not grounded in SOURCE")
-    result_value = reported_result.get("value")
-    result_text = str(reported_result.get("result_text") or "").strip()
-    if result_value not in (None, "") and not _objective_value_is_source_grounded(
-        result_value,
-        source_text,
-    ):
+    for field in ("value", "baseline_value", "target_value"):
+        result_value = reported_result.get(field)
+        if result_value in (None, "") or _objective_value_is_source_grounded(
+            result_value,
+            source_text,
+        ):
+            continue
         errors.append(
-            f"reported_result.value={result_value!r} is not grounded in SOURCE"
+            f"reported_result.{field}={result_value!r} is not grounded in SOURCE"
         )
+    result_text = str(reported_result.get("result_text") or "").strip()
     if _NUMBER_PATTERN.search(result_text):
         result_text_is_grounded = _objective_value_is_source_grounded(
             result_text,
@@ -678,6 +693,60 @@ def _objective_retain_source_grounded_context(
         grounded_context[group] = grounded_attributes
     grounded_record["scientific_context"] = grounded_context
     return grounded_record
+
+
+def _objective_recover_source_bound_objective_material(
+    record: Mapping[str, Any],
+    *,
+    source: Mapping[str, Any],
+    objective_context: ResearchObjective | None,
+) -> dict[str, Any]:
+    recovered = dict(record)
+    scientific_context = recovered.get("scientific_context")
+    if (
+        objective_context is None
+        or not objective_context.material_scope
+        or not isinstance(record.get("reported_result"), Mapping)
+        or not isinstance(scientific_context, Mapping)
+        or scientific_context.get("material")
+    ):
+        return recovered
+
+    reported_result = record["reported_result"]
+    binding_text = "\n".join(
+        value
+        for value in (
+            str(source.get("heading_path") or "").strip(),
+            str(source.get("caption_text") or "").strip(),
+            str(reported_result.get("result_text") or "").strip(),
+        )
+        if value
+    )
+    matching_materials = tuple(
+        material
+        for material in objective_context.material_scope
+        if property_matching.axis_label_is_mentioned(binding_text, material)
+        or property_matching.material_value_matches_objective_comparison_scope(
+            binding_text,
+            material,
+        )
+    )
+    if len(matching_materials) != 1:
+        return recovered
+
+    context = {
+        group: [dict(item) for item in scientific_context.get(group) or ()]
+        for group in ("material", "sample", "process", "test")
+    }
+    context["material"] = [
+        {
+            "name": "material",
+            "value": matching_materials[0],
+            "unit": None,
+        }
+    ]
+    recovered["scientific_context"] = context
+    return recovered
 
 
 def _objective_table_cell_matches_value(cell: Any, value: Any) -> bool:

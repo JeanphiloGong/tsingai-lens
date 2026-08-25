@@ -25,6 +25,7 @@ from application.core.objectives.discovery.study_window import (
     StructuredPaperSkim,
     StructuredPaperStudy,
     StructuredPaperStudyRelationship,
+    StructuredReviewSynthesisMap,
     _review_synthesis_only,
 )
 from application.core.objectives.llm.structured_response import (
@@ -37,6 +38,8 @@ from domain.core import (
     PaperStudy,
     PaperStudyRelationship,
     PaperStudySignal,
+    ReviewKnowledgeItem,
+    ReviewSynthesisMap,
 )
 from domain.source import SourceDocument, SourceDocumentTree
 
@@ -47,6 +50,18 @@ ProgressCallback = Callable[[dict[str, Any]], None]
 _SKIM_SOURCE_UNIT_CHARS = 4000
 _SKIM_HEADING_LIMIT = 16
 _SKIM_WARNING_LIMIT = 2
+_PAPER_MAP_SOURCE_ITEM_LIMIT = 16
+_PAPER_MAP_ABSTRACT_ITEM_LIMIT = 4
+_PAPER_MAP_CONCLUSION_ITEM_LIMIT = 4
+_PAPER_MAP_OVERVIEW_ITEM_LIMIT = 4
+_PAPER_MAP_VISUAL_ITEM_LIMIT = 4
+_PAPER_MAP_EXPANSION_ITEM_LIMIT = 8
+_PAPER_MAP_FALLBACK_ITEM_LIMIT = 8
+_PAPER_MAP_TABLE_CAPTION_CHARS = 1600
+_PAPER_MAP_FIGURE_CAPTION_CHARS = 3500
+_PAPER_MAP_HEADING_CHARS = 240
+_PAPER_MAP_COLUMN_HEADER_LIMIT = 12
+_PAPER_MAP_COLUMN_HEADER_CHARS = 120
 _SKIM_SINGLE_SOURCE_RECOVERY_MIN_CHARS = 800
 _SKIM_SINGLE_SOURCE_RECOVERY_MAX_DEPTH = 2
 _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT = 2
@@ -66,10 +81,11 @@ _SKIM_ROLE_BY_SEMANTIC_ROLE = {
 _EVIDENCE_DENSITY_RANK = {"unknown": 0, "low": 1, "medium": 2, "high": 3}
 _SIGNAL_RECONCILIATION_SIGNAL_LIMIT = 12
 _SIGNAL_RECONCILIATION_NEARBY_SOURCE_UNIT_DISTANCE = 12
+_SOURCE_UNIT_POSITION_PATTERN = re.compile(r"source-unit-(\d+)")
 _DEFAULT_MAX_EXTRACTION_CONCURRENCY = 4
-_DEFAULT_DOCUMENT_TIME_BUDGET_SECONDS = 1_200
-_MIN_DOCUMENT_RECOVERY_CALLS = 16
-_MAX_DOCUMENT_RECOVERY_CALLS = 64
+_DEFAULT_DOCUMENT_TIME_BUDGET_SECONDS = 300
+_MIN_DOCUMENT_RECOVERY_CALLS = 4
+_MAX_DOCUMENT_RECOVERY_CALLS = 12
 _NUMBERED_CITATION_PATTERN = re.compile(
     r"\[(?:\s*\d{1,4}\s*(?:(?:,|[-\u2013])\s*\d{1,4}\s*)*)\]"
 )
@@ -123,10 +139,19 @@ class _PaperSignalInput:
         }
 
 
+@dataclass(frozen=True)
+class _PaperMapAssessment:
+    status: str
+    limitations: tuple[str, ...]
+    expansion_focus: str | None = None
+
+
 @dataclass
 class _PaperExtractionBudget:
     deadline: float
+    max_calls: int
     max_recovery_calls: int
+    calls: int = 0
     recovery_calls: int = 0
     failure_kind: str | None = None
     _lock: Any = field(default_factory=Lock, repr=False)
@@ -136,17 +161,20 @@ class _PaperExtractionBudget:
             if monotonic() >= self.deadline:
                 self.failure_kind = "document_time_budget_exhausted"
                 return False
-            if not recovery:
-                return True
-            if self.recovery_calls >= self.max_recovery_calls:
+            if recovery and self.recovery_calls >= self.max_recovery_calls:
                 self.failure_kind = "recovery_budget_exhausted"
                 return False
-            self.recovery_calls += 1
+            if self.calls >= self.max_calls:
+                self.failure_kind = "document_call_budget_exhausted"
+                return False
+            self.calls += 1
+            if recovery:
+                self.recovery_calls += 1
             return True
 
 
 class PaperSkimService:
-    """Screen every paper through bounded source windows and consolidate its map."""
+    """Build a bounded Source-linked map of each paper's stated research scope."""
 
     def build_collection_paper_skims(
         self,
@@ -199,9 +227,11 @@ class PaperSkimService:
             window_skims: list[PaperSkim] = []
             paper_signals: list[_PaperSignalInput] = []
             window_count = len(payloads)
+            recovery_call_budget = self._document_recovery_call_budget(window_count)
             extraction_budget = _PaperExtractionBudget(
                 deadline=monotonic() + self._document_time_budget_seconds(),
-                max_recovery_calls=self._document_recovery_call_budget(window_count),
+                max_calls=window_count + recovery_call_budget,
+                max_recovery_calls=recovery_call_budget,
             )
             for window_position, payload in enumerate(payloads, start=1):
                 self._notify_progress(
@@ -210,7 +240,7 @@ class PaperSkimService:
                     current=document_position,
                     total=document_count,
                     unit="documents",
-                    message="Scanning papers for candidate research objectives.",
+                    message="Mapping paper scope for candidate research objectives.",
                     active_document_id=document.document_id,
                     active_document_title=getattr(document, "title", None),
                     active_source_filename=source_filename,
@@ -232,15 +262,94 @@ class PaperSkimService:
                 window_skims,
                 profile=profiles_by_document_id.get(document.document_id),
             )
+            assessment = self._assess_paper_map(
+                paper_skim,
+                signals=tuple(item.signal for item in paper_signals),
+                final=False,
+            )
+            if assessment.expansion_focus is not None:
+                selected_source_keys = frozenset(
+                    (
+                        str(unit.get("source_kind") or ""),
+                        str(unit.get("source_ref") or ""),
+                    )
+                    for payload in payloads
+                    for unit in payload.get("source_units") or ()
+                    if isinstance(unit, Mapping)
+                )
+                expansion_payloads = self._build_paper_skim_payloads(
+                    collection_id=collection_id,
+                    document=document,
+                    profile=profiles_by_document_id.get(document.document_id),
+                    blocks=document_blocks,
+                    tables=document_tables,
+                    table_rows=document_table_rows,
+                    figures=document_figures,
+                    document_tree=document_trees_by_document_id.get(
+                        document.document_id
+                    ),
+                    study_window_extractor=study_window_extractor,
+                    selection_focus=assessment.expansion_focus,
+                    excluded_source_keys=selected_source_keys,
+                )
+                for expansion_position, payload in enumerate(
+                    expansion_payloads,
+                    start=1,
+                ):
+                    self._notify_progress(
+                        progress_callback,
+                        phase="objective_paper_skim_started",
+                        current=document_position,
+                        total=document_count,
+                        unit="documents",
+                        message=(
+                            "Expanding the paper map for one missing scientific "
+                            "scope element."
+                        ),
+                        active_document_id=document.document_id,
+                        active_document_title=getattr(document, "title", None),
+                        active_source_filename=source_filename,
+                        active_window_position=expansion_position,
+                        active_window_count=len(expansion_payloads),
+                        active_window_role=(
+                            f"targeted_{assessment.expansion_focus}"
+                        ),
+                    )
+                for batch_skims, batch_signals in self._extract_window_payloads(
+                    collection_id=collection_id,
+                    document_id=document.document_id,
+                    payloads=expansion_payloads,
+                    study_window_extractor=study_window_extractor,
+                    extraction_budget=extraction_budget,
+                ):
+                    window_skims.extend(batch_skims)
+                    paper_signals.extend(batch_signals)
+                payloads.extend(expansion_payloads)
+                paper_skim = self._consolidate_window_skims(
+                    document.document_id,
+                    window_skims,
+                    profile=profiles_by_document_id.get(document.document_id),
+                )
             paper_skim = self._reconcile_paper_signals(
                 paper_skim,
                 paper_signals,
                 signal_reconciler=signal_reconciler,
+                extraction_budget=extraction_budget,
                 progress_callback=progress_callback,
                 document_position=document_position,
                 document_count=document_count,
                 document_title=getattr(document, "title", None),
                 source_filename=source_filename,
+            )
+            final_assessment = self._assess_paper_map(
+                paper_skim,
+                signals=paper_skim.unresolved_signals,
+                final=True,
+            )
+            paper_skim = replace(
+                paper_skim,
+                map_status=final_assessment.status,
+                map_limitations=final_assessment.limitations,
             )
             paper_skims.append(paper_skim)
             logger.info(
@@ -249,7 +358,7 @@ class PaperSkimService:
                 document.document_id,
                 document_position,
                 document_count,
-                window_count,
+                len(payloads),
                 paper_skim.doc_role,
                 len(paper_skim.studies),
                 sum(len(study.relationships) for study in paper_skim.studies),
@@ -388,6 +497,8 @@ class PaperSkimService:
         figures: list[Any],
         document_tree: SourceDocumentTree | None = None,
         study_window_extractor: PaperStudyWindowExtractor,
+        selection_focus: str | None = None,
+        excluded_source_keys: frozenset[tuple[str, str]] = frozenset(),
     ) -> list[dict[str, Any]]:
         source_items = self._build_source_items(
             document=document,
@@ -397,23 +508,50 @@ class PaperSkimService:
             figures=figures,
             document_tree=document_tree,
         )
-        bounded_items = [
-            bounded_item
-            for item in source_items
-            for bounded_item in self._split_oversized_source_item(item)
+        identified_items = [
+            replace(item, source_unit_id=f"source-unit-{position:06d}")
+            for position, item in enumerate(source_items, start=1)
         ]
-        items = [
-            replace(
-                bounded_item,
-                source_unit_id=f"source-unit-{position:06d}",
+        available_items = [
+            item
+            for item in identified_items
+            if (item.source_kind, item.source_ref) not in excluded_source_keys
+        ]
+        selected_items = (
+            self._select_paper_map_items(available_items)
+            if selection_focus is None
+            else self._select_paper_map_expansion_items(
+                available_items,
+                focus=selection_focus,
             )
-            for position, bounded_item in enumerate(bounded_items, start=1)
-        ]
+        )
+        bounded_items: list[_SkimSourceItem] = []
+        for item in selected_items:
+            fragments = self._split_oversized_source_item(item)
+            bounded_items.extend(
+                replace(
+                    fragment,
+                    source_unit_id=(
+                        item.source_unit_id
+                        if len(fragments) == 1
+                        else f"{item.source_unit_id}-fragment-{position:02d}"
+                    ),
+                )
+                for position, fragment in enumerate(fragments, start=1)
+            )
+        items = (
+            self._select_paper_map_items(bounded_items)
+            if selection_focus is None
+            else self._select_paper_map_expansion_items(
+                bounded_items,
+                focus=selection_focus,
+            )
+        )
         payloads: list[dict[str, Any]] = []
         role_window_positions = {role: 0 for role in _SKIM_WINDOW_ROLES}
-        for section_items in self._section_item_groups(items):
-            role = section_items[0].role
-            for window_items in self._pack_source_items(list(section_items)):
+        for role_items in self._paper_map_item_groups(items):
+            role = role_items[0].role
+            for window_items in self._pack_source_items(list(role_items)):
                 role_window_positions[role] += 1
                 payload = self._build_window_payload(
                     collection_id=collection_id,
@@ -423,6 +561,10 @@ class PaperSkimService:
                     role_window_position=role_window_positions[role],
                     items=window_items,
                 )
+                if selection_focus is not None:
+                    payload["reading_round"] = 2
+                    payload["expansion_focus"] = selection_focus
+                    payload["window_id"] = f"round-2.{payload['window_id']}"
                 payloads.extend(
                     self._fit_payload_to_prompt_limit(
                         payload,
@@ -431,6 +573,8 @@ class PaperSkimService:
                 )
         if payloads:
             return payloads
+        if selection_focus is not None:
+            return []
         empty_payload = self._build_window_payload(
             collection_id=collection_id,
             document=document,
@@ -447,13 +591,212 @@ class PaperSkimService:
         )
 
     @staticmethod
-    def _section_item_groups(
+    def _select_paper_map_items(
+        items: list[_SkimSourceItem],
+    ) -> list[_SkimSourceItem]:
+        """Select how a researcher skims scope before inspecting experiments."""
+
+        abstract_items: list[_SkimSourceItem] = []
+        conclusion_items: list[_SkimSourceItem] = []
+        overview_items: list[_SkimSourceItem] = []
+        table_items: list[_SkimSourceItem] = []
+        figure_items: list[_SkimSourceItem] = []
+        fallback_items: list[_SkimSourceItem] = []
+        for item in items:
+            section = " ".join(
+                "".join(
+                    character if character.isalpha() else " "
+                    for character in item.section_path
+                )
+                .casefold()
+                .split()
+            )
+            compact_section = section.replace(" ", "")
+            is_visual_summary = False
+            if isinstance(item.content, Mapping):
+                caption = str(item.content.get("caption_text") or "").strip()
+                if item.source_kind == "figure":
+                    is_visual_summary = bool(caption)
+                elif item.source_kind == "table" and "row_text" not in item.content:
+                    is_visual_summary = bool(
+                        caption or item.content.get("column_headers")
+                    )
+            if is_visual_summary:
+                if item.source_kind == "table":
+                    table_items.append(item)
+                else:
+                    figure_items.append(item)
+                continue
+            if item.source_kind == "table_row":
+                continue
+            if "abstract" in compact_section or "highlight" in compact_section:
+                abstract_items.append(item)
+            elif item.role == "conclusion" or any(
+                label in section
+                for label in ("conclusion", "summary", "key finding")
+            ):
+                conclusion_items.append(item)
+            elif item.role == "overview":
+                overview_items.append(item)
+            elif item.source_kind in {"block", "document"}:
+                fallback_items.append(item)
+
+        selected_text = [
+            *abstract_items[:_PAPER_MAP_ABSTRACT_ITEM_LIMIT],
+            *conclusion_items[:_PAPER_MAP_CONCLUSION_ITEM_LIMIT],
+            *overview_items[:_PAPER_MAP_OVERVIEW_ITEM_LIMIT],
+        ]
+        if not abstract_items and not conclusion_items and not overview_items:
+            edge_count = _PAPER_MAP_FALLBACK_ITEM_LIMIT // 2
+            selected_text.extend(fallback_items[:edge_count])
+            selected_text.extend(fallback_items[-edge_count:])
+
+        visual_capacity = min(
+            _PAPER_MAP_VISUAL_ITEM_LIMIT,
+            max(_PAPER_MAP_SOURCE_ITEM_LIMIT - len(selected_text), 0),
+        )
+        if table_items and figure_items:
+            table_limit = visual_capacity // 2
+            figure_limit = visual_capacity - table_limit
+        elif table_items:
+            table_limit, figure_limit = visual_capacity, 0
+        else:
+            table_limit, figure_limit = 0, visual_capacity
+        selected = [
+            *selected_text,
+            *table_items[:table_limit],
+            *figure_items[:figure_limit],
+        ]
+
+        selected_ids = {id(item) for item in selected}
+        bounded: list[_SkimSourceItem] = []
+        for item in items:
+            if id(item) not in selected_ids:
+                continue
+            if isinstance(item.content, Mapping) and "caption_text" in item.content:
+                content = dict(item.content)
+                content["caption_text"] = str(content.get("caption_text") or "")[: (
+                    _PAPER_MAP_FIGURE_CAPTION_CHARS
+                    if item.source_kind == "figure"
+                    else _PAPER_MAP_TABLE_CAPTION_CHARS
+                )]
+                content["heading_path"] = str(content.get("heading_path") or "")[
+                    :_PAPER_MAP_HEADING_CHARS
+                ]
+                if item.source_kind == "table":
+                    content["column_headers"] = [
+                        str(value)[:_PAPER_MAP_COLUMN_HEADER_CHARS]
+                        for value in content.get("column_headers") or ()
+                    ][:_PAPER_MAP_COLUMN_HEADER_LIMIT]
+                item = replace(item, content=content)
+            bounded.append(item)
+        return bounded[:_PAPER_MAP_SOURCE_ITEM_LIMIT]
+
+    @classmethod
+    def _select_paper_map_expansion_items(
+        cls,
+        items: list[_SkimSourceItem],
+        *,
+        focus: str,
+    ) -> list[_SkimSourceItem]:
+        selected: list[_SkimSourceItem] = []
+        for item in items:
+            if item.source_kind == "table_row":
+                continue
+            section = cls._normalized_section_path(item.section_path)
+            compact_section = section.replace(" ", "")
+            is_visual = cls._is_paper_map_visual(item)
+            if focus in {"missing_outcome", "outcome_specificity"}:
+                include = item.role == "results" or (
+                    is_visual
+                    and any(
+                        label in section
+                        for label in (
+                            "result",
+                            "characterization",
+                            "microstructure",
+                            "mechanical",
+                            "property",
+                        )
+                    )
+                )
+            elif focus == "missing_variable":
+                include = item.role == "methods" or (
+                    item.role == "overview"
+                    and "introduction" in compact_section
+                )
+            elif focus == "unclear_ownership":
+                include = item.role in {"overview", "conclusion"}
+            else:
+                include = item.role in {
+                    "overview",
+                    "methods",
+                    "results",
+                    "conclusion",
+                    "unknown",
+                }
+            if include:
+                selected.append(item)
+        return cls._bound_paper_map_items(
+            selected[:_PAPER_MAP_EXPANSION_ITEM_LIMIT]
+        )
+
+    @staticmethod
+    def _normalized_section_path(section_path: str) -> str:
+        return " ".join(
+            "".join(
+                character if character.isalpha() else " "
+                for character in section_path
+            )
+            .casefold()
+            .split()
+        )
+
+    @staticmethod
+    def _is_paper_map_visual(item: _SkimSourceItem) -> bool:
+        if not isinstance(item.content, Mapping):
+            return False
+        caption = str(item.content.get("caption_text") or "").strip()
+        if item.source_kind == "figure":
+            return bool(caption)
+        return bool(
+            item.source_kind == "table"
+            and "row_text" not in item.content
+            and (caption or item.content.get("column_headers"))
+        )
+
+    @staticmethod
+    def _bound_paper_map_items(
+        items: list[_SkimSourceItem],
+    ) -> list[_SkimSourceItem]:
+        bounded: list[_SkimSourceItem] = []
+        for item in items:
+            if isinstance(item.content, Mapping) and "caption_text" in item.content:
+                content = dict(item.content)
+                content["caption_text"] = str(content.get("caption_text") or "")[: (
+                    _PAPER_MAP_FIGURE_CAPTION_CHARS
+                    if item.source_kind == "figure"
+                    else _PAPER_MAP_TABLE_CAPTION_CHARS
+                )]
+                content["heading_path"] = str(content.get("heading_path") or "")[
+                    :_PAPER_MAP_HEADING_CHARS
+                ]
+                if item.source_kind == "table":
+                    content["column_headers"] = [
+                        str(value)[:_PAPER_MAP_COLUMN_HEADER_CHARS]
+                        for value in content.get("column_headers") or ()
+                    ][:_PAPER_MAP_COLUMN_HEADER_LIMIT]
+                item = replace(item, content=content)
+            bounded.append(item)
+        return bounded
+
+    @staticmethod
+    def _paper_map_item_groups(
         items: list[_SkimSourceItem],
     ) -> tuple[tuple[_SkimSourceItem, ...], ...]:
         groups: dict[str, list[_SkimSourceItem]] = {}
         for item in items:
-            section_key = item.section_path.strip().casefold() or "unsectioned"
-            groups.setdefault(section_key, []).append(item)
+            groups.setdefault(item.role, []).append(item)
         return tuple(tuple(group) for group in groups.values())
 
     def _build_source_items(
@@ -1087,9 +1430,9 @@ class PaperSkimService:
                             dict(payload)
                         )
                         fallback_warning = (
-                            "Full study reconstruction could not produce valid "
-                            "structured output for one Source; retained explicit "
-                            "source-local signals for paper reconciliation."
+                            "Paper-scope mapping could not produce valid structured "
+                            "output for one Source; retained explicit source-local "
+                            "signals for paper reconciliation."
                         )
                         compact = compact.model_copy(
                             update={
@@ -1422,9 +1765,10 @@ class PaperSkimService:
         parsed: StructuredPaperSkim,
     ) -> tuple[PaperSkim, tuple[_PaperSignalInput, ...]]:
         document_profile = payload.get("document_profile")
-        if isinstance(document_profile, Mapping) and (
+        is_review = isinstance(document_profile, Mapping) and (
             str(document_profile.get("doc_type") or "").strip() == "review"
-        ):
+        )
+        if is_review:
             parsed = _review_synthesis_only(parsed)
         if parsed.output_saturated:
             raise StructuredOutputSaturatedError(
@@ -1442,6 +1786,14 @@ class PaperSkimService:
         signals = []
         for item in parsed.unresolved_signals:
             signal_payload = item.model_dump()
+            signal_payload.update(
+                {
+                    "sample_context": [],
+                    "test_context": [],
+                    "comparator": None,
+                    "fixed_conditions": [],
+                }
+            )
             signal_payload["claim_scope"] = self._claim_scope_for_document(
                 claim_scope=item.claim_scope,
                 experiment_label=item.experiment_label,
@@ -1463,6 +1815,7 @@ class PaperSkimService:
             for source_unit_id in item.source_unit_ids
         ]
         for study in parsed.studies:
+            source_study = study
             study = study.model_copy(
                 update={
                     "claim_scope": self._claim_scope_for_document(
@@ -1475,13 +1828,17 @@ class PaperSkimService:
                         ],
                         payload=payload,
                         source_units=source_units,
-                    )
+                    ),
+                    "sample_context": [],
+                    "test_context": [],
+                    "comparator": None,
+                    "fixed_conditions": [],
                 }
             )
             retained_relationships = []
             for relationship in study.relationships:
                 if self._relationship_conflicts_with_fixed_conditions(
-                    study,
+                    source_study,
                     relationship,
                 ):
                     signal_payload = {
@@ -1532,6 +1889,14 @@ class PaperSkimService:
             relationship_source_unit_ids=relationship_source_unit_ids,
             signal_source_unit_ids=signal_source_unit_ids,
         )
+        review_synthesis = (
+            self._review_synthesis_from_window_result(
+                parsed.review_synthesis,
+                source_units=source_units,
+            )
+            if is_review
+            else ReviewSynthesisMap()
+        )
         return (
             PaperSkim.from_mapping(
                 {
@@ -1544,6 +1909,7 @@ class PaperSkimService:
                     "source_unit_coverage": [
                         item.to_record() for item in source_unit_coverage
                     ],
+                    "review_synthesis": review_synthesis.to_record(),
                 }
             ),
             tuple(signals),
@@ -1683,6 +2049,39 @@ class PaperSkimService:
             }
         )
 
+    @classmethod
+    def _review_synthesis_from_window_result(
+        cls,
+        review_map: StructuredReviewSynthesisMap,
+        *,
+        source_units: Mapping[str, Mapping[str, Any]],
+    ) -> ReviewSynthesisMap:
+        record: dict[str, list[dict[str, Any]]] = {}
+        for field_name in (
+            "synthesis_claims",
+            "disputes",
+            "evidence_gaps",
+            "citation_leads",
+        ):
+            items: list[dict[str, Any]] = []
+            for item in getattr(review_map, field_name):
+                resolved = cls._resolved_source_units(
+                    item.source_unit_ids,
+                    source_units=source_units,
+                )
+                if resolved is None:
+                    raise ValueError(
+                        "review knowledge contains an unknown Source-unit id"
+                    )
+                items.append(
+                    {
+                        **item.model_dump(exclude={"source_unit_ids"}),
+                        "source_refs": cls._source_refs_from_units(resolved),
+                    }
+                )
+            record[field_name] = items
+        return ReviewSynthesisMap.from_mapping(record)
+
     @staticmethod
     def _relationship_conflicts_with_fixed_conditions(
         study: StructuredPaperStudy,
@@ -1804,6 +2203,7 @@ class PaperSkimService:
         signal_inputs: list[_PaperSignalInput],
         *,
         signal_reconciler: PaperSignalReconciler,
+        extraction_budget: _PaperExtractionBudget,
         progress_callback: ProgressCallback | None,
         document_position: int,
         document_count: int,
@@ -1836,7 +2236,7 @@ class PaperSkimService:
                 unresolved_signals=tuple(
                     replace(
                         item.signal,
-                        reason="no experiment-evidence bridge was found in this paper",
+                        reason="no paper-scope bridge was found in this paper",
                     )
                     for item in unique_inputs
                 ),
@@ -1858,6 +2258,28 @@ class PaperSkimService:
         linked_signal_ids: set[str] = set()
         unresolved_reasons: dict[str, str] = {}
         for batch_position, batch in enumerate(batches, start=1):
+            if not extraction_budget.reserve(recovery=False):
+                logger.warning(
+                    "Paper signal reconciliation stopped at the document budget; "
+                    "preserving unresolved signals document_id=%s batch_position=%s "
+                    "batch_count=%s failure_kind=%s calls=%s max_calls=%s",
+                    paper_skim.document_id,
+                    batch_position,
+                    len(batches),
+                    extraction_budget.failure_kind,
+                    extraction_budget.calls,
+                    extraction_budget.max_calls,
+                )
+                for remaining_batch in batches[batch_position - 1 :]:
+                    for item in remaining_batch:
+                        unresolved_reasons.setdefault(
+                            item.signal.signal_id,
+                            (
+                                "paper-map judgment budget exhausted before "
+                                "reconciliation"
+                            ),
+                        )
+                break
             batch_studies, batch_unresolved = self._reconcile_signal_batch(
                 batch,
                 signal_reconciler=signal_reconciler,
@@ -1905,7 +2327,7 @@ class PaperSkimService:
                     "Conflicting reconciliation context: "
                     f"{', '.join(conflicting_fields)}."
                     if conflicting_fields
-                    else "no experiment-evidence bridge was found in this paper"
+                    else "no paper-scope bridge was found in this paper"
                 )
             unresolved_signals.append(replace(item.signal, reason=reason))
 
@@ -1919,7 +2341,7 @@ class PaperSkimService:
         )
 
     @staticmethod
-    def _signal_inputs_share_experiment_evidence(
+    def _signal_inputs_share_scope_evidence(
         left: _PaperSignalInput,
         right: _PaperSignalInput,
     ) -> bool:
@@ -1943,9 +2365,9 @@ class PaperSkimService:
             positions: list[int] = []
             for source in item.source_contexts:
                 source_unit_id = str(source.get("source_unit_id") or "")
-                position = source_unit_id.rsplit("-", maxsplit=1)[-1]
-                if position.isdigit():
-                    positions.append(int(position))
+                match = _SOURCE_UNIT_POSITION_PATTERN.search(source_unit_id)
+                if match is not None:
+                    positions.append(int(match.group(1)))
             return tuple(positions)
 
         left_positions = source_positions(left)
@@ -2019,7 +2441,7 @@ class PaperSkimService:
             candidates = tuple(
                 variable
                 for variable in variables
-                if self._signal_inputs_share_experiment_evidence(variable, outcome)
+                if self._signal_inputs_share_scope_evidence(variable, outcome)
             )
             current_variables: list[_PaperSignalInput] = []
             for variable in candidates:
@@ -2396,7 +2818,150 @@ class PaperSkimService:
                 for skim in window_skims
                 for item in skim.source_unit_coverage
             ),
+            review_synthesis=(
+                self._consolidate_review_synthesis(
+                    tuple(skim.review_synthesis for skim in window_skims)
+                )
+                if doc_role == "review"
+                else ReviewSynthesisMap()
+            ),
         )
+
+    @staticmethod
+    def _assess_paper_map(
+        skim: PaperSkim,
+        *,
+        signals: tuple[PaperStudySignal, ...],
+        final: bool,
+    ) -> _PaperMapAssessment:
+        owned_relationships = [
+            relationship
+            for study in skim.studies
+            if study.claim_scope in {"current_work", "synthesis"}
+            for relationship in study.relationships
+            if not property_matching.outcome_label_requires_resolution(
+                relationship.outcome
+            )
+        ]
+        limitations: list[str] = []
+        if not skim.coverage_complete:
+            limitations.append("source_extraction_incomplete")
+        has_review_judgment = skim.doc_role == "review" and any(
+            (
+                skim.review_synthesis.synthesis_claims,
+                skim.review_synthesis.disputes,
+                skim.review_synthesis.evidence_gaps,
+            )
+        )
+        if owned_relationships or has_review_judgment:
+            return _PaperMapAssessment(
+                status="sufficient",
+                limitations=tuple(limitations),
+            )
+
+        visible_signals = tuple((*signals, *skim.unresolved_signals))
+        has_variable = any(
+            signal.signal_type == "variable" for signal in visible_signals
+        )
+        has_outcome = any(
+            signal.signal_type == "outcome" for signal in visible_signals
+        )
+        has_broad_outcome = any(
+            signal.signal_type == "outcome"
+            and property_matching.outcome_label_requires_resolution(signal.label)
+            for signal in visible_signals
+        )
+        has_unowned_relationship = any(
+            study.relationships
+            and study.claim_scope not in {"current_work", "synthesis"}
+            for study in skim.studies
+        )
+
+        if not has_variable:
+            limitations.append("missing_variable")
+        if not has_outcome:
+            limitations.append("missing_outcome")
+        if has_broad_outcome:
+            limitations.append("outcome_too_broad")
+        if has_unowned_relationship:
+            limitations.append("unclear_ownership")
+        if has_variable and has_outcome and not has_broad_outcome:
+            limitations.append("relationship_not_established")
+
+        limitations = list(dict.fromkeys(limitations))
+        if final or "source_extraction_incomplete" in limitations:
+            return _PaperMapAssessment(
+                status="insufficient_map",
+                limitations=tuple(limitations or ("missing_research_scope",)),
+            )
+        if has_broad_outcome:
+            focus = "outcome_specificity"
+        elif not has_outcome:
+            focus = "missing_outcome"
+        elif not has_variable:
+            focus = "missing_variable"
+        elif has_unowned_relationship:
+            focus = "unclear_ownership"
+        else:
+            focus = "missing_scope"
+        return _PaperMapAssessment(
+            status="needs_expansion",
+            limitations=tuple(limitations or ("missing_research_scope",)),
+            expansion_focus=focus,
+        )
+
+    @classmethod
+    def _consolidate_review_synthesis(
+        cls,
+        maps: tuple[ReviewSynthesisMap, ...],
+    ) -> ReviewSynthesisMap:
+        return ReviewSynthesisMap(
+            **{
+                field_name: cls._merge_review_knowledge_items(
+                    tuple(
+                        item
+                        for review_map in maps
+                        for item in getattr(review_map, field_name)
+                    )
+                )
+                for field_name in (
+                    "synthesis_claims",
+                    "disputes",
+                    "evidence_gaps",
+                    "citation_leads",
+                )
+            }
+        )
+
+    @staticmethod
+    def _merge_review_knowledge_items(
+        items: tuple[ReviewKnowledgeItem, ...],
+    ) -> tuple[ReviewKnowledgeItem, ...]:
+        merged: list[ReviewKnowledgeItem] = []
+        identities: dict[tuple[object, ...], int] = {}
+        for item in items:
+            identity = (
+                item.content.casefold(),
+                tuple(value.casefold() for value in item.material_scope),
+                tuple(value.casefold() for value in item.variables),
+                tuple(value.casefold() for value in item.outcomes),
+                tuple(value.casefold() for value in item.conditions),
+            )
+            position = identities.get(identity)
+            if position is None:
+                identities[identity] = len(merged)
+                merged.append(item)
+                continue
+            existing = merged[position]
+            source_refs = tuple(
+                dict.fromkeys((*existing.source_refs, *item.source_refs))
+            )
+            merged[position] = replace(
+                existing,
+                source_refs=source_refs,
+                confidence=max(existing.confidence, item.confidence),
+            )
+        return tuple(merged)
 
     @staticmethod
     def _study_with_claim_scope(study: PaperStudy, claim_scope: str) -> PaperStudy:

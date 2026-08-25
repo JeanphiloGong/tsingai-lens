@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass
 from hashlib import sha1
 from typing import Annotated, Any, Callable, Iterable, Literal, Mapping
 
+from application.core.objectives import property_matching
+from application.core.objectives.llm.structured_response import StructuredResponseClient
+from domain.core import PaperSkim, ResearchObjective, normalize_objective_terms
+from domain.source import SourceDocumentTree
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -14,11 +21,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-
-from application.core.objectives import property_matching
-from application.core.objectives.llm.structured_response import StructuredResponseClient
-from domain.core import PaperSkim, ResearchObjective, normalize_objective_terms
-from domain.source import SourceDocumentTree
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,7 @@ _FRAME_PRIOR_RELATIONSHIP_LIMIT = 12
 _FRAME_TABLE_TEXT_CHARS = 800
 _FRAME_TABLE_VALUE_CHARS = 240
 _FRAME_SCREENING_NOTE_CHARS = 320
+_DEFAULT_PAPER_FRAMING_MAX_CONCURRENCY = 10
 OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT = 12_288
 OBJECTIVE_PAPER_FRAME_PROMPT_VERSION = "objective_paper_frame.v3"
 
@@ -458,6 +461,20 @@ class PaperAnalysisFrame:
         }
 
 
+@dataclass(frozen=True)
+class _PreparedPaperFrame:
+    objective: ResearchObjective
+    objective_position: int
+    document_position: int
+    document_id: str
+    document_title: str | None
+    source_filename: str | None
+    paper_skim: PaperSkim | None
+    payload: dict[str, Any] | None
+    batches: tuple[tuple[dict[str, Any], int | None], ...]
+    completed_frame: PaperAnalysisFrame | None = None
+
+
 def _text(value: Any) -> str:
     return str(value or "").strip()
 
@@ -497,7 +514,6 @@ def screen_sources(
     skim_by_document_id = {
         skim.document_id: skim for skim in paper_skims if skim.document_id
     }
-    frames: list[PaperAnalysisFrame] = []
     logger.info(
         "Research objective paper framing started collection_id=%s objective_count=%s document_count=%s",
         collection_id,
@@ -507,25 +523,21 @@ def screen_sources(
     objective_count = len(objectives)
     document_count = len(documents)
     total_frame_requests = objective_count * document_count
-    completed_frame_requests = 0
+    _notify_progress(
+        progress_callback,
+        phase="objective_paper_framing_started",
+        current=0,
+        total=total_frame_requests,
+        unit="frames",
+        message="Checking each paper against each research objective.",
+    )
+
+    prepared_frames: list[_PreparedPaperFrame] = []
     for objective_position, objective in enumerate(objectives, start=1):
         for document_position, document in enumerate(documents, start=1):
-            completed_frame_requests += 1
             document_id = str(getattr(document, "document_id", "") or "")
             document_title = str(getattr(document, "title", None) or "").strip() or None
             source_filename = _resolve_source_filename(document)
-            _notify_progress(
-                progress_callback,
-                phase="objective_paper_framing_started",
-                current=completed_frame_requests,
-                total=total_frame_requests,
-                unit="frames",
-                message="Checking each paper against each research objective.",
-                active_document_id=document_id,
-                active_document_title=document_title,
-                active_source_filename=source_filename,
-                active_objective_id=objective.objective_id,
-            )
             tables = tables_by_document_id.get(document_id, [])
             logger.info(
                 "Research objective paper framing document started collection_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s table_count=%s",
@@ -536,34 +548,36 @@ def screen_sources(
                 document_id,
                 document_position,
                 document_count,
-                completed_frame_requests - 1,
+                0,
                 total_frame_requests,
-                max(total_frame_requests - completed_frame_requests + 1, 0),
+                total_frame_requests,
                 len(tables),
             )
             if document_id in set(objective.excluded_document_ids):
-                frames.append(
-                    PaperAnalysisFrame.from_mapping(
-                        {
-                            "objective_id": objective.objective_id,
-                            "document_id": document_id,
-                            "relevance": "irrelevant",
-                            "paper_role": "irrelevant",
-                            "screening_note": (
-                                "Paper was explicitly excluded from this research "
-                                "objective."
-                            ),
-                        }
+                prepared_frames.append(
+                    _PreparedPaperFrame(
+                        objective=objective,
+                        objective_position=objective_position,
+                        document_position=document_position,
+                        document_id=document_id,
+                        document_title=document_title,
+                        source_filename=source_filename,
+                        paper_skim=skim_by_document_id.get(document_id),
+                        payload=None,
+                        batches=(),
+                        completed_frame=PaperAnalysisFrame.from_mapping(
+                            {
+                                "objective_id": objective.objective_id,
+                                "document_id": document_id,
+                                "relevance": "irrelevant",
+                                "paper_role": "irrelevant",
+                                "screening_note": (
+                                    "Paper was explicitly excluded from this research "
+                                    "objective."
+                                ),
+                            }
+                        ),
                     )
-                )
-                logger.info(
-                    "Research objective paper framing skipped explicitly excluded document collection_id=%s objective_id=%s document_id=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s",
-                    collection_id,
-                    objective.objective_id,
-                    document_id,
-                    completed_frame_requests,
-                    total_frame_requests,
-                    max(total_frame_requests - completed_frame_requests, 0),
                 )
                 continue
             payload = _build_objective_paper_frame_payload(
@@ -576,108 +590,238 @@ def screen_sources(
                 tables=tables,
                 document_tree=document_trees_by_document_id.get(document_id),
             )
-            batches = _build_objective_paper_frame_batches(
-                source_screener=source_screener,
-                payload=payload,
-            )
-            batch_results: list[tuple[Mapping[str, Any], str, tuple[str, ...]]] = []
-            fallback_batch_count = 0
-            for batch_position, (batch_payload, prompt_tokens) in enumerate(
-                batches,
-                start=1,
-            ):
-                fallback_reason: str | None = None
-                fallback_errors: tuple[str, ...] = ()
-                if (
-                    prompt_tokens is None
-                    or prompt_tokens > OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT
-                ):
-                    fallback_reason = "prompt_token_preflight_failed"
-                    fallback_errors = (
-                        "objective paper framing prompt token preflight failed; "
-                        f"prompt_tokens={prompt_tokens}",
-                    )
-                else:
-                    try:
-                        parsed = source_screener.screen_batch(batch_payload)
-                        batch_results.append(
-                            (
-                                parsed.model_dump(),
-                                parsed.source_accounting_origin,
-                                parsed.source_accounting_errors,
-                            )
-                        )
-                        continue
-                    except Exception as exc:  # noqa: BLE001
-                        fallback_reason = "model_call_failed"
-                        fallback_errors = (f"{type(exc).__name__}: {str(exc).strip()}",)
-                        logger.warning(
-                            "Research objective paper framing batch model failed; preserving batch sources collection_id=%s objective_id=%s document_id=%s batch_position=%s batch_count=%s prompt_tokens=%s",
-                            collection_id,
-                            objective.objective_id,
-                            document_id,
-                            batch_position,
-                            len(batches),
-                            prompt_tokens,
-                            exc_info=True,
-                        )
-
-                fallback_batch_count += 1
-                logger.warning(
-                    "Research objective paper framing batch used conservative fallback collection_id=%s objective_id=%s document_id=%s batch_position=%s batch_count=%s source_unit_count=%s reason=%s prompt_tokens=%s",
-                    collection_id,
-                    objective.objective_id,
-                    document_id,
-                    batch_position,
-                    len(batches),
-                    len(batch_payload["source_units"]),
-                    fallback_reason,
-                    prompt_tokens,
+            prepared_frames.append(
+                _PreparedPaperFrame(
+                    objective=objective,
+                    objective_position=objective_position,
+                    document_position=document_position,
+                    document_id=document_id,
+                    document_title=document_title,
+                    source_filename=source_filename,
+                    paper_skim=skim_by_document_id.get(document_id),
+                    payload=payload,
+                    batches=_build_objective_paper_frame_batches(
+                        source_screener=source_screener,
+                        payload=payload,
+                    ),
                 )
-                batch_results.append(
+            )
+
+    def screen_batch(
+        prepared: _PreparedPaperFrame,
+        batch_position: int,
+        batch_payload: dict[str, Any],
+        prompt_tokens: int | None,
+    ) -> tuple[
+        tuple[Mapping[str, Any], str, tuple[str, ...]],
+        bool,
+    ]:
+        fallback_reason: str | None = None
+        fallback_errors: tuple[str, ...] = ()
+        if (
+            prompt_tokens is None
+            or prompt_tokens > OBJECTIVE_PAPER_FRAME_PROMPT_TOKEN_LIMIT
+        ):
+            fallback_reason = "prompt_token_preflight_failed"
+            fallback_errors = (
+                (
+                    "objective paper framing prompt token preflight failed; "
+                    f"prompt_tokens={prompt_tokens}"
+                ),
+            )
+        else:
+            try:
+                parsed = source_screener.screen_batch(batch_payload)
+                return (
                     (
-                        _build_conservative_objective_paper_frame_batch(
-                            payload=batch_payload,
-                            paper_skim=skim_by_document_id.get(document_id),
-                        ),
-                        "fallback",
-                        fallback_errors,
-                    )
+                        parsed.model_dump(),
+                        parsed.source_accounting_origin,
+                        parsed.source_accounting_errors,
+                    ),
+                    False,
+                )
+            except Exception as exc:
+                fallback_reason = "model_call_failed"
+                fallback_errors = (f"{type(exc).__name__}: {str(exc).strip()}",)
+                logger.warning(
+                    "Research objective paper framing batch model failed; preserving batch sources collection_id=%s objective_id=%s document_id=%s batch_position=%s batch_count=%s prompt_tokens=%s",
+                    collection_id,
+                    prepared.objective.objective_id,
+                    prepared.document_id,
+                    batch_position,
+                    len(prepared.batches),
+                    prompt_tokens,
+                    exc_info=True,
                 )
 
-            frame = _aggregate_objective_paper_frame_batches(
-                objective_id=objective.objective_id,
-                document_id=document_id,
-                source_units=payload["source_units"],
-                batch_results=batch_results,
-                paper_skim=skim_by_document_id.get(document_id),
+        logger.warning(
+            "Research objective paper framing batch used conservative fallback collection_id=%s objective_id=%s document_id=%s batch_position=%s batch_count=%s source_unit_count=%s reason=%s prompt_tokens=%s",
+            collection_id,
+            prepared.objective.objective_id,
+            prepared.document_id,
+            batch_position,
+            len(prepared.batches),
+            len(batch_payload["source_units"]),
+            fallback_reason,
+            prompt_tokens,
+        )
+        return (
+            (
+                _build_conservative_objective_paper_frame_batch(
+                    payload=batch_payload,
+                    paper_skim=prepared.paper_skim,
+                ),
+                "fallback",
+                fallback_errors,
+            ),
+            True,
+        )
+
+    batch_jobs = tuple(
+        (prepared, batch_position, batch_payload, prompt_tokens)
+        for prepared in prepared_frames
+        for batch_position, (batch_payload, prompt_tokens) in enumerate(
+            prepared.batches,
+            start=1,
+        )
+    )
+    futures_by_frame: list[tuple[Any, ...]] = []
+    max_concurrency = min(
+        _paper_framing_max_concurrency(),
+        len(batch_jobs),
+    )
+    executor = (
+        ThreadPoolExecutor(max_workers=max_concurrency)
+        if max_concurrency > 0
+        else None
+    )
+    frames: list[PaperAnalysisFrame] = []
+    try:
+        for prepared in prepared_frames:
+            if executor is None:
+                futures_by_frame.append(())
+                continue
+            futures_by_frame.append(
+                tuple(
+                    executor.submit(
+                        copy_context().run,
+                        screen_batch,
+                        prepared,
+                        batch_position,
+                        batch_payload,
+                        prompt_tokens,
+                    )
+                    for batch_position, (batch_payload, prompt_tokens) in enumerate(
+                        prepared.batches,
+                        start=1,
+                    )
+                )
             )
+        if executor is not None:
+            logger.info(
+                "Research objective paper framing batch concurrency collection_id=%s max_concurrency=%s batch_count=%s",
+                collection_id,
+                max_concurrency,
+                len(batch_jobs),
+            )
+
+        for completed_frame_requests, (prepared, futures) in enumerate(
+            zip(prepared_frames, futures_by_frame, strict=True),
+            start=1,
+        ):
+            if prepared.completed_frame is not None:
+                frame = prepared.completed_frame
+                batch_outcomes: tuple[
+                    tuple[
+                        tuple[Mapping[str, Any], str, tuple[str, ...]],
+                        bool,
+                    ],
+                    ...,
+                ] = ()
+                logger.info(
+                    "Research objective paper framing skipped explicitly excluded document collection_id=%s objective_id=%s document_id=%s",
+                    collection_id,
+                    prepared.objective.objective_id,
+                    prepared.document_id,
+                )
+            else:
+                if prepared.payload is None:
+                    raise RuntimeError("prepared paper frame is missing its payload")
+                batch_outcomes = tuple(future.result() for future in futures)
+                frame = _aggregate_objective_paper_frame_batches(
+                    objective_id=prepared.objective.objective_id,
+                    document_id=prepared.document_id,
+                    source_units=prepared.payload["source_units"],
+                    batch_results=[outcome[0] for outcome in batch_outcomes],
+                    paper_skim=prepared.paper_skim,
+                )
+
             frames.append(frame)
+            fallback_batch_count = sum(outcome[1] for outcome in batch_outcomes)
             logger.info(
                 "Research objective paper framing document finished collection_id=%s objective_id=%s objective_position=%s objective_count=%s document_id=%s document_position=%s document_count=%s relevance=%s paper_role=%s relevant_tables=%s excluded_tables=%s batch_count=%s fallback_batch_count=%s completed_frame_requests=%s total_frame_requests=%s remaining_frame_requests=%s",
                 collection_id,
-                objective.objective_id,
-                objective_position,
+                prepared.objective.objective_id,
+                prepared.objective_position,
                 objective_count,
-                document_id,
-                document_position,
+                prepared.document_id,
+                prepared.document_position,
                 document_count,
                 frame.relevance,
                 frame.paper_role,
                 len(frame.relevant_tables),
                 len(frame.excluded_tables),
-                len(batches),
+                len(prepared.batches),
                 fallback_batch_count,
                 completed_frame_requests,
                 total_frame_requests,
                 max(total_frame_requests - completed_frame_requests, 0),
             )
+            _notify_progress(
+                progress_callback,
+                phase="objective_paper_framing_completed",
+                current=completed_frame_requests,
+                total=total_frame_requests,
+                unit="frames",
+                message="Checked a paper against the research objective.",
+                active_document_id=prepared.document_id,
+                active_document_title=prepared.document_title,
+                active_source_filename=prepared.source_filename,
+                active_objective_id=prepared.objective.objective_id,
+            )
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=True)
+
     logger.info(
         "Research objective paper framing finished collection_id=%s frame_count=%s",
         collection_id,
         len(frames),
     )
     return tuple(frames)
+
+
+def _paper_framing_max_concurrency() -> int:
+    raw_value = os.getenv("OBJECTIVE_PAPER_FRAMING_MAX_CONCURRENCY", "").strip()
+    if not raw_value:
+        return _DEFAULT_PAPER_FRAMING_MAX_CONCURRENCY
+    try:
+        value = int(raw_value)
+    except ValueError:
+        logger.warning(
+            "Invalid OBJECTIVE_PAPER_FRAMING_MAX_CONCURRENCY=%s; using default=%s",
+            raw_value,
+            _DEFAULT_PAPER_FRAMING_MAX_CONCURRENCY,
+        )
+        return _DEFAULT_PAPER_FRAMING_MAX_CONCURRENCY
+    if value < 1:
+        logger.warning(
+            "Non-positive OBJECTIVE_PAPER_FRAMING_MAX_CONCURRENCY=%s; using default=%s",
+            raw_value,
+            _DEFAULT_PAPER_FRAMING_MAX_CONCURRENCY,
+        )
+        return _DEFAULT_PAPER_FRAMING_MAX_CONCURRENCY
+    return value
 
 
 def _route_prompt_objective_record(

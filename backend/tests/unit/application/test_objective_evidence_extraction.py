@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event, Lock
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from httpx import Request, Response
-from openai import BadRequestError
-
 from application.core.objectives import property_matching
 from application.core.objectives.analysis import (
     evidence_materialization,
@@ -34,6 +33,8 @@ from application.core.objectives.analysis.source_screening import (
 from application.core.paper_facts.schemas import StructuredTableMatrixRepair
 from domain.core import ObjectiveAnalysis, PaperSkim
 from domain.source import SourceDocumentNode, SourceDocumentTree, SourceTable
+from httpx import Request, Response
+from openai import BadRequestError
 from tests.support.research_objective_service import (
     research_objective as _research_objective,
 )
@@ -138,6 +139,36 @@ class _BoundedFrameExtractor:
             relevant_source_unit_ids=relevant_source_unit_ids,
             excluded_source_unit_ids=excluded_source_unit_ids,
         )
+
+
+class _BlockingFrameExtractor(_BoundedFrameExtractor):
+    def __init__(self, *, expected_concurrency: int) -> None:
+        super().__init__(max_source_units=1)
+        self.expected_concurrency = expected_concurrency
+        self.release = Event()
+        self.expected_workers_started = Event()
+        self._lock = Lock()
+        self.active_calls = 0
+        self.call_count = 0
+        self.peak_concurrency = 0
+
+    def screen_batch(
+        self,
+        payload: dict[str, Any],
+    ) -> StructuredPaperFrameBatch:
+        with self._lock:
+            self.active_calls += 1
+            self.call_count += 1
+            self.peak_concurrency = max(self.peak_concurrency, self.active_calls)
+            if self.active_calls == self.expected_concurrency:
+                self.expected_workers_started.set()
+        try:
+            if not self.release.wait(timeout=5):
+                raise TimeoutError("framing concurrency test did not release workers")
+            return super().screen_batch(payload)
+        finally:
+            with self._lock:
+                self.active_calls -= 1
 
 
 def _frame_test_tree(*section_specs: tuple[str, str, str]) -> SourceDocumentTree:
@@ -1042,11 +1073,9 @@ def test_objective_paper_framing_batches_every_stable_source_once():
         document_trees_by_document_id={"paper-1": document_tree},
     )
 
-    assert [len(payload["source_units"]) for payload in extractor.frame_payloads] == [
-        2,
-        2,
-        1,
-    ]
+    assert sorted(
+        len(payload["source_units"]) for payload in extractor.frame_payloads
+    ) == [1, 2, 2]
     sent_ids = [
         unit["source_unit_id"]
         for payload in extractor.frame_payloads
@@ -1075,6 +1104,190 @@ def test_objective_paper_framing_batches_every_stable_source_once():
         and not item.accounting_errors
         for item in frames[0].source_dispositions
     )
+
+
+def test_objective_paper_framing_honors_configured_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OBJECTIVE_PAPER_FRAMING_MAX_CONCURRENCY", "10")
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    document_tree = _frame_test_tree(
+        *tuple(
+            (
+                f"section-{position}",
+                f"Section {position}",
+                f"Laser power and relative density observation {position}.",
+            )
+            for position in range(12)
+        )
+    )
+    extractor = _BlockingFrameExtractor(expected_concurrency=10)
+
+    with ThreadPoolExecutor(max_workers=1) as runner:
+        future = runner.submit(
+            source_screening.screen_sources,
+            collection_id="col-test",
+            source_screener=extractor,
+            objectives=(objective,),
+            paper_skims=(),
+            documents=(SimpleNamespace(document_id="paper-1", title="Density"),),
+            profiles_by_document_id={},
+            blocks_by_document_id={},
+            tables_by_document_id={},
+            document_trees_by_document_id={"paper-1": document_tree},
+        )
+        try:
+            assert extractor.expected_workers_started.wait(timeout=1)
+            with extractor._lock:
+                assert extractor.active_calls == 10
+                assert extractor.call_count == 10
+        finally:
+            extractor.release.set()
+        frames = future.result(timeout=5)
+
+    assert extractor.call_count == 12
+    assert extractor.peak_concurrency == 10
+    assert len(frames) == 1
+    assert [item.source_ref for item in frames[0].source_dispositions] == [
+        f"section-{position}" for position in range(12)
+    ]
+
+
+def test_objective_paper_framing_shares_concurrency_across_papers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OBJECTIVE_PAPER_FRAMING_MAX_CONCURRENCY", "10")
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    documents = tuple(
+        SimpleNamespace(document_id=f"paper-{position}", title=f"Paper {position}")
+        for position in range(12)
+    )
+    trees = {
+        document.document_id: _frame_test_tree(
+            (
+                f"results-{position}",
+                "Results",
+                f"Laser power and relative density observation {position}.",
+            )
+        )
+        for position, document in enumerate(documents)
+    }
+    extractor = _BlockingFrameExtractor(expected_concurrency=10)
+
+    with ThreadPoolExecutor(max_workers=1) as runner:
+        future = runner.submit(
+            source_screening.screen_sources,
+            collection_id="col-test",
+            source_screener=extractor,
+            objectives=(objective,),
+            paper_skims=(),
+            documents=documents,
+            profiles_by_document_id={},
+            blocks_by_document_id={},
+            tables_by_document_id={},
+            document_trees_by_document_id=trees,
+        )
+        try:
+            assert extractor.expected_workers_started.wait(timeout=1)
+            with extractor._lock:
+                assert extractor.active_calls == 10
+                assert extractor.call_count == 10
+        finally:
+            extractor.release.set()
+        frames = future.result(timeout=5)
+
+    assert extractor.call_count == 12
+    assert extractor.peak_concurrency == 10
+    assert [frame.document_id for frame in frames] == [
+        document.document_id for document in documents
+    ]
+
+
+def test_objective_paper_framing_progress_counts_completed_papers() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-density",
+            "question": "How does laser power affect relative density?",
+            "variables": ["laser power"],
+            "outcomes": ["relative density"],
+        }
+    )
+    documents = (
+        SimpleNamespace(document_id="paper-1", title="Paper 1"),
+        SimpleNamespace(document_id="paper-2", title="Paper 2"),
+    )
+    progress: list[dict[str, Any]] = []
+
+    source_screening.screen_sources(
+        collection_id="col-test",
+        source_screener=_BoundedFrameExtractor(max_source_units=1),
+        objectives=(objective,),
+        paper_skims=(),
+        documents=documents,
+        profiles_by_document_id={},
+        blocks_by_document_id={},
+        tables_by_document_id={},
+        document_trees_by_document_id={
+            "paper-1": _frame_test_tree(
+                ("results-1", "Results", "Relative density result 1.")
+            ),
+            "paper-2": _frame_test_tree(
+                ("results-2", "Results", "Relative density result 2.")
+            ),
+        },
+        progress_callback=progress.append,
+    )
+
+    assert [item["current"] for item in progress] == [0, 1, 2]
+    assert [item["phase"] for item in progress] == [
+        "objective_paper_framing_started",
+        "objective_paper_framing_completed",
+        "objective_paper_framing_completed",
+    ]
+    assert [item.get("active_document_id") for item in progress] == [
+        None,
+        "paper-1",
+        "paper-2",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("configured_value", "expected"),
+    [
+        (None, 10),
+        ("3", 3),
+        ("invalid", 10),
+        ("0", 10),
+    ],
+)
+def test_objective_paper_framing_concurrency_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    configured_value: str | None,
+    expected: int,
+) -> None:
+    if configured_value is None:
+        monkeypatch.delenv("OBJECTIVE_PAPER_FRAMING_MAX_CONCURRENCY", raising=False)
+    else:
+        monkeypatch.setenv(
+            "OBJECTIVE_PAPER_FRAMING_MAX_CONCURRENCY",
+            configured_value,
+        )
+
+    assert source_screening._paper_framing_max_concurrency() == expected
 
 
 def test_objective_paper_frame_routes_duplicate_headings_by_selected_source_ref(

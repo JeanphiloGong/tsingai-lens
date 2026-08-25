@@ -43,6 +43,10 @@ Read the analysis responsibilities in real research order:
 batches, the screening prompt and response schema, prompt preflight, bounded
 repair, model/repaired/fallback dispositions, and frame aggregation. Its
 `ObjectiveSourceScreener` performs only the current bounded relevance judgment.
+Independent batches across the selected papers run with the bounded
+`OBJECTIVE_PAPER_FRAMING_MAX_CONCURRENCY` setting (default `10`), while their
+results are aggregated in Source order so execution timing cannot change the
+scientific frame.
 Its optional `screening_note` explains only the current selection decision and
 is normalized after parsing so an overlong note cannot discard valid Source
 accounting. Later stages may consume a frame, but they may not reinterpret a

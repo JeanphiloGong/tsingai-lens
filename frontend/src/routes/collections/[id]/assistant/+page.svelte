@@ -33,6 +33,11 @@
 		| { kind: 'paragraph'; segments: InlineSegment[] }
 		| { kind: 'list'; items: InlineSegment[][] };
 
+	type ResearchProcessStep = {
+		step_id: string;
+		status: string;
+	};
+
 	const suggestionKeys = [
 		'researchAgent.suggestions.greeting',
 		'researchAgent.suggestions.overview',
@@ -352,6 +357,8 @@
 		switch (toolName) {
 			case 'get_collection_context':
 				return $t('researchAgent.capability.collection');
+			case 'inspect_research_process':
+				return $t('researchAgent.capability.researchProcess');
 			case 'query_published_findings':
 				return $t('researchAgent.capability.findings');
 			case 'propose_objective_drafts':
@@ -361,6 +368,15 @@
 			default:
 				return $t('researchAgent.capability.unknown');
 		}
+	}
+
+	function capabilityRequestLabel(toolName: string | null) {
+		if (toolName === 'inspect_research_process') {
+			return $t('researchAgent.capability.researchProcessRequested');
+		}
+		return $t('researchAgent.capability.requested', {
+			name: capabilityName(toolName)
+		});
 	}
 
 	function resultToolName(message: ChatMessage) {
@@ -402,6 +418,28 @@
 				objectives: numberValue(result.data, 'objective_count')
 			});
 		}
+		if (name === 'inspect_research_process') {
+			const process = result.data.process;
+			if (!process || typeof process !== 'object' || !('status' in process)) {
+				return $t('researchAgent.capability.researchProcessUnavailable');
+			}
+			switch (String(process.status)) {
+				case 'not_started':
+					return $t('researchAgent.researchProcess.notStartedSummary');
+				case 'queued':
+					return $t('researchAgent.researchProcess.queuedSummary');
+				case 'running':
+					return $t('researchAgent.researchProcess.runningSummary');
+				case 'completed':
+					return $t('researchAgent.researchProcess.completedSummary');
+				case 'partial_success':
+					return $t('researchAgent.researchProcess.partialSummary');
+				case 'failed':
+					return $t('researchAgent.researchProcess.failedSummary');
+				default:
+					return $t('researchAgent.capability.researchProcessUnavailable');
+			}
+		}
 		if (name === 'query_published_findings') {
 			if (result.data.scientific_absence === true) return $t('researchAgent.capability.absence');
 			return $t('researchAgent.capability.findingCount', {
@@ -422,10 +460,82 @@
 
 	function resultTitle(message: ChatMessage) {
 		const result = message.tool_result;
+		if (resultToolName(message) === 'inspect_research_process' && result?.status === 'succeeded') {
+			return $t('researchAgent.capability.researchProcessStatus');
+		}
 		const name = capabilityName(resultToolName(message));
 		if (result?.status === 'failed') return $t('researchAgent.capability.failed', { name });
 		if (result?.status === 'queued') return $t('researchAgent.capability.queued', { name });
 		return $t('researchAgent.capability.succeeded', { name });
+	}
+
+	function resultResearchSteps(message: ChatMessage): ResearchProcessStep[] {
+		if (resultToolName(message) !== 'inspect_research_process') return [];
+		const process = message.tool_result?.data.process;
+		if (!process || typeof process !== 'object' || !('steps' in process)) return [];
+		return Array.isArray(process.steps)
+			? process.steps.filter((step): step is ResearchProcessStep =>
+					Boolean(
+						step &&
+						typeof step === 'object' &&
+						'step_id' in step &&
+						typeof step.step_id === 'string' &&
+						'status' in step &&
+						typeof step.status === 'string'
+					)
+				)
+			: [];
+	}
+
+	function researchStepName(stepId: string) {
+		switch (stepId) {
+			case 'source_understanding':
+				return $t('researchAgent.researchProcess.sourceUnderstanding');
+			case 'paper_classification':
+				return $t('researchAgent.researchProcess.paperClassification');
+			case 'research_scope_screening':
+				return $t('researchAgent.researchProcess.scopeScreening');
+			case 'objective_formation':
+				return $t('researchAgent.researchProcess.objectiveFormation');
+			default:
+				return stepId;
+		}
+	}
+
+	function researchStepStatus(status: string) {
+		switch (status) {
+			case 'completed':
+				return $t('researchAgent.researchProcess.completed');
+			case 'running':
+				return $t('researchAgent.researchProcess.running');
+			case 'failed':
+				return $t('researchAgent.researchProcess.failed');
+			case 'skipped':
+				return $t('researchAgent.researchProcess.skipped');
+			default:
+				return $t('researchAgent.researchProcess.queued');
+		}
+	}
+
+	function researchProcessContext(message: ChatMessage) {
+		const process = message.tool_result?.data.process;
+		if (!process || typeof process !== 'object') return '';
+		const active = 'active_document' in process ? process.active_document : null;
+		const progress = 'document_progress' in process ? process.document_progress : null;
+		const activeTitle =
+			active && typeof active === 'object' && 'title' in active && String(active.title).trim()
+				? String(active.title).trim()
+				: active && typeof active === 'object' && 'document_id' in active
+					? String(active.document_id).trim()
+					: '';
+		if (progress && typeof progress === 'object' && 'current' in progress && 'total' in progress) {
+			return $t('researchAgent.researchProcess.documentProgress', {
+				document: activeTitle || $t('researchAgent.researchProcess.currentPaper'),
+				current: Number(progress.current) || 0,
+				total: Number(progress.total) || 0
+			});
+		}
+		return activeTitle;
 	}
 
 	function resultDrafts(message: ChatMessage) {
@@ -640,9 +750,7 @@
 									{/if}
 									{#if message.tool_call_id}
 										<p class="capability-request">
-											{$t('researchAgent.capability.requested', {
-												name: capabilityName(message.tool_name)
-											})}
+											{capabilityRequestLabel(message.tool_name)}
 										</p>
 									{/if}
 								</div>
@@ -683,6 +791,26 @@
 											</li>
 										{/each}
 									</ol>
+								{/if}
+
+								{#if resultResearchSteps(message).length}
+									<div class="research-process">
+										{#if researchProcessContext(message)}
+											<p>{researchProcessContext(message)}</p>
+										{/if}
+										<ol aria-label={$t('researchAgent.researchProcess.label')}>
+											{#each resultResearchSteps(message) as step (step.step_id)}
+												<li
+													class:active={step.status === 'running'}
+													class:failed={step.status === 'failed'}
+												>
+													<span aria-hidden="true"></span>
+													<strong>{researchStepName(step.step_id)}</strong>
+													<small>{researchStepStatus(step.status)}</small>
+												</li>
+											{/each}
+										</ol>
+									</div>
 								{/if}
 
 								{#if message.tool_result.warnings.length}
@@ -1246,6 +1374,61 @@
 		margin: 4px 0 0;
 		color: var(--text-secondary);
 		font-size: 12px;
+	}
+
+	.research-process {
+		margin-top: 14px;
+		padding-top: 12px;
+		border-top: 1px solid var(--border-default);
+	}
+
+	.research-process > p {
+		margin: 0 0 10px;
+		color: var(--text-secondary);
+		font-size: 12px;
+	}
+
+	.research-process ol {
+		display: grid;
+		gap: 9px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.research-process li {
+		display: grid;
+		grid-template-columns: 10px minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 9px;
+		min-height: 22px;
+	}
+
+	.research-process li > span {
+		width: 8px;
+		height: 8px;
+		border: 1px solid var(--border-strong);
+		border-radius: 50%;
+		background: var(--surface-card);
+	}
+
+	.research-process li.active > span {
+		border-color: var(--brand-primary);
+		background: var(--brand-primary);
+	}
+
+	.research-process li.failed > span {
+		border-color: var(--danger-text);
+		background: var(--danger-text);
+	}
+
+	.research-process li strong,
+	.research-process li small {
+		font-size: 12px;
+	}
+
+	.research-process li small {
+		color: var(--text-secondary);
 	}
 
 	.warnings {

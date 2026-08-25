@@ -22,6 +22,9 @@ This node owns the collection workspace route family.
   Collection-bound Research Agent conversation with transient streamed text,
   capability activity, structured results, canonical resource links, and exact
   write approval.
+  Its research-process capability projects the same persisted build task used
+  by the workspace into user-visible scientific stages; Chat does not own a
+  second progress model or expose model reasoning and retry internals.
   This route remains available before Objective discovery finishes so the
   researcher can converse, inspect readiness, and form Objective proposals;
   capabilities must still expose missing or incomplete collection artifacts.

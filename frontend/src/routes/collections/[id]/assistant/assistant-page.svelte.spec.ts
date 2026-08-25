@@ -311,6 +311,86 @@ describe('collections/[id]/assistant Research Agent', () => {
 			.toBeInTheDocument();
 	});
 
+	it('shows the canonical research process without technical recovery details', async () => {
+		installApi({
+			messageTurn: {
+				status: 'completed',
+				messages: [
+					message('msg_user_1', 'user', 'How far has the collection analysis progressed?'),
+					message('msg_call_1', 'assistant', '', {
+						tool_call_id: 'call_process_1',
+						tool_name: 'inspect_research_process',
+						tool_arguments: {}
+					}),
+					message('msg_result_1', 'tool', '', {
+						tool_call_id: 'call_process_1',
+						tool_result: {
+							tool_call_id: 'call_process_1',
+							status: 'succeeded',
+							data: {
+								process: {
+									status: 'running',
+									current_step: 'research_scope_screening',
+									summary: 'Screening paper Sources for research themes.',
+									progress_percent: 72,
+									document_progress: { current: 3, total: 10 },
+									active_document: {
+										document_id: 'paper-3',
+										title: 'LPBF process review'
+									},
+									steps: [
+										{ step_id: 'source_understanding', status: 'completed' },
+										{ step_id: 'paper_classification', status: 'completed' },
+										{ step_id: 'research_scope_screening', status: 'running' },
+										{ step_id: 'objective_formation', status: 'queued' }
+									],
+									failures: []
+								}
+							},
+							resource_refs: [
+								{
+									resource_type: 'collection',
+									resource_id: 'col_123',
+									href: '/collections/col_123'
+								}
+							],
+							warnings: [],
+							error_code: null,
+							error_message: null
+						}
+					}),
+					message('msg_assistant_2', 'assistant', 'The collection is currently being screened.')
+				],
+				pending_approval: null,
+				error_code: null
+			}
+		});
+
+		await send('How far has the collection analysis progressed?');
+
+		await expect
+			.element(browserPage.getByText('Literature analysis progress', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Literature analysis is in progress.'))
+			.toBeInTheDocument();
+		await expect.element(browserPage.getByText('Prepare paper contents')).toBeInTheDocument();
+		await expect.element(browserPage.getByText('Assess paper type and role')).toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Identify materials, variables, and results'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Synthesize candidate research questions'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('LPBF process review · paper 3 of 10'))
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByText('Screening paper Sources for research themes.'))
+			.not.toBeInTheDocument();
+		await expect.element(browserPage.getByText(/retry|window/i)).not.toBeInTheDocument();
+	});
+
 	it('renders a queued capability as started with a traceable resource', async () => {
 		installApi({
 			messageTurn: {

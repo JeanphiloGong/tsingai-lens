@@ -137,6 +137,12 @@ approve or reject the exact pending action before starting another turn.
 The production Research Agent currently exposes these automatic capabilities:
 
 - `get_collection_context` returns a bounded collection and Objective overview;
+- `inspect_research_process` reads the latest canonical collection build and
+  projects paper-content preparation, paper type and research-role assessment,
+  material/variable/result identification, and candidate research-question
+  synthesis. A successful read may report a failed or partial process; the
+  result exposes observable progress and warnings, never model chain-of-thought,
+  prompt repair, or retry internals;
 - `query_published_findings` returns bounded Finding and Evidence summaries
   only from published Objective analysis versions; an empty successful result
   is a scientific absence, not a provider failure;

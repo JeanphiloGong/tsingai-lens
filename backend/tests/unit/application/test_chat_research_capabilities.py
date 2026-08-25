@@ -18,6 +18,7 @@ from application.chat.capabilities import (
     CreateObjectiveCandidateArguments,
     CreateObjectiveCandidateCapability,
     GetCollectionContextCapability,
+    InspectResearchProcessCapability,
     ProposeObjectiveDraftsArguments,
     ProposeObjectiveDraftsCapability,
     QueryPublishedFindingsCapability,
@@ -129,6 +130,16 @@ class _ObjectiveRepository:
     async def read(self, collection_id: str) -> ObjectiveFactSet:
         assert collection_id == "col-1"
         return self.facts
+
+
+class _TaskService:
+    def __init__(self, tasks: list[dict]) -> None:
+        self.tasks = tasks
+        self.calls: list[dict] = []
+
+    async def list_tasks(self, **kwargs) -> list[dict]:
+        self.calls.append(kwargs)
+        return self.tasks
 
 
 class _ObjectiveAuthoringRepository(_ObjectiveRepository):
@@ -307,6 +318,236 @@ async def test_collection_context_is_bounded_and_uses_canonical_resource_refs() 
     assert result.resource_refs[0].resource_type == "collection"
     assert result.resource_refs[0].resource_id == "col-1"
     assert result.warnings == ("3 additional Objectives were omitted from this bounded result.",)
+
+
+async def test_research_process_projects_canonical_task_without_retry_internals() -> None:
+    task_service = _TaskService(
+        [
+            {
+                "task_id": "task-1",
+                "status": "running",
+                "current_stage": "objective_paper_skim_started",
+                "progress_percent": 72,
+                "progress_detail": {
+                    "phase": "objective_paper_skim_started",
+                    "message": "Screening paper Sources for research themes.",
+                    "current": 3,
+                    "total": 10,
+                    "active_document_id": "paper-3",
+                    "active_document_title": "LPBF process review",
+                    "active_window_position": 41,
+                    "active_window_count": 96,
+                    "retry_attempt": 7,
+                },
+                "pipeline_nodes": {
+                    "source_artifacts": {"status": "succeeded"},
+                    "document_profiles": {"status": "succeeded"},
+                    "objective_candidates": {"status": "running"},
+                },
+                "warnings": ["One paper could not be parsed."],
+                "errors": [],
+            }
+        ]
+    )
+    capability = InspectResearchProcessCapability(
+        collection_service=_CollectionService(),
+        task_service=task_service,
+    )
+
+    result = await capability.execute(_context(), capability.spec.input_model())
+
+    assert result.status.value == "succeeded"
+    assert result.data["process"]["status"] == "running"
+    assert result.data["process"]["current_step"] == "research_scope_screening"
+    assert result.data["process"]["document_progress"] == {"current": 3, "total": 10}
+    assert result.data["process"]["active_document"] == {
+        "document_id": "paper-3",
+        "title": "LPBF process review",
+    }
+    assert [step["status"] for step in result.data["process"]["steps"]] == [
+        "completed",
+        "completed",
+        "running",
+        "queued",
+    ]
+    assert "active_window_position" not in str(result.data)
+    assert "retry_attempt" not in str(result.data)
+    assert result.warnings == ("One paper could not be parsed.",)
+    assert task_service.calls == [
+        {"collection_id": "col-1", "limit": 1, "offset": 0}
+    ]
+    assert result.resource_refs[0].href == "/collections/col-1"
+
+
+async def test_research_process_reports_not_started_without_faking_progress() -> None:
+    capability = InspectResearchProcessCapability(
+        collection_service=_CollectionService(),
+        task_service=_TaskService([]),
+    )
+
+    result = await capability.execute(_context(), capability.spec.input_model())
+
+    assert result.status.value == "succeeded"
+    assert result.data["process"] == {
+        "status": "not_started",
+        "current_step": None,
+        "summary": "Literature analysis has not started.",
+        "progress_percent": 0,
+        "document_progress": None,
+        "active_document": None,
+        "steps": [
+            {"step_id": "source_understanding", "status": "queued"},
+            {"step_id": "paper_classification", "status": "queued"},
+            {"step_id": "research_scope_screening", "status": "queued"},
+            {"step_id": "objective_formation", "status": "queued"},
+        ],
+        "failures": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("task_status", "node_status", "expected_summary", "expected_step_status"),
+    (
+        (
+            "completed",
+            "succeeded",
+            "Paper preparation and candidate research-question synthesis "
+            "are complete.",
+            "completed",
+        ),
+        (
+            "partial_success",
+            "succeeded",
+            "Literature analysis is complete, but some content still needs review.",
+            "completed",
+        ),
+        (
+            "failed",
+            "failed",
+            "Literature analysis stopped before all stages were complete.",
+            "failed",
+        ),
+    ),
+)
+async def test_research_process_keeps_terminal_runtime_outcomes_distinct(
+    task_status: str,
+    node_status: str,
+    expected_summary: str,
+    expected_step_status: str,
+) -> None:
+    capability = InspectResearchProcessCapability(
+        collection_service=_CollectionService(),
+        task_service=_TaskService(
+            [
+                {
+                    "task_id": "task-terminal",
+                    "status": task_status,
+                    "progress_percent": 100,
+                    "progress_detail": {"message": "Build artifacts are ready."},
+                    "pipeline_nodes": {
+                        "source_artifacts": {"status": node_status},
+                        "document_profiles": {"status": node_status},
+                        "objective_candidates": {"status": node_status},
+                    },
+                    "warnings": [],
+                    "errors": (
+                        ["Source processing stopped."]
+                        if task_status == "failed"
+                        else []
+                    ),
+                }
+            ]
+        ),
+    )
+
+    result = await capability.execute(_context(), capability.spec.input_model())
+
+    assert result.status.value == "succeeded"
+    assert result.data["process"]["status"] == task_status
+    assert result.data["process"]["summary"] == expected_summary
+    assert result.data["process"]["steps"][-1]["status"] == expected_step_status
+    assert result.data["process"]["current_step"] == (
+        "source_understanding" if task_status == "failed" else None
+    )
+    assert result.data["process"]["failures"] == (
+        ["Source processing stopped."] if task_status == "failed" else []
+    )
+
+
+class _ResearchProcessModel:
+    def __init__(self, *turns: ModelTurn) -> None:
+        self.turns = deque(turns)
+        self.contexts: list[tuple] = []
+
+    def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
+        self.contexts.append(messages)
+        assert {item.name for item in tool_specs} == {"inspect_research_process"}
+        return self.turns.popleft()
+
+
+async def test_agent_continues_from_observable_research_process_result() -> None:
+    model = _ResearchProcessModel(
+        ModelTurn(
+            tool_call=ModelToolCall(name="inspect_research_process", arguments={})
+        ),
+        ModelTurn(
+            content=(
+                "The collection is screening research scope in paper 3 of 10; "
+                "Objective formation has not started yet."
+            )
+        ),
+    )
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry(
+            (
+                InspectResearchProcessCapability(
+                    collection_service=_CollectionService(),
+                    task_service=_TaskService(
+                        [
+                            {
+                                "task_id": "task-1",
+                                "status": "running",
+                                "progress_percent": 72,
+                                "progress_detail": {
+                                    "phase": "objective_paper_skim_started",
+                                    "current": 3,
+                                    "total": 10,
+                                },
+                                "pipeline_nodes": {
+                                    "source_artifacts": {"status": "succeeded"},
+                                    "document_profiles": {"status": "succeeded"},
+                                    "objective_candidates": {"status": "running"},
+                                },
+                                "warnings": [],
+                                "errors": [],
+                            }
+                        ]
+                    ),
+                ),
+            )
+        ),
+    )
+
+    result = await runner.run_turn(
+        context=AgentContext(
+            session_id="chat-1",
+            user_id="user-1",
+            collection_id="col-1",
+        ),
+        previous_messages=(),
+        user_message="How far has the collection analysis progressed?",
+    )
+
+    assert result.status.value == "completed"
+    assert result.tool_results[0].data["process"]["current_step"] == (
+        "research_scope_screening"
+    )
+    assert result.messages[-1].content.startswith("The collection is screening")
+    assert [message.role.value for message in model.contexts[-1][-2:]] == [
+        "assistant",
+        "tool",
+    ]
 
 
 async def test_published_findings_reads_only_published_objective_versions() -> None:

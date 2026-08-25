@@ -21,6 +21,10 @@ from application.chat.capabilities.published_findings import (
     QueryPublishedFindingsArguments,
     QueryPublishedFindingsCapability,
 )
+from application.chat.capabilities.research_process import (
+    InspectResearchProcessArguments,
+    InspectResearchProcessCapability,
+)
 from application.chat.capabilities.registry import CapabilityRegistry
 
 __all__ = [
@@ -32,6 +36,8 @@ __all__ = [
     "CreateObjectiveCandidateCapability",
     "GetCollectionContextArguments",
     "GetCollectionContextCapability",
+    "InspectResearchProcessArguments",
+    "InspectResearchProcessCapability",
     "ObjectiveDraftInput",
     "ProposeObjectiveDraftsArguments",
     "ProposeObjectiveDraftsCapability",

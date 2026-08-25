@@ -474,10 +474,15 @@ async def test_review_synthesis_map_round_trips_with_source_lineage(
 ) -> None:
     source_repository, builds = source_repositories
     build_id = "build_review_map"
-    repository = await _prepare_studies(source_repository, builds, build_id)
+    task = _task(f"task_{build_id}")
+    await builds.add_task(task, build_id=build_id)
+    await source_repository.replace_collection_documents(
+        "col_source", build_id, _analysis_artifacts()
+    )
+    repository = PostgresObjectiveRepository(source_repository.session_factory)
     review_skim = PaperSkim.from_mapping(
         {
-            "document_id": "srcdoc_runtime",
+            "document_id": "srcdoc_supporting",
             "doc_role": "review",
             "map_status": "sufficient",
             "review_synthesis": {
@@ -490,7 +495,7 @@ async def test_review_synthesis_map_round_trips_with_source_lineage(
                         "source_refs": [
                             {
                                 "source_kind": "block",
-                                "source_ref": "block-context",
+                                "source_ref": "block-support-2",
                             }
                         ],
                         "confidence": 0.82,
@@ -503,7 +508,7 @@ async def test_review_synthesis_map_round_trips_with_source_lineage(
                         "source_refs": [
                             {
                                 "source_kind": "block",
-                                "source_ref": "block-context",
+                                "source_ref": "block-support-2",
                             }
                         ],
                         "confidence": 0.7,
@@ -515,25 +520,27 @@ async def test_review_synthesis_map_round_trips_with_source_lineage(
                     "source_unit_id": "review-source-1",
                     "window_id": "overview-1",
                     "source_kind": "block",
-                    "source_ref": "block-context",
+                    "source_ref": "block-support-2",
                     "status": "no_study_signal",
                     "reason": "The Source contributes review knowledge only.",
                 }
             ],
         }
     )
+    study_facts = _study_facts()
     await repository.replace(
         "col_source",
         build_id,
-        ObjectiveFactSet(
-            research_objectives_ready=False,
-            paper_skims=(review_skim,),
+        replace(
+            study_facts,
+            paper_skims=(*study_facts.paper_skims, review_skim),
         ),
     )
+    await _finish(builds, task, success=True)
 
     restored = await repository.read("col_source", build_id=build_id)
 
-    assert restored.paper_skims == (review_skim,)
+    assert restored.paper_skims == (*study_facts.paper_skims, review_skim)
     assert (await repository.list_objectives("col_source"))[0].objective_id == (
         "objective-1"
     )

@@ -82,3 +82,32 @@ def test_context_builder_returns_a_bounded_recent_suffix() -> None:
     assert not (
         selected and selected[0].role.value == "tool"
     )
+
+
+def test_context_builder_budgets_tool_result_once_for_model_wire_content() -> None:
+    user = _user("msg-user", "split energy input effects into focused questions")
+    call = ChatMessage.assistant_tool_call(
+        message_id="msg-scope-call",
+        session_id="chat-1",
+        content="I will preview the relevant paper scope.",
+        tool_call_id="call-scope",
+        tool_name="preview_research_scope",
+        tool_arguments={"question": "How does energy input affect ductility?"},
+        created_at="2026-08-19T00:00:00+00:00",
+    )
+    result = ChatMessage.from_tool_result(
+        message_id="msg-scope-result",
+        session_id="chat-1",
+        result=ChatToolResult(
+            tool_call_id="call-scope",
+            status="succeeded",
+            data={"scope_records": ["x" * 4000]},
+        ),
+        created_at="2026-08-19T00:00:00+00:00",
+    )
+
+    selected = ChatContextBuilder(max_messages=3, max_chars=5_000).for_model(
+        (user, call, result)
+    )
+
+    assert selected == (user, call, result)

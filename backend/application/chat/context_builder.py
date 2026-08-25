@@ -64,9 +64,18 @@ class ChatContextBuilder:
 
     @staticmethod
     def _size(message: ChatMessage) -> int:
+        model_message: dict[str, object] = {
+            "role": message.role.value,
+            "content": message.content,
+        }
+        if message.tool_call_id:
+            model_message["tool_call_id"] = message.tool_call_id
+        if message.role is ChatMessageRole.ASSISTANT and message.tool_call_id:
+            model_message["tool_name"] = message.tool_name
+            model_message["tool_arguments"] = dict(message.tool_arguments or {})
         return len(
             json.dumps(
-                message.to_record(),
+                model_message,
                 ensure_ascii=True,
                 sort_keys=True,
                 separators=(",", ":"),

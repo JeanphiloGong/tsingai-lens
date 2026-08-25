@@ -209,7 +209,56 @@ class PreviewResearchScopeCapability:
             return "needs_inspection", "paper_map_incomplete", []
         if partial_scope or cls._unresolved_scope_matches(skim, question):
             return "needs_inspection", "partial_scope_match", []
+        if cls._material_scope_conflicts(skim, question.material_scope):
+            return "confidently_out_of_scope", "material_scope_conflict", []
+        if any(
+            property_matching.objective_variable_theme(variable) is not None
+            for variable in question.variables
+        ):
+            return "needs_inspection", "umbrella_scope_not_established", []
         return "confidently_out_of_scope", "no_mapped_scope_match", []
+
+    @classmethod
+    def _material_scope_conflicts(
+        cls,
+        skim: Any,
+        requested: Iterable[str],
+    ) -> bool:
+        requested_values = tuple(requested)
+        if not requested_values:
+            return False
+        observed_scopes = [
+            tuple(study.material_scope)
+            for study in skim.studies
+            if study.material_scope
+        ]
+        for field_name in (
+            "synthesis_claims",
+            "disputes",
+            "evidence_gaps",
+            "citation_leads",
+        ):
+            observed_scopes.extend(
+                tuple(item.material_scope)
+                for item in getattr(skim.review_synthesis, field_name)
+                if item.material_scope
+            )
+        observed_values = tuple(
+            value for scope in observed_scopes for value in scope
+        )
+        material_values = tuple(
+            value
+            for value in observed_values
+            if property_matching.material_scope_value_is_specific(value)
+            or property_matching.material_scope_value_is_broad(value)
+        )
+        return bool(material_values) and not any(
+            property_matching.material_scope_value_is_broad(value)
+            for value in material_values
+        ) and not any(
+            cls._material_matches(requested_values, observed)
+            for observed in observed_scopes
+        )
 
     @classmethod
     def _scope_matches(
@@ -270,7 +319,7 @@ class PreviewResearchScopeCapability:
             not requested_values
             or not observed_values
             or any(
-                property_matching.axis_values_match(left, right)
+                property_matching.material_values_match_for_scope(left, right)
                 for left in requested_values
                 for right in observed_values
             )

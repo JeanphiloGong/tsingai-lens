@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any, Callable, Mapping
 
@@ -17,6 +18,9 @@ from application.chat.model import (
 )
 from domain.chat import ChatMessage, ChatMessageRole
 from infra.llm.usage import record_llm_completion, record_llm_prompt_version
+
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIChatModel:
@@ -73,7 +77,12 @@ class OpenAIChatModel:
         message = completion.choices[0].message
         tool_calls = tuple(getattr(message, "tool_calls", None) or ())
         if len(tool_calls) > 1:
-            raise ValueError("research model must return exactly one tool call")
+            logger.warning(
+                "Research model returned parallel tool calls; serializing first call "
+                "call_count=%d",
+                len(tool_calls),
+            )
+            tool_calls = tool_calls[:1]
         content = str(getattr(message, "content", None) or "").strip()
         if not tool_calls:
             return ModelTurn(content=content)
@@ -102,6 +111,7 @@ class OpenAIChatModel:
         tool_name_parts: list[str] = []
         tool_argument_parts: list[str] = []
         tool_call_index: int | None = None
+        ignored_tool_call_indexes: set[int] = set()
         last_chunk = None
         for chunk in chunks:
             last_chunk = chunk
@@ -116,7 +126,8 @@ class OpenAIChatModel:
             for raw_call in tuple(getattr(delta, "tool_calls", None) or ()):
                 index = int(getattr(raw_call, "index", 0) or 0)
                 if tool_call_index is not None and index != tool_call_index:
-                    raise ValueError("research model must return exactly one tool call")
+                    ignored_tool_call_indexes.add(index)
+                    continue
                 tool_call_index = index
                 if (getattr(raw_call, "type", None) or "function") != "function":
                     raise ValueError(
@@ -130,6 +141,12 @@ class OpenAIChatModel:
 
         record_llm_prompt_version("research_agent", RESEARCH_AGENT_PROMPT_VERSION)
         record_llm_completion(last_chunk, requested_model=self.model)
+        if ignored_tool_call_indexes:
+            logger.warning(
+                "Research model streamed parallel tool calls; serializing first call "
+                "ignored_call_count=%d",
+                len(ignored_tool_call_indexes),
+            )
         content = "".join(content_parts).strip()
         if tool_call_index is None:
             return ModelTurn(content=content)

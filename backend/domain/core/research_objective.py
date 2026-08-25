@@ -2074,7 +2074,7 @@ def build_research_objective_id(
 def _is_question_shaped(value: Any) -> bool:
     question = (_text(value) or "").lower()
     return bool(
-        question.endswith("?")
+        question.endswith(("?", "？"))
         or any(term in question for term in _QUESTION_SIGNAL_TERMS)
     )
 

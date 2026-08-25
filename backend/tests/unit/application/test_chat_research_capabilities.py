@@ -918,6 +918,95 @@ async def test_scope_preview_keeps_an_insufficient_map_in_human_review_scope() -
     assert result.data["support_is_evidence"] is False
 
 
+async def test_scope_preview_maps_energy_input_to_precise_laser_interventions() -> None:
+    repository = _ObjectiveRepository(())
+    capability = PreviewResearchScopeCapability(
+        collection_service=_CollectionService(),
+        objective_repository=repository,
+    )
+
+    result = await capability.execute(
+        _context("call-energy-input-scope"),
+        capability.spec.input_model(
+            question="How does energy input affect ductility?",
+            material_scope=["Ti-6Al-4V"],
+            variables=["energy input (laser power, scan speed, energy density)"],
+            outcomes=["ductility"],
+        ),
+    )
+
+    assert [item["document_id"] for item in result.data["likely_relevant"]] == [
+        "paper-1"
+    ]
+    assert result.data["needs_inspection"] == []
+    assert result.data["confidently_out_of_scope"] == []
+    assert result.data["suggested_scope"] == {
+        "seed_document_ids": ["paper-1"],
+        "review_document_ids": [],
+        "excluded_document_ids": [],
+    }
+
+
+async def test_scope_preview_does_not_exclude_a_same_material_paper_for_an_umbrella_variable_miss() -> None:
+    same_material_unmatched = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-unmatched",
+            "doc_role": "experimental",
+            "map_status": "sufficient",
+            "studies": [
+                {
+                    "study_id": "study-unmatched",
+                    "design_type": "experimental",
+                    "claim_scope": "current_work",
+                    "material_scope": ["metal additively manufactured material"],
+                    "relationships": [
+                        {
+                            "relationship_id": "relationship-unmatched",
+                            "varied_factors": ["solution treatment temperature"],
+                            "outcome": "corrosion potential",
+                            "source_refs": [
+                                {
+                                    "source_kind": "block",
+                                    "source_ref": "block-unmatched",
+                                }
+                            ],
+                            "confidence": 0.88,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    repository = _ObjectiveRepository(())
+    repository.facts = ObjectiveFactSet(paper_skims=(same_material_unmatched,))
+    capability = PreviewResearchScopeCapability(
+        collection_service=_CollectionService(),
+        objective_repository=repository,
+    )
+
+    result = await capability.execute(
+        _context("call-umbrella-miss"),
+        capability.spec.input_model(
+            question="How does energy input affect ductility?",
+            material_scope=["Ti-6Al-4V"],
+            variables=["energy input (laser power, scan speed, energy density)"],
+            outcomes=["ductility"],
+        ),
+    )
+
+    assert result.data["likely_relevant"] == []
+    assert result.data["confidently_out_of_scope"] == []
+    assert result.data["needs_inspection"][0]["document_id"] == "paper-unmatched"
+    assert result.data["needs_inspection"][0]["reason"] == (
+        "umbrella_scope_not_established"
+    )
+    assert result.data["suggested_scope"] == {
+        "seed_document_ids": [],
+        "review_document_ids": ["paper-unmatched"],
+        "excluded_document_ids": [],
+    }
+
+
 async def test_scope_preview_does_not_promote_a_review_citation_lead_to_evidence() -> None:
     review = PaperSkim.from_mapping(
         {

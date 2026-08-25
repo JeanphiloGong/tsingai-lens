@@ -67,7 +67,7 @@ def _message() -> ChatMessage:
 
 
 def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None:
-    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v6"
+    assert RESEARCH_AGENT_PROMPT_VERSION == "research-agent-v9"
     assert "Match the user's language" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research question" in RESEARCH_AGENT_SYSTEM_PROMPT
     assert "research conclusion" in RESEARCH_AGENT_SYSTEM_PROMPT
@@ -84,6 +84,20 @@ def test_research_agent_prompt_keeps_default_answers_researcher_facing() -> None
         "Creating a research question and starting its analysis"
         in RESEARCH_AGENT_SYSTEM_PROMPT
     )
+
+
+def test_prompt_splits_multi_outcome_interest_before_scope_screening() -> None:
+    prompt = " ".join(RESEARCH_AGENT_SYSTEM_PROMPT.split())
+    assert (
+        "split it into separate focused questions before scope screening"
+        in prompt
+    )
+    assert "one intervention question and exactly one outcome" in prompt
+    assert "Outcomes never belong in the variables list" in prompt
+    assert "preview each focused question separately" in prompt
+    assert "Preserve every material explicitly named" in prompt
+    assert "do not leave scientific scope only" in prompt
+    assert "uncertainty, not grounds to exclude a same-material paper" in prompt
 
 
 def test_prompt_separates_product_questions_from_collection_reads() -> None:
@@ -208,22 +222,63 @@ def test_openai_chat_model_reassembles_one_streamed_tool_call() -> None:
     assert turn.tool_call.arguments == {}
 
 
-def test_openai_chat_model_rejects_multiple_or_non_object_tool_arguments() -> None:
+def test_openai_chat_model_serializes_provider_multiple_tool_calls() -> None:
     first = SimpleNamespace(
         id="call-1",
         type="function",
-        function=SimpleNamespace(name="one", arguments="{}"),
+        function=SimpleNamespace(name="preview_research_scope", arguments='{"outcomes":["ductility"]}'),
     )
     second = SimpleNamespace(
         id="call-2",
         type="function",
-        function=SimpleNamespace(name="two", arguments="{}"),
+        function=SimpleNamespace(name="preview_research_scope", arguments='{"outcomes":["strength"]}'),
     )
     client, _completions = _client(_completion(tool_calls=[first, second]))
     model = OpenAIChatModel(client=client, model="test-model")
 
-    with pytest.raises(ValueError, match="exactly one tool call"):
-        model.respond(messages=(_message(),), tool_specs=())
+    turn = model.respond(messages=(_message(),), tool_specs=())
+
+    assert turn.tool_call is not None
+    assert turn.tool_call.name == "preview_research_scope"
+    assert turn.tool_call.arguments == {"outcomes": ["ductility"]}
+
+
+def test_openai_chat_model_serializes_streamed_provider_multiple_tool_calls() -> None:
+    first = SimpleNamespace(
+        index=0,
+        id="call-1",
+        type="function",
+        function=SimpleNamespace(
+            name="preview_research_scope",
+            arguments='{"outcomes":["ductility"]}',
+        ),
+    )
+    second = SimpleNamespace(
+        index=1,
+        id="call-2",
+        type="function",
+        function=SimpleNamespace(
+            name="preview_research_scope",
+            arguments='{"outcomes":["strength"]}',
+        ),
+    )
+    client, _completions = _client(
+        iter((_stream_chunk(tool_calls=[first, second]),))
+    )
+    model = OpenAIChatModel(client=client, model="test-model")
+
+    turn = model.respond(
+        messages=(_message(),),
+        tool_specs=(),
+        text_delta_callback=lambda _content: None,
+    )
+
+    assert turn.tool_call is not None
+    assert turn.tool_call.name == "preview_research_scope"
+    assert turn.tool_call.arguments == {"outcomes": ["ductility"]}
+
+
+def test_openai_chat_model_rejects_non_object_tool_arguments() -> None:
 
     invalid = SimpleNamespace(
         id="call-3",

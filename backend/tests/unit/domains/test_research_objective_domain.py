@@ -262,6 +262,14 @@ def test_research_objective_requires_explicit_variables_and_outcomes() -> None:
         _objective(outcomes=[])
 
 
+def test_research_objective_recognizes_a_chinese_question_mark() -> None:
+    objective = _objective(
+        question="在激光增材制造 Ti-6Al-4V 中，能量输入如何影响延性？",
+    )
+
+    assert is_question_shaped_objective(objective) is True
+
+
 def test_research_objective_rejects_secondary_terms_that_duplicate_primary_terms() -> None:
     with pytest.raises(ValueError, match="mechanisms duplicate"):
         _objective(mechanisms=["strength"])

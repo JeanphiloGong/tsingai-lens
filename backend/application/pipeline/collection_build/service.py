@@ -1,7 +1,13 @@
 from __future__ import annotations
 
-from asyncio import get_running_loop, run_coroutine_threadsafe
 import logging
+from asyncio import (
+    CancelledError,
+    Task,
+    create_task,
+    get_running_loop,
+    run_coroutine_threadsafe,
+)
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -64,6 +70,10 @@ _OBJECTIVE_PROGRESS_PUBLIC_STAGE = {
 _OBJECTIVE_PROGRESS_UPDATE_INTERVAL = 5
 
 
+class CollectionBuildPreconditionError(ValueError):
+    """Raised before task creation when a collection cannot be processed."""
+
+
 class CollectionBuildPipelineService:
     """Application service for collection build task pipeline execution."""
 
@@ -82,6 +92,56 @@ class CollectionBuildPipelineService:
         self.source_artifact_repository = source_artifact_repository
         self.document_profile_service = document_profile_service
         self.research_objective_service = research_objective_service
+        self._active_build_tasks: set[Task[dict]] = set()
+
+    async def queue_build(
+        self,
+        collection_id: str,
+        *,
+        mode: IndexingMethod | str = IndexingMethod.Standard,
+        verbose: bool = False,
+        additional_context: dict[str, Any] | None = None,
+        request_id: str | None = None,
+    ) -> dict:
+        await self.collection_service.get_collection(collection_id)
+        if not await self.collection_service.list_files(collection_id):
+            raise CollectionBuildPreconditionError(
+                "The collection contains no files available for building"
+            )
+        task = await self.task_service.create_task(
+            collection_id=collection_id,
+            task_type="build",
+            mode=str(mode),
+        )
+        logger.info(
+            "Queued build task task_id=%s collection_id=%s mode=%s verbose=%s",
+            task["task_id"],
+            collection_id,
+            task["mode"],
+            verbose,
+        )
+        background_task = create_task(
+            self.run_task(
+                task["task_id"],
+                collection_id,
+                verbose=verbose,
+                additional_context=additional_context,
+                request_id=request_id,
+            )
+        )
+        self._active_build_tasks.add(background_task)
+        background_task.add_done_callback(self._active_build_tasks.discard)
+        background_task.add_done_callback(self._log_unexpected_build_failure)
+        return task
+
+    @staticmethod
+    def _log_unexpected_build_failure(task: Task[dict]) -> None:
+        try:
+            task.result()
+        except CancelledError:
+            logger.info("Build task cancelled during backend shutdown")
+        except Exception:  # noqa: BLE001
+            logger.exception("Build task crashed after scheduling")
 
     def _resolve_build_source_artifacts(self) -> SourceArtifactBuilder:
         global build_source_artifacts

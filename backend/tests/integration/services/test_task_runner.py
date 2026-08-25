@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -205,6 +206,81 @@ async def test_build_pipeline_service_builds_runtime_config_without_config_file(
     assert config.source.input.file_pattern == r".*\.(txt|pdf)$"
     assert config.source.cache.base_dir == "../cache"
     assert config.mode == IndexingMethod.Standard
+
+
+async def test_build_pipeline_service_queues_one_background_collection_process(
+    monkeypatch,
+    tmp_path,
+):
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    build_repository = MemoryBuildRepository()
+    runner, _artifact_registry = _build_runner(
+        tmp_path,
+        collection_service,
+        build_repository,
+    )
+    collection = await collection_service.create_collection("Agent Paper Map")
+    await collection_service.add_file(
+        collection["collection_id"],
+        "paper.txt",
+        b"Abstract\nLaser exposure affected porosity.",
+    )
+    started = asyncio.Event()
+    captured: dict[str, object] = {}
+
+    async def fake_run_task(*args, **kwargs):  # noqa: ANN002, ANN003
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        started.set()
+        return {
+            "task_id": args[0],
+            "collection_id": args[1],
+            "status": "completed",
+        }
+
+    monkeypatch.setattr(runner, "run_task", fake_run_task)
+
+    queued = await runner.queue_build(
+        collection["collection_id"],
+        mode="standard",
+        request_id="req-agent-1",
+    )
+    await asyncio.wait_for(started.wait(), timeout=1)
+
+    assert queued["status"] == "queued"
+    assert queued["mode"] == "standard"
+    assert captured == {
+        "args": (queued["task_id"], collection["collection_id"]),
+        "kwargs": {
+            "verbose": False,
+            "additional_context": None,
+            "request_id": "req-agent-1",
+        },
+    }
+    assert await build_repository.read_build(queued["task_id"]) is not None
+
+
+async def test_build_pipeline_service_rejects_empty_collection_before_task_creation(
+    tmp_path,
+):
+    collection_service = build_test_collection_service(tmp_path / "collections")
+    build_repository = MemoryBuildRepository()
+    runner, _artifact_registry = _build_runner(
+        tmp_path,
+        collection_service,
+        build_repository,
+    )
+    collection = await collection_service.create_collection("Empty Paper Map")
+
+    with pytest.raises(
+        ValueError,
+        match="collection contains no files available for building",
+    ):
+        await runner.queue_build(collection["collection_id"])
+
+    assert await build_repository.list_tasks(
+        collection_id=collection["collection_id"]
+    ) == ()
 
 
 async def test_build_pipeline_service_builds_collection_artifacts(monkeypatch, tmp_path):

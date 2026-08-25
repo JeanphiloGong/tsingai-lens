@@ -176,6 +176,10 @@ def test_app_lifespan_composes_one_shared_collection_service(
             service.collection_service is collection_service
             for service in collection_consumers
         )
+        assert "start_research_process" in {
+            spec.name
+            for spec in state.chat_session_service.runner.capabilities.specs
+        }
 
 
 def test_collections_api_requires_login(

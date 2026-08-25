@@ -6,6 +6,9 @@ describe('research process terminology', () => {
 		expect(translateKey('zh', 'researchAgent.capability.researchProcessStatus')).toBe(
 			'文献分析进度'
 		);
+		expect(translateKey('zh', 'researchAgent.capability.startResearchProcess')).toBe(
+			'开始文献分析'
+		);
 		expect(translateKey('zh', 'researchAgent.researchProcess.sourceUnderstanding')).toBe(
 			'整理论文内容'
 		);

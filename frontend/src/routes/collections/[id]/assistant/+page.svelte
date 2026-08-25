@@ -271,14 +271,24 @@
 		}
 	}
 
-	function applyTurn(turn: ChatTurn, localMessageIds: string[] = []) {
+	function applyTurn(
+		turn: ChatTurn,
+		localMessageIds: string[] = [],
+		decidedToolName: string | null = null
+	) {
 		const prior = localMessageIds.length
 			? messages.filter((message) => !localMessageIds.includes(message.message_id))
 			: messages;
 		const knownIds = new Set(prior.map((message) => message.message_id));
 		messages = [...prior, ...turn.messages.filter((message) => !knownIds.has(message.message_id))];
 		pendingApproval = turn.pending_approval;
-		if (turn.status === 'rejected') notice = $t('researchAgent.rejected');
+		if (turn.status === 'rejected') {
+			notice = $t(
+				decidedToolName === 'start_research_process'
+					? 'researchAgent.researchProcessRejected'
+					: 'researchAgent.rejected'
+			);
+		}
 		if (turn.status === 'failed' || turn.status === 'step_limit_reached') {
 			error = $t('researchAgent.turnFailed', { code: turn.error_code ?? turn.status });
 		}
@@ -297,7 +307,7 @@
 		notice = '';
 		try {
 			const turn = await decideChatToolCall(session.session_id, call, decision);
-			applyTurn(turn);
+			applyTurn(turn, [], call.name);
 		} catch (err) {
 			error = errorMessage(err);
 		} finally {
@@ -359,6 +369,8 @@
 				return $t('researchAgent.capability.collection');
 			case 'inspect_research_process':
 				return $t('researchAgent.capability.researchProcess');
+			case 'start_research_process':
+				return $t('researchAgent.capability.startResearchProcess');
 			case 'query_published_findings':
 				return $t('researchAgent.capability.findings');
 			case 'propose_objective_drafts':
@@ -571,6 +583,8 @@
 				return $t('researchAgent.resource.evidence');
 			case 'objective_analysis':
 				return $t('researchAgent.resource.analysis');
+			case 'collection_build_task':
+				return $t('researchAgent.resource.researchProcess');
 			default:
 				return $t('researchAgent.resource.other');
 		}
@@ -578,6 +592,22 @@
 
 	function approvalArguments(call: ChatToolCall) {
 		return Object.entries(call.arguments);
+	}
+
+	function approvalBody(call: ChatToolCall) {
+		return $t(
+			call.name === 'start_research_process'
+				? 'researchAgent.approval.startResearchBody'
+				: 'researchAgent.approval.body'
+		);
+	}
+
+	function approvalAction(call: ChatToolCall) {
+		return $t(
+			call.name === 'start_research_process'
+				? 'researchAgent.approval.startResearch'
+				: 'researchAgent.approval.approve'
+		);
 	}
 
 	function formatValue(value: unknown) {
@@ -842,19 +872,21 @@
 						<header>
 							<div>
 								<h3 id="approval-title">{$t('researchAgent.approval.title')}</h3>
-								<p>{$t('researchAgent.approval.body')}</p>
+								<p>{approvalBody(pendingApproval)}</p>
 							</div>
 							<strong>{capabilityName(pendingApproval.name)}</strong>
 						</header>
-						<h4>{$t('researchAgent.approval.arguments')}</h4>
-						<dl>
-							{#each approvalArguments(pendingApproval) as [key, value] (key)}
-								<div>
-									<dt>{key.replaceAll('_', ' ')}</dt>
-									<dd>{formatValue(value)}</dd>
-								</div>
-							{/each}
-						</dl>
+						{#if approvalArguments(pendingApproval).length}
+							<h4>{$t('researchAgent.approval.arguments')}</h4>
+							<dl>
+								{#each approvalArguments(pendingApproval) as [key, value] (key)}
+									<div>
+										<dt>{key.replaceAll('_', ' ')}</dt>
+										<dd>{formatValue(value)}</dd>
+									</div>
+								{/each}
+							</dl>
+						{/if}
 						<div class="approval-actions">
 							<button
 								class="reject"
@@ -872,7 +904,7 @@
 							>
 								{deciding
 									? $t('researchAgent.approval.processing')
-									: $t('researchAgent.approval.approve')}
+									: approvalAction(pendingApproval)}
 							</button>
 						</div>
 					</section>

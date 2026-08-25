@@ -21,6 +21,7 @@ from application.chat.capabilities import (
     InspectResearchProcessCapability,
     ProposeObjectiveDraftsCapability,
     QueryPublishedFindingsCapability,
+    StartResearchProcessCapability,
 )
 from application.core.document_profiles.service import (
     DocumentProfileService,
@@ -308,6 +309,12 @@ async def build_application_runtime(
                             InspectResearchProcessCapability(
                                 collection_service=collection_service,
                                 task_service=task_service,
+                            ),
+                            StartResearchProcessCapability(
+                                collection_service=collection_service,
+                                collection_build_pipeline_service=(
+                                    build_pipeline_service
+                                ),
                             ),
                             QueryPublishedFindingsCapability(
                                 collection_service=collection_service,

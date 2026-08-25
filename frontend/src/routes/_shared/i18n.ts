@@ -243,6 +243,7 @@ const translations: Record<Language, Translations> = {
 				failed: '{name} failed',
 				collection: 'Collection context',
 				researchProcess: 'Literature analysis progress',
+				startResearchProcess: 'Literature analysis',
 				researchProcessRequested: 'Checking literature analysis progress',
 				researchProcessStatus: 'Literature analysis progress',
 				researchProcessUnavailable: 'Literature analysis progress is unavailable.',
@@ -288,17 +289,22 @@ const translations: Record<Language, Translations> = {
 				finding: 'Open finding',
 				evidence: 'Open evidence',
 				analysis: 'Open analysis',
+				researchProcess: 'Open literature analysis',
 				other: 'Open referenced record'
 			},
 			approval: {
 				title: 'Approval required',
 				body: 'Review the exact candidate that will be created.',
+				startResearchBody:
+					'Prepare and classify the uploaded papers, build a lightweight Paper Map, and form candidate research questions.',
 				arguments: 'Proposed values',
 				approve: 'Approve and create',
+				startResearch: 'Approve and start',
 				reject: 'Reject',
 				processing: 'Recording decision...'
 			},
 			rejected: 'The proposed write was rejected. No research objective was created.',
+			researchProcessRejected: 'Literature analysis was not started.',
 			turnFailed: 'The Agent turn stopped with error: {code}'
 		},
 		research: {
@@ -2528,6 +2534,7 @@ const translations: Record<Language, Translations> = {
 				failed: '{name}执行失败',
 				collection: '集合上下文',
 				researchProcess: '文献分析进度',
+				startResearchProcess: '开始文献分析',
 				researchProcessRequested: '查看文献分析进度',
 				researchProcessStatus: '文献分析进度',
 				researchProcessUnavailable: '暂时无法读取文献分析进度。',
@@ -2572,17 +2579,21 @@ const translations: Record<Language, Translations> = {
 				finding: '打开研究发现',
 				evidence: '打开证据',
 				analysis: '打开分析',
+				researchProcess: '打开文献分析',
 				other: '打开引用记录'
 			},
 			approval: {
 				title: '需要确认',
 				body: '请核对即将创建的候选研究目标。',
+				startResearchBody: '整理论文、判断论文类型与用途、建立轻量论文地图并归纳候选研究问题。',
 				arguments: '拟写入内容',
 				approve: '确认并创建',
+				startResearch: '确认并开始',
 				reject: '拒绝',
 				processing: '正在记录决定...'
 			},
 			rejected: '已拒绝写入，没有创建研究目标。',
+			researchProcessRejected: '已取消启动文献分析。',
 			turnFailed: 'Agent 本轮执行停止，错误：{code}'
 		},
 		research: {

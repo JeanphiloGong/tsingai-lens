@@ -25,6 +25,10 @@ This node owns the collection workspace route family.
   Its research-process capability projects the same persisted build task used
   by the workspace into user-visible scientific stages; Chat does not own a
   second progress model or expose model reasoning and retry internals.
+  The Agent may also propose starting that canonical collection process. The
+  exact action requires user approval, returns a queued task linked to the
+  collection workspace, and does not confirm an Objective or start deep
+  Objective analysis.
   This route remains available before Objective discovery finishes so the
   researcher can converse, inspect readiness, and form Objective proposals;
   capabilities must still expose missing or incomplete collection artifacts.

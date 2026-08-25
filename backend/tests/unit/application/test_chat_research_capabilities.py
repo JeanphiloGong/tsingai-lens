@@ -22,6 +22,7 @@ from application.chat.capabilities import (
     ProposeObjectiveDraftsArguments,
     ProposeObjectiveDraftsCapability,
     QueryPublishedFindingsCapability,
+    StartResearchProcessCapability,
 )
 from application.core.objectives.research_objective_service import (
     ResearchObjectiveService,
@@ -115,6 +116,18 @@ class _CollectionService:
         }
 
 
+class _EmptyCollectionService(_CollectionService):
+    async def get_collection_for_user(
+        self,
+        collection_id: str,
+        user_id: str,
+    ) -> dict:
+        return {
+            **await super().get_collection_for_user(collection_id, user_id),
+            "paper_count": 0,
+        }
+
+
 class _ObjectiveRepository:
     def __init__(self, objectives: tuple[ResearchObjective, ...]) -> None:
         self.objectives = objectives
@@ -140,6 +153,30 @@ class _TaskService:
     async def list_tasks(self, **kwargs) -> list[dict]:
         self.calls.append(kwargs)
         return self.tasks
+
+
+class _CollectionBuildPipelineService:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def queue_build(self, collection_id: str, **kwargs) -> dict:
+        self.calls.append({"collection_id": collection_id, **kwargs})
+        return {
+            "task_id": "task-agent-1",
+            "collection_id": collection_id,
+            "status": "queued",
+            "mode": kwargs.get("mode", "standard"),
+        }
+
+
+class _StartResearchProcessModel:
+    def __init__(self, *turns: ModelTurn) -> None:
+        self.turns = deque(turns)
+
+    def respond(self, *, messages: tuple, tool_specs: tuple) -> ModelTurn:
+        assert messages
+        assert {item.name for item in tool_specs} == {"start_research_process"}
+        return self.turns.popleft()
 
 
 class _ObjectiveAuthoringRepository(_ObjectiveRepository):
@@ -403,6 +440,97 @@ async def test_research_process_reports_not_started_without_faking_progress() ->
         ],
         "failures": [],
     }
+
+
+async def test_agent_starts_research_process_only_after_exact_user_approval() -> None:
+    pipeline_service = _CollectionBuildPipelineService()
+    capability = StartResearchProcessCapability(
+        collection_service=_CollectionService(),
+        collection_build_pipeline_service=pipeline_service,
+    )
+    model = _StartResearchProcessModel(
+        ModelTurn(
+            content="I need your approval before I start reviewing the papers.",
+            tool_call=ModelToolCall(name="start_research_process", arguments={}),
+        ),
+        ModelTurn(
+            content=(
+                "The literature review has started. I can check its progress while "
+                "it prepares the Paper Map and candidate research questions."
+            )
+        ),
+    )
+    runner = ResearchAgentRunner(
+        model=model,
+        capabilities=CapabilityRegistry((capability,)),
+    )
+
+    proposed = await runner.run_turn(
+        context=AgentContext(
+            session_id="chat-1",
+            user_id="user-1",
+            collection_id="col-1",
+        ),
+        previous_messages=(),
+        user_message="Start understanding these papers and form research questions.",
+    )
+
+    assert proposed.status.value == "approval_required"
+    assert pipeline_service.calls == []
+    assert proposed.pending_approval is not None
+    approved_call = proposed.pending_approval.approve(
+        user_id="user-1",
+        arguments_digest=proposed.pending_approval.arguments_digest,
+        decided_at="2026-08-25T08:00:00+00:00",
+    )
+
+    completed = await runner.resume_approved_call(
+        context=AgentContext(
+            session_id="chat-1",
+            user_id="user-1",
+            collection_id="col-1",
+        ),
+        previous_messages=proposed.messages,
+        approved_call=approved_call,
+    )
+
+    assert completed.status.value == "completed"
+    assert pipeline_service.calls == [
+        {
+            "collection_id": "col-1",
+            "mode": "standard",
+        }
+    ]
+    assert completed.tool_results[0].status.value == "queued"
+    assert completed.tool_results[0].data == {
+        "collection_id": "col-1",
+        "task_id": "task-agent-1",
+        "status": "queued",
+        "mode": "standard",
+        "research_scope": "paper_map_and_objective_candidates",
+        "objective_analysis_started": False,
+    }
+    assert completed.tool_results[0].resource_refs[0].resource_type == (
+        "collection_build_task"
+    )
+    assert completed.tool_results[0].resource_refs[0].href == "/collections/col-1"
+
+
+async def test_start_research_process_reports_missing_papers_as_a_precondition() -> None:
+    pipeline_service = _CollectionBuildPipelineService()
+    capability = StartResearchProcessCapability(
+        collection_service=_EmptyCollectionService(),
+        collection_build_pipeline_service=pipeline_service,
+    )
+
+    result = await capability.execute(_context(), capability.spec.input_model())
+
+    assert result.status.value == "failed"
+    assert result.error_code == "collection_has_no_papers"
+    assert result.error_message == (
+        "Upload at least one paper before starting literature analysis."
+    )
+    assert pipeline_service.calls == []
 
 
 @pytest.mark.parametrize(

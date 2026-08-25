@@ -143,6 +143,14 @@ The production Research Agent currently exposes these automatic capabilities:
   synthesis. A successful read may report a failed or partial process; the
   result exposes observable progress and warnings, never model chain-of-thought,
   prompt repair, or retry internals;
+- `start_research_process` is a `write` capability. After exact-argument
+  approval, it submits the same standard collection build used by the workspace
+  and returns a queued collection-build task immediately. That process prepares
+  paper content, classifies each paper, builds lightweight Paper Map context,
+  and synthesizes Objective candidates. It does not confirm an Objective, run
+  Objective-specific Evidence extraction, or publish a Finding. A collection
+  with no uploaded papers returns the stable
+  `collection_has_no_papers` tool failure before any task is created;
 - `query_published_findings` returns bounded Finding and Evidence summaries
   only from published Objective analysis versions; an empty successful result
   is a scientific absence, not a provider failure;

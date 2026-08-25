@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from asyncio import CancelledError, Task, create_task
-import logging
-
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from application.pipeline.collection_build.service import (
+    CollectionBuildPreconditionError,
+)
 from controllers.schemas.source.task import (
     ArtifactStatusResponse,
     BuildTaskCreateRequest,
@@ -13,17 +13,6 @@ from controllers.schemas.source.task import (
 )
 
 router = APIRouter(tags=["tasks"])
-logger = logging.getLogger(__name__)
-_active_build_tasks: set[Task[dict]] = set()
-
-
-def _log_unexpected_build_failure(task: Task[dict]) -> None:
-    try:
-        task.result()
-    except CancelledError:
-        logger.info("Build task cancelled during backend shutdown")
-    except Exception:  # noqa: BLE001
-        logger.exception("Build task crashed after route scheduling")
 
 
 @router.post(
@@ -36,44 +25,18 @@ async def create_build_task(
     payload: BuildTaskCreateRequest,
     request: Request,
 ) -> TaskResponse:
-    collection_service = request.app.state.collection_service
     try:
-        await collection_service.get_collection(collection_id)
-        files = await collection_service.list_files(collection_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    if not files:
-        raise HTTPException(
-            status_code=400,
-            detail="The collection contains no files available for building",
-        )
-
-    task = await request.app.state.task_service.create_task(
-        collection_id=collection_id,
-        task_type="build",
-        mode=payload.mode,
-    )
-    request_id = getattr(request.state, "request_id", None)
-    logger.info(
-        "Queued build task task_id=%s collection_id=%s mode=%s verbose=%s",
-        task["task_id"],
-        collection_id,
-        payload.mode,
-        payload.verbose,
-    )
-    build_task = create_task(
-        request.app.state.build_pipeline_service.run_task(
-            task["task_id"],
+        task = await request.app.state.build_pipeline_service.queue_build(
             collection_id,
+            mode=payload.mode,
             verbose=payload.verbose,
             additional_context=payload.additional_context,
-            request_id=request_id,
+            request_id=getattr(request.state, "request_id", None),
         )
-    )
-    _active_build_tasks.add(build_task)
-    build_task.add_done_callback(_active_build_tasks.discard)
-    build_task.add_done_callback(_log_unexpected_build_failure)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CollectionBuildPreconditionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return TaskResponse(**task)
 
 

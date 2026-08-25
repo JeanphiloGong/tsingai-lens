@@ -2477,6 +2477,91 @@ def test_methods_variable_and_results_outcome_reconcile_into_one_candidate():
     )
 
 
+def test_reconciliation_shares_the_paper_judgment_budget(monkeypatch):
+    monkeypatch.setenv("CORE_PAPER_SKIM_MAX_RECOVERY_CALLS", "0")
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("abstract", "Abstract", 1),
+            _paragraph(
+                "scope-signals",
+                "VARIABLE_SIGNAL OUTCOME_SIGNAL",
+                2,
+                "Abstract",
+            ),
+        ]
+    )
+    extractor = _WindowExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 1
+    assert extractor.reconciliation_payloads == []
+    assert skim.studies == ()
+    assert {signal.label for signal in skim.unresolved_signals} == {
+        "laser power",
+        "relative density",
+    }
+    assert all(
+        signal.reason == "paper-map judgment budget exhausted before reconciliation"
+        for signal in skim.unresolved_signals
+    )
+    assert {item.status.value for item in skim.source_unit_coverage} == {
+        "unresolved_signal_emitted"
+    }
+
+
+def test_reconciliation_stops_after_using_the_remaining_paper_budget(monkeypatch):
+    monkeypatch.setenv("CORE_PAPER_SKIM_MAX_RECOVERY_CALLS", "1")
+    signal_specs = {
+        "power": {
+            "signal_type": "variable",
+            "label": "laser power",
+            "process_context": ["LPBF"],
+        },
+        "speed": {
+            "signal_type": "variable",
+            "label": "scan speed",
+            "process_context": ["LPBF"],
+        },
+        "density": {
+            "signal_type": "outcome",
+            "label": "relative density",
+            "process_context": ["LPBF"],
+        },
+        "porosity": {
+            "signal_type": "outcome",
+            "label": "porosity",
+            "process_context": ["LPBF"],
+        },
+    }
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("abstract", "Abstract", 1),
+            *[
+                _paragraph(source_ref, source_ref, position + 2, "Abstract")
+                for position, source_ref in enumerate(signal_specs)
+            ],
+        ]
+    )
+    extractor = _BoundedSignalReconciliationExtractor(signal_specs)
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 1
+    assert len(extractor.reconciliation_payloads) == 1
+    assert {
+        relationship.outcome
+        for study in skim.studies
+        for relationship in study.relationships
+    } == {"relative density"}
+    assert [(signal.label, signal.reason) for signal in skim.unresolved_signals] == [
+        (
+            "porosity",
+            "paper-map judgment budget exhausted before reconciliation",
+        )
+    ]
+
+
 def test_reconciliation_batches_repeat_one_outcome_without_dropping_variables():
     signal_specs = {
         f"variable-{position}": {

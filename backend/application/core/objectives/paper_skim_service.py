@@ -146,7 +146,9 @@ class _PaperMapAssessment:
 @dataclass
 class _PaperExtractionBudget:
     deadline: float
+    max_calls: int
     max_recovery_calls: int
+    calls: int = 0
     recovery_calls: int = 0
     failure_kind: str | None = None
     _lock: Any = field(default_factory=Lock, repr=False)
@@ -156,12 +158,15 @@ class _PaperExtractionBudget:
             if monotonic() >= self.deadline:
                 self.failure_kind = "document_time_budget_exhausted"
                 return False
-            if not recovery:
-                return True
-            if self.recovery_calls >= self.max_recovery_calls:
+            if recovery and self.recovery_calls >= self.max_recovery_calls:
                 self.failure_kind = "recovery_budget_exhausted"
                 return False
-            self.recovery_calls += 1
+            if self.calls >= self.max_calls:
+                self.failure_kind = "document_call_budget_exhausted"
+                return False
+            self.calls += 1
+            if recovery:
+                self.recovery_calls += 1
             return True
 
 
@@ -219,9 +224,11 @@ class PaperSkimService:
             window_skims: list[PaperSkim] = []
             paper_signals: list[_PaperSignalInput] = []
             window_count = len(payloads)
+            recovery_call_budget = self._document_recovery_call_budget(window_count)
             extraction_budget = _PaperExtractionBudget(
                 deadline=monotonic() + self._document_time_budget_seconds(),
-                max_recovery_calls=self._document_recovery_call_budget(window_count),
+                max_calls=window_count + recovery_call_budget,
+                max_recovery_calls=recovery_call_budget,
             )
             for window_position, payload in enumerate(payloads, start=1):
                 self._notify_progress(
@@ -324,6 +331,7 @@ class PaperSkimService:
                 paper_skim,
                 paper_signals,
                 signal_reconciler=signal_reconciler,
+                extraction_budget=extraction_budget,
                 progress_callback=progress_callback,
                 document_position=document_position,
                 document_count=document_count,
@@ -2149,6 +2157,7 @@ class PaperSkimService:
         signal_inputs: list[_PaperSignalInput],
         *,
         signal_reconciler: PaperSignalReconciler,
+        extraction_budget: _PaperExtractionBudget,
         progress_callback: ProgressCallback | None,
         document_position: int,
         document_count: int,
@@ -2203,6 +2212,28 @@ class PaperSkimService:
         linked_signal_ids: set[str] = set()
         unresolved_reasons: dict[str, str] = {}
         for batch_position, batch in enumerate(batches, start=1):
+            if not extraction_budget.reserve(recovery=False):
+                logger.warning(
+                    "Paper signal reconciliation stopped at the document budget; "
+                    "preserving unresolved signals document_id=%s batch_position=%s "
+                    "batch_count=%s failure_kind=%s calls=%s max_calls=%s",
+                    paper_skim.document_id,
+                    batch_position,
+                    len(batches),
+                    extraction_budget.failure_kind,
+                    extraction_budget.calls,
+                    extraction_budget.max_calls,
+                )
+                for remaining_batch in batches[batch_position - 1 :]:
+                    for item in remaining_batch:
+                        unresolved_reasons.setdefault(
+                            item.signal.signal_id,
+                            (
+                                "paper-map judgment budget exhausted before "
+                                "reconciliation"
+                            ),
+                        )
+                break
             batch_studies, batch_unresolved = self._reconcile_signal_batch(
                 batch,
                 signal_reconciler=signal_reconciler,

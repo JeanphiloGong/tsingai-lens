@@ -112,15 +112,19 @@ Objective analysis.
 
   Duplicate or non-input Source ids remain invalid and enter one bounded
   structured repair. Prompt overflow and output saturation can subdivide only
-  the already bounded selected Sources. The shared per-paper recovery budget
-  defaults to 4-12 calls, with a five-minute deadline; successful siblings
-  survive while a terminal failure becomes `extraction_failed`. Broad or
-  compound outcomes remain unresolved instead of being guessed. Review input
-  retains only review-author synthesis and never reconstructs a cited primary
-  experiment. The resulting `PaperSkim` persists Source-linked candidate-scope
-  relationships, unresolved axes, and one coverage result for every selected
-  Source unit. Coverage completeness refers to that bounded map, not to every
-  Source in the full paper.
+  the already bounded selected Sources. Initial mapping, one focused expansion,
+  technical recovery, and signal reconciliation share one per-paper judgment
+  budget and a five-minute deadline. The extra call allowance defaults to 4-12
+  beyond the initial high-level windows. Successful siblings survive while a
+  terminal Source extraction failure becomes `extraction_failed`; signals that
+  cannot be reconciled within the remaining budget stay unresolved rather than
+  becoming scientific or Source failures. Broad or compound outcomes remain
+  unresolved instead of being guessed. Review input retains only review-author
+  synthesis and never reconstructs a cited primary experiment. The resulting
+  `PaperSkim` persists Source-linked candidate-scope relationships, unresolved
+  axes, and one coverage result for every selected Source unit. Coverage
+  completeness refers to that bounded map, not to every Source in the full
+  paper.
 - `discovery/study_window.py`
   Owns the model judgment for one bounded PaperSkim Source window: its prompt,
   response schema, scientific bounds, repair instruction, stable-identity

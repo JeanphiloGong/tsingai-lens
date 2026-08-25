@@ -7,7 +7,9 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from threading import Lock
+from time import monotonic
 from typing import Any
 
 from application.core.objectives import property_matching
@@ -23,6 +25,7 @@ from application.core.objectives.discovery.study_window import (
     StructuredPaperSkim,
     StructuredPaperStudy,
     StructuredPaperStudyRelationship,
+    _review_synthesis_only,
 )
 from application.core.objectives.llm.structured_response import (
     StructuredOutputSaturatedError,
@@ -64,6 +67,9 @@ _EVIDENCE_DENSITY_RANK = {"unknown": 0, "low": 1, "medium": 2, "high": 3}
 _SIGNAL_RECONCILIATION_SIGNAL_LIMIT = 12
 _SIGNAL_RECONCILIATION_NEARBY_SOURCE_UNIT_DISTANCE = 12
 _DEFAULT_MAX_EXTRACTION_CONCURRENCY = 4
+_DEFAULT_DOCUMENT_TIME_BUDGET_SECONDS = 1_200
+_MIN_DOCUMENT_RECOVERY_CALLS = 16
+_MAX_DOCUMENT_RECOVERY_CALLS = 64
 _NUMBERED_CITATION_PATTERN = re.compile(
     r"\[(?:\s*\d{1,4}\s*(?:(?:,|[-\u2013])\s*\d{1,4}\s*)*)\]"
 )
@@ -115,6 +121,28 @@ class _PaperSignalInput:
                 for source in self.source_contexts
             ],
         }
+
+
+@dataclass
+class _PaperExtractionBudget:
+    deadline: float
+    max_recovery_calls: int
+    recovery_calls: int = 0
+    failure_kind: str | None = None
+    _lock: Any = field(default_factory=Lock, repr=False)
+
+    def reserve(self, *, recovery: bool) -> bool:
+        with self._lock:
+            if monotonic() >= self.deadline:
+                self.failure_kind = "document_time_budget_exhausted"
+                return False
+            if not recovery:
+                return True
+            if self.recovery_calls >= self.max_recovery_calls:
+                self.failure_kind = "recovery_budget_exhausted"
+                return False
+            self.recovery_calls += 1
+            return True
 
 
 class PaperSkimService:
@@ -171,6 +199,10 @@ class PaperSkimService:
             window_skims: list[PaperSkim] = []
             paper_signals: list[_PaperSignalInput] = []
             window_count = len(payloads)
+            extraction_budget = _PaperExtractionBudget(
+                deadline=monotonic() + self._document_time_budget_seconds(),
+                max_recovery_calls=self._document_recovery_call_budget(window_count),
+            )
             for window_position, payload in enumerate(payloads, start=1):
                 self._notify_progress(
                     progress_callback,
@@ -191,6 +223,7 @@ class PaperSkimService:
                 document_id=document.document_id,
                 payloads=payloads,
                 study_window_extractor=study_window_extractor,
+                extraction_budget=extraction_budget,
             ):
                 window_skims.extend(batch_skims)
                 paper_signals.extend(batch_signals)
@@ -233,6 +266,7 @@ class PaperSkimService:
         document_id: str,
         payloads: list[dict[str, Any]],
         study_window_extractor: PaperStudyWindowExtractor,
+        extraction_budget: _PaperExtractionBudget,
     ) -> tuple[
         tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]],
         ...,
@@ -244,6 +278,7 @@ class PaperSkimService:
                     document_id=document_id,
                     payload=payload,
                     study_window_extractor=study_window_extractor,
+                    extraction_budget=extraction_budget,
                 )
                 for payload in payloads
             )
@@ -259,6 +294,7 @@ class PaperSkimService:
                     document_id=document_id,
                     payload=payload,
                     study_window_extractor=study_window_extractor,
+                    extraction_budget=extraction_budget,
                 )
                 for payload in payloads
             ]
@@ -286,6 +322,59 @@ class PaperSkimService:
             )
             return _DEFAULT_MAX_EXTRACTION_CONCURRENCY
         return value
+
+    @staticmethod
+    def _document_time_budget_seconds() -> int:
+        raw_value = os.getenv(
+            "CORE_PAPER_SKIM_DOCUMENT_TIME_BUDGET_SECONDS",
+            "",
+        ).strip()
+        if not raw_value:
+            return _DEFAULT_DOCUMENT_TIME_BUDGET_SECONDS
+        try:
+            value = int(raw_value)
+        except ValueError:
+            logger.warning(
+                "Invalid CORE_PAPER_SKIM_DOCUMENT_TIME_BUDGET_SECONDS=%s; "
+                "using default=%s",
+                raw_value,
+                _DEFAULT_DOCUMENT_TIME_BUDGET_SECONDS,
+            )
+            return _DEFAULT_DOCUMENT_TIME_BUDGET_SECONDS
+        if value < 1:
+            logger.warning(
+                "Non-positive CORE_PAPER_SKIM_DOCUMENT_TIME_BUDGET_SECONDS=%s; "
+                "using default=%s",
+                raw_value,
+                _DEFAULT_DOCUMENT_TIME_BUDGET_SECONDS,
+            )
+            return _DEFAULT_DOCUMENT_TIME_BUDGET_SECONDS
+        return value
+
+    @staticmethod
+    def _document_recovery_call_budget(window_count: int) -> int:
+        raw_value = os.getenv("CORE_PAPER_SKIM_MAX_RECOVERY_CALLS", "").strip()
+        if raw_value:
+            try:
+                value = int(raw_value)
+            except ValueError:
+                logger.warning(
+                    "Invalid CORE_PAPER_SKIM_MAX_RECOVERY_CALLS=%s; using "
+                    "the document-sized default",
+                    raw_value,
+                )
+            else:
+                if value >= 0:
+                    return value
+                logger.warning(
+                    "Negative CORE_PAPER_SKIM_MAX_RECOVERY_CALLS=%s; using "
+                    "the document-sized default",
+                    raw_value,
+                )
+        return min(
+            _MAX_DOCUMENT_RECOVERY_CALLS,
+            max(_MIN_DOCUMENT_RECOVERY_CALLS, (window_count + 1) // 2),
+        )
 
     def _build_paper_skim_payloads(
         self,
@@ -848,9 +937,36 @@ class PaperSkimService:
         document_id: str,
         payload: Mapping[str, Any],
         study_window_extractor: PaperStudyWindowExtractor,
+        extraction_budget: _PaperExtractionBudget,
         attempt: int = 1,
         content_split_depth: int = 0,
     ) -> tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]]:
+        if not extraction_budget.reserve(recovery=attempt > 1):
+            failure_kind = extraction_budget.failure_kind or "recovery_budget_exhausted"
+            logger.warning(
+                "Paper skim document budget exhausted; preserving partial coverage "
+                "collection_id=%s document_id=%s window_id=%s attempt=%s "
+                "source_unit_count=%s failure_kind=%s recovery_calls=%s "
+                "max_recovery_calls=%s",
+                collection_id,
+                document_id,
+                payload.get("window_id"),
+                attempt,
+                len(payload.get("source_units") or ()),
+                failure_kind,
+                extraction_budget.recovery_calls,
+                extraction_budget.max_recovery_calls,
+            )
+            return (
+                (
+                    self._failed_source_unit_skim(
+                        document_id=document_id,
+                        payload=payload,
+                        failure_kind=failure_kind,
+                    ),
+                ),
+                (),
+            )
         try:
             parsed = study_window_extractor.extract(dict(payload))
             window_skim, window_signals = self._resolve_window_result(
@@ -893,6 +1009,7 @@ class PaperSkimService:
                             suffix=f"retry-{branch}",
                         ),
                         study_window_extractor=study_window_extractor,
+                        extraction_budget=extraction_budget,
                         attempt=attempt + 1,
                     )
                     child_skims.extend(retry_skims)
@@ -936,6 +1053,7 @@ class PaperSkimService:
                                 suffix=f"content-{branch}",
                             ),
                             study_window_extractor=study_window_extractor,
+                            extraction_budget=extraction_budget,
                             attempt=attempt + 1,
                             content_split_depth=content_split_depth + 1,
                         )
@@ -957,6 +1075,13 @@ class PaperSkimService:
                     1,
                     _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT + 1,
                 ):
+                    if not extraction_budget.reserve(recovery=True):
+                        final_failure_kind = (
+                            extraction_budget.failure_kind
+                            or "recovery_budget_exhausted"
+                        )
+                        final_error = RuntimeError(final_failure_kind)
+                        break
                     try:
                         compact = study_window_extractor.extract_source_signals(
                             dict(payload)
@@ -1296,6 +1421,11 @@ class PaperSkimService:
         payload: Mapping[str, Any],
         parsed: StructuredPaperSkim,
     ) -> tuple[PaperSkim, tuple[_PaperSignalInput, ...]]:
+        document_profile = payload.get("document_profile")
+        if isinstance(document_profile, Mapping) and (
+            str(document_profile.get("doc_type") or "").strip() == "review"
+        ):
+            parsed = _review_synthesis_only(parsed)
         if parsed.output_saturated:
             raise StructuredOutputSaturatedError(
                 "PaperSkim model reported that the bounded output omitted visible facts"

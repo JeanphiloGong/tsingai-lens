@@ -505,6 +505,103 @@ def test_paper_skim_prompt_defines_structured_research_map_contract():
     assert "source_unit_coverage" not in user_prompt
 
 
+def test_review_paper_skim_prompt_extracts_synthesis_not_cited_experiments():
+    _, user_prompt = build_paper_skim_prompt(
+        {
+            "document_id": "review-paper",
+            "title": "Review of preheating in LPBF",
+            "window_id": "unknown-1",
+            "window_role": "unknown",
+            "document_profile": {"doc_type": "review"},
+            "source_units": [
+                {
+                    "source_unit_id": "source-unit-000001",
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "section_path": "Preheating",
+                    "content": (
+                        "Miranda et al. [20] reported lower residual stress. "
+                        "Across studies, preheating generally reduced residual stress."
+                    ),
+                }
+            ],
+        }
+    )
+
+    assert "review-author synthesis screening" in user_prompt
+    assert "not cited-study reconstruction" in user_prompt
+    assert "claim_scope=synthesis" in user_prompt
+    assert "return no study or unresolved signal" in user_prompt
+    assert "Across studies, preheating generally reduced residual stress" in user_prompt
+    assert "Miranda et al. [20]" in user_prompt
+
+
+def test_review_paper_skim_extractor_keeps_only_review_author_synthesis():
+    source_unit_id = "source-unit-000001"
+    client = _FakeOpenAIClient(
+        json.dumps(
+            {
+                "doc_role": "review",
+                "studies": [
+                    {
+                        "experiment_label": "Miranda et al.",
+                        "claim_scope": "background",
+                        "relationships": [
+                            {
+                                "varied_factors": ["build plate temperature"],
+                                "outcome": "residual stress",
+                                "source_unit_ids": [source_unit_id],
+                            }
+                        ],
+                    },
+                    {
+                        "experiment_label": "review synthesis",
+                        "claim_scope": "synthesis",
+                        "relationships": [
+                            {
+                                "varied_factors": ["preheating condition"],
+                                "outcome": "residual stress",
+                                "source_unit_ids": [source_unit_id],
+                            }
+                        ],
+                    },
+                ],
+                "unresolved_signals": [
+                    {
+                        "signal_type": "outcome",
+                        "label": "porosity",
+                        "claim_scope": "background",
+                        "source_unit_ids": [source_unit_id],
+                    }
+                ],
+            }
+        )
+    )
+
+    skim = PaperStudyWindowExtractor(_response_client(client)).extract(
+        {
+            "document_id": "review-paper",
+            "document_profile": {"doc_type": "review"},
+            "source_units": [
+                {
+                    "source_unit_id": source_unit_id,
+                    "source_kind": "block",
+                    "source_ref": "block-1",
+                    "content": (
+                        "Miranda et al. [20] reported lower residual stress. "
+                        "Across studies, preheating generally reduced residual stress."
+                    ),
+                }
+            ],
+        }
+    )
+
+    assert skim.doc_role == "review"
+    assert [study.claim_scope for study in skim.studies] == ["synthesis"]
+    assert skim.studies[0].relationships[0].outcome == "residual stress"
+    assert skim.unresolved_signals == []
+
+
 def test_research_axis_canonicalization_prompt_defines_membership_boundaries():
     _, user_prompt = build_research_axis_canonicalization_prompt(
         {

@@ -20,7 +20,7 @@ from application.core.objectives.llm.structured_response import (
     StructuredResponseClient,
 )
 
-PAPER_SKIM_PROMPT_VERSION = "paper_skim.v6"
+PAPER_SKIM_PROMPT_VERSION = "paper_skim.v7"
 PAPER_SOURCE_SIGNAL_PROMPT_VERSION = "paper_source_signal.v1"
 PAPER_SKIM_PROMPT_TOKEN_LIMIT = 12_288
 PAPER_SKIM_SOURCE_UNIT_LIMIT = 12
@@ -51,6 +51,18 @@ Non-negotiable rules:
 - Scientific labels must be supported by supplied Source-unit content.
 - Copy only supplied `source_unit_id` values; never invent or rewrite an id.
 - Do not infer material systems from filenames or section names.
+""".strip()
+
+_REVIEW_SYSTEM_PROMPT = """
+You screen one bounded Source window from a review paper for traceable
+review-author scientific synthesis.
+
+Non-negotiable rules:
+- This is synthesis screening, not reconstruction of every cited experiment.
+- Return exactly one JSON object and nothing else.
+- Scientific labels must be supported by supplied Source-unit content.
+- Copy only supplied `source_unit_id` values; never invent or rewrite an id.
+- A citation points to primary literature; it is not review-owned evidence.
 """.strip()
 
 
@@ -584,7 +596,120 @@ class StructuredPaperSkim(_PaperSkimResponse):
         return self
 
 
+def _review_synthesis_only(response: StructuredPaperSkim) -> StructuredPaperSkim:
+    """Keep only scientific synthesis owned by a review's authors."""
+
+    return response.model_copy(
+        update={
+            "doc_role": "review",
+            "studies": [
+                study for study in response.studies if study.claim_scope == "synthesis"
+            ],
+            "unresolved_signals": [
+                signal
+                for signal in response.unresolved_signals
+                if signal.claim_scope == "synthesis"
+            ],
+        }
+    )
+
+
+def _build_review_synthesis_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    allowed_source_unit_ids = [
+        str(source_unit.get("source_unit_id") or "").strip()
+        for source_unit in payload.get("source_units") or ()
+        if isinstance(source_unit, Mapping)
+        and str(source_unit.get("source_unit_id") or "").strip()
+    ]
+    allowed_source_unit_ids_json = json.dumps(
+        allowed_source_unit_ids,
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
+    user_prompt = (
+        "TASK MODEL\n"
+        "Perform review-author synthesis screening for one bounded Source window. "
+        "This is thematic and comparative synthesis extraction, not cited-study "
+        "reconstruction, primary-paper Evidence extraction, or Objective generation. "
+        "The downstream backend uses the result to identify research themes worth "
+        "checking against primary papers.\n\n"
+        "INPUT SCHEMA\n"
+        "- `document_id` and `title` identify the review paper.\n"
+        "- `document_profile.doc_type=review` selects this scientific responsibility.\n"
+        "- `window_id`, `window_role`, and `section_paths` orient this incomplete "
+        "window but are not scientific evidence.\n"
+        "- `source_units` contain text, review tables, or figure captions. Their "
+        "content is the authority and their IDs provide lineage.\n"
+        "- A citation or named prior author identifies primary literature that may "
+        "later be inspected; it does not make that experiment a study owned by this "
+        "review.\n\n"
+        f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "DECISION PROCESS\n"
+        "1. Separate statements authored as review synthesis from reports of one "
+        "named or numbered cited study. Signals such as 'across studies', 'overall', "
+        "'the literature shows', explicit agreement/disagreement, taxonomies, and "
+        "review-author conclusions can establish synthesis. Citation count alone "
+        "cannot.\n"
+        "2. For an explicit review-author comparison linking a factor or condition "
+        "to one specific outcome, return one study with claim_scope=synthesis and "
+        "one relationship per outcome. Preserve the full jointly compared factor set.\n"
+        "3. When review-author synthesis explicitly names only a variable or only an "
+        "outcome, return that axis as an unresolved signal with "
+        "claim_scope=synthesis. Do not borrow its missing counterpart from a cited "
+        "study or another Source.\n"
+        "4. If the Source only describes individual cited experiments, generic "
+        "background, review methods, or bibliographic navigation, return no study or "
+        "unresolved signal.\n"
+        "5. Copy only context and Source-unit IDs that directly support the retained "
+        "review-author synthesis. Preserve ambiguity with confidence and warnings.\n\n"
+        "HARD RULES\n"
+        "- Return no claim_scope=current_work, background, or uncertain study or "
+        "signal from a review window; only claim_scope=synthesis is eligible.\n"
+        "- Do not reconstruct the design, samples, controls, conditions, or outcomes "
+        "of an individually cited paper. Those facts require the primary Source.\n"
+        "- Do not turn a list of citations into independent support or a causal "
+        "relationship.\n"
+        "- Do not infer scientific content from the title, section name, filename, "
+        "or general knowledge.\n"
+        "- Return empty arrays when the review authors do not make an eligible "
+        "synthesis statement in this window.\n\n"
+        "BOUNDARY EXAMPLES\n"
+        "- Cited result only: 'Miranda et al. [20] reported lower residual stress.' "
+        "This is a pointer to one primary study; return no study or unresolved signal.\n"
+        "- Review synthesis: 'Across studies, preheating generally reduced residual "
+        "stress.' Return one synthesis relationship with factor='preheating "
+        "condition', outcome='residual stress', and only the supporting Source ID.\n"
+        "- Conflict: 'Reported porosity trends disagree across scan strategies.' "
+        "Return synthesis axes only when the review authors identify the compared "
+        "factor and outcome; preserve disagreement as uncertainty rather than "
+        "inventing one direction.\n"
+        "- Review method only: 'We searched Web of Science using these keywords.' "
+        "Return empty studies and unresolved_signals.\n\n"
+        "OUTPUT CONTRACT\n"
+        "- Return doc_role='review', studies, unresolved_signals, evidence_density, "
+        "confidence, warnings, and output_saturated.\n"
+        "- Every returned study or signal must use claim_scope=synthesis. A study "
+        "contains one or more source-supported relationships; every relationship and "
+        "signal copies only allowed Source-unit IDs.\n"
+        "- Return at most 8 synthesis studies, 8 relationships per study, and 12 "
+        "unresolved synthesis signals. Set output_saturated=true only if eligible "
+        "review-author synthesis exceeds these limits. Individually cited studies do "
+        "not count toward saturation.\n"
+        "- Return only compact schema-valid JSON.\n\n"
+        "BATCH LINEAGE CONTRACT\n"
+        f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}\n"
+        "Copy IDs only from this exact list."
+    )
+    return _REVIEW_SYSTEM_PROMPT, user_prompt
+
+
 def build_paper_skim_prompt(payload: dict[str, Any]) -> tuple[str, str]:
+    document_profile = payload.get("document_profile")
+    if isinstance(document_profile, Mapping) and (
+        str(document_profile.get("doc_type") or "").strip() == "review"
+    ):
+        return _build_review_synthesis_prompt(payload)
+
     allowed_source_unit_ids = [
         str(source_unit.get("source_unit_id") or "").strip()
         for source_unit in payload.get("source_units") or ()
@@ -835,8 +960,24 @@ class PaperStudyWindowExtractor:
             ensure_ascii=True,
             separators=(",", ":"),
         )
+        is_review = (
+            isinstance(payload.get("document_profile"), Mapping)
+            and str(payload["document_profile"].get("doc_type") or "").strip()
+            == "review"
+        )
 
         def build_repair_instruction(repair_detail: str) -> str:
+            if is_review:
+                return (
+                    "Previous review synthesis output was invalid: "
+                    f"{repair_detail}. Retain only explicit scientific synthesis "
+                    "authored by the review. Discard individually cited experiments "
+                    "and every current_work, background, or uncertain study or signal. "
+                    "Only claim_scope=synthesis is eligible and only omitted synthesis "
+                    "counts toward output_saturated. Copy only unique Source-unit IDs "
+                    "from the input and return compact schema-valid JSON.\n"
+                    f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}"
+                )
             return (
                 "Previous PaperSkim output was invalid: "
                 f"{repair_detail}. Preserve every distinct supported study, "
@@ -850,9 +991,11 @@ class PaperStudyWindowExtractor:
                 f"ALLOWED SOURCE-UNIT IDS: {allowed_source_unit_ids_json}"
             )
 
-        def validate_output_contract(response: BaseModel) -> None:
+        def validate_output_contract(response: BaseModel) -> BaseModel | None:
             if not isinstance(response, StructuredPaperSkim):
                 raise TypeError("unexpected paper skim response type")
+            if is_review:
+                response = _review_synthesis_only(response)
             source_keys = {
                 str(source_unit.get("source_unit_id") or "").strip(): (
                     str(source_unit.get("source_kind") or "").strip(),
@@ -885,6 +1028,7 @@ class PaperStudyWindowExtractor:
                     "paper skim references unknown Source-unit ids: "
                     f"{unknown_source_unit_ids}"
                 )
+            return response
 
         def parse_json_text_with_contract(**kwargs: Any) -> tuple[BaseModel, str | None]:
             return self.response_client.complete_json(

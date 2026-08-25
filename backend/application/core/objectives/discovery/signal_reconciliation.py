@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from application.core.objectives import property_matching
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 
-PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION = "paper_signal_reconciliation.v3"
+PAPER_SIGNAL_RECONCILIATION_PROMPT_VERSION = "paper_signal_reconciliation.v4"
 PAPER_SIGNAL_RECONCILIATION_PROMPT_TOKEN_LIMIT = 12_288
 
 _MAX_COMPLETION_TOKENS = 4096
@@ -21,7 +21,7 @@ Non-negotiable rules:
 - This batch has exactly one outcome anchor and candidate variable signals selected by the backend.
 - This is paper-level membership adjudication, not cross-paper grouping or final synthesis.
 - Return exactly one JSON object and nothing else.
-- Link signals only when their supplied excerpts and contexts support one study design.
+- Link signals only when their supplied excerpts support one paper-owned research scope.
 - Copy only supplied `signal_id` values; never invent scientific labels or ids.
 - Preserve ambiguity by returning an unresolved signal instead of guessing a link.
 - Account only for the current batch; the backend derives final whole-paper accounting.
@@ -60,6 +60,12 @@ class StructuredUnresolvedPaperSignal(_SignalReconciliationResponse):
     signal_id: Annotated[str, Field(min_length=1, max_length=80)]
     reason: Annotated[str, Field(min_length=1, max_length=240)]
 
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _bound_reason(cls, value: object) -> str:
+        reason = " ".join(str(value or "").strip().split())
+        return (reason or "No supported paper-scope link was established.")[:240]
+
 
 class StructuredPaperSignalStudy(_SignalReconciliationResponse):
     relationships: list[StructuredPaperSignalRelationship] = Field(
@@ -95,29 +101,35 @@ def build_paper_signal_reconciliation_prompt(
     user_prompt = (
         "TASK MODEL\n"
         "Decide whether the candidate variables in one bounded candidate neighborhood "
-        "belong to the same experiment or model as its exactly one outcome anchor. "
+        "belong to the same stated paper-owned research scope as its exactly one "
+        "outcome anchor. "
         "This is membership adjudication, not scientific-field generation or "
         "whole-paper discovery.\n\n"
         "INPUT SCHEMA\n"
         "- `document_id` identifies the one paper.\n"
         "- `signals` contains exactly one outcome anchor and one or more candidate "
-        "variables. Each has a backend-owned `signal_id`, exact label, known scientific "
-        "context, and bounded Source excerpts with stable Source-unit positions.\n"
+        "variables. Each has a backend-owned `signal_id`, exact label, bounded "
+        "paper-scope context, and high-level Source excerpts with stable Source-unit "
+        "positions.\n"
         "- Signals omitted from this request are outside the current batch; omitted "
         "paper signals are outside this batch, not negative evidence.\n"
-        "- Source excerpts are the only authority for deciding whether signals belong "
-        "to the same experiment or model.\n\n"
+        "- Source excerpts are the authority for deciding whether signals describe the "
+        "same stated research scope. Detailed experiment facts are not available at "
+        "this stage.\n\n"
         f"Input JSON:\n{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
         "DECISION PROCESS\n"
         "1. Identify the single outcome anchor and evaluate each candidate variable "
         "against it.\n"
-        "2. Compare their material, process, condition, experiment, sample, and "
-        "section evidence. Do not link signals merely because they occur in the same paper.\n"
-        "3. Form a relationship only when the excerpts support the variable as varied, "
-        "compared, or modeled and the outcome as the response for that same study design.\n"
-        "4. Return at most one study for this neighborhood. Relationships may share the "
-        "outcome anchor only when the Source explicitly supports that membership.\n"
-        "5. Do not reason about omitted signals or attempt to reconstruct the whole paper.\n"
+        "2. Compare material, process family, claim ownership, and Source statements. "
+        "Do not link signals merely because they occur in the same paper or nearby "
+        "sections.\n"
+        "3. Form a relationship only when the high-level excerpts state that the "
+        "variable was varied, compared, or modeled and the outcome was inspected in "
+        "that same paper-owned research scope.\n"
+        "4. Return at most one paper-scope group for this neighborhood. Relationships "
+        "may share the outcome anchor only when the Source supports that membership.\n"
+        "5. Do not infer sample groups, controls, test settings, values, directions, or "
+        "a complete experiment. Do not reason about omitted signals.\n"
         "6. Include a rejected candidate once in `unresolved_signals` when a concise "
         "scientific reason is visible. The backend treats every omitted input signal "
         "as unresolved, so never invent a reason merely to repeat an ID.\n\n"
@@ -127,21 +139,21 @@ def build_paper_signal_reconciliation_prompt(
         "- Keep `signal_ids` unique inside each relationship, and never return the "
         "same signal membership more than once. Relationship membership is unordered; "
         "reversing the same IDs does not create another relationship.\n"
-        "- Never combine incompatible materials, processes, samples, tests, or "
-        "experiments. Ambiguous proximity is not a link.\n"
+        "- Never combine incompatible materials, process families, claim ownership, "
+        "or explicit contexts. Ambiguous proximity is not a link.\n"
         "- Do not output labels, contexts, Source locators, questions, or new scientific "
         "fields; the backend derives them from selected signals.\n"
         "- Do not mark a signal unresolved if it appears in a relationship. Backend "
         "relationship acceptance is authoritative when the response repeats an ID.\n\n"
         "BOUNDARY EXAMPLES\n"
-        "- Methods variable and Results outcome: Methods says laser power was varied "
-        "for LPBF 316L specimens; Results says relative density was measured for those "
-        "power conditions. Link both signal ids into one relationship.\n"
-        "- Different experiments: Methods describes heat-treatment temperature for "
-        "tensile coupons, while Results reports corrosion potential for as-built "
-        "electrochemical specimens. Return both signals unresolved; do not link them.\n"
-        "- Ambiguous result: Results lists hardness without identifying which of two "
-        "independent process studies it belongs to. Keep the hardness signal unresolved.\n\n"
+        "- Split high-level statement: an abstract says laser power was varied for LPBF "
+        "316L, and the conclusion says the paper evaluated relative density across "
+        "those power conditions. Link both signal ids into one relationship.\n"
+        "- Different scopes: one high-level Source describes heat-treatment effects on "
+        "tensile strength, while another describes as-built corrosion behavior without "
+        "linking it to heat treatment. Return the unmatched signals unresolved.\n"
+        "- Ambiguous outcome: a caption lists hardness without identifying which stated "
+        "process axis it accompanies. Keep the hardness signal unresolved.\n\n"
         "- Duplicate membership: [variable-a,outcome-a] and "
         "[outcome-a,variable-a] are the same relationship. Return it once.\n\n"
         "OUTPUT CONTRACT\n"
@@ -155,7 +167,7 @@ def build_paper_signal_reconciliation_prompt(
 
 
 class PaperSignalReconciler:
-    """Adjudicate one bounded variable/outcome neighborhood within a paper."""
+    """Adjudicate one bounded paper-scope variable/outcome neighborhood."""
 
     def __init__(self, response_client: StructuredResponseClient) -> None:
         self.response_client = response_client

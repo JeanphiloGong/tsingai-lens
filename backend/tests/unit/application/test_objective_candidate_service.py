@@ -409,6 +409,40 @@ def test_material_grade_word_order_preserves_shared_objective_material_scope():
     assert facts.research_objectives[0].material_scope == ("316L stainless steel",)
 
 
+def test_tial6v4_notation_does_not_fragment_ti_6al_4v_objective_scope():
+    skims = (
+        _paper_skim(
+            document_id="paper-iso-notation",
+            relationship_id="relationship-iso-notation",
+            material_scope=("TiAl6V4",),
+            factors=("laser power", "scan rate"),
+            outcome="porosity volume fraction",
+        ),
+        _paper_skim(
+            document_id="paper-composition-notation",
+            relationship_id="relationship-composition-notation",
+            material_scope=("Ti-6Al-4V",),
+            factors=("laser power", "powder layer thickness"),
+            outcome="porosity",
+        ),
+    )
+
+    facts = ObjectiveCandidateService().discover_candidate_facts(
+        "collection-ti64-notation",
+        paper_skims=skims,
+        axis_equivalence_classifier=_GroupingExtractor(),
+    )
+
+    assert len(facts.research_objectives) == 1
+    objective = facts.research_objectives[0]
+    assert objective.variables == ("laser exposure condition",)
+    assert objective.outcomes == ("porosity",)
+    assert set(objective.seed_document_ids) == {
+        "paper-iso-notation",
+        "paper-composition-notation",
+    }
+
+
 def test_two_relationships_with_missing_material_context_share_one_group():
     skims = (
         _paper_skim(

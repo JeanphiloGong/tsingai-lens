@@ -74,8 +74,8 @@ def test_paper_skim_contract_bounds_model_output():
     model_schema = StructuredPaperSkim.model_json_schema()
     schema = model_schema["properties"]
 
-    assert schema["studies"]["maxItems"] == 8
-    assert schema["unresolved_signals"]["maxItems"] == 12
+    assert schema["studies"]["maxItems"] == 4
+    assert schema["unresolved_signals"]["maxItems"] == 8
     assert schema["output_saturated"]["type"] == "boolean"
     study_schema = model_schema["$defs"]["StructuredPaperStudy"]["properties"]
     relationship_schema = model_schema["$defs"][
@@ -89,7 +89,7 @@ def test_paper_skim_contract_bounds_model_output():
     assert study_schema["test_context"]["maxItems"] == 12
     assert study_schema["test_context"]["items"]["maxLength"] == 160
     assert study_schema["fixed_conditions"]["maxItems"] == 12
-    assert study_schema["relationships"]["maxItems"] == 8
+    assert study_schema["relationships"]["maxItems"] == 6
     assert relationship_schema["varied_factors"]["maxItems"] == 12
     assert relationship_schema["source_unit_ids"]["minItems"] == 1
     assert relationship_schema["source_unit_ids"]["maxItems"] == 12
@@ -411,6 +411,22 @@ def test_paper_signal_reconciliation_contract_is_bounded_to_one_neighborhood():
     assert study_schema["relationships"]["maxItems"] == 11
 
 
+def test_paper_signal_reconciliation_bounds_diagnostic_reason_text():
+    parsed = StructuredPaperSignalReconciliation.model_validate(
+        {
+            "studies": [],
+            "unresolved_signals": [
+                {
+                    "signal_id": "signal-outcome",
+                    "reason": "reason " * 100,
+                }
+            ],
+        }
+    )
+
+    assert len(parsed.unresolved_signals[0].reason) == 240
+
+
 def test_paper_skim_contract_bounds_diagnostic_warnings():
     parsed = StructuredPaperSkim.model_validate(
         {"warnings": ["w" * 241, "second", "third"]}
@@ -451,7 +467,7 @@ def test_paper_skim_contract_rejects_duplicate_source_unit_ids(payload):
         StructuredPaperSkim.model_validate(payload)
 
 
-def test_paper_skim_prompt_defines_structured_research_map_contract():
+def test_paper_skim_prompt_defines_lightweight_research_map_contract():
     _, user_prompt = build_paper_skim_prompt(
         {
             "document_id": "paper-1",
@@ -473,30 +489,27 @@ def test_paper_skim_prompt_defines_structured_research_map_contract():
     )
 
     assert "TASK MODEL" in user_prompt
-    assert "Extract source-supported paper studies" in user_prompt
+    assert "Map the paper's stated research scope" in user_prompt
+    assert "not full experiment reconstruction" in user_prompt
+    assert "candidate scope, not proven Evidence" in user_prompt
+    assert "Leave sample_context, test_context, comparator, and fixed_conditions empty" in user_prompt
     assert "`window_id` is this bounded window's identity" in user_prompt
     assert "absence from this window is not evidence of absence elsewhere" in user_prompt
     assert "return one relationship per outcome" in user_prompt
     assert "full jointly varied, compared, or modeled factor set" in user_prompt
     assert "never label the cited study current_work" in user_prompt
-    assert "listed Methods setting alone is not an intervention" in user_prompt
     assert "Miranda et al. [20]" in user_prompt
-    assert "Laser power belongs only in fixed_conditions" in user_prompt
     assert "Return empty arrays rather than guessing" in user_prompt
-    assert "Return every distinct, explicitly supported study and relationship" in user_prompt
     assert "Return `studies=[]`; do not" in user_prompt
     assert "Return the explicit axis in `unresolved_signals`" in user_prompt
     assert "copy `source_unit_ids`" in user_prompt
     assert "at most 12 unique `source_unit_ids`" in user_prompt
-    assert "Return two studies" in user_prompt
     assert "up to 2 `warnings`, each at most 240 characters" in user_prompt
-    assert "up to 8 studies" in user_prompt
-    assert "up to 8 relationships per study" in user_prompt
-    assert "up to 12 unresolved signals" in user_prompt
+    assert "up to 4 studies" in user_prompt
+    assert "up to 6 relationships per study" in user_prompt
+    assert "up to 8 unresolved signals" in user_prompt
     assert "output_saturated=true" in user_prompt
     assert "neutral scientific axis" in user_prompt
-    assert "at most 12 process, sample, and test context values" in user_prompt
-    assert "each context value is at most 160 characters" in user_prompt
     assert "at most 12 varied-factor labels" in user_prompt
     assert "L-VED, M-VED, and H-VED" in user_prompt
     assert "varied_factors=['volumetric energy density']" in user_prompt
@@ -528,7 +541,7 @@ def test_review_paper_skim_prompt_extracts_synthesis_not_cited_experiments():
         }
     )
 
-    assert "review-author synthesis screening" in user_prompt
+    assert "review-author synthesis mapping" in user_prompt
     assert "not cited-study reconstruction" in user_prompt
     assert "claim_scope=synthesis" in user_prompt
     assert "return no study or unresolved signal" in user_prompt
@@ -696,6 +709,7 @@ def test_paper_signal_reconciliation_prompt_defines_backend_owned_accounting():
     )
 
     assert "membership adjudication" in user_prompt
+    assert "same stated paper-owned research scope" in user_prompt
     assert "one bounded candidate neighborhood" in user_prompt
     assert "exactly one outcome anchor" in user_prompt
     assert "omitted paper signals are outside this batch" in user_prompt
@@ -705,8 +719,9 @@ def test_paper_signal_reconciliation_prompt_defines_backend_owned_accounting():
     assert "never invent a reason merely to repeat an ID" in user_prompt
     assert "copy only input `signal_id` values" in user_prompt
     assert "same signal membership more than once" in user_prompt
-    assert "Methods variable and Results outcome" in user_prompt
-    assert "different experiments" in user_prompt.lower()
+    assert "Split high-level statement" in user_prompt
+    assert "Different scopes" in user_prompt
+    assert "Do not infer sample groups, controls, test settings" in user_prompt
 
 
 class _FakeCompletions:
@@ -1611,7 +1626,7 @@ def test_domain_model_extractors_validates_paper_skim_response():
     assert skim.doc_role == "experimental"
     assert skim.studies[0].material_scope == ["316L stainless steel"]
     assert skim.studies[0].relationships[0].outcome == "corrosion current density"
-    assert client.chat.completions.calls[0]["max_completion_tokens"] == 4096
+    assert client.chat.completions.calls[0]["max_completion_tokens"] == 2048
 
 
 def test_paper_skim_bounds_diagnostic_warnings_without_retrying_scientific_output():

@@ -179,7 +179,7 @@ def _paper_study_source_refs(value: Any) -> tuple[PaperStudySourceRef, ...]:
 
 @dataclass(frozen=True)
 class PaperStudyRelationship:
-    """One source-supported joint-factor-to-outcome relationship."""
+    """One Source-supported joint-factor-to-outcome candidate-scope link."""
 
     relationship_id: str
     varied_factors: tuple[str, ...]
@@ -256,7 +256,7 @@ _PAPER_STUDY_CLAIM_SCOPES = frozenset(
 
 @dataclass(frozen=True)
 class PaperStudy:
-    """One paper-local experiment, observation, or modeling study."""
+    """One paper-owned research-scope group used for Objective screening."""
 
     study_id: str
     document_id: str
@@ -680,7 +680,7 @@ class PaperSourceUnitCoverage:
 
 @dataclass(frozen=True)
 class PaperSkim:
-    """Source-linked study-design screening result for one paper."""
+    """Bounded Source-linked research-scope map for one paper."""
 
     document_id: str
     doc_role: str

@@ -120,6 +120,7 @@ _PROPERTY_LABEL_ALIASES = {
     "r film": "passive film resistance",
     "rfilm": "passive film resistance",
     "film resistance": "passive film resistance",
+    "porosity volume fraction": "porosity",
     "i u": "ultimate tensile strength",
     "iu": "ultimate tensile strength",
     "sigma u": "ultimate tensile strength",

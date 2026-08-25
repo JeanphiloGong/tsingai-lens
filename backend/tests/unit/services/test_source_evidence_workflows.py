@@ -33,6 +33,7 @@ from infra.source.runtime.source_evidence import (
 from infra.source.runtime.workflows.create_source_artifacts import (
     create_source_artifacts,
 )
+from infra.source.runtime.workflows.create_table_cells import create_table_cells
 
 
 def _source_bundle(document_id: str) -> SourceArtifactBundle:
@@ -329,6 +330,27 @@ def test_build_table_cells_extracts_pipe_delimited_rows():
     data_cells = table_cells[table_cells["row_index"] == 1]
     assert "Conductivity (mS/cm)" in set(data_cells["header_path"].dropna())
     assert "mS/cm" in set(table_cells["unit_hint"].dropna())
+
+
+def test_create_table_cells_returns_contract_shaped_empty_frame_without_tables():
+    documents = pd.DataFrame(
+        [
+            {
+                "id": "doc-1",
+                "title": "LPBF Ti-6Al-4V Study",
+                "text": (
+                    "Ti-6Al-4V specimens were produced by laser powder bed "
+                    "fusion. Microstructure was characterized by SEM."
+                ),
+            }
+        ]
+    )
+    text_units = pd.DataFrame(columns=["id", "text", "document_ids"])
+
+    table_cells = create_table_cells(documents, text_units)
+
+    assert table_cells.empty
+    assert table_cells.columns.tolist() == TABLE_CELLS_FINAL_COLUMNS
 
 
 def test_build_pdf_table_cells_preserves_docling_logical_topology():

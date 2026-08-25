@@ -39,17 +39,8 @@ def create_table_cells(
 ) -> pd.DataFrame:
     table_cells = build_table_cells(documents, text_units)
     normalized = table_cells.copy()
-    for column in (
-        "cell_id",
-        "table_id",
-        "row_index",
-        "col_index",
-        "cell_text",
-        "header_path",
-        "page",
-        "unit_hint",
-    ):
+    normalized["id"] = normalized.get("document_id")
+    for column in TABLE_CELLS_FINAL_COLUMNS:
         if column not in normalized.columns:
             normalized[column] = None
-    normalized["id"] = normalized.get("document_id")
     return normalized.loc[:, TABLE_CELLS_FINAL_COLUMNS]

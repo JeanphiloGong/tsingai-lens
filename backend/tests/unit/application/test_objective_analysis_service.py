@@ -6,7 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from application.core.objectives.analysis_service import ObjectiveAnalysisService
+from application.core.objectives.analysis_service import (
+    ObjectiveAnalysisDispatchError,
+    ObjectiveAnalysisService,
+)
 from application.core.objectives.analysis.diagnostics import (
     record_analysis_diagnostic,
 )
@@ -453,6 +456,96 @@ async def test_queue_analysis_confirms_a_candidate_and_queues_version_one() -> N
     assert result["objective"].active_analysis_version == 1
     assert result["analysis"].analysis_version == 1
     assert result["analysis"].status == "queued"
+
+
+async def test_start_analysis_queues_and_dispatches_the_canonical_worker() -> None:
+    service, repository, analyzer = _service()
+
+    queued = await service.start_analysis("collection-1", "objective-1")
+
+    assert queued["analysis"].status == "queued"
+    assert queued["objective"].active_analysis_version == 1
+    await asyncio.gather(*tuple(service._analysis_tasks))
+    completed = await service.get_analysis_state("collection-1", "objective-1")
+    assert completed["analysis"].status == "succeeded"
+    assert analyzer.calls == 1
+    assert repository.published_calls == 1
+
+
+async def test_start_analysis_marks_a_version_failed_when_dispatch_cannot_start() -> None:
+    repository = FakeObjectiveRepository()
+    analyzer = FakeResearchObjectiveService()
+
+    def unavailable_task_factory(_coroutine):
+        raise RuntimeError("event loop unavailable")
+
+    service = ObjectiveAnalysisService(
+        objective_repository=repository,
+        research_objective_service=analyzer,
+        task_factory=unavailable_task_factory,
+    )
+
+    with pytest.raises(ObjectiveAnalysisDispatchError) as error:
+        await service.start_analysis("collection-1", "objective-1")
+
+    assert error.value.analysis_version == 1
+    failed = await repository.read_analysis("collection-1", "objective-1", 1)
+    assert failed is not None
+    assert failed.status == "failed"
+    assert failed.error_code == "analysis_dispatch_failed"
+    assert analyzer.calls == 0
+
+
+async def test_start_analysis_enforces_the_service_concurrency_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = ObjectiveAnalysisService(
+        objective_repository=FakeObjectiveRepository(),
+        research_objective_service=FakeResearchObjectiveService(),
+        max_concurrency=1,
+    )
+    release_first = asyncio.Event()
+    first_started = asyncio.Event()
+    second_started = asyncio.Event()
+    active_count = 0
+    maximum_active_count = 0
+
+    async def queue_analysis(collection_id: str, objective_id: str) -> dict:
+        version = 1 if objective_id == "objective-1" else 2
+        return {"analysis": _analysis(version)}
+
+    async def execute_queued_analysis(
+        collection_id: str,
+        objective_id: str,
+        analysis_version: int,
+    ) -> dict:
+        nonlocal active_count, maximum_active_count
+        active_count += 1
+        maximum_active_count = max(maximum_active_count, active_count)
+        if objective_id == "objective-1":
+            first_started.set()
+            await release_first.wait()
+        else:
+            second_started.set()
+        active_count -= 1
+        return {"analysis_version": analysis_version}
+
+    monkeypatch.setattr(service, "queue_analysis", queue_analysis)
+    monkeypatch.setattr(service, "execute_queued_analysis", execute_queued_analysis)
+
+    await service.start_analysis("collection-1", "objective-1")
+    await first_started.wait()
+    await service.start_analysis("collection-1", "objective-2")
+    await asyncio.sleep(0)
+
+    assert not second_started.is_set()
+    assert maximum_active_count == 1
+
+    release_first.set()
+    await asyncio.gather(*tuple(service._analysis_tasks))
+
+    assert second_started.is_set()
+    assert maximum_active_count == 1
 
 
 async def test_objective_analysis_aggregates_persisted_contribution_warnings() -> None:

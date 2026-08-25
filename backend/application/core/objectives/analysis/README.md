@@ -47,13 +47,20 @@ Its optional `screening_note` explains only the current selection decision and
 is normalized after parsing so an overlong note cannot discard valid Source
 accounting. Later stages may consume a frame, but they may not reinterpret a
 screening decision or note as scientific Evidence or a paper-level conclusion.
+When the paper-level discovery record classifies a document as a review, frame
+aggregation preserves that role; a local Source judgment cannot promote one
+cited experiment into a primary experiment paper.
 
 `evidence_routing.py` owns transient route records, Source-tree candidate
 ordering, selection hints, the bounded routing prompt and response schema, the
 one-Source model call, deterministic fallback, and the document round-robin
 extraction queue. The model decides only whether and how to inspect the current
 Source; the backend preserves its identity, so a route cannot redirect work to
-another paper or Source or become durable Evidence.
+another paper or Source or become durable Evidence. A review frame remains a
+secondary synthesis or citation-lead source and does not enter the primary
+Evidence extraction queue. Review synthesis produced during discovery remains
+available upstream; a cited experiment must be inspected in its primary paper
+before it can support an Objective Finding.
 
 `source_extraction.py` owns the inspection of one exact Source at a time. It
 owns that judgment's prompt, response schema, scientific validation, bounded

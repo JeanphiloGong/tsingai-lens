@@ -3,12 +3,17 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from application.core.objectives import property_matching
-from application.core.objectives.analysis import evidence_routing, source_extraction
+from application.core.objectives.analysis import (
+    evidence_routing,
+    source_extraction,
+    source_screening,
+)
 from application.core.objectives.analysis.evidence_routing import (
     EvidenceCandidate,
     SourceSelectionHint,
 )
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
+from domain.core import PaperSkim
 from domain.source import SourceDocumentNode, SourceDocumentTree
 from tests.support.objective_extractor import (
     FakeObjectiveExtractor as _ObjectiveExtractor,
@@ -69,6 +74,87 @@ def test_research_objective_service_forces_direct_support_route_role():
     assert record["role"] == "current_experimental_evidence"
     assert record["extractable"] is True
     assert record["join_plan"] == {"evidence_role": "direct_support"}
+
+
+def test_review_citation_result_is_not_routed_as_primary_evidence() -> None:
+    class UnexpectedRouter:
+        def route_source(self, payload):  # noqa: ANN001, ARG002
+            raise AssertionError("review citations must not reach primary routing")
+
+    objective = _research_objective(
+        {
+            "objective_id": "obj-ti64-porosity",
+            "question": "How does scanning strategy affect porosity?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["laser exposure condition"],
+            "outcomes": ["porosity"],
+        }
+    )
+    source_ref = "block-review-17-4ph"
+    source_unit = {
+        "source_unit_id": "review-results-unit",
+        "source_kind": "section",
+        "source_ref": source_ref,
+        "section_label": "Effect of scanning strategy",
+        "text": (
+            "Rashid et al. studied two scanning strategies for 17-4PH "
+            "stainless steel."
+        ),
+    }
+    paper_skim = PaperSkim.from_mapping(
+        {
+            "document_id": "paper-scanning-review",
+            "doc_role": "review",
+            "studies": [],
+            "evidence_density": "medium",
+            "confidence": 0.9,
+        }
+    )
+    frame = source_screening._aggregate_objective_paper_frame_batches(
+        objective_id=objective.objective_id,
+        document_id=paper_skim.document_id,
+        source_units=(source_unit,),
+        batch_results=(
+            (
+                {
+                    "relevance": "medium",
+                    "paper_role": "primary_experiment",
+                    "material_match": ["Ti-6Al-4V"],
+                    "changed_variables": ["scanning strategy"],
+                    "measured_property_scope": ["porosity"],
+                    "relevant_source_unit_ids": [source_unit["source_unit_id"]],
+                    "excluded_source_unit_ids": [],
+                },
+                "model",
+                (),
+            ),
+        ),
+        paper_skim=paper_skim,
+    )
+    assert frame.paper_role == "review"
+    review_block = SimpleNamespace(
+        block_id=source_ref,
+        block_order=116,
+        block_type="paragraph",
+        heading_path="Effect of scanning strategy",
+        text=(
+            "Rashid et al. studied two scanning strategies for 17-4PH "
+            "stainless steel. The part made by Scan X had smaller porosity "
+            "than the part made by Scan O."
+        ),
+    )
+
+    routes = evidence_routing.route_sources(
+        collection_id="collection-review",
+        evidence_router=UnexpectedRouter(),
+        objectives=(objective,),
+        objective_paper_frames=(frame,),
+        blocks_by_document_id={frame.document_id: [review_block]},
+        tables_by_document_id={frame.document_id: []},
+        document_trees_by_document_id={},
+    )
+
+    assert routes == ()
 
 
 def test_research_objective_service_treats_energy_density_only_table_as_condition():

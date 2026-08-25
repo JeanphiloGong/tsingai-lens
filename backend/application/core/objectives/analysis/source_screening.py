@@ -1007,11 +1007,16 @@ def _aggregate_objective_paper_frame_batches(
         table_id for table_id in excluded_tables if table_id not in set(relevant_tables)
     ]
 
-    paper_role = str(
-        representative.get("paper_role") or ""
-    ).strip() or _deterministic_frame_paper_role(paper_skim)
+    deterministic_paper_role = _deterministic_frame_paper_role(paper_skim)
+    if deterministic_paper_role == "review":
+        paper_role = "review"
+    else:
+        paper_role = (
+            str(representative.get("paper_role") or "").strip()
+            or deterministic_paper_role
+        )
     if relevance != "irrelevant" and paper_role == "irrelevant":
-        paper_role = _deterministic_frame_paper_role(paper_skim)
+        paper_role = deterministic_paper_role
 
     return PaperAnalysisFrame.from_mapping(
         {

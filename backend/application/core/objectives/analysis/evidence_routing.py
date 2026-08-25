@@ -11,6 +11,9 @@ from typing import Any, Callable, Iterable, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from application.core.objectives import property_matching
+from application.core.objectives.analysis.diagnostics import (
+    record_analysis_diagnostic,
+)
 from application.core.objectives.analysis.source_screening import PaperAnalysisFrame
 from application.core.objectives.llm.structured_response import StructuredResponseClient
 from domain.core import (
@@ -386,6 +389,29 @@ def route_sources(
                 collection_id,
                 frame.objective_id,
                 frame.document_id,
+                frame.document_id,
+                frame_position,
+                frame_count,
+                frame_position,
+                max(frame_count - frame_position, 0),
+            )
+            continue
+        if frame.paper_role == "review":
+            record_analysis_diagnostic(
+                {
+                    "trace_type": "objective_review_routing",
+                    "collection_id": collection_id,
+                    "objective_id": frame.objective_id,
+                    "document_id": frame.document_id,
+                    "paper_role": frame.paper_role,
+                    "disposition": "citation_lead_only",
+                    "reason": "review_sources_are_not_primary_evidence",
+                }
+            )
+            logger.info(
+                "Research objective evidence routing frame skipped collection_id=%s objective_id=%s document_id=%s frame_position=%s frame_count=%s reason=review_sources_are_not_primary_evidence completed_frames=%s remaining_frames=%s",
+                collection_id,
+                frame.objective_id,
                 frame.document_id,
                 frame_position,
                 frame_count,

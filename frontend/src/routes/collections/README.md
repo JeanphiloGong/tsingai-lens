@@ -29,6 +29,12 @@ This node owns the collection workspace route family.
   exact action requires user approval, returns a queued task linked to the
   collection workspace, and does not confirm an Objective or start deep
   Objective analysis.
+  For a researcher-authored question, the Agent can preview a bounded paper
+  scope without claiming that mapped relationships or review citations are
+  Evidence. Creating the untested Objective candidate requires approval, and
+  starting its canonical Objective analysis requires a separate approval. The
+  Agent can then inspect the same persisted analysis state and paper progress
+  shown by the Objective workspace.
   This route remains available before Objective discovery finishes so the
   researcher can converse, inspect readiness, and form Objective proposals;
   capabilities must still expose missing or incomplete collection artifacts.

@@ -283,11 +283,7 @@
 		messages = [...prior, ...turn.messages.filter((message) => !knownIds.has(message.message_id))];
 		pendingApproval = turn.pending_approval;
 		if (turn.status === 'rejected') {
-			notice = $t(
-				decidedToolName === 'start_research_process'
-					? 'researchAgent.researchProcessRejected'
-					: 'researchAgent.rejected'
-			);
+			notice = $t(rejectionNoticeKey(decidedToolName));
 		}
 		if (turn.status === 'failed' || turn.status === 'step_limit_reached') {
 			error = $t('researchAgent.turnFailed', { code: turn.error_code ?? turn.status });
@@ -377,6 +373,12 @@
 				return $t('researchAgent.capability.proposals');
 			case 'create_objective_candidate':
 				return $t('researchAgent.capability.createObjective');
+			case 'preview_research_scope':
+				return $t('researchAgent.capability.previewResearchScope');
+			case 'start_objective_analysis':
+				return $t('researchAgent.capability.startObjectiveAnalysis');
+			case 'inspect_objective_analysis':
+				return $t('researchAgent.capability.inspectObjectiveAnalysis');
 			default:
 				return $t('researchAgent.capability.unknown');
 		}
@@ -466,6 +468,26 @@
 		}
 		if (name === 'create_objective_candidate') {
 			return $t('researchAgent.capability.objectiveCreated');
+		}
+		if (name === 'preview_research_scope') {
+			const counts = result.data.scope_counts;
+			return $t('researchAgent.capability.scopeCount', {
+				likely:
+					counts && typeof counts === 'object' && 'likely_relevant' in counts
+						? Number(counts.likely_relevant) || 0
+						: 0,
+				review:
+					counts && typeof counts === 'object' && 'needs_inspection' in counts
+						? Number(counts.needs_inspection) || 0
+						: 0,
+				excluded:
+					counts && typeof counts === 'object' && 'confidently_out_of_scope' in counts
+						? Number(counts.confidently_out_of_scope) || 0
+						: 0
+			});
+		}
+		if (name === 'inspect_objective_analysis' || name === 'start_objective_analysis') {
+			return objectiveAnalysisSummary(result.data);
 		}
 		return $t('researchAgent.capability.succeeded', { name: capabilityName(name) });
 	}
@@ -595,19 +617,59 @@
 	}
 
 	function approvalBody(call: ChatToolCall) {
-		return $t(
-			call.name === 'start_research_process'
-				? 'researchAgent.approval.startResearchBody'
-				: 'researchAgent.approval.body'
-		);
+		if (call.name === 'start_research_process') {
+			return $t('researchAgent.approval.startResearchBody');
+		}
+		if (call.name === 'start_objective_analysis') {
+			return $t('researchAgent.approval.objectiveAnalysisBody');
+		}
+		return $t('researchAgent.approval.body');
 	}
 
 	function approvalAction(call: ChatToolCall) {
-		return $t(
-			call.name === 'start_research_process'
-				? 'researchAgent.approval.startResearch'
-				: 'researchAgent.approval.approve'
-		);
+		if (call.name === 'start_research_process') {
+			return $t('researchAgent.approval.startResearch');
+		}
+		if (call.name === 'start_objective_analysis') {
+			return $t('researchAgent.approval.analyzeObjective');
+		}
+		return $t('researchAgent.approval.approve');
+	}
+
+	function rejectionNoticeKey(toolName: string | null) {
+		if (toolName === 'start_research_process') return 'researchAgent.researchProcessRejected';
+		if (toolName === 'start_objective_analysis') return 'researchAgent.objectiveAnalysisRejected';
+		return 'researchAgent.rejected';
+	}
+
+	function objectiveAnalysisSummary(data: Record<string, unknown>) {
+		const analysis = data.analysis;
+		if (!analysis || typeof analysis !== 'object' || !('status' in analysis)) {
+			return $t('researchAgent.capability.analysisNotStarted');
+		}
+		switch (String(analysis.status)) {
+			case 'queued':
+				return $t('researchAgent.capability.analysisQueued');
+			case 'running': {
+				const progress = 'document_progress' in analysis ? analysis.document_progress : null;
+				return $t('researchAgent.capability.analysisRunning', {
+					current:
+						progress && typeof progress === 'object' && 'current' in progress
+							? Number(progress.current) || 0
+							: 0,
+					total:
+						progress && typeof progress === 'object' && 'total' in progress
+							? Number(progress.total) || 0
+							: 0
+				});
+			}
+			case 'succeeded':
+				return $t('researchAgent.capability.analysisSucceeded');
+			case 'failed':
+				return $t('researchAgent.capability.analysisFailed');
+			default:
+				return $t('researchAgent.capability.analysisNotStarted');
+		}
 	}
 
 	function formatValue(value: unknown) {

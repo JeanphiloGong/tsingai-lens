@@ -568,6 +568,44 @@ describe('collections/[id]/assistant Research Agent', () => {
 		await expect.element(browserPage.getByText('Proposed values')).not.toBeInTheDocument();
 	});
 
+	it('requires a separate approval before analyzing one research question', async () => {
+		const call = pendingCall({
+			name: 'start_objective_analysis',
+			arguments: { objective_id: 'obj_energy_1' }
+		});
+		installApi({
+			messageTurn: {
+				status: 'approval_required',
+				messages: [
+					message('msg_user_1', 'user', 'Analyze this question'),
+					message('msg_call_write', 'assistant', '', {
+						tool_call_id: call.tool_call_id,
+						tool_name: call.name,
+						tool_arguments: call.arguments
+					})
+				],
+				pending_approval: call,
+				error_code: null
+			}
+		});
+
+		await send('Analyze this question');
+
+		await expect
+			.element(browserPage.getByText('Research question evidence analysis', { exact: true }))
+			.toBeInTheDocument();
+		await expect
+			.element(
+				browserPage.getByText(
+					'Inspect the selected papers, extract source-backed facts, and compare the result for this research question.'
+				)
+			)
+			.toBeInTheDocument();
+		await expect
+			.element(browserPage.getByRole('button', { name: 'Approve and analyze' }))
+			.toBeInTheDocument();
+	});
+
 	it('records a rejected literature-analysis start without implying that work ran', async () => {
 		const call = pendingCall({
 			name: 'start_research_process',

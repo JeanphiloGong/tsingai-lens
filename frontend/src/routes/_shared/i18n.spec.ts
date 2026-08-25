@@ -21,5 +21,11 @@ describe('research process terminology', () => {
 		expect(translateKey('zh', 'researchAgent.researchProcess.objectiveFormation')).toBe(
 			'归纳候选研究问题'
 		);
+		expect(translateKey('zh', 'researchAgent.capability.previewResearchScope')).toBe(
+			'预览相关论文范围'
+		);
+		expect(translateKey('zh', 'researchAgent.capability.startObjectiveAnalysis')).toBe(
+			'研究问题证据分析'
+		);
 	});
 });

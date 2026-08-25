@@ -85,6 +85,11 @@ def test_theme_objective_keeps_exact_interventions_in_separate_result_sets():
                     "result_text": "Elongation increased.",
                 },
                 "attribution_scope": "isolated_effect",
+                "scientific_context": {
+                    "material": [
+                        {"name": "material", "value": "Ti-6Al-4V"}
+                    ]
+                },
                 "resolution_status": "resolved",
                 "confidence": 0.9,
             }
@@ -118,6 +123,90 @@ def test_theme_objective_keeps_exact_interventions_in_separate_result_sets():
         ("annealing temperature",),
         ("HIP temperature",),
     }
+
+
+def test_comparable_result_requires_resolved_objective_material_scope() -> None:
+    objective = _research_objective(
+        {
+            "objective_id": "obj-ti64-porosity",
+            "question": "How does scanning strategy affect porosity?",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["laser exposure condition"],
+            "outcomes": ["porosity"],
+        }
+    )
+
+    def evidence(evidence_id: str, material: str | None) -> ObjectiveEvidence:
+        return ObjectiveEvidence.from_mapping(
+            {
+                "collection_id": objective.collection_id,
+                "objective_id": objective.objective_id,
+                "analysis_version": 1,
+                "evidence_id": evidence_id,
+                "document_id": f"paper-{evidence_id}",
+                "source_kind": "text_window",
+                "source_ref": f"source-{evidence_id}",
+                "source_excerpt": (
+                    "Scan X produced smaller porosity than Scan O."
+                ),
+                "evidence_role": "direct_result",
+                "selection_status": "extracted",
+                "changed_variables": [
+                    {
+                        "name": "scanning strategy",
+                        "baseline_value": "Scan O",
+                        "target_value": "Scan X",
+                    }
+                ],
+                "comparison": {
+                    "baseline_label": "Scan O",
+                    "target_label": "Scan X",
+                    "axis_names": ["scanning strategy"],
+                    "comparable": True,
+                    "incomparability_reasons": [],
+                },
+                "reported_result": {
+                    "outcome": "porosity",
+                    "direction": "decrease",
+                    "result_text": (
+                        "Scan X produced smaller porosity than Scan O."
+                    ),
+                },
+                "attribution_scope": "isolated_effect",
+                "scientific_context": {
+                    "material": (
+                        [{"name": "material", "value": material}]
+                        if material is not None
+                        else []
+                    )
+                },
+                "resolution_status": "resolved",
+                "confidence": 0.9,
+            }
+        )
+
+    service = finding_synthesis.FindingSynthesisService()
+
+    assert service.is_comparable_result_evidence(
+        objective,
+        evidence("matching", "TiAl6V4"),
+    )
+    assert not service.is_comparable_result_evidence(
+        objective,
+        evidence("missing", None),
+    )
+    assert not service.is_comparable_result_evidence(
+        objective,
+        evidence("conflicting", "17-4PH stainless steel"),
+    )
+    assert service.material_scope_status(
+        objective,
+        evidence("broad", "titanium alloy"),
+    ) == "unresolved"
+    assert service.material_scope_status(
+        objective,
+        evidence("other-grade", "316L"),
+    ) == "mismatched"
 
 
 def test_objective_evidence_document_state_is_typed_and_document_scoped():
@@ -1320,6 +1409,9 @@ def test_source_reported_hip_cooling_comparison_remains_an_association():
                 "evidence_role": "condition_context",
                 "attribution_scope": "not_attributable",
                 "scientific_context": {
+                    "material": [
+                        {"name": "material", "value": "Ti-6Al-4V"}
+                    ],
                     "sample": [{"name": "Condition", "value": label}],
                     "process": [
                         {

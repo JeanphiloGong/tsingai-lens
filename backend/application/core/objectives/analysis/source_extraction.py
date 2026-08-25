@@ -75,7 +75,7 @@ _OBJECTIVE_NON_RESULT_VALUE_COLUMN_TERMS = (
 )
 _NUMBER_PATTERN = re.compile(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?")
 _SOURCE_EXTRACTION_MAX_COMPLETION_TOKENS = 2048
-_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v5"
+_SOURCE_EXTRACTION_PROMPT_VERSION = "objective_evidence_extraction.v6"
 _SOURCE_EXTRACTION_ROLES = {
     "direct_result",
     "condition_context",
@@ -178,6 +178,10 @@ HARD RULES
   mechanism. Use `mixed` for an unordered qualitative change.
 - When SOURCE mixes current work with cited literature, extract current work only.
   Conditions from cited literature are not current-work comparison conditions.
+- For a direct result, return the material in `scientific_context.material` when
+  SOURCE explicitly binds a material to that result. If SOURCE discusses several
+  materials or cited studies and does not bind one material to the returned result,
+  return no direct result. Never copy the OBJECTIVE material into this field.
 - Generic composition or background is irrelevant unless OBJECTIVE explicitly
   asks about that composition, material identity, or background concept.
 - For a comparable comparison, `incomparability_reasons` must be empty. For an

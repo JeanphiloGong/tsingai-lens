@@ -5,6 +5,7 @@ from application.core.objectives.analysis.diagnostics import (
 )
 from application.core.objectives.analysis.evidence_materialization import (
     _analysis_contributions,
+    _record_material_scope_exclusions,
     materialize_evidence,
 )
 from application.core.objectives.analysis.evidence_routing import EvidenceCandidate
@@ -178,6 +179,192 @@ def test_out_of_scope_result_records_bounded_no_comparable_evidence_trace() -> N
         "selected_draft_count": 0,
         "evidence_record_count": 0,
         "paper_disposition_counts": {"no_comparable_evidence": 1},
+    }
+
+
+def test_material_scope_exclusion_records_source_decision_trace() -> None:
+    objective = research_objective(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-ti64-porosity",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["laser exposure condition"],
+            "outcomes": ["porosity"],
+        }
+    )
+    analysis = ObjectiveAnalysis(
+        collection_id=objective.collection_id,
+        objective_id=objective.objective_id,
+        analysis_version=1,
+        source_build_id="build-1",
+        pipeline_version="test.v1",
+        model_name="test-model",
+        prompt_versions={},
+    )
+    evidence = ObjectiveEvidence.from_mapping(
+        {
+            "collection_id": objective.collection_id,
+            "objective_id": objective.objective_id,
+            "analysis_version": 1,
+            "evidence_id": "evidence-steel-porosity",
+            "document_id": "paper-scanning-review",
+            "source_kind": "text_window",
+            "source_ref": "block-review-17-4ph",
+            "source_excerpt": "Scan X produced smaller porosity than Scan O.",
+            "evidence_role": "direct_result",
+            "selection_status": "extracted",
+            "changed_variables": [
+                {
+                    "name": "scanning strategy",
+                    "baseline_value": "Scan O",
+                    "target_value": "Scan X",
+                }
+            ],
+            "reported_result": {
+                "outcome": "porosity",
+                "direction": "decrease",
+                "result_text": "Scan X produced smaller porosity than Scan O.",
+            },
+            "comparison": {
+                "baseline_label": "Scan O",
+                "target_label": "Scan X",
+                "axis_names": ["scanning strategy"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {
+                "material": [
+                    {"name": "material", "value": "17-4PH stainless steel"}
+                ]
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+    with capture_analysis_diagnostics() as diagnostics:
+        _record_material_scope_exclusions(
+            collection_id=objective.collection_id,
+            analysis=analysis,
+            objective=objective,
+            evidence_records=(evidence,),
+        )
+
+    assert diagnostics.records == (
+        {
+            "trace_type": "objective_material_scope_decision",
+            "collection_id": "collection-1",
+            "objective_id": "objective-ti64-porosity",
+            "analysis_version": 1,
+            "document_id": "paper-scanning-review",
+            "source_kind": "text_window",
+            "source_ref": "block-review-17-4ph",
+            "objective_material_scope": ["Ti-6Al-4V"],
+            "evidence_material_scope": ["17-4PH stainless steel"],
+            "scope_status": "mismatched",
+            "disposition": "excluded_from_comparison",
+        },
+    )
+
+    out_of_axis_objective = research_objective(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-ti64-strength",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["laser exposure condition"],
+            "outcomes": ["yield strength"],
+        }
+    )
+    with capture_analysis_diagnostics() as diagnostics:
+        _record_material_scope_exclusions(
+            collection_id=out_of_axis_objective.collection_id,
+            analysis=analysis,
+            objective=out_of_axis_objective,
+            evidence_records=(evidence,),
+        )
+
+    assert diagnostics.records == ()
+
+
+def test_material_scope_exclusion_trace_is_bounded() -> None:
+    objective = research_objective(
+        {
+            "collection_id": "collection-1",
+            "objective_id": "objective-ti64-porosity",
+            "material_scope": ["Ti-6Al-4V"],
+            "variables": ["scanning strategy"],
+            "outcomes": ["porosity"],
+        }
+    )
+    analysis = ObjectiveAnalysis(
+        collection_id=objective.collection_id,
+        objective_id=objective.objective_id,
+        analysis_version=1,
+        source_build_id="build-1",
+        pipeline_version="test.v1",
+        model_name="test-model",
+        prompt_versions={},
+    )
+    evidence = ObjectiveEvidence.from_mapping(
+        {
+            "collection_id": objective.collection_id,
+            "objective_id": objective.objective_id,
+            "analysis_version": 1,
+            "evidence_id": "evidence-steel-porosity",
+            "document_id": "paper-steel",
+            "source_kind": "text_window",
+            "source_ref": "block-steel",
+            "source_excerpt": "Scan X produced smaller porosity than Scan O.",
+            "evidence_role": "direct_result",
+            "selection_status": "extracted",
+            "changed_variables": [
+                {
+                    "name": "scanning strategy",
+                    "baseline_value": "Scan O",
+                    "target_value": "Scan X",
+                }
+            ],
+            "reported_result": {
+                "outcome": "porosity",
+                "direction": "decrease",
+                "result_text": "Scan X produced smaller porosity than Scan O.",
+            },
+            "comparison": {
+                "baseline_label": "Scan O",
+                "target_label": "Scan X",
+                "axis_names": ["scanning strategy"],
+                "comparable": True,
+                "incomparability_reasons": [],
+            },
+            "attribution_scope": "isolated_effect",
+            "scientific_context": {
+                "material": [
+                    {"name": "material", "value": "17-4PH stainless steel"}
+                ]
+            },
+            "resolution_status": "resolved",
+            "confidence": 0.9,
+        }
+    )
+
+    with capture_analysis_diagnostics() as diagnostics:
+        _record_material_scope_exclusions(
+            collection_id=objective.collection_id,
+            analysis=analysis,
+            objective=objective,
+            evidence_records=(evidence,) * 102,
+        )
+
+    assert len(diagnostics.records) == 101
+    assert diagnostics.records[-1] == {
+        "trace_type": "objective_material_scope_decision_summary",
+        "collection_id": "collection-1",
+        "objective_id": "objective-ti64-porosity",
+        "analysis_version": 1,
+        "recorded_count": 100,
+        "omitted_count": 2,
+        "omitted_scope_status_counts": {"mismatched": 2},
     }
 
 

@@ -27,6 +27,7 @@ from domain.core import (
 
 
 _CONTRIBUTION_SUMMARY_CHARS = 320
+_MATERIAL_SCOPE_DECISION_TRACE_LIMIT = 100
 
 
 def _text(value: Any) -> str:
@@ -75,6 +76,12 @@ def materialize_evidence(
         tables_by_document_id=tables_by_document_id,
         figures_by_document_id=figures_by_document_id,
     )
+    _record_material_scope_exclusions(
+        collection_id=collection_id,
+        analysis=analysis,
+        objective=objective,
+        evidence_records=evidence_records,
+    )
     contributions = _analysis_contributions(
         collection_id=collection_id,
         analysis=analysis,
@@ -117,6 +124,78 @@ def materialize_evidence(
         }
     )
     return evidence_records, contributions
+
+
+def _record_material_scope_exclusions(
+    *,
+    collection_id: str,
+    analysis: ObjectiveAnalysis,
+    objective: ResearchObjective,
+    evidence_records: tuple[ObjectiveEvidence, ...],
+) -> None:
+    if not objective.material_scope:
+        return
+    exclusions: list[tuple[ObjectiveEvidence, str]] = []
+    for evidence in evidence_records:
+        if (
+            evidence.reported_result is None
+            or not evidence.changed_variables
+            or evidence.evidence_role
+            not in {"direct_result", "contradictory_result"}
+        ):
+            continue
+        if not FindingSynthesisService.evidence_matches_objective_axes(
+            objective,
+            evidence,
+        ):
+            continue
+        status = FindingSynthesisService.material_scope_status(objective, evidence)
+        if status in {"matched", "not_required"}:
+            continue
+        exclusions.append((evidence, status))
+
+    for evidence, status in exclusions[:_MATERIAL_SCOPE_DECISION_TRACE_LIMIT]:
+        record_analysis_diagnostic(
+            {
+                "trace_type": "objective_material_scope_decision",
+                "collection_id": collection_id,
+                "objective_id": objective.objective_id,
+                "analysis_version": analysis.analysis_version,
+                "document_id": evidence.document_id,
+                "source_kind": evidence.source_kind,
+                "source_ref": evidence.source_ref,
+                "objective_material_scope": list(objective.material_scope),
+                "evidence_material_scope": [
+                    attribute.value
+                    for attribute in evidence.scientific_context.material
+                    if attribute.value not in (None, "")
+                ],
+                "scope_status": status,
+                "disposition": "excluded_from_comparison",
+            }
+        )
+    omitted_count = len(exclusions) - _MATERIAL_SCOPE_DECISION_TRACE_LIMIT
+    if omitted_count > 0:
+        record_analysis_diagnostic(
+            {
+                "trace_type": "objective_material_scope_decision_summary",
+                "collection_id": collection_id,
+                "objective_id": objective.objective_id,
+                "analysis_version": analysis.analysis_version,
+                "recorded_count": _MATERIAL_SCOPE_DECISION_TRACE_LIMIT,
+                "omitted_count": omitted_count,
+                "omitted_scope_status_counts": dict(
+                    sorted(
+                        Counter(
+                            status
+                            for _evidence, status in exclusions[
+                                _MATERIAL_SCOPE_DECISION_TRACE_LIMIT:
+                            ]
+                        ).items()
+                    )
+                ),
+            }
+        )
 
 
 def _objective_detail_evidence(

@@ -163,3 +163,46 @@ def test_generic_model_roles_do_not_replace_specific_source_labels() -> None:
     assert property_matching.process_role_is_specific("laser power")
     assert not property_matching.result_role_is_specific_property("predicted result")
     assert property_matching.result_role_is_specific_property("yield strength")
+
+
+def test_material_scope_matching_distinguishes_alias_broad_and_conflicting_labels() -> None:
+    assert property_matching.material_values_match_for_scope(
+        "TiAl6V4 alloy",
+        "Ti-6Al-4V",
+    )
+    assert property_matching.material_values_match_for_scope(
+        "titanium alloy",
+        "Ti-6Al-4V",
+    )
+    assert not property_matching.material_scope_value_is_specific(
+        "metal additively manufactured material"
+    )
+    assert property_matching.material_scope_value_is_broad(
+        "metal additively manufactured material"
+    )
+    assert not property_matching.material_scope_value_is_broad(
+        "aerospace components"
+    )
+    assert property_matching.material_scope_value_is_specific("Al7075")
+    assert property_matching.material_scope_value_is_specific("316L")
+    assert property_matching.material_scope_value_is_specific("17-4PH")
+    assert not property_matching.material_values_match_for_scope(
+        "Al7075",
+        "Ti-6Al-4V",
+    )
+    assert property_matching.material_value_matches_objective_comparison_scope(
+        "TiAl6V4 alloy",
+        "Ti-6Al-4V",
+    )
+    assert property_matching.material_value_matches_objective_comparison_scope(
+        "stainless steel 316L",
+        "316L stainless steel",
+    )
+    assert not property_matching.material_value_matches_objective_comparison_scope(
+        "titanium alloy",
+        "Ti-6Al-4V",
+    )
+    assert not property_matching.material_value_matches_objective_comparison_scope(
+        "17-4PH stainless steel",
+        "Ti-6Al-4V",
+    )

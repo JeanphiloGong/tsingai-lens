@@ -473,6 +473,135 @@ def axis_key(value: Any) -> str:
     return " ".join(text.split())
 
 
+def _material_family(value: Any) -> str | None:
+    text = " ".join(str(value or "").strip().casefold().split())
+    if not text:
+        return None
+    if re.search(
+        r"(?<![a-z0-9])(?:ti(?:tanium)?|tc4)(?![a-z0-9])|"
+        r"(?<![a-z0-9])ti[\s-]*(?:6[\s-]*al[\s-]*4[\s-]*v|"
+        r"al[\s-]*6[\s-]*v[\s-]*4|64)(?![a-z0-9])",
+        text,
+    ):
+        return "titanium"
+    if re.search(r"\b(?:al(?:uminum|uminium)?)[\s-]*\d|\balumin(?:um|ium)\b", text):
+        return "aluminum"
+    if re.search(
+        r"\b(?:stainless steel|tool steel|maraging steel|carbon steel|"
+        r"austenitic stainless|h\d{2}|ss\d{3,4}|aisi[\s-]*\d{3,4})\b",
+        text,
+    ):
+        return "steel"
+    if re.search(r"\b(?:nickel|hastelloy|superalloy|hwsa)\b", text):
+        return "nickel-superalloy"
+    if re.search(r"\b(?:cobalt|cocr)\b", text):
+        return "cobalt-alloy"
+    if re.search(r"\b(?:tin|sn)\b", text):
+        return "tin"
+    return None
+
+
+def _material_is_exact_grade(value: Any) -> bool:
+    text = " ".join(str(value or "").strip().casefold().split())
+    return bool(
+        re.search(
+            r"(?<![a-z0-9])(?:tc4|ti[\s-]*(?:6[\s-]*al[\s-]*4[\s-]*v|"
+            r"al[\s-]*6[\s-]*v[\s-]*4|64)|al[\s-]*\d{4}|h\d{2}|"
+            r"ss\d{3,4}|aisi[\s-]*\d{3,4}|\d{3,4}l|cocr|hastelloy[\s-]*[a-z])"
+            r"(?![a-z0-9])",
+            text,
+        )
+    )
+
+
+def _canonical_material_grade(value: Any) -> str | None:
+    text = " ".join(str(value or "").strip().casefold().split())
+    if re.search(
+        r"(?<![a-z0-9])(?:tc4|ti[\s-]*(?:6[\s-]*al[\s-]*4[\s-]*v|"
+        r"al[\s-]*6[\s-]*v[\s-]*4|64))(?![a-z0-9])",
+        text,
+    ):
+        return "titanium:ti-6al-4v"
+    if re.search(
+        r"(?<![a-z0-9])(?:ss|aisi)?[\s-]*316[\s-]*l(?![a-z0-9])|"
+        r"(?<![a-z0-9])316[\s-]*l[\s-]*(?:stainless[\s-]*steel)?",
+        text,
+    ):
+        return "steel:316l"
+    if re.search(
+        r"(?<![a-z0-9])17[\s-]*4[\s-]*ph(?![a-z0-9])",
+        text,
+    ):
+        return "steel:17-4ph"
+    return None
+
+
+def material_values_match_for_scope(left: Any, right: Any) -> bool:
+    """Match material identity only for deciding whether a paper merits inspection."""
+
+    left_key = axis_key(left)
+    right_key = axis_key(right)
+    if not left_key or not right_key:
+        return False
+    if left_key == right_key:
+        return True
+    left_grade = _canonical_material_grade(left)
+    right_grade = _canonical_material_grade(right)
+    if left_grade is not None and left_grade == right_grade:
+        return True
+    left_family = _material_family(left)
+    right_family = _material_family(right)
+    if not left_family or left_family != right_family:
+        return False
+    if _material_is_exact_grade(left) and _material_is_exact_grade(right):
+        return False
+    return True
+
+
+def material_value_matches_objective_comparison_scope(
+    evidence_value: Any,
+    objective_value: Any,
+) -> bool:
+    """Require enough material identity for a direct Objective comparison."""
+
+    evidence_key = axis_key(evidence_value)
+    objective_key = axis_key(objective_value)
+    if not evidence_key or not objective_key:
+        return False
+    if evidence_key == objective_key:
+        return True
+    evidence_grade = _canonical_material_grade(evidence_value)
+    objective_grade = _canonical_material_grade(objective_value)
+    if evidence_grade is not None or objective_grade is not None:
+        return evidence_grade is not None and evidence_grade == objective_grade
+    evidence_family = _material_family(evidence_value)
+    objective_family = _material_family(objective_value)
+    if not evidence_family or evidence_family != objective_family:
+        return False
+    if _material_is_exact_grade(objective_value):
+        return False
+    return True
+
+
+def material_scope_value_is_specific(value: Any) -> bool:
+    """Return whether a material label can support a screening exclusion."""
+
+    return (
+        _canonical_material_grade(value) is not None
+        or _material_family(value) is not None
+    )
+
+
+def material_scope_value_is_broad(value: Any) -> bool:
+    """Return whether a label denotes an unresolved broad material population."""
+
+    text = " ".join(str(value or "").strip().casefold().split())
+    return bool(
+        re.search(r"\b(?:metal|metallic|materials?)\b", text)
+        and re.search(r"\b(?:alloys?|materials?|parts?|components?)\b", text)
+    )
+
+
 def axis_alias_matches_canonical(alias: str, canonical: str) -> bool:
     alias_key = axis_key(alias)
     canonical_key = axis_key(canonical)

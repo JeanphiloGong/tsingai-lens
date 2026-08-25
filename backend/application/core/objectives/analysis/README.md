@@ -93,15 +93,18 @@ caption-defined symbols, units, and row values jointly define it. The paper
 reconstruction then builds a registry keyed by exact condition label, merges
 complementary same-label context, and rejects conflicting definitions. A result
 may join registered conditions only when its own Source mentions those exact
-labels. An unchanged series becomes an isolated effect only when its first and
-last registered conditions have complete process context and differ by exactly
-one factor; incomplete, multi-factor, missing, or conflicting conditions remain
-associative or descriptive. No label spelling convention and no cross-document
-binding supplies scientific meaning. For same-table row comparisons, numeric
-results retain ordered increase/decrease semantics, while categorical results
-retain both raw endpoints and report only `changed` or `no_change`. A
-numeric/category mismatch or any incompatible material, sample, or test context
-remains explicitly non-comparable.
+labels. The result retains its own context and fills only missing material,
+sample, process, or test fields that are identical across both bound conditions;
+an explicit result-local value is never overwritten. An unchanged series becomes
+an isolated effect only when its first and last registered conditions have
+complete process context and differ by exactly one factor; incomplete,
+multi-factor, missing, or conflicting conditions remain associative or
+descriptive. No label spelling convention and no cross-document binding supplies
+scientific meaning. For same-table row comparisons, numeric results retain
+ordered increase/decrease semantics, while categorical results retain both raw
+endpoints and report only `changed` or `no_change`. A numeric/category mismatch
+or any incompatible material, sample, or test context remains explicitly
+non-comparable.
 
 `evidence_materialization.py` owns the trust boundary from transient paper
 facts to durable Evidence. It keeps the confirmed Objective's result details,
@@ -118,6 +121,11 @@ a warning. It does not persist artifacts or synthesize a cross-paper claim. Its
 private materialization trace records only bounded counts and paper
 dispositions, so an empty result can be distinguished from filtering and
 technical extraction failure without storing Source content in diagnostics.
+For factor/outcome candidates excluded only by material scope, material-scope
+decisions record the Source locator, Objective material scope, grounded Evidence
+material values, and mismatched or unresolved status without storing Source
+text. Detail records are capped at 100 per analysis and any remainder is kept as
+status counts.
 
 An analysis that inspects its paper scope but finds no grounded Objective
 Evidence publishes an empty Finding set as a scientific abstention. This is not
@@ -131,7 +139,11 @@ paper outcomes exist. `FindingSynthesisService` deterministically selects
 comparable Evidence, constructs atomic factor/outcome result sets, balances the
 bounded model input across papers, assigns all supporting and opposing Evidence,
 and derives the published statement, status, certainty, limitations, identity,
-and provenance. `FindingAssertionJudge` decides only assertion strength and
+and provenance. When an Objective declares a material scope, direct-result
+Evidence is comparable only after its source-local or same-study material
+identity resolves to that scope. Missing, broad-only, mixed, or conflicting
+material identity remains Evidence but cannot enter a result set or Finding.
+`FindingAssertionJudge` decides only assertion strength and
 optional context or mechanism annotations for one backend-owned result set. It
 cannot change result-set membership, scientific direction, Evidence bindings,
 or any published Finding identity. A schema-valid abstention may produce no

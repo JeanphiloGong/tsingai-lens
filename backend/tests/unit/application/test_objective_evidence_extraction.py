@@ -2876,6 +2876,24 @@ def test_research_objective_prompt_source_uses_complete_markdown_without_raw_cel
     assert "| A | 99.6 |" in prompt
 
 
+def test_objective_evidence_prompt_does_not_copy_objective_material() -> None:
+    system_prompt, _user_prompt = source_extraction.build_objective_evidence_prompt(
+        {
+            "objective": {
+                "question": "How does scanning strategy affect porosity?",
+                "material_scope": ["Ti-6Al-4V"],
+                "variables": ["scanning strategy"],
+                "outcomes": ["porosity"],
+            },
+            "source": {
+                "text": "Scan X reduced porosity in 17-4PH stainless steel."
+            },
+        }
+    )
+
+    assert "Never copy the OBJECTIVE material" in system_prompt
+
+
 def test_research_objective_evidence_prompt_compacts_long_text_source(
 ):
     objective = _research_objective(

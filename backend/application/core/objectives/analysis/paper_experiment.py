@@ -515,12 +515,10 @@ def _bind_objective_result_process_context(
                         "association; linked groups share the recorded process "
                         "context but do not expose quantified process values."
                     )
-                    scientific_context = unit.scientific_context.to_record()
-                    scientific_context["process"] = (
-                        _objective_common_pairwise_context(
-                            baseline_context,
-                            target_context,
-                        )["process"]
+                    scientific_context = _objective_context_with_bound_conditions(
+                        unit,
+                        baseline_context=baseline_context,
+                        target_context=target_context,
                     )
                     payload["scientific_context"] = scientific_context
                     payload["source_refs"] = list(
@@ -558,11 +556,11 @@ def _bind_objective_result_process_context(
                 changed_variables,
                 comparable=comparable,
             )
-            scientific_context = unit.scientific_context.to_record()
-            scientific_context["process"] = _objective_common_pairwise_context(
-                baseline_context,
-                target_context,
-            )["process"]
+            scientific_context = _objective_context_with_bound_conditions(
+                unit,
+                baseline_context=baseline_context,
+                target_context=target_context,
+            )
             payload["scientific_context"] = scientific_context
             payload["source_refs"] = list(
                 _dedupe_objective_source_refs(
@@ -613,10 +611,16 @@ def _bind_objective_result_process_context(
             continue
         payload = unit.to_record()
         scientific_context = unit.scientific_context.to_record()
-        scientific_context["process"] = [
-            item.to_record()
-            for item in process_context.scientific_context.process
-        ]
+        for context_name in ("material", "sample", "process", "test"):
+            if scientific_context[context_name]:
+                continue
+            scientific_context[context_name] = [
+                item.to_record()
+                for item in getattr(
+                    process_context.scientific_context,
+                    context_name,
+                )
+            ]
         payload["scientific_context"] = scientific_context
         payload["source_refs"] = list(
             _dedupe_objective_source_refs(
@@ -1210,6 +1214,24 @@ def _objective_common_pairwise_context(
             common.append(target_attribute.to_record())
         context[context_name] = common
     return context
+
+
+def _objective_context_with_bound_conditions(
+    unit: ExtractedEvidenceDraft,
+    *,
+    baseline_context: ExtractedEvidenceDraft,
+    target_context: ExtractedEvidenceDraft,
+) -> dict[str, list[dict[str, Any]]]:
+    scientific_context = unit.scientific_context.to_record()
+    common_context = _objective_common_pairwise_context(
+        baseline_context,
+        target_context,
+    )
+    scientific_context["process"] = common_context["process"]
+    for context_name in ("material", "sample", "test"):
+        if not scientific_context[context_name]:
+            scientific_context[context_name] = common_context[context_name]
+    return scientific_context
 
 
 def _objective_sample_identity_key(

@@ -1002,7 +1002,11 @@ def test_synthesis_normalizes_scientific_unit_typography_for_display() -> None:
 
 def test_synthesis_splits_cross_paper_results_at_process_context_boundary() -> None:
     service = FindingSynthesisService(assertion_judge=_Extractor([]))
-    common = {"material": [], "sample": [], "test": []}
+    common = {
+        "material": [{"name": "alloy", "value": "316L"}],
+        "sample": [],
+        "test": [],
+    }
 
     result_sets = service._result_sets(
         _objective(
@@ -1326,7 +1330,7 @@ def test_synthesis_splits_same_paper_results_at_fixed_context_boundary() -> None
     )
     service = FindingSynthesisService(assertion_judge=extractor)
     common = {
-        "material": [],
+        "material": [{"name": "alloy", "value": "316L"}],
         "sample": [],
         "test": [],
     }
@@ -2165,7 +2169,11 @@ def test_synthesis_splits_opposing_papers_at_explicit_condition_boundary(
     service = FindingSynthesisService(
         assertion_judge=_Extractor([_candidate(), _candidate()])
     )
-    shared = {"material": [], "sample": [], "test": []}
+    shared = {
+        "material": [{"name": "alloy", "value": "316L"}],
+        "sample": [],
+        "test": [],
+    }
 
     findings = service.synthesize(
         collection_id="col-1",

@@ -3757,7 +3757,7 @@ def test_objective_evidence_prompt_limits_text_routes_to_one_extraction():
     assert "must not become evidence" not in prompt
     assert "must not be copied" not in prompt
     assert "Return a changed variable only when this SOURCE explicitly names" in contract
-    assert "The backend may bind another grounded Source later" in contract
+    assert "the backend may bind another grounded Source later" in contract
     assert "absent, off, or without condition to numeric 0" in contract
     assert "one baseline-to-target comparison interval" in contract
     assert "Never repeat a changed-variable name" in contract

@@ -62,4 +62,4 @@ async def test_goal_service_rejects_empty_goal_signal(tmp_path):
             max_seed_documents=30,
         )
 
-    assert "至少提供" in str(exc_info.value)
+    assert "Provide at least one" in str(exc_info.value)

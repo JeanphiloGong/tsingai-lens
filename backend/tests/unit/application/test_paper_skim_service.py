@@ -1428,6 +1428,75 @@ def test_single_source_content_recovery_has_a_fixed_request_bound():
     assert skim.coverage_complete is False
 
 
+def test_paper_recovery_budget_bounds_saturated_batch_and_preserves_coverage():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("methods", "Methods", 1),
+            _paragraph("supported-method", "METHOD_CANDIDATE", 2, "Methods"),
+            _heading("results", "Results", 3),
+            *[
+                _paragraph(
+                    f"result-{position:02d}",
+                    f"SATURATED_SOURCE_{position:02d}",
+                    position + 4,
+                    "Results",
+                )
+                for position in range(12)
+            ],
+        ]
+    )
+
+    class AlwaysSaturatedExtractor(_WindowExtractor):
+        def __init__(self) -> None:
+            super().__init__()
+            self.compact_payloads: list[dict[str, Any]] = []
+
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            self.payloads.append(payload)
+            source_units = payload.get("source_units") or []
+            if any(
+                "METHOD_CANDIDATE" in str(unit.get("content") or "")
+                for unit in source_units
+            ):
+                return StructuredPaperSkim(
+                    doc_role="experimental",
+                    studies=[
+                        _study(
+                            varied_factors=["laser power"],
+                            outcome="relative density",
+                            source_unit_ids=[source_units[0]["source_unit_id"]],
+                            confidence=0.9,
+                        )
+                    ],
+                )
+            raise StructuredOutputSaturatedError("dense review output")
+
+        def extract_source_signals(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredPaperSkim:
+            self.compact_payloads.append(payload)
+            raise StructuredOutputSaturatedError("dense compact output")
+
+    extractor = AlwaysSaturatedExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) + len(extractor.compact_payloads) <= 18
+    assert len(skim.source_unit_coverage) == 13
+    assert [study.relationships[0].outcome for study in skim.studies] == [
+        "relative density"
+    ]
+    assert {item.status.value for item in skim.source_unit_coverage} == {
+        "relationship_emitted",
+        "extraction_failed",
+    }
+    assert any(
+        "recovery_budget_exhausted" in str(item.reason)
+        for item in skim.source_unit_coverage
+    )
+
+
 def test_late_results_content_is_screened_after_the_first_four_thousand_characters():
     artifacts, tree = _artifacts(
         blocks=[
@@ -2165,8 +2234,108 @@ def test_review_cited_experiment_cannot_become_current_work():
         parsed=parsed,
     )
 
-    assert skim.studies[0].claim_scope == "background"
-    assert signals[0].signal.claim_scope == "background"
+    assert skim.studies == ()
+    assert signals == ()
+    assert [item.status.value for item in skim.source_unit_coverage] == [
+        "no_study_signal"
+    ]
+
+
+def test_review_skim_retains_author_synthesis_but_discards_cited_studies():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("review", "Review of preheating", 1),
+            _paragraph(
+                "review-citation",
+                (
+                    "Miranda et al. [20] increased build plate temperature and "
+                    "reported lower residual stress."
+                ),
+                2,
+                "Review of preheating",
+            ),
+            _paragraph(
+                "review-synthesis",
+                (
+                    "Across the reviewed studies, preheating generally reduced "
+                    "residual stress."
+                ),
+                3,
+                "Review of preheating",
+            ),
+        ]
+    )
+
+    class ReviewExtractor(_WindowExtractor):
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            self.payloads.append(payload)
+            source_ids = {
+                str(unit["source_ref"]): str(unit["source_unit_id"])
+                for unit in payload["source_units"]
+            }
+            return StructuredPaperSkim(
+                doc_role="review",
+                studies=[
+                    {
+                        "experiment_label": "Miranda et al.",
+                        "design_type": "experimental",
+                        "claim_scope": "background",
+                        "relationships": [
+                            {
+                                "varied_factors": ["build plate temperature"],
+                                "outcome": "residual stress",
+                                "source_unit_ids": [source_ids["review-citation"]],
+                            }
+                        ],
+                    },
+                    {
+                        "experiment_label": "review synthesis on preheating",
+                        "design_type": "observational",
+                        "claim_scope": "synthesis",
+                        "relationships": [
+                            {
+                                "varied_factors": ["preheating condition"],
+                                "outcome": "residual stress",
+                                "source_unit_ids": [source_ids["review-synthesis"]],
+                            }
+                        ],
+                    },
+                ],
+                unresolved_signals=[
+                    {
+                        "signal_type": "outcome",
+                        "label": "porosity",
+                        "experiment_label": "Smith et al.",
+                        "claim_scope": "background",
+                        "source_unit_ids": [source_ids["review-citation"]],
+                    }
+                ],
+            )
+
+    extractor = ReviewExtractor()
+    skim = PaperSkimService().build_collection_paper_skims(
+        "collection-test",
+        documents=artifacts,
+        profiles_by_document_id={
+            "paper-1": SimpleNamespace(
+                doc_type="review",
+                parsing_warnings=(),
+                confidence=0.95,
+            )
+        },
+        document_trees_by_document_id={"paper-1": tree},
+        study_window_extractor=extractor,
+        signal_reconciler=extractor,
+    )[0]
+
+    assert [study.claim_scope for study in skim.studies] == ["synthesis"]
+    assert skim.studies[0].relationships[0].source_refs[0].source_ref == (
+        "review-synthesis"
+    )
+    assert [item.status.value for item in skim.source_unit_coverage] == [
+        "no_study_signal",
+        "relationship_emitted",
+    ]
 
 
 def test_unknown_source_unit_id_marks_the_window_failed():

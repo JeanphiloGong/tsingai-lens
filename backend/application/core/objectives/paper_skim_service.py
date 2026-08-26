@@ -47,25 +47,28 @@ logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[dict[str, Any]], None]
 
-_SKIM_SOURCE_UNIT_CHARS = 4000
-_SKIM_HEADING_LIMIT = 16
-_SKIM_WARNING_LIMIT = 2
-_PAPER_MAP_SOURCE_ITEM_LIMIT = 16
-_PAPER_MAP_ABSTRACT_ITEM_LIMIT = 4
-_PAPER_MAP_CONCLUSION_ITEM_LIMIT = 4
-_PAPER_MAP_OVERVIEW_ITEM_LIMIT = 4
-_PAPER_MAP_VISUAL_ITEM_LIMIT = 4
-_PAPER_MAP_EXPANSION_ITEM_LIMIT = 8
-_PAPER_MAP_FALLBACK_ITEM_LIMIT = 8
-_PAPER_MAP_TABLE_CAPTION_CHARS = 1600
-_PAPER_MAP_FIGURE_CAPTION_CHARS = 3500
-_PAPER_MAP_HEADING_CHARS = 240
+# Research-scope limits for the bounded pre-Objective reading rounds.
+_PAPER_MAP_INITIAL_SOURCE_LIMIT = 16
+_PAPER_MAP_TEXT_SOURCE_LIMIT_PER_ROLE = 4
+_PAPER_MAP_VISUAL_SOURCE_LIMIT = 4
+_PAPER_MAP_EXPANSION_SOURCE_LIMIT = 8
+_PAPER_MAP_FALLBACK_SOURCE_LIMIT_PER_EDGE = 4
+
+# Serialization limits that keep one selected Source from dominating a prompt.
+_PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT = 4000
+_PAPER_MAP_SECTION_PATH_LIMIT = 16
+_PAPER_MAP_PERSISTED_WARNING_LIMIT = 2
+_PAPER_MAP_TABLE_CAPTION_CHAR_LIMIT = 1600
+_PAPER_MAP_FIGURE_CAPTION_CHAR_LIMIT = 3500
+_PAPER_MAP_HEADING_PATH_CHAR_LIMIT = 240
 _PAPER_MAP_COLUMN_HEADER_LIMIT = 12
-_PAPER_MAP_COLUMN_HEADER_CHARS = 120
-_SKIM_SINGLE_SOURCE_RECOVERY_MIN_CHARS = 800
-_SKIM_SINGLE_SOURCE_RECOVERY_MAX_DEPTH = 2
-_SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT = 2
-_SKIM_TRANSIENT_STRUCTURED_FAILURE_KINDS = {
+_PAPER_MAP_COLUMN_HEADER_CHAR_LIMIT = 120
+
+# Technical recovery limits; these do not represent scientific outcomes.
+_PAPER_MAP_RECOVERY_FRAGMENT_MIN_CHAR_LIMIT = 800
+_PAPER_MAP_RECOVERY_SPLIT_DEPTH_LIMIT = 2
+_PAPER_MAP_COMPACT_ATTEMPT_LIMIT = 2
+_PAPER_MAP_TRANSIENT_STRUCTURED_FAILURE_KINDS = {
     "empty_response",
     "malformed_json",
     "no_json_object",
@@ -604,8 +607,9 @@ class PaperSkimService:
             )
         )
 
-    @staticmethod
+    @classmethod
     def _select_paper_map_items(
+        cls,
         items: list[_SkimSourceItem],
     ) -> list[_SkimSourceItem]:
         """Select how a researcher skims scope before inspecting experiments."""
@@ -617,14 +621,7 @@ class PaperSkimService:
         figure_items: list[_SkimSourceItem] = []
         fallback_items: list[_SkimSourceItem] = []
         for item in items:
-            section = " ".join(
-                "".join(
-                    character if character.isalpha() else " "
-                    for character in item.section_path
-                )
-                .casefold()
-                .split()
-            )
+            section = cls._normalized_section_path(item.section_path)
             compact_section = section.replace(" ", "")
             is_visual_summary = False
             if isinstance(item.content, Mapping):
@@ -656,18 +653,18 @@ class PaperSkimService:
                 fallback_items.append(item)
 
         selected_text = [
-            *abstract_items[:_PAPER_MAP_ABSTRACT_ITEM_LIMIT],
-            *conclusion_items[:_PAPER_MAP_CONCLUSION_ITEM_LIMIT],
-            *overview_items[:_PAPER_MAP_OVERVIEW_ITEM_LIMIT],
+            *abstract_items[:_PAPER_MAP_TEXT_SOURCE_LIMIT_PER_ROLE],
+            *conclusion_items[:_PAPER_MAP_TEXT_SOURCE_LIMIT_PER_ROLE],
+            *overview_items[:_PAPER_MAP_TEXT_SOURCE_LIMIT_PER_ROLE],
         ]
         if not abstract_items and not conclusion_items and not overview_items:
-            edge_count = _PAPER_MAP_FALLBACK_ITEM_LIMIT // 2
+            edge_count = _PAPER_MAP_FALLBACK_SOURCE_LIMIT_PER_EDGE
             selected_text.extend(fallback_items[:edge_count])
             selected_text.extend(fallback_items[-edge_count:])
 
         visual_capacity = min(
-            _PAPER_MAP_VISUAL_ITEM_LIMIT,
-            max(_PAPER_MAP_SOURCE_ITEM_LIMIT - len(selected_text), 0),
+            _PAPER_MAP_VISUAL_SOURCE_LIMIT,
+            max(_PAPER_MAP_INITIAL_SOURCE_LIMIT - len(selected_text), 0),
         )
         if table_items and figure_items:
             table_limit = visual_capacity // 2
@@ -683,28 +680,11 @@ class PaperSkimService:
         ]
 
         selected_ids = {id(item) for item in selected}
-        bounded: list[_SkimSourceItem] = []
-        for item in items:
-            if id(item) not in selected_ids:
-                continue
-            if isinstance(item.content, Mapping) and "caption_text" in item.content:
-                content = dict(item.content)
-                content["caption_text"] = str(content.get("caption_text") or "")[: (
-                    _PAPER_MAP_FIGURE_CAPTION_CHARS
-                    if item.source_kind == "figure"
-                    else _PAPER_MAP_TABLE_CAPTION_CHARS
-                )]
-                content["heading_path"] = str(content.get("heading_path") or "")[
-                    :_PAPER_MAP_HEADING_CHARS
-                ]
-                if item.source_kind == "table":
-                    content["column_headers"] = [
-                        str(value)[:_PAPER_MAP_COLUMN_HEADER_CHARS]
-                        for value in content.get("column_headers") or ()
-                    ][:_PAPER_MAP_COLUMN_HEADER_LIMIT]
-                item = replace(item, content=content)
-            bounded.append(item)
-        return bounded[:_PAPER_MAP_SOURCE_ITEM_LIMIT]
+        return [
+            cls._compact_paper_map_item_metadata(item)
+            for item in items
+            if id(item) in selected_ids
+        ][:_PAPER_MAP_INITIAL_SOURCE_LIMIT]
 
     @classmethod
     def _select_paper_map_expansion_items(
@@ -751,9 +731,10 @@ class PaperSkimService:
                 }
             if include:
                 selected.append(item)
-        return cls._bound_paper_map_items(
-            selected[:_PAPER_MAP_EXPANSION_ITEM_LIMIT]
-        )
+        return [
+            cls._compact_paper_map_item_metadata(item)
+            for item in selected[:_PAPER_MAP_EXPANSION_SOURCE_LIMIT]
+        ]
 
     @staticmethod
     def _normalized_section_path(section_path: str) -> str:
@@ -780,29 +761,30 @@ class PaperSkimService:
         )
 
     @staticmethod
-    def _bound_paper_map_items(
-        items: list[_SkimSourceItem],
-    ) -> list[_SkimSourceItem]:
-        bounded: list[_SkimSourceItem] = []
-        for item in items:
-            if isinstance(item.content, Mapping) and "caption_text" in item.content:
-                content = dict(item.content)
-                content["caption_text"] = str(content.get("caption_text") or "")[: (
-                    _PAPER_MAP_FIGURE_CAPTION_CHARS
-                    if item.source_kind == "figure"
-                    else _PAPER_MAP_TABLE_CAPTION_CHARS
-                )]
-                content["heading_path"] = str(content.get("heading_path") or "")[
-                    :_PAPER_MAP_HEADING_CHARS
-                ]
-                if item.source_kind == "table":
-                    content["column_headers"] = [
-                        str(value)[:_PAPER_MAP_COLUMN_HEADER_CHARS]
-                        for value in content.get("column_headers") or ()
-                    ][:_PAPER_MAP_COLUMN_HEADER_LIMIT]
-                item = replace(item, content=content)
-            bounded.append(item)
-        return bounded
+    def _compact_paper_map_item_metadata(
+        item: _SkimSourceItem,
+    ) -> _SkimSourceItem:
+        if not isinstance(item.content, Mapping) or "caption_text" not in item.content:
+            return item
+
+        content = dict(item.content)
+        caption_limit = (
+            _PAPER_MAP_FIGURE_CAPTION_CHAR_LIMIT
+            if item.source_kind == "figure"
+            else _PAPER_MAP_TABLE_CAPTION_CHAR_LIMIT
+        )
+        content["caption_text"] = str(content.get("caption_text") or "")[
+            :caption_limit
+        ]
+        content["heading_path"] = str(content.get("heading_path") or "")[
+            :_PAPER_MAP_HEADING_PATH_CHAR_LIMIT
+        ]
+        if item.source_kind == "table":
+            content["column_headers"] = [
+                str(value)[:_PAPER_MAP_COLUMN_HEADER_CHAR_LIMIT]
+                for value in content.get("column_headers") or ()
+            ][:_PAPER_MAP_COLUMN_HEADER_LIMIT]
+        return replace(item, content=content)
 
     @staticmethod
     def _paper_map_item_groups(
@@ -1029,7 +1011,7 @@ class PaperSkimService:
     def _split_oversized_source_item(
         item: _SkimSourceItem,
     ) -> tuple[_SkimSourceItem, ...]:
-        if item.size <= _SKIM_SOURCE_UNIT_CHARS:
+        if item.size <= _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT:
             return (item,)
         if isinstance(item.content, Mapping):
             if "row_text" in item.content:
@@ -1042,8 +1024,8 @@ class PaperSkimService:
         text = str(item.content)
         chunks: list[str] = []
         start = 0
-        while len(text) - start > _SKIM_SOURCE_UNIT_CHARS:
-            hard_end = start + _SKIM_SOURCE_UNIT_CHARS
+        while len(text) - start > _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT:
+            hard_end = start + _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT
             split_at = PaperSkimService._natural_text_split(text, start, hard_end)
             chunks.append(text[start:split_at])
             start = split_at
@@ -1083,7 +1065,7 @@ class PaperSkimService:
                         "fragment": row_text[start:candidate_end],
                     },
                 )
-                if candidate.size <= _SKIM_SOURCE_UNIT_CHARS:
+                if candidate.size <= _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT:
                     end = candidate_end
                     low = candidate_end + 1
                 else:
@@ -1130,7 +1112,7 @@ class PaperSkimService:
                     "value": value,
                 },
             )
-            if chunk.size > _SKIM_SOURCE_UNIT_CHARS:
+            if chunk.size > _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT:
                 raise ValueError(
                     "paper skim structured Source value cannot fit in a bounded "
                     "window"
@@ -1202,7 +1184,7 @@ class PaperSkimService:
                         "fragment": value[start:candidate_end],
                     },
                 )
-                if candidate.size <= _SKIM_SOURCE_UNIT_CHARS:
+                if candidate.size <= _PAPER_MAP_SOURCE_FRAGMENT_CHAR_LIMIT:
                     end = candidate_end
                     low = candidate_end + 1
                 else:
@@ -1274,7 +1256,7 @@ class PaperSkimService:
             "title": str(document.title or "")[:160],
             "window_id": f"{role}-{role_window_position}",
             "window_role": role,
-            "section_paths": list(section_paths[:_SKIM_HEADING_LIMIT]),
+            "section_paths": list(section_paths[:_PAPER_MAP_SECTION_PATH_LIMIT]),
             "document_profile": (
                 {
                     "doc_type": profile.doc_type,
@@ -1543,7 +1525,7 @@ class PaperSkimService:
         final_compact_failure_kind: str | None = None
         for compact_attempt in range(
             1,
-            _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT + 1,
+            _PAPER_MAP_COMPACT_ATTEMPT_LIMIT + 1,
         ):
             if not extraction_budget.reserve(recovery=True):
                 final_failure_kind = (
@@ -1593,9 +1575,9 @@ class PaperSkimService:
                     else "compact_non_recoverable"
                 )
                 will_retry = (
-                    compact_attempt < _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT
+                    compact_attempt < _PAPER_MAP_COMPACT_ATTEMPT_LIMIT
                     and compact_failure_kind
-                    in _SKIM_TRANSIENT_STRUCTURED_FAILURE_KINDS
+                    in _PAPER_MAP_TRANSIENT_STRUCTURED_FAILURE_KINDS
                 )
                 logger.warning(
                     "Paper skim compact Source recovery failed "
@@ -1607,7 +1589,7 @@ class PaperSkimService:
                     payload.get("window_id"),
                     attempt,
                     compact_attempt,
-                    _SKIM_COMPACT_TECHNICAL_ATTEMPT_LIMIT,
+                    _PAPER_MAP_COMPACT_ATTEMPT_LIMIT,
                     compact_failure_kind or "non_recoverable",
                     will_retry,
                     compact_exc,
@@ -1674,7 +1656,7 @@ class PaperSkimService:
         content_split_depth: int,
         failure_kind: str,
     ) -> tuple[tuple[PaperSkim, ...], tuple[_PaperSignalInput, ...]] | None:
-        if content_split_depth >= _SKIM_SINGLE_SOURCE_RECOVERY_MAX_DEPTH:
+        if content_split_depth >= _PAPER_MAP_RECOVERY_SPLIT_DEPTH_LIMIT:
             return None
         fragments = self._split_single_source_unit_for_retry(source_unit)
         if not fragments:
@@ -1753,7 +1735,7 @@ class PaperSkimService:
         else:
             return ()
 
-        minimum = _SKIM_SINGLE_SOURCE_RECOVERY_MIN_CHARS
+        minimum = _PAPER_MAP_RECOVERY_FRAGMENT_MIN_CHAR_LIMIT
         if len(text) < minimum * 2:
             return ()
         midpoint = len(text) // 2
@@ -3011,7 +2993,7 @@ class PaperSkimService:
             confidence=max((skim.confidence for skim in window_skims), default=0.0),
             warnings=self._unique_text_values(
                 warning for skim in window_skims for warning in skim.warnings
-            )[:_SKIM_WARNING_LIMIT],
+            )[:_PAPER_MAP_PERSISTED_WARNING_LIMIT],
             source_unit_coverage=tuple(
                 item
                 for skim in window_skims

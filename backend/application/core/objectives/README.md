@@ -107,22 +107,31 @@ Objective analysis.
   headers; it never carries measurement rows.
 
   Selected items retain their original document-order identity, are grouped by
-  broad reading role, packed up to 12 per request, and preflighted with the
+  broad reading role, packed up to four per request, and preflighted with the
   complete schema-bearing prompt against 12,288 tokens. Paper-map generation
-  has a 2,048-token completion budget and returns at most four scope groups, six
-  relationships per group, and eight unresolved signals. A relationship means
-  that a high-level Source states the paper investigates the supplied material,
-  joint intervention axes, and one specific outcome. It is candidate scope, not
-  `ObjectiveEvidence`, a measured effect, or proof that two experiments are
-  comparable. Sample context, test context, comparator, and fixed conditions
-  are removed at this boundary; confirmed-Objective extraction owns them.
+  has a 2,048-token completion budget. Experimental maps return at most two
+  scope groups, four relationships per group, and four unresolved signals;
+  sample context, test context, comparator, fixed conditions, and review
+  synthesis are absent from that model contract. Review maps instead return at
+  most two synthesis claims, disputes, and evidence gaps plus three citation
+  leads, without a duplicate study/signal representation. The backend derives
+  review candidate axes from those review-author statements. A relationship
+  means that a high-level Source states the paper investigates the supplied
+  material, joint intervention axes, and one specific outcome. It is candidate
+  scope, not `ObjectiveEvidence`, a measured effect, or proof that two
+  experiments are comparable. Confirmed-Objective extraction owns the omitted
+  experimental context.
 
   Duplicate or non-input Source ids remain invalid and enter one bounded
-  structured repair. Prompt overflow and output saturation can subdivide only
-  the already bounded selected Sources. Initial mapping, one focused expansion,
+  structured repair. When a multi-Source map still saturates or returns
+  technically unreadable structured output, each selected Source is screened
+  with the smaller source-local signal contract instead of recursively rerunning
+  the full map contract. A transient compact failure receives one bounded retry;
+  a dense splittable singleton then falls back to lossless content fragments
+  while retaining its Source identity. Initial mapping, one focused expansion,
   technical recovery, and signal reconciliation share one per-paper judgment
-  budget and a five-minute deadline. The extra call allowance defaults to 4-12
-  beyond the initial high-level windows. Successful siblings survive while a
+  budget and a five-minute deadline. The extra call allowance defaults to 4-16
+  based on the selected Source count. Successful siblings survive while a
   terminal Source extraction failure becomes `extraction_failed`; signals that
   cannot be reconciled within the remaining budget stay unresolved rather than
   becoming scientific or Source failures. Broad or compound outcomes remain
@@ -267,15 +276,17 @@ context conflict rejects only the affected relationship.
 The backend derives selected-Source coverage from validated references; an
 unreferenced selected unit becomes `no_study_signal` without requiring the model
 to return coverage. A failed call, invalid reference, 2,048-token output
-termination, or explicit `output_saturated=true` result can subdivide only this
-bounded map input. The default shared recovery budget is 4-12 calls per paper.
-Successful siblings survive, while a terminal failure becomes
-`extraction_failed`. `coverage_complete` therefore means that every selected
-paper-map Source received a valid first-stage outcome; it does not mean that
-every full-paper Source was read or that every relevant study was found. Those
-full-paper judgments begin after Objective confirmation. Permanent failures
-remain in the Objective node summary and warnings, and candidates from successful
-Sources remain readable.
+termination, or explicit `output_saturated=true` result triggers source-local
+compact screening for the affected bounded map window. Only a dense singleton
+whose compact screening also fails can be split into lossless content fragments.
+The default shared recovery budget is 4-16 calls per paper, sized from the
+selected Source count. Successful siblings survive, while a terminal failure
+becomes `extraction_failed`. `coverage_complete` therefore means that every
+selected paper-map Source received a valid first-stage outcome; it does not mean
+that every full-paper Source was read or that every relevant study was found.
+Those full-paper judgments begin after Objective confirmation. Permanent
+failures remain in the Objective node summary and warnings, and candidates from
+successful Sources remain readable.
 
 Objective paper framing is also source-batched. Explicitly excluded documents
 are rejected by the backend without entering the model. The framing prior

@@ -26,7 +26,11 @@ from application.core.objectives.discovery.axis_equivalence import (
 from application.core.objectives.discovery.signal_reconciliation import (
     StructuredPaperSignalReconciliation,
 )
-from application.core.objectives.discovery.study_window import StructuredPaperSkim
+from application.core.objectives.discovery.study_window import (
+    StructuredExperimentalPaperMap,
+    StructuredPaperSkim,
+    StructuredReviewPaperMap,
+)
 from application.core.paper_facts.schemas import (
     MeasurementValuePayload,
     StructuredTableBatchMentions,
@@ -142,7 +146,17 @@ class FakeDomainModelExtractor:
     ) -> Any:
         del system_prompt
         payload = _input_payload(user_prompt)
-        if response_model is StructuredPaperSkim:
+        if response_model is StructuredExperimentalPaperMap:
+            skim = self.extract(payload)
+            response = StructuredExperimentalPaperMap.model_validate(
+                skim.model_dump(exclude={"review_synthesis"})
+            )
+        elif response_model is StructuredReviewPaperMap:
+            response = StructuredReviewPaperMap(
+                evidence_density="low",
+                confidence=0.72,
+            )
+        elif response_model is StructuredPaperSkim:
             response = self.extract(payload)
         elif response_model is StructuredPaperSignalReconciliation:
             response = self.reconcile(payload)

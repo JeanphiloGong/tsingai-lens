@@ -3,6 +3,8 @@ import logging
 import re
 import secrets
 import sys
+import time
+from datetime import datetime, timedelta, timezone
 from logging.handlers import TimedRotatingFileHandler
 
 from config import LOG_DIR
@@ -29,6 +31,11 @@ _USER_ID_CONTEXT: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 )
 _LOG_CONTEXT_PLACEHOLDER = "-"
 _LOG_CONTEXT_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_CHINA_STANDARD_TIME = timezone(timedelta(hours=8), name="Asia/Shanghai")
+
+
+def _china_standard_time(timestamp: float) -> time.struct_time:
+    return datetime.fromtimestamp(timestamp, tz=_CHINA_STANDARD_TIME).timetuple()
 
 
 class _RequestContextFilter(logging.Filter):
@@ -102,8 +109,9 @@ def setup_logger(name: str = __name__) -> logging.Logger:
     formatter = logging.Formatter(
         "%(asctime)s | %(request_id)s | %(user_id)s | %(levelname)-8s | "
         "%(module)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        datefmt="%Y-%m-%d %H:%M:%S +0800",
     )
+    formatter.converter = _china_standard_time
 
     debug_file_handler = TimedRotatingFileHandler(
         filename=LOG_DIR / "app_debug.log",

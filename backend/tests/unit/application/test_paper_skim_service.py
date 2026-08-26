@@ -596,7 +596,7 @@ def test_every_source_unit_receives_one_explicit_coverage_outcome():
     assert skim.coverage_complete is True
 
 
-def test_six_source_refs_for_one_signal_do_not_split_a_valid_window():
+def test_four_source_windows_preserve_all_repeated_signal_lineage():
     artifacts, tree = _artifacts(
         blocks=[
             _heading("methods", "Methods", 1),
@@ -615,9 +615,16 @@ def test_six_source_refs_for_one_signal_do_not_split_a_valid_window():
 
     skim = _build_skims(artifacts, tree, extractor)[0]
 
-    assert len(extractor.payloads) == 1
-    assert len(skim.unresolved_signals) == 1
-    assert len(skim.unresolved_signals[0].source_refs) == 6
+    assert len(extractor.payloads) == 2
+    assert all(len(payload["source_units"]) <= 4 for payload in extractor.payloads)
+    assert len(skim.unresolved_signals) == 2
+    assert {
+        source_ref.source_ref
+        for signal in skim.unresolved_signals
+        for source_ref in signal.source_refs
+    } == {f"variable-{position}" for position in range(1, 7)}
+    assert len(skim.source_unit_coverage) == 6
+    assert skim.coverage_complete is True
 
 
 def test_failed_batch_splits_until_only_permanent_source_unit_failure_remains(
@@ -775,8 +782,8 @@ def test_unstructured_paper_map_samples_edges_then_expands_once_without_duplicat
 
     skim = _build_skims(artifacts, tree, extractor)[0]
 
-    assert len(extractor.payloads) == 2
-    assert all(len(payload["source_units"]) <= 12 for payload in extractor.payloads)
+    assert len(extractor.payloads) == 4
+    assert all(len(payload["source_units"]) <= 4 for payload in extractor.payloads)
     covered_refs = [item.source_ref for item in skim.source_unit_coverage]
     assert covered_refs[:8] == [
         "result-0", "result-1", "result-2", "result-3",
@@ -1415,7 +1422,7 @@ def test_single_source_content_recovery_has_a_fixed_request_bound():
 
     skim = _build_skims(artifacts, tree, extractor)[0]
 
-    assert len(extractor.payloads) == 4
+    assert len(extractor.payloads) == 6
     assert [item.status.value for item in skim.source_unit_coverage] == [
         "extraction_failed"
     ]
@@ -1476,7 +1483,7 @@ def test_paper_recovery_budget_bounds_saturated_batch_and_preserves_coverage():
 
     skim = _build_skims(artifacts, tree, extractor)[0]
 
-    assert len(extractor.payloads) + len(extractor.compact_payloads) <= 8
+    assert len(extractor.payloads) + len(extractor.compact_payloads) <= 11
     assert len(skim.source_unit_coverage) == 8
     assert [study.relationships[0].outcome for study in skim.studies] == [
         "relative density"
@@ -1485,10 +1492,145 @@ def test_paper_recovery_budget_bounds_saturated_batch_and_preserves_coverage():
         "relationship_emitted",
         "extraction_failed",
     }
-    assert any(
-        "recovery_budget_exhausted" in str(item.reason)
+    assert all(
+        "compact_output_saturated" in str(item.reason)
+        for item in skim.source_unit_coverage
+        if item.status.value == "extraction_failed"
+    )
+
+
+def test_saturated_paper_map_recovers_each_source_directly_with_compact_screening():
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("scope", "Scope", 1),
+            *[
+                _paragraph(
+                    f"scope-{position}",
+                    f"Explicit research outcome {position}.",
+                    position + 2,
+                    "Scope",
+                )
+                for position in range(4)
+            ],
+        ]
+    )
+
+    class SaturatedMapExtractor(_WindowExtractor):
+        def __init__(self) -> None:
+            super().__init__(reconciliation="unresolved")
+            self.compact_payloads: list[dict[str, Any]] = []
+
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            self.payloads.append(payload)
+            raise StructuredOutputSaturatedError("paper map output saturated")
+
+        def extract_source_signals(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredPaperSkim:
+            self.compact_payloads.append(payload)
+            source_unit = payload["source_units"][0]
+            return StructuredPaperSkim.model_validate(
+                {
+                    "doc_role": "experimental",
+                    "unresolved_signals": [
+                        {
+                            "signal_type": "outcome",
+                            "label": str(source_unit["content"]),
+                            "claim_scope": "current_work",
+                            "source_unit_ids": [source_unit["source_unit_id"]],
+                            "confidence": 0.8,
+                        }
+                    ],
+                }
+            )
+
+    extractor = SaturatedMapExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.payloads) == 1
+    assert len(extractor.compact_payloads) == 4
+    assert len(skim.source_unit_coverage) == 4
+    assert {item.status.value for item in skim.source_unit_coverage} == {
+        "unresolved_signal_emitted"
+    }
+    assert skim.coverage_complete is True
+
+
+def test_dense_source_in_saturated_map_uses_bounded_content_fragments():
+    dense_text = "Dense explicit outcome " + "A" * 2200
+    artifacts, tree = _artifacts(
+        blocks=[
+            _heading("scope", "Scope", 1),
+            _paragraph("dense-scope", dense_text, 2, "Scope"),
+            _paragraph("scope-2", "Explicit outcome 2.", 3, "Scope"),
+            _paragraph("scope-3", "Explicit outcome 3.", 4, "Scope"),
+            _paragraph("scope-4", "Explicit outcome 4.", 5, "Scope"),
+        ]
+    )
+
+    class DenseSourceExtractor(_WindowExtractor):
+        def __init__(self) -> None:
+            super().__init__(reconciliation="unresolved")
+            self.compact_payloads: list[dict[str, Any]] = []
+
+        def extract(self, payload: dict[str, Any]) -> StructuredPaperSkim:
+            self.payloads.append(payload)
+            source_units = payload["source_units"]
+            if len(source_units) > 1:
+                raise StructuredOutputSaturatedError("paper map output saturated")
+            source_unit = source_units[0]
+            return StructuredPaperSkim.model_validate(
+                {
+                    "doc_role": "experimental",
+                    "unresolved_signals": [
+                        {
+                            "signal_type": "outcome",
+                            "label": "dense explicit outcome",
+                            "claim_scope": "current_work",
+                            "source_unit_ids": [source_unit["source_unit_id"]],
+                            "confidence": 0.8,
+                        }
+                    ],
+                }
+            )
+
+        def extract_source_signals(
+            self,
+            payload: dict[str, Any],
+        ) -> StructuredPaperSkim:
+            self.compact_payloads.append(payload)
+            source_unit = payload["source_units"][0]
+            if len(str(source_unit["content"])) > 1600:
+                raise StructuredOutputSaturatedError("dense compact output")
+            return StructuredPaperSkim.model_validate(
+                {
+                    "doc_role": "experimental",
+                    "unresolved_signals": [
+                        {
+                            "signal_type": "outcome",
+                            "label": str(source_unit["content"]),
+                            "claim_scope": "current_work",
+                            "source_unit_ids": [source_unit["source_unit_id"]],
+                            "confidence": 0.8,
+                        }
+                    ],
+                }
+            )
+
+    extractor = DenseSourceExtractor()
+
+    skim = _build_skims(artifacts, tree, extractor)[0]
+
+    assert len(extractor.compact_payloads) == 4
+    assert len(extractor.payloads) == 3
+    assert len(skim.source_unit_coverage) == 4
+    assert all(
+        item.status.value != "extraction_failed"
         for item in skim.source_unit_coverage
     )
+    assert skim.coverage_complete is True
 
 
 def test_paper_map_reads_high_level_scope_before_detailed_experiment_sources():

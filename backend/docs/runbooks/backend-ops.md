@@ -101,6 +101,8 @@ duplicate its destructive restore commands.
 
 ## Operational Notes
 
+- Application log timestamps use China Standard Time and include the explicit
+  `+0800` offset. Persisted domain and runtime timestamps remain UTC.
 - Structured product state persists in PostgreSQL. `backend/data` holds
   immutable object bytes, collection workspaces, and rebuildable scratch.
 - Collection build creates Source runtime settings from collection paths and
